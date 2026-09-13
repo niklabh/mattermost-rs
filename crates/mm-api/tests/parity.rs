@@ -86,6 +86,7 @@ mod parity {
     pub mod gated_reads;
     pub mod group_syncables;
     pub mod group_writes;
+    pub mod group_writes_licensed;
     pub mod groups;
     pub mod image_writes;
     pub mod incoming_hooks;

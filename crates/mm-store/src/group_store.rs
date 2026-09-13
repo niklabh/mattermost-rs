@@ -40,8 +40,10 @@
 //! Go's `Join` of an empty slice yields `IN ('')`, which matches no group; `= ANY(ARRAY[]::text[])`
 //! is also empty. They agree. The handler's `len(groupIDsParam) < 26` check makes it moot.
 
-use mm_model::group::{Group, GroupSource};
+use mm_model::group::{Group, GroupSource, GroupWithUserIds};
+use mm_model::group_member::GroupMember;
 use mm_model::user::UserWithGroups;
+use mm_model::utils::{get_millis, new_id};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
@@ -198,6 +200,114 @@ pub trait GroupStore {
         &self,
         group_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Group>, StoreError>> + Send;
+
+    // --- The write surface behind the seven CRUD and membership routes of `api4/group.go`,
+    // ported 2026-09-13 with the licensed pair as the oracle ([D-360]). The syncable methods
+    // (`GetGroupSyncable` and its three siblings) are a separate port ([D-390]).
+
+    /// Port of `SqlGroupStore.Get` (group_store.go:275) — by id, **any** `DeleteAt`.
+    ///
+    /// A miss is `ErrNotFound("Group", id)`, which every app caller turns into
+    /// `app.group.no_rows` at 404. A soft-deleted group is found: `deleteGroup` on it then fails
+    /// in [`GroupStore::delete`], not here.
+    fn get(
+        &self,
+        group_id: &str,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetByName` (group_store.go:290). `filter_allow_reference` is the
+    /// one field of `GroupSearchOpts` it reads. A miss names `name=<name>`, not the bare name.
+    fn get_by_name(
+        &self,
+        name: &str,
+        filter_allow_reference: bool,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetByNames` (group_store.go:309). No `DeleteAt` filter — a
+    /// soft-deleted group is still returned by name — and no ordering.
+    fn get_by_names(
+        &self,
+        names: &[String],
+        filter_allow_reference: bool,
+    ) -> impl std::future::Future<Output = Result<Vec<Group>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.CreateWithUserIds` (group_store.go:141): validate, check every
+    /// user exists and is active, then insert the group and its members in one transaction and
+    /// read the group back with its member count.
+    ///
+    /// Three refusals before the insert, in Go's order: a non-empty `Id` is `ErrInvalidInput`,
+    /// `IsValidForCreate` is passed through as its own `AppError`, and a user that does not exist
+    /// (or is deactivated) is `ErrNotFound("User", id)`. A taken name is `ErrUniqueConstraint`.
+    fn create_with_user_ids(
+        &self,
+        group: GroupWithUserIds,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.Update` (group_store.go:386): re-read the row, refuse a `DeleteAt`
+    /// that changed to anything but 0, keep the stored `CreateAt`, stamp `UpdateAt`, validate,
+    /// write **every** column. Returns the input with those two timestamps set — not a re-read —
+    /// so the `db:"-"` fields are whatever the caller passed in.
+    fn update(
+        &self,
+        group: Group,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.Delete` (group_store.go:428): a soft delete of a group that is
+    /// **not already deleted**, stamping `DeleteAt` and `UpdateAt` with one clock reading. An
+    /// already-deleted group is `ErrNotFound`.
+    fn delete(
+        &self,
+        group_id: &str,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.Restore` (group_store.go:455): the mirror of [`GroupStore::delete`]
+    /// — a group that is **not** deleted is `ErrNotFound`.
+    fn restore(
+        &self,
+        group_id: &str,
+    ) -> impl std::future::Future<Output = Result<Group, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetMember` (group_store.go:481) — the **active** membership row.
+    ///
+    /// Go wraps `sql.ErrNoRows` and its one caller (`SessionHasPermissionToGroup`) tests for it
+    /// with `errors.Is`, treating "not a member" as a fact and every other failure as a refusal.
+    /// `Option` says the first; `Err` the second.
+    fn get_member(
+        &self,
+        group_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<GroupMember>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetMemberCount` (group_store.go:590) — `COUNT(DISTINCT Users.Id)`
+    /// over active memberships of **active** users.
+    fn get_member_count(
+        &self,
+        group_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.UpsertMembers` (group_store.go:1921): every user must exist and be
+    /// active (`ErrNotFound("User", id)`), then one insert with `ON CONFLICT (groupid, userid)
+    /// DO UPDATE` that resurrects a soft-deleted membership. The rows come back in **request
+    /// order** with one `CreateAt` for all of them.
+    ///
+    /// A user id listed twice makes Postgres refuse the whole statement ("cannot affect row a
+    /// second time"), which Go surfaces as a plain failure and the app layer as a 500 — kept,
+    /// because it is what a client sees.
+    fn upsert_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<GroupMember>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.DeleteMembers` (group_store.go:1984): read the **active**
+    /// memberships named, refuse with `ErrNotFound("User", id)` for any id that has none, then
+    /// stamp `DeleteAt` on them. The rows come back in the order the `SELECT` produced them,
+    /// which has no `ORDER BY` in Go and none here.
+    fn delete_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<GroupMember>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -618,4 +728,626 @@ impl GroupStore for SqlGroupStore {
             })
             .collect())
     }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id))]
+    async fn get(&self, group_id: &str) -> Result<Group, StoreError> {
+        let row = sqlx::query_as!(
+            GroupRow,
+            r#"
+            SELECT id, name, displayname, description, source, remoteid, createat, updateat,
+                   deleteat, allowreference
+              FROM usergroups
+             WHERE id = $1
+            "#,
+            group_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Group with id={group_id}"),
+            source,
+        })?;
+        row.map(GroupRow::into_group)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "Group",
+                criteria: group_id.to_owned(),
+            })
+    }
+
+    #[tracing::instrument(skip(self), fields(name = %name, filter_allow_reference))]
+    async fn get_by_name(
+        &self,
+        name: &str,
+        filter_allow_reference: bool,
+    ) -> Result<Group, StoreError> {
+        // `AllowReference = true` is appended only when the option is set; expressed as a bound
+        // parameter so the statement stays compile-checked.
+        let row = sqlx::query_as!(
+            GroupRow,
+            r#"
+            SELECT id, name, displayname, description, source, remoteid, createat, updateat,
+                   deleteat, allowreference
+              FROM usergroups
+             WHERE name = $1
+               AND ($2 = FALSE OR allowreference = TRUE)
+            "#,
+            name,
+            filter_allow_reference
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Group with name={name}"),
+            source,
+        })?;
+        row.map(GroupRow::into_group)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "Group",
+                criteria: format!("name={name}"),
+            })
+    }
+
+    #[tracing::instrument(skip(self, names), fields(names = names.len(), filter_allow_reference, found))]
+    async fn get_by_names(
+        &self,
+        names: &[String],
+        filter_allow_reference: bool,
+    ) -> Result<Vec<Group>, StoreError> {
+        let rows = sqlx::query_as!(
+            GroupRow,
+            r#"
+            SELECT id, name, displayname, description, source, remoteid, createat, updateat,
+                   deleteat, allowreference
+              FROM usergroups
+             WHERE name = ANY($1)
+               AND ($2 = FALSE OR allowreference = TRUE)
+            "#,
+            names,
+            filter_allow_reference
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Groups by names".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows.into_iter().map(GroupRow::into_group).collect())
+    }
+
+    #[tracing::instrument(skip_all, fields(id))]
+    async fn create_with_user_ids(&self, group: GroupWithUserIds) -> Result<Group, StoreError> {
+        let GroupWithUserIds {
+            mut group,
+            user_ids,
+        } = group;
+        if !group.id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "Group",
+                field: "id",
+                value: group.id,
+            });
+        }
+        group
+            .is_valid_for_create()
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Group",
+                app_error,
+            })?;
+        let user_ids = user_ids.unwrap_or_default();
+        self.check_users_exist(&user_ids).await?;
+
+        group.id = new_id();
+        group.create_at = get_millis();
+        group.update_at = group.create_at;
+        tracing::Span::current().record("id", &group.id);
+
+        let mut txn = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO usergroups
+                (id, name, displayname, description, source, remoteid, createat, updateat,
+                 deleteat, allowreference)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9)
+            "#,
+            group.id,
+            group.name,
+            group.display_name,
+            group.description,
+            group.source.as_str(),
+            group.remote_id,
+            group.create_at,
+            group.update_at,
+            group.allow_reference
+        )
+        .execute(&mut *txn)
+        .await
+        .map_err(|source| {
+            if is_group_name_unique_violation(&source) {
+                StoreError::Conflict {
+                    resource: "Name",
+                    source,
+                }
+            } else {
+                StoreError::Db {
+                    context: "failed to save Group".to_owned(),
+                    source,
+                }
+            }
+        })?;
+
+        // `insertGroupUsers` (group_store.go:255): one `CreateAt` for the whole batch, chunked
+        // in Go for the parameter limit — an array bind has no such limit.
+        if !user_ids.is_empty() {
+            let create_at = get_millis();
+            sqlx::query!(
+                r#"
+                INSERT INTO groupmembers (groupid, userid, createat, deleteat)
+                SELECT $1, unnest($2::text[]), $3, 0
+                "#,
+                group.id,
+                &user_ids,
+                create_at
+            )
+            .execute(&mut *txn)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to insert GroupMembers".to_owned(),
+                source,
+            })?;
+        }
+
+        // The read-back Go does inside the transaction: the ten columns plus a member count
+        // that counts **every** `GroupMembers` row, deleted or not — a fresh group has none of
+        // those, and the app layer overwrites the count anyway.
+        let row = sqlx::query!(
+            r#"
+            SELECT ug.id, ug.name, ug.displayname, ug.description, ug.source, ug.remoteid,
+                   ug.createat, ug.updateat, ug.deleteat, ug.allowreference,
+                   (SELECT COUNT(gm.userid) FROM groupmembers gm WHERE gm.groupid = ug.id)
+                       AS "membercount!"
+              FROM usergroups ug
+             WHERE ug.id = $1
+            "#,
+            group.id
+        )
+        .fetch_one(&mut *txn)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to read back Group with id={}", group.id),
+            source,
+        })?;
+        txn.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })?;
+
+        let mut created = GroupRow {
+            id: row.id,
+            name: row.name,
+            displayname: row.displayname,
+            description: row.description,
+            source: row.source,
+            remoteid: row.remoteid,
+            createat: row.createat,
+            updateat: row.updateat,
+            deleteat: row.deleteat,
+            allowreference: row.allowreference,
+        }
+        .into_group();
+        created.member_count = Some(row.membercount);
+        Ok(created)
+    }
+
+    #[tracing::instrument(skip_all, fields(id = %group.id))]
+    async fn update(&self, mut group: Group) -> Result<Group, StoreError> {
+        let stored = self.get(&group.id).await?;
+
+        // "If updating DeleteAt it can only be to 0" — a bare `errors.New` in Go, which the app
+        // layer reads as a 500. Nothing reachable through api4 can set it, since `Patch` never
+        // touches `DeleteAt`.
+        if group.delete_at != stored.delete_at && group.delete_at != 0 {
+            return Err(StoreError::Argument {
+                entity: "Group",
+                detail: "DeleteAt should be 0 when updating",
+            });
+        }
+
+        group.create_at = stored.create_at;
+        group.update_at = get_millis();
+
+        group
+            .is_valid_for_update()
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Group",
+                app_error,
+            })?;
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE usergroups
+               SET name = $2, displayname = $3, description = $4, source = $5, remoteid = $6,
+                   createat = $7, updateat = $8, deleteat = $9, allowreference = $10
+             WHERE id = $1
+            "#,
+            group.id,
+            group.name,
+            group.display_name,
+            group.description,
+            group.source.as_str(),
+            group.remote_id,
+            group.create_at,
+            group.update_at,
+            group.delete_at,
+            group.allow_reference
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| {
+            if is_group_name_unique_violation(&source) {
+                StoreError::Conflict {
+                    resource: "Name",
+                    source,
+                }
+            } else {
+                StoreError::Db {
+                    context: "failed to update Group".to_owned(),
+                    source,
+                }
+            }
+        })?;
+        if result.rows_affected() > 1 {
+            return Err(StoreError::Argument {
+                entity: "Group",
+                detail: "multiple Groups were update",
+            });
+        }
+        Ok(group)
+    }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id))]
+    async fn delete(&self, group_id: &str) -> Result<Group, StoreError> {
+        let row = sqlx::query_as!(
+            GroupRow,
+            r#"
+            SELECT id, name, displayname, description, source, remoteid, createat, updateat,
+                   deleteat, allowreference
+              FROM usergroups
+             WHERE id = $1 AND deleteat = 0
+            "#,
+            group_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Group with id={group_id}"),
+            source,
+        })?;
+        let mut group = row
+            .map(GroupRow::into_group)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "Group",
+                criteria: group_id.to_owned(),
+            })?;
+
+        let time = get_millis();
+        group.delete_at = time;
+        group.update_at = time;
+        sqlx::query!(
+            "UPDATE usergroups SET deleteat = $1, updateat = $2 WHERE id = $3 AND deleteat = 0",
+            group.delete_at,
+            group.update_at,
+            group_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Group with id={group_id}"),
+            source,
+        })?;
+        Ok(group)
+    }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id))]
+    async fn restore(&self, group_id: &str) -> Result<Group, StoreError> {
+        let row = sqlx::query_as!(
+            GroupRow,
+            r#"
+            SELECT id, name, displayname, description, source, remoteid, createat, updateat,
+                   deleteat, allowreference
+              FROM usergroups
+             WHERE id = $1 AND deleteat <> 0
+            "#,
+            group_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Group with id={group_id}"),
+            source,
+        })?;
+        let mut group = row
+            .map(GroupRow::into_group)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "Group",
+                criteria: group_id.to_owned(),
+            })?;
+
+        group.update_at = get_millis();
+        group.delete_at = 0;
+        sqlx::query!(
+            "UPDATE usergroups SET deleteat = 0, updateat = $1 WHERE id = $2 AND deleteat <> 0",
+            group.update_at,
+            group_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Group with id={group_id}"),
+            source,
+        })?;
+        Ok(group)
+    }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id, user_id = %user_id, member))]
+    async fn get_member(
+        &self,
+        group_id: &str,
+        user_id: &str,
+    ) -> Result<Option<GroupMember>, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT groupid AS "groupid!", userid AS "userid!",
+                   COALESCE(createat, 0) AS "createat!", COALESCE(deleteat, 0) AS "deleteat!"
+              FROM groupmembers
+             WHERE userid = $1 AND groupid = $2 AND deleteat = 0
+            "#,
+            user_id,
+            group_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "GetMember".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("member", row.is_some());
+        Ok(row.map(|row| GroupMember {
+            group_id: row.groupid,
+            user_id: row.userid,
+            create_at: row.createat,
+            delete_at: row.deleteat,
+        }))
+    }
+
+    #[tracing::instrument(skip(self), fields(group_id = %group_id, count))]
+    async fn get_member_count(&self, group_id: &str) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(DISTINCT u.id) AS "count!"
+              FROM groupmembers gm
+              JOIN users u ON u.id = gm.userid
+             WHERE gm.groupid = $1 AND u.deleteat = 0 AND gm.deleteat = 0
+            "#,
+            group_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count member Users for Group with id={group_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip(self, user_ids), fields(group_id = %group_id, users = user_ids.len()))]
+    async fn upsert_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<GroupMember>, StoreError> {
+        // Go reads the group first and wraps a miss as a plain error, not `ErrNotFound` — the
+        // app layer answers 500 to it. Unreachable through api4, which fetched the group already.
+        let exists = sqlx::query_scalar!(
+            "SELECT 1 AS \"one!\" FROM usergroups WHERE id = $1",
+            group_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get UserGroup with groupId={group_id}"),
+            source,
+        })?;
+        if exists.is_none() {
+            return Err(StoreError::Argument {
+                entity: "UserGroup",
+                detail: "no such group",
+            });
+        }
+
+        self.check_users_exist(user_ids).await?;
+
+        let create_at = get_millis();
+        let members: Vec<GroupMember> = user_ids
+            .iter()
+            .map(|user_id| GroupMember {
+                group_id: group_id.to_owned(),
+                user_id: user_id.clone(), // the row carries its own copy of the id
+                create_at,
+                delete_at: 0,
+            })
+            .collect();
+
+        if !members.is_empty() {
+            sqlx::query!(
+                r#"
+                INSERT INTO groupmembers (groupid, userid, createat, deleteat)
+                SELECT $1, unnest($2::text[]), $3, 0
+                ON CONFLICT (groupid, userid) DO UPDATE SET createat = $3, deleteat = 0
+                "#,
+                group_id,
+                user_ids,
+                create_at
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save GroupMember".to_owned(),
+                source,
+            })?;
+        }
+        Ok(members)
+    }
+
+    #[tracing::instrument(skip(self, user_ids), fields(group_id = %group_id, users = user_ids.len()))]
+    async fn delete_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<GroupMember>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT groupid AS "groupid!", userid AS "userid!",
+                   COALESCE(createat, 0) AS "createat!", COALESCE(deleteat, 0) AS "deleteat!"
+              FROM groupmembers
+             WHERE groupid = $1 AND userid = ANY($2) AND deleteat = 0
+            "#,
+            group_id,
+            user_ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to select GroupMembers".to_owned(),
+            source,
+        })?;
+
+        let mut members: Vec<GroupMember> = rows
+            .into_iter()
+            .map(|row| GroupMember {
+                group_id: row.groupid,
+                user_id: row.userid,
+                create_at: row.createat,
+                delete_at: row.deleteat,
+            })
+            .collect();
+
+        // Go compares lengths first, so a request that names one member twice passes — both
+        // copies are "retrieved" — while a single id with no active row is refused.
+        if members.len() != user_ids.len() {
+            for user_id in user_ids {
+                if !members.iter().any(|m| &m.user_id == user_id) {
+                    return Err(StoreError::NotFound {
+                        entity: "User",
+                        criteria: user_id.clone(),
+                    });
+                }
+            }
+        }
+
+        let delete_at = get_millis();
+        for member in &mut members {
+            member.delete_at = delete_at;
+        }
+
+        // No `DeleteAt = 0` predicate on the update, exactly as in Go — every named row is
+        // stamped, including one deleted earlier, which the select above did not return.
+        sqlx::query!(
+            "UPDATE groupmembers SET deleteat = $1 WHERE groupid = $2 AND userid = ANY($3)",
+            delete_at,
+            group_id,
+            user_ids
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete GroupMembers".to_owned(),
+            source,
+        })?;
+        Ok(members)
+    }
+}
+
+impl SqlGroupStore {
+    /// Port of `SqlGroupStore.checkUsersExist` (group_store.go:218): every id must name an
+    /// **active** user, and the first missing one — in request order — is the error.
+    async fn check_users_exist(&self, user_ids: &[String]) -> Result<(), StoreError> {
+        if user_ids.is_empty() {
+            return Ok(());
+        }
+        let found = sqlx::query_scalar!(
+            r#"SELECT id AS "id!" FROM users WHERE id = ANY($1) AND deleteat = 0"#,
+            user_ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to check Users exist".to_owned(),
+            source,
+        })?;
+        if found.len() == user_ids.len() {
+            return Ok(());
+        }
+        for user_id in user_ids {
+            if !found.contains(user_id) {
+                return Err(StoreError::NotFound {
+                    entity: "User",
+                    criteria: user_id.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The ten stored columns of `UserGroups` (`userGroupsSelectQuery`, group_store.go:62).
+struct GroupRow {
+    id: String,
+    name: Option<String>,
+    displayname: Option<String>,
+    description: Option<String>,
+    source: Option<String>,
+    remoteid: Option<String>,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    allowreference: Option<bool>,
+}
+
+impl GroupRow {
+    /// `group.ToModel()` (group_store.go:1155) for a row read without the joined counts: the
+    /// five `db:"-"` fields stay at their zero values, as Go's scan leaves them.
+    fn into_group(self) -> Group {
+        Group {
+            id: self.id,
+            name: self.name,
+            display_name: self.displayname.unwrap_or_default(),
+            description: self.description.unwrap_or_default(),
+            source: GroupSource(self.source.unwrap_or_default()),
+            remote_id: self.remoteid,
+            create_at: self.createat.unwrap_or_default(),
+            update_at: self.updateat.unwrap_or_default(),
+            delete_at: self.deleteat.unwrap_or_default(),
+            allow_reference: self.allowreference.unwrap_or_default(),
+            has_syncables: false,
+            member_count: None,
+            channel_member_count: None,
+            channel_member_timezones_count: None,
+            member_ids: None,
+        }
+    }
+}
+
+/// `IsUniqueConstraintError(err, []string{"Name", "groups_name_key"})` (group_store.go:172):
+/// the `UNIQUE(name)` of `000007_create_user_groups.up.sql`, which Postgres names
+/// `usergroups_name_key`.
+fn is_group_name_unique_violation(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|db| db.constraint())
+        .is_some_and(|constraint| constraint.contains("groups_name_key"))
 }

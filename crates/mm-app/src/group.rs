@@ -207,3 +207,484 @@ impl App {
             })
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// The seven CRUD and membership writes of `api4/group.go`, ported 2026-09-13 against the licensed
+// pair ([D-360]). Every function here sits behind `requireLicense` in its handler, so none is
+// reachable on an unlicensed server; the licence question itself is the handler's, not these.
+// ---------------------------------------------------------------------------------------------
+
+use mm_model::group::{GroupSource, GroupWithUserIds};
+use mm_model::group_member::GroupMember;
+use mm_model::license::minimum_professional_license;
+use mm_model::websocket_message::{
+    WEBSOCKET_EVENT_GROUP_MEMBER_ADD, WEBSOCKET_EVENT_GROUP_MEMBER_DELETE,
+    WEBSOCKET_EVENT_RECEIVED_GROUP, WebSocketEvent,
+};
+use mm_store::{StoreError, UserStore};
+
+impl App {
+    /// Port of `licensedAndConfiguredForGroupBySource` (api4/group.go:1566).
+    ///
+    /// Returns the error with a **blank `where`**, exactly as Go does; every caller sets its own
+    /// (`Api4.createGroup`, `Api4.patchGroup`, …) before answering. Five refusals, in order:
+    ///
+    /// | condition | id | status |
+    /// |---|---|---|
+    /// | no licence | `api.license_error` | **403** — not the 501 `requireLicense` gives for the same fact |
+    /// | `ldap` source without `Features.LDAPGroups` | `api.ldap_groups.license_error` | 403 |
+    /// | a `plugin_` source without `Features.LDAPGroups` | `api.ldap_groups.license_error` | 403 |
+    /// | `custom` below the Professional tier | `api.custom_groups.license_error` | 400 |
+    /// | `custom` with `ServiceSettings.EnableCustomGroups` off | `api.custom_groups.feature_disabled` | 400 |
+    ///
+    /// The first arm is unreachable from api4 — `requireLicense` answered already — but it is
+    /// the arm a caller with a stale licence reads, and it is kept because the status differs.
+    /// `*lic.Features.LDAPGroups` is dereferenced unguarded in Go; `SetDefaults` ran at load, so
+    /// it is never nil there and never `None` here.
+    #[tracing::instrument(skip_all, fields(source = %source.as_str()))]
+    pub async fn licensed_and_configured_for_group_by_source(
+        &self,
+        source: &GroupSource,
+    ) -> AppResult<()> {
+        let Some(license) = self.license().await? else {
+            return Err(AppError::boxed(
+                "",
+                "api.license_error",
+                None,
+                String::new(),
+                403,
+            ));
+        };
+        let ldap_groups = license
+            .features
+            .as_ref()
+            .and_then(|f| f.ldap_groups)
+            .unwrap_or(false);
+
+        if source.as_str() == GroupSource::LDAP && !ldap_groups {
+            return Err(ldap_groups_license_error());
+        }
+        if source.as_str().starts_with(GroupSource::PLUGIN_PREFIX) && !ldap_groups {
+            return Err(ldap_groups_license_error());
+        }
+        if source.as_str() == GroupSource::CUSTOM && !minimum_professional_license(Some(&license)) {
+            return Err(AppError::boxed(
+                "",
+                "api.custom_groups.license_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+        if source.as_str() == GroupSource::CUSTOM && !self.config().enable_custom_groups {
+            return Err(AppError::boxed(
+                "",
+                "api.custom_groups.feature_disabled",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Port of `App.GetGroup` (app/group.go:16) with `opts == nil`: the row and nothing computed.
+    ///
+    /// `IncludeMemberIDs` and `IncludeMemberCount` have no caller among the seven writes, so the
+    /// two extra queries they would trigger are not ported here.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id))]
+    pub async fn get_group(&self, group_id: &str) -> AppResult<Group> {
+        self.store().group().get(group_id).await.map_err(|err| {
+            let (id, status) = match err {
+                StoreError::NotFound { .. } => ("app.group.no_rows", 404),
+                _ => {
+                    tracing::error!(error = %err, "group lookup failed");
+                    ("app.select_error", 500)
+                }
+            };
+            AppError::boxed("GetGroup", id, None, String::new(), status)
+        })
+    }
+
+    /// Port of `App.GetGroupByName` (app/group.go:53). Only `FilterAllowReference` of the
+    /// options is read by the store.
+    #[tracing::instrument(skip_all, fields(name = %name))]
+    pub async fn get_group_by_name(
+        &self,
+        name: &str,
+        filter_allow_reference: bool,
+    ) -> AppResult<Group> {
+        self.store()
+            .group()
+            .get_by_name(name, filter_allow_reference)
+            .await
+            .map_err(|err| {
+                let (id, status) = match err {
+                    StoreError::NotFound { .. } => ("app.group.no_rows", 404),
+                    _ => {
+                        tracing::error!(error = %err, "group-by-name lookup failed");
+                        ("app.select_error", 500)
+                    }
+                };
+                AppError::boxed("GetGroupByName", id, None, String::new(), status)
+            })
+    }
+
+    /// Port of `App.GetGroupsByNames` (app/group.go:101).
+    #[tracing::instrument(skip_all, fields(names = names.len()))]
+    pub async fn get_groups_by_names(
+        &self,
+        names: &[String],
+        filter_allow_reference: bool,
+    ) -> AppResult<Vec<Group>> {
+        self.store()
+            .group()
+            .get_by_names(names, filter_allow_reference)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "groups-by-names lookup failed");
+                AppError::boxed(
+                    "GetGroupsByNames",
+                    "app.select_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `App.isUniqueToUsernames` (app/group.go:132): a group may not take a name any
+    /// user has. An empty name is not checked; a store failure other than "no such user" is a
+    /// 500 whose id is `model.NoTranslation` — the literal `<untranslated>`.
+    async fn is_unique_to_usernames(&self, name: &str) -> AppResult<()> {
+        if name.is_empty() {
+            return Ok(());
+        }
+        match self.store().user().get_by_username(name).await {
+            Ok(_) => {
+                let mut params = std::collections::HashMap::new();
+                params.insert("Username".to_owned(), serde_json::Value::from(name));
+                Err(AppError::boxed(
+                    "isUniqueToUsernames",
+                    "app.group.username_conflict",
+                    Some(params),
+                    String::new(),
+                    400,
+                ))
+            }
+            Err(StoreError::NotFound { .. }) => Ok(()),
+            Err(err) => {
+                tracing::error!(error = %err, "username uniqueness check failed");
+                Err(AppError::boxed(
+                    "isUniqueToUsernames",
+                    mm_model::utils::NO_TRANSLATION,
+                    None,
+                    String::new(),
+                    500,
+                ))
+            }
+        }
+    }
+
+    /// Port of `App.CreateGroupWithUserIds` (app/group.go:147).
+    ///
+    /// The store's four failures map to three ids — and `ErrNotFound`, which the store raises
+    /// for a member id naming no active user, is **not** in Go's switch: it falls to the default
+    /// arm and is a **500** `app.insert_error`, not the 400 `UpsertGroupMembers` gives the same
+    /// fact. Reproduced. On success the member count is re-read and a `received_group` event is
+    /// published to everyone, its payload the group as a JSON **string**.
+    #[tracing::instrument(skip_all, fields(name = group.group.get_name()))]
+    pub async fn create_group_with_user_ids(&self, group: GroupWithUserIds) -> AppResult<Group> {
+        self.is_unique_to_usernames(group.group.get_name())
+            .await
+            .map_err(|mut err| {
+                err.where_ = "CreateGroupWithUserIds".to_owned();
+                err
+            })?;
+
+        let mut created = self
+            .store()
+            .group()
+            .create_with_user_ids(group)
+            .await
+            .map_err(|err| match err {
+                StoreError::Invalid { app_error, .. } => app_error,
+                StoreError::InvalidInput { .. } => AppError::boxed(
+                    "CreateGroupWithUserIds",
+                    "app.group.id.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ),
+                StoreError::Conflict { .. } => AppError::boxed(
+                    "CreateGroupWithUserIds",
+                    "app.custom_group.unique_name",
+                    None,
+                    String::new(),
+                    400,
+                ),
+                other => {
+                    tracing::error!(error = %other, "group create failed");
+                    AppError::boxed(
+                        "CreateGroupWithUserIds",
+                        "app.insert_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+
+        let count = self
+            .member_count_or_id_error(&created.id, "CreateGroupWithUserIds")
+            .await?;
+        created.member_count = Some(count);
+        self.publish_received_group(&created).await?;
+        Ok(created)
+    }
+
+    /// Port of `App.UpdateGroup` (app/group.go:186). The duplicate-name arm names
+    /// **`CreateGroup`** as its `where` — copied from its neighbour in Go and kept, since
+    /// `where` is not on the wire.
+    #[tracing::instrument(skip_all, fields(group_id = %group.id))]
+    pub async fn update_group(&self, group: Group) -> AppResult<Group> {
+        self.is_unique_to_usernames(group.get_name())
+            .await
+            .map_err(|mut err| {
+                err.where_ = "UpdateGroup".to_owned();
+                err
+            })?;
+
+        let mut updated = self
+            .store()
+            .group()
+            .update(group)
+            .await
+            .map_err(|err| match err {
+                StoreError::Invalid { app_error, .. } => app_error,
+                StoreError::NotFound { .. } => {
+                    AppError::boxed("UpdateGroup", "app.group.no_rows", None, String::new(), 404)
+                }
+                StoreError::Conflict { .. } => AppError::boxed(
+                    "CreateGroup",
+                    "app.custom_group.unique_name",
+                    None,
+                    String::new(),
+                    400,
+                ),
+                other => {
+                    tracing::error!(error = %other, "group update failed");
+                    AppError::boxed("UpdateGroup", "app.select_error", None, String::new(), 500)
+                }
+            })?;
+
+        let count = self
+            .member_count_or_id_error(&updated.id, "UpdateGroup")
+            .await?;
+        updated.member_count = Some(count);
+        self.publish_received_group(&updated).await?;
+        Ok(updated)
+    }
+
+    /// Port of `App.DeleteGroup` (app/group.go:227). A group already deleted is `no_rows` at
+    /// 404, because the store's select carries `DeleteAt = 0`.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id))]
+    pub async fn delete_group(&self, group_id: &str) -> AppResult<Group> {
+        let mut deleted = self
+            .store()
+            .group()
+            .delete(group_id)
+            .await
+            .map_err(|err| match err {
+                StoreError::NotFound { .. } => {
+                    AppError::boxed("DeleteGroup", "app.group.no_rows", None, String::new(), 404)
+                }
+                other => {
+                    tracing::error!(error = %other, "group delete failed");
+                    AppError::boxed("DeleteGroup", "app.update_error", None, String::new(), 500)
+                }
+            })?;
+        let count = self
+            .member_count_or_id_error(group_id, "DeleteGroup")
+            .await?;
+        deleted.member_count = Some(count);
+        self.publish_received_group(&deleted).await?;
+        Ok(deleted)
+    }
+
+    /// Port of `App.RestoreGroup` (app/group.go:258) — the mirror of [`App::delete_group`].
+    #[tracing::instrument(skip_all, fields(group_id = %group_id))]
+    pub async fn restore_group(&self, group_id: &str) -> AppResult<Group> {
+        let mut restored =
+            self.store()
+                .group()
+                .restore(group_id)
+                .await
+                .map_err(|err| match err {
+                    StoreError::NotFound { .. } => AppError::boxed(
+                        "RestoreGroup",
+                        "app.group.no_rows",
+                        None,
+                        String::new(),
+                        404,
+                    ),
+                    other => {
+                        tracing::error!(error = %other, "group restore failed");
+                        AppError::boxed(
+                            "RestoreGroup",
+                            "app.update_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                    }
+                })?;
+        let count = self
+            .member_count_or_id_error(group_id, "RestoreGroup")
+            .await?;
+        restored.member_count = Some(count);
+        self.publish_received_group(&restored).await?;
+        Ok(restored)
+    }
+
+    /// Port of `App.UpsertGroupMembers` (app/group.go:824). A member id naming no active user
+    /// is `app.group.user_not_found` at 400 with the id under the `Username` parameter — the
+    /// parameter name is Go's. One `group_member_add` event per member, each addressed to that
+    /// member alone.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, users = user_ids.len()))]
+    pub async fn upsert_group_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> AppResult<Vec<GroupMember>> {
+        let members = self
+            .store()
+            .group()
+            .upsert_members(group_id, user_ids)
+            .await
+            .map_err(|err| {
+                group_member_write_error(err, "UpsertGroupMembers", "app.update_error")
+            })?;
+        for member in &members {
+            self.publish_group_member_event(WEBSOCKET_EVENT_GROUP_MEMBER_ADD, member)
+                .await?;
+        }
+        Ok(members)
+    }
+
+    /// Port of `App.DeleteGroupMembers` (app/group.go:851). Its `where` is the singular
+    /// **`DeleteGroupMember`** in Go, on every arm.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, users = user_ids.len()))]
+    pub async fn delete_group_members(
+        &self,
+        group_id: &str,
+        user_ids: &[String],
+    ) -> AppResult<Vec<GroupMember>> {
+        let members = self
+            .store()
+            .group()
+            .delete_members(group_id, user_ids)
+            .await
+            .map_err(|err| {
+                group_member_write_error(err, "DeleteGroupMember", "app.update_error")
+            })?;
+        for member in &members {
+            self.publish_group_member_event(WEBSOCKET_EVENT_GROUP_MEMBER_DELETE, member)
+                .await?;
+        }
+        Ok(members)
+    }
+
+    /// `GetMemberCount` as the four group writes call it: a failure is `app.group.id.app_error`
+    /// at **400** — Go's choice of id and status for what is a store fault, kept.
+    async fn member_count_or_id_error(&self, group_id: &str, where_: &str) -> AppResult<i64> {
+        self.store()
+            .group()
+            .get_member_count(group_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "group member count failed");
+                AppError::boxed(where_, "app.group.id.app_error", None, String::new(), 400)
+            })
+    }
+
+    /// The `received_group` event the four group writes publish: no team, channel or user in
+    /// the broadcast — every connection gets it — and the group marshalled as a JSON **string**
+    /// under `group`, not embedded as an object.
+    async fn publish_received_group(&self, group: &Group) -> AppResult<()> {
+        let json = serde_json::to_string(group).map_err(|err| {
+            tracing::error!(error = %err, "group does not serialise");
+            AppError::boxed("UpdateGroup", "api.marshal_error", None, String::new(), 500)
+        })?;
+        let mut event = WebSocketEvent::new(WEBSOCKET_EVENT_RECEIVED_GROUP, "", "", "", None, "");
+        event.add("group", serde_json::Value::String(json));
+        self.publish(event).await;
+        Ok(())
+    }
+
+    /// Port of `App.publishGroupMemberEvent` (app/group.go:879): addressed to the member's own
+    /// user id, payload the membership row as a JSON string under `group_member`.
+    async fn publish_group_member_event(
+        &self,
+        event_name: &str,
+        member: &GroupMember,
+    ) -> AppResult<()> {
+        let json = serde_json::to_string(member).map_err(|err| {
+            tracing::error!(error = %err, "group member does not serialise");
+            AppError::boxed(
+                "publishGroupMemberEvent",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+        let mut event = WebSocketEvent::new(event_name, "", "", &member.user_id, None, "");
+        event.add("group_member", serde_json::Value::String(json));
+        self.publish(event).await;
+        Ok(())
+    }
+}
+
+/// `api.ldap_groups.license_error` at 403, from `licensedAndConfiguredForGroupBySource` —
+/// the same id `getLdapGroups` answers at **501**, two files away.
+fn ldap_groups_license_error() -> Box<AppError> {
+    AppError::boxed(
+        "",
+        "api.ldap_groups.license_error",
+        None,
+        String::new(),
+        403,
+    )
+}
+
+/// The shared switch of `UpsertGroupMembers` and `DeleteGroupMembers`: an `AppError` passes
+/// through, `ErrInvalidInput` is `uniqueness_error`, `ErrNotFound` is `user_not_found` with the
+/// missing id under `Username`, and anything else is the 500 the caller names.
+fn group_member_write_error(err: StoreError, where_: &str, fallback_id: &str) -> Box<AppError> {
+    match err {
+        StoreError::Invalid { app_error, .. } => app_error,
+        StoreError::InvalidInput { .. } => AppError::boxed(
+            where_,
+            "app.group.uniqueness_error",
+            None,
+            String::new(),
+            400,
+        ),
+        StoreError::NotFound { criteria, .. } => {
+            let mut params = std::collections::HashMap::new();
+            params.insert("Username".to_owned(), serde_json::Value::from(criteria));
+            AppError::boxed(
+                where_,
+                "app.group.user_not_found",
+                Some(params),
+                String::new(),
+                400,
+            )
+        }
+        other => {
+            tracing::error!(error = %other, "group membership write failed");
+            AppError::boxed(where_, fallback_id, None, String::new(), 500)
+        }
+    }
+}

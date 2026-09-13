@@ -12157,6 +12157,37 @@ now *readable* here and *comparable* against Go, which neither was before.
    flag by the time `GetClientLicense` dereferences them — and a licence with no `features` object
    at all would be a nil-pointer panic in Go's loader. Refused here instead.
 
+## The licensed half of the seven group writes — `api4/group.go` (2026-09-13)
+
+Base 80162e4. Route count unchanged at 460 of 764: the seven routes were already counted as
+served (the unlicensed 501); what changed is that a licensed server is served too, and compared.
+[D-360] closed.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/group_store.rs` — `get`, `get_by_name`, `get_by_names`, `create_with_user_ids`, `update`, `delete`, `restore`, `get_member`, `get_member_count`, `upsert_members`, `delete_members` | DONE | via parity | `Update` writes back the **input** with two timestamps reset, not a re-read; `Delete`/`Restore` select with `DeleteAt = 0` / `<> 0` so each is a 404 on the other's state; `DeleteMembers` compares lengths before it looks for the missing id, so a member named twice passes; the returned rows keep the `SELECT`'s order, which has no `ORDER BY`. |
+| app | `crates/mm-app/src/group.rs`, `authorization.rs` — `licensed_and_configured_for_group_by_source`, `session_has_permission_to_group`, the seven app functions | DONE | via parity | `CreateGroupWithUserIds`' switch has no `ErrNotFound` arm, so a member id naming nobody is a **500** `app.insert_error` there and a 400 `user_not_found` in `UpsertGroupMembers`. `UpdateGroup`'s duplicate-name arm says `where: CreateGroup`. `DeleteGroupMembers`' `where` is singular. |
+| api | `crates/mm-api/src/groups.rs` — the seven handlers | DONE | 3 unit + 7 parity | `restoreGroup` refuses a non-custom group at **501**, the others at 400. `addGroupMembers` checks the permission **before** it reads the body. An empty removal answers `null` (nil slice), an empty add `[]`. The derived name uses Go's simple `ToLower` — corpus line `derived_name` in `behaviour_group.json`. |
+| config | `crates/mm-app/src/config.rs` — `enable_custom_groups` | DONE | fixture | `ServiceSettings.EnableCustomGroups`, default true; the config half of the by-source gate. Projected into `config_active.json`. |
+| test | `crates/mm-api/tests/parity/group_writes_licensed.rs` — 7 tests | DONE | — | Serialised on one lock: every test sweeps the `mmrslicgrp` prefix and two running together deleted each other's fixture mid-request. |
+
+### Notes
+
+1. **`system_user` holds every custom-group permission**, measured: a plain user not in a group
+   patched it, added members, deleted and restored it — 200 each. So a plain user cannot show a
+   permission refusal; the suite makes one with `roles = ''` and a fresh login.
+2. **The implicit `custom_group_user` role is empty** (role.go:926). Being a member grants
+   nothing until an administrator gives the role a permission, which the suite does through the
+   licensed Go's `PUT /roles/{id}/patch` — `POST /caches/invalidate` was measured to leave that
+   server's role cache stale, so the write has to be Go's own.
+3. **Empty membership answers differ by handler.** `UpsertMembers` builds `make([]…, 0)` and
+   marshals `[]`; `buildDeleteMembersQuery` names a nil slice that `Select` leaves nil, and
+   marshals `null`. Measured, and the handler writes the literal.
+4. **A name that is not referenceable is still a name.** `patchGroup`'s collision check filters
+   to `allow_reference = true`, so a name held by an unreferenceable group passes it and fails on
+   the unique constraint instead — `app.custom_group.unique_name`, `where: CreateGroup`.
+5. **The audit records are not ported.** None are, anywhere; the six here are not an exception
+   and not a new entry.
 ## The licensed halves of the acknowledgement pair, `createTermsOfService`, and the archive cleanup (2026-09-13)
 
 Three ledger entries the licence surface unblocked, each now served and compared against the
