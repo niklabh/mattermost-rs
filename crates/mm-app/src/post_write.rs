@@ -411,15 +411,13 @@ impl App {
     /// Port of `app.App.DeletePost` (app/post.go:1978) and the `CleanUpAfterPostDeletion`
     /// (:3362) it ends in, for a **root** post.
     ///
-    /// # Deleting a reply is forwarded, and the reason is `RemoveNotifications`
+    /// # Deleting a reply runs `RemoveNotifications`
     ///
-    /// `RemoveNotifications` (notification.go:914) runs the whole mention pass over the deleted
-    /// post — explicit mentions, group mentions and every member's notify-prop keywords — to
-    /// decrement `ThreadMemberships.UnreadMentions` for anyone whose unread mention it was. Its
-    /// entire body is behind `post.RootId != "" && CRT is allowed`, so for a root post it is a
-    /// no-op and for a reply it is the notification engine. Hence the split: a root deletion is
-    /// reproducible here and a reply's is not. Dropping it silently would leave a phantom mention
-    /// count on a thread the client can still see.
+    /// `RemoveNotifications` (notification.go:914) runs the mention pass over the deleted post
+    /// to decrement `ThreadMemberships.UnreadMentions` for anyone whose unread mention it was —
+    /// `mm_app::notification::App::remove_notifications`, after the `post_deleted` events, with
+    /// its error logged as Go logs it. A group mention on a licensed server is the one arm still
+    /// forwarded, decided before the delete.
     ///
     /// # A missing post here is a **400**, not a 404
     ///
@@ -463,15 +461,16 @@ impl App {
                 ))
             })?;
 
-        if !post.root_id.is_empty()
-            && self.config().collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED
-        {
-            return Err(PrepareError::Unreproducible(
-                "deleting a reply recomputes thread mentions through the notification engine",
-            ));
-        }
-
         let channel = self.get_channel(&post.channel_id).await?;
+        // `RemoveNotifications` runs after the delete, from a goroutine, and its one arm this
+        // server cannot run — a group mention's member pages — is decided here, on the reply's
+        // own mentions, before anything is written.
+        if let Some(reason) = self
+            .remove_notifications_forward_reason(&post, &channel)
+            .await?
+        {
+            return Err(PrepareError::Unreproducible(reason));
+        }
 
         if channel.delete_at != 0 {
             return Err(app_error_400(
@@ -528,6 +527,12 @@ impl App {
 
         self.clean_up_after_post_deletion(&post, &channel, delete_by_id)
             .await?;
+
+        // `a.Srv().Go(func() { RemoveNotifications })` — after the `post_deleted` events, and
+        // its error is logged ("DeletePost failed to delete notification"), never answered.
+        if let Err(err) = self.remove_notifications(&post, &channel).await {
+            tracing::error!(error = %err, post_id = %post_id, "DeletePost failed to delete notification");
+        }
 
         tracing::Span::current().record("forwarded", false);
         Ok(post)

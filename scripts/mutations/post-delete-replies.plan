@@ -1,0 +1,17 @@
+# Mutation plan for deleting a reply — `RemoveNotifications` and the store's reply branch.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-delete-replies.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+
+delete-participant-always-dropped	crates/mm-store/src/post_store.rs	    let result = if count == 0 {	    let result = if count >= 0 {	store	store_delete_reply
+delete-last-reply-counts-deleted	crates/mm-store/src/post_store.rs	               SET participants = participants - $2::text,\n                   lastreplyat = (SELECT COALESCE(MAX(createat), 0) FROM posts WHERE rootid = $1 AND deleteat = 0),	               SET participants = participants - $2::text,\n                   lastreplyat = (SELECT COALESCE(MAX(createat), 0) FROM posts WHERE rootid = $1),	store	store_delete_reply
+remove-viewed-inclusive	crates/mm-app/src/notification.rs	            if thread_membership.last_viewed > post.create_at	            if thread_membership.last_viewed >= post.create_at	api	post_delete_replies
+remove-zero-driven-negative	crates/mm-app/src/notification.rs	                || thread_membership.unread_mentions == 0	                || thread_membership.unread_mentions < 0	api	post_delete_replies
+remove-reset-not-decrement	crates/mm-app/src/notification.rs	            thread_membership.unread_mentions -= 1;	            thread_membership.unread_mentions = 0;	api	post_delete_replies
+remove-previous-not-zero	crates/mm-app/src/notification.rs	            message.add("previous_unread_mentions", serde_json::Value::from(0_i64));	            message.add("previous_unread_mentions", serde_json::Value::from(thread_membership.unread_mentions + 1));	api	post_delete_replies
+remove-skipped-for-replies	crates/mm-app/src/notification.rs	        if !(is_crt_allowed && !post.root_id.is_empty()) {\n            return Ok(());	        if is_crt_allowed && !post.root_id.is_empty() {\n            return Ok(());	api	post_delete_replies
+delete-forwards-every-mention	crates/mm-app/src/notification.rs	        Ok((!mentions.group_mentions.is_empty())	        Ok((!mentions.mentions.is_empty())	api	post_delete_replies
+control-swap-previous-adds	crates/mm-app/src/notification.rs	            message.add("previous_unread_mentions", serde_json::Value::from(0_i64));\n            message.add("previous_unread_replies", serde_json::Value::from(0_i64));	            message.add("previous_unread_replies", serde_json::Value::from(0_i64));\n            message.add("previous_unread_mentions", serde_json::Value::from(0_i64));	api	post_delete_replies
+control-redundant-predicate	crates/mm-store/src/post_store.rs	           AND posts.userid = $2\n           AND posts.deleteat = 0	           AND posts.userid = $2\n           AND posts.deleteat = 0 AND $2 <> ''	store	store_delete_reply

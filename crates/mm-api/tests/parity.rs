@@ -108,6 +108,7 @@ mod parity {
     pub mod post_bulk_reactions;
     pub mod post_create_replies;
     pub mod post_creates;
+    pub mod post_delete_replies;
     pub mod post_edit_history;
     pub mod post_get;
     pub mod post_reactions;

@@ -8721,7 +8721,12 @@ in the same session.
 
 ## D-590 · Deleting a reply is forwarded for `RemoveNotifications`
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (createPost replies)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-14 (createPost replies)
+**Closed** 2026-09-14 — `mm_app::notification::App::remove_notifications`, run after the
+`post_deleted` events with its error logged as Go logs it; the store's reply branch of
+`Delete` (`updateThreadAfterReplyDeletion`) landed with it. Compared in
+`parity::post_delete_replies`. A group mention on a licensed server is the one arm still
+forwarded, before the delete — it is [D-591]'s third row.
 
 `App.DeletePost` on a reply runs `RemoveNotifications` (notification.go:914), which re-derives
 the reply's mentions over the channel's members and decrements `ThreadMemberships.UnreadMentions`
@@ -8743,7 +8748,7 @@ written, when the pass would have to send text this server cannot mint ([D-092])
 | arm | Go | what it sends |
 |---|---|---|
 | an `@name` that is nobody in the channel | `sendOutOfChannelMentions` (notification.go:1219) | an ephemeral post to the author listing the out-of-channel (or out-of-team) users, translated |
-| a group mention | `insertGroupMentions` (:1567) and `sendNoUsersNotifiedByGroupInChannel` | the group's members become mentions; the notice is translated |
+| a group mention | `insertGroupMentions` (:1567) and `sendNoUsersNotifiedByGroupInChannel`; on a reply **delete**, `GetGroupMemberUsersPage` in `RemoveNotifications` | the group's members become mentions; the notice is translated |
 | `@channel`/`@all`/`@here` past `MaxNotificationsPerChannel` | the three `api.post.disabled_*` ephemeral posts | translated |
 
 The out-of-channel arm is the one a client reaches on Team Edition, and it needs

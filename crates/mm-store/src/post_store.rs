@@ -319,14 +319,12 @@ pub trait PostStore {
     /// because `jsonb_set(NULL, …)` is NULL, so a post written before that column was populated
     /// comes back with `"props":{}` and no `deleteBy` at all.
     ///
-    /// # Narrowed to the root branch on purpose
+    /// # Two branches on `RootId`
     ///
-    /// Go's reply branch calls `updateThreadAfterReplyDeletion`, which recomputes the thread's
-    /// `ReplyCount`, `LastReplyAt` and `Participants`. It is absent here because its **caller** is:
-    /// `App.DeletePost` on a reply runs `RemoveNotifications`, which needs the mention engine, so
-    /// [`mm_app::App::delete_post`] forwards a reply's deletion whole. A query with no reachable
-    /// caller is the thing this project has 20,000 lines of. A reply reaching this is a
-    /// [`StoreError::Argument`] rather than a silent half-delete.
+    /// A root marks its thread and its replies' files (below). A reply runs
+    /// `updateThreadAfterReplyDeletion` — the thread's `ReplyCount` and `LastReplyAt` recomputed
+    /// from the live replies, the author dropped from `Participants` when this was their last —
+    /// and moves the root's `UpdateAt` to the delete time. Both inside the one transaction.
     ///
     /// # `Threads` and `FileInfo` are marked, not removed
     ///
@@ -2950,10 +2948,10 @@ impl PostStore for SqlPostStore {
             source,
         })?;
 
-        // Go selects `RootId, UserId`. `UserId` is read only by the reply branch, which is not
-        // ported, so this selects the one column that decides anything here.
+        // Go selects `RootId, UserId`: the first decides the branch, the second is what the
+        // reply branch removes from the thread's participants.
         let row = sqlx::query!(
-            r#"SELECT rootid AS "root_id!" FROM posts WHERE id = $1"#,
+            r#"SELECT rootid AS "root_id!", userid AS "user_id!" FROM posts WHERE id = $1"#,
             post_id
         )
         .fetch_optional(&mut *tx)
@@ -2971,14 +2969,6 @@ impl PostStore for SqlPostStore {
                 criteria: post_id.to_owned(),
             });
         };
-
-        if !row.root_id.is_empty() {
-            return Err(StoreError::Argument {
-                entity: "Post",
-                detail: "deleting a reply needs updateThreadAfterReplyDeletion, whose caller the \
-                         app layer forwards",
-            });
-        }
 
         sqlx::query!(
             r#"
@@ -3000,39 +2990,56 @@ impl PostStore for SqlPostStore {
             source,
         })?;
 
-        // `deleteThread` — the `Threads` row is marked, not removed, so the thread's reply count
-        // and participants survive the delete.
-        sqlx::query!(
-            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",
-            time,
-            post_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|source| StoreError::Db {
-            context: format!("failed to mark thread for root post {post_id} as deleted"),
-            source,
-        })?;
+        if row.root_id.is_empty() {
+            // `deleteThread` — the `Threads` row is marked, not removed, so the thread's reply
+            // count and participants survive the delete.
+            sqlx::query!(
+                "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",
+                time,
+                post_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to mark thread for root post {post_id} as deleted"),
+                source,
+            })?;
 
-        // `deleteThreadFiles` — the **replies'** files, joined through `Posts.RootId`. The root's
-        // own attachments are not in this set.
-        sqlx::query!(
-            r#"
-            UPDATE fileinfo
-               SET deleteat = $1
-              FROM posts
-             WHERE fileinfo.postid = posts.id
-               AND posts.rootid = $2
-            "#,
-            time,
-            post_id
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|source| StoreError::Db {
-            context: format!("failed to mark files of thread post {post_id} as deleted"),
-            source,
-        })?;
+            // `deleteThreadFiles` — the **replies'** files, joined through `Posts.RootId`. The
+            // root's own attachments are not in this set.
+            sqlx::query!(
+                r#"
+                UPDATE fileinfo
+                   SET deleteat = $1
+                  FROM posts
+                 WHERE fileinfo.postid = posts.id
+                   AND posts.rootid = $2
+                "#,
+                time,
+                post_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to mark files of thread post {post_id} as deleted"),
+                source,
+            })?;
+        } else {
+            update_thread_after_reply_deletion(&mut tx, &row.root_id, &row.user_id).await?;
+
+            // `UPDATE Posts SET UpdateAt = ? WHERE Id = root` — inside the transaction, and its
+            // failure is a **warning** in Go (`Error updating Post UpdateAt.`), not a rollback.
+            if let Err(source) = sqlx::query!(
+                "UPDATE posts SET updateat = $1 WHERE id = $2",
+                time,
+                row.root_id
+            )
+            .execute(&mut *tx)
+            .await
+            {
+                tracing::warn!(error = %source, "Error updating Post UpdateAt.");
+            }
+        }
 
         tx.commit().await.map_err(|source| StoreError::Db {
             context: "commit_transaction".to_owned(),
@@ -3336,6 +3343,76 @@ impl PostStore for SqlPostStore {
         tracing::Span::current().record("post_id", post.id.as_str());
         Ok(post)
     }
+}
+
+/// Port of `updateThreadAfterReplyDeletion` (post_store.go:3063), inside the delete's
+/// transaction.
+///
+/// # The participant goes only when this was their last live reply
+///
+/// `COUNT` the author's undeleted replies to the root **after** the delete marked this one; at
+/// zero, `Participants - userId` removes them from the jsonb array. `ReplyCount` and
+/// `LastReplyAt` are recomputed from the live replies either way — and only on a row whose
+/// `ReplyCount > 0`, so a thread row that already reads zero is left alone rather than driven
+/// negative or rewritten.
+async fn update_thread_after_reply_deletion(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    root_id: &str,
+    user_id: &str,
+) -> Result<(), StoreError> {
+    let count: i64 = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(posts.id) AS "count!"
+          FROM posts
+         WHERE posts.rootid = $1
+           AND posts.userid = $2
+           AND posts.deleteat = 0
+        "#,
+        root_id,
+        user_id,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count user's posts in thread".to_owned(),
+        source,
+    })?;
+
+    // One statement in Go with an optional `Set`; two literal statements here, since sqlx wants
+    // each one whole. The predicate and the two subqueries are identical between them.
+    let result = if count == 0 {
+        sqlx::query!(
+            r#"
+            UPDATE threads
+               SET participants = participants - $2::text,
+                   lastreplyat = (SELECT COALESCE(MAX(createat), 0) FROM posts WHERE rootid = $1 AND deleteat = 0),
+                   replycount = (SELECT COUNT(*) FROM posts WHERE rootid = $1 AND deleteat = 0)
+             WHERE postid = $1
+               AND replycount > 0
+            "#,
+            root_id,
+            user_id,
+        )
+        .execute(&mut **tx)
+        .await
+    } else {
+        sqlx::query!(
+            r#"
+            UPDATE threads
+               SET lastreplyat = (SELECT COALESCE(MAX(createat), 0) FROM posts WHERE rootid = $1 AND deleteat = 0),
+                   replycount = (SELECT COUNT(*) FROM posts WHERE rootid = $1 AND deleteat = 0)
+             WHERE postid = $1
+               AND replycount > 0
+            "#,
+            root_id,
+        )
+        .execute(&mut **tx)
+        .await
+    };
+    result.map(|_| ()).map_err(|source| StoreError::Db {
+        context: "failed to update Threads".to_owned(),
+        source,
+    })
 }
 
 /// Port of `updateThreadsFromPosts` (post_store.go:270) for the one post `Save` inserts, inside

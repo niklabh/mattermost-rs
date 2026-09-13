@@ -12650,3 +12650,27 @@ opened. Email, push and the auto-responder stay [D-402].
 reverse and every input it needs is now in the tree ([D-590]). Then a DM or group message on
 create, which is `SendAutoResponseIfNecessary` plus the GM `channel_display_name`.
 
+## Deleting a reply: `RemoveNotifications` (2026-09-14)
+
+Route count unchanged at 463 of 764. `DELETE /api/v4/posts/{post_id}` on a reply was the
+second thing [D-221] forwarded; it is served now. Two pieces, both in files that already existed:
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/post_store.rs` — `delete`'s reply branch: `updateThreadAfterReplyDeletion` and the root's `UpdateAt`; `db_post_save_reply.rs` +1 db | DONE |
+| app | `crates/mm-app/src/notification.rs` — `remove_notifications`, `remove_notifications_forward_reason`; `post_write.rs` — the forward lifted, the pass run after `post_deleted` | DONE |
+| test | `crates/mm-api/tests/parity/post_delete_replies.rs` — 4; `post_writes.rs` — one test flipped from "forwards" to "served" | DONE |
+
+- **The pass is asynchronous in Go and its error never reaches the client.** Run inline here,
+  after the events, and logged. `App::delete_post`.
+- **`LastViewed > CreateAt` skips, strictly; a zero count skips.** Both measured on the row.
+- **`previous_*` are hardcoded zero on this event**, unlike the create's. `remove_notifications`.
+- **A group mention forwards before the delete.** The member paging is unported — [D-591].
+
+[D-590] closed.
+
+### The next route in this family
+
+A DM or group message on create — `SendAutoResponseIfNecessary` and the GM
+`channel_display_name` — is the last client-hot create-post shape still forwarded.
+

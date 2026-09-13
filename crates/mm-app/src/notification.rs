@@ -817,6 +817,194 @@ impl App {
         })
     }
 
+    /// The one arm of `RemoveNotifications` this server cannot run: a **group** mention on a
+    /// licensed server, whose members Go pages through `GetGroupMemberUsersPage`. Decided before
+    /// the delete, on the deleted post's own mentions. `Some(reason)` means forward.
+    pub(crate) async fn remove_notifications_forward_reason(
+        &self,
+        post: &Post,
+        channel: &Channel,
+    ) -> AppResult<Option<&'static str>> {
+        if post.root_id.is_empty()
+            || self.config().collapsed_threads == COLLAPSED_THREADS_DISABLED
+            || !self.allow_group_mentions(post).await?
+        {
+            return Ok(None);
+        }
+        let team = if channel.team_id.is_empty() {
+            Team::default()
+        } else {
+            self.get_team(&channel.team_id).await?
+        };
+        let profile_map = self
+            .store()
+            .user()
+            .get_all_profiles_in_channel(&channel.id, true)
+            .await
+            .map_err(|err| select_error("RemoveNotifications", &err))?;
+        let member_props = self
+            .store()
+            .channel()
+            .get_all_channel_members_notify_props_for_channel(&channel.id, true)
+            .await
+            .map_err(|err| select_error("RemoveNotifications", &err))?;
+        let groups = self
+            .get_groups_allowed_for_reference_in_channel(channel, Some(&team))
+            .await?;
+        let (mentions, _) = self
+            .get_explicit_mentions_and_keywords(
+                post,
+                channel,
+                &profile_map,
+                &groups,
+                &member_props,
+                None,
+            )
+            .await?;
+        Ok((!mentions.group_mentions.is_empty())
+            .then_some("a deleted reply's group mention pages the group's members"))
+    }
+
+    /// Port of `App.RemoveNotifications` (app/notification.go:914): the mention pass over a
+    /// **deleted reply**, in reverse. Go spawns it after the delete and logs its error; the
+    /// caller here does the same, so nothing in it reaches the client.
+    ///
+    /// # Which memberships move
+    ///
+    /// Every user the reply mentioned whose thread membership has an unread mention **and** whose
+    /// `LastViewed` is not past the reply: `UnreadMentions - 1`, then a `thread_updated` to that
+    /// user with the thread as they now see it and both `previous_*` counters at **zero** — Go
+    /// hardcodes them here. A membership that does not exist is an error, and it ends the loop
+    /// for the users after it (Go returns), which is why the order is the map's.
+    ///
+    /// # No keywords for a DM, and no parent list
+    ///
+    /// `getExplicitMentionsAndKeywords` is called with a nil parent, so the comment-thread
+    /// mentions that a *create* adds are never removed here — Go's asymmetry, kept.
+    #[tracing::instrument(skip_all, fields(post_id = %post.id, removed))]
+    pub(crate) async fn remove_notifications(
+        &self,
+        post: &Post,
+        channel: &Channel,
+    ) -> AppResult<()> {
+        let is_crt_allowed = self.config().collapsed_threads != COLLAPSED_THREADS_DISABLED;
+        // CRT is the main issue in this case as notifications indicator are not updated when
+        // accessing threads from the sidebar.
+        if !(is_crt_allowed && !post.root_id.is_empty()) {
+            return Ok(());
+        }
+
+        let team = if channel.team_id.is_empty() {
+            // Blank team for DMs.
+            Team::default()
+        } else {
+            self.get_team(&channel.team_id).await.map_err(|err| {
+                tracing::error!(error = %err, "team lookup failed");
+                AppError::boxed(
+                    "RemoveNotifications",
+                    "app.post.delete_post.get_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?
+        };
+
+        let profile_map = self
+            .store()
+            .user()
+            .get_all_profiles_in_channel(&channel.id, true)
+            .await
+            .map_err(|err| select_error("RemoveNotifications", &err))?;
+        let member_props = self
+            .store()
+            .channel()
+            .get_all_channel_members_notify_props_for_channel(&channel.id, true)
+            .await
+            .map_err(|err| select_error("RemoveNotifications", &err))?;
+        let groups = if self.allow_group_mentions(post).await? {
+            self.get_groups_allowed_for_reference_in_channel(channel, Some(&team))
+                .await?
+        } else {
+            BTreeMap::new()
+        };
+
+        let (mentions, _) = self
+            .get_explicit_mentions_and_keywords(
+                post,
+                channel,
+                &profile_map,
+                &groups,
+                &member_props,
+                None,
+            )
+            .await?;
+
+        // Group members are paged by `GetGroupMemberUsersPage`; a group mention is a forward
+        // condition decided before the delete, so reaching one here is a gate bug.
+        if !mentions.group_mentions.is_empty() {
+            tracing::warn!(post_id = %post.id, "a group mention reached RemoveNotifications; the pre-delete gate should have forwarded it");
+        }
+
+        let mut removed = 0_usize;
+        for user_id in mentions.mentions.keys() {
+            let mut thread_membership = self
+                .get_thread_membership_for_user(user_id, &post.root_id)
+                .await?;
+
+            // If the user has viewed the thread or there are no unread mentions, skip.
+            if thread_membership.last_viewed > post.create_at
+                || thread_membership.unread_mentions == 0
+            {
+                continue;
+            }
+
+            thread_membership.unread_mentions -= 1;
+            self.store()
+                .thread()
+                .update_membership(&thread_membership)
+                .await
+                .map_err(|err| select_error("RemoveNotifications", &err))?;
+            removed += 1;
+
+            let mut user_thread = self.get_thread_for_user(&thread_membership, true).await?;
+
+            let options = self.sanitize_options(false);
+            for participant in user_thread.participants.iter_mut().flatten() {
+                participant.sanitize_profile(&options, false);
+            }
+            if let Some(thread_post) = user_thread.post.take() {
+                let (sanitized, _is_member_for_preview) = self
+                    .sanitize_post_metadata_for_user(*thread_post, user_id)
+                    .await
+                    .map_err(|err| match err {
+                        crate::post::PrepareError::App(app_error) => app_error,
+                        other => select_error("RemoveNotifications", &other),
+                    })?;
+                user_thread.post = Some(Box::new(sanitized));
+            }
+
+            let payload = go_json_marshal(&user_thread).map_err(|err| {
+                tracing::warn!(error = %err, "Failed to encode thread to JSON");
+                select_error("RemoveNotifications", &err)
+            })?;
+            let mut message = WebSocketEvent::new(
+                WEBSOCKET_EVENT_THREAD_UPDATED,
+                &team.id,
+                "",
+                user_id,
+                None,
+                "",
+            );
+            message.add("thread", serde_json::Value::String(payload));
+            message.add("previous_unread_mentions", serde_json::Value::from(0_i64));
+            message.add("previous_unread_replies", serde_json::Value::from(0_i64));
+            self.publish(message).await;
+        }
+        tracing::Span::current().record("removed", removed);
+        Ok(())
+    }
+
     /// Port of `App.publishWebsocketEventForPost` (app/post.go) for the shapes the create route
     /// serves: the post is serialised **once**, after the permalink metadata and the
     /// `channel_mentions` prop would have been removed — neither exists on a post that reaches

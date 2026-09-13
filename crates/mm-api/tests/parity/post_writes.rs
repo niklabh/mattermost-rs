@@ -1243,11 +1243,11 @@ async fn deleting_a_root_post_matches_go_and_takes_its_replies_with_it() {
     common::delete_channel(&http, &token, &rust_channel).await;
 }
 
-/// Deleting a **reply** is forwarded: `App.DeletePost` runs `RemoveNotifications` for it, which is
-/// the mention engine. A `?permanent=true` delete is forwarded for its own reason — the hard-delete
-/// cascade — and both forwards are invisible to the client.
+/// Deleting a **reply** is served since `RemoveNotifications` landed (`parity/post_delete_replies`
+/// compares what it does). A `?permanent=true` delete is still forwarded for its own reason — the
+/// hard-delete cascade — and that forward is invisible to the client.
 #[tokio::test]
-async fn deleting_a_reply_and_a_permanent_delete_are_forwarded() {
+async fn deleting_a_reply_is_served_and_a_permanent_delete_is_forwarded() {
     if !stack_enabled() {
         return;
     }
@@ -1260,11 +1260,8 @@ async fn deleting_a_reply_and_a_permanent_delete_are_forwarded() {
 
     let (status, raw, served_by_rust) =
         delete_post_request(&http, RUST, &token, &reply, None).await;
-    assert_eq!(status, 200, "the forwarded reply delete succeeds: {raw}");
-    assert!(
-        !served_by_rust,
-        "deleting a reply must be forwarded, not answered here: {raw}"
-    );
+    assert_eq!(status, 200, "the reply delete succeeds: {raw}");
+    assert!(served_by_rust, "deleting a reply is served here now: {raw}");
 
     // `?permanent=yes` is **not** a true value — `strconv.ParseBool`'s error is discarded — so it
     // takes the ordinary path and is ours.

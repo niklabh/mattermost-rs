@@ -306,3 +306,71 @@ async fn store_save_reply_rebuilds_participants_from_every_live_reply() {
 
     purge(&pool).await;
 }
+
+/// Deleting a reply recomputes the thread's live counters and drops the author from the
+/// participants only when it was their last live reply (`updateThreadAfterReplyDeletion`);
+/// the root's `UpdateAt` moves to the delete time.
+#[tokio::test]
+async fn store_delete_reply_recomputes_the_thread_and_drops_a_last_participant() {
+    if !db_enabled() {
+        return;
+    }
+    let _guard = FIXTURES.lock().await;
+    let pool = pool().await;
+    seed(&pool).await;
+    let store = SqlPostStore::new(pool.clone());
+
+    let a1 = store.save(&reply(ALICE, T_ROOT + 10)).await.expect("saves");
+    let b1 = store.save(&reply(BOB, T_ROOT + 20)).await.expect("saves");
+    let a2 = store.save(&reply(ALICE, T_ROOT + 30)).await.expect("saves");
+    assert_eq!(
+        thread_row(&pool).await.expect("row").participants,
+        vec![BOB.to_owned(), ALICE.to_owned()]
+    );
+
+    // Alice's latest goes: she still has one live reply, so she stays a participant.
+    store
+        .delete(&a2.id, T_ROOT + 100, BOB)
+        .await
+        .expect("deletes");
+    let row = thread_row(&pool).await.expect("row");
+    assert_eq!(row.reply_count, 2);
+    assert_eq!(
+        row.last_reply_at,
+        T_ROOT + 20,
+        "recomputed from the live replies"
+    );
+    assert_eq!(row.participants, vec![BOB.to_owned(), ALICE.to_owned()]);
+    assert_eq!(
+        root_update_at(&pool).await,
+        T_ROOT + 100,
+        "the root's UpdateAt is the delete time"
+    );
+
+    // Bob's only reply goes: he is removed from the participants.
+    store
+        .delete(&b1.id, T_ROOT + 110, BOB)
+        .await
+        .expect("deletes");
+    let row = thread_row(&pool).await.expect("row");
+    assert_eq!(row.reply_count, 1);
+    assert_eq!(row.last_reply_at, T_ROOT + 10);
+    assert_eq!(row.participants, vec![ALICE.to_owned()]);
+
+    // The last reply: count 0, last reply 0, nobody left. The `ReplyCount > 0` guard still
+    // admits this row (it read 1).
+    store
+        .delete(&a1.id, T_ROOT + 120, BOB)
+        .await
+        .expect("deletes");
+    let row = thread_row(&pool).await.expect("row");
+    assert_eq!(row.reply_count, 0);
+    assert_eq!(row.last_reply_at, 0);
+    assert_eq!(row.participants, Vec::<String>::new());
+    assert_eq!(
+        row.delete_at, None,
+        "a reply delete never marks the thread deleted"
+    );
+
+    purge(&pool).await;
+}
