@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT gm.userid AS \"userid!\", gt.teamid AS \"teamid!\"\n              FROM groupmembers gm\n              JOIN groupteams gt ON gt.groupid = gm.groupid\n              JOIN usergroups ug ON ug.id = gm.groupid\n              JOIN teams t ON t.id = gt.teamid\n              LEFT OUTER JOIN teammembers tm ON tm.teamid = gt.teamid AND tm.userid = gm.userid\n             WHERE ug.deleteat = 0\n               AND gt.deleteat = 0\n               AND gt.autoadd = true\n               AND gm.deleteat = 0\n               AND t.deleteat = 0\n               AND ($3 OR (tm.userid IS NULL AND (gm.createat >= $1 OR gt.updateat >= $1)))\n               AND ($2::text IS NULL OR t.id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7e869f531ceca7b9b710bb7f874df82d8f17f771b2073b51ceddbcc74ca64e26"
+}

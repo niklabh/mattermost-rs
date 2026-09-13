@@ -64,7 +64,7 @@ MODELLED = {
         "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
         "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
-        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands",
+        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands", "EnableCustomGroups",
         "AllowPersistentNotifications", "AllowPersistentNotificationsForGuests",
         "UniqueEmojiReactionLimitPerPost",
         # The mobile session length and the cookie-domain flag, read by
@@ -106,7 +106,7 @@ MODELLED = {
         # `PUT /api/v4/users/{user_id}/active`.
         "EnableUserDeactivation",
     ],
-    "LdapSettings": ["PictureAttribute", "Enable"],
+    "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
     "EmailSettings": [
         "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",

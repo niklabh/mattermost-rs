@@ -13,6 +13,7 @@
 //! folds unquoted identifiers to lower case, so `CreateAt` is `createat` on the wire to the
 //! driver. Queries here spell them the way the database does.
 
+pub mod access_control_policy_store;
 pub mod audit_store;
 pub mod bot_store;
 pub mod channel_join_request_store;
@@ -26,9 +27,11 @@ pub mod error;
 pub mod file_info_store;
 /// The one `GroupStore` read the channel-member add path needs.
 pub mod group_store;
+pub mod group_syncable_store;
 pub mod job_store;
 pub mod license_store;
 pub mod oauth_store;
+pub mod post_acknowledgement_store;
 pub mod post_store;
 pub mod preference_store;
 /// The five CPA reads across `PropertyGroups`, `PropertyFields` and `PropertyValues`.
@@ -54,6 +57,7 @@ pub mod user_terms_of_service_store;
 pub mod view_store;
 pub mod webhook_store;
 
+pub use access_control_policy_store::{AccessControlPolicyStore, SqlAccessControlPolicyStore};
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use bot_store::{BotStore, SqlBotStore};
 pub use channel_join_request_store::{ChannelJoinRequestStore, SqlChannelJoinRequestStore};
@@ -66,9 +70,11 @@ pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
 pub use group_store::{GroupStore, SqlGroupStore};
+pub use group_syncable_store::GroupSyncableStore;
 pub use job_store::{JobStore, SqlJobStore};
 pub use license_store::{LicenseStore, SqlLicenseStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
+pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
@@ -114,6 +120,8 @@ pub struct SqlStore {
     file_info: SqlFileInfoStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
+    access_control_policy: SqlAccessControlPolicyStore,
+    post_acknowledgement: SqlPostAcknowledgementStore,
     license: SqlLicenseStore,
     oauth: SqlOAuthStore,
     post: SqlPostStore,
@@ -177,6 +185,8 @@ impl SqlStore {
             file_info: SqlFileInfoStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
+            access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
+            post_acknowledgement: SqlPostAcknowledgementStore::new(pool.clone()),
             license: SqlLicenseStore::new(pool.clone()),
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
@@ -300,6 +310,16 @@ impl SqlStore {
     /// Port of `store.Store.Job()`.
     pub fn job(&self) -> &SqlJobStore {
         &self.job
+    }
+
+    /// Port of `store.Store.AccessControlPolicy()`.
+    pub fn access_control_policy(&self) -> &SqlAccessControlPolicyStore {
+        &self.access_control_policy
+    }
+
+    /// Port of `store.Store.PostAcknowledgement()`.
+    pub fn post_acknowledgement(&self) -> &SqlPostAcknowledgementStore {
+        &self.post_acknowledgement
     }
 
     /// Port of `store.Store.Bot()`.

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE propertyfields AS linked\n               SET type = source.type,\n                   attrs = jsonb_set(COALESCE(linked.attrs, '{}'::jsonb), '{options}',\n                                     COALESCE(source.attrs->'options', '[]'::jsonb)),\n                   updateat = $1\n              FROM propertyfields AS source\n             WHERE source.id = $2\n               AND linked.linkedfieldid = source.id\n               AND linked.deleteat = 0\n               AND (linked.type != source.type\n                    OR linked.attrs->'options' IS DISTINCT FROM source.attrs->'options')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0c1034909aaad1bd54a5cf4640bcb5e58162689ebfa48b437c945870ec3bb11b"
+}

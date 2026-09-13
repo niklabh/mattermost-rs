@@ -369,6 +369,8 @@ async fn post_names_both(
     token: &str,
     names: &[&str],
 ) -> (Vec<u8>, Vec<u8>) {
+    // Nobody patches a built-in role between the two fetches — see `common::ROLE_ROWS`.
+    let _rows = common::ROLE_ROWS.read().await;
     warm_go_role_cache(client, token, names).await;
     let body = serde_json::to_vec(names).expect("serialises");
     let ((go_status, go_body), (rs_status, rs_body)) =
@@ -385,6 +387,7 @@ async fn fetch_forwarded(
     token: &str,
     path: &str,
 ) -> ((u16, Vec<u8>), (u16, Vec<u8>), String) {
+    let _rows = common::ROLE_ROWS.read().await;
     let get = async |base: &str| {
         let response = client
             .get(format!("{base}{path}"))
@@ -1024,6 +1027,7 @@ async fn all_roles_matches_go_byte_for_byte() {
     if !stack_enabled() {
         return;
     }
+    let _rows = common::ROLE_ROWS.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
 

@@ -93,8 +93,9 @@ const ERROR_TERMS_OF_SERVICE_NO_ROWS_FOUND: &str = "app.terms_of_service.get.no_
 /// from the 501 the content-flagging and channel-bookmark families give for the same kind of
 /// refusal, and it is the one this deployment always reaches.
 ///
-/// A licensed installation is forwarded: whether `Features.CustomTermsOfService` is on inside a
-/// signed licence is not something this server can read.
+/// `Features.CustomTermsOfService` is read off the loaded licence ([`mm_app::App::license`]) —
+/// `SetDefaults` fills it from `FutureFeatures` at load, so it is never nil there. A licensed
+/// installation was forwarded until 2026-09-13; [D-382].
 ///
 /// # `Config.IsValid` is the `where` on the empty-text error
 ///
@@ -136,7 +137,7 @@ pub async fn create_terms_of_service(
             axum::body::Bytes::new()
         }
     };
-    let request = Request::from_parts(parts, axum::body::Body::from(bytes.clone()));
+    drop(parts);
 
     // Go: `license := c.App.Channels().License(); license == nil ||
     // !*license.Features.CustomTermsOfService` → **400**. Read as a value rather than as an early
@@ -146,13 +147,16 @@ pub async fn create_terms_of_service(
     // **Unlicensed is the refusal, not the pass.** Writing the gate the other way round publishes
     // a revision on a server that forbids it, which is what the first run of the parity suite
     // caught this handler doing.
-    let custom_terms_of_service = match crate::channels::licence_gate(&state, request).await {
-        // A licence's feature set lives inside a signed blob this process cannot open, so whether
-        // `CustomTermsOfService` is on is unanswerable here and the request is Go's.
-        crate::channels::LicenceGate::Forward(response) => return response,
-        crate::channels::LicenceGate::Failed(err) => return err.into_response(),
-        // Go's `license == nil`.
-        crate::channels::LicenceGate::Unlicensed => false,
+    let custom_terms_of_service = match state.app.license().await {
+        Ok(license) => {
+            tracing::Span::current().record("licensed", license.is_some());
+            license
+                .as_ref()
+                .and_then(|l| l.features.as_ref())
+                .and_then(|f| f.custom_terms_of_service)
+                .unwrap_or(false)
+        }
+        Err(err) => return ApiError::from(err).into_response(),
     };
     if !custom_terms_of_service {
         return ApiError::from(AppError::new(

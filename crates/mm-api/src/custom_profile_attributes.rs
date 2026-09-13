@@ -29,29 +29,51 @@
 //! 200s to 403s and the 404s to 403s. A port that answered a flat 403 to all seven would be
 //! wrong on five.
 //!
-//! Everything a client can get wrong *before* the gate — a malformed id, a body that will not
-//! decode, an invalid patch, an empty or oversized batch — is answered ahead of it and is
-//! therefore fully comparable. That is most of what these handlers are.
+//! # And past the gate, a licensed server is served too
 //!
-//! # What is not ported
+//! Since 2026-09-13 nothing here forwards on the licence. The success path of every write —
+//! `CreatePropertyField`/`UpdatePropertyField`/`DeletePropertyField`/`UpsertPropertyValues`,
+//! the access-control and attribute-validation hooks, the field limit, the type-change cleanup
+//! and the four CPA websocket events — is [`mm_app::App`]'s, and this module is the handler
+//! logic proper: the body, the id, the permission, the object-type check, the CPA event, in Go's
+//! order. Compared against the licensed Go oracle by `parity::custom_profile_attributes`.
 //!
-//! The success path of every write. It reaches `CreatePropertyField`/`UpdatePropertyField`/
-//! `DeletePropertyField`/`UpsertPropertyValues`, and behind those the access-control hook, the
-//! attribute-validation hook, the type-change value cleanup and four websocket events — none of
-//! which exist on this side. They are unreachable without an Enterprise licence, so each handler
-//! **forwards to Go the moment anything says this installation is licensed** and serves only the
-//! unlicensed contract itself. See [`mm_app::App::cpa_list_fields_unlicensed`] and its
-//! neighbours, whose names carry that precondition because no type can.
+//! # The permission checks that only a licensed server reaches
+//!
+//! `patchCPAField` chooses between two checks on the **shape of the patch**: a patch that touches
+//! only `attrs.options` on a field whose type has options needs
+//! `SessionHasPermissionToManagePropertyFieldOptions`; anything else needs
+//! `SessionHasPermissionToEditPropertyField`, which additionally refuses a protected field
+//! outright. Both levels are pinned to `sysadmin` by the attribute hook for every field in this
+//! group, so in practice both mean `manage_system` — but the two refusals carry different ids.
+//! `cpaPatchValues` asks `SessionHasPermissionToSetPropertyFieldValues` per field against the
+//! **target user**, which for a `user` field on a system target is "any authenticated user" at
+//! `member` level and `manage_system` at `sysadmin` level (a `managed: admin` field).
+//!
+//! # The one hand-over left
+//!
+//! `hasTargetAccess`'s read arm asks `UserCanSeeOtherUser`, which needs the team and channel
+//! membership lookups this port lacks whenever the caller's account carries view restrictions.
+//! That request is forwarded untouched; it is a permission question, not a licence one.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_app::property_hooks::PropertyCaller;
+use mm_model::custom_profile_attributes::CPAField;
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_VIEW_MEMBERS,
     make_permission_error,
 };
-use mm_model::property_field::PropertyFieldPatch;
+use mm_model::property_field::{
+    PROPERTY_FIELD_ATTRIBUTE_OPTIONS, PROPERTY_FIELD_OBJECT_TYPE_USER,
+    PROPERTY_FIELD_TARGET_LEVEL_SYSTEM, PropertyFieldPatch,
+};
 use mm_model::utils::{AppError, is_valid_id};
+use mm_model::websocket_message::{
+    WEBSOCKET_EVENT_CPA_FIELD_CREATED, WEBSOCKET_EVENT_CPA_FIELD_DELETED,
+    WEBSOCKET_EVENT_CPA_FIELD_UPDATED, WEBSOCKET_EVENT_CPA_VALUES_UPDATED, WebSocketEvent,
+};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -62,10 +84,20 @@ use crate::proxy;
 /// Port of `maxPropertyValuePatchItems` (api4/properties.go:20).
 const MAX_PROPERTY_VALUE_PATCH_ITEMS: usize = 50;
 
-/// `json.NewEncoder(w).Encode(v)` — a JSON body **with** the encoder's trailing newline ([D-086]).
-fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
-    let mut body = match serde_json::to_vec(value) {
-        Ok(body) => body,
+/// `model.ConnectionId` — the header a websocket client sends so its own connection is omitted
+/// from the broadcast of what it did.
+const CONNECTION_ID_HEADER: &str = "Connection-Id";
+
+/// `json.NewEncoder(w).Encode(v)` — a JSON body **with** the encoder's trailing newline ([D-086]),
+/// at `status`. Go's encoder escapes `<`, `>` and `&`, which matters here: field names, option
+/// names and text values are user-supplied.
+fn encoded_with_status(
+    status: StatusCode,
+    value: &impl serde::Serialize,
+    where_: &'static str,
+) -> Response {
+    let mut body = match mm_model::utils::go_json_marshal(value) {
+        Ok(body) => body.into_bytes(),
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise a CPA response");
             return ApiError::from(AppError::new(
@@ -81,7 +113,7 @@ fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
     body.push(b'\n');
 
     (
-        StatusCode::OK,
+        status,
         [
             ("Content-Type", "application/json"),
             ("x-mmrs-served-by", "rust"),
@@ -91,31 +123,30 @@ fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
         .into_response()
 }
 
-/// The licence decision every route in this file starts from, as a `Request`-preserving split.
-///
-/// [`licence_gate`] consumes the request to forward it, which the three body-carrying handlers
-/// cannot afford: they need the body in the *other* branch. So the decision is taken first and
-/// the request is forwarded only on the arm that wants it.
-enum Cpa {
-    /// Nothing says this server is licensed — serve the contract in this module.
-    Unlicensed,
-    /// A licence is installed; the work behind the gate is not ported.
-    Forward,
-    Failed(ApiError),
+fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
+    encoded_with_status(StatusCode::OK, value, where_)
 }
 
-async fn cpa_gate(state: &AppState) -> Cpa {
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Unlicensed) => {
-            tracing::Span::current().record("licensed", false);
-            Cpa::Unlicensed
-        }
-        Ok(mm_app::license::LicenseState::Licensed) => {
-            tracing::Span::current().record("licensed", true);
-            Cpa::Forward
-        }
-        Err(err) => Cpa::Failed(ApiError::from(err)),
-    }
+/// `web.ReturnStatusOK` (web/handlers.go) — `{"status":"OK"}` with **no** trailing newline.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
+}
+
+fn connection_id(request: &Request) -> String {
+    request
+        .headers()
+        .get(CONNECTION_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// `json.NewDecoder(r.Body).Decode(&v)` over a body already read into memory: the **first** JSON
@@ -164,32 +195,27 @@ fn decode_map(body: &[u8]) -> Option<serde_json::Map<String, serde_json::Value>>
 /// `GET /api/v4/custom_profile_attributes/fields`.
 ///
 /// Unlicensed this is `[]` or a 403, and which one depends on whether the `access_control` group
-/// holds a `user`-object field. See the module docs.
-#[tracing::instrument(skip_all, fields(licensed))]
+/// holds a `user`-object field (module docs). Licensed it is the fields, sorted by `sort_order`
+/// then id, each as the caller may see it.
+#[tracing::instrument(skip_all)]
 pub async fn list_cpa_fields(
     State(state): State<AppState>,
-    _session: AuthenticatedSession,
-    request: Request,
+    session: AuthenticatedSession,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            let group = match state.app.cpa_property_group().await {
-                Ok(group) => group,
-                Err(err) => return ApiError::from(err).into_response(),
-            };
-            match state.app.cpa_list_fields_unlicensed(&group.id).await {
-                Ok(fields) => encoded(&fields, "listCPAFields"),
-                Err(err) => ApiError::from(err).into_response(),
-            }
-        }
+    let caller = PropertyCaller::from_session(&session.0);
+    let group = match state.app.cpa_property_group().await {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    match state.app.cpa_list_fields(&group, &caller).await {
+        Ok(fields) => encoded(&fields, "listCPAFields"),
+        Err(err) => ApiError::from(err).into_response(),
     }
 }
 
 /// Port of `createCPAField` (:62) — `POST /api/v4/custom_profile_attributes/fields`.
 ///
-/// # Three things happen before the licence, and all three are comparable
+/// # Three things happen before the licence, and all three are comparable on any server
 ///
 /// The body is decoded into a `*model.CPAField` — a bad body, a bare `null` and a JSON array are
 /// all **400 `api.context.invalid_body_param.app_error`** naming `property_field`. Then
@@ -197,50 +223,79 @@ pub async fn list_cpa_fields(
 /// applied to a system-typed field, so a non-admin gets a **permission error** and never learns
 /// whether the server is licensed. Only then does the group read run, and only then the hook.
 ///
-/// The decoded field is otherwise discarded here: everything Go does with it —
-/// `strings.TrimSpace` on the name, `ToPropertyField`, stamping the group, object type, target
-/// shape and creator, clearing id/target/protected — happens between the permission check and
-/// `CreatePropertyField`, which refuses unconditionally. None of it is observable unlicensed.
-#[tracing::instrument(skip_all, fields(licensed))]
+/// # The server-controlled fields are stamped, and the caller's copies discarded
+///
+/// `ToPropertyField`, then id, group, object type (`user`), target (`system`, no id), `Protected`
+/// and both `*By` are overwritten — so a caller cannot inject an id, a target or a protected flag.
+/// What is **not** overwritten is `linked_field_id`, `type` and the three permission levels,
+/// which ride through to the app layer and are refused or repinned there.
+///
+/// **201**, and the CPA event `custom_profile_attributes_field_created` carries the field as a
+/// CPA field — typed attrs — where the generic `property_field_created` the app layer publishes
+/// carries the raw one as a string.
+#[tracing::instrument(skip_all, fields(field_id))]
 pub async fn create_cpa_field(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            let Some(body) = read_body(request).await else {
-                return body_unreadable();
-            };
-            if decode_struct::<mm_model::custom_profile_attributes::CPAField>(&body).is_none() {
-                return ApiError::invalid_param("property_field").into_response();
-            }
+    let connection_id = connection_id(&request);
+    let Some(body) = read_body(request).await else {
+        return body_unreadable();
+    };
+    let Some(mut cpa_field) = decode_struct::<CPAField>(&body) else {
+        return ApiError::invalid_param("property_field").into_response();
+    };
+    cpa_field.property_field.name = cpa_field.property_field.name.trim().to_owned();
 
-            if !state
-                .app
-                .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
-                .await
-            {
-                return ApiError::from(make_permission_error(
-                    &session.0,
-                    &[&PERMISSION_MANAGE_SYSTEM],
-                ))
-                .into_response();
-            }
-
-            match state.app.cpa_property_group().await {
-                Err(err) => ApiError::from(err).into_response(),
-                Ok(_) => {
-                    ApiError::from(mm_app::custom_profile_attributes::property_licence_refusal(
-                        "CreatePropertyField",
-                    ))
-                    .into_response()
-                }
-            }
-        }
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        ))
+        .into_response();
     }
+
+    let group = match state.app.cpa_property_group().await {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut field = cpa_field.to_property_field();
+    field.id = String::new();
+    field.group_id = group.id.clone();
+    field.object_type = PROPERTY_FIELD_OBJECT_TYPE_USER.to_owned();
+    field.target_type = PROPERTY_FIELD_TARGET_LEVEL_SYSTEM.to_owned();
+    field.target_id = String::new();
+    field.protected = false;
+    field.created_by = session.0.user_id.clone();
+    field.updated_by = session.0.user_id.clone();
+
+    let caller = PropertyCaller::from_session(&session.0);
+    let created = match state
+        .app
+        .cpa_create_field(&group, &caller, field, &connection_id)
+        .await
+    {
+        Ok(created) => created,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("field_id", &created.id);
+
+    let cpa_field = match CPAField::from_property_field(&created) {
+        Ok(cpa_field) => cpa_field,
+        Err(err) => return conversion_error("createCPAField", err).into_response(),
+    };
+
+    let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_CREATED, "", "", "", None, "");
+    message.add("field", cpa_json(&cpa_field));
+    state.app.publish(message).await;
+
+    encoded_with_status(StatusCode::CREATED, &cpa_field, "createCPAField")
 }
 
 /// Port of `patchCPAField` (:130) — `PATCH /api/v4/custom_profile_attributes/fields/{field_id}`.
@@ -254,87 +309,183 @@ pub async fn create_cpa_field(
 ///
 /// `TargetID` and `TargetType` are cleared before validation too, so a caller cannot patch them
 /// and cannot fail validation on them either.
-#[tracing::instrument(skip_all, fields(field_id = %field_id, licensed))]
+///
+/// # The patch is applied with `mergeAttrs = true`
+///
+/// A key in `attrs` overwrites that one attr and a `null` deletes it; the rest of the blob is
+/// kept. The attribute hook then re-sanitises the merged result, which is how a patch of
+/// `{"attrs":{"visibility":""}}` lands as `when_set`.
+///
+/// `delete_values` on the CPA event is whether the type-change cleanup cleared this field's
+/// values — the signal a pre-PSAv2 client uses to drop its cache.
+#[tracing::instrument(skip_all, fields(field_id = %field_id, options_only))]
 pub async fn patch_cpa_field(
     State(state): State<AppState>,
     Path(field_id): Path<String>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            // `c.RequireFieldId()` (web/context.go) — first, before the body is even read.
-            if !is_valid_id(&field_id) {
-                return ApiError::invalid_url_param("field_id").into_response();
-            }
-
-            let Some(body) = read_body(request).await else {
-                return body_unreadable();
-            };
-            let Some(mut patch) = decode_struct::<PropertyFieldPatch>(&body) else {
-                return ApiError::invalid_param("property_field_patch").into_response();
-            };
-
-            if let Some(name) = patch.name.as_mut() {
-                *name = name.trim().to_owned();
-            }
-            patch.target_id = None;
-            patch.target_type = None;
-
-            if let Err(err) = patch.is_valid() {
-                return ApiError::from(err).into_response();
-            }
-
-            let group = match state.app.cpa_property_group().await {
-                Ok(group) => group,
-                Err(err) => return ApiError::from(err).into_response(),
-            };
-            ApiError::from(
-                state
-                    .app
-                    .cpa_field_write_unlicensed(&group.id, &field_id)
-                    .await,
-            )
-            .into_response()
-        }
+    // `c.RequireFieldId()` (web/context.go) — first, before the body is even read.
+    if !is_valid_id(&field_id) {
+        return ApiError::invalid_url_param("field_id").into_response();
     }
+
+    let connection_id = connection_id(&request);
+    let Some(body) = read_body(request).await else {
+        return body_unreadable();
+    };
+    let Some(mut patch) = decode_struct::<PropertyFieldPatch>(&body) else {
+        return ApiError::invalid_param("property_field_patch").into_response();
+    };
+
+    if let Some(name) = patch.name.as_mut() {
+        *name = name.trim().to_owned();
+    }
+    patch.target_id = None;
+    patch.target_type = None;
+
+    if let Err(err) = patch.is_valid() {
+        return ApiError::from(err).into_response();
+    }
+
+    let group = match state.app.cpa_property_group().await {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let caller = PropertyCaller::from_session(&session.0);
+
+    let mut existing = match state.app.cpa_get_field(&group, &caller, &field_id).await {
+        Ok(existing) => existing,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    if existing.object_type != PROPERTY_FIELD_OBJECT_TYPE_USER {
+        return refusal(
+            "patchCPAField",
+            "api.property_field.object_type_mismatch.app_error",
+            404,
+        )
+        .into_response();
+    }
+
+    let options_only = is_options_only_patch(&patch) && existing.type_.supports_options();
+    tracing::Span::current().record("options_only", options_only);
+    if options_only {
+        if !state
+            .app
+            .session_has_permission_to_manage_property_field_options(&session.0, &existing)
+            .await
+        {
+            return refusal(
+                "patchCPAField",
+                "api.property_field.update.no_options_permission.app_error",
+                403,
+            )
+            .into_response();
+        }
+    } else if !state
+        .app
+        .session_has_permission_to_edit_property_field(&session.0, &existing)
+        .await
+    {
+        return refusal(
+            "patchCPAField",
+            "api.property_field.update.no_field_permission.app_error",
+            403,
+        )
+        .into_response();
+    }
+
+    existing.patch(&patch, true);
+    existing.updated_by = session.0.user_id.clone();
+
+    let update = match state
+        .app
+        .cpa_update_field(&group, &caller, existing, &connection_id)
+        .await
+    {
+        Ok(update) => update,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let cpa_field = match CPAField::from_property_field(&update.field) {
+        Ok(cpa_field) => cpa_field,
+        Err(err) => return conversion_error("patchCPAField", err).into_response(),
+    };
+
+    let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_UPDATED, "", "", "", None, "");
+    message.add("field", cpa_json(&cpa_field));
+    message.add(
+        "delete_values",
+        serde_json::Value::Bool(!update.cleared_field_ids.is_empty()),
+    );
+    state.app.publish(message).await;
+
+    encoded(&cpa_field, "patchCPAField")
 }
 
 /// Port of `deleteCPAField` (:236) — `DELETE /api/v4/custom_profile_attributes/fields/{field_id}`.
 ///
-/// The same read as the patch and the same two answers, with **no body** between the id check and
-/// the group read — so a delete of an unknown id is a 404 where the patch of the same id might
-/// still be a 400, because the patch reads a body first.
-#[tracing::instrument(skip_all, fields(field_id = %field_id, licensed))]
+/// The same read as the patch and the same first two answers, with **no body** between the id
+/// check and the group read — so a delete of an unknown id is a 404 where the patch of the same
+/// id might still be a 400, because the patch reads a body first. Then the field-edit permission
+/// (a **different** id from the patch's, `delete.no_permission`), the delete, and the CPA event
+/// carrying only the id. The body is `ReturnStatusOK`'s, without a newline.
+#[tracing::instrument(skip_all, fields(field_id = %field_id))]
 pub async fn delete_cpa_field(
     State(state): State<AppState>,
     Path(field_id): Path<String>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            if !is_valid_id(&field_id) {
-                return ApiError::invalid_url_param("field_id").into_response();
-            }
-
-            let group = match state.app.cpa_property_group().await {
-                Ok(group) => group,
-                Err(err) => return ApiError::from(err).into_response(),
-            };
-            ApiError::from(
-                state
-                    .app
-                    .cpa_field_write_unlicensed(&group.id, &field_id)
-                    .await,
-            )
-            .into_response()
-        }
+    if !is_valid_id(&field_id) {
+        return ApiError::invalid_url_param("field_id").into_response();
     }
+    let connection_id = connection_id(&request);
+
+    let group = match state.app.cpa_property_group().await {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let caller = PropertyCaller::from_session(&session.0);
+
+    let existing = match state.app.cpa_get_field(&group, &caller, &field_id).await {
+        Ok(existing) => existing,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    if existing.object_type != PROPERTY_FIELD_OBJECT_TYPE_USER {
+        return refusal(
+            "deleteCPAField",
+            "api.property_field.object_type_mismatch.app_error",
+            404,
+        )
+        .into_response();
+    }
+    if !state
+        .app
+        .session_has_permission_to_edit_property_field(&session.0, &existing)
+        .await
+    {
+        return refusal(
+            "deleteCPAField",
+            "api.property_field.delete.no_permission.app_error",
+            403,
+        )
+        .into_response();
+    }
+
+    if let Err(err) = state
+        .app
+        .delete_property_field_with_hooks(&group, &caller, &field_id, &connection_id)
+        .await
+    {
+        return ApiError::from(err).into_response();
+    }
+
+    let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_FIELD_DELETED, "", "", "", None, "");
+    message.add("field_id", serde_json::Value::String(field_id));
+    state.app.publish(message).await;
+
+    status_ok()
 }
 
 /// Port of `patchCPAValues` (:434) — `PATCH /api/v4/custom_profile_attributes/values`.
@@ -342,23 +493,18 @@ pub async fn delete_cpa_field(
 /// The target is **always the session's own user**, so `hasTargetAccess`'s self-access arm always
 /// passes and no permission can refuse this route. Everything else it does is
 /// [`cpa_patch_values`].
-#[tracing::instrument(skip_all, fields(licensed))]
+#[tracing::instrument(skip_all)]
 pub async fn patch_cpa_values(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            let Some(body) = read_body(request).await else {
-                return body_unreadable();
-            };
-            let user_id = session.0.user_id.clone();
-            cpa_patch_values(&state, &session, &user_id, &body).await
-        }
-    }
+    let connection_id = connection_id(&request);
+    let Some(body) = read_body(request).await else {
+        return body_unreadable();
+    };
+    let user_id = session.0.user_id.clone();
+    cpa_patch_values(&state, &session, &user_id, &body, &connection_id).await
 }
 
 /// Port of `listCPAValues` (:371) —
@@ -377,43 +523,34 @@ pub async fn patch_cpa_values(
 /// `returnValue := make(map[string]json.RawMessage)` is always non-nil, so a user with no values
 /// gets an empty object. A `BTreeMap` serialises the same way, and its ordering is Go's too:
 /// `encoding/json` sorts map keys.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, licensed))]
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn list_cpa_values(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            let user_id = resolve_me(&user_id, &session).to_owned();
-            if !is_valid_id(&user_id) {
-                return ApiError::invalid_url_param("user_id").into_response();
-            }
+    let user_id = resolve_me(&user_id, &session).to_owned();
+    if !is_valid_id(&user_id) {
+        return ApiError::invalid_url_param("user_id").into_response();
+    }
 
-            match target_access_read(&state, &session, &user_id).await {
-                TargetAccess::Denied(err) => return err.into_response(),
-                // The caller's account carries view restrictions, which needs two membership
-                // lookups this port does not have. Forward the request untouched.
-                TargetAccess::Forward => return proxy::forward_to_go(State(state), request).await,
-                TargetAccess::Allowed => {}
-            }
+    match target_access_read(&state, &session, &user_id).await {
+        TargetAccess::Denied(err) => return err.into_response(),
+        // The caller's account carries view restrictions, which needs two membership lookups
+        // this port does not have. Forward the request untouched.
+        TargetAccess::Forward => return proxy::forward_to_go(State(state), request).await,
+        TargetAccess::Allowed => {}
+    }
 
-            let group = match state.app.cpa_property_group().await {
-                Ok(group) => group,
-                Err(err) => return ApiError::from(err).into_response(),
-            };
-            match state
-                .app
-                .cpa_list_values_unlicensed(&group.id, &user_id)
-                .await
-            {
-                Ok(values) => encoded(&values, "listCPAValues"),
-                Err(err) => ApiError::from(err).into_response(),
-            }
-        }
+    let group = match state.app.cpa_property_group().await {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let caller = PropertyCaller::from_session(&session.0);
+    match state.app.cpa_list_values(&group, &caller, &user_id).await {
+        Ok(values) => encoded(&values, "listCPAValues"),
+        Err(err) => ApiError::from(err).into_response(),
     }
 }
 
@@ -423,33 +560,28 @@ pub async fn list_cpa_values(
 /// The id check runs before the body is read, and the write-side target check —
 /// `PermissionEditOtherUsers` for anyone but yourself — runs inside [`cpa_patch_values`], after
 /// the group read.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, licensed))]
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn patch_cpa_values_for_user(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match cpa_gate(&state).await {
-        Cpa::Forward => proxy::forward_to_go(State(state), request).await,
-        Cpa::Failed(err) => err.into_response(),
-        Cpa::Unlicensed => {
-            let user_id = resolve_me(&user_id, &session).to_owned();
-            if !is_valid_id(&user_id) {
-                return ApiError::invalid_url_param("user_id").into_response();
-            }
-
-            let Some(body) = read_body(request).await else {
-                return body_unreadable();
-            };
-            cpa_patch_values(&state, &session, &user_id, &body).await
-        }
+    let user_id = resolve_me(&user_id, &session).to_owned();
+    if !is_valid_id(&user_id) {
+        return ApiError::invalid_url_param("user_id").into_response();
     }
+
+    let connection_id = connection_id(&request);
+    let Some(body) = read_body(request).await else {
+        return body_unreadable();
+    };
+    cpa_patch_values(&state, &session, &user_id, &body, &connection_id).await
 }
 
 /// Port of `cpaPatchValues` (:302), shared by both PATCH-values routes.
 ///
-/// # The order of the four refusals is the whole content
+/// # The order of the refusals is the whole content
 ///
 /// 1. The body must decode as a JSON **object** — `map[string]json.RawMessage`. An array or a
 ///    number is 400 `api.context.invalid_body_param.app_error` naming `value`; a literal `null`
@@ -461,14 +593,25 @@ pub async fn patch_cpa_values_for_user(
 /// 4. More than fifty entries is 400 `api.property_value.patch.too_many_items.request_error`,
 ///    **before** any id is checked — so an oversized batch of malformed ids reports the size.
 /// 5. Every key must be a valid id: 400 `api.property_value.patch.invalid_field_id.app_error`.
+/// 6. The fields are read by id, through the hooks: a short read is 404
+///    `app.property_field.not_found.app_error`; unlicensed, a full read is the 403.
+/// 7. Per field, in batch order: a non-`user` field is 404 `object_type_mismatch`, and a caller
+///    without the field's value permission **on the target user** is 403
+///    `no_values_permission`. The first refusal wins, so the batch's order decides which.
+/// 8. `UpsertPropertyValues`, then the CPA event with the `{field_id: value}` map the response
+///    also carries.
 ///
 /// Go's duplicate-`FieldID` check from the generic handler is absent here and its comment says
-/// why: the keys come from a JSON object, so uniqueness is already guaranteed.
+/// why: the keys come from a JSON object, so uniqueness is already guaranteed. **Batch order is
+/// map order** — Go ranges over the decoded map, whose iteration order is random, so the
+/// per-field loop in (7) runs in an order Go itself does not fix; a batch with two refusable
+/// fields is answered with either. Sorted key order here, which is one of Go's possible answers.
 async fn cpa_patch_values(
     state: &AppState,
     session: &AuthenticatedSession,
     user_id: &str,
     body: &[u8],
+    connection_id: &str,
 ) -> Response {
     let Some(updates) = decode_map(body) else {
         return ApiError::invalid_param("value").into_response();
@@ -520,13 +663,133 @@ async fn cpa_patch_values(
         field_ids.push(field_id.clone());
     }
 
-    ApiError::from(
-        state
+    let caller = PropertyCaller::from_session(&session.0);
+    let fields = match state.app.cpa_get_fields(&group, &caller, &field_ids).await {
+        Ok(fields) => fields,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let by_id: std::collections::HashMap<&str, &mm_model::property_field::PropertyField> =
+        fields.iter().map(|f| (f.id.as_str(), f)).collect();
+    for field_id in &field_ids {
+        let Some(field) = by_id.get(field_id.as_str()) else {
+            let mut params = std::collections::HashMap::new();
+            params.insert(
+                "FieldID".to_owned(),
+                serde_json::Value::String(field_id.clone()),
+            );
+            return ApiError::from(AppError::new(
+                "cpaPatchValues",
+                "api.property_value.patch.field_not_found.app_error",
+                Some(params),
+                String::new(),
+                404,
+            ))
+            .into_response();
+        };
+        if field.object_type != PROPERTY_FIELD_OBJECT_TYPE_USER {
+            return refusal(
+                "cpaPatchValues",
+                "api.property_field.object_type_mismatch.app_error",
+                404,
+            )
+            .into_response();
+        }
+        if !state
             .app
-            .cpa_patch_values_unlicensed(&group.id, &field_ids)
-            .await,
-    )
-    .into_response()
+            .session_has_permission_to_set_property_field_values(&session.0, field, user_id)
+            .await
+        {
+            return refusal(
+                "cpaPatchValues",
+                "api.property_value.patch.no_values_permission.app_error",
+                403,
+            )
+            .into_response();
+        }
+    }
+
+    let caller_id = session.0.user_id.clone();
+    let values: Vec<mm_model::property_value::PropertyValue> = field_ids
+        .iter()
+        .map(|field_id| mm_model::property_value::PropertyValue {
+            target_id: user_id.to_owned(),
+            target_type: PROPERTY_FIELD_OBJECT_TYPE_USER.to_owned(),
+            group_id: group.id.clone(),
+            field_id: field_id.clone(),
+            value: updates
+                .get(field_id)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            created_by: caller_id.clone(),
+            updated_by: caller_id.clone(),
+            ..Default::default()
+        })
+        .collect();
+
+    let upserted = match state
+        .app
+        .cpa_upsert_values(&group, &caller, values, user_id, connection_id)
+        .await
+    {
+        Ok(upserted) => upserted,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let results: std::collections::BTreeMap<String, serde_json::Value> = upserted
+        .into_iter()
+        .map(|value| (value.field_id, value.value))
+        .collect();
+
+    let mut message = WebSocketEvent::new(WEBSOCKET_EVENT_CPA_VALUES_UPDATED, "", "", "", None, "");
+    message.add("user_id", serde_json::Value::String(user_id.to_owned()));
+    message.add(
+        "values",
+        serde_json::to_value(&results).unwrap_or(serde_json::Value::Null),
+    );
+    state.app.publish(message).await;
+
+    encoded(&results, "cpaPatchValues")
+}
+
+/// `isOptionsOnlyPatch` (api4/properties.go:928): nothing but `attrs`, and `attrs` holding
+/// exactly the one key `options`.
+fn is_options_only_patch(patch: &PropertyFieldPatch) -> bool {
+    if patch.name.is_some()
+        || patch.type_.is_some()
+        || patch.target_id.is_some()
+        || patch.target_type.is_some()
+        || patch.linked_field_id.is_some()
+    {
+        return false;
+    }
+    let Some(attrs) = patch.attrs.as_ref() else {
+        return false;
+    };
+    attrs.len() == 1 && attrs.contains_key(PROPERTY_FIELD_ATTRIBUTE_OPTIONS)
+}
+
+/// A CPA field as a websocket payload — `message.Add("field", cpaField)`, an object.
+fn cpa_json(field: &CPAField) -> serde_json::Value {
+    serde_json::to_value(field).unwrap_or(serde_json::Value::Null)
+}
+
+/// One of the refusals `api4/custom_profile_attributes.go` mints by hand, all of which carry an
+/// empty `detailed_error` on the wire once `WipeDetailed` has run.
+fn refusal(where_: &'static str, id: &'static str, status: i32) -> ApiError {
+    ApiError::from(AppError::new(where_, id, None, String::new(), status))
+}
+
+/// `app.custom_profile_attributes.property_field_conversion.app_error`, the handler's 500 when a
+/// written field will not convert back to a CPA field.
+fn conversion_error(where_: &'static str, err: impl std::fmt::Display) -> ApiError {
+    tracing::error!(error = %err, "a CPA field would not convert");
+    ApiError::from(AppError::new(
+        where_,
+        "app.custom_profile_attributes.property_field_conversion.app_error",
+        None,
+        String::new(),
+        500,
+    ))
 }
 
 /// The three 400s `cpaPatchValues` raises itself, all with `Where` = `cpaPatchValues`.
@@ -659,6 +922,25 @@ mod tests {
         let decoded = decode_map(br#"{"a":1} {"b":2}"#).expect("the first value decodes");
         assert_eq!(decoded.len(), 1);
         assert!(decoded.contains_key("a"));
+    }
+
+    /// `isOptionsOnlyPatch`: `attrs` alone, holding exactly `options`. A second key, an empty
+    /// `attrs`, or any other patched member makes it a field edit — which needs the other
+    /// permission and answers the other id.
+    #[test]
+    fn an_options_only_patch_is_exactly_one_attr_and_nothing_else() {
+        let only: PropertyFieldPatch = serde_json::from_str(r#"{"attrs":{"options":[]}}"#).unwrap();
+        assert!(is_options_only_patch(&only));
+        let two: PropertyFieldPatch =
+            serde_json::from_str(r#"{"attrs":{"options":[],"visibility":"always"}}"#).unwrap();
+        assert!(!is_options_only_patch(&two));
+        let named: PropertyFieldPatch =
+            serde_json::from_str(r#"{"name":"x","attrs":{"options":[]}}"#).unwrap();
+        assert!(!is_options_only_patch(&named));
+        let empty: PropertyFieldPatch = serde_json::from_str(r#"{"attrs":{}}"#).unwrap();
+        assert!(!is_options_only_patch(&empty));
+        let none: PropertyFieldPatch = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(!is_options_only_patch(&none));
     }
 
     /// The cap is fifty, and it is a `>` and not a `>=`: exactly fifty entries is accepted.

@@ -104,6 +104,35 @@ pub fn json_values_equal_like_go(a: &serde_json::Value, b: &serde_json::Value) -
     }
 }
 
+/// Rewrite every integral float in a JSON document as an integer, recursively — the number
+/// Go's `encoding/json` would print for it.
+///
+/// A `map[string]any` decoded from JSON holds every number as `float64`, and `json.Marshal`
+/// prints an integral `float64` **without** a fraction: `3`, never `3.0`. serde_json keeps the
+/// distinction it parsed — `3.0` stays an `f64` and prints as `3.0` — so a document that passed
+/// through a Go map and one that passed through a `serde_json::Value` differ on every integral
+/// float. Where Go decodes into `any` (a `PropertyField`'s `Attrs`, for one), this is applied on
+/// the way in and on the way out. Where Go keeps the raw bytes (`json.RawMessage`, a property
+/// **value**), it must not be: Go reproduces `2.0` there.
+///
+/// Only floats that are finite, integral and within `i64` are rewritten; anything else is left to
+/// serde's own formatting. Measured: `sort_order: 3` came back from a Rust-written row as `3.0`
+/// through this server and `3` through Go, in the `property_field_created` broadcast.
+pub fn go_normalize_json_numbers(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Number(number) => {
+            if let Some(f) = number.as_f64() {
+                if number.is_f64() && f.is_finite() && f.fract() == 0.0 && f.abs() < 9.0e15 {
+                    *number = serde_json::Number::from(f as i64);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(go_normalize_json_numbers),
+        serde_json::Value::Object(map) => map.values_mut().for_each(go_normalize_json_numbers),
+        _ => {}
+    }
+}
+
 /// Go's **`encoding/json`** rendering of a `float64` — which is not [`go_format_float`], and not
 /// serde_json's either.
 ///

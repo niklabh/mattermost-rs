@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT groupid, teamid AS syncableid, autoadd, schemeadmin, createat, updateat, deleteat\n                  FROM groupteams\n                 WHERE groupid = $1 AND teamid = $2\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "groupid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "syncableid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "autoadd",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "schemeadmin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleteat",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "7aa2735ccc80b5ceb3f332ce2685d07ef9d824859fe0f4d52e265e5fc1b041a4"
+}

@@ -53,7 +53,9 @@ use mm_model::websocket_message::{
     WEBSOCKET_EVENT_CHANNEL_CONVERTED, WEBSOCKET_EVENT_CHANNEL_DELETED,
     WEBSOCKET_EVENT_CHANNEL_RESTORED, WEBSOCKET_EVENT_CHANNEL_UPDATED, WebSocketEvent,
 };
-use mm_store::{ChannelStore, PostStore, StoreError, UserStore, WebhookStore};
+use mm_store::{
+    AccessControlPolicyStore, ChannelStore, PostStore, StoreError, UserStore, WebhookStore,
+};
 
 use crate::App;
 use crate::channel_member::system_props;
@@ -540,6 +542,19 @@ impl App {
                     500,
                 )
             })?;
+
+        // `cleanupChannelAccessControlPolicy` (channel.go:4564): "archiving a channel tears down
+        // the membership policy attached to it". The access-control service is nil off the
+        // enterprise tree, so the store fallback runs unconditionally and is a no-op for a channel
+        // with no policy row; a failure is a warning, not the request's error.
+        if let Err(err) = self
+            .store()
+            .access_control_policy()
+            .delete(&channel.id)
+            .await
+        {
+            tracing::warn!(channel_id = %channel.id, error = %err, "Failed to delete channel ABAC policy during channel delete/archive");
+        }
 
         let mut message = if channel.channel_type == CHANNEL_TYPE_OPEN {
             WebSocketEvent::new(

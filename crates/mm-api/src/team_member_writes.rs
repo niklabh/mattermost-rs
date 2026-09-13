@@ -394,11 +394,13 @@ pub async fn add_team_member(
                 ))
                 .into_response();
             }
-        } else if !state.app.team_access_controlled(&team.id)
-            && !state
-                .app
-                .session_has_permission_to(&session.0, &PERMISSION_JOIN_PRIVATE_TEAMS)
-                .await
+        } else if !match state.app.team_access_controlled(&team.id).await {
+            Ok(controlled) => controlled,
+            Err(err) => return ApiError::from(err).into_response(),
+        } && !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_JOIN_PRIVATE_TEAMS)
+            .await
         {
             return ApiError::from(*make_permission_error(
                 &session.0,

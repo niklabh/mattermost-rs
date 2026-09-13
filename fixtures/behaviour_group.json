@@ -1,4 +1,62 @@
 {
+    "derived_name": [
+        {
+            "in": "",
+            "out": ""
+        },
+        {
+            "in": "Display Name",
+            "out": "display-name"
+        },
+        {
+            "in": "Display  Two Spaces",
+            "out": "display--two-spaces"
+        },
+        {
+            "in": "MiXeD",
+            "out": "mixed"
+        },
+        {
+            "in": " leading",
+            "out": "-leading"
+        },
+        {
+            "in": "trailing ",
+            "out": "trailing-"
+        },
+        {
+            "in": "Tab\tName",
+            "out": "tab\tname"
+        },
+        {
+            "in": "nbsp name",
+            "out": "nbsp name"
+        },
+        {
+            "in": "ÀÉ Group",
+            "out": "àé-group"
+        },
+        {
+            "in": "İstanbul Group",
+            "out": "istanbul-group"
+        },
+        {
+            "in": "ΣΊΣΥΦΟΣ",
+            "out": "σίσυφοσ"
+        },
+        {
+            "in": "ǅ Title",
+            "out": "ǆ-title"
+        },
+        {
+            "in": "ẞ Sharp",
+            "out": "ß-sharp"
+        },
+        {
+            "in": "already-derived",
+            "out": "already-derived"
+        }
+    ],
     "is_syncable": [
         {
             "is_syncable": true,
