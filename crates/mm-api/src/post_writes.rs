@@ -23,7 +23,6 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_app::license::LicenseState;
 use mm_app::post::PrepareError;
 use mm_app::post_create::CreatePostFlags;
 use mm_app::post_unread::MarkUnreadError;
@@ -1351,26 +1350,37 @@ async fn post_priority_check(
         )));
     }
 
-    let licensed = state.app.license_state().await? == LicenseState::Licensed;
+    // `MinimumProfessionalLicense(license)` — the tier, read from the parsed licence since
+    // 2026-09-13. Read once; Go reads `a.License()` once too, before the check.
+    let license = state.app.license().await?;
+    let professional = mm_model::license::minimum_professional_license(license.as_deref());
 
-    if priority.requested_ack == Some(true) {
-        if licensed {
-            // `MinimumProfessionalLicense` compares the licence's SKU, which lives in the signed
-            // body this server never parses.
-            return Err(PrepareError::Unreproducible(
-                "the acknowledgement gate compares the licence SKU",
-            ));
-        }
+    if priority.requested_ack == Some(true) && !professional {
         return Err(license_feature_unavailable(where_));
     }
 
     if priority.persistent_notifications == Some(true) {
-        if licensed {
-            return Err(PrepareError::Unreproducible(
-                "the persistent-notification gate compares the licence SKU",
-            ));
+        if !professional {
+            return Err(license_feature_unavailable(where_));
         }
-        return Err(license_feature_unavailable(where_));
+        // `IsPersistentNotificationsEnabled` — the setting, tested *after* the tier.
+        if !state.app.config().allow_persistent_notifications {
+            return Err(forbidden());
+        }
+        // `*priority.Priority != model.PostPriorityUrgent` — a nil `Priority` would be a nil
+        // dereference in Go; here it simply is not "urgent".
+        if priority.priority.as_deref() != Some(mm_model::post::POST_PRIORITY_URGENT) {
+            return Err(PrepareError::App(AppError::boxed(
+                where_,
+                "api.post.post_priority.urgent_persistent_notification_post.request_error",
+                None,
+                String::new(),
+                400,
+            )));
+        }
+        if !state.app.config().allow_persistent_notifications_for_guests && user.is_guest() {
+            return Err(forbidden());
+        }
     }
 
     Ok(())

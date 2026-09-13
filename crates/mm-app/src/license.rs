@@ -718,10 +718,15 @@ pub(crate) mod test_signing {
     /// A `Config` whose `MM_LICENSE` is a licence of `sku` that verifies: the signed body and
     /// the PEM of the key it was signed with, in the two fields `App::with_config` reads.
     pub(crate) fn licensed_config(sku: &str) -> crate::config::Config {
-        let (private, public) = keypair();
-        let body = format!(
+        licensed_config_from(&format!(
             r#"{{"id":"mmrslicensedtestkey0000001","issued_at":1,"starts_at":1,"expires_at":4102444800000,"customer":{{"id":"c","name":"n","email":"e","company":"co"}},"features":{{"users":10}},"sku_name":"{sku}","sku_short_name":"{sku}"}}"#
-        );
+        ))
+    }
+
+    /// [`licensed_config`] over an arbitrary licence body, for the tests whose subject is a
+    /// field other than the SKU.
+    pub(crate) fn licensed_config_from(body: &str) -> crate::config::Config {
+        let (private, public) = keypair();
         crate::config::Config {
             license: sign(&private, body.as_bytes()),
             license_public_key: Some(public),

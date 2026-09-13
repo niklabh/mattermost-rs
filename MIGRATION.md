@@ -12191,6 +12191,62 @@ is now ours, measured against the licensed pair and its guest variant.
    signs has the flag on; the 403 it guards is pinned by a mutation, not by a comparison.
 4. **The miss id is `app.user.missing_account.const`**, not `.app_error` — measured on both
    licensed servers after the port had guessed the neighbour's suffix.
+## The licence sweep: every `license_state()` site re-decided on the parsed licence (2026-09-13)
+
+`App::license` returns the body now, so "forward on any licence" stopped being a decision and
+became a question per site: what does Go actually read? Each of the twenty-two sites below was
+re-read against its Go, decided one of three ways, and measured against the licensed pair
+(`parity::licensed_sweep`, 18 tests) as well as the unlicensed one. Route count relative to the
+base commit (80162e4): unchanged at 460 of 764 — these routes were already registered; what
+changed is how much of each is answered here.
+
+| site | Go reads | became |
+|---|---|---|
+| `system.rs` ping | `ActiveSearchBackend`: Elasticsearch active on `EnableIndexing && ready` | served; forward on `EnableIndexing` or `EnableSearching`, never the licence |
+| `system.rs` cluster status | `a.Cluster() == nil` → `[]` | served on every build — [D-571] |
+| `gated_reads.rs` prev trial, SAML metadata | nil interfaces | the same refusal, served — [D-571] |
+| `gated_reads.rs` LDAP groups | `LDAPGroups` flag, then `a.Ldap() == nil` | both refusals served — [D-571] |
+| `gated_reads.rs` CPA group | `MinimumEnterpriseLicense`, then the group row | served both sides of the gate |
+| `gated_reads.rs` load metric | `Features.Users`, then MAU over 31 days | served; `UserStore::analytics_active_count` is new |
+| `gated_reads.rs` support packet | `License() != nil`, then `GenerateSupportPacket` | forward stays, on that predicate — [D-571] |
+| `data_retention.rs` | `a.DataRetention() == nil` | the same 501, served — [D-571] |
+| `team_admin.rs` import | `License().IsCloud()` | served; a cloud licence is the 403 |
+| `user_updates.rs` roles | `Features.CustomPermissionsSchemes` | served both sides of the gate |
+| `user_updates.rs` activate, `user_creates.rs`, `bot.rs` | `isAtUserLimit` and the licensed error ids | served; `GetServerLimits` ported in full |
+| `limits.rs` | `GetServerLimits` | served for every licence |
+| `user_auth.rs` two switches | `License() != nil && !ExperimentalEnableAuthenticationTransfer` | served; the 403 is unit-tested, the pass measured |
+| `post_writes.rs` priority | `MinimumProfessionalLicense`, then three settings | served; a passing priority post still forwards on the unported `PostsPriority` write |
+| `post_write.rs` group mentions | `LDAPGroups && matched`, then `use_group_mentions` | served |
+| `channels.rs` recommended | `MinimumEnterpriseAdvancedLicense && EnableAttributeBasedAccessControl` | served below Advanced; forward on the conjunction |
+| `channels.rs` moderations | `License() != nil`, scheme roles | served; `mm_app::channel_moderation` is new |
+| `channels.rs` member counts by group | `License() != nil`, one query | served; `ChannelStore::get_member_counts_by_group` is new |
+| `channels.rs` bookmark list | `License() != nil`, the bookmark store | forward stays, on that predicate |
+| `channel_creates.rs` | `UseAnonymousURLs && MinimumEnterpriseAdvancedLicense` | served; forward on the conjunction |
+| `local.rs` client licence | `ClientLicense()` | the full map, served |
+| `config.rs` three reads | the licensed blocks of `GenerateClientConfig`; `IsCloud` for `getConfig` | served; ported blocks, forward only on a cloud licence |
+| `login.rs` | guest: `License() == nil` then a setting; cloud cookie | served; forward only on a cloud licence |
+| `schemes.rs` | `CustomPermissionsSchemes || sku == professional` | the gate served; the writes forwarded — [D-572] |
+| `user_update.rs` provider attributes | `a.Ldap() != nil`, `a.Saml() != nil` | no conflict, served — [D-571] |
+
+### Notes
+
+1. **`BuildEnterpriseReady` is the one key the licensed client configuration cannot match.** It is
+   an `-ldflags` constant — `"true"` in the enterprise-ready oracle and `""` in this binary, which
+   is not rebuilt per edition. The generator now emits `mm_model::version::BUILD_ENTERPRISE_READY`
+   (compile-time `MM_BUILD_ENTERPRISE_READY`, empty by default) and the licensed comparison
+   exempts the key by name. Everything else in both maps is byte-identical.
+2. **Five config settings joined the narrowed `Config`** — `EnableIndexing`,
+   `ExperimentalEnableAuthenticationTransfer`, `UseAnonymousURLs`,
+   `EnableAttributeBasedAccessControl`, `AllowPersistentNotificationsForGuests` — with their
+   keys in `scripts/dump-config-fixture.sh` (72 → 77) and the fixture regenerated.
+3. **Both guest-login refusals are masked to the same id** by `login`'s deferred mask, so the
+   licensed arm (`guest_accounts.disabled.error`) and the unlicensed one are the same bytes on
+   the wire; the licensed test asserts the masked id and says why.
+4. **`EnableMetrics` is behind `Features.Cluster`**, not `Features.Metrics` — Go's `if` reads
+   `Cluster` twice (client.go:201, :205). Reproduced and unit-tested.
+5. **The load metric cannot be discriminated on this stack**: with 100,000 licensed seats the
+   ratio rounds to 0 or 1 whatever the count, so the licensed comparison proves the read runs and
+   the two agree, not the arithmetic; the arithmetic is one line and is transcribed.
 ## The licensed half of the seven group writes — `api4/group.go` (2026-09-13)
 
 Base 80162e4. Route count unchanged at 460 of 764: the seven routes were already counted as

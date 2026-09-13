@@ -360,8 +360,10 @@ pub async fn delete_scheme(
 /// three: `License() == nil || (!*Features.CustomPermissionsSchemes && SkuShortName !=
 /// LicenseShortSkuProfessional)`.
 ///
-/// Unlicensed answers 501 with the route's own id. Licensed forwards, because the remaining two
-/// clauses read the signed licence body.
+/// Answered from the parsed licence since 2026-09-13: a server whose licence fails the test gets
+/// the 501 too. One that passes it is forwarded — the scheme writes behind the gate
+/// (`CreateScheme`, `PatchScheme`, `DeleteScheme` and their store transactions) are not ported
+/// yet, [D-572].
 async fn licence_gate(
     state: &AppState,
     where_: &'static str,
@@ -369,8 +371,15 @@ async fn licence_gate(
     parts: axum::http::request::Parts,
     body: axum::body::Bytes,
 ) -> Response {
-    let licensed = match state.app.license_state().await {
-        Ok(state) => state == mm_app::license::LicenseState::Licensed,
+    let licensed = match state.app.license().await {
+        Ok(license) => license.as_deref().is_some_and(|l| {
+            let custom_schemes = l
+                .features
+                .as_ref()
+                .and_then(|f| f.custom_permissions_schemes)
+                .unwrap_or(false);
+            custom_schemes || l.sku_short_name == mm_model::license::LICENSE_SHORT_SKU_PROFESSIONAL
+        }),
         Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("licensed", licensed);

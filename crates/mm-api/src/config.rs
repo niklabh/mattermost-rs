@@ -20,11 +20,12 @@
 //!
 //! # What is forwarded, and why each thing is
 //!
-//! - **A licensed installation**, for all three. `GenerateClientConfig`'s licensed block is a
-//!   feature matrix over the signed licence body — `MinimumProfessionalLicense`,
-//!   `HasSharedChannels`, `license.Features.*` — none of which is ported, and `getConfig` adds a
-//!   cloud tag filter when `License().IsCloud()`. Same decision, and the same reason, as
-//!   [`crate::license::get_client_license`].
+//! - **A cloud licence**, for `getConfig` only. `getConfig` adds a `cloud_restrictable` tag
+//!   filter when `License().IsCloud()` (config.go:83), and the `access:` tags that filter reads
+//!   are the 1,300 the model does not carry. `IsCloud` is read from the parsed licence since
+//!   2026-09-13; a licence that is not cloud — every self-hosted one — is served. The client
+//!   configuration's licensed blocks are ported (`mm_app::config::generate_client_config`), so
+//!   the other two routes no longer ask.
 //! - **A session without `manage_system`**, for `getConfig` and `getEnvironmentConfig`. Both run
 //!   every leaf of the struct through `readFilter` (config.go:432), which consults the `access:`
 //!   tag on the Go *field* — about 1,300 tags that `mm_model::config` deliberately does not
@@ -42,7 +43,6 @@
 use axum::extract::{Request, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_app::license::LicenseState;
 use mm_model::permission::{
     PERMISSION_MANAGE_SYSTEM, SYSCONSOLE_READ_PERMISSIONS, make_permission_error,
 };
@@ -90,7 +90,7 @@ pub async fn get_config(
         query_first(request.uri().query(), param)
             .is_some_and(|raw| matches!(raw.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"))
     });
-    if filtered || !reads_every_field(&state, &session.0).await || licensed(&state).await {
+    if filtered || !reads_every_field(&state, &session.0).await || cloud_licensed(&state).await {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }
@@ -131,9 +131,9 @@ pub async fn get_client_config(
     session: OptionalSession,
     request: Request,
 ) -> Response {
-    if licensed(&state).await {
-        return proxy::forward_to_go(State(state), request).await;
-    }
+    // No licence question since 2026-09-13: both maps carry Go's licensed blocks, built from
+    // the licence `App::license` parsed. `request` is no longer forwarded on any branch.
+    let _ = request;
 
     // Go reads `Session().UserId`, not the presence of a session object: a session row whose
     // `UserId` is empty takes the limited branch too.
@@ -189,7 +189,9 @@ pub async fn get_environment_config(
     // per-field `readFilter`, which for a session with no system-console permission at all
     // returns false everywhere and leaves an empty object. Forwarding covers that case rather
     // than reproducing it.
-    if !reads_every_field(&state, &session.0).await || licensed(&state).await {
+    // `getEnvironmentConfig` asks nothing of the licence (config.go:266) — the forward on
+    // "any licence" that was here until 2026-09-13 had no Go statement behind it.
+    if !reads_every_field(&state, &session.0).await {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }
@@ -211,13 +213,13 @@ async fn reads_every_field(state: &AppState, session: &Session) -> bool {
             .await
 }
 
-/// Whether a licence is installed, with a read failure counted as "licensed" so the answer is
-/// forwarded rather than guessed at.
-async fn licensed(state: &AppState) -> bool {
-    match state.app.license_state().await {
-        Ok(state_of_licence) => state_of_licence == LicenseState::Licensed,
+/// `License().IsCloud()` — `getConfig`'s one licence question. A read failure counts as cloud
+/// so the answer is forwarded rather than guessed at.
+async fn cloud_licensed(state: &AppState) -> bool {
+    match state.app.license().await {
+        Ok(license) => license.as_deref().is_some_and(|l| l.is_cloud()),
         Err(err) => {
-            tracing::warn!(error = %err, "could not determine the licence state; forwarding");
+            tracing::warn!(error = %err, "could not read the licence; forwarding");
             true
         }
     }

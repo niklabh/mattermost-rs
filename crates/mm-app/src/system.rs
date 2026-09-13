@@ -11,7 +11,6 @@ use mm_model::utils::{AppError, AppResult};
 use mm_store::SystemStore;
 
 use crate::App;
-use crate::license::LicenseState;
 
 impl App {
     /// Port of `App.GetOnboarding` (app/onboarding.go:90).
@@ -86,20 +85,14 @@ impl App {
     /// **`make(..., 0)`, not `nil`** — so the JSON is `[]` and never `null`. The distinction is
     /// the whole wire format of this route.
     ///
-    /// The licensed branch is not ported and cannot be: it reads gossip state held in the other
-    /// process. A caller must forward when [`LicenseState::Licensed`], which is why this returns
-    /// the state it decided on rather than swallowing it.
+    /// **The licence does not enter into it** (re-measured 2026-09-13 against the licensed Go
+    /// oracle, which answers `[]` too). The interface is registered by the enterprise
+    /// repository's `init`, which is not in this tree, so a licence changes nothing on any build
+    /// from it. The gossip roster itself is the cluster bus, owed under [D-087]; until it exists
+    /// here there is no branch to take.
     #[tracing::instrument(skip_all)]
     pub async fn get_cluster_status(&self) -> AppResult<Vec<ClusterInfo>> {
         Ok(Vec::new())
-    }
-
-    /// Whether [`Self::get_cluster_status`] may answer at all.
-    ///
-    /// Extracted so the boundary is one named decision rather than a condition repeated in every
-    /// handler that has one.
-    pub async fn cluster_status_is_ours_to_answer(&self) -> AppResult<bool> {
-        Ok(self.license_state().await? == LicenseState::Unlicensed)
     }
 }
 

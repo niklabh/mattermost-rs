@@ -3168,16 +3168,18 @@ pub async fn get_recommended_channels_for_team(
         .into_response();
     }
 
-    let licence = match state.app.license_state().await {
-        Ok(licence) => licence,
+    // `!MinimumEnterpriseAdvancedLicense(l) || !EnableAttributeBasedAccessControl` — the exact
+    // gate, read from the parsed licence since 2026-09-13. Below the Advanced tier, or with the
+    // setting off, the answer is `[]` on every server; only the conjunction of both hands the
+    // request to Go, whose access-control scan this port does not have.
+    let advanced = match state.app.license().await {
+        Ok(license) => mm_model::license::minimum_enterprise_advanced_license(license.as_deref()),
         Err(err) => return ApiError::from(err).into_response(),
     };
-    tracing::Span::current().record(
-        "licensed",
-        licence == mm_app::license::LicenseState::Licensed,
-    );
+    let abac = advanced && state.app.config().enable_attribute_based_access_control;
+    tracing::Span::current().record("licensed", abac);
 
-    if licence == mm_app::license::LicenseState::Licensed {
+    if abac {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -3205,29 +3207,77 @@ pub async fn get_recommended_channels_for_team(
 /// far too short to be valid — answers the **licence** error, not a 400. Measured against the
 /// running server, and it is the only ordering this route has to get right.
 ///
-/// A licensed installation is forwarded: the moderations are computed from the channel's scheme
-/// roles against the team's, and that machinery is not ported.
+/// Past the gate, served since 2026-09-13: `sysconsole_read_user_management_channels`, the
+/// channel, and [`mm_app::App::get_channel_moderations_for_channel`] — `json.Marshal` and
+/// `w.Write`, so **no trailing newline**.
 #[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed))]
 pub async fn get_channel_moderations(
     State(state): State<AppState>,
     Path(channel_id): Path<String>,
-    _session: AuthenticatedSession,
-    request: Request,
+    session: AuthenticatedSession,
 ) -> Response {
-    match licence_gate(&state, request).await {
-        LicenceGate::Forward(response) => response,
-        LicenceGate::Unlicensed => {
-            let _ = &channel_id;
-            ApiError::from(mm_model::utils::AppError::new(
+    match state.app.license().await {
+        Ok(Some(_)) => tracing::Span::current().record("licensed", true),
+        Ok(None) => {
+            tracing::Span::current().record("licensed", false);
+            return ApiError::from(mm_model::utils::AppError::new(
                 "Api4.GetChannelModerations",
                 "api.channel.get_channel_moderations.license.error",
                 None,
                 String::new(),
                 403,
             ))
-            .into_response()
+            .into_response();
         }
-        LicenceGate::Failed(err) => err.into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    if !is_valid_id(&channel_id) {
+        return ApiError::invalid_url_param("channel_id").into_response();
+    }
+    if !state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+        )
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS],
+        ))
+        .into_response();
+    }
+    let channel = match state.app.get_channel(&channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let moderations = match state
+        .app
+        .get_channel_moderations_for_channel(&channel)
+        .await
+    {
+        Ok(moderations) => moderations,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    match serde_json::to_vec(&moderations) {
+        Ok(body) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(_) => ApiError::from(mm_model::utils::AppError::new(
+            "Api4.getChannelModerations",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+        .into_response(),
     }
 }
 
@@ -3268,29 +3318,80 @@ pub async fn list_channel_bookmarks(
 /// error id for it. Its status matches `getChannelModerations` — a 403 — and not the bookmarks
 /// route's 501, so the three gates are two statuses and three ids between them.
 ///
-/// A licensed installation is forwarded: the counts come from the group-membership tables, which
-/// are enterprise-only and unported.
-#[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed))]
+/// Past the gate, served since 2026-09-13: `RequireChannelId`, `read_channel` on the channel,
+/// then one query over `GroupMembers` with `include_timezones=true` adding the distinct-timezone
+/// count. `json.Marshal` and `w.Write` — **no trailing newline** — and Go reads the counts from
+/// the master, which a single-database deployment cannot tell apart.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed, include_timezones))]
 pub async fn get_channel_member_counts_by_group(
     State(state): State<AppState>,
     Path(channel_id): Path<String>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match licence_gate(&state, request).await {
-        LicenceGate::Forward(response) => response,
-        LicenceGate::Unlicensed => {
-            let _ = &channel_id;
-            ApiError::from(mm_model::utils::AppError::new(
+    match state.app.license().await {
+        Ok(Some(_)) => tracing::Span::current().record("licensed", true),
+        Ok(None) => {
+            tracing::Span::current().record("licensed", false);
+            return ApiError::from(mm_model::utils::AppError::new(
                 "Api4.channelMemberCountsByGroup",
                 "api.channel.channel_member_counts_by_group.license.error",
                 None,
                 String::new(),
                 403,
             ))
-            .into_response()
+            .into_response();
         }
-        LicenceGate::Failed(err) => err.into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    if !is_valid_id(&channel_id) {
+        return ApiError::invalid_url_param("channel_id").into_response();
+    }
+    let (ok, _) = state
+        .app
+        .session_has_permission_to_channel(
+            &session.0,
+            &channel_id,
+            &mm_model::permission::PERMISSION_READ_CHANNEL,
+        )
+        .await;
+    if !ok {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_READ_CHANNEL],
+        ))
+        .into_response();
+    }
+    // `r.URL.Query().Get("include_timezones") == "true"` — the literal, case-sensitively.
+    let include_timezones =
+        query_first(request.uri().query(), "include_timezones").as_deref() == Some("true");
+    tracing::Span::current().record("include_timezones", include_timezones);
+    let counts = match state
+        .app
+        .get_member_counts_by_group(&channel_id, include_timezones)
+        .await
+    {
+        Ok(counts) => counts,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    match serde_json::to_vec(&counts) {
+        Ok(body) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(_) => ApiError::from(mm_model::utils::AppError::new(
+            "Api4.channelMemberCountsByGroup",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+        .into_response(),
     }
 }
 

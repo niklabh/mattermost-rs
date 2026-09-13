@@ -129,13 +129,11 @@ pub(crate) async fn ping_answer(
 ) -> Result<Option<Response>, ApiError> {
     let config = state.app.config();
 
-    let licensed = state.app.license_state().await? == mm_app::license::LicenseState::Licensed;
-
     if let Some(reason) = ping_is_not_ours_to_answer(
         params.get_server_status.as_deref(),
         params.device_id.as_deref(),
         config.goroutine_health_threshold,
-        licensed,
+        config.elasticsearch_enable_indexing,
         config.elasticsearch_enable_searching,
     ) {
         tracing::Span::current().record("forwarded", reason);
@@ -217,7 +215,7 @@ fn ping_is_not_ours_to_answer(
     get_server_status: Option<&str>,
     device_id: Option<&str>,
     goroutine_health_threshold: i64,
-    licensed: bool,
+    elasticsearch_enable_indexing: bool,
     elasticsearch_enable_searching: bool,
 ) -> Option<&'static str> {
     // Go compares against the literal `"true"`; `?get_server_status=1` is not a request for the
@@ -234,8 +232,14 @@ fn ping_is_not_ours_to_answer(
     if goroutine_health_threshold > 0 {
         return Some("goroutine_health_threshold");
     }
-    if licensed {
-        return Some("licensed");
+    // `ActiveSearchBackend` is the broker's first active engine, and the Elasticsearch engine is
+    // active on `EnableIndexing && ready` (enterprise/elasticsearch/elasticsearch.go:116) — a
+    // live connection this process cannot see. The licence is **not** in that predicate: the
+    // engine is registered by the build, not the licence, and the licensed oracle answers
+    // `"database"` like everyone else (re-measured 2026-09-13). So the two settings, not the
+    // licence, decide the hand-over.
+    if elasticsearch_enable_indexing {
+        return Some("elasticsearch_indexing");
     }
     if elasticsearch_enable_searching {
         return Some("elasticsearch");
@@ -405,9 +409,9 @@ pub async fn get_onboarding(
 /// # The answer is `[]`, and that is the whole route on an unlicensed server
 ///
 /// `App.GetClusterStatus` returns `make([]*model.ClusterInfo, 0)` whenever no cluster interface
-/// is registered, which on Team Edition is always — see [`mm_app::App::get_cluster_status`]. A
-/// licensed installation is forwarded: the roster is gossip state held in the other process and
-/// there is no way to read it from here.
+/// is registered, which on every build from this tree is always — see
+/// [`mm_app::App::get_cluster_status`]. Licensed or not: the licensed oracle answers `[]` too,
+/// so since 2026-09-13 nothing here forwards on the licence.
 ///
 /// # `SessionHasPermissionToAndNotRestrictedAdmin`
 ///
@@ -416,21 +420,11 @@ pub async fn get_onboarding(
 /// installation's admin out of infrastructure routes, and this is one of them.
 ///
 /// `json.Marshal` and `w.Write`: **no** trailing newline.
-#[tracing::instrument(skip_all, fields(licensed))]
+#[tracing::instrument(skip_all)]
 pub async fn get_cluster_status(
     State(state): State<AppState>,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    match state.app.cluster_status_is_ours_to_answer().await {
-        Ok(true) => tracing::Span::current().record("licensed", false),
-        Ok(false) => {
-            tracing::Span::current().record("licensed", true);
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Err(err) => return ApiError::from(err).into_response(),
-    };
-
     if !state
         .app
         .session_has_permission_to_and_not_restricted_admin(
@@ -970,9 +964,11 @@ mod tests {
             "and -1 is the Go default"
         );
 
+        // `EnableIndexing` is the setting the Elasticsearch engine reports itself active on; the
+        // licence is not in the predicate and cannot be passed here at all.
         assert_eq!(
             ping_is_not_ours_to_answer(None, None, -1, true, false),
-            Some("licensed")
+            Some("elasticsearch_indexing")
         );
         assert_eq!(
             ping_is_not_ours_to_answer(None, None, -1, false, true),

@@ -43,6 +43,26 @@ pub trait UserStore {
         options: &mm_model::user_count::UserCountOptions,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.AnalyticsActiveCount` (user_store.go:1518): accounts whose `Status`
+    /// row shows activity in the last `time_period_ms` milliseconds.
+    ///
+    /// Counts **`Status` rows**, not users — an account that has never connected has no row and
+    /// is not "active" however recently it was created. Only three of the options are read
+    /// (bots, remote, deleted); Go joins `Users` only when one of the last two is off, which a
+    /// `LEFT JOIN` on the primary key reproduces without changing the count.
+    fn analytics_active_count(
+        &self,
+        time_period_ms: i64,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.AnalyticsGetSingleChannelGuestCount` (user_store.go:1856): live
+    /// guests who belong to exactly **one** live open-or-private channel. Direct and group
+    /// channels do not count towards the one.
+    fn analytics_get_single_channel_guest_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
@@ -1012,6 +1032,68 @@ impl UserStore for SqlUserStore {
     /// `getFilteredUsersStats` never sets it, and with `IncludeBotAccounts` off Go **returns an
     /// error** rather than a count for that combination (user_store.go:1491). Nothing reachable
     /// from the wire produces either half.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_active_count(
+        &self,
+        time_period_ms: i64,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> Result<i64, StoreError> {
+        let since = mm_model::utils::get_millis() - time_period_ms;
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM status s
+              LEFT JOIN bots b ON s.userid = b.userid
+              LEFT JOIN users u ON s.userid = u.id
+             WHERE s.lastactivityat > $1
+               AND ($2 OR b.userid IS NULL)
+               AND ($3 OR u.remoteid = '' OR u.remoteid IS NULL)
+               AND ($4 OR u.deleteat = 0)
+            "#,
+            since,
+            options.include_bot_accounts,
+            options.include_remote_users,
+            options.include_deleted,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_get_single_channel_guest_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM (
+                SELECT cm.userid
+                  FROM channelmembers cm
+                  JOIN users u ON cm.userid = u.id
+                  JOIN channels c ON cm.channelid = c.id
+                 WHERE u.roles ILIKE '%system_guest%'
+                   AND u.deleteat = 0
+                   AND c.deleteat = 0
+                   AND c.type IN ('O', 'P')
+                 GROUP BY cm.userid
+                HAVING COUNT(cm.channelid) = 1
+              ) AS single_channel_guests
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count single-channel guest Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
     #[tracing::instrument(skip_all, fields(count))]
     async fn count(
         &self,

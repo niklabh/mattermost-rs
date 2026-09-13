@@ -495,6 +495,23 @@ pub trait ChannelStore {
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetMemberCountsByGroup` (channel_store.go:2687): per group, how
+    /// many of the channel's members belong to it, and optionally how many distinct timezones
+    /// they span.
+    ///
+    /// **No `ORDER BY` in Go**, so the row order is the planner's; callers compare as sets. The
+    /// timezone count is Go's `CASE` over the `Timezone` JSON verbatim — an automatic timezone
+    /// counts only when it is non-empty, a manual one likewise, and a member with neither
+    /// contributes `NULL`, which `COUNT(DISTINCT …)` ignores. Computed in one statement and
+    /// zeroed when not asked for, which is the wire shape of Go's two.
+    fn get_member_counts_by_group(
+        &self,
+        channel_id: &str,
+        include_timezones: bool,
+    ) -> impl std::future::Future<
+        Output = Result<Vec<mm_model::channel::ChannelMemberCountByGroup>, StoreError>,
+    > + Send;
+
     /// Port of `SqlChannelStore.GetGuestCount` (channel_store.go:2752). `allowFromCache` dropped.
     fn get_guest_count(
         &self,
@@ -1370,6 +1387,53 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
     async fn get_member_count(&self, channel_id: &str) -> Result<i64, StoreError> {
         get_member_count(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, include_timezones))]
+    async fn get_member_counts_by_group(
+        &self,
+        channel_id: &str,
+        include_timezones: bool,
+    ) -> Result<Vec<mm_model::channel::ChannelMemberCountByGroup>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT gm.groupid AS "group_id!",
+                   COUNT(cm.userid) AS "channel_member_count!",
+                   COUNT(DISTINCT (
+                       CASE WHEN u.timezone->>'useAutomaticTimezone' = 'true'
+                                 AND length(u.timezone->>'automaticTimezone') > 0
+                            THEN u.timezone->>'automaticTimezone'
+                            WHEN u.timezone->>'useAutomaticTimezone' = 'false'
+                                 AND length(u.timezone->>'manualTimezone') > 0
+                            THEN u.timezone->>'manualTimezone'
+                       END
+                   )) AS "channel_member_timezones_count!"
+              FROM channelmembers cm
+              JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat = 0
+              JOIN users u ON u.id = gm.userid
+             WHERE cm.channelid = $1
+             GROUP BY gm.groupid
+            "#,
+            channel_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count ChannelMembers with channelId={channel_id}"),
+            source,
+        })?;
+        Ok(rows
+            .into_iter()
+            .map(|row| mm_model::channel::ChannelMemberCountByGroup {
+                group_id: row.group_id,
+                channel_member_count: row.channel_member_count,
+                channel_member_timezones_count: if include_timezones {
+                    row.channel_member_timezones_count
+                } else {
+                    0
+                },
+            })
+            .collect())
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]

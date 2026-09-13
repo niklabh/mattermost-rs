@@ -3,6 +3,7 @@
 //! Depends on `mm-store`; knows nothing about HTTP. Handlers live in `mm-api` and call into here,
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
+pub mod analytics;
 pub mod audit;
 pub mod auth;
 pub mod authorization;
@@ -13,6 +14,7 @@ pub mod channel;
 pub mod channel_create;
 pub mod channel_join_request;
 pub mod channel_member;
+pub mod channel_moderation;
 pub mod channel_view;
 pub mod channel_write;
 pub mod command;

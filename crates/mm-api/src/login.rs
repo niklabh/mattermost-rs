@@ -137,7 +137,7 @@ fn mask_login_error(state: &AppState, err: ApiError) -> ApiError {
 /// |---|---|---|
 /// | `magic_link_token` present | before the body is otherwise read | `AuthenticateUserForGuestMagicLink` is not ported, and the branch is licensed |
 /// | `LdapSettings.Enable` | before any lookup | both `GetUserForLogin` and `authenticateUser` consult an LDAP client this port has not got |
-/// | the installation is licensed | before any lookup | the guest-account branch, the LDAP picture refresh and the cloud cookie all read the licence |
+/// | the licence is a **cloud** one | before any lookup | the cloud session cookie and the CWS token path; a self-hosted licence is served since 2026-09-13 |
 /// | the account has MFA and the server has MFA on | after the blank-password check, before the counter | Go asks *after* claiming a failed-attempt slot; asking here costs one `SELECT` and keeps the counter honest |
 ///
 /// Every one of those is a read. Nothing in this handler writes until
@@ -191,14 +191,19 @@ pub async fn login(State(state): State<AppState>, request: Request) -> Response 
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            tracing::Span::current().record("outcome", "licensed");
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(_) => {}
+    // The licence's three appearances in `login` and `DoLogin`, each on its own predicate since
+    // 2026-09-13: the guest branch below reads `License() == nil` and then a setting; the LDAP
+    // picture refresh (login.go:225) is behind `a.Ldap() != nil`, which no build from this tree
+    // has; and the cloud session cookie (login.go:341) and the CWS token path both turn on
+    // `License().IsCloud()`. Only the last is not ported, so only a cloud licence is handed over.
+    let license = match state.app.license().await {
+        Ok(license) => license,
         Err(err) => return mask_login_error(&state, ApiError::from(err)).into_response(),
+    };
+    if license.as_deref().is_some_and(|l| l.is_cloud()) {
+        tracing::Span::current().record("forwarded", true);
+        tracing::Span::current().record("outcome", "cloud");
+        return proxy::forward_to_go(State(state), request).await;
     }
 
     // `AuthenticateUserForLogin` refuses a blank password before it looks anything up, and that
@@ -268,18 +273,30 @@ async fn serve_login(
         )));
     }
 
-    // `c.App.Channels().License() == nil` — the licensed installation forwarded above, so the
-    // licence is always absent here and the first of Go's two guest refusals always wins. The
-    // `GuestAccountsSettings.Enable` arm below it is therefore unreachable on this deployment and
-    // is not written out.
+    // Go's two guest refusals in order: `License() == nil` first, then
+    // `!GuestAccountsSettings.Enable`. Both 401, one word apart in the id.
     if user.is_guest() {
-        return Err(ApiError::from(AppError::boxed(
-            "login",
-            "api.user.login.guest_accounts.license.error",
-            None,
-            String::new(),
-            401,
-        )));
+        // Read here rather than threaded in from the handler: `App::license` is cached by id, and
+        // a store failure on the read is the same 500 every other read in this function gives.
+        let licensed = state.app.license().await.map_err(ApiError::from)?.is_some();
+        if !licensed {
+            return Err(ApiError::from(AppError::boxed(
+                "login",
+                "api.user.login.guest_accounts.license.error",
+                None,
+                String::new(),
+                401,
+            )));
+        }
+        if !state.app.config().guest_accounts_enable {
+            return Err(ApiError::from(AppError::boxed(
+                "login",
+                "api.user.login.guest_accounts.disabled.error",
+                None,
+                String::new(),
+                401,
+            )));
+        }
     }
 
     if user.is_remote() {
@@ -396,7 +413,7 @@ async fn serve_login(
 /// `Expires` is `GetMillis()/1000 + maxAgeSeconds` — a second-resolution instant computed from a
 /// fresh clock read, so it is a second or two later than the session's own `ExpiresAt`.
 ///
-/// The cloud cookie (`a.License().IsCloud()`) is unreachable: a licensed installation forwards.
+/// The cloud cookie (`a.License().IsCloud()`) is unreachable: a cloud licence is forwarded.
 fn session_cookies(
     state: &AppState,
     headers: &HeaderMap,

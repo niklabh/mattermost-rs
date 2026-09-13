@@ -78,7 +78,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, get, post};
-use mm_app::license::LicenseState;
 use mm_model::session::Session;
 use mm_model::utils::AppError;
 
@@ -361,17 +360,20 @@ async fn local_get_client_license(
         return ApiError::invalid_param("format").into_response();
     }
 
-    let state_of_licence = match state.app.license_state().await {
-        Ok(state_of_licence) => state_of_licence,
+    // `c.App.Srv().ClientLicense()` — the **full** map, never sanitized: the local socket is
+    // root, and `localGetClientLicense` (api4/license_local.go:118) asks no permission. Served
+    // for a licensed installation since 2026-09-13.
+    let _ = (&go, request);
+    let map = match state.app.client_license().await {
+        Ok(map) => map,
         Err(err) => return ApiError::from(err).into_response(),
     };
-    tracing::Span::current().record("licensed", state_of_licence == LicenseState::Licensed);
+    tracing::Span::current().record(
+        "licensed",
+        map.get("IsLicensed").map(String::as_str) == Some("true"),
+    );
 
-    if state_of_licence == LicenseState::Licensed {
-        return forward_over_unix(&go.0, request).await;
-    }
-
-    match serde_json::to_vec(&LicenseState::unlicensed_client_license()) {
+    match serde_json::to_vec(&map) {
         // `model.MapToJSON` + `w.Write` — no encoder, so **no trailing newline**.
         Ok(body) => (
             StatusCode::OK,
