@@ -11707,9 +11707,8 @@ guard and the 250-seat activation limit.
 ### What is not here
 
 [D-460] `User`/`UserPatch` decode case-sensitively where Go folds — fail-safe, and the divergence
-is asserted rather than hidden. [D-461] deactivation, which needs the OAuth auth-data store
-methods, `disableUserBots` and the sysadmin notification, all of which run *after* the row is
-written and so have no servable prefix. [D-462] the two untested branches.
+is asserted rather than hidden. [D-461] deactivation — **closed by the session below**. [D-462]
+the two untested branches.
 
 ### The next route in this family
 
@@ -11717,3 +11716,101 @@ written and so have no servable prefix. [D-462] the two untested branches.
 variant, so it needs exactly [D-461]'s list and nothing else. `PUT /users/{user_id}/mfa` and
 `/auth` are the other two writes left on the `{user_id}` subtree; `/auth` is system-admin-only and
 needs `UpdateAuthData`, which the store already has.
+
+## `DELETE /api/v4/users/{user_id}` and the deactivation half of `/active` (2026-09-13, branch `wt/userdelete`)
+
+**The soft delete serves; `?permanent=true`'s refusal serves; the deactivation forward [D-461]
+opened is closed.** 10 parity tests in `parity/user_deletes.rs`, one unit test, one rewritten
+parity test in `parity/user_updates.rs`. Mutation run: **26 run, 24 caught, 2 controls survived, 0 harness faults** — in two passes,
+because the first pass aborted at line 14 on a harness fault of my own making (see below) and was
+re-run from there after the repair.
+
+`439 → 440 of 764 route+method pairs`, measured with `scripts/routes.py` in this worktree against
+base `7bc3555`. `api4/user.go` goes 60/78 → 61/78.
+
+| File | What |
+|---|---|
+| `crates/mm-api/src/user_deletes.rs` | `deleteUser`, both registrations (`{user_id}` and the literal `me`), `strconv.ParseBool` |
+| `crates/mm-app/src/user_delete.rs` | `UpdateActive`'s deactivation half, `userDeactivated`, `App::owns_bots` |
+| `crates/mm-store/src/oauth_store.rs` | `RemoveAuthDataByUserId`, `PermanentDeleteAuthDataByUser` |
+| `crates/mm-app/src/config.rs` | `ServiceSettings.EnableAPIUserDeletion`, `TeamSettings.EnableUserDeactivation` |
+
+The one thing a reader would otherwise get wrong: **`PermanentDeleteAuthDataByUser` deletes
+`OAuthAccessData`, not `OAuthAuthData`.** The name says one table and the statement says the
+other (oauth_store.go:327), and `userDeactivated` calls it beside `RemoveAuthDataByUserId`, which
+*does* touch `OAuthAuthData`. Reading the names instead of the statements swaps the two and leaves
+every live OAuth token of a deactivated account working. Both directions are mutated, and
+`a_soft_delete_clears_both_oauth_tables_and_only_for_that_user` plants a row in each table plus a
+bystander's pair, so the swap, the dropped statement and an unpredicated `DELETE` are three
+distinct failures.
+
+### How a deactivation became servable when [D-461] said no prefix of it could be
+
+[D-461] was right that everything `UpdateActive(false)` does runs after the `UPDATE`, so there is
+no *prefix* to serve. What it missed is that two of those steps —
+`notifySysadminsBotOwnerDeactivated` and `disableUserBots` — return immediately when the account
+owns no bots (app/bot.go:568 and the empty first `GetBots` page), and that is a fact a `SELECT`
+can establish **before** the write. `App::owns_bots` asks it; `true` forwards the whole request,
+`false` serves it. Everything else in the tail is ported: `RevokeAllSessions`, `SetStatusOffline`,
+`sendUpdatedUserEvent`, and now the two OAuth deletes.
+
+What still forwards, and on exactly what condition:
+
+| request | condition | why |
+|---|---|---|
+| `DELETE /users/{id}` | the target owns a non-deleted bot | the sysadmin DM needs an i18n template ([D-472]) |
+| `DELETE /users/{id}?permanent=true` | `EnableAPIUserDeletion` is on | 17 unported store methods ([D-470]); the flag is **off** here, so the served 401 is what a client gets |
+| `PUT /users/{id}/active` `{"active":false}` | the target owns a bot | as above |
+| `PUT /users/{id}/active` `{"active":false}` | it is a self-deactivation **and** `EnableUserDeactivation` is on | `SendDeactivateAccountEmail` ([D-238]); the flag is off here, so the served 401 is what a client gets |
+| `PUT /users/{id}/active` `{"active":true}` | a licence is installed | unchanged from last session |
+
+Every one of those is decided from the configuration and `SELECT`s alone. Four of the five are
+provably before the write, because the served path answers with `x-mmrs-served-by: rust` and the
+forwarded one does not while the row is untouched by us. The bot-owner case is **not** provable
+that way and is not claimed to be — see [D-475].
+
+### The harness fault, because it cost a run and the next session will hit it too
+
+`mutate-batch.sh` parses each plan line with `IFS=$'\t' read`. Tab is an IFS **whitespace**
+character, so a run of two tabs collapses into one — an **empty `to` field shifts `suite` into the
+replacement text and `filter` into `suite`**. The suite is then unrecognised, `mutate.sh` exits 2,
+`set -e` aborts the batch, and — because the abort happens after the substitution — the tree is
+left with the literal string `api` where a block of Rust used to be. Four lines in this plan meant
+"delete this block"; all four were empty-`to`. `scripts/preflight-plans.sh` does not catch it: it
+checks anchors, not field counts. The four now replace the block with an inert `let _ = …;`
+instead, which is a deletion for every purpose that matters.
+
+Every line was compile-checked before launching (`broken: 0`, both passes). That check is what
+makes the *other* documented trap harmless: dropping a predicate from a `sqlx::query!` leaves a
+bound parameter unreferenced and the macro refuses to compile, so the two "loses its predicate"
+mutations are written as `WHERE length($1) >= 0`.
+
+### Two findings that were flaky assertions first
+
+**`DeleteAt` and `UpdateAt` are not equal.** `UpdateActive` writes `UpdateAt = GetMillis()` and
+then `DeleteAt = UpdateAt`, which reads as one clock feeding both — and `SqlUserStore.Update`
+calls `PreUpdate`, whose `u.UpdateAt = GetMillis()` (model/user.go:563) overwrites it. So the
+assignment's only lasting effect is the value `DeleteAt` copied off it, and the row satisfies
+`DeleteAt <= UpdateAt`. A full parity run produced a row 1 ms apart and failed an assertion that
+said "one clock read". The assertion now pins the *relation*.
+
+**`permanent` is `strconv.ParseBool` with the error discarded** (web/params.go:232). Six spellings
+are true; `?permanent=yes` is silently false and soft-deletes the account while answering the same
+`{"status":"OK"}` a permanent delete would. `?permanent=tRue` is false too — Go's parser is not
+case-insensitive beyond the exact set.
+
+### What the parity stack cannot show
+
+`EnableAPIUserDeletion` and `EnableUserDeactivation` are both **off** in the live document, which
+is Go's own default for each. That makes the two refusals the reachable arms and the two writes
+they guard unreachable — recorded, not worked around ([D-470], [D-238]). The permanent refusal's
+*non-admin* wording is unreachable for a different reason: a caller who is not a system admin can
+only reach the `permanent` fork for themselves, and the self-delete guard refuses that first. The
+LDAP asymmetry between the two routes and the `manage_system` self-delete escape are [D-473].
+
+### The next route in this family
+
+`PUT /api/v4/users/{user_id}/auth` — system-admin-only, and `UserStore::update_auth_data` is
+already the second-most-wanted unserved store method by `scripts/deps.py`. `PUT
+/users/{user_id}/mfa` is the other write left on the `{user_id}` subtree and needs the MFA
+secret path [D-462]'s sibling probe already exercises.
