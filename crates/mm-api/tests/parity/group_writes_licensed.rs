@@ -287,24 +287,35 @@ async fn set_custom_group_user_permissions(
         "patching custom_group_user: {}",
         response.text().await.unwrap_or_default()
     );
-    // The main server's cached copy still holds the previous permissions, so this is a real
-    // change from its point of view and it saves — which is what refreshes its cache.
-    let response = client
-        .put(format!(
-            "{}/api/v4/roles/{}/patch",
-            GO,
-            role["id"].as_str().expect("an id")
-        ))
-        .header("Authorization", format!("Bearer {admin}"))
-        .json(&serde_json::json!({ "permissions": permissions }))
-        .send()
-        .await
-        .expect("the role is patched on the main server too");
-    assert_eq!(
-        response.status(),
-        200,
-        "patching custom_group_user on the main server"
-    );
+    // **Twice, and the first one is a change.** `patchRole` reads the row from the database,
+    // not from the cache, and a patch that changes nothing is not saved — and the licensed
+    // server has just written exactly these permissions. Measured 2026-09-13: one patch here
+    // with the target set left the main server's cached copy at the pre-run `update_at` for
+    // the whole run. So the first patch flips the set (a real change, so it saves and the
+    // cache is refreshed), and the second sets the target the same way.
+    let toggled: &[&str] = if permissions.is_empty() {
+        &["edit_custom_group"]
+    } else {
+        &[]
+    };
+    for set in [toggled, permissions] {
+        let response = client
+            .put(format!(
+                "{}/api/v4/roles/{}/patch",
+                GO,
+                role["id"].as_str().expect("an id")
+            ))
+            .header("Authorization", format!("Bearer {admin}"))
+            .json(&serde_json::json!({ "permissions": set }))
+            .send()
+            .await
+            .expect("the role is patched on the main server too");
+        assert_eq!(
+            response.status(),
+            200,
+            "patching custom_group_user on the main server"
+        );
+    }
 }
 
 /// Create a custom group through the licensed Go server, returning its body.
