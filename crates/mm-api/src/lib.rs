@@ -1334,6 +1334,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/member_counts_by_group",
             partially_migrated_with_ids(&state, get(channels::get_channel_member_counts_by_group)),
         )
+        // `BaseRoutes.Channel.Handle("/members_minus_group_members")` (api4/channel.go:95) — a
+        // literal under `{channel_id}` and, unlike its three neighbours here, **not** licence-
+        // gated: it reads the group tables on an unlicensed server and answers 200.
+        .route(
+            "/api/v4/channels/{channel_id}/members_minus_group_members",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_admin::channel_members_minus_group_members),
+            ),
+        )
         .route(
             "/api/v4/groups",
             partially_migrated(get(groups::get_groups).post(groups::create_group)),
@@ -3732,11 +3742,15 @@ mod tests {
         const USER: &str = "abcdefghijklmnopqrstuvwxyz";
 
         let served: Vec<(Method, String)> = vec![
-            // The three this session adds.
+            // The four this session adds.
             (Method::PUT, format!("/api/v4/channels/{CHANNEL}/scheme")),
             (
                 Method::PUT,
                 format!("/api/v4/channels/{CHANNEL}/moderations/patch"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members_minus_group_members"),
             ),
             (
                 Method::PUT,
@@ -3818,10 +3832,6 @@ mod tests {
             (
                 Method::POST,
                 format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
-            ),
-            (
-                Method::GET,
-                format!("/api/v4/channels/{CHANNEL}/members_minus_group_members"),
             ),
             // `moderations/patch` is a `PUT` only; a `GET` there is gorilla's 405 path, forwarded.
             (

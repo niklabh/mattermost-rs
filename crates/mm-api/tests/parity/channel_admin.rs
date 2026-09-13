@@ -421,3 +421,613 @@ async fn a_license_row_hands_the_two_licence_routes_back() {
         "the body gate runs before the licence check, licensed or not"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `GET /api/v4/channels/{channel_id}/members_minus_group_members`
+//
+// The one route in `api4/channel.go` that reads the group tables with no licence gate — so it
+// answers 200 on this stack, and this half of the suite is about the rows rather than an error.
+// ---------------------------------------------------------------------------
+
+/// The three groups this suite inserts. Ids are `mmrschadmgrp…` so the purge below can find them
+/// and so nothing another suite writes can collide.
+const GROUP_ONE: &str = "mmrschadmgrp0000000000001x";
+const GROUP_TWO: &str = "mmrschadmgrp0000000000002x";
+const GROUP_THREE: &str = "mmrschadmgrp0000000000003x";
+
+/// A channel whose membership is built to make every predicate in the query *matter*.
+///
+/// | member | groups | why it is here |
+/// |---|---|---|
+/// | admin | — | the creator, and the only member with no `GroupMembers` row at all |
+/// | `chga` | one | the user `minus GROUP_ONE` must **exclude** |
+/// | `chgb` | two | excluded only when `GROUP_TWO` is asked for |
+/// | `chgc` | two, three | two joined rows for one user — what `count(DISTINCT)` is for |
+/// | `chgd` | one, **deleted** | the subquery's `deleteat = 0`: not excluded, yet still reports the group |
+/// | `chge` | — | deactivated, so `Users.DeleteAt = 0` drops them |
+/// | a bot | — | a channel member that `Bots.UserId IS NULL` drops |
+struct GroupFixture {
+    channel: String,
+    admin: String,
+    users: std::collections::HashMap<&'static str, String>,
+    plain_token: String,
+}
+
+static GROUP_FIXTURE: tokio::sync::OnceCell<GroupFixture> = tokio::sync::OnceCell::const_new();
+
+async fn group_pool() -> sqlx::PgPool {
+    let url = std::env::var("DATABASE_URL").expect("the parity stack exports DATABASE_URL");
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .expect("the shared database is reachable")
+}
+
+async fn group_fixture(client: &reqwest::Client, token: &str) -> &'static GroupFixture {
+    GROUP_FIXTURE
+        .get_or_init(|| async {
+            let team = create_team(client, token, "chadmgrp").await;
+            let channel = create_channel(client, token, &team, "chadmgrp").await;
+
+            let admin = client
+                .get(format!("{GO}/api/v4/users/me"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("Go answers")
+                .json::<serde_json::Value>()
+                .await
+                .expect("a user")["id"]
+                .as_str()
+                .expect("an id")
+                .to_owned();
+
+            let mut users = std::collections::HashMap::new();
+            let mut plain_token = String::new();
+            for tag in ["chga", "chgb", "chgc", "chgd", "chge"] {
+                let user = create_plain_user(client, token, &team, tag).await;
+                let joined = client
+                    .post(format!("{GO}/api/v4/channels/{channel}/members"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .json(&serde_json::json!({ "user_id": user.id }))
+                    .send()
+                    .await
+                    .expect("Go answers");
+                assert!(joined.status().is_success(), "{tag} joins the channel");
+                if tag == "chga" {
+                    plain_token = user.token.clone();
+                }
+                users.insert(tag, user.id);
+            }
+
+            // A bot in the channel, for `Bots.UserId IS NULL`. Created through Go so the `Bots`
+            // row and the `Users` row are written the way the server writes them.
+            let bot = client
+                .post(format!("{GO}/api/v4/bots"))
+                .header("Authorization", format!("Bearer {token}"))
+                .json(&serde_json::json!({
+                    "username": "mmrschadmgrpbot",
+                    "display_name": "chadmgrp bot",
+                }))
+                .send()
+                .await
+                .expect("Go answers");
+            if bot.status().is_success() {
+                let bot: serde_json::Value = bot.json().await.expect("a bot");
+                let bot_id = bot["user_id"].as_str().expect("a user id").to_owned();
+                let _ = client
+                    .post(format!("{GO}/api/v4/teams/{team}/members"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .json(&serde_json::json!({ "team_id": team, "user_id": bot_id }))
+                    .send()
+                    .await;
+                let _ = client
+                    .post(format!("{GO}/api/v4/channels/{channel}/members"))
+                    .header("Authorization", format!("Bearer {token}"))
+                    .json(&serde_json::json!({ "user_id": bot_id }))
+                    .send()
+                    .await;
+                users.insert("bot", bot_id);
+            }
+
+            // `chge` is deactivated **last**, so its `Users.UpdateAt` settles before any read.
+            let deactivated = client
+                .delete(format!("{GO}/api/v4/users/{}", users["chge"]))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("Go answers");
+            assert!(deactivated.status().is_success(), "chge is deactivated");
+
+            // The group rows. Written by SQL because every route that would write them is
+            // licence-gated to a 501 — there is no way to create a group through this server.
+            let pool = group_pool().await;
+            sqlx::query("DELETE FROM groupmembers WHERE groupid LIKE 'mmrschadmgrp%'")
+                .execute(&pool)
+                .await
+                .expect("the old memberships clear");
+            sqlx::query("DELETE FROM usergroups WHERE id LIKE 'mmrschadmgrp%'")
+                .execute(&pool)
+                .await
+                .expect("the old groups clear");
+
+            for (id, name) in [
+                (GROUP_ONE, "mmrs-chadmgrp-one"),
+                (GROUP_TWO, "mmrs-chadmgrp-two"),
+                (GROUP_THREE, "mmrs-chadmgrp-three"),
+            ] {
+                sqlx::query(
+                    "INSERT INTO usergroups
+                       (id, name, displayname, description, source, remoteid,
+                        createat, updateat, deleteat, allowreference)
+                     VALUES ($1, $2, $3, 'a group this suite made', 'custom', NULL,
+                             1700000000000, 1700000000000, 0, TRUE)",
+                )
+                .bind(id)
+                .bind(name)
+                .bind(format!("Display {name}"))
+                .execute(&pool)
+                .await
+                .expect("the group is written");
+            }
+
+            for (group, user, delete_at) in [
+                (GROUP_ONE, users["chga"].as_str(), 0i64),
+                (GROUP_TWO, users["chgb"].as_str(), 0),
+                (GROUP_TWO, users["chgc"].as_str(), 0),
+                (GROUP_THREE, users["chgc"].as_str(), 0),
+                // The deleted membership: `chgd` is still reported as being in `GROUP_ONE` by the
+                // outer `string_agg`, which has no `DeleteAt` filter, and is **not** excluded by
+                // the subquery, which has one.
+                (GROUP_ONE, users["chgd"].as_str(), 1700000001000),
+            ] {
+                sqlx::query(
+                    "INSERT INTO groupmembers (groupid, userid, createat, deleteat)
+                     VALUES ($1, $2, 1700000000000, $3)",
+                )
+                .bind(group)
+                .bind(user)
+                .bind(delete_at)
+                .execute(&pool)
+                .await
+                .expect("the membership is written");
+            }
+
+            GroupFixture {
+                channel,
+                admin,
+                users,
+                plain_token,
+            }
+        })
+        .await
+}
+
+fn minus(channel_id: &str, query: &str) -> String {
+    format!("/api/v4/channels/{channel_id}/members_minus_group_members?{query}")
+}
+
+/// The answer itself, byte for byte, and then the seven facts about the fixture that make the
+/// byte comparison mean something.
+#[tokio::test]
+async fn the_page_matches_go_byte_for_byte_and_every_predicate_bites() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let p = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    assert!(
+        !rs.ends_with(b"\n"),
+        "`json.Marshal` then `w.Write`, so no trailing newline"
+    );
+
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    let users = body["users"].as_array().expect("a users array");
+    let ids: Vec<&str> = users
+        .iter()
+        .map(|u| u["id"].as_str().expect("an id"))
+        .collect();
+
+    // 1. The member in the asked-for group is gone; 2. the members in other groups are not.
+    assert!(
+        !ids.contains(&f.users["chga"].as_str()),
+        "chga is in GROUP_ONE"
+    );
+    assert!(
+        ids.contains(&f.users["chgb"].as_str()),
+        "chgb is in GROUP_TWO"
+    );
+    assert!(
+        ids.contains(&f.users["chgc"].as_str()),
+        "chgc is in two others"
+    );
+    // 3. A **deleted** group membership does not exclude: the subquery filters `DeleteAt = 0`.
+    assert!(
+        ids.contains(&f.users["chgd"].as_str()),
+        "chgd's GROUP_ONE membership is deleted"
+    );
+    // 4. `Users.DeleteAt = 0` drops the deactivated member.
+    assert!(
+        !ids.contains(&f.users["chge"].as_str()),
+        "chge is deactivated"
+    );
+    // 5. `Bots.UserId IS NULL` drops the bot.
+    if let Some(bot) = f.users.get("bot") {
+        assert!(!ids.contains(&bot.as_str()), "a bot is not a member here");
+    }
+    // 6. The member with no group row at all is present, with `groups: []` and not `null` —
+    //    the app layer's `user.Groups = []*model.Group{}`.
+    assert!(ids.contains(&f.admin.as_str()), "the admin is a member");
+    let admin = users
+        .iter()
+        .find(|u| u["id"] == f.admin.as_str())
+        .expect("the admin row");
+    assert_eq!(admin["groups"], serde_json::json!([]), "empty, not null");
+
+    // 7. `total_count` counts **users**, not joined rows: `chgc` is in two groups and contributes
+    //    one. A `count(*)` in place of `count(DISTINCT Users.Id)` would answer one more than the
+    //    page holds.
+    assert_eq!(
+        body["total_count"].as_u64().expect("a count"),
+        ids.len() as u64,
+        "one row per user, whatever their group count"
+    );
+}
+
+/// The `groups` array is **every** group the member is in, not only the ones asked about — and it
+/// ignores `GroupMembers.DeleteAt`, unlike the subquery three lines above it in the same SQL.
+#[tokio::test]
+async fn the_groups_array_is_hydrated_from_every_membership_row() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let p = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}");
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    let users = body["users"].as_array().expect("a users array");
+
+    let groups_of = |user_id: &str| -> Vec<String> {
+        users
+            .iter()
+            .find(|u| u["id"] == user_id)
+            .and_then(|u| u["groups"].as_array())
+            .expect("a groups array")
+            .iter()
+            .map(|g| g["id"].as_str().expect("a group id").to_owned())
+            .collect()
+    };
+
+    let mut chgc = groups_of(&f.users["chgc"]);
+    chgc.sort();
+    assert_eq!(
+        chgc,
+        vec![GROUP_TWO.to_owned(), GROUP_THREE.to_owned()],
+        "two memberships, two groups"
+    );
+
+    assert_eq!(
+        groups_of(&f.users["chgd"]),
+        vec![GROUP_ONE.to_owned()],
+        "the outer join has no `DeleteAt` filter, so a deleted membership still shows"
+    );
+
+    // And the hydrated group carries the stored columns, not an id-only stub.
+    let group = users
+        .iter()
+        .find(|u| u["id"] == f.users["chgb"].as_str())
+        .and_then(|u| u["groups"].as_array())
+        .and_then(|g| g.first())
+        .expect("chgb's group");
+    assert_eq!(group["display_name"], "Display mmrs-chadmgrp-two");
+    assert_eq!(group["source"], "custom");
+    assert_eq!(group["allow_reference"], true);
+    // The five `db:"-"` fields that `GetByIDs` does not compute.
+    assert_eq!(group["has_syncables"], false);
+    assert_eq!(group["member_ids"], serde_json::Value::Null);
+    assert!(
+        group.get("member_count").is_none(),
+        "`omitempty` and not computed"
+    );
+}
+
+/// Asking for two groups removes the members of both, and `total_count` follows the page.
+#[tokio::test]
+async fn a_second_group_id_removes_a_second_member() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let p = minus(&f.channel, &format!("group_ids={GROUP_ONE},{GROUP_TWO}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    let ids: Vec<&str> = body["users"]
+        .as_array()
+        .expect("a users array")
+        .iter()
+        .map(|u| u["id"].as_str().expect("an id"))
+        .collect();
+    for tag in ["chga", "chgb", "chgc"] {
+        assert!(!ids.contains(&f.users[tag].as_str()), "{tag} is excluded");
+    }
+    assert!(ids.contains(&f.users["chgd"].as_str()), "chgd is not");
+    assert_eq!(
+        body["total_count"].as_u64().expect("a count"),
+        ids.len() as u64
+    );
+}
+
+/// Paging is `LIMIT per_page OFFSET page * per_page`, and `total_count` is the **whole** set —
+/// it does not shrink with the page. A port that counted the page would agree on page 0 and
+/// diverge on every other one.
+#[tokio::test]
+async fn paging_slices_the_page_and_leaves_the_total_alone() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let whole = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
+    let (go_whole, rs_whole) = common::fetch_both(&client, &token, &whole).await;
+    assert_eq!(go_whole, rs_whole, "{whole}");
+    let whole: serde_json::Value = serde_json::from_slice(&go_whole).expect("the body decodes");
+    let total = whole["total_count"].as_u64().expect("a count");
+    assert!(total >= 3, "the fixture must have something to page");
+
+    let mut seen = Vec::new();
+    for page in 0..total {
+        let p = minus(
+            &f.channel,
+            &format!("group_ids={GROUP_ONE}&page={page}&per_page=1"),
+        );
+        let (go, rs) = common::fetch_both(&client, &token, &p).await;
+        assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+        let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+        assert_eq!(
+            body["total_count"].as_u64().expect("a count"),
+            total,
+            "page {page}: the total is the whole set"
+        );
+        let users = body["users"].as_array().expect("a users array");
+        assert_eq!(users.len(), 1, "page {page}: one per page");
+        seen.push(users[0]["id"].as_str().expect("an id").to_owned());
+    }
+
+    // Every page is a different user, and together they are the whole answer in username order.
+    let expected: Vec<String> = whole["users"]
+        .as_array()
+        .expect("a users array")
+        .iter()
+        .map(|u| u["id"].as_str().expect("an id").to_owned())
+        .collect();
+    assert_eq!(
+        seen, expected,
+        "`ORDER BY Users.Username ASC`, one at a time"
+    );
+
+    // One page past the end is an empty list and the same total, not a 404.
+    let p = minus(
+        &f.channel,
+        &format!("group_ids={GROUP_ONE}&page={total}&per_page=1"),
+    );
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}");
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    assert_eq!(body["users"], serde_json::json!([]));
+    assert_eq!(body["total_count"].as_u64().expect("a count"), total);
+}
+
+/// `ORDER BY Users.Username ASC` is asserted against the usernames the body itself carries, so it
+/// cannot pass on a coincidence of insertion order.
+#[tokio::test]
+async fn the_page_is_ordered_by_username() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let p = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}");
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    let names: Vec<&str> = body["users"]
+        .as_array()
+        .expect("a users array")
+        .iter()
+        .map(|u| u["username"].as_str().expect("a username"))
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted, "ascending, and by username and not by id");
+    assert!(names.len() > 1, "one element is sorted by accident");
+}
+
+/// The two `group_ids` gates, over HTTP. Each row is a 400 naming `group_ids`, and the pairs that
+/// look alike are the point: `a!b…` is stripped to `ab…` for the **length** test and split raw for
+/// the **id** test, so the two strings differ and so do the clauses they fail.
+#[tokio::test]
+async fn the_group_ids_gates_answer_the_same_400_go_does() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    for query in [
+        // No parameter at all.
+        "".to_owned(),
+        // Present and empty.
+        "group_ids=".to_owned(),
+        // Too short after the strip.
+        "group_ids=abcdefghijklmnopqrstuvwxy".to_owned(),
+        // Long enough only before the strip.
+        format!("group_ids={}", "a!".repeat(20)),
+        // Past the length gate, not an id.
+        format!("group_ids={}", "a".repeat(30)),
+        // Two ids of 13 characters each: the comma keeps the length gate happy.
+        format!("group_ids={},{}", "a".repeat(13), "b".repeat(13)),
+        // A trailing comma is an empty element, and "" is not a valid id.
+        format!("group_ids={GROUP_ONE},"),
+    ] {
+        let p = minus(&f.channel, &query);
+        let ((go_status, go), (rs_status, rs)) = common::fetch_both_raw(&client, &token, &p).await;
+        assert_eq!(go_status, 400, "{p}: {}", String::from_utf8_lossy(&go));
+        assert_eq!(rs_status, go_status, "{p}");
+        let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, &p);
+        assert_eq!(
+            parsed["id"], "api.context.invalid_body_param.app_error",
+            "{p}"
+        );
+        assert_eq!(
+            parsed["message"],
+            "Invalid or missing group_ids in request body."
+        );
+    }
+}
+
+/// **The gates are in this order**: the channel id, then `group_ids`, then the permission — and
+/// the channel is never fetched at all.
+#[tokio::test]
+async fn the_id_gate_precedes_the_group_gate_and_neither_reads_the_channel() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    // A malformed channel id with a malformed `group_ids`: the id error wins.
+    let p = minus("abc", "group_ids=short");
+    let ((go_status, go), (rs_status, rs)) = common::fetch_both_raw(&client, &token, &p).await;
+    assert_eq!(go_status, 400, "{p}");
+    assert_eq!(rs_status, go_status, "{p}");
+    let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, &p);
+    assert_eq!(
+        parsed["id"], "api.context.invalid_url_param.app_error",
+        "{p}"
+    );
+
+    // A well-formed channel id naming nothing: **200 with an empty page**, not a 404. Nothing on
+    // this path calls `GetChannel` — the store's `Channels.Id = ?` simply matches no row.
+    let p = minus(ABSENT, &format!("group_ids={GROUP_ONE}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    assert_eq!(body["users"], serde_json::json!([]));
+    assert_eq!(body["total_count"], 0);
+}
+
+/// The permission is `sysconsole_read_user_management_channels`, and it is asked **after** both
+/// `group_ids` gates — so a plain user with a bad `group_ids` gets the 400, not the 403.
+#[tokio::test]
+async fn a_plain_user_is_refused_but_only_after_the_group_gates() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    let p = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
+    let ((go_status, go), (rs_status, rs)) =
+        common::fetch_both_raw(&client, &f.plain_token, &p).await;
+    assert_eq!(go_status, 403, "{p}: {}", String::from_utf8_lossy(&go));
+    assert_eq!(rs_status, go_status, "{p}");
+    let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, &p);
+    assert_eq!(parsed["id"], "api.context.permissions.app_error", "{p}");
+
+    let p = minus(&f.channel, "group_ids=short");
+    let ((go_status, go), (rs_status, rs)) =
+        common::fetch_both_raw(&client, &f.plain_token, &p).await;
+    assert_eq!(go_status, 400, "{p}: the group gate runs first");
+    assert_eq!(rs_status, go_status, "{p}");
+    let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, &p);
+    assert_eq!(
+        parsed["id"], "api.context.invalid_body_param.app_error",
+        "{p}"
+    );
+}
+
+/// **`Channels.DeleteAt = 0`.** An archived channel keeps its `ChannelMembers` rows, and this
+/// route still answers 200 — with an empty page, because the join to `Channels` filters the
+/// channel itself out. Not a 404 and not the membership list: the predicate is on the *channel*
+/// row, which is the one a reader is most likely to drop as redundant.
+#[tokio::test]
+async fn an_archived_channel_answers_an_empty_page() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = group_fixture(&client, &token).await;
+
+    // Its own channel, in the fixture's team, so archiving it disturbs nothing else.
+    let team = client
+        .get(format!("{GO}/api/v4/channels/{}", f.channel))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers")
+        .json::<serde_json::Value>()
+        .await
+        .expect("a channel")["team_id"]
+        .as_str()
+        .expect("a team id")
+        .to_owned();
+    let doomed = create_channel(&client, &token, &team, "chadmgrparch").await;
+    let joined = client
+        .post(format!("{GO}/api/v4/channels/{doomed}/members"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "user_id": f.users["chgb"] }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        joined.status().is_success(),
+        "chgb joins the doomed channel"
+    );
+
+    // Live, it answers the two members.
+    let p = minus(&doomed, &format!("group_ids={GROUP_ONE}"));
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    assert_eq!(
+        body["total_count"], 2,
+        "the creator and chgb, before archiving"
+    );
+
+    let archived = client
+        .delete(format!("{GO}/api/v4/channels/{doomed}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(archived.status().is_success(), "the channel is archived");
+
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    assert_eq!(body["users"], serde_json::json!([]), "and after, nothing");
+    assert_eq!(body["total_count"], 0);
+}

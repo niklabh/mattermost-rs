@@ -27,6 +27,8 @@ pub mod export;
 pub mod file;
 /// Port of `platform/shared/filestore` — the local driver, and a refusal for the other two.
 pub mod filestore;
+/// The one unlicensed read of `app/group.go`, for `members_minus_group_members`.
+pub mod group;
 /// The websocket connection registry and event fan-out — Go's `app/platform` hub.
 pub mod hub;
 /// The supported-locale list, for `users.CreateUser`'s locale reset.

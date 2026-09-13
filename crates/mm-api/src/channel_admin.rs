@@ -24,14 +24,19 @@
 //! member flag — reads enterprise tables this store does not port. A licensed installation is
 //! forwarded whole, exactly as `channels::get_channel_moderations` and its two siblings do.
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, RawQuery, Request, State};
 use axum::response::{IntoResponse, Response};
+use mm_model::channel::CHANNEL_TYPE_SPACE;
+use mm_model::permission::{
+    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS, make_permission_error,
+};
 use mm_model::scheme::SchemeIDPatch;
+use mm_model::user::UsersWithGroupsAndCount;
 use mm_model::utils::{AppError, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{LicenceGate, licence_gate};
+use crate::channels::{LicenceGate, licence_gate, parse_page, parse_per_page, query_first};
 use crate::error::ApiError;
 
 /// Port of `patchChannelModerations` (api4/channel.go:3011) —
@@ -183,6 +188,161 @@ fn body_names_a_valid_scheme_id(bytes: &[u8]) -> bool {
     }
 }
 
+/// Port of `channelMembersMinusGroupMembers` (api4/channel.go:2881) —
+/// `GET /api/v4/channels/{channel_id}/members_minus_group_members`.
+///
+/// The System Console's "who would this group constraint remove?" preview: the channel's members
+/// who are in **none** of the `group_ids`, one page at a time, plus the total.
+///
+/// # The one group route in this file with no licence gate
+///
+/// Every handler in `api4/group.go` opens with `requireLicense` and answers 501 unlicensed (see
+/// [`crate::groups`]), and three handlers in `api4/channel.go` open with a licence check of their
+/// own. This one has neither, so an unlicensed server reads the group tables and answers `200`.
+/// Measured against the pinned Go server before it was ported, which is the only way that fact is
+/// knowable — the surrounding code all says "enterprise".
+///
+/// # `group_ids` is validated twice, against two different strings
+///
+/// 1. `groupIDsQueryParamRegex.ReplaceAllString(param, "")` strips **everything outside
+///    `[a-zA-Z0-9,]`** and the *stripped* string must be at least 26 characters. So
+///    `group_ids=!!!!` is a 400 for length even though it has four characters, and a 30-character
+///    run of letters passes the length test with no comma in it at all.
+/// 2. The split is then over the **unstripped** parameter, and every element must satisfy
+///    `IsValidId`. So the 30-character run fails here instead — same 400, a different clause.
+///
+/// Reproducing the two-string dance matters because collapsing it to one changes which inputs
+/// pass: validating the stripped string would accept `a!b` wherever `ab` is valid.
+///
+/// # A space channel is rejected; a board channel is **not**
+///
+/// `rejectSpaceChannelByID` guards this route and `rejectBoardChannelByID` does not — unlike the
+/// three `PUT …/members/{user_id}/…` handlers, which carry both. A board id therefore reaches the
+/// store here and answers an empty page rather than the board guard's 400.
+///
+/// # The body carries no trailing newline
+///
+/// `json.Marshal` then `w.Write`, not `json.NewEncoder(w).Encode` — so unlike the channel lists
+/// ([D-086]) there is no `\n`. The two conventions sit four hundred lines apart in the same file.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, groups, page, per_page))]
+pub async fn channel_members_minus_group_members(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    RawQuery(query): RawQuery,
+    session: AuthenticatedSession,
+) -> Response {
+    if !is_valid_id(&channel_id) {
+        return ApiError::invalid_url_param("channel_id").into_response();
+    }
+
+    match state
+        .app
+        .get_channel_of_type(&channel_id, CHANNEL_TYPE_SPACE)
+        .await
+    {
+        Ok(_) => {
+            return ApiError::from(AppError::new(
+                "",
+                "api.channel.space_channel.app_error",
+                None,
+                "space channels cannot be accessed via /channels endpoints".to_owned(),
+                400,
+            ))
+            .into_response();
+        }
+        Err(err) if err.status_code == 404 => {}
+        Err(err) => return ApiError::from(err).into_response(),
+    }
+
+    let raw = query_first(query.as_deref(), "group_ids").unwrap_or_default();
+    let Some(group_ids) = parse_group_ids(&raw) else {
+        return ApiError::invalid_param("group_ids").into_response();
+    };
+    tracing::Span::current().record("groups", group_ids.len());
+
+    if !state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+        )
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS],
+        ))
+        .into_response();
+    }
+
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+
+    let (users, count) = match state
+        .app
+        .channel_members_minus_group_members(&channel_id, &group_ids, page, per_page)
+        .await
+    {
+        Ok(answer) => answer,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let body = UsersWithGroupsAndCount {
+        users: Some(users),
+        count,
+    };
+    match serde_json::to_vec(&body) {
+        // `json.Marshal` then `w.Write` — **no trailing newline**, unlike the channel lists.
+        Ok(bytes) => (
+            axum::http::StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(err) => ApiError::from(AppError::new(
+            "Api4.channelMembersMinusGroupMembers",
+            "api.marshal_error",
+            None,
+            err.to_string(),
+            500,
+        ))
+        .into_response(),
+    }
+}
+
+/// Both of `channelMembersMinusGroupMembers`'s `group_ids` gates, as one function returning the
+/// ids Go would have passed to the store.
+///
+/// `None` is the single 400 the two gates share. Separate from the handler because the two
+/// strings they run against — stripped for the length, raw for the split — are the whole subtlety.
+fn parse_group_ids(raw: &str) -> Option<Vec<String>> {
+    // `groupIDsParamPattern = "[^a-zA-Z0-9,]*"` (api4/team.go:24), replaced with "". A `*` regex
+    // deletes every run of non-matching characters, so this is simply "keep the alphanumerics and
+    // the commas".
+    let stripped_len = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == ',')
+        .count();
+    if stripped_len < 26 {
+        return None;
+    }
+
+    // ...and the split is over `c.Params.GroupIDs`, the **raw** parameter, not the stripped one.
+    let mut ids = Vec::new();
+    for id in raw.split(',') {
+        if !is_valid_id(id) {
+            return None;
+        }
+        ids.push(id.to_owned());
+    }
+    Some(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +401,60 @@ mod tests {
                 "{id} should pass"
             );
         }
+    }
+
+    /// The two `group_ids` gates, one branch at a time. The pairs that look alike and answer
+    /// differently are the point: `a!b…` and `ab…` differ only in characters the *length* gate
+    /// deletes and the *split* gate keeps.
+    #[test]
+    fn parse_group_ids_runs_the_length_gate_on_the_stripped_string() {
+        // 25 alphanumerics — one short, whatever else is in the string.
+        assert_eq!(parse_group_ids("abcdefghijklmnopqrstuvwxy"), None);
+        // Four characters, none of which survive the strip: the length gate, not the split.
+        assert_eq!(parse_group_ids("!!!!"), None);
+        // 40 characters, of which only 20 survive the strip.
+        assert_eq!(parse_group_ids(&"a!".repeat(20)), None);
+        // Nothing at all — the absent parameter arrives here as "".
+        assert_eq!(parse_group_ids(""), None);
+    }
+
+    #[test]
+    fn parse_group_ids_runs_the_split_gate_on_the_raw_string() {
+        // 30 alphanumerics: past the length gate, and not a valid 26-character id.
+        assert_eq!(parse_group_ids(&"a".repeat(30)), None);
+        // The strip keeps commas, so this clears 26 — and then the first element is 13 long.
+        let two_short = format!("{},{}", "a".repeat(13), "b".repeat(13));
+        assert_eq!(parse_group_ids(&two_short), None);
+        // A separator that is not a comma: the strip deletes it, the split does not see it, and
+        // the single 53-character element fails `IsValidId`.
+        assert_eq!(parse_group_ids(&format!("{VALID};{VALID}")), None);
+    }
+
+    #[test]
+    fn parse_group_ids_accepts_what_go_accepts() {
+        assert_eq!(
+            parse_group_ids(VALID),
+            Some(vec![VALID.to_owned()]),
+            "one id"
+        );
+        assert_eq!(
+            parse_group_ids(&format!("{VALID},{VALID}")),
+            Some(vec![VALID.to_owned(), VALID.to_owned()]),
+            "two ids, duplicates and all — Go de-duplicates nowhere"
+        );
+        // `IsValidId` is letters-or-numbers, so upper case passes the split gate as well.
+        assert_eq!(
+            parse_group_ids("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            Some(vec!["ABCDEFGHIJKLMNOPQRSTUVWXYZ".to_owned()])
+        );
+    }
+
+    /// A trailing comma is one empty element, and the empty string is not a valid id — so
+    /// `"<valid>,"` is a 400 while `"<valid>"` is a 200.
+    #[test]
+    fn a_trailing_comma_is_an_empty_element_and_fails() {
+        assert_eq!(parse_group_ids(&format!("{VALID},")), None);
+        assert_eq!(parse_group_ids(&format!(",{VALID}")), None);
     }
 
     /// The reverse: the trailing garbage cannot rescue a body whose *first* value is bad.

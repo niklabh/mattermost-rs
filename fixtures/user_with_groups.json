@@ -1,0 +1,74 @@
+{
+    "id": "5fi93rjoozx5ojuk91eubbg9zy",
+    "create_at": 1701376514000,
+    "update_at": 1702646267000,
+    "delete_at": 1705901337000,
+    "username": "username-10679a",
+    "password": "correct-horse-battery-76e251",
+    "auth_data": "authdata-c875b0",
+    "auth_service": "authservice-60f494",
+    "email": "email-1cb717@example.com",
+    "email_verified": true,
+    "nickname": "nickname-3a0a90",
+    "first_name": "firstname-3ef6e7",
+    "last_name": "lastname-52afb9",
+    "position": "position-dc7243",
+    "roles": "roles-801366",
+    "allow_marketing": true,
+    "props": {
+        "key0-af0eba": "val0-ab30c1",
+        "key1-b0106d": "val1-ac3274"
+    },
+    "notify_props": {
+        "key0-bf281b": "val0-73be0d",
+        "key1-be2668": "val1-72bc5a"
+    },
+    "last_password_update": 1701627503000,
+    "last_picture_update": 1700433334000,
+    "failed_attempts": 25,
+    "locale": "locale-ab7036",
+    "timezone": {
+        "key0-d44298": "val0-6c04f3",
+        "key1-d340e5": "val1-6b0340"
+    },
+    "mfa_active": true,
+    "mfa_secret": "mfasecret-aeddaa",
+    "remote_id": "1xr4jmki5s1jpag8w1simzfr1a",
+    "last_activity_at": 1704615339000,
+    "is_bot": true,
+    "bot_description": "botdescription-d987fd",
+    "bot_last_icon_update": 1705463588000,
+    "terms_of_service_id": "xyaornahd34cwk3uyefta85w3e",
+    "terms_of_service_create_at": 1705764135000,
+    "disable_welcome_email": true,
+    "last_login": 1702734724000,
+    "mfa_used_timestamps": [
+        "mfausedtimestamps-2fcbbc",
+        "mfausedtimestamps-360862"
+    ],
+    "groups": [
+        {
+            "id": "fj8zank1ynhs8zkoxoriryp3cc",
+            "name": "name-1853ba",
+            "display_name": "displayname-f2baf8",
+            "description": "description-721046",
+            "source": "source-03586d",
+            "remote_id": "mucqpyj9ooucsd64h4yu9bjg3c",
+            "create_at": 1707281589000,
+            "update_at": 1703127688000,
+            "delete_at": 1707156794000,
+            "has_syncables": true,
+            "member_count": 18,
+            "allow_reference": true,
+            "channel_member_count": 33,
+            "channel_member_timezones_count": 99,
+            "member_ids": [
+                "memberids-17efd1",
+                "memberids-506cea"
+            ]
+        }
+    ],
+    "scheme_guest": true,
+    "scheme_user": true,
+    "scheme_admin": true
+}

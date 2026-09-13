@@ -1,0 +1,79 @@
+{
+    "users": [
+        {
+            "id": "heepuaun71hqdfe158tgf5pahr",
+            "create_at": 1705608605000,
+            "update_at": 1703163088000,
+            "delete_at": 1707406002000,
+            "username": "username-ec7332",
+            "password": "correct-horse-battery-b14600",
+            "auth_data": "authdata-089504",
+            "auth_service": "authservice-073716",
+            "email": "email-34e160@example.com",
+            "email_verified": true,
+            "nickname": "nickname-a061e3",
+            "first_name": "firstname-2527e4",
+            "last_name": "lastname-9be60f",
+            "position": "position-128c4f",
+            "roles": "roles-6cb437",
+            "allow_marketing": true,
+            "props": {
+                "key0-dc8872": "val0-12fb38",
+                "key1-db86bf": "val1-11f985"
+            },
+            "notify_props": {
+                "key0-cb8d16": "val0-8a8d10",
+                "key1-cc8ec9": "val1-8b8ec3"
+            },
+            "last_password_update": 1703588924000,
+            "last_picture_update": 1702145143000,
+            "failed_attempts": 88,
+            "locale": "locale-d021d8",
+            "timezone": {
+                "key0-3402b8": "val0-0ff236",
+                "key1-35046b": "val1-10f3e9"
+            },
+            "mfa_active": true,
+            "mfa_secret": "mfasecret-b5f03c",
+            "remote_id": "1t6mmi6xd9nukt56szmh6egfgw",
+            "last_activity_at": 1706086268000,
+            "is_bot": true,
+            "bot_description": "botdescription-baa51e",
+            "bot_last_icon_update": 1703263857000,
+            "terms_of_service_id": "1hcouou4ib6az3yzb8b8ij57tc",
+            "terms_of_service_create_at": 1707768820000,
+            "disable_welcome_email": true,
+            "last_login": 1706586753000,
+            "mfa_used_timestamps": [
+                "mfausedtimestamps-4bf227",
+                "mfausedtimestamps-4c1018"
+            ],
+            "groups": [
+                {
+                    "id": "7c6wf3qtt1zmwqbhem17dn7qze",
+                    "name": "name-ba1ac7",
+                    "display_name": "displayname-c65e3e",
+                    "description": "description-49134f",
+                    "source": "source-449621",
+                    "remote_id": "ssgi4hncmgtisywcmiarasfdmc",
+                    "create_at": 1700967872000,
+                    "update_at": 1707624353000,
+                    "delete_at": 1700630271000,
+                    "has_syncables": true,
+                    "member_count": 35,
+                    "allow_reference": true,
+                    "channel_member_count": 66,
+                    "channel_member_timezones_count": 90,
+                    "member_ids": [
+                        "memberids-da5826",
+                        "memberids-a1db0d"
+                    ]
+                }
+            ],
+            "scheme_guest": true,
+            "scheme_user": true,
+            "scheme_admin": true
+        }
+    ],
+    "total_count": 27
+}

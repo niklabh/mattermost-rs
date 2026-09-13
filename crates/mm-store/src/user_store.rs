@@ -743,38 +743,38 @@ impl SqlUserStore {
 /// One row of Go's `usersQuery` — `getUsersColumns()` plus `getBotInfoColumns()` over
 /// `Users LEFT JOIN Bots` (user_store.go:120-126). Both ported lookups select exactly this
 /// shape, so the mapping lives once in [`user_from_row`].
-struct UserRow {
-    id: String,
-    createat: Option<i64>,
-    updateat: Option<i64>,
-    deleteat: Option<i64>,
-    username: Option<String>,
-    password: Option<String>,
-    authdata: Option<String>,
-    authservice: Option<String>,
-    email: Option<String>,
-    emailverified: Option<bool>,
-    nickname: Option<String>,
-    firstname: Option<String>,
-    lastname: Option<String>,
-    position: Option<String>,
-    roles: Option<String>,
-    allowmarketing: Option<bool>,
-    props: Option<serde_json::Value>,
-    notifyprops: Option<serde_json::Value>,
-    lastpasswordupdate: Option<i64>,
-    lastpictureupdate: Option<i64>,
-    failedattempts: Option<i64>,
-    locale: Option<String>,
-    timezone: Option<serde_json::Value>,
-    mfaactive: Option<bool>,
-    mfasecret: Option<String>,
-    mfausedtimestamps: Option<serde_json::Value>,
-    remoteid: Option<String>,
-    lastlogin: i64,
-    isbot: bool,
-    botdescription: String,
-    botlasticonupdate: i64,
+pub(crate) struct UserRow {
+    pub(crate) id: String,
+    pub(crate) createat: Option<i64>,
+    pub(crate) updateat: Option<i64>,
+    pub(crate) deleteat: Option<i64>,
+    pub(crate) username: Option<String>,
+    pub(crate) password: Option<String>,
+    pub(crate) authdata: Option<String>,
+    pub(crate) authservice: Option<String>,
+    pub(crate) email: Option<String>,
+    pub(crate) emailverified: Option<bool>,
+    pub(crate) nickname: Option<String>,
+    pub(crate) firstname: Option<String>,
+    pub(crate) lastname: Option<String>,
+    pub(crate) position: Option<String>,
+    pub(crate) roles: Option<String>,
+    pub(crate) allowmarketing: Option<bool>,
+    pub(crate) props: Option<serde_json::Value>,
+    pub(crate) notifyprops: Option<serde_json::Value>,
+    pub(crate) lastpasswordupdate: Option<i64>,
+    pub(crate) lastpictureupdate: Option<i64>,
+    pub(crate) failedattempts: Option<i64>,
+    pub(crate) locale: Option<String>,
+    pub(crate) timezone: Option<serde_json::Value>,
+    pub(crate) mfaactive: Option<bool>,
+    pub(crate) mfasecret: Option<String>,
+    pub(crate) mfausedtimestamps: Option<serde_json::Value>,
+    pub(crate) remoteid: Option<String>,
+    pub(crate) lastlogin: i64,
+    pub(crate) isbot: bool,
+    pub(crate) botdescription: String,
+    pub(crate) botlasticonupdate: i64,
 }
 
 /// The row-to-model mapping both lookups share.
@@ -789,7 +789,7 @@ struct UserRow {
 /// shapes mean "absent" and only a *type* mismatch is an error. Treating JSON null as a decode
 /// failure made `GET /users/me` a 500 for every user except the one the parity tests happen to
 /// log in as — see [D-135].
-fn user_from_row(row: UserRow) -> Result<User, StoreError> {
+pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
     let decode_map = |value: Option<serde_json::Value>,
                       column: &'static str|
      -> Result<Option<StringMap>, StoreError> {

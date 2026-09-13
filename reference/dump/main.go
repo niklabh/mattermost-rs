@@ -48,6 +48,11 @@ import (
 var registry = map[string]any{
 	"app_error":      &model.AppError{},
 	"user":           &model.User{},
+
+	// The `members_minus_group_members` pair (user.go:1118, :1139), landed with
+	// `GET /channels/{channel_id}/members_minus_group_members`.
+	"user_with_groups":             &model.UserWithGroups{},
+	"users_with_groups_and_count":  &model.UsersWithGroupsAndCount{},
 	"team":           &model.Team{},
 	"channel":        &model.Channel{},
 	"channel_member": &model.ChannelMember{},

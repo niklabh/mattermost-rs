@@ -1482,6 +1482,82 @@ mod tests {
     }
 
     #[test]
+    fn user_with_groups_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/user_with_groups.json");
+        let parsed: UserWithGroups = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+    }
+
+    /// The embedded `User` is flattened, not nested, so the fixture is the 35 user keys plus
+    /// exactly four of its own — and `group_ids` is **not** among them, because Go tags it `-`.
+    #[test]
+    fn user_with_groups_flattens_the_user_and_hides_group_ids() {
+        let go: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/user_with_groups.json")).unwrap();
+        let keys = go.as_object().unwrap();
+        assert_eq!(keys.len(), 39, "user_with_groups.json field count changed");
+        assert!(keys.contains_key("username"), "the User is flattened");
+        assert!(!keys.contains_key("group_ids"), "GroupIDs is `json:\"-\"`");
+        for key in ["groups", "scheme_guest", "scheme_user", "scheme_admin"] {
+            assert!(keys.contains_key(key), "{key} is missing");
+        }
+    }
+
+    #[test]
+    fn users_with_groups_and_count_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/users_with_groups_and_count.json");
+        let parsed: UsersWithGroupsAndCount = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+    }
+
+    /// The count is `total_count`, which is the one key on this body a reader would guess wrong.
+    #[test]
+    fn the_count_key_is_total_count() {
+        let go: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/users_with_groups_and_count.json"
+        ))
+        .unwrap();
+        let keys = go.as_object().unwrap();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains_key("total_count"), "not `count`");
+    }
+
+    /// Port of `GetGroupIDs`'s three empties and its one split, asserted per branch because each
+    /// is a `nil` in Go that a Rust reader would naturally turn into an empty `Vec`.
+    #[test]
+    fn get_group_ids_splits_the_string_agg_column() {
+        let with = |raw: Option<&str>| UserWithGroups {
+            group_ids: raw.map(str::to_owned),
+            ..Default::default()
+        };
+
+        assert_eq!(with(None).get_group_ids(), None, "a nil pointer");
+        assert_eq!(with(Some("")).get_group_ids(), None, "the empty string");
+        assert_eq!(with(Some("   ")).get_group_ids(), None, "whitespace only");
+        assert_eq!(
+            with(Some("aaa")).get_group_ids(),
+            Some(vec!["aaa"]),
+            "one id, no comma"
+        );
+        assert_eq!(
+            with(Some("aaa,bbb,ccc")).get_group_ids(),
+            Some(vec!["aaa", "bbb", "ccc"])
+        );
+        // `TrimSpace` runs on the whole string before the split, not on each element after it.
+        assert_eq!(
+            with(Some(" a , b ")).get_group_ids(),
+            Some(vec!["a ", " b"]),
+            "the inner spaces survive"
+        );
+        // An empty element is kept: Go's `strings.Split` never drops one.
+        assert_eq!(with(Some("a,,b")).get_group_ids(), Some(vec!["a", "", "b"]));
+    }
+
+    #[test]
     fn fixture_covers_every_field() {
         // Guards the oracle itself: if the generator ever emits a partial user, the parity
         // test above would still pass while proving less.
@@ -3385,4 +3461,86 @@ pub struct LoginTypeResponse {
         skip_serializing_if = "crate::serde_helpers::is_false"
     )]
     pub is_deactivated: bool,
+}
+
+// ---------------------------------------------------------------------------
+// The `members_minus_group_members` wire pair.
+//
+// Landed with `GET /api/v4/channels/{channel_id}/members_minus_group_members`
+// (api4/channel.go:2881), which is the only route that answers either type.
+// ---------------------------------------------------------------------------
+
+/// Port of `model.UserWithGroups` (user.go:1118) — a channel member plus the groups they are in.
+///
+/// # `GroupIDs` is `json:"-"`, and it is a **comma-joined string**, not a list
+///
+/// The column behind it is `string_agg(UserGroups.Id, ',')` (group_store.go:1745), so the store
+/// hands the app a single string and `GetGroupIDs` splits it. It never reaches the wire — Go tags
+/// it `-` — so it is `#[serde(skip)]` here rather than a renamed field.
+///
+/// # The three scheme booleans are **not** the ones on `ChannelMember`
+///
+/// They come from the same columns, but only `SchemeGuest` is `COALESCE`d to `FALSE`
+/// (group_store.go:1740); `SchemeAdmin` and `SchemeUser` are selected raw. A NULL in either would
+/// be a scan error in Go, which is why they are plain `bool` here and not `Option<bool>`: the
+/// columns are `NOT NULL DEFAULT false` in the schema and the difference is unreachable.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserWithGroups {
+    #[serde(flatten)]
+    pub user: User,
+
+    /// Go's `GroupIDs *string \`json:"-"\`` — the `string_agg` column, never serialised.
+    #[serde(skip)]
+    pub group_ids: Option<String>,
+
+    /// **Never `omitempty`**, so a user in no group is `"groups": []` and a nil slice is
+    /// `"groups": null`. The app layer always assigns `[]*model.Group{}` first (app/group.go:791),
+    /// so `null` is unreachable through the route — but the *type* still distinguishes them.
+    #[serde(rename = "groups")]
+    pub groups: Option<Vec<crate::group::Group>>,
+
+    #[serde(rename = "scheme_guest")]
+    pub scheme_guest: bool,
+
+    #[serde(rename = "scheme_user")]
+    pub scheme_user: bool,
+
+    #[serde(rename = "scheme_admin")]
+    pub scheme_admin: bool,
+}
+
+impl UserWithGroups {
+    /// Port of `(*UserWithGroups).GetGroupIDs` (user.go:1127).
+    ///
+    /// Three distinct empties collapse to the same answer — a nil pointer, a string that is
+    /// whitespace only, and (after the `TrimSpace`) the empty string — and every one of them is
+    /// `None` rather than an empty list, because Go returns a nil slice for all three and the
+    /// caller's `for range` over it does nothing either way.
+    ///
+    /// **`TrimSpace` runs before the emptiness test and not after the split**, so
+    /// `" a , b "` splits into `["a ", " b"]` with the inner spaces intact. `string_agg` never
+    /// produces them, which is exactly why the behaviour is easy to get wrong by "tidying".
+    pub fn get_group_ids(&self) -> Option<Vec<&str>> {
+        let raw = self.group_ids.as_deref()?;
+        let trimmed = raw.trim_matches(|c: char| c.is_whitespace());
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.split(',').collect())
+    }
+}
+
+/// Port of `model.UsersWithGroupsAndCount` (user.go:1139) — the whole response body of
+/// `members_minus_group_members`.
+///
+/// **`Count` is `total_count` on the wire**, not `count`, and neither field carries `omitempty`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UsersWithGroupsAndCount {
+    #[serde(rename = "users")]
+    pub users: Option<Vec<UserWithGroups>>,
+
+    #[serde(rename = "total_count")]
+    pub count: i64,
 }
