@@ -117,6 +117,14 @@ pub struct Config {
     /// bots straight to the tables. Read by `mm_api::bots::create_bot`.
     pub enable_bot_account_creation: bool,
 
+    /// `ServiceSettings.EnableCustomGroups` (config.go:487), default **`true`** (config.go:990).
+    ///
+    /// The configuration half of `licensedAndConfiguredForGroupBySource` (api4/group.go:1566):
+    /// with it off, every custom-group route answers `api.custom_groups.feature_disabled` at 400
+    /// — after the licence tier has passed, so on an unlicensed server it is never consulted.
+    /// Read by `mm_app::App::licensed_and_configured_for_group_by_source`.
+    pub enable_custom_groups: bool,
+
     /// `ServiceSettings.PostPriority` (config.go:992). Go default **`true`**.
     ///
     /// Gates `metadata.priority` *and* `metadata.acknowledgements`. `IsPostPriorityEnabled`
@@ -1077,6 +1085,7 @@ impl Default for Config {
             enable_custom_emoji: true,
             // config.go:918 — `new(false)`.
             enable_bot_account_creation: false,
+            enable_custom_groups: true,
             // config.go:599 — `new(false)`.
             enable_dynamic_client_registration: false,
             enable_post_username_override: false,
@@ -1311,6 +1320,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION",
                 default.enable_bot_account_creation,
+            ),
+            enable_custom_groups: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLECUSTOMGROUPS",
+                default.enable_custom_groups,
             ),
             allow_persistent_notifications: lookup_bool(
                 lookup,
@@ -1874,6 +1888,9 @@ impl Config {
             enable_bot_account_creation: service
                 .enable_bot_account_creation
                 .unwrap_or(default.enable_bot_account_creation),
+            enable_custom_groups: service
+                .enable_custom_groups
+                .unwrap_or(default.enable_custom_groups),
             post_priority: service.post_priority.unwrap_or(default.post_priority),
             allow_persistent_notifications: service
                 .allow_persistent_notifications
@@ -2494,6 +2511,8 @@ struct ServiceSettingsDocument {
     enable_custom_emoji: Option<bool>,
     #[serde(rename = "EnableBotAccountCreation")]
     enable_bot_account_creation: Option<bool>,
+    #[serde(rename = "EnableCustomGroups")]
+    enable_custom_groups: Option<bool>,
     #[serde(rename = "PostPriority")]
     post_priority: Option<bool>,
     #[serde(rename = "AllowPersistentNotifications")]

@@ -66,6 +66,7 @@ func writeGroupBehaviourFixture(outDir string) error {
 		"is_syncable":         grpIsSyncableAll(),
 		"member_is_valid":     grpMemberIsValidAll(),
 		"syncable_sources":    grpSyncableSources(),
+		"derived_name":        grpDerivedNameAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -493,4 +494,26 @@ func grpSyncableSources() map[string]any {
 		"sources":  toStrings(model.GetSyncableGroupSources()),
 		"prefixes": toStrings(model.GetSyncableGroupSourcePrefixes()),
 	}
+}
+
+type grpDerivedNameCase struct {
+	In  string `json:"in"`
+	Out string `json:"out"`
+}
+
+// `patchGroup`'s name derivation (api4/group.go:265): `strings.ReplaceAll(strings.ToLower(x), " ",
+// "-")`. Recorded because Go's `ToLower` is the **simple** Unicode mapping — one rune to one rune —
+// where a port reaching for a full case mapping turns U+0130 into two runes. Only the ASCII space
+// is replaced; a tab and a no-break space survive.
+func grpDerivedNameAll() []grpDerivedNameCase {
+	inputs := []string{
+		"", "Display Name", "Display  Two Spaces", "MiXeD", " leading", "trailing ",
+		"Tab\tName", "nbsp\u00a0name", "\u00c0\u00c9 Group", "\u0130stanbul Group",
+		"\u03a3\u038a\u03a3\u03a5\u03a6\u039f\u03a3", "ǅ Title", "ẞ Sharp", "already-derived",
+	}
+	cases := make([]grpDerivedNameCase, 0, len(inputs))
+	for _, in := range inputs {
+		cases = append(cases, grpDerivedNameCase{In: in, Out: strings.ReplaceAll(strings.ToLower(in), " ", "-")})
+	}
+	return cases
 }

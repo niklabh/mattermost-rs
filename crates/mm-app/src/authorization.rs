@@ -47,7 +47,7 @@ use mm_model::permission::Permission;
 use mm_model::role::Role;
 use mm_model::session::Session;
 use mm_model::utils::{AppError, AppResult};
-use mm_store::{ChannelStore, RoleStore, UserStore};
+use mm_store::{ChannelStore, GroupStore, RoleStore, UserStore};
 
 use crate::App;
 
@@ -188,6 +188,45 @@ impl App {
         }
         self.roles_grant_permission(&owned(session.get_user_roles()), &permission.id)
             .await
+    }
+
+    /// Port of `app.App.SessionHasPermissionToGroup` (authorization.go:188).
+    ///
+    /// A member of the group implicitly holds `custom_group_user` in it, so membership plus
+    /// that role granting the permission is a yes without looking at the session's own roles.
+    /// Two things a reader gets wrong: the membership read tolerates **only** "no such row" —
+    /// any other store failure is a flat `false`, not a fall-through to the system roles — and
+    /// group-override schemes are not implemented in Go either (the comment says so).
+    #[tracing::instrument(skip(self, session, permission), fields(user_id = %session.user_id, group_id = %group_id, permission = %permission.id))]
+    pub async fn session_has_permission_to_group(
+        &self,
+        session: &Session,
+        group_id: &str,
+        permission: &Permission,
+    ) -> bool {
+        let member = match self
+            .store()
+            .group()
+            .get_member(group_id, &session.user_id)
+            .await
+        {
+            Ok(member) => member,
+            Err(err) => {
+                tracing::error!(error = %err, "group membership lookup failed");
+                return false;
+            }
+        };
+        if member.is_some()
+            && self
+                .roles_grant_permission(
+                    &[mm_model::role::CUSTOM_GROUP_USER_ROLE_ID.to_owned()],
+                    &permission.id,
+                )
+                .await
+        {
+            return true;
+        }
+        self.session_has_permission_to(session, permission).await
     }
 
     /// Port of `app.App.SessionHasPermissionToAndNotRestrictedAdmin` (authorization.go:27).

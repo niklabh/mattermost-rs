@@ -7317,54 +7317,30 @@ marker on that one file.
 
 ---
 
-## D-360 · the licensed half of the seven group writes is forwarded, not served
+## D-360 · the licensed half of the seven group writes is forwarded, not served — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group CRUD and membership)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-12 (group CRUD and membership) ·
+**Closed** 2026-09-13 by the licensed port of `createGroup`, `getGroupsByNames`, `patchGroup`,
+`deleteGroup`, `restoreGroup`, `addGroupMembers` and `deleteGroupMembers`
 
-`crate::groups` now serves the **unlicensed** contract of all seven writes in `api4/group.go` —
-`createGroup`, `getGroupsByNames`, `patchGroup`, `deleteGroup`, `restoreGroup`, `addGroupMembers`,
-`deleteGroupMembers` — alongside the ten reads it already answered. `requireLicense`
-(api4/handlers.go:237) is the first statement of every one of them, ahead of `RequireGroupId` *and
-ahead of reading the request body*, so an unlicensed server's whole contract is one 501 and that
-501 is fully compared. Everything past it forwards.
+All seven are served on a licensed server and compared against the licensed pair in
+`parity::group_writes_licensed` (seven tests, 70-odd cases). What landed: the `GroupStore` write
+surface (`mm_store::group_store` — create, update, delete, restore, member upsert and removal,
+plus the reads they need), `licensedAndConfiguredForGroupBySource`, `SessionHasPermissionToGroup`,
+`patchGroup`'s name derivation with Go's simple `ToLower` (corpus in `behaviour_group.json`),
+and the three websocket events. The three branch-level facts recorded above are now measured:
+`restoreGroup`'s 501, `deleteGroupMembers`' `where`, and the `[]`-versus-`null` of an empty
+membership answer (`addGroupMembers` writes `[]`, `deleteGroupMembers` writes `null`).
 
-Go loads its licence at startup and re-reads it only on a save, so `set_active_licence_id` moves
-our answer and not Go's: on this stack the licensed side of these routes has no oracle beside it,
-which is a fact to route around and not a reason the work is skipped.
+Two facts the comparison established that the source did not say: `system_user` holds every
+custom-group permission, so a plain user may write any custom group; and the implicit
+`custom_group_user` role is **empty** by default, so the membership branch of
+`SessionHasPermissionToGroup` grants nothing until an administrator edits the role — the suite
+edits it through Go's role API to reach that branch, and restores it.
 
-What a licensed server reaches that this side does not have:
-
-| behind the gate | Go |
-|---|---|
-| the `GroupStore` write surface — `Create`, `Update`, `Delete`, `Restore`, `UpsertMembers`, `DeleteMembers` | `channels/store/sqlstore/group_store.go` |
-| `licensedAndConfiguredForGroupBySource` — four refusals keyed on source, two statuses | `api4/group.go:1566` |
-| the custom-group permissions — `create_custom_group`, `edit_custom_group`, `delete_custom_group`, `restore_custom_group`, `manage_custom_group_members` — and `SessionHasPermissionToGroup` | `app/authorization.go` |
-| `patchGroup`'s name derivation: `strings.ReplaceAll(strings.ToLower(DisplayName), " ", "-")` when `allow_reference` is turned on without a name, plus the user-name and mentionable-group collision checks | `api4/group.go:265` |
-| six audit records and their `Auditable`/`LogClone` payloads | `model/group.go:45` |
-
-Three branch-level facts are recorded here because no test on this stack can reach them and they
-are the ones a later port will get wrong:
-
-1. **`restoreGroup`'s non-custom refusal is a 501, not a 400.** Every other handler in the family
-   answers `app.group.crud_permission` at `http.StatusBadRequest`; `restoreGroup` answers the same
-   id at `http.StatusNotImplemented` (group.go:1367), which on the wire is indistinguishable from
-   the licence error it sits behind.
-2. **`deleteGroupMembers`' marshal-failure branch names `Api4.addGroupMembers`** (group.go:1516),
-   copied from its neighbour. `Where` carries `json:"-"`, so it is a log-line difference only.
-3. **`getGroupsByNames` short-circuits an empty list before the permission question.** An empty
-   array writes a literal `[]` and returns (group.go:934), so a caller with no group permission at
-   all gets a 200 — the `FilterAllowReference` computation happens after.
-
-**What is owed:** `mm_store::group_store`'s write half and the custom-group permission checks,
-behind whichever route needs them first. `mm_model::Group`'s validators are already ported and are
-now pinned branch-by-branch against a generated oracle (`fixtures/behaviour_group.json`), so the
-model layer is not the blocker; the store and the permission model are.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+Not ported, deliberately: the six audit records (no audit record is ported anywhere yet), and
+`ldap`-source groups' `LDAPGroups` refusal remains measurable only as "not refused" — the oracle's
+licence has the feature on and no LDAP is configured, so an `ldap` group is a planted row.
 
 ---
 
