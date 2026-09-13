@@ -65,6 +65,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod system;
+pub mod team_admin;
 pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
@@ -791,6 +792,37 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
             partially_migrated(get(channels::get_channel_by_name_for_team_name)),
+        )
+        // `BaseRoutes.Teams.Handle("/{team_id}/members_minus_group_members")` (api4/team.go:77) —
+        // registered on `Teams` rather than on `Team`, which makes no difference to the path. The
+        // team twin of the channel route below it, and like that one **not** licence-gated: it
+        // reads the group tables on an unlicensed server and answers 200.
+        .route(
+            "/api/v4/teams/{team_id}/members_minus_group_members",
+            partially_migrated_with_ids(&state, get(team_admin::team_members_minus_group_members)),
+        )
+        // `BaseRoutes.Teams.Handle("/{team_id}/scheme")` (api4/team.go:36). Unlicensed this is a
+        // 400 or a **501** — the channel sibling answers 403 for the same gate.
+        .route(
+            "/api/v4/teams/{team_id}/scheme",
+            partially_migrated_with_ids(&state, put(team_admin::update_team_scheme)),
+        )
+        // `BaseRoutes.Team.Handle("/invite/email")` (api4/team.go:72). One segment deeper than
+        // `/teams/invite/{invite_id}`, which is `Teams`-rooted, so the two never collide.
+        .route(
+            "/api/v4/teams/{team_id}/invite/email",
+            partially_migrated_with_ids(&state, post(team_admin::invite_users_to_team)),
+        )
+        // `BaseRoutes.Team.Handle("/invite-guests/email")` (api4/team.go:73). The hyphen is not in
+        // the id charset, so nothing here can be read as a `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/invite-guests/email",
+            partially_migrated_with_ids(&state, post(team_admin::invite_guests_to_channels)),
+        )
+        // `BaseRoutes.Team.Handle("/import")` (api4/team.go:71).
+        .route(
+            "/api/v4/teams/{team_id}/import",
+            partially_migrated_with_ids(&state, post(team_admin::import_team)),
         )
         // gorilla registers the GET and the POST separately on `BaseRoutes.TeamMembers`
         // (api4/team.go:56, :59) and picks by method; chaining onto one `MethodRouter`
