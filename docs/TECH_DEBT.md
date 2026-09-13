@@ -8082,7 +8082,16 @@ and the two assertions above inverted.
 
 ## D-461 · `PUT /users/{user_id}/active` serves activation and forwards deactivation
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-update vertical)
+**Status** CLOSED 2026-09-13 (the user-delete vertical) · **Severity** gap · **Raised** 2026-09-13
+(the user-update vertical)
+
+**Closed by** `mm_app::user_delete` and `mm_api::user_deletes`. The two `OAuthStore` deletes are
+ported; the bot notification and the bot cascade are **not**, and both are no-ops for an account
+that owns no bots — which is one `SELECT` away and therefore knowable before the `UPDATE`. So the
+deactivation is served for an owner of no bots and forwarded for an owner of one, with the
+decision taken from reads alone. The self-deactivation e-mail keeps that one arm forwarded; see
+[D-238], still open. What remains of the original entry is below, for the reader who wants the
+list of what `userDeactivated` does.
 
 `App.UpdateActive(active = false)` writes the row and *then* runs `RevokeAllSessions` and
 `userDeactivated` (app/user.go:1172), which:
@@ -8104,9 +8113,10 @@ reads `"active": false`, before any permission check — Go re-evaluates every g
 `parity::user_updates::deactivation_forwards_before_any_write` pins both halves: the response
 carries no `x-mmrs-served-by: rust`, and the user's session rows are gone, which only Go can do.
 
-**What is owed:** `OAuthStore::remove_auth_data_by_user_id` and `permanent_delete_auth_data_by_user`,
-`App::disable_user_bots`, and `notifySysadminsBotOwnerDeactivated`. The bot half is also what
-`DELETE /users/{user_id}` needs, so the two routes should land together.
+**What was owed, and what became of it:** `OAuthStore::remove_auth_data_by_user_id` and
+`permanent_delete_auth_data_by_user` are ported. `App::disable_user_bots` and
+`notifySysadminsBotOwnerDeactivated` are not, and are now [D-472]; the two routes did land
+together, as this entry asked.
 
 ---
 
@@ -8225,3 +8235,121 @@ calls it as its **first** validation, so it inherits that forward exactly.
 copy with the new type, name and display name. The handler's own gates run first and in a
 different order: board, space, body decode, `IsGuest`, `create_private_channel` **on the body's
 team**, then `channel_id` matching the URL.
+
+---
+
+## D-470 · `?permanent=true` forwards, because `PermanentDeleteUser` is eighteen store families
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+`App.PermanentDeleteUser` (app/user.go:2134) erases a user from `Sessions`, `UserAccessTokens`,
+`OAuthAccessData`, both `Webhooks` tables, `Commands`, `Preferences`, `ChannelMembers`,
+`GroupMembers`, `Posts`, `Reactions`, `ScheduledPosts`, `Drafts`, `Bots`, `FileInfo`, `Users`,
+`Audits` and `TeamMembers`, plus the profile-image directory in the file store. `scripts/deps.py`
+scores `DELETE /api/v4/users/{user_id}` at **17 new store methods** — the most expensive unserved
+route in the tree at the time of writing — and `ScheduledPost` has no store in `mm-store` at all.
+
+It is also **unreachable on this deployment**: `ServiceSettings.EnableAPIUserDeletion` is `false`
+in the live configuration document (Go's own default, config.go:894), so the arm a client actually
+gets is the 401 refusal, which `mm_api::user_deletes` serves. The forward exists for the
+configuration that turns the flag on.
+
+**What is owed:** the seventeen store methods, the file-store sweep, and the two-arm error mapping
+`PermanentDeleteUser` gives each of them. `OAuthStore::permanent_delete_auth_data_by_user` and
+`UserStore` aside, none of them is written.
+
+---
+
+## D-471 · the `UserHasBeenDeactivated` plugin hook has no host
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (the user-delete vertical)
+
+`UpdateActive` ends with `Srv().Go(…)` running `hooks.UserHasBeenDeactivated` over every loaded
+plugin (app/user.go:1279). There is no plugin host in this tree, and none installed on the stack
+this is tested against — `reference/.build/mmroot-3/plugins` is empty, so Go's own hook fires over
+an empty list and the two servers agree by accident rather than by construction.
+
+That accident is the whole reason the deactivation could be served. On a server with a plugin
+that implements the hook, a deactivation served here would skip it silently.
+
+**What is owed:** the plugin host, which is out of scope for a route session and is the same
+dependency several other entries name. Until then, a deployment with plugins should not point at
+this server for `DELETE /users/{user_id}`.
+
+---
+
+## D-472 · `disableUserBots` and the sysadmin bot-owner DM are not ported, and gate a forward
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+`userDeactivated` DMs every system administrator when the deactivated account owned bots
+(`notifySysadminsBotOwnerDeactivated`, app/bot.go:536) and then disables those bots when
+`ServiceSettings.DisableBotsWhenOwnerIsDeactivated` — `true` by default and `true` here.
+
+The DM is the blocker, not the cascade. `disableUserBots` is `GetBots` plus a recursive
+`UpdateActive` plus `BotStore::update`, all of which exist. The DM needs `GetOrCreateDirectChannel`
+and `CreatePost` — both ported — and `app.bot.get_disable_bot_sysadmin_message`, an i18n template
+with a plural and two conditionals in it, which is [D-092]'s dependency and not ported.
+
+Porting the cascade without the DM would be *worse* than forwarding: the bots would be disabled
+and no administrator told, a divergence that lives in `Posts` rows and that no response body can
+show. So `App::owns_bots` gates the whole request to Go instead — see `mm_app::user_delete`.
+
+**What is owed:** the i18n message, then `App::disable_user_bots` and
+`App::notify_sysadmins_bot_owner_deactivated`, at which point the gate becomes unconditional.
+
+---
+
+## D-473 · `deleteUser` skips three gates `updateUserActive` applies, and two are untestable here
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+The two routes perform the same operation and disagree about who may ask for it:
+
+| gate | `DELETE /users/{id}` | `PUT /users/{id}/active` |
+|---|---|---|
+| target is LDAP-managed | not checked — **deactivates** | 403 |
+| target is a guest and guests are off | not checked | 401, activation only |
+| self-deactivation with `manage_system` | allowed | **refused** |
+
+The first is transcribed in `mm_api::user_deletes` and asserted nowhere: the stack has no LDAP
+account and `LdapSettings.Enable` is off, so nothing can produce `AuthService == "ldap"` through
+the API. The third needs a system administrator as the subject, and the only one on this stack is
+the account the whole parity binary logs in as — the same wall [D-462] hit.
+
+**What is owed:** an LDAP-flavoured row planted directly (`UPDATE users SET authservice='ldap'`)
+for the first, and a second system administrator for the third. Both are fixture work rather than
+port work.
+
+---
+
+## D-474 · `user_activation_status_change` carries nothing that identifies whose status changed
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-13 (the user-delete vertical)
+
+`updateUserActive` publishes `model.NewWebSocketEvent(WebsocketEventUserActivationStatusChange,
+"", "", "", nil, "")` — no team, no channel, no user id, no omit-list, and no data. It is
+reproduced exactly, and that exactness is why `parity/user_deletes.rs` asserts nothing about it:
+a wait scoped to this suite's subject is impossible to write, and an unscoped one is satisfied by
+any other suite's deactivation. Accepted rather than open — the frame is Go's, byte for byte, and
+there is nothing to fix.
+
+`sendUpdatedUserEvent`, which `UpdateActive` also fires, *is* scoped and is asserted elsewhere.
+
+---
+
+## D-475 · "the forward precedes the write" is unobservable for a bot owner
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-09-13 (the user-delete vertical)
+
+`deleting_a_bot_owner_forwards_before_any_write` asserts that the response is not served here and
+that Go did the work. It does **not** prove the ordering its name claims. Moving the `owns_bots`
+check to after `App::deactivate_user` would write the row locally and then hand the request to
+Go, which writes the same row, revokes the same sessions and clears the same OAuth grants — a
+superset of what was already done. No response byte and no database row distinguishes the two
+orders, so no mutation over that reordering can be a true CAUGHT and none is in
+`scripts/mutations/user-delete.plan`.
+
+The property is enforced by reading `mm_api::user_deletes` and `mm_api::user_updates`, where the
+gate is the last thing before the write in both. Accepted, and stated as a parity risk rather
+than dressed up as tested.

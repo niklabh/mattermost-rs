@@ -1101,14 +1101,15 @@ async fn a_non_boolean_active_is_refused_identically() {
     scrub_pair("actb").await;
 }
 
-/// **Deactivation forwards, and the forward happens before anything is written.**
+/// **Deactivation is served here now, and it revokes the account's sessions.**
 ///
-/// `active = false` continues into `RevokeAllSessions` and `userDeactivated`, neither of which is
-/// ported — see [D-461]. The test asserts both halves: the response carries no
-/// `x-mmrs-served-by: rust`, and Go's own work (the row, and the revoked sessions) is done, which
-/// is only possible if the request reached Go intact rather than after a partial local write.
+/// This test used to assert the opposite — that `active = false` forwarded the whole request,
+/// because `RevokeAllSessions` and `userDeactivated` were not ported ([D-461]). Both are now, for
+/// an owner of no bots; `parity/user_deletes.rs` is where the family lives and covers the forward
+/// that remains, the OAuth sweep and both self-deactivation refusals. What is kept here is the
+/// neighbourly check that this route still answers the deactivation it shares a path with.
 #[tokio::test]
-async fn deactivation_forwards_before_any_write() {
+async fn deactivation_is_served_and_revokes_sessions() {
     if !stack_enabled() {
         return;
     }
@@ -1133,20 +1134,20 @@ async fn deactivation_forwards_before_any_write() {
     .await;
 
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert_ne!(
+    assert_eq!(
         served.as_deref(),
         Some("rust"),
-        "deactivation must be forwarded, not served here"
+        "deactivation is served here now"
     );
     assert_ne!(
         column_of("deac", "deleteat").await.as_deref(),
         Some("0"),
-        "Go did the deactivation"
+        "the row is deactivated"
     );
     assert_eq!(
         session_roles("deac").await,
         None,
-        "and RevokeAllSessions ran, which only Go can do"
+        "and RevokeAllSessions ran"
     );
 
     scrub("deac").await;

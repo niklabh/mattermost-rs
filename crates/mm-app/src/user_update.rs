@@ -450,11 +450,12 @@ impl App {
 
     /// Port of `App.UpdateActive` (app/user.go:1229), **activation only**.
     ///
-    /// # `UpdateAt` is written first and `DeleteAt` is copied from it
+    /// # `UpdateAt` is written here and overwritten in the store
     ///
-    /// One `GetMillis()` call feeds both, so a deactivated row has `DeleteAt == UpdateAt`
-    /// exactly. Reading the clock twice would produce rows that differ by a millisecond and a
-    /// `DeleteAt` that no longer identifies the update that set it.
+    /// `SqlUserStore.Update` calls `PreUpdate`, which re-stamps `UpdateAt` from the clock
+    /// (model/user.go:563), so the assignment below reaches no column of its own — on the
+    /// activation arm `DeleteAt` is the constant `0` and nothing is copied off it at all. The
+    /// deactivation arm is where the seeding matters; see [`App::deactivate_user`](crate::App::deactivate_user).
     ///
     /// # Why deactivation is not here
     ///

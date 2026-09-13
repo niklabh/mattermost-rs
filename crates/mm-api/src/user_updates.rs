@@ -27,7 +27,7 @@
 //! |---|---|---|
 //! | `PUT /users/{id}` | everything on an unlicensed server whose target is not LDAP/SAML-locked | an LDAP or SAML target on a licensed server; a licensed profile-field lock that would actually refuse |
 //! | `PUT /users/{id}/patch` | the same, plus: any patch that does not switch the auto-responder **on** | the same, plus a patch that switches the auto-responder on |
-//! | `PUT /users/{id}/active` | `{"active": true}` | `{"active": false}`, and a licensed server |
+//! | `PUT /users/{id}/active` | `{"active": true}` unlicensed; `{"active": false}` for an account that owns no bots; the self-deactivation refusal | a licensed *activation*; a self-deactivation the flag permits; a deactivation whose target owns a bot |
 //! | `PUT /users/{id}/roles` | everything on an unlicensed server | a licensed server when the new roles name a system-console role |
 //!
 //! The ordering property is load-bearing on the first two routes, because
@@ -37,10 +37,14 @@
 //! of them would lock the account out of a password it typed correctly once. Every forward above
 //! is decided from the body, a `SELECT`, or the licence, and all three come first.
 //!
-//! `updateUserActive`'s forward is the starker one: `active = false` continues into
-//! `RevokeAllSessions` and `userDeactivated`, which delete the user's OAuth grants, disable the
-//! bots they own and DM the system admins — all of it **after** the row is written, so there is
-//! no prefix of it that can be served. The whole request goes to Go. See [D-461].
+//! `updateUserActive`'s deactivation arm is under the starkest version of that constraint:
+//! everything `active = false` does — the session revocation, the OAuth sweep, the bot cascade,
+//! the sysadmin DM, the plugin hook — runs **after** the row is written, so there is no prefix of
+//! it to serve. It is served anyway now, because the two steps this process cannot reproduce are
+//! no-ops for an account that owns no bots and that is one `SELECT` away. See
+//! [`mm_app::user_delete`], [`crate::user_deletes`] and `parity/user_deletes.rs`. That closes
+//! [D-461]; what still forwards is a *self*-deactivation the flag permits, because
+//! `SendDeactivateAccountEmail` follows the write ([D-238]).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -128,7 +132,7 @@ fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_jso
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing
 /// newline**, because it is a `w.Write` rather than an encoder.
-fn status_ok() -> Response {
+pub(crate) fn status_ok() -> Response {
     (
         StatusCode::OK,
         [
@@ -194,7 +198,7 @@ fn field_conflict(handler: &'static str, id: &'static str, field: &str) -> Respo
 ///
 /// Both then run the sysadmin check, but `updateUser` runs it before the audit prior-state and
 /// `patchUser` after; that is not observable.
-async fn require_edit_target(
+pub(crate) async fn require_edit_target(
     state: &AppState,
     session: &AuthenticatedSession,
     user_id: &str,
@@ -213,7 +217,7 @@ async fn require_edit_target(
 }
 
 /// "Cannot update a system admin unless user making request is a systemadmin also."
-async fn refuse_untrusted_admin_edit(
+pub(crate) async fn refuse_untrusted_admin_edit(
     state: &AppState,
     session: &AuthenticatedSession,
     target: &User,
@@ -578,25 +582,49 @@ pub async fn update_user_active(
     };
     tracing::Span::current().record("active", active);
 
-    // Deactivation's whole tail runs after the write — see [D-461] and the module doc.
-    if !active {
+    // `isSelfDeactivate` is Go's own name for it (api4/user.go:1909): deactivation, and only of
+    // yourself. It does two things — it *skips* the permission check below, and it arms the
+    // deactivation e-mail after the write.
+    let is_self_deactivate = !active && user_id == session.0.user_id;
+
+    if is_self_deactivate {
+        // Go's next gate, and the only one this arm can answer: with the flag off nothing is
+        // written and there is no e-mail to send. Unlike `deleteUser`'s version of the same
+        // guard there is no `manage_system` escape, so a system admin deactivating *themselves*
+        // is refused here and allowed there.
+        if !state.app.config().enable_user_deactivation {
+            return ApiError::from(AppError::new(
+                "updateUserActive",
+                "api.user.update_active.not_enable.app_error",
+                None,
+                format!("userId={user_id}"),
+                401,
+            ))
+            .into_response();
+        }
+        // The flag is on, so the write would go through and `SendDeactivateAccountEmail` would
+        // follow it — [D-238]. Forwarded before anything is read, let alone written.
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }
 
     // The licensed seat-limit message, `CreateGuest` and the licensed activation warning all read
-    // the licence, which is not visible here.
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            return proxy::forward_to_go(State(state), request).await;
+    // the licence, which is not visible here. **Activation only**: `isAtUserLimit` and the
+    // post-write seat warning both sit inside `if active` (app/user.go:1230, :1287), so a
+    // deactivation neither consults the licence nor can be refused by a limit.
+    if active {
+        match state.app.license_state().await {
+            Ok(mm_app::license::LicenseState::Licensed) => {
+                tracing::Span::current().record("forwarded", true);
+                return proxy::forward_to_go(State(state), request).await;
+            }
+            Ok(_) => {}
+            Err(err) => return ApiError::from(err).into_response(),
         }
-        Ok(_) => {}
-        Err(err) => return ApiError::from(err).into_response(),
     }
 
-    // `isSelfDeactivate` is `!active && …`, so on this path it is false by construction and the
-    // permission is always required — including from the account's own owner reactivating itself.
+    // Required of everyone except a self-deactivator, who returned above — including the
+    // account's own owner reactivating itself.
     if !state
         .app
         .session_has_permission_to(
@@ -633,7 +661,9 @@ pub async fn update_user_active(
         return ApiError::from(err).into_response();
     }
 
-    if user.is_guest() && !state.app.config().guest_accounts_enable {
+    // `active && user.IsGuest() && !Enable` — the first conjunct matters now that deactivation
+    // reaches this line: turning a guest *off* never consults the guest-accounts flag.
+    if active && user.is_guest() && !state.app.config().guest_accounts_enable {
         return ApiError::from(AppError::new(
             "updateUserActive",
             "api.user.update_active.cannot_enable_guest_when_guest_feature_is_disabled.app_error",
@@ -657,8 +687,26 @@ pub async fn update_user_active(
         .into_response();
     }
 
-    if let Err(err) = state.app.activate_user(&user).await {
-        return ApiError::from(err).into_response();
+    if active {
+        if let Err(err) = state.app.activate_user(&user).await {
+            return ApiError::from(err).into_response();
+        }
+    } else {
+        // The bot cascade and the sysadmin DM are the only parts of `userDeactivated` this
+        // process cannot reproduce, and both are no-ops for an owner of no bots. Asked here,
+        // after every read-only gate and before the `UPDATE`, because there is no prefix of a
+        // deactivation that can be handed over; see [`mm_app::user_delete`] and [D-461].
+        match state.app.owns_bots(&user_id).await {
+            Ok(true) => {
+                tracing::Span::current().record("forwarded", true);
+                return proxy::forward_to_go(State(state), request).await;
+            }
+            Ok(false) => {}
+            Err(err) => return ApiError::from(err).into_response(),
+        }
+        if let Err(err) = state.app.deactivate_user(&user).await {
+            return ApiError::from(err).into_response();
+        }
     }
 
     let message = mm_model::websocket_message::WebSocketEvent::new(
