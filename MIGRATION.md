@@ -12738,3 +12738,33 @@ role edit that every concurrent suite would see).
 that still forwards; the priority one also unblocks `GET /posts/{id}/priority` parity on a
 served write.
 
+## A priority on `POST /api/v4/posts` — `savePostsPriority` (2026-09-14)
+
+Route count unchanged at 463 of 764. `metadata.priority` is written to `PostsPriority` inside
+the post's transaction (`PostStore::save`) and the create body **echoes the request** — Go
+prepares the new post without `IncludePriority` — so the body has no `PostId` key and `null` for
+the booleans the client left out, while the read that follows has the row's shape. The urgent
+mention counter already moved on `post.is_urgent()`. A persistent notification still forwards.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/post_store.rs` — `savePostsPriority` in `save` | DONE |
+| app | `crates/mm-app/src/post_create.rs` — the refusals narrow to persistent notifications and non-priority metadata | DONE |
+| test | `crates/mm-api/tests/parity/post_create_priority.rs` — 7 | DONE |
+| mutation | `scripts/mutations/post-create-priority.plan` — 9 run, 7 caught, 2 controls survived | DONE |
+
+- **A priority with no level is a 500**: nothing validates the document, and the NOT NULL
+  `Priority` column fails the save — transaction and post with it. Measured on both.
+- **Nothing validates the level either**: `"whatever"` is stored and echoed.
+- **The inbound metadata is echoed**, so anything in it beyond `priority` (`expire_at`,
+  acknowledgements, translations) forwards: this port has not measured those echoes.
+
+[D-401] narrowed: the `PostPriority` row is now the persistent notification alone.
+
+### The next route in this family
+
+The `~channel` mention on create — `FillInPostProps` resolving channel names into the
+`channel_mentions` prop and the `channel_mentions` broadcast hook — or the persistent
+notification itself, which needs `forEachPersistentNotificationPost`, the `PersistentNotifications`
+row and the job that sends from it, and [D-551] for the reply that resolves it.
+

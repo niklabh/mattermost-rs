@@ -1,0 +1,21 @@
+# Mutation plan for `metadata.priority` on `POST /api/v4/posts` — savePostsPriority.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-priority.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The parity suite writes a priority on each server and reads the PostsPriority row and the
+# member counters back. Not mutated because the stack cannot see them: the persistent-notification
+# refusal (the store's own guard forwards the same shape a line later) and the insert's place in
+# the transaction (a failed insert drops the transaction either way). The last two lines are the
+# no-op controls and must SURVIVE.
+
+priority-insert-dropped	crates/mm-store/src/post_store.rs	        if let Some(priority) = post.get_priority() {	        if let Some(priority) = post.get_priority().filter(|_| false) {	api	post_create_priority
+requested-ack-coalesced	crates/mm-store/src/post_store.rs	                priority.requested_ack,	                priority.requested_ack.or(Some(false)),	api	post_create_priority
+persistent-coalesced	crates/mm-store/src/post_store.rs	                priority.persistent_notifications,	                priority.persistent_notifications.or(Some(false)),	api	post_create_priority
+level-null-defaulted	crates/mm-store/src/post_store.rs	                priority.priority.as_deref(),	                Some(priority.priority.as_deref().unwrap_or("")),	api	post_create_priority
+urgent-ignored	crates/mm-app/src/notification.rs	                    post.is_urgent(),	                    false,	api	post_create_priority
+metadata-refusal-inverted	crates/mm-app/src/post_create.rs	            if rest != PostMetadata::default() {	            if rest == PostMetadata::default() {	api	post_create_priority
+priority-read-from-row	crates/mm-app/src/post_create.rs	                    is_edit_post: true,	                    is_edit_post: true,\n                    include_priority: true,	api	post_create_priority
+control-reorder-insert-columns	crates/mm-store/src/post_store.rs	                INSERT INTO postspriority (postid, channelid, priority, requestedack, persistentnotifications)\n                VALUES ($1, $2, $3, $4, $5)	                INSERT INTO postspriority (channelid, postid, priority, requestedack, persistentnotifications)\n                VALUES ($2, $1, $3, $4, $5)	api	post_create_priority
+control-rename-binding	crates/mm-app/src/post_create.rs	            let rest = PostMetadata {\n                priority: None,\n                ..metadata.clone()\n            };\n            if rest != PostMetadata::default() {	            let remainder = PostMetadata {\n                priority: None,\n                ..metadata.clone()\n            };\n            if remainder != PostMetadata::default() {	api	post_create_priority

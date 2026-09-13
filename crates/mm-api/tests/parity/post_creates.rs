@@ -974,8 +974,10 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
             serde_json::json!({ "message": "mmrs fwd attach", "props": { "attachments": [] } }),
         ),
         (
-            "an inbound metadata document",
-            serde_json::json!({ "message": "mmrs fwd metadata", "metadata": { "embeds": [] } }),
+            // A priority alone is served since 2026-09-14; anything else in the document — an
+            // `expire_at` here — is still a shape this server has not measured the echo of.
+            "an inbound metadata document beyond a priority",
+            serde_json::json!({ "message": "mmrs fwd metadata", "metadata": { "expire_at": 5 } }),
         ),
     ];
 

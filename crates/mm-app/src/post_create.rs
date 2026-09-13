@@ -5,8 +5,8 @@
 //! # `CreatePost` is 300 lines of branches on shapes; this reproduces the ones a client sends
 //!
 //! Served: a **message or a reply in an open or private channel**, mentions included — `@user`,
-//! `@channel`, `@here`, `@all`, mention keys and first names — with or without `file_ids`, with
-//! no priority, no metadata, the default post type, no props that name an integration or an embed, and a
+//! `@channel`, `@here`, `@all`, mention keys and first names — with or without `file_ids` or a
+//! priority, with no other metadata, the default post type, no props that name an integration or an embed, and a
 //! message with no link and no `~`. Everything else is forwarded, and two functions decide, both
 //! **before the pending-post id is claimed and before `Post().Save`** so that no forward leaves a
 //! half-written row behind: [`App::refuse_create_post_shapes`] on the request's shape, and
@@ -47,6 +47,7 @@ use mm_model::post::{
     POST_TYPE_EPHEMERAL, Post,
 };
 use mm_model::post_list::PostList;
+use mm_model::post_metadata::PostMetadata;
 use mm_model::session::Session;
 use mm_model::utils::{AppError, get_millis, new_id, parse_hashtags};
 use mm_model::websocket_message::{WEBSOCKET_EVENT_EPHEMERAL_MESSAGE, WebSocketEvent};
@@ -274,19 +275,33 @@ impl App {
                 "a non-default post type takes a branch of its own in CreatePost",
             ));
         }
-        // `savePostsPriority` and `savePostsPersistentNotifications` write two more tables.
-        if post.get_priority().is_some() {
+        // A priority is served — `savePostsPriority` writes the row with the post — but a
+        // persistent notification is not: `savePostsPersistentNotifications` writes a row the
+        // notification job then acts on, the recipients check above the save runs
+        // `forEachPersistentNotificationPost`, and a reply to that root is resolved by
+        // `ResolvePersistentNotification` ([D-551]).
+        if post.get_persistent_notification() == Some(true) {
             return Err(PrepareError::Unreproducible(
-                "savePostsPriority writes PostsPriority, which has no port",
+                "savePostsPersistentNotifications writes PersistentNotifications, which has no port",
             ));
         }
-        // Nothing else in `Metadata` survives the store — it is recomputed by
-        // `PreparePostForClient` — but a client that sends one is a client taking a shape this
-        // port has not measured.
-        if post.metadata.is_some() {
-            return Err(PrepareError::Unreproducible(
-                "an inbound metadata document is a shape this port has not measured",
-            ));
+        // The inbound `metadata` is **echoed**, not recomputed: `CreatePost` prepares the post
+        // without `IncludePriority` ("we don't want to include PostPriority from the db to avoid
+        // the replica lag, so we just return the one that was passed with post"), and
+        // `PreparePostForClient` overwrites only emojis, reactions, files, embeds and images. A
+        // priority is the one field a client sends; anything else that survives (an
+        // acknowledgement list, translations, `expire_at`, recipients) is a shape this port has
+        // not measured.
+        if let Some(metadata) = post.metadata.as_ref() {
+            let rest = PostMetadata {
+                priority: None,
+                ..metadata.clone()
+            };
+            if rest != PostMetadata::default() {
+                return Err(PrepareError::Unreproducible(
+                    "an inbound metadata document beyond a priority is a shape this port has not measured",
+                ));
+            }
         }
         if post.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
             return Err(PrepareError::Unreproducible("plugin post type"));

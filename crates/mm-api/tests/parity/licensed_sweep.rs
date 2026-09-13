@@ -371,8 +371,8 @@ async fn the_authentication_transfer_gate_passes_licensed() {
 /// `postPriorityCheck` licensed: the tier gate passes, and the checks **behind** it are now the
 /// ones that answer. `persistent_notifications` on a non-urgent post is the 400
 /// `urgent_persistent_notification_post` — served — and a plain `requested_ack` passes every
-/// check and reaches the create, whose `PostsPriority` write is not ported, so that one is
-/// forwarded and Go's 201 comes back.
+/// check and reaches the create, whose `PostsPriority` write is served too (since 2026-09-14),
+/// so that one is a 201 from this server.
 #[tokio::test]
 async fn a_priority_post_passes_the_tier_gate_licensed() {
     if !stack_enabled() {
@@ -417,8 +417,8 @@ async fn a_priority_post_passes_the_tier_gate_licensed() {
     )
     .await;
     assert!(
-        !by_rust,
-        "the gate passed and the PostsPriority write is Go's, so this is forwarded"
+        by_rust,
+        "the gate passed and the PostsPriority write is this server's (since 2026-09-14)"
     );
     assert_eq!(rs_status, 201, "{}", text(&rs));
     let created: serde_json::Value = serde_json::from_slice(&rs).unwrap();

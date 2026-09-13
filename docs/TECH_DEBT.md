@@ -7611,7 +7611,7 @@ be done without claiming on shapes we then forward.
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
 **Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
-(`attachFilesToPost`); the rows below are what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
+(`attachFilesToPost`) and a `PostPriority`; the rows below are what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
 `App::notification_forward_reason` carry the Go branch behind each arm.
 
 `POST /api/v4/posts` answers a message or a reply, mentions included, in an open or private
@@ -7621,7 +7621,7 @@ it:
 | forwarded shape | what it needs |
 |---|---|
 | a reply to a live persistent-notification root | `ResolvePersistentNotification` after the save — the [D-551] scan |
-| a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
+| `persistent_notifications: true` | `forEachPersistentNotificationPost`'s recipients check, `savePostsPersistentNotifications`, and the job that sends from the row (a priority without it is served since 2026-09-14) |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |

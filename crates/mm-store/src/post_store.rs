@@ -448,11 +448,19 @@ pub trait PostStore {
     /// and `LastPostAt`, but not the two `Root` columns — `channelNewRootPosts` is only ever
     /// filled by a root.
     ///
+    /// # The priority row is written with the post
+    ///
+    /// `savePostsPriority` runs after the `Threads` update in the same transaction: one
+    /// `PostsPriority` row holding the three fields as the client sent them. `Priority` is NOT
+    /// NULL while the two booleans are nullable, so a priority with no level fails the whole
+    /// save and a `nil` boolean reads back as `null`, not `false`.
+    ///
     /// # What is refused rather than half-done
     ///
-    /// A `PostPriority`, a persistent notification and `burn_on_read` are each a
-    /// [`StoreError::Argument`]. None is reachable from a system post; a caller that grew one
-    /// would otherwise get a post with no priority row and no notification row, silently.
+    /// A persistent notification and `burn_on_read` are each a [`StoreError::Argument`]:
+    /// `savePostsPersistentNotifications` writes a row the notification job consumes, and the
+    /// burn-on-read post is a `TemporaryPost` write. Neither is reachable from a system post; a
+    /// caller that grew one would otherwise get a post with no notification row, silently.
     fn save(
         &self,
         post: &Post,
@@ -3349,12 +3357,6 @@ impl PostStore for SqlPostStore {
                 detail: "a burn-on-read post is a TemporaryPost write",
             });
         }
-        if post.get_priority().is_some() {
-            return Err(StoreError::Argument {
-                entity: "Post",
-                detail: "savePostsPriority writes PostsPriority, which has no port",
-            });
-        }
         if post.get_persistent_notification() == Some(true) {
             return Err(StoreError::Argument {
                 entity: "Post",
@@ -3392,6 +3394,33 @@ impl PostStore for SqlPostStore {
                     source,
                 })?;
         }
+
+        // `savePostsPriority` (post_store.go:3115): one row per post that carries a priority,
+        // written as the client sent it. `Priority` is a `*string` over a NOT NULL column, so a
+        // priority document with no level — `{"requested_ack": true}` alone — fails **here**, in
+        // the transaction, and the post is rolled back with it; `CreatePost` answers that with
+        // its generic 500. The two booleans are nullable columns, and a `nil` stays NULL: an
+        // omitted `requested_ack` reads back as `null`, a sent `false` as `false`.
+        if let Some(priority) = post.get_priority() {
+            sqlx::query!(
+                r#"
+                INSERT INTO postspriority (postid, channelid, priority, requestedack, persistentnotifications)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+                post.id,
+                post.channel_id,
+                priority.priority.as_deref(),
+                priority.requested_ack,
+                priority.persistent_notifications,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save PostPriority".to_owned(),
+                source,
+            })?;
+        }
+        // `savePostsPersistentNotifications` — refused above; see the trait docs.
 
         tx.commit().await.map_err(|source| StoreError::Db {
             context: "commit_transaction".to_owned(),
