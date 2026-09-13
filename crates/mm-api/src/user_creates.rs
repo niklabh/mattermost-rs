@@ -124,24 +124,36 @@ fn query_get(request: &Request, name: &str) -> String {
 ///    stops; `from_slice` refuses anything after it. Using a streaming `Deserializer` without
 ///    calling `end()` is what reproduces that.
 #[allow(clippy::result_large_err)]
-fn decode_user(bytes: &[u8]) -> Result<User, ApiError> {
+pub(crate) fn decode_user(bytes: &[u8]) -> Result<User, ApiError> {
+    decode_go_struct(bytes, "user")
+}
+
+/// [`decode_user`] for any struct target. `updateUser` decodes a `model.User` and `patchUser` a
+/// `model.UserPatch` through the identical `json.NewDecoder(r.Body).Decode(&v)` call, and the
+/// three differences above are properties of *that call*, not of `model.User` — so they belong in
+/// one function rather than in one per type.
+#[allow(clippy::result_large_err)]
+pub(crate) fn decode_go_struct<T: Default + serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    parameter: &'static str,
+) -> Result<T, ApiError> {
     use serde::Deserialize;
 
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     let value = serde_json::Value::deserialize(&mut deserializer).map_err(|err| {
-        tracing::warn!(error = %err, "the user body is not JSON");
-        ApiError::invalid_param("user")
+        tracing::warn!(error = %err, parameter, "the body is not JSON");
+        ApiError::invalid_param(parameter)
     })?;
 
     match value {
-        serde_json::Value::Null => Ok(User::default()),
+        serde_json::Value::Null => Ok(T::default()),
         serde_json::Value::Object(_) => serde_json::from_value(value).map_err(|err| {
-            tracing::warn!(error = %err, "the user body did not decode");
-            ApiError::invalid_param("user")
+            tracing::warn!(error = %err, parameter, "the body did not decode");
+            ApiError::invalid_param(parameter)
         }),
         _ => {
-            tracing::warn!("the user body is not a JSON object");
-            Err(ApiError::invalid_param("user"))
+            tracing::warn!(parameter, "the body is not a JSON object");
+            Err(ApiError::invalid_param(parameter))
         }
     }
 }

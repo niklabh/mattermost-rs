@@ -1021,6 +1021,15 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
         "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
         "DELETE FROM users WHERE username LIKE 'mmrsnewuser%'",
+        // `parity/user_updates.rs`. Its own prefix, so an abandoned run of that file cannot be
+        // mistaken for one of the two above — and a hard delete, because a row it left behind is
+        // an off-by-one in `users_stats`.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsupduser%'",
         // Rows keyed on a *post* id, which nothing below reaches — the channel subquery is the
         // only handle on them, and it stops resolving once the posts are gone. These used to
         // live in each suite's own purge, which is a race rather than a cleanup: the parity

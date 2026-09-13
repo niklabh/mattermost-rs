@@ -8048,3 +8048,84 @@ committed fixture values other suites assert against and that belongs in its own
 **What is owed:** derive the key list from `Document` — or, cheaper and nearly as good, assert the
 count against a `const` that lives beside the struct instead of beside the fixture — then
 regenerate and review the values that appear for the first time.
+
+---
+
+## D-460 · `model.User` and `model.UserPatch` decode case-sensitively where Go folds
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-update vertical)
+**Related** [D-040], which closed this class for `Post`'s attachment family only.
+
+`encoding/json` matches a JSON key against a struct field name **case-insensitively** when no
+exact match exists, so Go's `patchUser` takes `{"USERNAME":"folded"}` as a username change.
+`mm_api::user_creates::decode_go_struct` hands the object to serde, which is exact-match only, so
+we leave the field unset. Measured, not reasoned: the row is in
+`fixtures/behaviour_user_update.json`'s `patch_decode` section and
+`user_patch_decoding_matches_go` asserts the *divergence* rather than skipping it, so closing this
+entry will fail that test and the assertion has to be flipped deliberately.
+
+`mm_model::go_json::remap_object_keys` is the machinery that closes it, driven by a per-type
+`GoFields` schema; `MESSAGE_ATTACHMENT_FIELDS` is the worked example. `UserPatch` needs twelve
+entries and `User` about thirty-five, plus the schema-covers-the-struct test
+`message_attachment.rs` carries.
+
+**The direction of the divergence is fail-safe, which is why it is deferred rather than fixed
+here.** A folded key we ignore is a field that does not change; Go changes it. On `PUT
+/users/{id}` a folded `"Id"` leaves `user.id` empty, the `user.Id != c.Params.UserId` guard fires
+and we answer 400 where Go answers 200 — a refusal, not a privilege escalation. No real client
+sends anything but the exact tags.
+
+**What is owed:** `GoFields` schemas for `User` and `UserPatch`, wired into `decode_go_struct`,
+and the two assertions above inverted.
+
+---
+
+## D-461 · `PUT /users/{user_id}/active` serves activation and forwards deactivation
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-update vertical)
+
+`App.UpdateActive(active = false)` writes the row and *then* runs `RevokeAllSessions` and
+`userDeactivated` (app/user.go:1172), which:
+
+- sets the user offline (ported), and
+- DMs every system administrator when the account owned bots (`notifySysadminsBotOwnerDeactivated`
+  — a post, a channel lookup and a template), and
+- disables those bots when `ServiceSettings.DisableBotsWhenOwnerIsDeactivated`, and
+- deletes the user's rows from `OAuthAuthData` and `OAuthAccessData` — two store methods
+  `mm_store::OAuthStore` does not have, and
+
+then `UpdateActive` runs the `UserHasBeenDeactivated` plugin hook and the handler sends a
+deactivation e-mail ([D-238]).
+
+All of it is **after** the `UPDATE`, so there is no prefix of the deactivation that can be served:
+a forward taken part-way through would leave a deactivated row whose sessions were never revoked.
+`mm_api::user_updates::update_user_active` therefore forwards the whole request the moment it
+reads `"active": false`, before any permission check — Go re-evaluates every gate anyway.
+`parity::user_updates::deactivation_forwards_before_any_write` pins both halves: the response
+carries no `x-mmrs-served-by: rust`, and the user's session rows are gone, which only Go can do.
+
+**What is owed:** `OAuthStore::remove_auth_data_by_user_id` and `permanent_delete_auth_data_by_user`,
+`App::disable_user_bots`, and `notifySysadminsBotOwnerDeactivated`. The bot half is also what
+`DELETE /users/{user_id}` needs, so the two routes should land together.
+
+---
+
+## D-462 · the last-administrator guard and the activation seat limit have no test
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-update vertical)
+
+Two branches of `App::update_user_roles_with_user` and `App::activate_user` are translated and
+unasserted, because the shared parity stack cannot produce the input that separates the right
+answer from the wrong one:
+
+- **`count <= 1`** (app/user.go:2080) refuses to demote the *last* system administrator. Reaching
+  a count of one means removing the fixture administrator every other suite in the binary logs in
+  as. No mutation for it is in `scripts/mutations/user-update.plan` for that reason — a mutation
+  whose right and wrong answers coincide is a false CAUGHT.
+- **`ActiveUserCount >= MaxUsersHardLimit`** (app/limits.go:124) refuses an activation at the
+  250-user hard limit. The stack has ~130 users and nothing sends the input that separates `>`
+  from `>=`.
+
+**What is owed:** a DB-backed `mm-app` test for each, against a pool it owns rather than the
+shared stack — the arrangement `crates/mm-app/tests/db_login_mfa_probe.rs` uses for the MFA branch
+it is in the same position about.

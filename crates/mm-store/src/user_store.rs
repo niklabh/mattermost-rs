@@ -47,6 +47,33 @@ pub trait UserStore {
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// `SqlUserStore.Count` under the exact options `UpdateUserRolesWithUser` passes it
+    /// (app/user.go:2074): `{IncludeBotAccounts: false, Roles: ["system_admin"]}`.
+    ///
+    /// A dedicated method rather than a `roles` field on [`UserCountOptions`][mm_model::user_count::UserCountOptions],
+    /// because `applyMultiRoleFilters` (user_store.go:729) is a seven-way switch over role names
+    /// with a *different* predicate per name, and only one of its arms is reachable from any
+    /// route this server answers. The one arm is reproduced here verbatim:
+    /// `Users.Roles ILIKE '%system_admin%'` — Go's `sq.ILike` over
+    /// `wildcardSearchTerm` (team_store.go:88), which lower-cases the *term* and leaves the
+    /// column to `ILIKE`.
+    ///
+    /// # It is a substring match, and that is load-bearing
+    ///
+    /// The `system_admin` arm is the wildcard one, not the equality one — `system_user` is the
+    /// only role compared with `sq.Eq`. So a user whose roles are `"system_user system_admin"`
+    /// counts, which is what makes the last-admin guard work at all: a sole administrator always
+    /// carries `system_user` beside the admin role.
+    ///
+    /// # The three filters that are not the role
+    ///
+    /// `DeleteAt = 0` (a deactivated administrator does not hold the door open), the remote-user
+    /// exclusion, and the `Bots` anti-join from `IncludeBotAccounts: false`. Dropping any one of
+    /// them makes the guard count somebody who cannot log in to use the permission.
+    fn count_system_admins(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetKnownUsers` (user_store.go:2357): every *other* user who shares a
     /// channel with this one.
     fn get_known_users(
@@ -910,6 +937,30 @@ impl UserStore for SqlUserStore {
             options.include_bot_accounts,
             options.team_id,
             options.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count_system_admins(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.deleteat = 0
+               AND (u.remoteid = '' OR u.remoteid IS NULL)
+               AND b.userid IS NULL
+               AND u.roles ILIKE '%system_admin%'
+            "#
         )
         .fetch_one(&self.pool)
         .await

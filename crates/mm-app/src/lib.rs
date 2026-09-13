@@ -68,6 +68,7 @@ pub mod user_access_token;
 pub mod user_agent;
 pub mod user_create;
 pub mod user_terms_of_service;
+pub mod user_update;
 pub mod utils;
 /// Port of `app/view.go` — the integrated-boards (kanban view) surface.
 pub mod view;

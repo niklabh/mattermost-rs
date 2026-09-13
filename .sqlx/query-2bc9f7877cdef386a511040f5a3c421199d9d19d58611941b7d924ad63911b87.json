@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.deleteat = 0\n               AND (u.remoteid = '' OR u.remoteid IS NULL)\n               AND b.userid IS NULL\n               AND u.roles ILIKE '%system_admin%'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2bc9f7877cdef386a511040f5a3c421199d9d19d58611941b7d924ad63911b87"
+}

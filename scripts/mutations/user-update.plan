@@ -1,0 +1,76 @@
+# Mutation plan for the user-update family (updateUser, patchUser, updateUserActive,
+# updateUserRoles).
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-update.plan
+#
+# The decisions worth mutating here are the ones whose wrong answer is a *successful* response:
+#
+#   * `tryingToChange`, whose inversion turns every profile-field lock into its opposite;
+#   * the fill-in-once escapes on first and last name, which strand nameless accounts;
+#   * the ORDER of the five locked-field returns, which is only observable to a patch that moves
+#     two of them at once — the corpus grew four adjacent-pair rows for exactly this;
+#   * the auto-responder's two transitions, which are NOT negations of one another;
+#   * `NewSystemRoleIDs` membership as `any` rather than `all`;
+#   * `MapFromJSON`'s partial decode, whose collapse-to-empty erases a user's roles;
+#   * the trailing-bytes tolerance of both decoders, which is `Decoder.Decode` and not
+#     `Unmarshal`;
+#   * `user.Id != c.Params.UserId`, which is the only thing stopping a body from naming another
+#     account;
+#   * `patch.RemoteId = nil`, which is the only thing stopping a client claiming a remote row;
+#   * which of the two routes propagates a credential error and which flattens it;
+#   * `trustedUpdateData`, twice — the flag that decides whether a write may move `Roles` and
+#     `DeleteAt` at all;
+#   * which column `Sessions.Roles` is keyed on, an `Id`-for-`UserId` swap that updates one
+#     device instead of all of them;
+#   * and which half of `/active` is forwarded.
+#
+#
+# # One survivor in the first pass, and it was a real finding about the code, not the tests
+#
+# `api-patch-keeps-the-remote-id` removed `patch.remote_id = None;` from `patchUser` and SURVIVED.
+# The reason is that `SqlUserStore.Update` copies `RemoteId` off the stored row
+# **unconditionally** — in the trusted path as well as the untrusted one — so the handler's
+# nil-ing is defence in depth and nothing reachable through the REST API can tell the two apart.
+# The right answer and the wrong answer coincide, which is the one situation where deleting the
+# mutation is correct rather than a shrug.
+#
+# What replaced it asserts the protection that *is* load-bearing: the store's copy-back, which on
+# `PUT /users/{id}` is the only thing there is — that route has no `SanitizeInput` and no explicit
+# nil-ing. `the_body_cannot_grant_itself_roles_or_undelete_itself` grew two `remoteid` assertions
+# in the same change, and without them this replacement would have survived too.
+#
+# Not mutated, and why: the last-administrator guard (`count <= 1`) has no test, because reaching
+# a count of one on a shared stack means removing the fixture administrator. Recorded as a parity
+# risk rather than asserted. `is_at_user_limit`'s `>=` is in the same position — the stack is
+# nowhere near 250 users and nothing sends the input that separates `>` from `>=`.
+
+app-trying-to-change-is-inverted	crates/mm-app/src/user_update.rs	patch_value.is_some_and(|value| value != user_value)	patch_value.is_some_and(|value| value == user_value)	unit	user_update::go_parity
+app-trying-to-change-ignores-absence	crates/mm-app/src/user_update.rs	patch_value.is_some_and(|value| value != user_value)	patch_value.is_none_or(|value| value != user_value)	unit	user_update::go_parity
+app-locked-first-name-loses-its-fill-in-once	crates/mm-app/src/user_update.rs	if !user.first_name.is_empty() && trying_to_change(&user.first_name, patch.first_name.as_ref())	if trying_to_change(&user.first_name, patch.first_name.as_ref())	unit	user_update::go_parity
+app-locked-last-name-loses-its-fill-in-once	crates/mm-app/src/user_update.rs	if !user.last_name.is_empty() && trying_to_change(&user.last_name, patch.last_name.as_ref()) {	if trying_to_change(&user.last_name, patch.last_name.as_ref()) {	unit	user_update::go_parity
+app-locked-username-after-first-name	crates/mm-app/src/user_update.rs	    if trying_to_change(&user.username, patch.username.as_ref()) {\n        return Some(LOCKED_PROFILE_FIELD_USERNAME);\n    }\n\n    if !user.first_name.is_empty() && trying_to_change(&user.first_name, patch.first_name.as_ref())\n    {\n        return Some(LOCKED_PROFILE_FIELD_FIRST_NAME);\n    }	    if !user.first_name.is_empty() && trying_to_change(&user.first_name, patch.first_name.as_ref())\n    {\n        return Some(LOCKED_PROFILE_FIELD_FIRST_NAME);\n    }\n\n    if trying_to_change(&user.username, patch.username.as_ref()) {\n        return Some(LOCKED_PROFILE_FIELD_USERNAME);\n    }	unit	user_update::go_parity
+app-locked-nickname-after-position	crates/mm-app/src/user_update.rs	        if trying_to_change(&user.nickname, patch.nickname.as_ref()) {\n            return Some(LOCKED_PROFILE_FIELD_NICKNAME);\n        }\n        if trying_to_change(&user.position, patch.position.as_ref()) {\n            return Some(LOCKED_PROFILE_FIELD_POSITION);\n        }	        if trying_to_change(&user.position, patch.position.as_ref()) {\n            return Some(LOCKED_PROFILE_FIELD_POSITION);\n        }\n        if trying_to_change(&user.nickname, patch.nickname.as_ref()) {\n            return Some(LOCKED_PROFILE_FIELD_NICKNAME);\n        }	unit	user_update::go_parity
+app-locked-first-and-last-name-swapped	crates/mm-app/src/user_update.rs	    if !user.first_name.is_empty() && trying_to_change(&user.first_name, patch.first_name.as_ref())\n    {\n        return Some(LOCKED_PROFILE_FIELD_FIRST_NAME);\n    }\n    if !user.last_name.is_empty() && trying_to_change(&user.last_name, patch.last_name.as_ref()) {\n        return Some(LOCKED_PROFILE_FIELD_LAST_NAME);\n    }	    if !user.last_name.is_empty() && trying_to_change(&user.last_name, patch.last_name.as_ref()) {\n        return Some(LOCKED_PROFILE_FIELD_LAST_NAME);\n    }\n    if !user.first_name.is_empty() && trying_to_change(&user.first_name, patch.first_name.as_ref())\n    {\n        return Some(LOCKED_PROFILE_FIELD_FIRST_NAME);\n    }	unit	user_update::go_parity
+app-auto-responder-flag-accepts-any-value	crates/mm-app/src/user_update.rs	.is_some_and(|value| value == "true")	.is_some_and(|value| !value.is_empty())	unit	user_update::go_parity
+app-auto-responder-turns-on-ignores-the-old-state	crates/mm-app/src/user_update.rs	!auto_responder_flag(old_notify_props) && auto_responder_flag(new_notify_props)	auto_responder_flag(new_notify_props)	unit	user_update::go_parity
+app-auto-responder-turns-off-is-the-negation-of-turns-on	crates/mm-app/src/user_update.rs	auto_responder_flag(old_notify_props) && !auto_responder_flag(new_notify_props)	!auto_responder_turns_on(new_notify_props, old_notify_props)	unit	user_update::go_parity
+app-licence-gate-needs-every-role-to-be-gated	crates/mm-app/src/user_update.rs	.any(|role| NEW_SYSTEM_ROLE_IDS.contains(&role))	.all(|role| NEW_SYSTEM_ROLE_IDS.contains(&role))	unit	user_update::go_parity
+api-map-from-json-drops-the-mistyped-key	crates/mm-api/src/user_updates.rs	                serde_json::Value::String(value) => (key, value),\n                _ => (key, String::new()),	                serde_json::Value::String(value) => (key, value),\n                other => (key, other.to_string()),	unit	user_updates::tests
+api-map-from-json-refuses-trailing-bytes	crates/mm-api/src/user_updates.rs	    let mut deserializer = serde_json::Deserializer::from_slice(bytes);\n    match serde_json::Value::deserialize(&mut deserializer) {\n        Ok(serde_json::Value::Object(map)) => map\n            .into_iter()	    match serde_json::from_slice::<serde_json::Value>(bytes) {\n        Ok(serde_json::Value::Object(map)) => map\n            .into_iter()	unit	user_updates::tests
+api-string-interface-refuses-trailing-bytes	crates/mm-api/src/user_updates.rs	    let mut deserializer = serde_json::Deserializer::from_slice(bytes);\n    match serde_json::Value::deserialize(&mut deserializer) {\n        Ok(serde_json::Value::Object(map)) => map,\n        _ => serde_json::Map::new(),\n    }	    match serde_json::from_slice::<serde_json::Value>(bytes) {\n        Ok(serde_json::Value::Object(map)) => map,\n        _ => serde_json::Map::new(),\n    }	unit	user_updates::tests
+api-body-id-need-not-match-the-path	crates/mm-api/src/user_updates.rs	    if user.id != user_id {	    if user.id == user_id {	api	user_updates
+store-update-does-not-copy-back-the-remote-id	crates/mm-store/src/user_store.rs	        user.remote_id = old_user.remote_id.clone();	        let _ = old_user.remote_id.clone();	api	user_updates
+api-patch-forwards-the-wrong-auto-responder-transition	crates/mm-api/src/user_updates.rs	    if mm_app::user_update::auto_responder_turns_on(	    if mm_app::user_update::auto_responder_turns_off(	api	user_updates
+api-patch-forwards-every-notify-props-patch	crates/mm-api/src/user_updates.rs	    if mm_app::user_update::auto_responder_turns_on(\n        patch.notify_props.as_ref().or(target.notify_props.as_ref()),\n        target.notify_props.as_ref(),\n    ) {	    if patch.notify_props.is_some() {	api	user_updates
+api-patch-reports-a-missing-user-as-a-404	crates/mm-api/src/user_updates.rs	        Err(_) => return ApiError::invalid_param("user_id").into_response(),	        Err(err) => return ApiError::from(err).into_response(),	api	user_updates
+api-update-propagates-the-password-error	crates/mm-api/src/user_updates.rs	        if state\n            .app\n            .double_check_password(&target, &user.password)\n            .await\n            .is_err()\n        {\n            return ApiError::invalid_param("password").into_response();\n        }	        if let Err(err) = state\n            .app\n            .double_check_password(&target, &user.password)\n            .await\n        {\n            return ApiError::from(err).into_response();\n        }	api	user_updates
+api-update-skips-the-password-check-for-its-own-session	crates/mm-api/src/user_updates.rs	    if !user.email.is_empty() && target.email != user.email && session.0.user_id == user_id {	    if !user.email.is_empty() && target.email != user.email && session.0.user_id != user_id {	api	user_updates
+api-patch-compares-the-email-the-wrong-way	crates/mm-api/src/user_updates.rs	    if let Some(email) = patch.email.as_ref()\n        && &target.email != email\n        && session.0.user_id == user_id	    if let Some(email) = patch.email.as_ref()\n        && &target.email == email\n        && session.0.user_id == user_id	api	user_updates
+api-patch-accepts-a-missing-password	crates/mm-api/src/user_updates.rs	        let Some(password) = patch.password.as_ref() else {\n            return ApiError::invalid_param("password").into_response();\n        };	        let empty = String::new();\n        let password = patch.password.as_ref().unwrap_or(&empty);	api	user_updates
+api-activation-is-the-half-that-forwards	crates/mm-api/src/user_updates.rs	    if !active {\n        tracing::Span::current().record("forwarded", true);	    if active {\n        tracing::Span::current().record("forwarded", true);	api	user_updates
+app-role-update-is-untrusted	crates/mm-app/src/user_update.rs	            .update(&user, true)\n            .await\n            .map_err(|err| update_roles_error(err, &user.id))?;	            .update(&user, false)\n            .await\n            .map_err(|err| update_roles_error(err, &user.id))?;	api	user_updates
+app-activation-is-untrusted	crates/mm-app/src/user_update.rs	            .update(&user, true)\n            .await\n            .map_err(|err| update_active_error(err, &user.id))?;	            .update(&user, false)\n            .await\n            .map_err(|err| update_active_error(err, &user.id))?;	api	user_updates
+app-activation-does-not-clear-delete-at	crates/mm-app/src/user_update.rs	        user.update_at = mm_model::utils::get_millis();\n        user.delete_at = 0;	        user.update_at = mm_model::utils::get_millis();	api	user_updates
+store-session-roles-are-keyed-on-the-session-id	crates/mm-store/src/session_store.rs	"UPDATE sessions SET roles = $1 WHERE userid = $2"	"UPDATE sessions SET roles = $1 WHERE id = $2"	api	user_updates
+CONTROL-rename-a-binding	crates/mm-app/src/user_update.rs	        let names: Vec<String> = new_roles.split_whitespace().map(str::to_owned).collect();\n        self.check_roles_exist(&names).await?;	        let role_names: Vec<String> = new_roles.split_whitespace().map(str::to_owned).collect();\n        self.check_roles_exist(&role_names).await?;	api	user_updates
+CONTROL-reorder-two-independent-predicates	crates/mm-store/src/user_store.rs	             WHERE u.deleteat = 0\n               AND (u.remoteid = '' OR u.remoteid IS NULL)\n               AND b.userid IS NULL	             WHERE (u.remoteid = '' OR u.remoteid IS NULL)\n               AND b.userid IS NULL\n               AND u.deleteat = 0	api	user_updates

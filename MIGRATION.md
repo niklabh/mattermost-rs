@@ -11643,3 +11643,77 @@ in the plan asserts the *gate*, by flipping `&&` to `||`, rather than the refusa
 `api4/user.go`'s verification path. The cheapest next one is `POST /api/v4/teams/{team_id}/invite/email`
 — it needs [D-452]'s token minting, which is the same work the two `/send` routes are waiting on,
 and it would then unblock `CreateUserWithToken` behind it.
+
+## `PUT /api/v4/users/{user_id}`, `/patch`, `/active`, `/roles` (2026-09-13, branch `wt/userupdate`)
+
+**Three of the four serve whole; `/active` serves activation and forwards deactivation.** 15
+parity tests, 12 unit tests across the two new modules, plus a router guard in `lib.rs`.
+Mutation run, first pass: **28 run, 25 caught, 1 survived, 2 controls survived, 0 harness
+faults**; after the repair below, a five-line re-run: **5 run, 3 caught, 2 controls survived, 0
+faults**. Every one of the 28 real mutations in `scripts/mutations/user-update.plan` is now
+caught.
+
+The survivor was a finding about the *code*, not the tests. `api-patch-keeps-the-remote-id`
+removed `patch.RemoteId = nil` from `patchUser` and nothing noticed, because
+`SqlUserStore.Update` copies `RemoteId` off the stored row **unconditionally** — trusted path
+included — so the handler's nil-ing is defence in depth and no REST request can tell the two
+apart. Deleted rather than papered over, and replaced by one that removes the store's copy-back:
+on `PUT /users/{id}` that is the *only* protection, since `updateUser` has neither a
+`SanitizeInput` call nor a nil-ing of its own. `the_body_cannot_grant_itself_roles_or_undelete_itself`
+grew two `remoteid` assertions in the same change; without them the replacement would have
+survived too.
+
+| File | What |
+|---|---|
+| `crates/mm-api/src/user_updates.rs` | all four handlers, `MapFromJSON`/`StringInterfaceFromJSON`, the forwarding table |
+| `crates/mm-app/src/user_update.rs` | `CheckProviderAttributes`, `CheckLockedProfileFields`, `PatchUser`, `UpdateUserAsUser`, `UpdateUserRoles(WithUser)`, `CheckRolesExist`, `UpdateActive`'s activation half, `SetAutoResponderStatus`, `isAtUserLimit` |
+| `crates/mm-store/src/session_store.rs` | `SqlSessionStore.UpdateRoles` |
+| `crates/mm-store/src/user_store.rs` | `Count` under `UpdateUserRolesWithUser`'s options, as `count_system_admins` |
+| `reference/dump/behaviour_user_update.go` | the oracle: both map decoders, `UserPatch` decoding, `User.Patch`/`ToPatch`/`SanitizeInput`, the locked-field scan, `tryingToChange`, `NewSystemRoleIDs`, the auto-responder transitions |
+
+The one thing a reader would otherwise get wrong: **`updateUser` does not call `SanitizeInput`** —
+`createUser` is the only api4 handler that does, and the protection on this route is
+`SqlUserStore.Update`'s copy-back of thirteen columns plus, at `trustedUpdateData = false`,
+`Roles` and `DeleteAt`. See the module doc on `mm_app::user_update`; `parity::user_updates::the_body_cannot_grant_itself_roles_or_undelete_itself`
+sends a body claiming all of them and checks the stored row, not only the response.
+
+### Five things that are not symmetric between the pair, and are on the wire
+
+1. **`updateUser` replaces, `patchUser` merges.** An absent `position` in a `PUT /users/{id}` body
+   is written as `""`; in a patch it is left alone. An explicit `null` in a patch is
+   indistinguishable from an absent key; `""` is not.
+2. **A wrong password on an e-mail change is a 400 on `/users/{id}` and a 401 on `/patch`.**
+   `updateUser` flattens every `DoubleCheckPassword` failure — including the account-lockout
+   401 — to `SetInvalidParam("password")`; `patchUser` propagates it.
+3. **An unknown but well-formed user id is a 404 on `/users/{id}` and a 400 on `/patch`**, and the
+   400 names a *body* parameter for a value that came from the URL.
+4. **`patch.RemoteId = nil` is unconditional**, on the second line of the handler, with no admin
+   bypass. `User.ToPatch` also omits `RemoteId`, so no conflict scan driven from a `model.User`
+   can ever see one.
+5. **`updateUserRoles` answers `{"status":"OK"}`, not the user**, and its licence check runs
+   *before* the permission check — so an unprivileged caller naming `system_manager` is told about
+   the licence rather than about the permission.
+
+### What the parity stack cannot show
+
+`CheckLockedProfileFields` and `CheckProviderAttributes`'s LDAP/SAML arms need an Enterprise
+licence, which no second process can see. Both are structured so only a request Go would
+*actually refuse* reaches the licence question: the field scan runs first and a patch that
+conflicts with nothing is served regardless. The scan itself is asserted against a generated
+corpus (25 rows, four of them adjacent pairs that exist only to make the *order* of the five
+returns observable). [D-462] records the two branches with no test at all — the last-administrator
+guard and the 250-seat activation limit.
+
+### What is not here
+
+[D-460] `User`/`UserPatch` decode case-sensitively where Go folds — fail-safe, and the divergence
+is asserted rather than hidden. [D-461] deactivation, which needs the OAuth auth-data store
+methods, `disableUserBots` and the sysadmin notification, all of which run *after* the row is
+written and so have no servable prefix. [D-462] the two untested branches.
+
+### The next route in this family
+
+`DELETE /api/v4/users/{user_id}` is the cheapest: it is `UpdateActive(false)` plus the permanent
+variant, so it needs exactly [D-461]'s list and nothing else. `PUT /users/{user_id}/mfa` and
+`/auth` are the other two writes left on the `{user_id}` subtree; `/auth` is system-admin-only and
+needs `UpdateAuthData`, which the store already has.
