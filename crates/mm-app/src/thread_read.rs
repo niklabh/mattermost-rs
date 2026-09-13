@@ -43,7 +43,7 @@ use crate::mention::{MentionKeywords, get_explicit_mentions};
 /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214 and
 /// `true` on this deployment — the same literal `crate::post::get_emoji_names_for_post` and
 /// `crate::post_write` carry, for the same reason.
-const MM_BLOCKS_ENABLED: bool = true;
+pub(crate) const MM_BLOCKS_ENABLED: bool = true;
 
 impl App {
     /// Port of `app.App.UpdateThreadReadForUserByPost` (app/user.go:3221).

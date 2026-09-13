@@ -106,6 +106,7 @@ mod parity {
     pub mod post_acks;
     pub mod post_acks_licensed;
     pub mod post_bulk_reactions;
+    pub mod post_create_replies;
     pub mod post_creates;
     pub mod post_edit_history;
     pub mod post_get;

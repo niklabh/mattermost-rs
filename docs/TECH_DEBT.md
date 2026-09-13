@@ -6632,7 +6632,13 @@ point both conditions come out of `patch_needs_go` — the member half belongs w
 
 ## D-221 · `createPost` needs the notification pipeline, not the post write
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, post writes)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, post writes)
+**Closed** 2026-09-14 — the notification pass is `mm_app::notification` (`SendNotifications`
+and its helpers), on the mention engine and the three broadcast hooks of the hub. A reply is
+served whole and a mention raises the counters, publishes `mentions` on the `posted` frame and
+`thread_updated` to each follower; compared in `parity::post_create_replies`. What this entry
+listed and is still owed lives on: files and priority in [D-401], email and push in [D-402], the
+reply-delete `RemoveNotifications` in [D-590], and the three translated-notice arms in [D-591].
 
 `POST /api/v4/posts` is the one route of the post-write group this session did not take, and the
 reason is not the row. `SqlPostStore.SaveMultiple` is a day's work — an insert, a `Channels`
@@ -7604,15 +7610,17 @@ be done without claiming on shapes we then forward.
 ## D-401 · createPost serves one shape and forwards the rest
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
+**Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed); the rows below are
+what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
+`App::notification_forward_reason` carry the Go branch behind each arm.
 
-`POST /api/v4/posts` answers a plain root-level message in an open or private channel and
-forwards everything else. `mm_app::post_create::App::refuse_create_post_shapes` is the complete
-list and carries the Go branch behind each arm; what is owed, grouped by the subsystem that would
-unblock it:
+`POST /api/v4/posts` answers a message or a reply, mentions included, in an open or private
+channel, and forwards everything else. What is owed, grouped by the subsystem that would unblock
+it:
 
 | forwarded shape | what it needs |
 |---|---|
-| a reply (`root_id` set) | `updateThreadsFromPosts` — a `Threads` row and a `ThreadMemberships` row; plus `ResolvePersistentNotification` and the CRT follower fan-out |
+| a reply to a live persistent-notification root | `ResolvePersistentNotification` after the save — the [D-551] scan |
 | `file_ids` | `FileInfoStore::attach_to_post`, and `Post().Overwrite` for the partial-attachment path |
 | a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
@@ -7620,21 +7628,21 @@ unblock it:
 | a DM or group message | `SendAutoResponseIfNecessary`, which writes a second post |
 | a shared channel | the shared-channel sync service |
 | a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
-| a message with `@` or `~`, or a channel with a keyword-mention recipient | the mention engine and `Channel().IncrementMentionCount` |
+| a message with `~` | `FillInPostProps` resolving the channel names into the `channel_mentions` prop, and the `channel_mentions` broadcast hook |
+| a message that mentions a non-member, a group, or the whole channel past `MaxNotificationsPerChannel` | the translated ephemeral notices — [D-591] |
 | a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
 | `?silent=true` | the notification suppression the prop names |
 | the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
-
-The mention engine is the largest single unlock: it removes three rows at once and it is what
-`SendNotifications` is built around.
 
 ## D-402 · email, push and plugin hooks do not fire for a post this server writes
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
 
-A post served here publishes the `posted` websocket event and nothing else.
+A post served here publishes the `posted` websocket event, the `thread_updated` events and the
+mention-count increments (`mm_app::notification`, since 2026-09-14) and nothing else.
 `sendNotificationEmail`, `sendPushNotification`, `SendAutoResponseIfNecessary`,
-`MessageWillBePosted` and `MessageHasBeenPosted` are all absent.
+`MessageWillBePosted` and `MessageHasBeenPosted` are all absent, as is the mobile all-activity
+list, which Go computes only to feed push.
 
 Deliberately *not* turned into forward conditions, unlike the mention fan-out. The distinction is
 whether the effect is observable: the mention fan-out writes `ChannelMembers.MentionCount`, which
@@ -8708,4 +8716,37 @@ top of each of the five handlers — and, before that, their parity suites must 
 `common::BUSY_STATE`, because `local_mode` and `typing` mark this server busy for a window and a
 gated search would 503 under them. That lock requirement is the reason the five were not gated
 in the same session.
+
+---
+
+## D-590 · Deleting a reply is forwarded for `RemoveNotifications`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (createPost replies)
+
+`App.DeletePost` on a reply runs `RemoveNotifications` (notification.go:914), which re-derives
+the reply's mentions over the channel's members and decrements `ThreadMemberships.UnreadMentions`
+and the channel members' mention counts. It was the second thing [D-221] forwarded, and the
+engine it needed now exists: `mm_app::notification::App::get_explicit_mentions_and_keywords`
+produces the same mention set. **What is owed:** the port of `RemoveNotifications` behind
+`DELETE /api/v4/posts/{post_id}` for a reply, and the store decrements it makes. See
+`mm_app::App::delete_post` for the forward.
+
+---
+
+## D-591 · Three arms of `SendNotifications` forward for a translated notice
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (createPost replies)
+
+`mm_app::notification::App::notification_forward_reason` hands a post to Go, before the row is
+written, when the pass would have to send text this server cannot mint ([D-092]):
+
+| arm | Go | what it sends |
+|---|---|---|
+| an `@name` that is nobody in the channel | `sendOutOfChannelMentions` (notification.go:1219) | an ephemeral post to the author listing the out-of-channel (or out-of-team) users, translated |
+| a group mention | `insertGroupMentions` (:1567) and `sendNoUsersNotifiedByGroupInChannel` | the group's members become mentions; the notice is translated |
+| `@channel`/`@all`/`@here` past `MaxNotificationsPerChannel` | the three `api.post.disabled_*` ephemeral posts | translated |
+
+The out-of-channel arm is the one a client reaches on Team Edition, and it needs
+`GetProfilesByUsernames`, `FilterUsersByVisible` and `makeOutOfChannelMentionPost`'s three
+message forms besides the i18n bundle. **What is owed:** the i18n bundle first, then the three.
 

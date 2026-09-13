@@ -417,35 +417,27 @@ pub trait PostStore {
     /// failure here leaves a saved post in a channel whose counters did not move. Reproduced: the
     /// error is logged and `Ok` is returned.
     ///
+    /// # A reply is one transaction: the row, then `updateThreadsFromPosts`
+    ///
+    /// Go inserts the post and updates the `Threads` row for its root inside one transaction
+    /// (post_store.go:206). A root with no `Threads` row gets one built from the table —
+    /// participants in first-reply order, the live reply count, the last reply time and the
+    /// channel's team — and an existing row is advanced: `ReplyCount + 1`, the author moved to the
+    /// **end** of `Participants`, `LastReplyAt` raised. After the commit the root's `UpdateAt` is
+    /// set to the reply's `CreateAt` and the returned reply carries the thread's live reply count
+    /// (`populateReplyCount`). The channel counters move differently for a reply: `TotalMsgCount`
+    /// and `LastPostAt`, but not the two `Root` columns — `channelNewRootPosts` is only ever
+    /// filled by a root.
+    ///
     /// # What is refused rather than half-done
     ///
-    /// A non-empty `root_id` (`updateThreadsFromPosts`), a `PostPriority`, a persistent
-    /// notification and `burn_on_read` are each a [`StoreError::Argument`]. None is reachable
-    /// from a system post; a caller that grew one would otherwise get a post with no thread row,
-    /// no priority row and no notification row, silently.
+    /// A `PostPriority`, a persistent notification and `burn_on_read` are each a
+    /// [`StoreError::Argument`]. None is reachable from a system post; a caller that grew one
+    /// would otherwise get a post with no priority row and no notification row, silently.
     fn save(
         &self,
         post: &Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
-
-    /// Whether any member of this channel can be mentioned by a **keyword** rather than by an
-    /// `@`-token.
-    ///
-    /// Not a port of a Go query: it is the cheapest sound test for "would
-    /// `getExplicitMentions` (app/mention_parser.go) find a mention in a message with no `@` in
-    /// it". Go builds each recipient's mention keys from `NotifyProps`: `@username` and the three
-    /// channel-wide tokens all need the `@`, but `mention_keys` is an arbitrary comma-separated
-    /// word list and `first_name` adds the member's own first name — either of which can match a
-    /// plain word.
-    ///
-    /// A mention reaches `Channel().IncrementMentionCount`, so `mm_app`'s create-post path
-    /// forwards whenever this answers `true`. It over-approximates deliberately: a member whose
-    /// `mention_keys` is `" ,"` counts, and so does one whose first name is empty. Narrowing it
-    /// would write a row Go would have raised somebody's mention count for.
-    fn channel_has_keyword_mention_recipients(
-        &self,
-        channel_id: &str,
-    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
 
     /// Port of `SqlPostStore.SetPostReminder` (post_store.go:3278) — the write behind
     /// `POST /api/v4/users/{user_id}/posts/{post_id}/reminder`.
@@ -3115,35 +3107,6 @@ impl PostStore for SqlPostStore {
         })
     }
 
-    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
-    async fn channel_has_keyword_mention_recipients(
-        &self,
-        channel_id: &str,
-    ) -> Result<bool, StoreError> {
-        // Deactivated users are skipped: `SendNotifications` reads `GetAllProfilesInChannel`,
-        // which filters `Users.DeleteAt = 0`.
-        sqlx::query_scalar!(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                  FROM channelmembers cm
-                  JOIN users u ON u.id = cm.userid
-                 WHERE cm.channelid = $1
-                   AND u.deleteat = 0
-                   AND ( COALESCE(TRIM(u.notifyprops ->> 'mention_keys'), '') <> ''
-                      OR u.notifyprops ->> 'first_name' = 'true' )
-            ) AS "found!"
-            "#,
-            channel_id,
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|source| StoreError::Db {
-            context: "failed to look for keyword mention recipients".to_owned(),
-            source,
-        })
-    }
-
     #[tracing::instrument(skip(self), fields(post_id = %post_id, user_id = %user_id, target_time))]
     async fn set_post_reminder(
         &self,
@@ -3255,12 +3218,6 @@ impl PostStore for SqlPostStore {
                 detail: "a post that already carries an id is an ErrInvalidInput on Save",
             });
         }
-        if !post.root_id.is_empty() {
-            return Err(StoreError::Argument {
-                entity: "Post",
-                detail: "a reply needs updateThreadsFromPosts, which has no caller here",
-            });
-        }
         if post.post_type == mm_model::post::POST_TYPE_BURN_ON_READ {
             return Err(StoreError::Argument {
                 entity: "Post",
@@ -3290,27 +3247,53 @@ impl PostStore for SqlPostStore {
             })?;
         // `ValidateProps` would run here. It only logs — see the trait docs on `update`.
 
-        insert_post(&self.pool, &post)
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        insert_post(&mut *tx, &post)
             .await
             .map_err(|source| StoreError::Db {
                 context: "failed to save Post".to_owned(),
                 source,
             })?;
 
+        if !post.root_id.is_empty() {
+            update_threads_from_post(&mut tx, &post)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: "update thread from posts failed".to_owned(),
+                    source,
+                })?;
+        }
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })?;
+
         // Go accumulates this per channel across the batch; with one post the count is the
-        // post's own contribution and the two dates are its `CreateAt`.
+        // post's own contribution and the date is its `CreateAt`. The two `Root` columns move
+        // only for a root: a reply leaves `channelNewRootPosts` and `maxDateNewRootPosts` unset,
+        // so it adds 0 and compares `GREATEST(0, LastRootPostAt)`.
         let count = i64::from(!post.excludes_from_channel_message_count());
+        let is_root = post.root_id.is_empty();
+        let root_count = if is_root { count } else { 0 };
+        let root_date = if is_root { post.create_at } else { 0 };
         if let Err(source) = sqlx::query!(
             r#"
             UPDATE channels
                SET lastpostat        = GREATEST($1, lastpostat),
-                   lastrootpostat    = GREATEST($1, lastrootpostat),
-                   totalmsgcount     = totalmsgcount + $2,
-                   totalmsgcountroot = totalmsgcountroot + $2
-             WHERE id = $3
+                   lastrootpostat    = GREATEST($2, lastrootpostat),
+                   totalmsgcount     = totalmsgcount + $3,
+                   totalmsgcountroot = totalmsgcountroot + $4
+             WHERE id = $5
             "#,
             post.create_at,
+            root_date,
             count,
+            root_count,
             post.channel_id,
         )
         .execute(&self.pool)
@@ -3319,9 +3302,159 @@ impl PostStore for SqlPostStore {
             tracing::warn!(error = %source, "Error updating Channel LastPostAt.");
         }
 
+        if !is_root {
+            // `UPDATE Posts SET UpdateAt = ? WHERE Id = ?` with the batch's latest reply time —
+            // the root's `UpdateAt` is what a client's "has this thread changed" check reads.
+            // Logged and swallowed, as the channel update above.
+            if let Err(source) = sqlx::query!(
+                "UPDATE posts SET updateat = $1 WHERE id = $2",
+                post.create_at,
+                post.root_id,
+            )
+            .execute(&self.pool)
+            .await
+            {
+                tracing::warn!(error = %source, "Error updating Post UpdateAt.");
+            }
+
+            // `populateReplyCount`: the returned reply carries the thread's live reply count,
+            // itself included, read back from the table rather than derived.
+            match sqlx::query_scalar!(
+                r#"SELECT COUNT(id) AS "count!" FROM posts WHERE rootid = $1 AND posts.deleteat = 0"#,
+                post.root_id,
+            )
+            .fetch_one(&self.pool)
+            .await
+            {
+                Ok(count) => post.reply_count = count,
+                Err(source) => {
+                    tracing::warn!(error = %source, "Unable to populate the reply count in some posts.");
+                }
+            }
+        }
+
         tracing::Span::current().record("post_id", post.id.as_str());
         Ok(post)
     }
+}
+
+/// Port of `updateThreadsFromPosts` (post_store.go:270) for the one post `Save` inserts, inside
+/// the caller's transaction.
+///
+/// # Insert or advance, decided by the `Threads` row
+///
+/// No row: build one from the table — the participants are every live replier in the order of
+/// their **latest** reply (`GROUP BY UserId ORDER BY MAX(CreateAt)`), the reply count and last
+/// reply time are counted from `Posts`, and `ThreadTeamId` is the channel's team (empty for a
+/// DM). The reply just inserted is in the same transaction and is counted. A row: `ReplyCount`
+/// goes up by one, the author is removed from `Participants` if present and appended at the end,
+/// and `LastReplyAt` is raised only if this reply is later. Both branches write `ChannelId`.
+///
+/// # `ThreadDeleteAt` is not written
+///
+/// The insert names six columns and leaves it NULL, which every read in `thread_store.rs`
+/// coalesces to zero. Writing `0` here would be a different row from the one Go writes.
+async fn update_threads_from_post(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    post: &Post,
+) -> Result<(), sqlx::Error> {
+    let existing = sqlx::query!(
+        r#"
+        SELECT postid                             AS "post_id!",
+               COALESCE(replycount, 0)            AS "reply_count!",
+               COALESCE(lastreplyat, 0)           AS "last_reply_at!",
+               participants                       AS "participants?"
+          FROM threads
+         WHERE postid = $1
+        "#,
+        post.root_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    match existing {
+        None => {
+            let participants: Vec<String> = sqlx::query_scalar!(
+                r#"
+                SELECT posts.userid AS "user_id!"
+                  FROM posts
+                 WHERE posts.rootid = $1
+                   AND posts.deleteat = 0
+                 GROUP BY posts.userid
+                 ORDER BY MAX(posts.createat) ASC
+                "#,
+                post.root_id,
+            )
+            .fetch_all(&mut **tx)
+            .await?;
+
+            let count: i64 = sqlx::query_scalar!(
+                r#"SELECT COUNT(posts.id) AS "count!" FROM posts WHERE posts.rootid = $1 AND posts.deleteat = 0"#,
+                post.root_id,
+            )
+            .fetch_one(&mut **tx)
+            .await?;
+
+            let last_reply_at: i64 = sqlx::query_scalar!(
+                r#"SELECT COALESCE(MAX(posts.createat), 0) AS "last_reply_at!" FROM posts WHERE posts.rootid = $1 AND posts.deleteat = 0"#,
+                post.root_id,
+            )
+            .fetch_one(&mut **tx)
+            .await?;
+
+            let team_id: String = sqlx::query_scalar!(
+                r#"SELECT COALESCE(channels.teamid, '') AS "team_id!" FROM channels WHERE channels.id = $1"#,
+                post.channel_id,
+            )
+            .fetch_one(&mut **tx)
+            .await?;
+
+            sqlx::query!(
+                r#"
+                INSERT INTO threads
+                    (postid, channelid, replycount, lastreplyat, participants, threadteamid)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                "#,
+                post.root_id,
+                post.channel_id,
+                count,
+                last_reply_at,
+                serde_json::Value::from(participants),
+                team_id,
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+        Some(row) => {
+            let mut participants: Vec<String> = row
+                .participants
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default();
+            participants.retain(|id| id != &post.user_id);
+            participants.push(post.user_id.clone());
+            let reply_count = row.reply_count + 1;
+            let last_reply_at = row.last_reply_at.max(post.create_at);
+
+            sqlx::query!(
+                r#"
+                UPDATE threads
+                   SET channelid = $1,
+                       replycount = $2,
+                       lastreplyat = $3,
+                       participants = $4
+                 WHERE postid = $5
+                "#,
+                post.channel_id,
+                reply_count,
+                last_reply_at,
+                serde_json::Value::from(participants),
+                post.root_id,
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// `model.StringInterfaceToJSON(post.Props)` for a `jsonb` column.
@@ -3345,7 +3478,10 @@ fn props_for_column(post: &Post) -> serde_json::Value {
 /// The column order is `postSliceColumnsWithTypes` (post_store.go:53) exactly. It is not the
 /// table's own column order — `EditAt`, `IsPinned` and `RemoteId` were added later and sit at the
 /// end of the physical table — so naming the columns is what keeps the two apart.
-async fn insert_post(pool: &PgPool, post: &Post) -> Result<(), sqlx::Error> {
+async fn insert_post<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    post: &Post,
+) -> Result<(), sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO posts
@@ -3372,7 +3508,7 @@ async fn insert_post(pool: &PgPool, post: &Post) -> Result<(), sqlx::Error> {
         post.has_reactions,
         post.remote_id,
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .map(|_| ())
 }

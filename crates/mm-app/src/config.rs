@@ -337,6 +337,14 @@ pub struct Config {
     /// holding `0` caps a team at zero members rather than disabling the limit.
     pub max_users_per_team: i64,
 
+    /// `TeamSettings.MaxNotificationsPerChannel` (config.go:2559). Go default **`1000`**.
+    ///
+    /// Read by the notification pass twice: `allowChannelMentions` refuses `@channel`/`@all`/
+    /// `@here` when the channel has **at least** this many members (`numProfiles >= max`), and
+    /// `SendNotifications` sends the author an ephemeral notice when it has **more** than this
+    /// many (`len(profileMap) > max`). Two different comparisons against one number.
+    pub max_notifications_per_channel: i64,
+
     /// `TeamSettings.ExperimentalDefaultChannels` (config.go:2568). Go default **`[]`**.
     ///
     /// When empty, `DefaultChannelNames` is `["town-square", "off-topic"]`; when set, the list
@@ -1171,6 +1179,7 @@ impl Default for Config {
             max_channels_per_team: 2000,
             // config.go:2577 — `TeamSettingsDefaultMaxUsersPerTeam`.
             max_users_per_team: 50,
+            max_notifications_per_channel: 1000,
             // config.go:2653 — `[]string{}`.
             experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
@@ -1485,6 +1494,11 @@ impl Config {
                 lookup,
                 "MM_TEAMSETTINGS_MAXUSERSPERTEAM",
                 default.max_users_per_team,
+            ),
+            max_notifications_per_channel: lookup_int(
+                lookup,
+                "MM_TEAMSETTINGS_MAXNOTIFICATIONSPERCHANNEL",
+                default.max_notifications_per_channel,
             ),
             // Go's env decoder splits a `[]string` setting on commas, so the environment form of
             // this is `town-square,welcome`. An unset variable and an empty one are different:
@@ -2056,6 +2070,9 @@ impl Config {
             max_users_per_team: team_settings
                 .max_users_per_team
                 .unwrap_or(default.max_users_per_team),
+            max_notifications_per_channel: team_settings
+                .max_notifications_per_channel
+                .unwrap_or(default.max_notifications_per_channel),
             experimental_default_channels: team_settings
                 .experimental_default_channels
                 .unwrap_or(default.experimental_default_channels),
@@ -2487,6 +2504,8 @@ struct TeamSettingsDocument {
     max_channels_per_team: Option<i64>,
     #[serde(rename = "MaxUsersPerTeam")]
     max_users_per_team: Option<i64>,
+    #[serde(rename = "MaxNotificationsPerChannel")]
+    max_notifications_per_channel: Option<i64>,
     #[serde(rename = "ExperimentalDefaultChannels")]
     experimental_default_channels: Option<Vec<String>>,
     #[serde(rename = "LockProfileFieldsForEmailUsers")]
@@ -3495,8 +3514,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 79,
-            "the fixture covers {keys} settings and Config reads 79 from the document. \
+            keys, 80,
+            "the fixture covers {keys} settings and Config reads 80 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

@@ -936,7 +936,9 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
     // distinct.
     let cases: Vec<(&str, serde_json::Value)> = vec![
         (
-            "an @-mention reaches the notification fan-out",
+            // Served since the notification pass landed — except that `@nobody` is a member of
+            // nothing, and an out-of-channel mention sends the author a translated notice.
+            "an @-mention of a non-member sends the out-of-channel notice",
             serde_json::json!({ "message": "mmrs fwd at @nobody" }),
         ),
         (
@@ -1004,14 +1006,13 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
     }
 }
 
-/// A reply that passes every root check is forwarded, and leaves one row.
+/// A reply that passes every root check is **served**, and leaves one row.
 ///
-/// Split from the table above because it needs a real root post, and because it is the one
-/// forward that happens *after* several checks have already run and answered — so it is the
-/// strongest test that a served refusal and a forwarded success can live in the same function
-/// without the refusal path writing anything.
+/// This test asserted a forward until the notification pass landed; the reply's thread
+/// bookkeeping, events and counters are compared in `parity/post_create_replies.rs`. What is
+/// pinned here is only that the route answers and that the row is written once.
 #[tokio::test]
-async fn a_valid_reply_is_forwarded_and_leaves_one_row() {
+async fn a_valid_reply_is_served_and_leaves_one_row() {
     if !stack_enabled() {
         return;
     }
@@ -1041,7 +1042,7 @@ async fn a_valid_reply_is_forwarded_and_leaves_one_row() {
     )
     .await;
     assert_eq!(status, 201);
-    assert!(!served_by_rust, "a reply must be forwarded");
+    assert!(served_by_rust, "a reply is served");
     assert_eq!(reply["root_id"], root["id"]);
 
     let messages = posts_in_channel_named(&client, &token, &channel).await;
@@ -1056,13 +1057,11 @@ async fn a_valid_reply_is_forwarded_and_leaves_one_row() {
 }
 
 /// A channel member whose `mention_keys` is non-empty makes every message in that channel a
-/// possible mention, so the whole channel is forwarded.
-///
-/// This is the third of `getExplicitMentions`' three ways to find a mention, and the only one
-/// that cannot be read off the message. Without the query behind it, a post with no `@` in it
-/// would be served here while Go raised somebody's mention count.
+/// possible mention. Until the notification pass landed that forwarded the whole channel; now
+/// the message is served and the keyword is counted — the count itself is compared in
+/// `parity/post_create_replies.rs`. What stays pinned here is one row, served, either way.
 #[tokio::test]
-async fn a_member_with_mention_keys_forwards_the_whole_channel() {
+async fn a_member_with_mention_keys_is_still_served() {
     if !stack_enabled() {
         return;
     }
@@ -1113,8 +1112,8 @@ async fn a_member_with_mention_keys_forwards_the_whole_channel() {
     .await;
     assert_eq!(status, 201);
     assert!(
-        !served_after,
-        "a member with mention_keys must forward the channel"
+        served_after,
+        "a member with mention_keys no longer forwards the channel"
     );
 
     let messages = posts_in_channel_named(&client, &admin, &channel).await;
@@ -1127,19 +1126,9 @@ async fn a_member_with_mention_keys_forwards_the_whole_channel() {
     delete_plain_user(&client, &admin, &user_id).await;
 }
 
-/// The **other** arm of the same query: `first_name` alone, with no `mention_keys`.
-///
-/// `channel_has_keyword_mention_recipients` is a disjunction — a member counts if their
-/// `mention_keys` is non-blank **or** their `first_name` notify prop is on, because Go builds a
-/// mention key from the member's own first name (app/mention_parser.go). The test above sets
-/// `mention_keys` and explicitly turns `first_name` off, which pins the first arm and leaves the
-/// second one free: deleting `OR u.notifyprops ->> 'first_name' = 'true'` changed no answer in
-/// the whole suite, and the mutation survived. Right and wrong coincided because nothing ever
-/// sent a member who qualifies *only* by first name.
-///
-/// So this is the mirror: `mention_keys` blank, `first_name` on. A post must still forward.
+/// The first-name arm of the same keyword table, served the same way.
 #[tokio::test]
-async fn a_member_notified_on_their_first_name_forwards_the_whole_channel() {
+async fn a_member_notified_on_their_first_name_is_still_served() {
     if !stack_enabled() {
         return;
     }
@@ -1193,8 +1182,8 @@ async fn a_member_notified_on_their_first_name_forwards_the_whole_channel() {
     .await;
     assert_eq!(status, 201);
     assert!(
-        !served_after,
-        "a member notified on their first name must forward the channel"
+        served_after,
+        "a first-name recipient no longer forwards the channel"
     );
 
     let messages = posts_in_channel_named(&client, &admin, &channel).await;

@@ -46,6 +46,7 @@ pub mod license;
 pub mod limits;
 pub mod login;
 pub mod mention;
+pub mod notification;
 pub mod oauth;
 pub mod password;
 pub mod post;

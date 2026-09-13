@@ -1,0 +1,31 @@
+# Mutation plan for a reply and a mention on `POST /api/v4/posts` — the notification pass.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-replies.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The parity suite performs each action on both servers and compares the rows and frames left
+# behind; the store suite pins the `Threads` bookkeeping on planted rows. Two arms are not
+# mutated because the stack cannot observe them: `update_participants` on the poster (the save
+# already appended them) and the comment-thread mentions (every user is a CRT user under
+# `always_on`). The last two lines are the no-op controls and must SURVIVE.
+
+save-participants-duplicated	crates/mm-store/src/post_store.rs	            participants.retain(|id| id != &post.user_id);\n            participants.push(post.user_id.clone());	            participants.push(post.user_id.clone());	api	post_create_replies
+save-last-reply-not-max	crates/mm-store/src/post_store.rs	            let last_reply_at = row.last_reply_at.max(post.create_at);	            let last_reply_at = post.create_at;	store	store_save_reply
+save-reply-count-frozen	crates/mm-store/src/post_store.rs	            let reply_count = row.reply_count + 1;	            let reply_count = row.reply_count;	api	post_create_replies
+save-root-counters-for-replies	crates/mm-store/src/post_store.rs	        let root_count = if is_root { count } else { 0 };	        let root_count = count;	store	store_save_reply
+save-root-updateat-skipped	crates/mm-store/src/post_store.rs	                "UPDATE posts SET updateat = $1 WHERE id = $2",	                "UPDATE posts SET updateat = $1 WHERE id = $2 AND $1::bigint < 0",	api	post_create_replies
+mentions-keep-the-poster	crates/mm-app/src/notification.rs	            mentions.remove_mention(&post.user_id);	            let _ = &post.user_id;	api	post_create_replies
+increment-root-flag-inverted	crates/mm-app/src/notification.rs	                    post.root_id.is_empty(),\n                    post.is_urgent(),	                    !post.root_id.is_empty(),\n                    post.is_urgent(),	api	post_create_replies
+autofollow-no-increment	crates/mm-app/src/notification.rs	                        following: true,\n                        increment_mentions,	                        following: true,\n                        increment_mentions: false,	api	post_create_replies
+commenter-not-zeroed	crates/mm-app/src/notification.rs	                if uid == &post.user_id {\n                    self.store()	                if uid != &post.user_id {\n                    self.store()	api	post_create_replies
+previous-replies-not-decremented	crates/mm-app/src/notification.rs	                    previous_unread_replies = (user_thread.unread_replies - 1).max(0);	                    previous_unread_replies = user_thread.unread_replies;	api	post_create_replies
+thread-updated-for-non-crt	crates/mm-app/src/notification.rs	                if !self.is_crt_enabled_for_user(uid).await {\n                    continue;\n                }\n                let mut message = WebSocketEvent::new(	                if self.is_crt_enabled_for_user(uid).await {\n                    continue;\n                }\n                let mut message = WebSocketEvent::new(	api	post_create_replies
+mentions-hook-dropped	crates/mm-app/src/notification.rs	        if !mentioned_users_list.is_empty() {\n            let mut args = StringInterface::new();	        if mentioned_users_list.is_empty() {\n            let mut args = StringInterface::new();	api	post_create_replies
+out-of-channel-served	crates/mm-app/src/notification.rs	            && !mentions.other_potential_mentions.is_empty()	            && mentions.other_potential_mentions.is_empty()	api	post_create_replies
+crt-reply-marks-viewed	crates/mm-app/src/post_create.rs	        let is_crt_reply = !saved.root_id.is_empty() && is_crt_enabled;	        let is_crt_reply = false;	api	post_create_replies
+crt-user-none-ignored	crates/mm-app/src/notification.rs	    let notify_desktop = desktop != USER_NOTIFY_NONE	    let notify_desktop = desktop == USER_NOTIFY_NONE	unit	notification::
+crt-member-default-notifies	crates/mm-app/src/notification.rs	    let notify_desktop = desktop != CHANNEL_NOTIFY_DEFAULT\n        && desktop != CHANNEL_NOTIFY_NONE	    let notify_desktop = desktop != CHANNEL_NOTIFY_NONE\n        && desktop != CHANNEL_NOTIFY_NONE	unit	notification::
+gm-name-unsorted	crates/mm-app/src/notification.rs	                names.sort();\n                names.join(", ")	                names.join(", ")	unit	notification::
+control-redundant-predicate	crates/mm-store/src/post_store.rs	                "UPDATE posts SET updateat = $1 WHERE id = $2",	                "UPDATE posts SET updateat = $1 WHERE id = $2 AND $1::bigint >= 0",	api	post_create_replies
+control-swap-adds	crates/mm-app/src/notification.rs	        message.add("team_id", serde_json::Value::String(team.id.clone()));\n        message.add("set_online", serde_json::Value::Bool(set_online));	        message.add("set_online", serde_json::Value::Bool(set_online));\n        message.add("team_id", serde_json::Value::String(team.id.clone()));	api	post_create_replies

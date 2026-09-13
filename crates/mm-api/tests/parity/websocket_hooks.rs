@@ -25,9 +25,8 @@
 //! is the first test, and it is the case this server reproduces today.
 //!
 //! The acking case needs the recipient's `notify_props.desktop` set to `all`. Go answers it with
-//! `should_ack: true` in the encoder shape; this server answers it the same way only once
-//! `SendNotifications`' port attaches the hook, so the cross-server half of that test is
-//! `#[ignore]`d with the reason on it, and the Go half stands alone as the oracle.
+//! `should_ack: true` in the encoder shape, and this server answers it the same way now that
+//! `SendNotifications`' port attaches the hook (2026-09-14).
 //!
 //! # Fixture rows all begin `mmrshubhooks`
 //!
@@ -412,11 +411,9 @@ async fn go_acks_a_desktop_all_member_only_on_a_flagged_connection_and_never_the
 }
 
 /// The cross-server half of the test above. The hub runs the hook and the encoding follows the
-/// copy; what is missing is the raiser: `publish_user_posted_event` in `mm_app::post_create` does
-/// not yet attach `posted_ack` with `users` from `shouldAckWebsocketNotification`. Un-ignore when
-/// it does — nothing here needs to change.
+/// copy; the raiser is `mm_app::notification::App::send_notifications`, which attaches
+/// `posted_ack` with `users` from `shouldAckWebsocketNotification` on every `posted` event.
 #[tokio::test]
-#[ignore = "needs SendNotifications' port to attach posted_ack (posted_user_id, channel_type, users) in mm_app::post_create::publish_user_posted_event; the hub half is unit-tested"]
 async fn a_desktop_all_member_is_acked_on_a_flagged_connection_the_same_way_on_both() {
     if !stack_enabled() {
         return;

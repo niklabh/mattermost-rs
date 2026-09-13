@@ -2,22 +2,26 @@
 //! `app.App.SendEphemeralPost` (:759) — the write behind `POST /api/v4/posts` and
 //! `POST /api/v4/posts/ephemeral`.
 //!
-//! # `CreatePost` is 300 lines of branches on shapes; this reproduces one of them
+//! # `CreatePost` is 300 lines of branches on shapes; this reproduces the ones a client sends
 //!
-//! The single shape served is a **plain root-level message in an open or private channel**: no
-//! `root_id`, no `file_ids`, no priority, no metadata, the default post type, no props that name
-//! an integration or an embed, and a message with no link, no `@` and no `~`. Everything else is
-//! forwarded, and [`App::refuse_create_post_shapes`] is the one function that decides — it runs
-//! **before the pending-post id is claimed and before `Post().Save`**, so no forward can leave a
-//! half-written row behind.
+//! Served: a **message or a reply in an open or private channel**, mentions included — `@user`,
+//! `@channel`, `@here`, `@all`, mention keys and first names — with no `file_ids`, no priority,
+//! no metadata, the default post type, no props that name an integration or an embed, and a
+//! message with no link and no `~`. Everything else is forwarded, and two functions decide, both
+//! **before the pending-post id is claimed and before `Post().Save`** so that no forward leaves a
+//! half-written row behind: [`App::refuse_create_post_shapes`] on the request's shape, and
+//! [`App::notification_forward_reason`] on what the notification pass would have to say — a
+//! group mention, an out-of-channel mention, or a channel-wide mention past
+//! `MaxNotificationsPerChannel`, each of which ends in translated text this server cannot mint.
 //!
-//! # What the served shape still does not do, and why it is not a forward
+//! # A reply is served whole
 //!
-//! `handlePostEvents` ends in `SendNotifications`, whose only database write is
-//! `IncrementMentionCount` for the users a post mentions. The refusals above guarantee the
-//! mention set is empty — that is what the `@`, `~` and keyword-recipient checks are *for* — so
-//! the fan-out has nothing to write and what remains of it is the `posted` event, reproduced in
-//! [`App::publish_user_posted_event`].
+//! The root is resolved where Go resolves it ([`App::resolve_root_post`]); the store writes the
+//! `Threads` row with the post; the poster is auto-followed; and the notification pass
+//! (`crate::notification`) writes the participants' memberships, increments the mention counts,
+//! and publishes `posted` with its hooks and one `thread_updated` per follower. The one reply
+//! shape still forwarded is a reply to a live persistent-notification root, whose
+//! `ResolvePersistentNotification` needs the mention scan over the root's recipients.
 //!
 //! Three side effects are genuinely absent rather than refused, each following a decision this
 //! project already made elsewhere:
@@ -42,16 +46,13 @@ use mm_model::post::{
     POST_PROPS_WEBHOOK_DISPLAY_NAME, POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ,
     POST_TYPE_EPHEMERAL, Post,
 };
+use mm_model::post_list::PostList;
 use mm_model::session::Session;
-use mm_model::user::User;
-use mm_model::user::external::SHOW_USERNAME;
 use mm_model::utils::{AppError, get_millis, new_id, parse_hashtags};
-use mm_model::websocket_message::{
-    WEBSOCKET_EVENT_EPHEMERAL_MESSAGE, WEBSOCKET_EVENT_POSTED, WebSocketEvent,
-};
+use mm_model::websocket_message::{WEBSOCKET_EVENT_EPHEMERAL_MESSAGE, WebSocketEvent};
 
 use mm_store::post_store::{GetPostThreadOptions, ThreadDirection};
-use mm_store::{ChannelStore, PostStore, WebhookStore};
+use mm_store::{ChannelStore, PostStore, ThreadStore, WebhookStore};
 
 use crate::App;
 use crate::channel::RestrictedDm;
@@ -344,13 +345,6 @@ impl App {
                 "a ~channel mention resolves channels and teams into a prop",
             ));
         }
-        // `@here`, `@all`, `@channel`, `@username` and the group mentions all need the `@`, and
-        // every one of them ends in `IncrementMentionCount`.
-        if post.message.contains('@') {
-            return Err(PrepareError::Unreproducible(
-                "an @-mention reaches IncrementMentionCount and the notification fan-out",
-            ));
-        }
 
         // `handleWebhookEvents` fires an outgoing webhook whose *response* Go turns into a second
         // post. Its own two gates come first and both are cheap: `EnableOutgoingWebhooks`, then
@@ -374,24 +368,9 @@ impl App {
             }
         }
 
-        // The keyword half of `getExplicitMentions`: a member whose `mention_keys` is non-empty,
-        // or whose `first_name` notification is on, can be mentioned by a message with no `@` in
-        // it at all.
-        if self
-            .store()
-            .post()
-            .channel_has_keyword_mention_recipients(&channel.id)
-            .await
-            .map_err(|err| {
-                tracing::error!(error = %err, "keyword mention recipient lookup failed");
-                PrepareError::Unreproducible("the keyword mention recipient lookup failed")
-            })?
-        {
-            return Err(PrepareError::Unreproducible(
-                "a channel member can be mentioned by a keyword rather than by an @",
-            ));
-        }
-
+        // Mentions — `@user`, the channel-wide three, mention keys and first names — are served
+        // by the notification pass. What that pass cannot say is decided by
+        // [`App::notification_forward_reason`], after the root is resolved.
         Ok(())
     }
 
@@ -467,10 +446,12 @@ impl App {
         let (saved, author_is_bot) = self.create_post(post, &channel, session, flags).await?;
 
         // `_, fromWebhook := post.GetProps()[from_webhook]` and the `from_bot` twin. Both props
-        // are refused inbound, so only the bot flag `CreatePost` derives survives; `isCRTReply`
-        // needs a `root_id`, also refused.
-        if !author_is_bot {
-            let is_crt_enabled = self.is_crt_enabled_for_user(&saved.user_id).await;
+        // are refused inbound, so only the bot flag `CreatePost` derives survives.
+        let is_crt_enabled = self.is_crt_enabled_for_user(&saved.user_id).await;
+        // `isCRTReply := post.RootId != "" && isCRTEnabled` — a reply with collapsed threads on
+        // does not mark the channel viewed; the thread is what the user is reading.
+        let is_crt_reply = !saved.root_id.is_empty() && is_crt_enabled;
+        if !author_is_bot && !is_crt_reply {
             if let Err(err) = self
                 .mark_channels_as_viewed(
                     std::slice::from_ref(&saved.channel_id),
@@ -632,10 +613,23 @@ impl App {
         // goroutine at the top of `CreatePost` and consumes it **here** — after the author
         // lookup, after the props and after the mention gate — so a reply whose author is
         // missing is a 404 and not a root-id 400.
-        self.resolve_root_post(post, channel).await?;
+        let parent_post_list = self.resolve_root_post(post, channel).await?;
 
         let (hashtags, _plain_text) = parse_hashtags(&post.message);
         post.hashtags = hashtags;
+        // The notification pass's own forward conditions, decided on the pre-save post — the
+        // same channel members, the same keywords, the same parent list the fan-out will read.
+        let team = if channel.team_id.is_empty() {
+            None
+        } else {
+            Some(self.get_team(&channel.team_id).await?)
+        };
+        if let Some(reason) = self
+            .notification_forward_reason(post, channel, team.as_ref(), parent_post_list.as_ref())
+            .await?
+        {
+            return Err(PrepareError::Unreproducible(reason));
+        }
 
         // `FillInPostProps` reduces to its `else if post.GetProps() != nil` arm: every other
         // branch needs a `~` mention, an `@` on a licensed server, an `ai_generated_by` prop or a
@@ -691,11 +685,44 @@ impl App {
             )
             .await?;
 
-        // `applyPostWillBeConsumedHook`, `ResolvePersistentNotification` and the `ThreadAutoFollow`
-        // membership are all plugin- or reply-shaped. What is left of `handlePostEvents` is the
-        // `posted` event.
-        self.publish_user_posted_event(&prepared, channel, &user, flags.set_online)
-            .await;
+        // `applyPostWillBeConsumedHook` — no plugin environment, [D-183].
+        // `ResolvePersistentNotification` — a reply to a live persistent-notification root is
+        // forwarded by `resolve_root_post`; every other root returns on its first lines.
+        // Make sure the poster is following the thread.
+        if self.config().thread_auto_follow && !prepared.root_id.is_empty() {
+            if let Err(err) = self
+                .store()
+                .thread()
+                .maintain_membership(
+                    &user.id,
+                    &prepared.root_id,
+                    mm_store::thread_store::ThreadMembershipOpts {
+                        following: true,
+                        increment_mentions: false,
+                        update_following: true,
+                        update_viewed_timestamp: false,
+                        update_participants: false,
+                    },
+                )
+                .await
+            {
+                tracing::warn!(error = %err, "Failed to update thread membership");
+            }
+        }
+        if let Err(err) = self
+            .handle_post_events(
+                &prepared,
+                &user,
+                channel,
+                parent_post_list.as_ref(),
+                flags.set_online,
+            )
+            .await
+        {
+            // Go: `rctx.Logger().Warn("Failed to handle post events")` — the post is written and
+            // is answered whatever the fan-out did.
+            tracing::warn!(error = %err, post_id = %prepared.id, "Failed to handle post events");
+        }
 
         let (sanitized, _is_member_for_previews) = self
             .sanitize_post_metadata_for_user(prepared, &session.user_id)
@@ -722,15 +749,21 @@ impl App {
     /// again, the same id as an unreadable root. A client cannot tell the two apart, and neither
     /// can a log reader with only the id.
     ///
-    /// # A reply that passes every check is then handed to Go
+    /// # A reply that passes every check is served, with one exception
     ///
-    /// `SqlPostStore.Save` calls `updateThreadsFromPosts`, which writes a `Threads` row and a
-    /// `ThreadMemberships` row; `ResolvePersistentNotification` and the CRT follower fan-out hang
-    /// off the same field. None is ported — so the refusals are served, the success is forwarded,
-    /// and the forward is before `Post().Save` and before anything else writes.
-    async fn resolve_root_post(&self, post: &Post, channel: &Channel) -> Result<(), PrepareError> {
+    /// The thread the root was fetched by is returned for the notification pass, which reads
+    /// the root and the earlier repliers from it. The exception is a root that is a **live
+    /// persistent-notification post**: `CreatePost` then runs `ResolvePersistentNotification`
+    /// after the save, which re-scans the root's mentions over its recipients and clears the
+    /// notification when the replier is one of them — the same forward the acknowledgement and
+    /// reaction routes make ([D-551]), decided here before anything writes.
+    async fn resolve_root_post(
+        &self,
+        post: &Post,
+        channel: &Channel,
+    ) -> Result<Option<PostList>, PrepareError> {
         if post.root_id.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let root_id_error = || {
@@ -802,79 +835,24 @@ impl App {
             )));
         }
 
-        Err(PrepareError::Unreproducible(
-            "a reply needs updateThreadsFromPosts and the CRT follower fan-out",
-        ))
-    }
-
-    /// The `posted` event `SendNotifications` builds (notification.go:699) for a **user** post.
-    ///
-    /// # Both names are formatted with `ShowUsername`, and that is a constant, not a setting
-    ///
-    /// `GetChannelName(model.ShowUsername, "")` and `GetSenderName(model.ShowUsername, …)` — the
-    /// literal constant is passed at both call sites, so neither the `TeammateNameDisplay` setting
-    /// nor the caller's `name_format` preference is read. A port that helpfully threaded
-    /// `GetNotificationNameFormat` through here would send a different `sender_name` on any server
-    /// whose users had set a display preference.
-    ///
-    /// # `sender_name` carries an `@` and `channel_display_name` does not
-    ///
-    /// `GetDisplayNameWithPrefix(…, "@")` against `GetDisplayName(…)`. For an open or private
-    /// channel `GetChannelName` returns `Channel.DisplayName` untouched.
-    ///
-    /// # Three keys are absent and one is
-    ///
-    /// `otherFile` and `image` need file ids; `add_mentions`, `add_followers` and `posted_ack` are
-    /// broadcast hooks, which the hub strips ([D-183]).
-    async fn publish_user_posted_event(
-        &self,
-        post: &Post,
-        channel: &Channel,
-        sender: &User,
-        set_online: bool,
-    ) {
-        // `SendNotifications` opens with `if channel.DeleteAt > 0 { return }`. Unreachable from
-        // this route — `CreatePostAsUser` refuses an archived channel — but the guard is the
-        // function's, not the caller's.
-        if channel.delete_at > 0 {
-            return;
+        if self
+            .store()
+            .post()
+            .has_persistent_notification(&post.root_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "persistent notification lookup failed");
+                PrepareError::Unreproducible("the persistent notification lookup failed")
+            })?
+        {
+            return Err(PrepareError::Unreproducible(
+                "a reply to a persistent-notification root runs ResolvePersistentNotification",
+            ));
         }
-
-        let mut message =
-            WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", &post.channel_id, "", None, "");
-        message.add(
-            "channel_type",
-            serde_json::Value::String(channel.channel_type.clone()),
-        );
-        message.add(
-            "channel_display_name",
-            serde_json::Value::String(channel.display_name.clone()),
-        );
-        message.add(
-            "channel_name",
-            serde_json::Value::String(channel.name.clone()),
-        );
-        message.add(
-            "sender_name",
-            serde_json::Value::String(sender.get_display_name_with_prefix(SHOW_USERNAME, "@")),
-        );
-        // `team.Id`, and Go substitutes an empty `model.Team{}` for a DM — which cannot reach
-        // here, so the channel's team id is the team's id.
-        message.add(
-            "team_id",
-            serde_json::Value::String(channel.team_id.clone()),
-        );
-        message.add("set_online", serde_json::Value::Bool(set_online));
-
-        match post.to_json() {
-            Ok(json) => message.add("post", serde_json::Value::String(json)),
-            Err(err) => {
-                tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
-                return;
-            }
-        }
-
-        self.publish(message).await;
+        Ok(Some(PostList {
+            posts: Some(posts),
+            ..parent
+        }))
     }
 
     /// Port of `app.App.SendEphemeralPost` (app/post.go:759).

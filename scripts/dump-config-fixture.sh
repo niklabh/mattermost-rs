@@ -105,6 +105,9 @@ MODELLED = {
         # The self-deactivation switch, read by `DELETE /api/v4/users/{user_id}` and
         # `PUT /api/v4/users/{user_id}/active`.
         "EnableUserDeactivation",
+        # Read twice by the notification pass behind `POST /api/v4/posts`: `>=` refuses
+        # channel-wide mentions, `>` sends the author a notice.
+        "MaxNotificationsPerChannel",
     ],
     "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],

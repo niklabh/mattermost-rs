@@ -120,6 +120,7 @@
     "EnableUserCreation": true,
     "EnableUserDeactivation": false,
     "LockProfileFieldsForEmailUsers": "none",
+    "MaxNotificationsPerChannel": 1000,
     "RestrictCreationToDomains": "",
     "RestrictDirectMessage": "any",
     "UserStatusAwayTimeout": 300

@@ -12611,3 +12611,42 @@ survived (`scripts/mutate-batch.sh`, one `api` line for the wire flag).
 `{ "posted_user_id": post.user_id, "channel_type": channel.type, "users": [ids] }` always. Ids
 are `serde_json::Value::String`s in a `Value::Array`; `users` is the `shouldAckWebsocketNotification`
 set. Consts in `mm_app::broadcast_hooks`.
+
+## Replies and mentions on `POST /api/v4/posts` — the notification pass (2026-09-14)
+
+Route count unchanged at 463 of 764: the route was already counted, and every reply and every
+mention it used to hand to Go is now served. `mm_app::notification` is `SendNotifications`
+(app/notification.go:53) and its helpers; `crates/mm-markdown` and `mm_app::mention` are what it
+runs on; the hub runs the three `posted` hooks (`wt/hubhooks`) and the store gained the five
+reads and writes the pass makes (`wt/notifystore`, sections above).
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/post_store.rs` — `save` writes a reply's `Threads` row in the insert's transaction (`updateThreadsFromPosts`), bumps the root's `UpdateAt`, reads the reply count back; `db_post_save_reply.rs` 3 db | DONE |
+| app | `crates/mm-app/src/notification.rs` — `send_notifications`, `handle_post_events`, `get_explicit_mentions_and_keywords`, `notification_forward_reason`, `CrtNotifiers`, the three CRT rules, `PostNotification`; `post_create.rs` — replies resolved and served, the poster auto-followed, the CRT-reply viewed rule; `config.rs` — `MaxNotificationsPerChannel` | DONE, 9 unit |
+| test | `crates/mm-api/tests/parity/post_create_replies.rs` — 8; `post_creates.rs` — three tests flipped from "forwards" to "served" | DONE |
+
+What a reader would otherwise get wrong:
+
+- **The forward is decided before the row, on the pass's own inputs.** `notification_forward_reason`
+  runs the same mention pass the fan-out runs; a post that clears it is served whole. The three
+  arms it forwards each end in a translated notice — [D-591].
+- **A reply moves the root's `UpdateAt` and not the channel's `Root` counters.** `save`.
+- **The commenter's own `thread_updated` is zeroed after their `LastViewed` moves**, and
+  `previous_unread_replies` is `max(unread - 1, 0)` for an existing follower and `0` for a new one.
+- **`@here` reads the `Status` row where Go reads its cache**, which is nil on a miss — the [D-087]
+  class, agreed whenever the member's status was touched since Go booted. `notification` docs.
+- **`GetStatusFromCache` aside, `updateThreadParticipantsForUserTx` appends only when absent** and
+  only on the insert branch (the store agent measured it); the move-to-end lives in
+  `updateThreadsFromPosts`, which `save` ports.
+- **A CRT reply does not mark the channel viewed.** `create_post_as_user`.
+
+[D-221] closed. [D-401] narrowed. [D-590] (reply delete) and [D-591] (the translated notices)
+opened. Email, push and the auto-responder stay [D-402].
+
+### The next route in this family
+
+`DELETE /api/v4/posts/{post_id}` for a reply — `RemoveNotifications` is the mention pass in
+reverse and every input it needs is now in the tree ([D-590]). Then a DM or group message on
+create, which is `SendAutoResponseIfNecessary` plus the GM `channel_display_name`.
+
