@@ -8163,3 +8163,65 @@ input. Go's `%q` and JSON's string escaping diverge only on non-ASCII — `%q` e
 escapes for some runes JSON leaves alone — and this field carries 26-character base32 ids, so no
 reachable input can tell them apart. Recorded rather than fixed because fixing it would mean
 reimplementing Go's quoting for a value that cannot exercise the difference.
+
+---
+
+## D-480 · `POST /channels/{channel_id}/move` is not ported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
+
+`moveChannel` (api4/channel.go:3063) is unblocked and unported. It is forwarded, and Go answers it
+normally — measured on stack 4, where a move of a public channel to its own team returned 200 and
+the channel body.
+
+**What it needs**, none of which exists yet:
+
+- `Channel().RemoveAllDeactivatedMembers` and `Channel().UpdateSidebarChannelCategoryOnMove`;
+- `Thread().UpdateTeamIdForChannelThreads`;
+- `Webhook().UpdateIncoming`/`UpdateOutgoing`, driven from the two per-team webhook page reads
+  that **are** ported — the move rewrites `TeamId` on every hook pointing at the channel;
+- `GetTeamMembersByIds`, which `App.MoveChannel` asks **twice**: once as a precondition (every
+  channel member must already be in the target team, or the whole move is an
+  `app.channel.move_channel.members_do_not_match.error` 500) and once inside
+  `RemoveUsersFromChannelNotMemberOfTeam`;
+- the `api.team.move_channel.success` i18n string for `postChannelMoveMessage`.
+
+**The ordering worth preserving when it lands:** the `force` flag removes non-members *before* the
+move, and `MoveChannel` then calls `RemoveUsersFromChannelNotMemberOfTeam` again itself and
+**logs** rather than fails on its error — so a forced move and an unforced one differ only in
+whether the precondition can be met, not in the end state.
+
+**A parity suite for it must create its own team and channel.** `moveChannel` rewrites
+`Channels.TeamId`, and the shared fixture channel is read by two dozen suites in the same binary.
+
+---
+
+## D-481 · `POST /channels/{channel_id}/convert_to_channel` is not ported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
+
+`convertGroupMessageToChannel` (api4/channel.go:3186) is unblocked and unported; forwarded.
+Measured unlicensed: a public channel id answers 400
+`app.channel.get_common_teams.incorrect_channel_type`, a mismatched body `channel_id` answers 400
+`api.context.invalid_body_param.app_error`, and a malformed body the same.
+
+Most of the machinery is already here — `mm_app::common_teams` is the validator's first step, and
+`GetSidebarCategories`/`UpdateSidebarCategories`/`UpdateChannelMemberSchemeRoles`/`UpdateChannel`
+are all ported. What is missing:
+
+- `Channel().DeleteAllSidebarChannelForChannel`, which clears the GM from every sidebar before the
+  converted channel is re-added to each member's default category;
+- `GetUsersInChannelPage` with `ChannelGroupMaxUsers`;
+- the `api.channel.group_message.converted.to_private_channel` i18n string, and `utils.JoinList`
+  for the "a, b and c" member list it interpolates.
+
+**The blocking dependency is `common_teams`' own.** `GetDirectOrGroupMessageMembersCommonTeams`
+forwards whenever an active member is a bot, because `IsBotExemptFromDMRestrictions` needs the
+plugin manifests in the running server's memory — see `mm-app/src/common_teams.rs`. This route
+calls it as its **first** validation, so it inherits that forward exactly.
+
+**Validation order, for whoever ports it:** common teams → the requested team is among them →
+`Type == 'G'` (a **404**, not a 400) → the caller's channel membership → `clone.IsValid()` on a
+copy with the new type, name and display name. The handler's own gates run first and in a
+different order: board, space, body decode, `IsGuest`, `create_private_channel` **on the body's
+team**, then `channel_id` matching the URL.

@@ -11796,3 +11796,39 @@ pinned by the doc comment rather than by an assertion.
 no caller in api4 and is not ported; `ChannelSearch` has no json tag for it. [D-441] records the
 `%q`-versus-JSON quoting of `parent_access_control_policy_id`, which is the same bytes for every
 id shape that field can hold.
+
+## api4/channel.go — the channel administration routes (2026-09-13)
+
+| File | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| api4/channel.go (`updateChannelScheme`, `patchChannelModerations`, `updateChannelMemberAutotranslation`) | `mm-api/src/channel_admin.rs` | PARTIAL | 10 pass + 7 parity | Three gates on an unlicensed server. **Only `updateChannelScheme` has anything in front of its gate**: `RequireChannelId` then the body, so `{"scheme_id":"nope"}` is a 400 and a well-formed one is the 403 — the other two answer their gate for every id, including one that does not exist. Licensed installations forward. `IsValidId` is 26 bytes of letters-or-numbers, **not** base32; see the doc comment. Mutations for both rows: 31 run over two passes, 23 caught, 2 controls survived, 0 harness faults. |
+| api4/channel.go (`channelMembersMinusGroupMembers`), app/group.go, sqlstore/group_store.go | `mm-api/src/channel_admin.rs`, `mm-app/src/group.rs`, `mm-store/src/group_store.rs` | PARTIAL | 5 pass + 13 parity | The **one route in this file that reads the group tables with no licence gate** — 200 with real rows unlicensed, measured before porting. `group_ids` is validated twice against two different strings (length on the regex-stripped copy, `IsValidId` on the raw split). The outer join onto `GroupMembers` has **no `DeleteAt` filter** while the exclusion subquery does, so a deleted membership still appears in `groups` and does not exclude the member. `count(DISTINCT Users.Id)` against the page's `GROUP BY`. No trailing newline. Four first-pass survivors, all fixture gaps, all fixed and re-run — see note 4. |
+
+### Notes
+
+1. **`updateChannelMemberAutotranslation`'s gate is not a licence field.** It is
+   `AutoTranslation() == nil || !IsFeatureAvailable()` — an enterprise interface registered by
+   `RegisterAutoTranslationInterface`, nil in the compared build. `IsFeatureAvailable` is not
+   visible from this tree, so the licensed branch forwards rather than reproducing the 403.
+   The route had been left unregistered on the note that it "needs the AutoTranslation store"; it
+   does not, because the gate precedes every store call.
+2. **Go interpolates the group ids into the SQL** (`IN ('%s')`, group_store.go:1752) where this
+   port binds `= ANY($2)`. Identical for every input the handler admits — which is every input,
+   since `IsValidId` runs first — and documented where it is not.
+3. `sanitize_profile(&mut user.user, false)` on a sysconsole route: `as_admin` false, so
+   `notify_props` is emptied and `auth_data` blanked. A mutation to `true` is caught by the byte
+   comparison, because `notify_props` is `omitempty` and an emptied map disappears from the body.
+4. **The four survivors were four fixture gaps, and one of them was a test that could not fail.**
+   The bot the `Bots.UserId IS NULL` predicate exists for was created with `POST /bots`, which is
+   refused on this deployment, and the assertion about it sat inside an `if let Some(bot)` — so
+   there was no bot and nothing said so. It is planted now, the way `scripts/stack.sh` plants its
+   own. The other three: paging only ever asked for `per_page=1`, where `page * per_page` and
+   `page * 1` agree; the `group_ids` rows had no input where stripping changes the split, which
+   takes a `!` **inside** an otherwise valid id; and the `total_count` mutation's plan line used a
+   `|` in a filter that the `unit` suite passes to libtest as one substring, so nothing ran.
+
+### What is not here
+
+`moveChannel` and `convertGroupMessageToChannel` — [D-480] and [D-481]. Both are unblocked,
+neither is small: five new store methods between them, plus an i18n string each for the system
+message they post.

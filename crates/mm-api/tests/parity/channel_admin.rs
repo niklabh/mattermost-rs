@@ -502,35 +502,35 @@ async fn group_fixture(client: &reqwest::Client, token: &str) -> &'static GroupF
                 users.insert(tag, user.id);
             }
 
-            // A bot in the channel, for `Bots.UserId IS NULL`. Created through Go so the `Bots`
-            // row and the `Users` row are written the way the server writes them.
-            let bot = client
-                .post(format!("{GO}/api/v4/bots"))
-                .header("Authorization", format!("Bearer {token}"))
-                .json(&serde_json::json!({
-                    "username": "mmrschadmgrpbot",
-                    "display_name": "chadmgrp bot",
-                }))
-                .send()
+            // A bot in the channel, for `Bots.UserId IS NULL`.
+            //
+            // **Planted, not created.** `POST /bots` is refused on this deployment —
+            // `ServiceSettings.EnableBotAccountCreation` is false, which `bot_writes` asserts —
+            // so the first version of this fixture swallowed a 403 and left no bot at all. The
+            // mutation that drops `Bots.UserId IS NULL` then **survived**, and the survivor was
+            // the only thing that said so: every assertion about the bot was inside
+            // `if let Some(bot)`. `common::plant_bot` writes the same two rows `scripts/stack.sh`
+            // writes for its own seeded bot.
+            let bot_id = common::plant_bot("chadmgrp", &admin, 0)
                 .await
-                .expect("Go answers");
-            if bot.status().is_success() {
-                let bot: serde_json::Value = bot.json().await.expect("a bot");
-                let bot_id = bot["user_id"].as_str().expect("a user id").to_owned();
-                let _ = client
-                    .post(format!("{GO}/api/v4/teams/{team}/members"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .json(&serde_json::json!({ "team_id": team, "user_id": bot_id }))
-                    .send()
-                    .await;
-                let _ = client
-                    .post(format!("{GO}/api/v4/channels/{channel}/members"))
-                    .header("Authorization", format!("Bearer {token}"))
-                    .json(&serde_json::json!({ "user_id": bot_id }))
-                    .send()
-                    .await;
-                users.insert("bot", bot_id);
-            }
+                .expect("the parity stack exports DATABASE_URL");
+            // Straight into `ChannelMembers` for the same reason: `POST /channels/{id}/members`
+            // would need the bot in the team, and nothing here reads a bot's team membership.
+            let pool = group_pool().await;
+            sqlx::query(
+                "INSERT INTO channelmembers
+                    (channelid, userid, roles, lastviewedat, msgcount, mentioncount, notifyprops,
+                     lastupdateat, schemeuser, schemeadmin, schemeguest, mentioncountroot,
+                     msgcountroot, urgentmentioncount)
+                 VALUES ($1, $2, '', 0, 0, 0, '{}'::jsonb, 1788600000000, TRUE, FALSE, FALSE, 0, 0, 0)
+                 ON CONFLICT (channelid, userid) DO NOTHING",
+            )
+            .bind(&channel)
+            .bind(&bot_id)
+            .execute(&pool)
+            .await
+            .expect("the bot joins the channel");
+            users.insert("bot", bot_id);
 
             // `chge` is deactivated **last**, so its `Users.UpdateAt` settles before any read.
             let deactivated = client
@@ -658,10 +658,12 @@ async fn the_page_matches_go_byte_for_byte_and_every_predicate_bites() {
         !ids.contains(&f.users["chge"].as_str()),
         "chge is deactivated"
     );
-    // 5. `Bots.UserId IS NULL` drops the bot.
-    if let Some(bot) = f.users.get("bot") {
-        assert!(!ids.contains(&bot.as_str()), "a bot is not a member here");
-    }
+    // 5. `Bots.UserId IS NULL` drops the bot — which is a `ChannelMembers` row like any other,
+    //    and is in none of the groups, so nothing but that predicate keeps it out.
+    assert!(
+        !ids.contains(&f.users["bot"].as_str()),
+        "a bot is a channel member here and must not be in the answer"
+    );
     // 6. The member with no group row at all is present, with `groups: []` and not `null` —
     //    the app layer's `user.Groups = []*model.Group{}`.
     assert!(ids.contains(&f.admin.as_str()), "the admin is a member");
@@ -823,6 +825,42 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
         "`ORDER BY Users.Username ASC`, one at a time"
     );
 
+    // **A page size other than one.** With `per_page=1` the offset is `page * 1`, so a port that
+    // dropped the multiplication entirely would agree on every page — the mutation
+    // `page-offset-ignores-the-page-number` survived the loop above for exactly that reason.
+    // At `per_page=2`, page 1 must start where page 0 stopped.
+    let p = minus(
+        &f.channel,
+        &format!("group_ids={GROUP_ONE}&page=0&per_page=2"),
+    );
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    let first: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+    let p = minus(
+        &f.channel,
+        &format!("group_ids={GROUP_ONE}&page=1&per_page=2"),
+    );
+    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
+    let second: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
+
+    let page_ids = |v: &serde_json::Value| -> Vec<String> {
+        v["users"]
+            .as_array()
+            .expect("a users array")
+            .iter()
+            .map(|u| u["id"].as_str().expect("an id").to_owned())
+            .collect()
+    };
+    let (a, b) = (page_ids(&first), page_ids(&second));
+    assert_eq!(a, expected[..2], "page 0 of 2 is the first two");
+    assert_eq!(a.len(), 2, "and it is two, not one");
+    assert_eq!(
+        b,
+        expected[2..(4.min(expected.len()))],
+        "page 1 of 2 starts at offset 2, not at offset 1"
+    );
+
     // One page past the end is an empty list and the same total, not a 404.
     let p = minus(
         &f.channel,
@@ -889,6 +927,12 @@ async fn the_group_ids_gates_answer_the_same_400_go_does() {
         format!("group_ids={},{}", "a".repeat(13), "b".repeat(13)),
         // A trailing comma is an empty element, and "" is not a valid id.
         format!("group_ids={GROUP_ONE},"),
+        // **The two gates run on two different strings.** Stripped, this is `GROUP_ONE` and a
+        // valid id; raw, it is 27 characters and is not. Go splits the **raw** parameter, so it
+        // is a 400 — and a port that validated the stripped copy would answer 200 here. The only
+        // row in this list that separates the two, and the mutation
+        // `group-ids-split-runs-on-the-stripped-string` survived until it existed.
+        format!("group_ids={}!{}", &GROUP_ONE[..3], &GROUP_ONE[3..]),
     ] {
         let p = minus(&f.channel, &query);
         let ((go_status, go), (rs_status, rs)) = common::fetch_both_raw(&client, &token, &p).await;
