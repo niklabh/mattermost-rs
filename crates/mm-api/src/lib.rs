@@ -76,6 +76,7 @@ pub mod tokens;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
+pub mod user_convert;
 pub mod user_creates;
 pub mod user_deletes;
 pub mod user_updates;
@@ -392,6 +393,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/roles",
             partially_migrated_with_ids(&state, put(user_updates::update_user_roles)),
+        )
+        // The conversion pair and the guest pair, all four `POST` and all four one segment
+        // deeper than `{user_id}`, so there is no precedence question with the route above.
+        .route(
+            "/api/v4/users/{user_id}/convert_to_bot",
+            partially_migrated_with_ids(&state, post(user_convert::convert_user_to_bot)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/promote",
+            partially_migrated_with_ids(&state, post(user_convert::promote_guest_to_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/demote",
+            partially_migrated_with_ids(&state, post(user_convert::demote_user_to_guest)),
         )
         // The literal `ids` beside `{user_id}`: axum prefers the literal, so `POST /users/ids`
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
@@ -2633,6 +2648,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/bots/{bot_user_id}/enable",
             partially_migrated_with_ids(&state, post(bots::enable_bot)),
         )
+        .route(
+            "/api/v4/bots/{bot_user_id}/convert_to_user",
+            partially_migrated_with_ids(&state, post(user_convert::convert_bot_to_user)),
+        )
         // `{user_id:[A-Za-z0-9]+}` is the **only** id in this family Go spells with an explicit
         // charset in `InitBot`; the other two inherit it from `BaseRoutes`. Both are id-shaped, so
         // `partially_migrated_with_ids` applies the same rule to each — including to the literal
@@ -3689,6 +3708,9 @@ mod tests {
                 Method::GET,
                 format!("/api/v4/users/{USER}/terms_of_service"),
             ),
+            (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
+            (Method::POST, format!("/api/v4/users/{USER}/promote")),
+            (Method::POST, format!("/api/v4/users/{USER}/demote")),
             // And `me`, which resolves through the same `{user_id}` slot.
             (Method::GET, "/api/v4/users/me".to_owned()),
             (Method::GET, "/api/v4/users/me/preferences".to_owned()),
@@ -3721,14 +3743,17 @@ mod tests {
             );
         }
 
-        // The other side of the same coin: three literals Go owns under `{user_id}` that this
+        // The other side of the same coin: two literals Go owns under `{user_id}` that this
         // server still forwards. There is no Go server on port 1, so a forwarded request answers
         // without the header — and if a registration above had swallowed them, they would come
         // back as ours.
+        //
+        // `convert_to_bot` left this list when `user_convert` landed: it is answered here now and
+        // forwards only for an account carrying an `AuthService`, which is a decision taken from
+        // the row rather than from the path.
         let forwarded: Vec<(Method, String)> = vec![
             (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
             (Method::PUT, format!("/api/v4/users/{USER}/auth")),
-            (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
         ];
         for (method, path) in &forwarded {
             let response = router(state.clone())

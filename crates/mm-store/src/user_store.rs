@@ -358,6 +358,35 @@ pub trait UserStore {
         hashed_password: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.PromoteGuestToUser` (user_store.go:2195) — behind
+    /// `POST /api/v4/users/{user_id}/promote`.
+    ///
+    /// # Three statements in one transaction, and the first one is a read
+    ///
+    /// Go reads the user *inside* the transaction to get its roles, rewrites every `system_guest`
+    /// token to `system_user` **in place**, and writes the list back joined by a single space.
+    /// The substitution is per element of `strings.Fields`, not a `strings.Replace` over the
+    /// whole string: a role called `system_guest_reviewer` is left alone, and the relative order
+    /// of the caller's other roles is preserved. A port that rebuilt the list — dropping
+    /// `system_guest` and appending `system_user` — would reorder roles for every guest that
+    /// holds more than one, and `Roles` is on the wire.
+    ///
+    /// A guest with **no** `system_guest` token writes its own roles back unchanged and still
+    /// bumps `UpdateAt`; the handler's `IsGuest()` gate is what normally stops that.
+    ///
+    /// # `SchemeUser` and `SchemeGuest` move for *every* membership, unscoped by team
+    ///
+    /// Both `ChannelMembers` and `TeamMembers` are updated by `UserId` alone, so promotion is
+    /// installation-wide — there is no per-team promotion. `SchemeUser` is set true and
+    /// `SchemeGuest` false even on rows where neither was a guest's, which is a no-op in value
+    /// terms but still rewrites the row.
+    ///
+    /// A miss is [`StoreError::NotFound`] from the read, before anything is written.
+    fn promote_guest_to_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetForLogin` (user_store.go:1422).
     ///
     /// # The two flags choose the predicate, and neither being set is an error
@@ -2846,6 +2875,90 @@ impl UserStore for SqlUserStore {
         })?;
 
         tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, roles))]
+    async fn promote_guest_to_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go's `us.Get(rctx, userId)` inside the transaction, of which only `GetRoles()` is used.
+        // A miss there is `ErrNotFound` and nothing has been written yet.
+        let roles: String = sqlx::query_scalar!("SELECT roles FROM users WHERE id = $1", user_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to get User with userId={user_id}"),
+                source,
+            })?
+            .flatten()
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "User",
+                criteria: format!("id={user_id}"),
+            })?;
+
+        // `strings.Fields` then an in-place substitution, then `strings.Join(roles, " ")`.
+        let promoted = roles
+            .split_whitespace()
+            .map(|role| {
+                if role == mm_model::user::external::SYSTEM_GUEST_ROLE_ID {
+                    mm_model::bot::external::SYSTEM_USER_ROLE_ID
+                } else {
+                    role
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        tracing::Span::current().record("roles", &promoted);
+
+        let cur_time = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1",
+            user_id,
+            promoted,
+            cur_time,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update ChannelMembers with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update TeamMembers with userId={user_id}"),
+            source,
+        })?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+
         Ok(())
     }
 

@@ -1,0 +1,82 @@
+# Mutation plan for the four account-conversion routes:
+#
+#   POST /api/v4/users/{user_id}/convert_to_bot
+#   POST /api/v4/bots/{bot_user_id}/convert_to_user
+#   POST /api/v4/users/{user_id}/promote
+#   POST /api/v4/users/{user_id}/demote
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-convert.plan
+#
+# These routes turn accounts into bots and back, so the decisions worth mutating are the ones
+# whose wrong answer leaves an account in a state no code path is supposed to produce: a bot that
+# is still logged in, a user whose password was never written, a guest whose memberships did not
+# move with its roles.
+#
+# What is mutated, and why each is a plausible misreading:
+#
+#   * **the three gate orders**, which differ per route and are the whole point of the family. Each
+#     swap is invisible to any request that is wrong in only one way, so each is paired with a
+#     fixture that is wrong in two.
+#   * **which permission each route names.** No stock role on this deployment holds `promote_guest`
+#     without `manage_system`, so a planted role carrying exactly `promote_guest` is what separates
+#     them; without it all four constants are interchangeable.
+#   * **the trailing newline**, in both directions. `convertUserToBot` writes bytes and
+#     `convertBotToUser` encodes — two lines apart in the Go tree and different on the wire.
+#   * **`set_system_admin`**, forced to each constant, and the `!IsInRole` guard that stops it
+#     appending a duplicate.
+#   * **the five writes of `ConvertBotToUser`**, whose order has no transaction around it: a
+#     password written before the patch, or a `Bots` delete moved ahead of the password, changes
+#     what a client sees after a *failed* call.
+#   * **the promotion transaction's three statements**, each dropped and the channel one inverted.
+#   * **`JoinDefaultChannels`' two arguments**, including `shouldBeAdmin`, which is why
+#     `guest_shape` counts `SchemeAdmin` rows.
+#
+# # Not mutated, and why
+#
+# **The order of promote's two 501s.** `IsMagicLinkEnabled` is `AuthService == "magic_link" &&
+# IsGuest()`, so it can only be true when `!IsGuest()` is already false. Swapping the two checks
+# cannot change any answer, and a mutation that cannot change an answer is a false SURVIVED.
+#
+# **`PromoteGuestToUser`'s `requestorId`.** Its only use in Go is the join system post, which this
+# port does not write (D-243), so passing the target instead of the caller is unobservable here.
+#
+# **`ConvertUserToBot` revoking before saving.** The only fixture that reaches a failing `Save` is
+# a planted bot, which has no sessions, so the swap changes nothing that is measured. Reaching it
+# would need an account that is already a bot *and* logged in, which no route can produce.
+#
+# **`BotStore::permanent_delete` losing its predicate outright.** `DELETE FROM bots WHERE
+# length($1) >= 0` empties the table for the whole installation, and the debris outlives the
+# mutation (D-385). The predicate is mutated to the *wrong column* instead, which is the same
+# reading error and deletes nothing.
+
+api-convert-to-bot-checks-the-permission-first	crates/mm-api/src/user_convert.rs	    let user = match state.app.get_user(&user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n\n    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    let federated	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    let user = match state.app.get_user(&user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n\n    let federated	api	user_convert
+api-convert-to-bot-wants-promote-guest	crates/mm-api/src/user_convert.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    let federated	        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    let federated	api	user_convert
+api-convert-to-bot-forwards-the-unfederated-account	crates/mm-api/src/user_convert.rs	    if federated {	    if !federated {	api	user_convert
+api-convert-to-bot-body-gains-a-newline	crates/mm-api/src/user_convert.rs	        Ok(bot) => match serde_json::to_vec(&bot) {	        Ok(bot) => match serde_json::to_vec(&bot).map(|mut b| {\n            b.push(b'\\n');\n            b\n        }) {	api	user_convert
+api-convert-to-user-wants-promote-guest	crates/mm-api/src/user_convert.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    match state	        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    match state	api	user_convert
+api-convert-to-user-accepts-an-empty-password	crates/mm-api/src/user_convert.rs	    if patch.password.as_deref().unwrap_or_default().is_empty() {	    if patch.password.is_none() {	api	user_convert
+api-convert-to-user-checks-the-permission-before-the-body	crates/mm-api/src/user_convert.rs	    let patch: UserPatch = match decode_one_from_json(&bytes) {	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n    let patch: UserPatch = match decode_one_from_json(&bytes) {	api	user_convert
+api-convert-to-user-loses-its-trailing-newline	crates/mm-api/src/user_convert.rs	                body.push(b'\\n');	                let _ = &mut body;	api	user_convert
+api-convert-to-user-never-sets-the-system-admin	crates/mm-api/src/user_convert.rs	    let set_system_admin = query_flag_is_true(query.as_deref(), "set_system_admin");	    let set_system_admin = false;\n    let _ = query;	api	user_convert
+api-convert-to-user-always-sets-the-system-admin	crates/mm-api/src/user_convert.rs	    let set_system_admin = query_flag_is_true(query.as_deref(), "set_system_admin");	    let set_system_admin = true;\n    let _ = query;	api	user_convert
+api-promote-wants-manage-system	crates/mm-api/src/user_convert.rs	        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)	api	user_convert
+api-promote-fetches-before-it-checks-the-permission	crates/mm-api/src/user_convert.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_PROMOTE_GUEST],\n        ))\n        .into_response();\n    }\n\n    let user = match state.app.get_user(&user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };	    let user = match state.app.get_user(&user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n\n    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_PROMOTE_GUEST],\n        ))\n        .into_response();\n    }	api	user_convert
+api-promote-guest-check-is-inverted	crates/mm-api/src/user_convert.rs	    if !user.is_guest() {	    if user.is_guest() {	api	user_convert
+api-promote-magic-link-check-is-inverted	crates/mm-api/src/user_convert.rs	    if user.is_magic_link_enabled() {	    if !user.is_magic_link_enabled() {	api	user_convert
+api-demote-names-the-config-refusal-not-the-licence-one	crates/mm-api/src/user_convert.rs	            "api.team.demote_user_to_guest.license.error",	            "api.team.demote_user_to_guest.disabled.error",	api	user_convert
+api-demote-validates-the-id-after-the-licence	crates/mm-api/src/user_convert.rs	    if !is_valid_id(user_id) {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }\n\n    match licence_gate	    if false && !is_valid_id(user_id) {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }\n\n    match licence_gate	api	user_convert
+api-the-501s-are-403s	crates/mm-api/src/user_convert.rs	    ApiError::from(AppError::new(where_, id, None, String::new(), 501))	    ApiError::from(AppError::new(where_, id, None, String::new(), 403))	api	user_convert
+app-convert-to-bot-skips-the-session-revoke	crates/mm-app/src/user_convert.rs	        self.revoke_all_sessions(&user.id).await?;	        let _ = &user.id;	api	user_convert
+app-convert-to-user-leaves-the-bot-row-standing	crates/mm-app/src/user_convert.rs	            .permanent_delete(&bot.user_id)	            .permanent_delete("")	api	user_convert
+app-convert-to-user-deletes-the-bot-before-writing-the-password	crates/mm-app/src/user_convert.rs	        self.update_password(\n            caller_session,\n            &user,\n            patch.password.as_deref().unwrap_or_default(),\n        )\n        .await?;	        self.store()\n            .bot()\n            .permanent_delete(&bot.user_id)\n            .await\n            .ok();\n        self.update_password(\n            caller_session,\n            &user,\n            patch.password.as_deref().unwrap_or_default(),\n        )\n        .await?;	api	user_convert
+app-convert-to-user-appends-the-admin-role-even-when-present	crates/mm-app/src/user_convert.rs	        if sysadmin && !user.is_in_role(mm_model::user::external::SYSTEM_ADMIN_ROLE_ID) {	        if sysadmin {	api	user_convert
+app-promote-skips-the-default-channel-join	crates/mm-app/src/user_convert.rs	        for team in &teams {	        for team in teams.iter().take(0) {	api	user_convert
+app-promote-joins-the-default-channels-as-an-admin	crates/mm-app/src/user_convert.rs	                .join_default_channels(&team.id, user, false, requestor_id)	                .join_default_channels(&team.id, user, true, requestor_id)	api	user_convert
+store-promote-forgets-the-channel-members	crates/mm-store/src/user_store.rs	"UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",	"UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1 AND false",	api	user_convert
+store-promote-forgets-the-team-members	crates/mm-store/src/user_store.rs	"UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1",	"UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1 AND false",	api	user_convert
+store-promote-swaps-the-two-scheme-flags	crates/mm-store/src/user_store.rs	"UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",	"UPDATE channelmembers SET schemeuser = false, schemeguest = true WHERE userid = $1",	api	user_convert
+store-promote-never-writes-the-roles	crates/mm-store/src/user_store.rs	            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1",	            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1 AND false",	api	user_convert
+store-promote-substitutes-the-admin-role	crates/mm-store/src/user_store.rs	                    mm_model::bot::external::SYSTEM_USER_ROLE_ID	                    mm_model::user::external::SYSTEM_ADMIN_ROLE_ID	api	user_convert
+store-bot-permanent-delete-keys-on-the-owner	crates/mm-store/src/bot_store.rs	sqlx::query!("DELETE FROM bots WHERE userid = $1", bot_user_id)	sqlx::query!("DELETE FROM bots WHERE ownerid = $1", bot_user_id)	api	user_convert
+control-reorder-two-independent-updates	crates/mm-store/src/user_store.rs	"UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",\n            user_id,\n        )\n        .execute(&mut *transaction)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to update ChannelMembers with userId={user_id}"),\n            source,\n        })?;\n\n        sqlx::query!(\n            "UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1",\n            user_id,\n        )\n        .execute(&mut *transaction)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to update TeamMembers with userId={user_id}"),\n            source,\n        })?;	"UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1",\n            user_id,\n        )\n        .execute(&mut *transaction)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to update TeamMembers with userId={user_id}"),\n            source,\n        })?;\n\n        sqlx::query!(\n            "UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",\n            user_id,\n        )\n        .execute(&mut *transaction)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to update ChannelMembers with userId={user_id}"),\n            source,\n        })?;	api	user_convert
+control-inline-a-binding	crates/mm-app/src/user_convert.rs	                let is_guest = promoted.is_guest();\n                if let Err(err) = self.update_sessions_is_guest(&promoted, is_guest).await {	                if let Err(err) = self\n                    .update_sessions_is_guest(&promoted, promoted.is_guest())\n                    .await\n                {	api	user_convert

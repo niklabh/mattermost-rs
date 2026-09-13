@@ -266,7 +266,7 @@ impl App {
     /// that user's connections only and not the rest of the team. The payload is the member
     /// JSON-encoded into a *string* under `member`; a client parses it with a second
     /// `JSON.parse`, so a nested object there would break every existing client.
-    async fn send_updated_team_member_event(&self, member: &TeamMember) {
+    pub(crate) async fn send_updated_team_member_event(&self, member: &TeamMember) {
         let mut event = WebSocketEvent::new(
             WEBSOCKET_EVENT_MEMBERROLE_UPDATED,
             "",
