@@ -1,0 +1,96 @@
+# Mutation plan for the channel listing and search routes —
+# `GET /channels`, `POST /channels/search`, `POST /channels/group/search`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-search-all.plan
+#
+# (`channel-search.plan`, without the suffix, belongs to `searchChannelsForTeam`.)
+#
+# Every line runs the `channel_search_all` parity module, the only suite that reaches these
+# queries. What is worth mutating here is the *shape* of the answer as much as its content: two
+# response types selected by a flag, two sort keys with no tie-break behind them, a count query
+# that deliberately disagrees with the list beside it, and a permission asked twice — once as a
+# gate and once as a field selector.
+#
+# ## A mutation may not leave a bound parameter unused
+#
+# Five lines of the first run were reported as harness faults, all the same cause: `sqlx::query!`
+# asks Postgres to describe the statement, and a parameter with no remaining reference cannot be
+# typed — `could not determine data type of parameter $2`. That is a compile failure, so no test
+# runs and the verdict is void. Neutralise a predicate instead of deleting it:
+#
+#   OFFSET $2          ->  swap it with LIMIT $1, so both stay bound and the page moves
+#   ($9 AND <pred>)    ->  (($9 OR NOT $9) AND <pred>), vacuously true, $9 still referenced
+#   WHERE <pred($1)>   ->  WHERE <pred($1)> OR TRUE
+#
+# Each rewritten line was compiled on its own before this plan was run.
+#
+# ## Not mutated
+#
+# Because no input reachable on this stack can tell the answers apart, so a survivor would be a
+# fact about the fixture rather than about the code:
+#
+#   * the `exclude_remote` disjunction — `SharedChannels` is empty and nothing in api4 writes it;
+#   * `parent_access_control_policy_id`'s `Data->'imports' @>` branch, for the same reason;
+#   * `autocomplete_in_team_filtered`'s `Shared` and `GroupConstrained` predicates — no fixture
+#     channel can be either;
+#   * `CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT` (100) — every fixture search returns single digits, so
+#     50 and 100 are the same answer;
+#   * which permission each 403 names: `MakePermissionError` puts the list in `detailed_error`,
+#     which Go wipes before the wire ([D-092]), so the bodies are identical either way.
+#
+# ## One equivalent mutant, retired with its reason
+#
+# `gac-type-admits-group-messages` — `c.type IN ('P','O')` -> `('P','O','G')` in the **list**
+# query — survived, and provably cannot be caught: that query inner-joins
+# `Teams ON t.id = c.teamid`, and every `G` and `D` row in the database carries `teamid = ''`
+# (measured: 577 and 2 rows, none joining a team). The join already excludes them, so the type
+# predicate is dead for those two types there. It is *not* dead in the count query, which has no
+# join — so the line below mutates that copy instead, where the same mistake moves `total_count`
+# by the 577 group messages.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+gac-order-drops-the-team-key	crates/mm-store/src/channel_store.rs	WHERE acp.id = c.id))\n         ORDER BY c.displayname, t.displayname	WHERE acp.id = c.id))\n         ORDER BY c.displayname	api	channel_search_all
+gac-order-uses-name-not-display-name	crates/mm-store/src/channel_store.rs	WHERE acp.id = c.id))\n         ORDER BY c.displayname, t.displayname	WHERE acp.id = c.id))\n         ORDER BY c.name, t.displayname	api	channel_search_all
+gac-offset-and-limit-swapped	crates/mm-store/src/channel_store.rs	WHERE acp.id = c.id))\n         ORDER BY c.displayname, t.displayname\n         LIMIT $1 OFFSET $2	WHERE acp.id = c.id))\n         ORDER BY c.displayname, t.displayname\n         LIMIT $2 OFFSET $1	api	channel_search_all
+gacc-type-admits-group-messages	crates/mm-store/src/channel_store.rs	WHERE c.type IN ('P', 'O')\n           AND ($1 OR c.deleteat = 0)	WHERE c.type IN ('P', 'O', 'G')\n           AND ($1 OR c.deleteat = 0)	api	channel_search_all
+gac-include-deleted-inverted	crates/mm-store/src/channel_store.rs	AND ($4 OR c.deleteat = 0)	AND (NOT $4 OR c.deleteat = 0)	api	channel_search_all
+gac-exclude-names-inverted	crates/mm-store/src/channel_store.rs	AND (cardinality($8::text[]) = 0 OR c.name <> ALL($8::text[]))	AND (cardinality($8::text[]) = 0 OR c.name = ALL($8::text[]))	api	channel_search_all
+gac-policy-id-column-suppressed	crates/mm-store/src/channel_store.rs	        opts.include_policy_id,\n        opts.include_deleted,	        false,\n        opts.include_deleted,	api	channel_search_all
+gac-exclude-policy-constrained-inverted	crates/mm-store/src/channel_store.rs	AND (NOT $9 OR NOT EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc	AND (NOT $9 OR EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc	api	channel_search_all
+gac-acp-enforced-inverted	crates/mm-store/src/channel_store.rs	AND ($10 OR NOT $11 OR EXISTS (	AND ($10 OR NOT $11 OR NOT EXISTS (	api	channel_search_all
+gac-exclude-acp-inverted	crates/mm-store/src/channel_store.rs	AND (NOT $10 OR c.id NOT IN (\n                   SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel'))	AND (NOT $10 OR c.id IN (\n                   SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel'))	api	channel_search_all
+gacc-include-deleted-inverted	crates/mm-store/src/channel_store.rs	AND ($1 OR c.deleteat = 0)	AND ($1 OR c.deleteat <> 0)	api	channel_search_all
+gacc-exclude-names-ignored	crates/mm-store/src/channel_store.rs	AND (cardinality($5::text[]) = 0 OR c.name <> ALL($5::text[]))	AND (cardinality($5::text[]) >= 0 OR c.name <> ALL($5::text[]))	api	channel_search_all
+sac-order-drops-the-team-key	crates/mm-store/src/channel_store.rs	                END)\n         ORDER BY c.displayname, t.displayname	                END)\n         ORDER BY c.displayname	api	channel_search_all
+sac-order-uses-name-not-display-name	crates/mm-store/src/channel_store.rs	                END)\n         ORDER BY c.displayname, t.displayname	                END)\n         ORDER BY c.name, t.displayname	api	channel_search_all
+sac-offset-and-limit-swapped	crates/mm-store/src/channel_store.rs	                END)\n         ORDER BY c.displayname, t.displayname\n         LIMIT $1 OFFSET $2	                END)\n         ORDER BY c.displayname, t.displayname\n         LIMIT $2 OFFSET $1	api	channel_search_all
+sac-deleted-and-include-deleted-swapped	crates/mm-store/src/channel_store.rs	WHERE (($5 AND c.deleteat <> 0) OR (NOT $5 AND ($6 OR c.deleteat = 0)))	WHERE (($6 AND c.deleteat <> 0) OR (NOT $6 AND ($5 OR c.deleteat = 0)))	api	channel_search_all
+sac-search-by-id-guard-always-true	crates/mm-store/src/channel_store.rs	OR ($9 AND LOWER(c.id) LIKE LOWER($8) ESCAPE '*')	OR (($9 OR NOT $9) AND LOWER(c.id) LIKE LOWER($8) ESCAPE '*')	api	channel_search_all
+sac-team-ids-inverted	crates/mm-store/src/channel_store.rs	AND (cardinality($14::text[]) = 0 OR c.teamid = ANY($14::text[]))	AND (cardinality($14::text[]) = 0 OR c.teamid <> ALL($14::text[]))	api	channel_search_all
+sac-public-ignores-private	crates/mm-store/src/channel_store.rs	                  WHEN $17 AND NOT $18\n                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)	                  WHEN $17\n                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)	api	channel_search_all
+sac-private-selects-open-channels	crates/mm-store/src/channel_store.rs	WHEN $18 AND NOT $17 THEN c.type = 'P'	WHEN $18 AND NOT $17 THEN c.type = 'O'	api	channel_search_all
+sac-exclude-acp-inverted	crates/mm-store/src/channel_store.rs	                  WHEN $20 THEN c.id NOT IN (	                  WHEN $20 THEN c.id IN (	api	channel_search_all
+sac-acp-enforced-inverted	crates/mm-store/src/channel_store.rs	                  WHEN $23\n                    THEN EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)	                  WHEN $23\n                    THEN NOT EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)	api	channel_search_all
+sac-exclude-policy-constrained-inverted	crates/mm-store/src/channel_store.rs	AND (NOT $4 OR NOT EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc	AND (NOT $4 OR EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc	api	channel_search_all
+sac-policy-id-column-suppressed	crates/mm-store/src/channel_store.rs	        opts.include_policy_id,\n        opts.exclude_policy_constrained,	        false,\n        opts.exclude_policy_constrained,	api	channel_search_all
+sac-count-ignores-deleted	crates/mm-store/src/channel_store.rs	WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)))	WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)) OR TRUE)	api	channel_search_all
+sac-count-drops-the-search-clause	crates/mm-store/src/channel_store.rs	                    WHERE rpc.channelid = c.id))\n           AND (NOT $4\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'	                    WHERE rpc.channelid = c.id))\n           AND (NOT $4 OR TRUE\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'	api	channel_search_all
+sgc-every-word-becomes-any-word	crates/mm-store/src/channel_store.rs	~~ ALL($2::text[])	~~ ANY($2::text[])	api	channel_search_all
+sgc-searches-direct-messages	crates/mm-store/src/channel_store.rs	WHERE c.type = 'G' AND u.id = $1	WHERE c.type = 'D' AND u.id = $1	api	channel_search_all
+sgc-limit-is-one	crates/mm-store/src/channel_store.rs	                    LIMIT 50)	                    LIMIT 1)	api	channel_search_all
+sgc-like-is-prefix-only	crates/mm-store/src/channel_store.rs	.map(|word| format!("%{}%", sanitize_search_term_with_backslash(word)))	.map(|word| format!("{}%", sanitize_search_term_with_backslash(word)))	api	channel_search_all
+sgc-term-is-not-lowered	crates/mm-store/src/channel_store.rs	let terms: Vec<String> = mm_model::utils::go_to_lower(term)	let terms: Vec<String> = term.to_owned()	api	channel_search_all
+app-count-keeps-the-access-control-flag	crates/mm-app/src/channel.rs	        store_opts.access_control_policy_enforced = false;	        store_opts.access_control_policy_enforced = opts.access_control_policy_enforced;	api	channel_search_all
+app-group-search-trims-before-the-empty-check	crates/mm-app/src/channel.rs	        if term.is_empty() {\n            return Ok(ChannelList(Vec::new()));	        if term.trim().is_empty() {\n            return Ok(ChannelList(Vec::new()));	api	channel_search_all
+app-search-all-does-not-trim	crates/mm-app/src/channel.rs	        let term = term.trim();\n\n        let (channels, total) = self	        let term = term;\n\n        let (channels, total) = self	api	channel_search_all
+api-include-total-count-inverted	crates/mm-api/src/channels.rs	    if !query_flag_is_true(query, "include_total_count") {	    if query_flag_is_true(query, "include_total_count") {	api	channel_search_all
+api-body-pagination-needs-only-one-half	crates/mm-api/src/channels.rs	    let encoded = if props.page.is_some() && props.per_page.is_some() {	    let encoded = if props.page.is_some() || props.per_page.is_some() {	api	channel_search_all
+api-include-deleted-is-anded	crates/mm-api/src/channels.rs	let include_deleted = query_flag_is_true(query, "include_deleted") || props.include_deleted;	let include_deleted = query_flag_is_true(query, "include_deleted") && props.include_deleted;	api	channel_search_all
+api-system-console-defaults-to-false	crates/mm-api/src/channels.rs	        _ => true,\n    };\n    tracing::Span::current().record("system_console", from_sys_console);	        _ => false,\n    };\n    tracing::Span::current().record("system_console", from_sys_console);	api	channel_search_all
+api-empty-system-console-is-parsed	crates/mm-api/src/channels.rs	        Some(raw) if !raw.is_empty() => match parse_go_bool(&raw) {	        Some(raw) => match parse_go_bool(&raw) {	api	channel_search_all
+api-sanitize-gate-inverted	crates/mm-api/src/channels.rs	    if state\n        .app\n        .session_has_permission_to_any(&session.0, &READERS)\n        .await\n    {\n        return;\n    }	    if !state\n        .app\n        .session_has_permission_to_any(&session.0, &READERS)\n        .await\n    {\n        return;\n    }	api	channel_search_all
+api-team-branch-accepts-more-than-one-id	crates/mm-api/src/channels.rs	    if let [team_id] = team_ids\n        && is_valid_id(team_id)	    if let [team_id, ..] = team_ids\n        && is_valid_id(team_id)	api	channel_search_all
+api-team-branch-skips-the-id-check	crates/mm-api/src/channels.rs	    if let [team_id] = team_ids\n        && is_valid_id(team_id)\n    {	    if let [team_id] = team_ids {	api	channel_search_all
+api-filtered-autocomplete-needs-both-flags	crates/mm-api/src/channels.rs	        let channels = if props.private || props.exclude_group_constrained {	        let channels = if props.private && props.exclude_group_constrained {	api	channel_search_all
+control-reorder-two-independent-select-columns	crates/mm-store/src/channel_store.rs	               NULL::varchar AS "policyid",\n               COALESCE(t.displayname, '') AS "teamdisplayname!",\n               COALESCE(t.name, '') AS "teamname!",	               NULL::varchar AS "policyid",\n               COALESCE(t.name, '') AS "teamname!",\n               COALESCE(t.displayname, '') AS "teamdisplayname!",	api	channel_search_all
+control-rename-a-local-binding	crates/mm-api/src/channels.rs	    let with_count = ChannelsWithCount {\n        channels: Some(channels),\n        total_count,\n    };\n    Ok(channel_list_response(encoded_json(\n        "getAllChannels",\n        &with_count,\n    )?))	    let wrapper = ChannelsWithCount {\n        channels: Some(channels),\n        total_count,\n    };\n    Ok(channel_list_response(encoded_json(\n        "getAllChannels",\n        &wrapper,\n    )?))	api	channel_search_all

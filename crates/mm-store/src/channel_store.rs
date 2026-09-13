@@ -6941,11 +6941,13 @@ const CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT: i64 = 100;
 /// Port of `SqlChannelStore.SearchAllChannels` (channel_store.go:3778) and `channelSearchQuery`
 /// (channel_store.go:3644) — the system console's channel search.
 ///
-/// Returns the page and the total, where the total is **0 unless the request is paginated**:
-/// Go runs the second `count(*)` query only when `IsPaginated()` — both `Page` and `PerPage`
-/// present — so an unpaginated search reports zero rather than the number it would have found.
-/// The handler then only puts the count on the wire when the same condition holds, so the zero
-/// is never observable; it is still what this returns.
+/// Returns the page and the total. **The total means two different things**: Go runs the second
+/// `count(*)` query only when `IsPaginated()` — both `Page` and `PerPage` present — and
+/// otherwise sets it to `len(channels)`, the size of the page it already has
+/// (channel_store.go:3802). So an unpaginated search reports the number of rows returned, which
+/// is a ceiling rather than a total whenever the limit bit. The handler writes the count on the
+/// wire only under the paginated condition, so the difference is not observable through
+/// `searchAllChannels`; it is the store's contract all the same.
 ///
 /// # Order, and the absence of a tie-break
 ///
@@ -7125,7 +7127,14 @@ pub async fn search_all_channels(
         .collect::<Result<_, _>>()?;
 
     if !paginated {
-        return Ok((ChannelListWithTeamData(channels), 0));
+        // Go's `else` branch (channel_store.go:3802): the total of an unpaginated search is the
+        // **length of the page**, not zero and not a second query. Unobservable through
+        // `searchAllChannels`, whose handler writes the count only when the same condition holds
+        // — but this is the store's contract, and a future caller reading it would be told 0
+        // where Go says 4.
+        let total = i64::try_from(channels.len()).unwrap_or(i64::MAX);
+        tracing::Span::current().record("total", total);
+        return Ok((ChannelListWithTeamData(channels), total));
     }
 
     let total = sqlx::query_scalar!(

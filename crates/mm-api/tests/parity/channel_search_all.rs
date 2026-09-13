@@ -568,10 +568,21 @@ async fn the_console_search_flags_narrow_the_same_way() {
             serde_json::json!({ "term": format!("z{STEM} shared") }),
         ),
         (
-            // `App.SearchAllChannels` trims; without that the LIKE carries the spaces and
-            // matches nothing.
-            "a padded term is trimmed before it reaches the store",
-            serde_json::json!({ "term": format!("   {STEM}   ") }),
+            // **The term has to be a mid-word substring, and that is the whole point.**
+            // `App.SearchAllChannels` trims, and without the trim the LIKE carries the spaces
+            // and matches nothing — but the *fulltext* arm splits on whitespace, so padding
+            // never reaches the tsquery at all. A term like `mmrscastx` matches every fixture
+            // channel through `to_tsquery('mmrscastx:*')` against the hyphen-split lexeme in
+            // its `Name`, padded or not, and a dropped trim is invisible. Measured in Postgres:
+            // for `castx` the fulltext arm matches nothing and only the LIKE can find these
+            // rows, so the padding is observable. A mutation removing the trim survived this
+            // test until the term changed.
+            "a padded mid-word term is trimmed before it reaches the store",
+            serde_json::json!({ "term": "   castx   " }),
+        ),
+        (
+            "…and the same term unpadded, so the pair is a difference rather than a guess",
+            serde_json::json!({ "term": "castx" }),
         ),
     ];
 
@@ -1401,6 +1412,15 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
                 "/api/v4/channels?per_page=200&access_control_policy_enforced=true",
                 false,
             ),
+            (
+                // The mirror of the one above, and the only request in the suite that sends it
+                // to `getAllChannels` rather than to the search. Inverting this predicate
+                // survived a mutation run until this line existed: the search route's copy was
+                // covered and the list route's was not.
+                "exclude_access_control_policy_enforced",
+                "/api/v4/channels?per_page=200&exclude_access_control_policy_enforced=true",
+                true,
+            ),
         ] {
             let (go, rust) = fetch_both_stable(&client, &token, path).await;
             assert_lists_agree_modulo_ties(&go, &rust, path);
@@ -1410,6 +1430,12 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
                 present,
                 "{label}: the retention-constrained channel"
             );
+            if label == "exclude_access_control_policy_enforced" {
+                assert!(
+                    !display_names(&rust).contains(&format!("m{STEM} private")),
+                    "{label} must drop the enforced channel from the server-wide list"
+                );
+            }
             if label == "access_control_policy_enforced" {
                 assert_eq!(
                     names,

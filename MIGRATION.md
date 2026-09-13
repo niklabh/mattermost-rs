@@ -11493,6 +11493,29 @@ urgent post exists, `count_urgent_posts_after` is only ever compared at `0`, and
 The fourth route of the family, `GET /api/v4/teams/{team_id}/channels/managed_categories`, is
 **not registered by Go on this stack** and stays forwarded — see [D-440].
 
+*Mutations: 45 run, 43 caught, 2 controls survived, 0 harness faults.*
+`scripts/mutations/channel-search-all.plan` (the unsuffixed `channel-search.plan` is
+`searchChannelsForTeam`'s). Two passes were needed and both taught something:
+
+- **Five lines of the first pass were harness faults, all one cause.** A mutation that deletes a
+  predicate deletes a bound parameter's last reference, and `sqlx::query!` then cannot type it —
+  `could not determine data type of parameter $2`. That is a compile failure, so no test runs and
+  the verdict is void. Neutralise instead of deleting: swap `LIMIT $1 OFFSET $2`, wrap a guard as
+  `($9 OR NOT $9)`, append `OR TRUE`. The plan's header carries the rule; each rewritten line was
+  compiled on its own before the second pass.
+- **Two survivors, and neither was a shrug.** `app-search-all-does-not-trim` survived a test that
+  *did* send a padded term: `build_fulltext_term` splits on whitespace, so padding never reaches
+  the tsquery, and `mmrscastx:*` matches the hyphen-split lexeme in every fixture channel's
+  `Name` either way. The term had to become a mid-word substring (`castx`), which the fulltext arm
+  cannot match at all — verified in Postgres before the fixture changed.
+  `gac-exclude-acp-inverted` survived because the only request sending that flag sent it to the
+  search route, not to the list.
+- **One equivalent mutant, retired with its reason.** `c.type IN ('P','O')` → `('P','O','G')` in
+  the *list* query cannot be caught: that query inner-joins `Teams`, and every `G` and `D` row in
+  the database carries `teamid = ''` (577 and 2 rows, none joining a team), so the join already
+  excludes them. The count query has no join, the same mistake there moves `total_count` by 577,
+  and that line is caught.
+
 ### What a reader would otherwise get wrong
 
 1. **`include_total_count` changes the response's top-level type**, from a bare array to
@@ -11524,6 +11547,11 @@ The fourth route of the family, `GET /api/v4/teams/{team_id}/channels/managed_ca
    search in the file uses `*`.
 
 ### What is not here
+
+**`search_all_channels`' unpaginated total is `len(channels)`, not `0`** — Go's `else` branch at
+channel_store.go:3802, which is easy to read past. No test can see it (the handler writes the
+count only when paginated, which is the same condition that runs the real `count(*)`), so it is
+pinned by the doc comment rather than by an assertion.
 
 `channelSearchQuery`'s `PolicyID` branch — an inner join narrowing to one retention policy — has
 no caller in api4 and is not ported; `ChannelSearch` has no json tag for it. [D-441] records the
