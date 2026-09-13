@@ -128,6 +128,23 @@ pub trait SessionStore {
         &self,
         session: &Session,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateRoles` (session_store.go:331).
+    ///
+    /// **Every live session of the user**, not one row: the `WHERE` is on `UserId`, so a role
+    /// change reaches the caller's phone and desktop as well as the browser that made it. A port
+    /// keyed on `Id` would leave every other device carrying the old roles until it re-logged in.
+    ///
+    /// The length guard is `> UserRolesMaxLength` on the *bytes* of the string and it fires
+    /// **before** the statement, so an over-long list writes nothing at all. It is a plain
+    /// `fmt.Errorf` in Go rather than an `ErrInvalidInput`, and `UpdateUserRolesWithUser` only
+    /// *logs* whatever comes back — so this failing is silent to the client either way, and the
+    /// user row has already been written by then.
+    fn update_roles(
+        &self,
+        user_id: &str,
+        roles: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of `me.sessionSelectQuery`, named so both queries share a mapping.
@@ -549,6 +566,31 @@ impl SessionStore for SqlSessionStore {
         .await
         .map_err(|source| StoreError::Db {
             context: "failed to update Session".to_owned(),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn update_roles(&self, user_id: &str, roles: &str) -> Result<(), StoreError> {
+        // `len(roles)` in Go is bytes, not characters.
+        if roles.len() > mm_model::user::USER_ROLES_MAX_LENGTH {
+            return Err(StoreError::Argument {
+                entity: "Session",
+                detail: "given session roles length exceeds max storage limit",
+            });
+        }
+
+        sqlx::query!(
+            "UPDATE sessions SET roles = $1 WHERE userid = $2",
+            roles,
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with userId={user_id}"),
             source,
         })?;
 

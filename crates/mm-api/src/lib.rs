@@ -75,6 +75,7 @@ pub mod tokens;
 pub mod uploads;
 pub mod usage;
 pub mod user_creates;
+pub mod user_updates;
 pub mod users;
 pub mod views;
 pub mod webhooks;
@@ -349,9 +350,38 @@ pub fn router(state: AppState) -> Router {
         // The parameterised sibling. `/users/me` above wins as a literal; every *other* literal
         // Go owns under /users (`stats`, `known`, `autocomplete`, `tokens`, …) lands here and is
         // forwarded by the handler's serve-only-exact-ids rule — see `users::get_user`.
+        // `BaseRoutes.User.Handle("", APISessionRequired(updateUser)).Methods(PUT)`
+        // (api4/user.go:46) shares this path with the GET above; axum requires one method router
+        // per path, so the two are chained rather than registered twice — `.route` called twice
+        // with the same path panics on the duplicated fallback, not on the methods.
         .route(
             "/api/v4/users/{user_id}",
-            partially_migrated_with_ids(&state, get(users::get_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(users::get_user).put(user_updates::update_user),
+            ),
+        )
+        // The three literal children of `{user_id}` (api4/user.go:47, :49, :50). Each is one
+        // segment deeper than `/users/{user_id}`, so none of them shadows it — but the reverse
+        // risk is real and is why they are registered explicitly: matchit prefers a **static**
+        // child to a `{param}` one and does not backtrack across method routers, so a path that
+        // reaches `/users/{id}/` and finds no matching child is a 404 here rather than a fall
+        // through to the parameterised route. Every other `/users/{id}/…` segment Go owns —
+        // `image`, `mfa`, `password`, `email`, `tokens`, `teams`, `status`, … — is still reached
+        // through its own registration or through `partially_migrated`'s fallback, and
+        // `the_user_update_routes_and_their_neighbours_are_all_still_answered_here` in
+        // `tests/parity.rs` is the regression guard over the whole neighbourhood.
+        .route(
+            "/api/v4/users/{user_id}/patch",
+            partially_migrated_with_ids(&state, put(user_updates::patch_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/active",
+            partially_migrated_with_ids(&state, put(user_updates::update_user_active)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/roles",
+            partially_migrated_with_ids(&state, put(user_updates::update_user_roles)),
         )
         // The literal `ids` beside `{user_id}`: axum prefers the literal, so `POST /users/ids`
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
@@ -3299,5 +3329,124 @@ mod tests {
 
         assert!(state.show_full_name(), "names are shown");
         assert!(!state.show_email_address(), "emails are not");
+    }
+
+    /// Nothing the user-update session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `patch`, `active` and `roles` are **literal children of `{user_id}`**, registered under a
+    /// path whose parameterised parent this server already answers with `GET` and now `PUT`.
+    /// matchit prefers a static child to a `{param}` one and does not backtrack across method
+    /// routers, so a request that reaches `/users/{id}/` and finds no matching static child is a
+    /// 404 here rather than a fall-through — and the `/users/{id}/…` neighbourhood is one of the
+    /// busiest in api4. Registering three of its literals is exactly the shape that can silently
+    /// un-serve the rest.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `PUT /api/v4/users/{id}/mfa` — a route this server
+    /// deliberately forwards — to the `served` list and confirming the assertion fails. It does.
+    #[tokio::test]
+    async fn the_user_update_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The four this session adds.
+            (Method::PUT, format!("/api/v4/users/{USER}")),
+            (Method::PUT, format!("/api/v4/users/{USER}/patch")),
+            (Method::PUT, format!("/api/v4/users/{USER}/active")),
+            (Method::PUT, format!("/api/v4/users/{USER}/roles")),
+            // The parameterised parent keeps its GET.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            // Every other `/users/{id}/…` literal this server answered before them. Each is a
+            // sibling of `patch`/`active`/`roles` at the same depth, which is the depth at which
+            // a botched registration bites.
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (Method::GET, format!("/api/v4/users/{USER}/channel_members")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/teams/{USER}/threads"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+            // And `me`, which resolves through the same `{user_id}` slot.
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, "/api/v4/users/me/preferences".to_owned()),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The other side of the same coin: three literals Go owns under `{user_id}` that this
+        // server still forwards. There is no Go server on port 1, so a forwarded request answers
+        // without the header — and if a registration above had swallowed them, they would come
+        // back as ours.
+        let forwarded: Vec<(Method, String)> = vec![
+            (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
+            (Method::PUT, format!("/api/v4/users/{USER}/auth")),
+            (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
+        ];
+        for (method, path) in &forwarded {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "{method} {path} is now answered here and should still forward"
+            );
+        }
     }
 }
