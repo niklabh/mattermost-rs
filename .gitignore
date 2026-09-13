@@ -4,7 +4,14 @@
 
 # Go reference source — pinned shallow clone, never vendored into history.
 # The pinned SHA is recorded in MIGRATION.md; re-clone from there.
-/reference/mattermost/
+#
+# **No trailing slash, on purpose.** `/reference/mattermost/` matches only a directory, and in a
+# worktree this path is a *symlink* to the main checkout's clone. On 2026-09-13 a `git add -A` in
+# a worktree therefore committed both symlinks, and merging that into main clobbered the real
+# clone and the whole build directory (git treats ignored paths as expendable when a tracked
+# file lands on them). The same for `.build`, which was never listed at all.
+/reference/mattermost
+/reference/.build
 
 # Local environment
 .env
