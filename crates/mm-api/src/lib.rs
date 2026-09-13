@@ -75,6 +75,7 @@ pub mod tokens;
 pub mod uploads;
 pub mod usage;
 pub mod user_creates;
+pub mod user_deletes;
 pub mod user_updates;
 pub mod users;
 pub mod views;
@@ -345,20 +346,27 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v4/websocket/", get(websocket::connect_websocket))
         .route(
             "/api/v4/users/me",
-            partially_migrated(get(users::get_user_me)),
+            // `deleteUser` reaches this spelling in Go through `{user_id}` and `RequireUserId`'s
+            // `me` substitution; here the literal wins over the parameterised route, so the
+            // method has to be registered on it explicitly or it forwards. `PUT` is not, and
+            // still forwards — see `user_deletes::delete_user_me`.
+            partially_migrated(get(users::get_user_me).delete(user_deletes::delete_user_me)),
         )
         // The parameterised sibling. `/users/me` above wins as a literal; every *other* literal
         // Go owns under /users (`stats`, `known`, `autocomplete`, `tokens`, …) lands here and is
         // forwarded by the handler's serve-only-exact-ids rule — see `users::get_user`.
         // `BaseRoutes.User.Handle("", APISessionRequired(updateUser)).Methods(PUT)`
-        // (api4/user.go:46) shares this path with the GET above; axum requires one method router
-        // per path, so the two are chained rather than registered twice — `.route` called twice
-        // with the same path panics on the duplicated fallback, not on the methods.
+        // (api4/user.go:46) shares this path with the GET above, and `deleteUser` (api4/user.go:48)
+        // shares it again on DELETE; axum requires one method router per path, so the three are
+        // chained rather than registered three times — `.route` called twice with the same path
+        // panics on the duplicated fallback, not on the methods.
         .route(
             "/api/v4/users/{user_id}",
             partially_migrated_with_ids(
                 &state,
-                get(users::get_user).put(user_updates::update_user),
+                get(users::get_user)
+                    .put(user_updates::update_user)
+                    .delete(user_deletes::delete_user),
             ),
         )
         // The three literal children of `{user_id}` (api4/user.go:47, :49, :50). Each is one
