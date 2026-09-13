@@ -347,7 +347,8 @@ pub trait TeamStore {
 /// Postgres-backed implementation.
 #[derive(Debug, Clone)]
 pub struct SqlTeamStore {
-    pool: PgPool,
+    /// Shared with `group_syncable_store.rs`, which adds `update_members_role` on this type.
+    pub(crate) pool: PgPool,
 }
 
 impl SqlTeamStore {

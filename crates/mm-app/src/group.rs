@@ -187,6 +187,42 @@ impl App {
         Ok(())
     }
 
+    /// Port of `App.GetGroup` (app/group.go:16) with neither option set: the row whatever its
+    /// `DeleteAt`, 404 `app.group.no_rows` on a miss, 500 `app.select_error` otherwise.
+    ///
+    /// Through [`Self::get_groups_by_ids`]' query, which is `SqlGroupStore.Get`'s select with
+    /// `Id IN (…)` in place of `Id = ?` — one statement fewer to keep in step, and the same ten
+    /// columns with the same absence of a `DeleteAt` filter.
+    #[tracing::instrument(skip(self), fields(found))]
+    pub async fn get_group(&self, id: &str) -> AppResult<Group> {
+        let group = self
+            .store
+            .group()
+            .get_groups_by_ids(std::slice::from_ref(&id.to_owned()))
+            .await
+            .map_err(|source| {
+                AppError::boxed(
+                    "GetGroup",
+                    "app.select_error",
+                    None,
+                    source.to_string(),
+                    500,
+                )
+            })?
+            .into_iter()
+            .next();
+        tracing::Span::current().record("found", group.is_some());
+        group.ok_or_else(|| {
+            AppError::boxed(
+                "GetGroup",
+                "app.group.no_rows",
+                None,
+                format!("Group not found: {id}"),
+                404,
+            )
+        })
+    }
+
     /// Port of `App.GetGroupsByIDs` (app/group.go:740).
     ///
     /// **`app.select_error` at 500**, the generic store error id, not one of its own.

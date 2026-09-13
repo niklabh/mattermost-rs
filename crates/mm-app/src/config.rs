@@ -779,6 +779,11 @@ pub struct Config {
     /// while it is set rather than answering from the local rows alone.
     pub ldap_enable: bool,
 
+    /// `LdapSettings.ReAddRemovedMembers` (config.go:2845, default **false**): whether a group
+    /// sync re-adds a member who left or was removed from a team or channel by hand. Read by
+    /// `App::sync_roles_and_membership` for an LDAP-source group only.
+    pub ldap_re_add_removed_members: bool,
+
     /// `SamlSettings.Enable` (config.go, defaulted **`false`** at :3033).
     ///
     /// One of the five flags `login`'s deferred error mask reads (api4/user.go:2163). Any of
@@ -1202,6 +1207,7 @@ impl Default for Config {
             enable_sign_in_with_email: true,
             enable_sign_in_with_username: true,
             ldap_enable: false,
+            ldap_re_add_removed_members: false,
             saml_enable: false,
             gitlab_enable: false,
             openid_enable: false,
@@ -1694,6 +1700,11 @@ impl Config {
                 default.enable_sign_in_with_username,
             ),
             ldap_enable: lookup_bool(lookup, "MM_LDAPSETTINGS_ENABLE", default.ldap_enable),
+            ldap_re_add_removed_members: lookup_bool(
+                lookup,
+                "MM_LDAPSETTINGS_READDREMOVEDMEMBERS",
+                default.ldap_re_add_removed_members,
+            ),
             saml_enable: lookup_bool(lookup, "MM_SAMLSETTINGS_ENABLE", default.saml_enable),
             gitlab_enable: lookup_bool(lookup, "MM_GITLABSETTINGS_ENABLE", default.gitlab_enable),
             openid_enable: lookup_bool(lookup, "MM_OPENIDSETTINGS_ENABLE", default.openid_enable),
@@ -1997,6 +2008,9 @@ impl Config {
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
             ldap_enable: ldap_settings.enable.unwrap_or(default.ldap_enable),
+            ldap_re_add_removed_members: ldap_settings
+                .re_add_removed_members
+                .unwrap_or(default.ldap_re_add_removed_members),
             saml_enable_sync_with_ldap: saml_settings
                 .enable_sync_with_ldap
                 .unwrap_or(default.saml_enable_sync_with_ldap),
@@ -2292,6 +2306,8 @@ struct LdapSettingsDocument {
     picture_attribute: Option<String>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
+    #[serde(rename = "ReAddRemovedMembers")]
+    re_add_removed_members: Option<bool>,
 }
 
 /// The two fields of `SamlSettings` a migrated route reads: `EnableSyncWithLdap` is only ever
@@ -3365,8 +3381,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 72,
-            "the fixture covers {keys} settings and Config reads 72 from the document. \
+            keys, 73,
+            "the fixture covers {keys} settings and Config reads 73 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

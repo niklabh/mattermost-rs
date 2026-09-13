@@ -446,7 +446,7 @@ impl App {
     }
 
     /// Port of `app.App.sendUpdateChannelMemberEvent` (app/channel.go:1651).
-    async fn send_update_channel_member_event(&self, member: &ChannelMember) {
+    pub(crate) async fn send_update_channel_member_event(&self, member: &ChannelMember) {
         let mut event = WebSocketEvent::new(
             WEBSOCKET_EVENT_CHANNEL_MEMBER_UPDATED,
             "",

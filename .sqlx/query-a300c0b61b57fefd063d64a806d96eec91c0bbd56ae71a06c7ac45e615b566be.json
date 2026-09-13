@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT cm.channelid AS \"channelid!\", cm.userid AS \"userid!\"\n              FROM channelmembers cm\n              JOIN channels c ON c.id = cm.channelid\n              LEFT JOIN bots b ON b.userid = cm.userid\n             WHERE c.deleteat = 0\n               AND c.groupconstrained = true\n               AND b.userid IS NULL\n               AND c.type IN ('O', 'P')\n               AND (cm.channelid, cm.userid) NOT IN (\n                       SELECT c2.id AS channelid, gm.userid\n                         FROM channels c2\n                         JOIN groupchannels gc ON gc.channelid = c2.id\n                         JOIN usergroups ug ON ug.id = gc.groupid\n                         JOIN groupmembers gm ON gm.groupid = ug.id\n                        WHERE c2.groupconstrained = true\n                          AND gc.deleteat = 0\n                          AND ug.deleteat = 0\n                          AND c2.deleteat = 0\n                          AND gm.deleteat = 0\n                        GROUP BY c2.id, gm.userid)\n               AND ($1::text IS NULL OR cm.channelid = $1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a300c0b61b57fefd063d64a806d96eec91c0bbd56ae71a06c7ac45e615b566be"
+}

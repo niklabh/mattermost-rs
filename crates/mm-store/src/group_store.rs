@@ -203,7 +203,9 @@ pub trait GroupStore {
 /// Postgres-backed implementation.
 #[derive(Debug, Clone)]
 pub struct SqlGroupStore {
-    pool: PgPool,
+    /// Shared with `group_syncable_store.rs`, which implements the syncable half of Go's
+    /// `SqlGroupStore` on the same type.
+    pub(crate) pool: PgPool,
 }
 
 impl SqlGroupStore {

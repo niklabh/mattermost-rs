@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT gt.groupid, gt.teamid, gt.autoadd, gt.schemeadmin, gt.createat, gt.updateat,\n                       gt.deleteat,\n                       COALESCE(t.displayname, '') AS \"teamdisplayname!\",\n                       COALESCE(t.type::text, '')  AS \"teamtype!\"\n                  FROM groupteams gt\n                  JOIN teams t ON t.id = gt.teamid\n                 WHERE gt.groupid = $1 AND gt.deleteat = 0\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "groupid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "teamid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "autoadd",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "schemeadmin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "teamdisplayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "teamtype!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "8624779f5903f2d624eedf6e58ffe77ab5bca4db73d2dda302514de3055261e0"
+}

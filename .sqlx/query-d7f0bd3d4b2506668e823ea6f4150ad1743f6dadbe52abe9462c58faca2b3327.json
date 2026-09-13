@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO groupchannels\n                        (groupid, autoadd, schemeadmin, createat, deleteat, updateat, channelid)\n                    VALUES ($1, $2, $3, $4, $5, $6, $7)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d7f0bd3d4b2506668e823ea6f4150ad1743f6dadbe52abe9462c58faca2b3327"
+}

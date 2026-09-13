@@ -58,6 +58,7 @@ pub mod session;
 /// The read side of `app/channel_category.go`.
 pub mod sidebar;
 pub mod status;
+pub mod syncables;
 pub mod system;
 pub mod team;
 pub mod team_member;
