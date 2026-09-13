@@ -39,14 +39,15 @@ use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_PROMOTE_GUEST, make_permission_error,
+    PERMISSION_DEMOTE_TO_GUEST, PERMISSION_MANAGE_SYSTEM, PERMISSION_PROMOTE_GUEST,
+    make_permission_error,
 };
 use mm_model::user::UserPatch;
 use mm_model::utils::{AppError, decode_one_from_json, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{LicenceGate, ME, licence_gate, query_flag_is_true, resolve_me};
+use crate::channels::{query_flag_is_true, resolve_me};
 use crate::error::ApiError;
 
 /// `web.ReturnStatusOK` (web/web.go:127) — `w.Write(MapToJSON(...))`, so no trailing newline.
@@ -325,47 +326,122 @@ pub async fn promote_guest_to_user(
 
 /// Port of `demoteUserToGuest` (api4/user.go:3540) — `POST /api/v4/users/{user_id}/demote`.
 ///
-/// # The licence is checked before anything else, so on this deployment that *is* the route
+/// # Six gates, in Go's order, and three of them are 501
 ///
-/// `RequireUserId`, then `License() == nil` → **501 `api.team.demote_user_to_guest.license.error`**.
-/// Not the permission, not the user, not the config: a demote of an id that does not exist by a
-/// caller with no permissions is 501 on an unlicensed server, measured. Everything past it — the
-/// `GuestAccountsSettings.Enable` 501, the `Features.GuestAccounts` **403** (a different status
-/// for what reads like the same refusal, and the only 403 in the handler that is not a permission
-/// error), the `demote_to_guest` permission, the `manage_system` escalation guard for demoting an
-/// administrator, the already-a-guest 501, and `DemoteUserToGuest` itself — needs a licence to
-/// reach and is forwarded whole.
+/// `RequireUserId`, then:
 ///
-/// A licensed server is therefore handed the request **before any write**: the first thing past
-/// the gate is a config read. See [D-511] for the body, which cannot be compared against Go on an
-/// unlicensed stack at all — planting `Systems.ActiveLicenseId` moves this side and leaves Go
-/// where it was.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, licensed))]
+/// | gate | answer |
+/// |---|---|
+/// | `License() == nil` | 501 `api.team.demote_user_to_guest.license.error` |
+/// | `!GuestAccountsSettings.Enable` | 501 `api.team.demote_user_to_guest.disabled.error` |
+/// | `!License().Features.GuestAccounts` | **403** `api.team.invite_guests_to_channels.disabled.error` |
+/// | `demote_to_guest` | 403 permission error |
+/// | target is a system admin and caller lacks `manage_system` | 403 permission error naming `manage_system` |
+/// | target already a guest | 501 `api.user.demote_user_to_guest.already_guest.app_error` |
+///
+/// The licence and the setting come **before** the permission and before the user is fetched,
+/// so on an unlicensed server every demote is the same 501 whoever asks and whatever id they
+/// name (measured), and on a licensed server with guest accounts off it is the second 501 just
+/// as indiscriminately. The `Features.GuestAccounts` refusal is the only 403 in the handler that
+/// is not a permission error — a different status for what reads like the same refusal as the
+/// setting's.
+///
+/// Until 2026-09-13 everything past the licence was forwarded ([D-511]); the licence body is
+/// readable now and the licensed pair is the oracle.
+///
+/// Not ported: the audit record, as for every route in this file.
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn demote_user_to_guest(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
-    _session: AuthenticatedSession,
-    request: Request,
+    session: AuthenticatedSession,
 ) -> Response {
     // `RequireUserId` resolves `me` before validating, so `/users/me/demote` is a 501 rather than
     // a 400 — the id it checks is the session's.
-    let user_id = if user_id == ME {
-        _session.0.user_id.as_str()
-    } else {
-        user_id.as_str()
-    };
-    if !is_valid_id(user_id) {
+    let user_id = resolve_me(&user_id, &session).to_owned();
+    if !is_valid_id(&user_id) {
         return ApiError::invalid_url_param("user_id").into_response();
     }
 
-    match licence_gate(&state, request).await {
-        LicenceGate::Forward(response) => response,
-        LicenceGate::Unlicensed => not_implemented(
+    let license = match state.app.license().await {
+        Ok(license) => license,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let Some(license) = license else {
+        return not_implemented(
             "Api4.demoteUserToGuest",
             "api.team.demote_user_to_guest.license.error",
         )
-        .into_response(),
-        LicenceGate::Failed(err) => err.into_response(),
+        .into_response();
+    };
+
+    if !state.app.config().guest_accounts_enable {
+        return not_implemented(
+            "Api4.demoteUserToGuest",
+            "api.team.demote_user_to_guest.disabled.error",
+        )
+        .into_response();
+    }
+
+    // `*License().Features.GuestAccounts` — non-nil after `SetDefaults`, which `App::license`
+    // ran. 403, and not a permission error.
+    let guest_enabled = license
+        .features
+        .as_ref()
+        .and_then(|f| f.guest_accounts)
+        .unwrap_or(false);
+    if !guest_enabled {
+        return ApiError::from(AppError::new(
+            "Api4.demoteUserToGuest",
+            "api.team.invite_guests_to_channels.disabled.error",
+            None,
+            String::new(),
+            403,
+        ))
+        .into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_DEMOTE_TO_GUEST)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_DEMOTE_TO_GUEST],
+        ))
+        .into_response();
+    }
+
+    let user = match state.app.get_user(&user_id).await {
+        Ok(user) => user,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if user.is_system_admin()
+        && !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        ))
+        .into_response();
+    }
+
+    if user.is_guest() {
+        return not_implemented(
+            "Api4.demoteUserToGuest",
+            "api.user.demote_user_to_guest.already_guest.app_error",
+        )
+        .into_response();
+    }
+
+    match state.app.demote_user_to_guest(&user).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
     }
 }
 

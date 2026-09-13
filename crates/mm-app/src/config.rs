@@ -2448,6 +2448,12 @@ struct LocalizationSettingsDocument {
 /// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
 /// name collides with `TeamSettings`', which is exactly why this needs its own section.
 #[derive(Debug, Default, serde::Deserialize)]
+struct AccessControlSettingsDocument {
+    #[serde(rename = "EnableAttributeBasedAccessControl")]
+    enable_attribute_based_access_control: Option<bool>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
 struct GuestAccountsSettingsDocument {
     #[serde(rename = "RestrictCreationToDomains")]
     restrict_creation_to_domains: Option<String>,
@@ -2458,12 +2464,6 @@ struct GuestAccountsSettingsDocument {
 }
 
 /// The one field of `AccessControlSettings` a migrated route reads.
-#[derive(Debug, Default, serde::Deserialize)]
-struct AccessControlSettingsDocument {
-    #[serde(rename = "EnableAttributeBasedAccessControl")]
-    enable_attribute_based_access_control: Option<bool>,
-}
-
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
 /// absent means **enabled**.
 #[derive(Debug, Default, serde::Deserialize)]
@@ -2944,6 +2944,7 @@ mod tests {
             "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS" => Some("all".to_owned()),
             "MM_LDAPSETTINGS_PICTUREATTRIBUTE" => Some("thumbnailPhoto".to_owned()),
             "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP" => Some("true".to_owned()),
+            "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL" => Some("true".to_owned()),
             _ => None,
         });
 
@@ -2951,6 +2952,8 @@ mod tests {
         assert_eq!(config.lock_profile_fields_for_email_users, "all");
         assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
         assert!(config.saml_enable_sync_with_ldap);
+        // The fifth, the ABAC gate's setting: the only reader of its whole section.
+        assert!(config.enable_attribute_based_access_control);
 
         // And with nothing set every one of them keeps the value the document gave it.
         let untouched = Config::default().apply_env_from(&|_| None);
@@ -3451,6 +3454,7 @@ mod go_parity {
             "OpenIdSettings": { "Enable": true },
             "Office365Settings": { "Enable": true },
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
+            "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false
@@ -3478,6 +3482,9 @@ mod go_parity {
         assert_eq!(config.lock_profile_fields_for_email_users, "all");
         assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
         assert!(config.saml_enable_sync_with_ldap);
+        // Its section exists in `Document` for this one key; a dropped wiring would fall back
+        // to the default `false` that every other test here is happy with.
+        assert!(config.enable_attribute_based_access_control);
         assert!(!config.show_full_name);
         assert!(!config.show_email_address);
         assert_eq!(config.session_idle_timeout_in_minutes, 17);

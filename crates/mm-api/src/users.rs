@@ -1213,12 +1213,29 @@ enum ForwardReason {
     /// `applyTeamGroupConstrainedFilter`, three group tables deep. The other branches never read
     /// the flag, so they are served with it set.
     GroupConstrained,
-    /// `abac_match_only=true` on a `not_in_*` branch → the Enterprise Advanced access-control
-    /// service. See the handler's note for the half of ABAC this cannot detect.
-    AbacMatchOnly,
+    /// The Enterprise Advanced access-control service could narrow this listing: the licence is
+    /// at least Advanced **and** `AccessControlSettings.EnableAttributeBasedAccessControl` is on
+    /// — the conjunction `ChannelAccessControlled` (app/channel.go:4523) and
+    /// `TeamMembershipAccessControlEnabled` (app/team.go:936) both open with. On `not_in_channel`
+    /// that is enough on its own: Go then reads the channel's policy, which is enterprise code,
+    /// and narrows a private policy-enforced channel *without* any query parameter. On
+    /// `not_in_team` the narrowing needs `abac_match_only=true` as well.
+    AccessControlled,
 }
 
-fn forward_reason(query: &GetUsersQuery, branch: Branch) -> Option<ForwardReason> {
+/// The conjunction `ChannelAccessControlled` (app/channel.go:4523) and
+/// `TeamMembershipAccessControlEnabled` (app/team.go:936) open with: `MinimumEnterpriseAdvancedLicense`
+/// **and** `AccessControlSettings.EnableAttributeBasedAccessControl`. An Enterprise licence is one
+/// rung short, and the licensed pair carries one, so this is false there and the arms are served.
+fn access_control_possible(setting_on: bool, license: Option<&mm_model::license::License>) -> bool {
+    setting_on && mm_model::license::minimum_enterprise_advanced_license(license)
+}
+
+fn forward_reason(
+    query: &GetUsersQuery,
+    branch: Branch,
+    access_control_possible: bool,
+) -> Option<ForwardReason> {
     if !query.role.is_empty()
         || !query.roles.is_empty()
         || !query.channel_roles.is_empty()
@@ -1236,11 +1253,20 @@ fn forward_reason(query: &GetUsersQuery, branch: Branch) -> Option<ForwardReason
         Branch::WithoutTeam => Some(ForwardReason::WithoutTeam),
         Branch::InGroup => Some(ForwardReason::InGroup),
         Branch::NotInGroup => Some(ForwardReason::NotInGroup),
-        Branch::NotInChannel | Branch::NotInTeam => {
+        Branch::NotInChannel => {
             if query.group_constrained {
                 Some(ForwardReason::GroupConstrained)
-            } else if query.abac_match_only {
-                Some(ForwardReason::AbacMatchOnly)
+            } else if access_control_possible {
+                Some(ForwardReason::AccessControlled)
+            } else {
+                None
+            }
+        }
+        Branch::NotInTeam => {
+            if query.group_constrained {
+                Some(ForwardReason::GroupConstrained)
+            } else if access_control_possible && query.abac_match_only {
+                Some(ForwardReason::AccessControlled)
             } else {
                 None
             }
@@ -1277,14 +1303,16 @@ fn forward_reason(query: &GetUsersQuery, branch: Branch) -> Option<ForwardReason
 /// one. The `not_in_team` arm passes **`in_team`** to `GetUsersNotInTeamEtag` (api4/user.go:1049)
 /// — see [`mm_app::App::get_users_not_in_team_etag`], which reproduces it.
 ///
-/// # ABAC is a licence-gated divergence
+/// # ABAC is a licence-gated forward, on Go's own predicate
 ///
-/// `ChannelAccessControlled` / `TeamAccessControlled` return false without an Enterprise
-/// Advanced licence, which is this deployment, so the served arms match. On a licensed server
-/// with attribute-based access control on, a policy-enforced **private** channel would narrow
-/// Go's `not_in_channel` list without any query parameter to detect it by — the port cannot see
-/// the licence, so that variant would diverge. Recorded as [D-154]; the explicit
-/// `abac_match_only=true` half is forwarded.
+/// `ChannelAccessControlled` and `TeamAccessControlled` are false unless the licence is at least
+/// Enterprise Advanced **and** `AccessControlSettings.EnableAttributeBasedAccessControl` is on.
+/// Below that, `abac_match_only` is read and ignored on both arms, so it is served with the flag
+/// set; at or above it, Go reads a policy this tree does not have and may narrow the listing —
+/// on `not_in_channel` with no parameter to detect it by — so the whole arm is forwarded on
+/// exactly that conjunction. Until 2026-09-13 the licence was not readable here and the flag
+/// was forwarded unconditionally, which closed only the half a parameter could name ([D-154]).
+/// An Enterprise (not Advanced) licence, which is what the licensed pair carries, serves.
 ///
 /// # Not ported
 ///
@@ -1302,7 +1330,19 @@ pub async fn get_users(
     let branch = branch_of(&parsed);
     tracing::Span::current().record("branch", tracing::field::debug(branch));
 
-    if let Some(reason) = forward_reason(&parsed, branch) {
+    // Only the two `not_in_*` arms ask, so the licence is read only when it can matter.
+    let access_control_possible = if matches!(branch, Branch::NotInChannel | Branch::NotInTeam)
+        && state.app.config().enable_attribute_based_access_control
+    {
+        match state.app.license().await {
+            Ok(license) => access_control_possible(true, license.as_deref()),
+            Err(err) => return ApiError::from(err).into_response(),
+        }
+    } else {
+        false
+    };
+
+    if let Some(reason) = forward_reason(&parsed, branch, access_control_possible) {
         tracing::Span::current().record("forwarded", tracing::field::debug(reason));
         return crate::proxy::forward_to_go(State(state), request).await;
     }
@@ -2592,8 +2632,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{
-        Branch, ForwardReason, UsersByIdsRequest, branch_of, forward_reason,
-        parse_get_users_request, parse_users_by_ids_request, sanitize_options,
+        Branch, ForwardReason, UsersByIdsRequest, access_control_possible, branch_of,
+        forward_reason, parse_get_users_request, parse_users_by_ids_request, sanitize_options,
         segment_matches_username_mux,
     };
 
@@ -2602,10 +2642,18 @@ mod tests {
         branch_of(&parse_get_users_request(Some(query)))
     }
 
-    /// `forward_reason` on the query string.
+    /// `forward_reason` on the query string, on a server where access control cannot apply —
+    /// the stack's own shape.
     fn forward(query: &str) -> Option<ForwardReason> {
         let parsed = parse_get_users_request(Some(query));
-        forward_reason(&parsed, branch_of(&parsed))
+        forward_reason(&parsed, branch_of(&parsed), false)
+    }
+
+    /// The same, on a server whose licence and setting make attribute-based access control
+    /// possible.
+    fn forward_access_controlled(query: &str) -> Option<ForwardReason> {
+        let parsed = parse_get_users_request(Some(query));
+        forward_reason(&parsed, branch_of(&parsed), true)
     }
 
     /// The chain is ordered and the order is **not** the order the parameters are declared in.
@@ -2739,7 +2787,8 @@ mod tests {
             "the in_team arm never reads in_group, so this is served"
         );
 
-        // group_constrained and abac_match_only, on and off the arms that read them.
+        // group_constrained on the arms that read it, and abac_match_only, which below the
+        // Advanced tier is read and ignored on both.
         for scoped in ["not_in_team=t", "not_in_channel=c&in_team=t"] {
             assert_eq!(
                 forward(&format!("{scoped}&group_constrained=true")),
@@ -2748,8 +2797,8 @@ mod tests {
             );
             assert_eq!(
                 forward(&format!("{scoped}&abac_match_only=true")),
-                Some(ForwardReason::AbacMatchOnly),
-                "{scoped}"
+                None,
+                "{scoped}: without the licence and the setting the flag changes nothing"
             );
         }
         for ignored in ["", "in_team=t", "in_channel=c"] {
@@ -2760,6 +2809,56 @@ mod tests {
                 None,
                 "{ignored:?} never reads either flag"
             );
+        }
+    }
+
+    /// The gate is the **Advanced** rung and the setting, both: an Enterprise licence with the
+    /// setting on is not enough, and an Advanced one with it off is not either.
+    #[test]
+    fn access_control_needs_the_advanced_rung_and_the_setting() {
+        let licence = |sku: &str| mm_model::license::License {
+            sku_short_name: sku.to_owned(),
+            ..mm_model::license::License::default()
+        };
+        assert!(!access_control_possible(true, None));
+        assert!(!access_control_possible(
+            true,
+            Some(&licence("professional"))
+        ));
+        assert!(!access_control_possible(true, Some(&licence("enterprise"))));
+        assert!(access_control_possible(true, Some(&licence("advanced"))));
+        assert!(
+            access_control_possible(true, Some(&licence("entry"))),
+            "entry sits at 30"
+        );
+        assert!(!access_control_possible(false, Some(&licence("advanced"))));
+    }
+
+    /// Where access control *is* possible, the two arms differ: `not_in_channel` forwards
+    /// outright, because Go narrows a private policy-enforced channel with no parameter set;
+    /// `not_in_team` forwards only with `abac_match_only=true`, the flag Go requires there.
+    /// `group_constrained` still wins, being checked first, and no other arm is touched.
+    #[test]
+    fn access_control_forwards_the_channel_arm_outright_and_the_team_arm_on_the_flag() {
+        assert_eq!(
+            forward_access_controlled("not_in_channel=c&in_team=t"),
+            Some(ForwardReason::AccessControlled)
+        );
+        assert_eq!(
+            forward_access_controlled("not_in_channel=c&in_team=t&abac_match_only=true"),
+            Some(ForwardReason::AccessControlled)
+        );
+        assert_eq!(forward_access_controlled("not_in_team=t"), None);
+        assert_eq!(
+            forward_access_controlled("not_in_team=t&abac_match_only=true"),
+            Some(ForwardReason::AccessControlled)
+        );
+        assert_eq!(
+            forward_access_controlled("not_in_team=t&abac_match_only=true&group_constrained=true"),
+            Some(ForwardReason::GroupConstrained)
+        );
+        for untouched in ["", "in_team=t", "in_channel=c&abac_match_only=true"] {
+            assert_eq!(forward_access_controlled(untouched), None, "{untouched:?}");
         }
     }
 

@@ -7,6 +7,7 @@
 #   scripts/go-licensed.sh rebuild   force a rebuild of the binary, then start
 #   scripts/go-licensed.sh port      print the port it uses on this stack
 #   scripts/go-licensed.sh files     print the directory holding the key pair and the licence
+#   MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh start|stop|port   the guest variant, +33
 #
 # # Why the stack's own Go server cannot be licensed
 #
@@ -45,6 +46,18 @@
 # `cloud` is the one feature left off: `IsCloud()` reroutes dozens of handlers to a billing
 # service that does not exist here. Everything else is on, so a route gated on a feature flag
 # reaches its licensed branch.
+#
+# # The guest variant
+#
+# `MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh start` runs a **second** licensed server on
+# port +33 with `MM_GUESTACCOUNTSSETTINGS_ENABLE=true` as an environment override — the same
+# binary, the same licence, one setting different. `demoteUserToGuest` refuses with a 501 while
+# that setting is off, ahead of the permission and the user (api4/user.go:3551), so every branch
+# past it needs a Go whose setting is on; and turning it on in the shared configuration document
+# would move `getLoginType`, `login` and every other guest-gated route under suites that assert
+# the stock value. A separate process is the same answer `go-discoverable.sh` gives for a flag.
+# `common::licensed_guest` in the parity harness starts the matching mm-api with the same
+# override, on :8091 + the stack offset.
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
@@ -52,10 +65,22 @@ SRC="$ROOT/reference/mattermost/server"
 BUILD="$ROOT/reference/.build"
 LIC="$BUILD/license"
 source "$ROOT/scripts/stack-env.sh"
-# +32, one above the discoverable oracle's +31, still below the next stack's block.
-PORT=$((MMRS_GO_PORT + 32))
-RUN="$BUILD/mmlic$MMRS_RUN_SUFFIX"
-LOG="$BUILD/licensed$MMRS_STACK_SUFFIX.log"
+case "${MMRS_LICENSED_VARIANT:-}" in
+  "")
+    # +32, one above the discoverable oracle's +31, still below the next stack's block.
+    PORT=$((MMRS_GO_PORT + 32))
+    RUN="$BUILD/mmlic$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/licensed$MMRS_STACK_SUFFIX.log"
+    API_PORT=$((MMRS_API_PORT + 24))
+    ;;
+  guest)
+    PORT=$((MMRS_GO_PORT + 33))
+    RUN="$BUILD/mmlicguest$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/licensed-guest$MMRS_STACK_SUFFIX.log"
+    API_PORT=$((MMRS_API_PORT + 25))
+    ;;
+  *) echo "MMRS_LICENSED_VARIANT must be unset or 'guest'"; exit 2 ;;
+esac
 DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmode=disable&connect_timeout=10"
 BIN="$BUILD/mattermost-licensed"
 
@@ -105,9 +130,9 @@ case "${1:-start}" in
     mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     # The licensed mm-api the parity harness starts beside it (`common::licensed`, :8090 + the
-    # stack offset) is a static in the test binary and outlives the run; it is the pair's other
-    # half, so it goes with this.
-    mmrs_free_port "$((MMRS_API_PORT + 24))"
+    # stack offset; the guest variant's on :8091) is a static in the test binary and outlives the
+    # run; it is the pair's other half, so it goes with this.
+    mmrs_free_port "$API_PORT"
     echo "stopped"
     ;;
   rebuild)
@@ -135,6 +160,8 @@ case "${1:-start}" in
     # The two differences from `go-server.sh`, and the entire point of this script.
     export MM_LICENSE="$(cat "$LIC/license.signed")"
     export MMRS_LICENSE_PUBLIC_KEY_FILE="$LIC/public.pem"
+    # The guest variant's one difference from the licensed server — see the header.
+    [ "${MMRS_LICENSED_VARIANT:-}" = guest ] && export MM_GUESTACCOUNTSSETTINGS_ENABLE=true
     mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1
@@ -148,7 +175,7 @@ case "${1:-start}" in
     # Say so in words: a licensed oracle that loaded no licence is the silent failure this
     # script exists to remove.
     if curl -sf "http://127.0.0.1:$PORT/api/v4/license/client?format=old" | grep -q '"IsLicensed":"true"'; then
-      echo "the licensed Go oracle is listening on :$PORT (log: $LOG)"
+      echo "the licensed${MMRS_LICENSED_VARIANT:+ ($MMRS_LICENSED_VARIANT)} Go oracle is listening on :$PORT (log: $LOG)"
     else
       echo "the licensed oracle is up on :$PORT but reports IsLicensed=false — see $LOG"; exit 1
     fi
