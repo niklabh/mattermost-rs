@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE threads\n           SET participants = participants || jsonb_build_array($2::text)\n         WHERE postid = $1\n           AND NOT participants ? $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "055e3da884f1653d3375b999f545123b1663fbef15570b6c79782271e484fa13"
+}

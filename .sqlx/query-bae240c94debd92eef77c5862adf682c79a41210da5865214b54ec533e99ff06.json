@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT userid AS \"user_id!\"\n              FROM threadmemberships\n             WHERE postid = $1\n               AND (NOT $2 OR following = TRUE)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bae240c94debd92eef77c5862adf682c79a41210da5865214b54ec533e99ff06"
+}

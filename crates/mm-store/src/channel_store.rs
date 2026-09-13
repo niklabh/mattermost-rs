@@ -199,6 +199,38 @@ pub trait ChannelStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<HashMap<String, String>, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetAllChannelMembersNotifyPropsForChannel`
+    /// (channel_store.go:2619): every member's `NotifyProps`, keyed by user id.
+    ///
+    /// **A member with no props is in the map with an empty one.** Go scans the column into
+    /// `model.StringMap`, whose `Scan` leaves the map nil on SQL `NULL`, and a nil map indexes as
+    /// `""` everywhere `SendNotifications` reads it — so the entry exists and is empty, exactly
+    /// as a `'{}'` column would be. Go's `{}` and `NULL` and JSON `null` all land here as an
+    /// empty [`StringMap`], never as a missing key.
+    ///
+    /// `allow_from_cache` is accepted for signature parity and is a no-op: this server never
+    /// caches, so every call is the query.
+    fn get_all_channel_members_notify_props_for_channel(
+        &self,
+        channel_id: &str,
+        allow_from_cache: bool,
+    ) -> impl std::future::Future<Output = Result<BTreeMap<String, StringMap>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.IncrementMentionCount` (channel_store.go:3050): `+1` to
+    /// `MentionCount` for every listed member of the channel, `+1` to `MentionCountRoot` only
+    /// when `is_root`, `+1` to `UrgentMentionCount` only when `is_urgent`, and `LastUpdateAt`
+    /// to now on every row touched.
+    ///
+    /// An empty `user_ids` matches nothing — squirrel renders `sq.Eq{"UserId": []}` as `(1=0)`
+    /// — and is not an error. A listed id that is not a member is skipped silently.
+    fn increment_mention_count(
+        &self,
+        channel_id: &str,
+        user_ids: &[String],
+        is_root: bool,
+        is_urgent: bool,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetChannelUnread` (channel_store.go:921).
     fn get_channel_unread(
         &self,
@@ -1066,6 +1098,82 @@ impl ChannelStore for SqlChannelStore {
         include_deleted: bool,
     ) -> Result<HashMap<String, String>, StoreError> {
         get_all_channel_members_for_user(&self.pool, user_id, include_deleted).await
+    }
+
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, allow_from_cache = allow_from_cache, found))]
+    async fn get_all_channel_members_notify_props_for_channel(
+        &self,
+        channel_id: &str,
+        allow_from_cache: bool,
+    ) -> Result<BTreeMap<String, StringMap>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT userid      AS "user_id!",
+                   notifyprops AS "notify_props"
+              FROM channelmembers
+             WHERE channelid = $1
+            "#,
+            channel_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find data from ChannelMembers with channelId={channel_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter()
+            .map(|row| {
+                // Nil map in Go, empty map here: both index as `""` — see the trait doc.
+                let props = notify_props_from_column("ChannelMember", row.notify_props)?
+                    .unwrap_or_default();
+                Ok((row.user_id, props))
+            })
+            .collect()
+    }
+
+    #[tracing::instrument(
+        skip(self, user_ids),
+        fields(channel_id = %channel_id, requested = user_ids.len(), is_root = is_root, is_urgent = is_urgent, updated)
+    )]
+    async fn increment_mention_count(
+        &self,
+        channel_id: &str,
+        user_ids: &[String],
+        is_root: bool,
+        is_urgent: bool,
+    ) -> Result<(), StoreError> {
+        // Go binds `rootInc`/`urgentInc` as 0 or 1 and adds them unconditionally; the casts keep
+        // the bound booleans as the integers Go sends rather than a CASE the planner reads
+        // differently. `UserId = ANY('{}')` is squirrel's `(1=0)`: no rows, no error.
+        let now = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            r#"
+            UPDATE channelmembers
+               SET mentioncount = mentioncount + 1,
+                   mentioncountroot = mentioncountroot + $3::int,
+                   urgentmentioncount = urgentmentioncount + $4::int,
+                   lastupdateat = $5
+             WHERE userid = ANY($1::text[])
+               AND channelid = $2
+            "#,
+            user_ids,
+            channel_id,
+            i32::from(is_root),
+            i32::from(is_urgent),
+            now,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to Update ChannelMembers with channelId={channel_id} and userId={user_ids:?}"
+            ),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id, found))]

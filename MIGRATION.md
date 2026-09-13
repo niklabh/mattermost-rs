@@ -12545,3 +12545,32 @@ no hub ([D-215]); the condition is evaluated and traced in `update_thread_read_f
 `countMentionsFromPost`'s public-channel branch in `mm_app::post_unread` — the refusal there
 names exactly what `mention.rs` now provides plus `GetPostsAfterPost` — and after that
 `SendNotifications` for `createPost` ([D-221]).
+
+## The five store methods behind `SendNotifications` (2026-09-14)
+
+Route count unchanged — `POST /api/v4/posts`' reply-and-mention path is the main session's —
+but `App.SendNotifications` (app/notification.go:53) reads and writes through five store
+methods that did not exist here, and it is coded against them now. All five are
+`db_notification_store` tests against planted rows on both sides of every predicate, and the
+two writes are additionally read back through Go (`parity::notification_store`): a counter
+one higher in `GET /channels/{id}/members/{user_id}`, a follower rendered last in
+`GET /users/{id}/teams/{team_id}/threads/{thread_id}`.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/user_store.rs` — `get_all_profiles_in_channel` | DONE | 2 store | `Users.DeleteAt = 0` and nothing else — bots are in, the caller skips them. `Sanitize` with the **empty** map: the email survives, and `SendNotifications` reads it. |
+| store | `crates/mm-store/src/channel_store.rs` — `get_all_channel_members_notify_props_for_channel`, `increment_mention_count` | DONE | 4 store, 1 parity | A `NULL` or JSON-`null` column is an **empty** map under its key, never a missing key (Go's nil `StringMap` indexes as `""`). An empty id list is squirrel's `(1=0)`: no rows, no error. |
+| store | `crates/mm-store/src/thread_store.rs` — `get_thread_followers`, `ThreadMembershipOpts::update_participants` | DONE | 6 store, 1 parity | `Following = true` is an equality, so a `NULL` fails it. **The participants write is an append guarded by `NOT participants ? user`, not a move to the end** — a user already listed stays where they are — and it runs on the insert branch only; Go reads the flag after `saveMembership`. |
+
+`allow_from_cache` is accepted on both reads for signature parity and documented as a no-op —
+this server never caches. `ImportData` is still absent from `ThreadMembershipOpts`; it is the
+importer's, and the only thing that reaches the participants write on an existing row.
+
+Mutation tally: 15 run, 15 caught, 2 controls survived (`store` suite, `--test
+db_notification_store`: the dropped `DeleteAt = 0`, no sanitize and the fuller sanitize, a
+`NOT NULL` on the props read, the swapped root/urgent columns, each flag inverted, `MentionCount`
+gated on the root flag, the dropped channel predicate, the `Following` filter dropped and made
+NULL-tolerant, the participant prepended, the guard dropped, the flag inverted on the insert
+branch, and the write added to the update branch). Two of the fifteen first appeared as harness
+faults — `AND TRUE` in place of a bound predicate does not compile under `sqlx::query!` — and
+were rerun as `OR TRUE` with the bind kept.

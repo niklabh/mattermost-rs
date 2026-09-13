@@ -1,6 +1,8 @@
 //! Port of `SqlUserStore` (channels/store/sqlstore/user_store.go), `Get`, `GetByUsername` and
 //! `GetProfileByIds`.
 
+use std::collections::BTreeMap;
+
 use mm_model::user::{User, UserUpdate};
 use mm_model::utils::{CURRENT_VERSION, StringArray, StringMap};
 use sqlx::PgPool;
@@ -201,6 +203,19 @@ pub trait UserStore {
         per_page: i64,
         deleted: Option<bool>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetAllProfilesInChannel` (user_store.go:961): every **live** user
+    /// with a `ChannelMembers` row on the channel, keyed by user id, sanitized with the empty
+    /// options map.
+    ///
+    /// `allow_from_cache` is accepted for signature parity and is a no-op — this server never
+    /// caches (the vertical-slice decision in `MIGRATION.md`), so every call is Go's cache-miss
+    /// path: the query below, which is what the cache would have been filled from.
+    fn get_all_profiles_in_channel(
+        &self,
+        channel_id: &str,
+        allow_from_cache: bool,
+    ) -> impl std::future::Future<Output = Result<BTreeMap<String, User>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetProfilesNotInChannel` (user_store.go:1012) for nil view
     /// restrictions and `groupConstrained = false`.
@@ -1874,6 +1889,83 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", rows.len());
 
         rows.into_iter().map(user_from_row).collect()
+    }
+
+    /// # Deleted users are out, bots are in, and the map hides the sort
+    ///
+    /// The predicate is `Users.DeleteAt = 0` and nothing else — `ChannelMembers` has no
+    /// `DeleteAt`, and there is no `Bots` filter: `SendNotifications` gets the bot rows and
+    /// skips them itself. Go's `ORDER BY Username` is reproduced although the result is a map;
+    /// it costs nothing and keeps the statement Go's.
+    ///
+    /// Each user is `Sanitize(map[string]bool{})` — the *empty* options map, which blanks the
+    /// password, the MFA secret, the MFA timestamps and `LastLogin` and leaves the email and
+    /// auth fields alone. `SendNotifications` reads `Email` from these rows, so the fuller
+    /// sanitizer would silently disable email notifications.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, allow_from_cache = allow_from_cache, found))]
+    async fn get_all_profiles_in_channel(
+        &self,
+        channel_id: &str,
+        allow_from_cache: bool,
+    ) -> Result<BTreeMap<String, User>, StoreError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              JOIN channelmembers cm ON (cm.userid = u.id)
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE cm.channelid = $1
+               AND u.deleteat = 0
+             ORDER BY u.username ASC
+            "#,
+            channel_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter()
+            .map(|row| {
+                let mut user = user_from_row(row)?;
+                user.sanitize(&std::collections::HashMap::new());
+                Ok((user.id.clone(), user))
+            })
+            .collect()
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, channel_id = %channel_id, found))]

@@ -192,5 +192,6 @@ mod parity {
     pub mod local_mode;
 
     // Appended 2026-09-13, same reason: the user-update family.
+    pub mod notification_store;
     pub mod user_updates;
 }

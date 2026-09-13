@@ -110,6 +110,19 @@ pub trait ThreadStore {
         opts: ThreadMembershipOpts,
     ) -> impl std::future::Future<Output = Result<ThreadMembership, StoreError>> + Send;
 
+    /// Port of `SqlThreadStore.GetThreadFollowers` (thread_store.go:513): the user ids with a
+    /// `ThreadMemberships` row on the thread, restricted to `Following = true` when
+    /// `following_only` (Go's `fetchOnlyActive`).
+    ///
+    /// **Unordered.** Go's select has no `ORDER BY`, and neither does this one; the caller
+    /// (`SendNotifications`) treats the result as a set. A missing thread is an empty list, not
+    /// `NotFound`.
+    fn get_thread_followers(
+        &self,
+        thread_id: &str,
+        following_only: bool,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
     /// Port of `SqlThreadStore.Get` (thread_store.go:119).
     fn get(
         &self,
@@ -145,13 +158,12 @@ pub trait ThreadStore {
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
-/// Port of `store.ThreadMembershipOpts` (store/store.go:436), narrowed to the fields the follow
-/// and unfollow routes set.
+/// Port of `store.ThreadMembershipOpts` (store/store.go:1368), without `ImportData`.
 ///
-/// **`UpdateParticipants` and `ImportData` are deliberately absent.** Both exist in Go and both
-/// pull in `updateThreadParticipantsForUserTx`; no route this server answers sets either, and
-/// modelling a flag whose effect is unimplemented is how a caller silently loses the participant
-/// write. Add the field and the `UPDATE Threads.Participants` together, or not at all.
+/// **`ImportData` is deliberately absent.** It exists only for the bulk importer, which is not a
+/// route, and it is the one option that reaches `updateThreadParticipantsForUserTx` on the
+/// *existing-row* branch of `maintainMembershipTx`. Without it the participants write happens on
+/// the insert branch alone — see [`ThreadStore::maintain_membership`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ThreadMembershipOpts {
     /// The state `UpdateFollowing` moves the row to. Also the `Following` an inserted row gets,
@@ -167,6 +179,12 @@ pub struct ThreadMembershipOpts {
     /// Moves `LastViewed` to now and zeroes `UnreadMentions`. The follow route sets this to the
     /// same value as `following`, so following a thread marks it read and unfollowing does not.
     pub update_viewed_timestamp: bool,
+    /// Go's `UpdateParticipants`: append the user to `Threads.Participants` when the membership
+    /// row is **inserted**. Ignored on an existing row — Go reads it only after `saveMembership`
+    /// (thread_store.go:986), so a follower who already has a row is never added to the list by
+    /// this flag, even if the list does not name them. `SendNotifications` sets it for the
+    /// poster of a reply; the follow and unfollow routes leave it `false`.
+    pub update_participants: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -830,8 +848,18 @@ impl ThreadStore for SqlThreadStore {
         Ok(())
     }
 
-    /// Port of `maintainMembershipTx` (thread_store.go:899) for the option sets a ported route
+    /// Port of `maintainMembershipTx` (thread_store.go:898) for the option sets a ported caller
     /// builds — see [`ThreadMembershipOpts`], which carries no `ImportData`.
+    ///
+    /// # `update_participants` appends, and only on the insert branch
+    ///
+    /// `updateThreadParticipantsForUserTx` (thread_store.go:1125) is one statement on Postgres:
+    /// `SET Participants = Participants || '["<user>"]' WHERE PostId = ? AND NOT Participants ?
+    /// '<user>'`. A user already in the list is **left where they are**, not moved to the end —
+    /// there is no read-modify-write. A root post with no `Threads` row (nobody has replied yet)
+    /// matches nothing and that is not an error; nor is a `NULL` list, which `||` leaves `NULL`.
+    /// Go runs it after `saveMembership` and never on the update branch unless `ImportData` is
+    /// set, so a re-follow with the flag does not repair a list the user is missing from.
     ///
     /// # The update branch is guarded, and an unfollow of an unfollowed thread writes nothing
     ///
@@ -866,7 +894,7 @@ impl ThreadStore for SqlThreadStore {
     /// error on both servers.
     #[tracing::instrument(
         skip(self),
-        fields(user_id = %user_id, post_id = %post_id, existing, wrote)
+        fields(user_id = %user_id, post_id = %post_id, existing, wrote, participants_updated)
     )]
     async fn maintain_membership(
         &self,
@@ -998,6 +1026,10 @@ impl ThreadStore for SqlThreadStore {
                     source,
                 })?;
 
+                if opts.update_participants {
+                    update_thread_participants_for_user(&mut tx, post_id, user_id).await?;
+                }
+
                 membership
             }
         };
@@ -1008,6 +1040,34 @@ impl ThreadStore for SqlThreadStore {
         })?;
 
         Ok(membership)
+    }
+
+    #[tracing::instrument(skip(self), fields(thread_id = %thread_id, following_only = following_only, found))]
+    async fn get_thread_followers(
+        &self,
+        thread_id: &str,
+        following_only: bool,
+    ) -> Result<Vec<String>, StoreError> {
+        // `sq.Eq{"Following": true}` is an equality, so a NULL `Following` fails it just as
+        // `false` does; `$2 = FALSE` short-circuits to Go's unfiltered select.
+        let rows = sqlx::query_scalar!(
+            r#"
+            SELECT userid AS "user_id!"
+              FROM threadmemberships
+             WHERE postid = $1
+               AND (NOT $2 OR following = TRUE)
+            "#,
+            thread_id,
+            following_only,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get thread followers for thread id={thread_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows)
     }
 
     /// **A missing row is `Ok(None)`, not `ErrNotFound`.** Go returns `nil, nil` for
@@ -1180,4 +1240,39 @@ impl ThreadStore for SqlThreadStore {
         tracing::Span::current().record("updated", result.rows_affected());
         Ok(())
     }
+}
+
+/// Port of `updateThreadParticipantsForUserTx` (thread_store.go:1125), in the caller's
+/// transaction.
+///
+/// `jsonb_build_array($2::text)` is Go's `jsonArray([]string{userID})` — the one-element JSON
+/// array `||` appends. The guard is jsonb's `?` (key/element exists), which on a JSON array tests
+/// string membership, so the append is idempotent per user. `Threads` has no row for a root
+/// nobody has replied to, and the affected-row count is recorded rather than checked: Go ignores
+/// it too.
+async fn update_thread_participants_for_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    post_id: &str,
+    user_id: &str,
+) -> Result<(), StoreError> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE threads
+           SET participants = participants || jsonb_build_array($2::text)
+         WHERE postid = $1
+           AND NOT participants ? $2
+        "#,
+        post_id,
+        user_id,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to update thread participants with postid={post_id} userid={user_id}"
+        ),
+        source,
+    })?;
+    tracing::Span::current().record("participants_updated", result.rows_affected());
+    Ok(())
 }

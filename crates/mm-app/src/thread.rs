@@ -370,6 +370,7 @@ impl App {
                     increment_mentions: false,
                     update_following: true,
                     update_viewed_timestamp: state,
+                    update_participants: false,
                 },
             )
             .await
