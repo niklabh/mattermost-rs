@@ -28,6 +28,9 @@ types stay reusable under the more permissive terms:
     crates/mm-model/          Apache-2.0     derived from server/public/model/
                                              full text: crates/mm-model/LICENSE
 
+    crates/mm-markdown/       Apache-2.0     derived from server/public/shared/markdown/
+                                             full text: crates/mm-markdown/LICENSE
+
     crates/mm-store/          AGPL-3.0-only  derived (as they gain content) from
     crates/mm-app/                           server/channels/store/, /app/ and
     crates/mm-api/                           /api4/, which are AGPL v3.0
@@ -36,11 +39,11 @@ types stay reusable under the more permissive terms:
     everything else           AGPL-3.0-only  the repository default
 
 Apache-2.0 is one-way compatible with AGPL-3.0, so the AGPL crates may depend on
-mm-model. The reverse is not true: mm-model must never take code, or a
-dependency, from an AGPL-licensed crate or from server/channels/. That
-constraint is the same one the existing dependency rule already enforces —
-mm-model has zero internal dependencies — but it is now a licensing requirement
-and not only an architectural one.
+mm-model and mm-markdown. The reverse is not true: neither Apache-2.0 crate may
+ever take code, or a dependency, from an AGPL-licensed crate or from
+server/channels/. That constraint is the same one the existing dependency rule
+already enforces — mm-model and mm-markdown have zero internal dependencies —
+but it is now a licensing requirement and not only an architectural one.
 
 The four AGPL crates are still stubs at the time of writing. They carry
 AGPL-3.0-only ahead of holding any AGPL-derived line, deliberately: the label is

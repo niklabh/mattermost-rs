@@ -524,6 +524,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | — (tooling) | `reference/dump/behaviour_channel.go` → `fixtures/behaviour_channel.json` | DONE | 15 diff tests | 67 whole-channel `IsValid` cases plus `Patch`, `PreSave`, `Sanitize`, both regexes and the DM/GM helpers. Each case embeds the channel as **Go-marshalled JSON**, so a wire drift and a logic drift both fail the same test. |
 | — (tooling) | `reference/dump/behaviour.go` → `fixtures/behaviour_utils.json` | DONE | 12 diff tests | Behavioural oracle: runs a corpus through the real Go funcs and records the answers. Caught two bugs a reading of the source did not. Extend the corpus when translating anything with branching logic. |
 | — (tooling) | `reference/dump/` → `fixtures/` | DONE | 10 fixtures | Parity oracle. Reflection-populated from zero values, so adding a type is one registry line; deterministic output (FNV of field path — no rand/time.Now, keeps diffs clean). Fails the run if a declared top-level key is missing from the JSON. Re-run and commit after adding a type. |
+| shared/markdown/ (17 files, 7,916 lines; `html_entities.go` alone 2,133) | `crates/mm-markdown/` (new crate, Apache-2.0) | DONE | 53 pass; 558-row Go oracle | **The blocker behind [D-044] and [D-250]**, ported line for line rather than replaced by a CommonMark crate — the server's mention engine walks *this* parser's tree, so what it does not recognise is wire behaviour. Every quirk is pinned by `fixtures/behaviour_markdown.json` (`RenderHTML`, both `Inspect` traces, definitions, per-paragraph inlines and `MergeInlineText`, the whole entity table, `EqualFold`, `IsPunct`/`IsSpace`): `trimLeftSpace` shrinks the **end** of the range, one trailing space is a hard break, `Inspect` calls `f(nil)` after a node it refused, `<http://…>` is text, `escapeURL` writes `%1` not `%01`. The server calls only `inspect` and `set_max_post_runes` (`app/platform/service.go:338`, to be wired by the app layer). 22 mutations run, 22 caught, 2 controls survived — **two survived the first pass and both were corpus gaps**: no row put a one-space hard break at raw position 2 (`a \nb`), and the 999-byte label boundary was only ever reached through an inline link, which never calls `parseLinkLabel`; four rows added, both caught. See notes at the end of this file. |
 
 ## Notes — model/utils.go
 
@@ -10530,7 +10531,7 @@ checking: two worktrees shared stack 1 during the round that produced all three 
 `api4/custom_profile_attributes.go`, whose eighth route (`/group`) was already served in
 `mm_api::gated_reads`. New: `mm_store::property_store`, `mm_app::custom_profile_attributes`,
 `mm_api::custom_profile_attributes`, `parity::custom_profile_attributes` (12 tests).
-`scripts/mutations/cpa-routes.plan`: MUTATION_TALLY_PLACEHOLDER.
+`scripts/mutations/cpa-routes.plan`: MUTATION_22 mutations run, 22 caught, 2 controls survived — **two survived the first pass and both were corpus gaps**: no row put a one-space hard break at raw position 2 (`a \nb`), and the 999-byte label boundary was only ever reached through an inline link, which never calls `parseLinkLabel`; four rows added, both caught.
 
 **No model work was needed.** `property_field.rs`, `property_value.rs`, `property_group.rs`,
 `property_access.rs`, `property_field_attrs_validation.rs` and `custom_profile_attributes.rs` were
@@ -12399,3 +12400,53 @@ Closes [D-300]; opens [D-541], [D-542], [D-543].
    refusable fields in one batch the refusal Go reports is not fixed; this side iterates sorted
    keys, which is one of Go's possible answers. The suite refuses one field per batch.
 
+
+## Notes — shared/markdown (`crates/mm-markdown`)
+
+Ported 2026-09-13 as a new Apache-2.0 crate with no dependencies (it derives only from
+`server/public/`). The oracle is `reference/dump/behaviour_markdown.go` →
+`fixtures/behaviour_markdown.json`: 558 inputs, each recording `RenderHTML`, the full `Inspect`
+trace under an accepting and under a refusing callback, `Parse`'s definitions, and every
+paragraph's `ParseInlines` and `MergeInlineText`; plus the entity table entry by entry,
+`strings.EqualFold` pairs and `unicode.IsPunct`/`IsSpace` probes. `crates/mm-markdown/src/go_parity.rs`
+asserts all of it. The generator also emits `crates/mm-markdown/src/go_unicode_generated.rs`
+(`IsPunct`, `IsSpace`, `SimpleFold` from the Go toolchain — the [D-070] decision again) and
+`scripts/gen-html-entities.py` transcribes the entity table, refusing to write one that
+disagrees with the fixture.
+
+1. **`trimLeftSpace` shrinks the END of the range** (markdown.go:107) — the leading-whitespace
+   count is subtracted from `End`. Reachable with a paragraph whose first line starts with `\f`
+   or `\v`, and `\fhello` renders as `\fhell`; kept, and pinned — `markdown::trim_left_space`.
+2. **One trailing space is a hard line break** (inlines.go:171): the second clause re-tests
+   the first conjunct — `inlines::InlineParser::parse_line_ending`.
+3. **`Inspect` calls `f(nil)` after a node whether or not `f` accepted it**; refusing only
+   skips the children (inspect.go:83). `trace_prune` in the fixture pins it — `inspect::inspect`.
+4. **No `<…>` autolink, emphasis, heading, thematic break or HTML block**; `<`, `*`, `#`, `_`
+   are text. Only `scheme://` (with the slashes) and `www.` link — crate docs in `lib.rs`.
+5. **A `Text` node's range is not always its text's length**: an entity's range is its
+   *decoded* length and the final run of a paragraph keeps its untrimmed length. `MergeInlineText`
+   compares those ranges, so `&#65;&#66;` stays two nodes — `inlines` module docs.
+6. **`checkDomain` walks bytes and never examines the last one** (`i < len(data)-1`), and
+   `parseURLAutolink` adds `position` rather than `position+3` to its result; both are harmless
+   only because the link is then extended to the next ASCII whitespace — `autolink::check_domain`.
+7. **Reference labels compare by `strings.EqualFold`**, Unicode simple folding: `[K]` (Kelvin)
+   resolves `[k]`, `[ẞ]` resolves `[ß]`, `[STRASSE]` does not resolve `[straße]` — `unicode::equal_fold`
+   over the emitted `SIMPLE_FOLD` orbits.
+8. **`escapeURL` writes `%X` unpadded**, so a control byte is `%1` — `html::escape_url`.
+9. **`MaxLen` is bytes, `SetMaxPostRunes` is runes, four bytes per rune** (default 131,072);
+   one byte over yields an empty `Document` and no `Inspect` callbacks. The Go server sets it
+   once at `app/platform/service.go:338` from `Store.Post().GetMaxPostSize()` — recorded on
+   `inspect::set_max_post_runes` for the app layer to wire.
+10. **Unbounded nesting is Go-safe and was not Rust-safe.** `![![![…` nests 40k deep in 130 KiB;
+    Go's stack grows, a tokio worker's does not. `inspect` is iterative and the link/image
+    nodes drop iteratively (`inlines::drain_nested_children`); `render_html` — Go's own test
+    renderer, called by no route — still recurses and says so in `html.rs`.
+11. **Three deliberate divergences, all unreachable or test-only:** `strings.Fields(info)[0]`
+    panics on an info string that is whitespace after unescaping (`` ```&nbsp; ``) and this
+    side emits an empty class; `parseAutolink` would panic if the scheme text were shorter than
+    the rewind (it cannot be) and this side returns false; `Block<'a>`/`Inline<'a>` borrow the
+    input where Go's structs hold string headers, so `Node<'a>` is `Block(&'a Block<'a>) |
+    Inline(&'a Inline<'a>)`.
+12. **Running the generator on this host changed three unrelated fixtures** — a random
+    multipart boundary in `behaviour_filestore.json` and case-insensitive tzdata lookups in the
+    two scheduled-post fixtures ([D-065]'s "deployment artifact") — reverted, not committed.

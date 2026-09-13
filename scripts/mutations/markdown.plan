@@ -1,0 +1,32 @@
+# Mutation plan for crates/mm-markdown (the shared/markdown port).
+#
+#   scripts/mutate-batch.sh scripts/mutations/markdown.plan
+#
+# Every line is a decision a reader of the Go source could plausibly get wrong; the suite is the
+# 558-row Go oracle in fixtures/behaviour_markdown.json. The last two lines are the no-op
+# controls and must SURVIVE.
+
+hard-break-bound-off-by-one	crates/mm-markdown/src/inlines.rs	p >= 2 && bytes[p - 1] == b' '	p >= 3 && bytes[p - 1] == b' '	unit	go_parity::corpus
+text-stop-set-drops-colon	crates/mm-markdown/src/inlines.rs	&![]wW:".contains(&b)	&![]wW".contains(&b)	unit	go_parity::corpus
+label-limit-gt-for-ge	crates/mm-markdown/src/links.rs	if position - original_position >= 1000	if position - original_position > 1000	unit	go_parity::corpus
+domain-scan-examines-last-byte	crates/mm-markdown/src/autolink.rs	while i < bytes.len().saturating_sub(1) {	while i < bytes.len() {	unit	go_parity::corpus
+bang-can-end-autolink	crates/mm-markdown/src/autolink.rs	'?' | '!' | '.' | ','	'?' | '.' | ','	unit	go_parity::corpus
+scheme-walk-stops-early	crates/mm-markdown/src/autolink.rs	while start > 0 && is_alphanumeric_byte(bytes[start - 1]) {	while start > 1 && is_alphanumeric_byte(bytes[start - 1]) {	unit	go_parity::corpus
+emoji-prev-guard-at-one	crates/mm-markdown/src/emoji.rs	if position > 1 && is_word_byte(bytes[position - 1]) {	if position > 0 && is_word_byte(bytes[position - 1]) {	unit	go_parity::corpus
+decimal-entity-nine-digits	crates/mm-markdown/src/inlines.rs	if i > 8 || !d.is_ascii_digit() {	if i > 9 || !d.is_ascii_digit() {	unit	go_parity::corpus
+entity-range-is-source-length	crates/mm-markdown/src/inlines.rs	let len = s.len();	let len = semicolon + 2;	unit	go_parity::corpus
+block-pop-marker-skipped	crates/mm-markdown/src/inspect.rs	Frame::Exit => {\n                f(None);\n            }\n            Frame::Enter(block) => {	Frame::Exit => {}\n            Frame::Enter(block) => {	unit	go_parity::corpus
+inline-pop-only-when-accepted	crates/mm-markdown/src/inspect.rs	stack.push(Frame::Exit);\n                if !f(Some(inline)) {\n                    continue;\n                }	if !f(Some(inline)) {\n                    continue;\n                }\n                stack.push(Frame::Exit);	unit	go_parity::corpus
+quote-continuation-keeps-column	crates/mm-markdown/src/blocks.rs	let indentation = indentation.saturating_sub(1);	let indentation = indentation.saturating_sub(0);	unit	go_parity::corpus
+five-space-rule-off-by-one	crates/mm-markdown/src/blocks.rs	if is_blank_content || indent_after_marker >= 5 {	if is_blank_content || indent_after_marker >= 6 {	unit	go_parity::corpus
+ten-digit-marker-accepted	crates/mm-markdown/src/blocks.rs	if digits > 9 || r.position + digits >= r.end {	if digits > 10 || r.position + digits >= r.end {	unit	go_parity::corpus
+closing-fence-four-columns	crates/mm-markdown/src/blocks.rs	if indentation <= 3 && s.starts_with(fence) {	if indentation <= 4 && s.starts_with(fence) {	unit	go_parity::corpus
+list-merge-ignores-bullet	crates/mm-markdown/src/blocks.rs	if b_children.len() == 1 && a_ordered == b_ordered && a_bullet == b_bullet {	if b_children.len() == 1 && a_ordered == b_ordered {	unit	go_parity::corpus
+links-nest-images-do-not	crates/mm-markdown/src/inlines.rs	if !is_image {\n                        for earlier in	if is_image {\n                        for earlier in	unit	go_parity::corpus
+scheme-case-sensitive	crates/mm-markdown/src/autolink.rs	.any(|allowed| equal_fold(allowed, scheme))	.any(|allowed| *allowed == scheme)	unit	go_parity::corpus
+entity-lookup-lowercased	crates/mm-markdown/src/inlines.rs	html_entities::lookup(reference)	html_entities::lookup(&reference.to_ascii_lowercase())	unit	go_parity::corpus
+trim-left-space-bug-fixed	crates/mm-markdown/src/markdown.rs	let trimmed = s.trim_start_matches(is_whitespace);\n    Range::new(r.position, r.end - (s.len() - trimmed.len()))	let trimmed = s.trim_start_matches(is_whitespace);\n    Range::new(r.position + (s.len() - trimmed.len()), r.end)	unit	go_parity::corpus
+trim-returns-runes-not-bytes	crates/mm-markdown/src/autolink.rs	.map(|c| c.len_utf8())	.map(|_| 1)	unit	go_parity::corpus
+autolink-continue-dropped	crates/mm-markdown/src/inlines.rs	if self.parse_autolink(c) {\n                        continue;\n                    }\n                    if self.parse_emoji_node() {	if self.parse_autolink(c) {}\n                    if self.parse_emoji_node() {	unit	go_parity::corpus
+control-reorder-independent-lets	crates/mm-markdown/src/inlines.rs	let is_image = d.kind == DelimiterType::ImageOpening;\n                let mut inline = None;	let mut inline = None;\n                let is_image = d.kind == DelimiterType::ImageOpening;	unit	go_parity::corpus
+control-rename-local	crates/mm-markdown/src/autolink.rs	let prev = bytes[position - 1];\n        if !is_whitespace_byte(prev) && !is_allowed_before_www_link(prev) {	let previous = bytes[position - 1];\n        if !is_whitespace_byte(previous) && !is_allowed_before_www_link(previous) {	unit	go_parity::corpus

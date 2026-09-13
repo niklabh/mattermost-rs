@@ -1,0 +1,19 @@
+[package]
+name = "mm-markdown"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# DELIBERATELY NOT `license.workspace = true`. The workspace default is AGPL-3.0-only; this crate
+# is the Apache-2.0 half of the split, because every line of it derives from
+# `server/public/shared/markdown/`, which upstream licenses under Apache-2.0. See ./LICENSE, the
+# root NOTICE, and D-031. Remove this override the moment this crate takes anything from
+# `server/channels/`.
+license = "Apache-2.0"
+repository.workspace = true
+
+# No dependencies, on purpose: the parser is a hand-written CommonMark subset and a general
+# CommonMark crate would drift from it (D-044). It depends on no other workspace crate either.
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true

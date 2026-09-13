@@ -760,6 +760,7 @@ func main() {
 
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
+	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -1147,6 +1148,11 @@ func main() {
 
 	if err := writeQuoteGenerated(*out, *rustOut); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: quote table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeMarkdownBehaviourFixture(*out, *rustOutMarkdown); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: markdown behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 

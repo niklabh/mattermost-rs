@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/mm-model",
+    "crates/mm-markdown",
     "crates/mm-store",
     "crates/mm-app",
     "crates/mm-api",
@@ -15,8 +16,8 @@ rust-version = "1.85"
 # The licence is SPLIT, mirroring upstream's own split (see NOTICE and D-031):
 #   - this default, AGPL-3.0-only, covers mm-store / mm-app / mm-api / mm-ws, which derive from
 #     `server/channels/` — the AGPL v3.0 half of the Mattermost tree;
-#   - `crates/mm-model` OVERRIDES it back to Apache-2.0, because it derives solely from
-#     `server/public/`, which upstream licenses under Apache-2.0.
+#   - `crates/mm-model` and `crates/mm-markdown` OVERRIDE it back to Apache-2.0, because they
+#     derive solely from `server/public/`, which upstream licenses under Apache-2.0.
 # A crate that starts consuming `server/channels/` source must drop its override, not add one.
 license = "AGPL-3.0-only"
 repository = "https://github.com/niklabh/mattermost-rs"
@@ -25,6 +26,8 @@ repository = "https://github.com/niklabh/mattermost-rs"
 # Internal crates. Dependency direction is strict and enforced by review:
 #   mm-model <- mm-store <- mm-app <- {mm-api, mm-ws}
 mm-model = { path = "crates/mm-model" }
+# Apache-2.0 like mm-model; depends on nothing. The mention engine (mm-app) consumes it.
+mm-markdown = { path = "crates/mm-markdown" }
 mm-store = { path = "crates/mm-store" }
 mm-app = { path = "crates/mm-app" }
 
