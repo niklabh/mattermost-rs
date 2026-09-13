@@ -929,6 +929,9 @@ async fn patch_refuses_derives_and_updates_identically() {
     // Give the role `edit_custom_group`: now membership is what lets them through, and the
     // outsider — same roles, no membership — is still refused. The description changes on both
     // servers, one after the other, and the second answer differs only in `update_at`.
+    // Exclusive on the built-in rows from the edit to the restore: `roles` byte-compares this
+    // role, `update_at` included, and must not fetch one server on each side of the patch.
+    let role_rows = common::ROLE_ROWS.write().await;
     set_custom_group_user_permissions(&client, &pair, &admin, &["edit_custom_group"]).await;
     let ((go_status, go), (rs_status, rs)) = both(
         &client,
@@ -970,6 +973,7 @@ async fn patch_refuses_derives_and_updates_identically() {
     assert!(rs_group["update_at"].as_i64().unwrap() >= go_group["update_at"].as_i64().unwrap());
     assert!(!rs.ends_with(b"\n"));
     set_custom_group_user_permissions(&client, &pair, &admin, &[]).await;
+    drop(role_rows);
 
     // Derivation: `allow_reference: true` with no name lower-cases the display name and turns
     // spaces into hyphens. Done on two different groups so each server derives once.

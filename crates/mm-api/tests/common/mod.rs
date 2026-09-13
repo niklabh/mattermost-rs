@@ -251,6 +251,15 @@ pub async fn a_team_and_channel_the_user_is_in(
 /// `x-mmrs-served-by: go` where it asserted `rust`.
 pub static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **The built-in `Roles` rows are one resource, and byte-comparing them is shared while patching
+/// one is exclusive.** `roles` compares every built-in role between the two servers — `update_at`
+/// included — and the licensed group suite patches `custom_group_user` through the licensed Go
+/// to prove the permission model, then restores it. Measured 2026-09-13 in the same full run:
+/// `roles_by_names_matches_for_every_builtin_role` fetched Go before the patch and Rust after it,
+/// and the two bodies differed in one `update_at`. Readers hold this shared; the patch holds it
+/// exclusively from the edit to the restore.
+pub static ROLE_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **The shared admin's broadcast stream is one resource, and counting frames on it is exclusive.**
 ///
 /// A websocket sees everything the server publishes to that connection, so a test asserting
