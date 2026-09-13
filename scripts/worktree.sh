@@ -41,6 +41,10 @@ case "${1:-}" in
     NAME="${2:?worktree name}"; STACK="${3:?stack number}"
     DEST="$TREES/$NAME"
     mkdir -p "$TREES"
+    # The hook that refuses to commit the two reference symlinks a worktree carries. Hooks live in
+    # the shared .git, so installing it once covers every worktree; done on every `add` so a
+    # clone that never ran it gets it the first time it makes a worktree. See scripts/git-hooks.
+    install -m 755 "$ROOT/scripts/git-hooks/pre-commit" "$ROOT/.git/hooks/pre-commit"
 
     # **One stack, one worktree.** Two worktrees pinned to the same stack share a Postgres, a Go
     # server and — the part that actually bites — one `purge_api_fixtures`, so each run deletes
