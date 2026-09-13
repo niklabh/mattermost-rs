@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 mm-store.workspace = true
 mm-model.workspace = true
+mm-markdown.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true

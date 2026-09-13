@@ -90,6 +90,26 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let app = App::with_config(store, config);
+
+    // `markdown.SetMaxPostRunes(ps.MaxPostSize())` (platform/service.go:338): the markdown
+    // walker refuses inputs longer than four bytes per rune of the post limit, and the limit is
+    // read from the `Posts.Message` column at boot. `GetMaxPostSize` swallows its own error and
+    // answers the v1 default, so a failure here is the same default rather than a refusal to
+    // boot.
+    let max_post_size = match app.max_post_size().await {
+        Ok(size) => size,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the maximum post size; using the v1 default");
+            mm_model::post::POST_MESSAGE_MAX_RUNES_V1
+        }
+    };
+    mm_markdown::set_max_post_runes(max_post_size);
+    tracing::info!(
+        max_post_size,
+        max_markdown_len = mm_markdown::max_len(),
+        "markdown limits set"
+    );
+
     let state = AppState::new(app, go_upstream.clone());
     let listener = tokio::net::TcpListener::bind(&listen)
         .await

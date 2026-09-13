@@ -277,6 +277,14 @@ pub static ROLE_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new((
 /// there; the emulator was hiding them.
 pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Serialises the tests that touch the busy flag.
+///
+/// `ServerBusy` is one global per process — that is what it is in Go too — so a test that marks
+/// this server busy and a test that asserts it is idle cannot both run at once. The alternative
+/// was a test that passes alone and fails in the suite, which this project already has enough of.
+/// Held by `local_mode`'s busy tests and by `typing`'s `DisableWhenBusy` test.
+pub static BUSY_STATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
 ///
 /// `parity/custom_profile_attributes` plants rows in the `access_control` group and
@@ -1165,6 +1173,17 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM channels WHERE name LIKE 'mmrs-parity-%'",
         // Teams created by tests: Go's `DELETE /teams/{id}` archives like the channel one, and
         // an archived team keeps its name, so the next run's create fails without this.
+        // Group links onto test teams and channels, and the groups `group_reads_licensed` creates
+        // through the licensed oracle. Without these the team below is deleted and its
+        // `GroupTeams` rows survive it — orphans that `mm-store`'s whole-table
+        // `db_group_syncable_store` reads then count as real members. Measured 2026-09-13: three
+        // store tests failed on a team that no longer existed.
+        "DELETE FROM groupteams WHERE teamid IN (SELECT id FROM teams WHERE name LIKE 'mmrs-parity-%') OR teamid NOT IN (SELECT id FROM teams)",
+        "DELETE FROM groupchannels WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%') OR channelid NOT IN (SELECT id FROM channels)",
+        "DELETE FROM groupmembers WHERE groupid IN (SELECT id FROM usergroups WHERE name LIKE 'mmrsgrpread%' OR id LIKE 'mmrsgrpread%')",
+        "DELETE FROM groupteams WHERE groupid IN (SELECT id FROM usergroups WHERE name LIKE 'mmrsgrpread%' OR id LIKE 'mmrsgrpread%')",
+        "DELETE FROM groupchannels WHERE groupid IN (SELECT id FROM usergroups WHERE name LIKE 'mmrsgrpread%' OR id LIKE 'mmrsgrpread%')",
+        "DELETE FROM usergroups WHERE name LIKE 'mmrsgrpread%' OR id LIKE 'mmrsgrpread%'",
         "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM teams WHERE name LIKE 'mmrs-parity-%'",
         // Rows the getUser suite plants directly (Team Edition cannot author a ToS over REST).

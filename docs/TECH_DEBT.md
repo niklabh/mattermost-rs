@@ -1481,8 +1481,10 @@ What did **not** come with it is the id-collection half of the same Go file; tha
 ## D-042 · `propsIsValid` and `ValidateProps` are still unported
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
-**Depends on** [D-044] (the markdown parser) and `ValidateMmBlocksActions`
-(integration_action.go:1103) — i.e. integration_action.go chunk 2.
+**Depends on** `ValidateMmBlocksActions` (integration_action.go:1103) — i.e.
+integration_action.go chunk 2. [D-044] (the markdown parser) landed 2026-09-13 as
+`mm-markdown`, so the `Inspect` walk over `InlineLink`/`ReferenceLink`/`Autolink` destinations
+that `appendMmactionIDsFromText` needs is available; the collectors it lists remain unported.
 **Narrowed** 2026-08-14 (`post_interactive_blocks.go`): the walkers are ported, so the only
 missing pieces are the ones [D-044] describes.
 
@@ -1568,7 +1570,14 @@ round-trip fixtures are all **complete** objects, which is precisely why this su
 
 ## D-044 · The `mmaction://` id scan needs `shared/markdown`
 
-**Status** ACCEPTED · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+**Closed** 2026-09-13 — `shared/markdown` is ported, as `crates/mm-markdown` (Apache-2.0, like
+`mm-model`), against a Go-generated corpus (`fixtures/behaviour_markdown.json`: the HTML render,
+the `Inspect` trace and the merged text of every input). The 2026-08-20 "decided: forward"
+below was reversed by the 2026-09-07 direction that the strangler proxy is never a reason to
+skip work, and by the first route that needed the walker for a column the Go server reads
+([D-250]). What this entry *blocked* — the `mmaction://` scan and [D-042] — is now unblocked
+and still owed; it moves to [D-042].
 **Blocks** [D-042] (`propsIsValid`), and with it `ValidateMmBlocksActions`,
 `RefreshInteractiveActionsOnPost` and the interactive-webhook path.
 
@@ -5980,7 +5989,7 @@ the wire type and a client is entitled to use them.
 | Action | What it needs |
 |---|---|
 | `ping` | nothing — four constants and `GetMillis` |
-| `user_typing` | `PublishUserTyping`, a channel permission check, and the server-busy gate |
+| `user_typing` | a channel permission check and the server-busy gate; `App::publish_user_typing` and `mm_api::system::refuse_when_busy` exist since 2026-09-13 (the REST route is served) |
 | `user_update_active_status` | `SetStatusOnline` / `SetStatusAwayIfNeeded` — status **writes** |
 | `get_statuses` | `GetAllStatuses`, which reads Go's in-memory status cache, not a table |
 | `get_statuses_by_ids` | `mm_app::status::get_user_statuses_by_ids`, already ported |
@@ -6839,7 +6848,12 @@ the other `ServiceSettings` fields, because both arms of that branch then matter
 
 ## D-250 · The two thread read-state writes are blocked on `countThreadMentions`
 
-**Status** OPEN · **Severity** unported route · **Raised** 2026-09-11 (phase 2, thread writes)
+**Status** CLOSED · **Severity** unported route · **Raised** 2026-09-11 (phase 2, thread writes)
+**Closed** 2026-09-13 — both routes are served. `countThreadMentions` is
+`mm_app::thread_read::App::count_thread_mentions` on top of `mm_app::mention` (the four Go
+mention files) and the `mm-markdown` crate ([D-044]); the four store methods the table below
+names are in `thread_store.rs`, `post_store.rs` and `group_store.rs`. Compared on the same
+thread against both servers in `parity::thread_read`, byte for byte.
 
 ```text
 PUT  /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}
@@ -8655,4 +8669,31 @@ clears it — and refuses a team or channel target with `StoreError::Argument`. 
 two is its own three-way `COALESCE`, and the team arm joins `Channels` to find the team's channel
 fields. Owed by whichever route first **writes** a team- or channel-scoped PSAv2 field — the
 generic `POST /properties/groups/{group}/{object_type}/fields`, when it is served.
+
+---
+
+## D-585 · Five served routes carry Go's `DisableWhenBusy` and ignore the busy flag
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (typing)
+
+`web.Handler.ServeHTTP` refuses a `DisableWhenBusy` handler with
+`api.context.server_busy.app_error` / 503 while `platform.Busy` is set (web/handlers.go:349).
+Eleven api4 handlers are registered that way; six are served here, and only `publishUserTyping`
+gates — through `mm_api::system::refuse_when_busy`, added with it. The other five answer as if
+the server were never busy:
+
+```text
+POST /api/v4/channels/group/search           searchGroupChannels
+POST /api/v4/channels/search                 searchAllChannels
+POST /api/v4/teams/search                    searchTeams
+POST /api/v4/teams/{team_id}/channels/search searchChannelsForTeam
+POST /api/v4/users/search                    searchUsers
+```
+
+The flag is this process's own ([D-320]), so the divergence is observable only when
+`POST /server_busy` was sent to *this* server. **What is owed:** one `refuse_when_busy()?` at the
+top of each of the five handlers — and, before that, their parity suites must take
+`common::BUSY_STATE`, because `local_mode` and `typing` mark this server busy for a window and a
+gated search would 503 under them. That lock requirement is the reason the five were not gated
+in the same session.
 

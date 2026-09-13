@@ -100,6 +100,15 @@ pub trait PostStore {
         post_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Post>, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.GetPostsByThread` (post_store.go:1686): the undeleted replies to
+    /// `thread_id` created at or after `since`, in no particular order. The root itself is not a
+    /// reply to anything and is not in the result.
+    fn get_posts_by_thread(
+        &self,
+        thread_id: &str,
+        since: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Post>, StoreError>> + Send;
+
     /// Port of `SqlPostPriorityStore.GetForPostWithContext` (post_priority_store.go:29).
     fn get_priority_for_post(
         &self,
@@ -1802,6 +1811,64 @@ impl PostStore for SqlPostStore {
             });
         }
 
+        rows.into_iter().map(post_from_row).collect()
+    }
+
+    /// # `>=`, where the unread-reply count beside it is `>`
+    ///
+    /// `sq.GtOrEq{"CreateAt": since}` — the one caller, `countThreadMentions`, then filters
+    /// `p.CreateAt >= timestamp` a second time in Go, so the bound is stated twice and both
+    /// are inclusive. `GetThreadUnreadReplyCount` is the strict one. A port that unified them
+    /// would count a reply at exactly `LastViewed` as a mention but not as unread.
+    ///
+    /// No `ORDER BY`: Go has none, and the caller only counts.
+    #[tracing::instrument(skip(self), fields(thread_id = %thread_id, since, found))]
+    async fn get_posts_by_thread(
+        &self,
+        thread_id: &str,
+        since: i64,
+    ) -> Result<Vec<Post>, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT posts.id,
+                   posts.createat   AS "create_at!",
+                   posts.updateat   AS "update_at!",
+                   posts.editat     AS "edit_at!",
+                   posts.deleteat   AS "delete_at!",
+                   posts.ispinned   AS "is_pinned!",
+                   posts.userid     AS "user_id!",
+                   posts.channelid  AS "channel_id!",
+                   posts.rootid     AS "root_id!",
+                   posts.originalid AS "original_id!",
+                   posts.message    AS "message!",
+                   posts.type       AS "post_type!",
+                   posts.props      AS "props?",
+                   posts.hashtags   AS "hashtags!",
+                   posts.filenames  AS "filenames?",
+                   posts.fileids    AS "file_ids?",
+                   posts.hasreactions AS "has_reactions!",
+                   posts.remoteid   AS "remote_id?",
+                   (SELECT COUNT(*)
+                      FROM posts p
+                     WHERE p.rootid = (CASE WHEN posts.rootid = '' THEN posts.id ELSE posts.rootid END)
+                       AND p.deleteat = 0) AS "reply_count!"
+              FROM posts
+             WHERE posts.rootid = $1
+               AND posts.deleteat = 0
+               AND posts.createat >= $2
+            "#,
+            thread_id,
+            since,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to fetch thread posts".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
         rows.into_iter().map(post_from_row).collect()
     }
 

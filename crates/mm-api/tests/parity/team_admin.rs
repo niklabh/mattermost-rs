@@ -339,7 +339,10 @@ async fn the_team_page_matches_go_byte_for_byte_and_every_predicate_bites() {
     let f = fixture(&client, &token).await;
 
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    // `fetch_both_stable`, not `fetch_both`: the page carries the shared admin, whose `Users`
+    // row other suites bump between the Go read and ours (`update_at` alone differed, five tests,
+    // 2026-09-13). The quiescent-window read is the standing remedy for that row.
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     assert!(
         !rs.ends_with(b"\n"),
@@ -423,7 +426,7 @@ async fn the_groups_array_is_hydrated_from_every_membership_row() {
     let f = fixture(&client, &token).await;
 
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}");
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     let users = body["users"].as_array().expect("a users array");
@@ -477,7 +480,7 @@ async fn a_second_group_id_removes_a_second_member() {
     let f = fixture(&client, &token).await;
 
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE},{GROUP_TWO}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
 
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
@@ -509,7 +512,7 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
     let f = fixture(&client, &token).await;
 
     let whole = minus(&f.team, &format!("group_ids={GROUP_ONE}"));
-    let (go_whole, rs_whole) = common::fetch_both(&client, &token, &whole).await;
+    let (go_whole, rs_whole) = common::fetch_both_stable(&client, &token, &whole).await;
     assert_eq!(go_whole, rs_whole, "{whole}");
     let whole: serde_json::Value = serde_json::from_slice(&go_whole).expect("the body decodes");
     let total = whole["total_count"].as_u64().expect("a count");
@@ -521,7 +524,7 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
             &f.team,
             &format!("group_ids={GROUP_ONE}&page={page}&per_page=1"),
         );
-        let (go, rs) = common::fetch_both(&client, &token, &p).await;
+        let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
         assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
         let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
         assert_eq!(
@@ -548,11 +551,11 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
     // **A page size other than one.** With `per_page=1` the offset is `page * 1`, so a port that
     // dropped the multiplication would agree on every page above.
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}&page=0&per_page=2"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     let first: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}&page=1&per_page=2"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     let second: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
 
@@ -577,7 +580,7 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
         &f.team,
         &format!("group_ids={GROUP_ONE}&page={total}&per_page=1"),
     );
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}");
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     assert_eq!(body["users"], serde_json::json!([]));
@@ -596,7 +599,7 @@ async fn the_page_is_ordered_by_username() {
     let f = fixture(&client, &token).await;
 
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}");
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     let names: Vec<&str> = body["users"]
@@ -673,7 +676,7 @@ async fn the_id_gate_precedes_the_group_gate_and_neither_reads_the_team() {
 
     // A well-formed team id naming nothing: **200 with an empty page**, not a 404.
     let p = minus(ABSENT, &format!("group_ids={GROUP_ONE}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     assert_eq!(body["users"], serde_json::json!([]));
@@ -754,10 +757,15 @@ async fn the_permission_is_the_groups_one_and_not_the_channels_one() {
     let p = minus(&f.team, &format!("group_ids={GROUP_ONE}"));
 
     // The groups permission admits, and the body is the same one the admin gets.
-    let ((go_status, go), (rs_status, rs)) =
-        common::fetch_both_raw(&client, &groups_reader, &p).await;
-    assert_eq!(go_status, 200, "{p}: {}", String::from_utf8_lossy(&go));
-    assert_eq!(rs_status, go_status, "{p}");
+    // The page carries the shared admin, whose `Users` row other suites bump between the two
+    // reads — so the quiescent-window fetch, as for the admin's own reads above. A 200 is
+    // implied: the bodies are the user page, and they must be byte-identical.
+    let (go, rs) = common::fetch_both_stable(&client, &groups_reader, &p).await;
+    assert!(
+        go.starts_with(b"{\"users\""),
+        "{p}: the groups reader is allowed: {}",
+        String::from_utf8_lossy(&go)
+    );
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
 
     // The channels permission does **not** — it is the gate on the *channel* route.
@@ -818,7 +826,7 @@ async fn a_deleted_team_answers_an_empty_page() {
 
     // Live, it answers its one member — the creator.
     let p = minus(&doomed, &format!("group_ids={GROUP_ONE}"));
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     assert_eq!(body["total_count"], 1, "the creator, before the delete");
@@ -831,7 +839,7 @@ async fn a_deleted_team_answers_an_empty_page() {
         .expect("Go answers");
     assert!(deleted.status().is_success(), "the team is soft-deleted");
 
-    let (go, rs) = common::fetch_both(&client, &token, &p).await;
+    let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
     assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
     let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
     assert_eq!(body["users"], serde_json::json!([]), "and after, nothing");

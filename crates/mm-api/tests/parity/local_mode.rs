@@ -221,12 +221,9 @@ fn assert_forwarded_body_is_gos(go_body: &[u8], rust_body: &[u8], context: &str)
     );
 }
 
-/// Serialises the tests that touch the busy flag.
-///
-/// `ServerBusy` is one global per process — that is what it is in Go too — so a test that marks
-/// this server busy and a test that asserts it is idle cannot both run at once. The alternative
-/// was a test that passes alone and fails in the suite, which this project already has enough of.
-static BUSY_STATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// The busy-flag lock, shared with every other suite that marks this server busy — see
+/// `common::BUSY_STATE` for why it is one lock per process.
+use common::BUSY_STATE;
 
 /// The cheapest possible end-to-end proof that the socket works: `getSystemPing` over both.
 ///

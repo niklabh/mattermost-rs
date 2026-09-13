@@ -43,6 +43,7 @@ pub mod job;
 pub mod license;
 pub mod limits;
 pub mod login;
+pub mod mention;
 pub mod oauth;
 pub mod password;
 pub mod post;
@@ -67,6 +68,8 @@ pub mod team;
 pub mod team_member;
 pub mod terms_of_service;
 pub mod thread;
+pub mod thread_read;
+pub mod typing;
 /// Port of the two read functions in `app/upload.go`.
 pub mod upload;
 pub mod usage;

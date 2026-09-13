@@ -529,12 +529,12 @@ fn zbase32_encode(input: &[u8]) -> String {
 /// Not `char::is_alphabetic()`: that is the Alphabetic *property*, which also includes
 /// `Other_Alphabetic` (combining marks such as U+0345), so it accepts identifiers Go
 /// rejects. The behavioural oracle caught this; see `is_valid_id_matches_go`.
-fn is_go_letter(c: char) -> bool {
+pub fn is_go_letter(c: char) -> bool {
     in_ranges(crate::go_unicode_generated::IS_LETTER_RANGES, c)
 }
 
 /// Port of `unicode.IsNumber` — Unicode general category `N`.
-fn is_go_number(c: char) -> bool {
+pub fn is_go_number(c: char) -> bool {
     in_ranges(crate::go_unicode_generated::IS_NUMBER_RANGES, c)
 }
 

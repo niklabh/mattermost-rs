@@ -154,9 +154,11 @@ mod parity {
     pub mod terms_of_service_licensed;
     pub mod terms_of_service_writes;
     pub mod thread_for_user;
+    pub mod thread_read;
     pub mod thread_writes;
     pub mod threads_for_user;
     pub mod token_writes;
+    pub mod typing;
     pub mod user_access_tokens;
     pub mod user_audits;
     pub mod user_auth;

@@ -1,0 +1,63 @@
+# Mutation plan for the per-thread read-state pair and typing:
+#
+#   PUT  /users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}
+#   POST /users/{user_id}/teams/{team_id}/threads/{thread_id}/set_unread/{post_id}
+#   POST /users/{user_id}/typing
+#
+#   scripts/mutate-batch.sh scripts/mutations/thread-read.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The parity suite runs each write on ONE thread against both servers with the same planted row,
+# so the bodies are byte-compared and the counts have to be Go's number exactly. The store
+# boundaries (`>` vs `>=`, `DeleteAt = 0`) are additionally pinned by
+# `mm-store/tests/db_thread_read_state.rs`, on rows planted AT the boundary.
+#
+# `thread_store.rs` holds three statements that write `LastViewed`; every anchor here carries a
+# token unique to its statement (`lastupdated = $2\n             WHERE userid = $3` is
+# mark_as_read's, `unreadmentions = $6` is update_membership's).
+#
+# The mention-parser lines run the unit suite: the parser is pure and its branches are pinned by
+# `mention::tests`; the parity suite would catch most of them too, at ten times the cost.
+#
+# Three lines keep a bind parameter referenced with a no-op (`$1::bigint >= 0`, `+ ($6 - $6)`,
+# `TRUE OR $3`): a dropped bind is a sqlx compile error and a HARNESS FAULT, not a verdict, and
+# the cast is needed too — an untyped `$1 >= 0` infers int4 against an i64 bind. The first run
+# of this plan showed both.
+#
+# `addMention`'s `>=` has no mutation here on purpose: `>` is an *equivalent* mutant, since the
+# only case it changes — an equal priority — rewrites the map entry with the value it already
+# holds. It survived the first run for that reason, not for a missing test.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+read-mark-is-the-clock	crates/mm-store/src/thread_store.rs	               SET lastviewed = $1,\n                   lastupdated = $2\n             WHERE userid = $3	               SET lastviewed = $2,\n                   lastupdated = $2\n             WHERE userid = $3 AND $1::bigint >= 0	api	thread_read
+unread-count-inclusive	crates/mm-store/src/thread_store.rs	               AND posts.createat > $2	               AND posts.createat >= $2	api	thread_read
+unread-count-keeps-deleted	crates/mm-store/src/thread_store.rs	               AND posts.createat > $2\n               AND posts.deleteat = 0	               AND posts.createat > $2\n               AND posts.deleteat >= 0	api	thread_read
+membership-mentions-not-written	crates/mm-store/src/thread_store.rs	                   unreadmentions = $6	                   unreadmentions = unreadmentions + ($6::bigint - $6::bigint)	api	thread_read
+membership-following-forced	crates/mm-store/src/thread_store.rs	               SET following = $3,	               SET following = TRUE OR $3::boolean,	api	thread_read
+thread-posts-exclusive	crates/mm-store/src/post_store.rs	               AND posts.createat >= $2	               AND posts.createat > $2	api	thread_read
+thread-posts-keep-deleted	crates/mm-store/src/post_store.rs	             WHERE posts.rootid = $1\n               AND posts.deleteat = 0\n               AND posts.createat >= $2	             WHERE posts.rootid = $1\n               AND posts.deleteat >= 0\n               AND posts.createat >= $2	api	thread_read
+by-post-mark-at-the-post	crates/mm-app/src/thread_read.rs	            post.create_at - 1,	            post.create_at,	api	thread_read
+by-post-root-refused	crates/mm-app/src/thread_read.rs	        if post.root_id != thread_id && post_id != thread_id {	        if post.root_id != thread_id || post_id != thread_id {	api	thread_read
+read-back-with-the-old-mark	crates/mm-app/src/thread_read.rs	        membership.last_viewed = timestamp;	        membership.last_viewed = membership.last_viewed;	api	thread_read
+event-previous-replies-is-current	crates/mm-app/src/thread_read.rs	            serde_json::Value::from(previous_unread_replies),	            serde_json::Value::from(thread.unread_replies),	api	thread_read
+mention-loop-exclusive	crates/mm-app/src/thread_read.rs	            if reply.create_at >= timestamp {	            if reply.create_at > timestamp {	api	thread_read
+dm-counts-own-side	crates/mm-app/src/thread_read.rs	                .filter(|reply| reply.user_id == other_id)	                .filter(|reply| reply.user_id != other_id)	api	thread_read
+gm-takes-the-keyword-path	crates/mm-app/src/thread_read.rs	        if channel.channel_type == CHANNEL_TYPE_DIRECT || channel.channel_type == CHANNEL_TYPE_GROUP	        if channel.channel_type == CHANNEL_TYPE_DIRECT	api	thread_read
+channel-mentions-disallowed	crates/mm-app/src/thread_read.rs	            // Assume channel mentions are always allowed for simplicity.\n            true,	            // Assume channel mentions are always allowed for simplicity.\n            false,	api	thread_read
+reader-not-online	crates/mm-app/src/thread_read.rs	                status: STATUS_ONLINE.to_owned(),	                status: "away".to_owned(),	api	thread_read
+emoji-shape-either-end	crates/mm-app/src/mention.rs	            if word.starts_with(':') && word.ends_with(':') {	            if word.starts_with(':') || word.ends_with(':') {	unit	mention::
+leading-trim-drops-underscore	crates/mm-app/src/mention.rs	            let word = word.trim_start_matches([':', '.', '-', '_']);	            let word = word.trim_start_matches([':', '.', '-']);	unit	mention::
+suffix-peel-drops-underscore	crates/mm-app/src/mention.rs	                && word_without_suffix.ends_with(['.', '-', ':', '_'])	                && word_without_suffix.ends_with(['.', '-', ':'])	unit	mention::
+potential-strips-underscore-too	crates/mm-app/src/mention.rs	                    b'.' | b'-' | b':' => &word[..word.len() - 1],	                    b'.' | b'-' | b':' | b'_' => &word[..word.len() - 1],	unit	mention::
+separator-uses-is-alphabetic	crates/mm-app/src/mention.rs	        || is_go_letter(c)	        || c.is_alphabetic()	unit	mention::
+multibyte-test-inverted	crates/mm-app/src/mention.rs	        if keyword.len() != keyword.chars().count() && word.contains(keyword.as_str()) {	        if keyword.len() == keyword.chars().count() && word.contains(keyword.as_str()) {	unit	mention::
+first-name-lowercased	crates/mm-app/src/mention.rs	            self.push(profile.first_name.clone(), mentionable_id.clone());	            self.push(go_to_lower(&profile.first_name), mentionable_id.clone());	unit	mention::
+api-read-validator-order	crates/mm-api/src/thread_writes.rs	    if !is_valid_id(thread_id) {\n        return Some("thread_id");\n    }\n    if timestamp == 0 {\n        return Some("timestamp");\n    }	    if timestamp == 0 {\n        return Some("timestamp");\n    }\n    if !is_valid_id(thread_id) {\n        return Some("thread_id");\n    }	unit	thread_writes::
+api-timestamp-class-alnum	crates/mm-api/src/lib.rs	        "timestamp" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()),	        "timestamp" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric()),	api	thread_read
+typing-self-not-omitted	crates/mm-app/src/typing.rs	        omit_users.insert(user_id.to_owned(), true);	        omit_users.insert(user_id.to_owned(), false);	api	typing
+typing-manage-system-inverted	crates/mm-api/src/typing.rs	    if user_id != session.0.user_id\n        && !state	    if user_id != session.0.user_id\n        && state	api	typing
+typing-array-body-accepted	crates/mm-api/src/typing.rs	        Some(_) => return Err(ApiError::invalid_param("typing_request")),	        Some(_) => TypingRequest::default(),	api	typing
+control-redundant-predicate	crates/mm-store/src/thread_store.rs	             WHERE userid = $3\n               AND postid = $4	             WHERE userid = $3\n               AND postid = $4\n               AND length($3) >= 0	api	thread_read
+control-swap-event-adds	crates/mm-app/src/thread_read.rs	        message.add("thread_id", serde_json::Value::String(thread_id.to_owned()));\n        message.add("timestamp", serde_json::Value::from(timestamp));	        message.add("timestamp", serde_json::Value::from(timestamp));\n        message.add("thread_id", serde_json::Value::String(thread_id.to_owned()));	api	thread_read

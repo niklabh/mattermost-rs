@@ -35,7 +35,7 @@ const HEADER_ETAG_SERVER: &str = "ETag";
 /// two of which (`authservice`, `authdata`) have no config source at all — a non-admin viewer
 /// never sees them regardless of settings, because `Sanitize`'s populated-map mode strips every
 /// unflagged field.
-fn sanitize_options(
+pub(crate) fn sanitize_options(
     show_full_name: bool,
     show_email_address: bool,
     as_admin: bool,
@@ -3534,7 +3534,7 @@ async fn serve_threads(
 }
 
 /// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.
-fn marshal_error(where_: &'static str) -> ApiError {
+pub(crate) fn marshal_error(where_: &'static str) -> ApiError {
     ApiError::from(AppError::new(
         where_,
         "api.marshal_error",

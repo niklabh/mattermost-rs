@@ -12489,3 +12489,59 @@ Mutation tally: 18 run, 18 caught, 2 controls survived (`api` suite filtered to 
    suite compares those as sets.
 6. **A pool in a static fixture dies with the first test's runtime** ("a Tokio 1.x context was
    found, but it is being shutdown"); the suite opens one per test.
+## The thread read-state pair, typing, and the mention engine behind them (2026-09-13)
+
+**460 → 463 of 764.** `PUT /users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}`,
+`POST …/threads/{thread_id}/set_unread/{post_id}` and `POST /users/{user_id}/typing`. The first
+two were [D-250]: blocked on `countThreadMentions`, which is the mention engine over the
+markdown walker. Both are ported now rather than stubbed, because the count lands in
+`ThreadMemberships.UnreadMentions`, a column the Go server reads on every threads list.
+
+| layer | file | status |
+|---|---|---|
+| markdown | `crates/mm-markdown` — port of `server/public/shared/markdown` (Apache-2.0), oracle `fixtures/behaviour_markdown.json` | DONE — see "Notes — shared/markdown" above |
+| store | `crates/mm-store/src/thread_store.rs` — `mark_as_read`, `get_thread_unread_reply_count`, `update_membership`; `post_store.rs` — `get_posts_by_thread`; `group_store.rs` — `get_groups`, `get_groups_by_channel`, `get_groups_by_team` | DONE, `db_thread_read_state.rs` 4 db |
+| app | `crates/mm-app/src/mention.rs` — `MentionKeywords`, `MentionResults`, `StandardMentionParser`, `get_explicit_mentions`; `thread_read.rs` — `update_thread_read_for_user[_by_post]`, `count_thread_mentions`; `typing.rs`; `group.rs` — `get_groups_allowed_for_reference_in_channel` | DONE, 22 + 1 unit |
+| api | `crates/mm-api/src/thread_writes.rs` (two handlers), `typing.rs`, `system.rs::refuse_when_busy`, `lib.rs` (`{timestamp:[0-9]+}` charset) | DONE, 4 unit |
+| test | `crates/mm-api/tests/parity/thread_read.rs` — 19; `parity/typing.rs` — 7 | DONE |
+
+What a reader would otherwise get wrong, each pointing at the code that holds it:
+
+- **The parity oracle is the same thread, planted twice.** The response is the `ThreadResponse`
+  for that thread, so with the same prior row and the same timestamp the two servers' bodies are
+  byte-identical, and `thread_read_changed`'s `previous_*` counters too. `parity::thread_read`'s
+  module docs.
+- **`set_unread` follows first, then counts.** So the event's `previous_unread_mentions` is 0
+  whatever the row held, the membership is created when missing, and `thread_follow_changed`
+  precedes `thread_read_changed`. `mm_api::thread_writes::set_unread_thread_by_post_id`.
+- **An unfollowed membership is written and then refused.** `UpdateMembership` and `MarkAsRead`
+  run before `GetThreadForUser` says `not_found`; the 404 leaves a moved row on both servers.
+  `parity::thread_read::reading_an_unfollowed_thread_writes_the_row_and_then_answers_404`.
+- **Mentions are `>=` the timestamp, unread replies are `>` it.** Two stores, two comparisons;
+  a reply at exactly the timestamp is a mention and is read.
+  `SqlPostStore::get_posts_by_thread`, `SqlThreadStore::get_thread_unread_reply_count`.
+- **A group message counts zero mentions.** `GetOtherUserIdForDM` is `""` for a GM, and that is
+  Go's answer. `App::count_thread_mentions`.
+- **The word splitter is Go's `unicode.IsLetter`, not `is_alphabetic`.** A Devanagari vowel sign
+  splits a word in Go. `mm_app::mention::is_word_separator`; `is_go_letter` is now `pub`.
+- **Two multibyte keywords in one word is the one input Go answers nondeterministically**;
+  this port answers in key order. `mm_app::mention::is_keyword_multibyte`.
+- **`{timestamp:[0-9]+}` is a mux class**, so `now` and `-1` are forwarded for Go's 404 and only
+  an all-digit zero or overflow is the handler's 400. `segment_matches_go_mux_for`.
+- **Typing is the first served `DisableWhenBusy` route that gates**; five served search routes
+  carry the same flag in Go and do not — [D-585].
+- **A forwarded 404 carries `x-mmrs-served-by: go`**, and its body is Go's translated one on
+  both sides, so the D-092 comparison helper does not apply to it. The two suites carry
+  `assert_forwarded_bodies_match` for that case.
+
+[D-250] and [D-044] closed; [D-042] is unblocked and still owed. `clearPushNotification` still has
+no hub ([D-215]); the condition is evaluated and traced in `update_thread_read_for_user`.
+
+### The next route in this family
+
+`api4/user.go` has ten unserved pairs left, none client-hot: the three SSO logins
+(`login/cws`, `login/desktop_token`, `login/sso/code-exchange`), the two `migrate_auth` writes,
+`notify-admin` and `trigger-notify-admin-posts`. The mention engine's next caller is
+`countMentionsFromPost`'s public-channel branch in `mm_app::post_unread` — the refusal there
+names exactly what `mention.rs` now provides plus `GetPostsAfterPost` — and after that
+`SendNotifications` for `createPost` ([D-221]).

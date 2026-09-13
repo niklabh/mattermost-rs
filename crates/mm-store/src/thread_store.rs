@@ -115,6 +115,34 @@ pub trait ThreadStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<Option<Thread>, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.MarkAsRead` (thread_store.go:698).
+    ///
+    /// Despite the name it moves the read mark to **`timestamp`**, wherever that is — the
+    /// set-unread route calls it with a reply's `CreateAt - 1` to move the mark backwards. It
+    /// writes `LastViewed` and `LastUpdated` only; `UnreadMentions` is the caller's, through
+    /// [`ThreadStore::update_membership`] one statement earlier.
+    fn mark_as_read(
+        &self,
+        user_id: &str,
+        thread_id: &str,
+        timestamp: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.GetThreadUnreadReplyCount` (thread_store.go:1055): the undeleted
+    /// replies created **strictly after** the membership's `LastViewed`.
+    fn get_thread_unread_reply_count(
+        &self,
+        membership: &ThreadMembership,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.UpdateMembership` (thread_store.go:727): rewrites the four mutable
+    /// columns of an existing row from the value given. Go hands the same pointer back; there is
+    /// nothing in it the caller did not put there, so this returns `()`.
+    fn update_membership(
+        &self,
+        membership: &ThreadMembership,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Port of `store.ThreadMembershipOpts` (store/store.go:436), narrowed to the fields the follow
@@ -1028,5 +1056,128 @@ impl ThreadStore for SqlThreadStore {
             delete_at: row.delete_at,
             team_id: row.team_id,
         }))
+    }
+
+    /// # `LastViewed` is the argument, `LastUpdated` is the clock
+    ///
+    /// The two columns are set from **different** sources here, unlike the team sweep beside it
+    /// which writes one `GetMillis()` into both. A port that copied the sweep would move
+    /// `LastViewed` to now on a set-unread, which is exactly the opposite of what that route
+    /// asks for.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, thread_id = %thread_id, timestamp, updated))]
+    async fn mark_as_read(
+        &self,
+        user_id: &str,
+        thread_id: &str,
+        timestamp: i64,
+    ) -> Result<(), StoreError> {
+        let now = mm_model::utils::get_millis();
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE threadmemberships
+               SET lastviewed = $1,
+                   lastupdated = $2
+             WHERE userid = $3
+               AND postid = $4
+            "#,
+            timestamp,
+            now,
+            user_id,
+            thread_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to update thread read state for user id={user_id} thread_id={thread_id}"
+            ),
+            source,
+        })?;
+
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    /// # Strictly greater, on the root's replies only
+    ///
+    /// `Posts.RootId = PostId AND Posts.CreateAt > LastViewed AND DeleteAt = 0`. The root post
+    /// itself has an empty `RootId` and is never counted, and a reply created at exactly
+    /// `LastViewed` is read. `GetThreadForUser`'s own unread-replies subquery says the same, and
+    /// the set-unread route relies on the two agreeing: it moves the mark to `CreateAt - 1` so
+    /// that the reply lands on the unread side of a `>`.
+    #[tracing::instrument(
+        skip(self, membership),
+        fields(post_id = %membership.post_id, last_viewed = membership.last_viewed)
+    )]
+    async fn get_thread_unread_reply_count(
+        &self,
+        membership: &ThreadMembership,
+    ) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(posts.id) AS "count!"
+              FROM posts
+             WHERE posts.rootid = $1
+               AND posts.createat > $2
+               AND posts.deleteat = 0
+            "#,
+            membership.post_id,
+            membership.last_viewed,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to count unread reply count for post id={}",
+                membership.post_id
+            ),
+            source,
+        })?;
+
+        Ok(count)
+    }
+
+    /// # No guard, no clock
+    ///
+    /// Unlike [`Self::maintain_membership`], this writes every column from the argument
+    /// unconditionally, `LastUpdated` included — so a caller that wants the clock in that column
+    /// sets it first, and `UpdateThreadReadForUser` does not: it leaves the row's old
+    /// `LastUpdated` in place here and lets [`Self::mark_as_read`] stamp it a statement later.
+    /// A row that does not exist is a no-op, not an error, on both servers.
+    #[tracing::instrument(
+        skip(self, membership),
+        fields(post_id = %membership.post_id, user_id = %membership.user_id, updated)
+    )]
+    async fn update_membership(&self, membership: &ThreadMembership) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE threadmemberships
+               SET following = $3,
+                   lastviewed = $4,
+                   lastupdated = $5,
+                   unreadmentions = $6
+             WHERE postid = $1
+               AND userid = $2
+            "#,
+            membership.post_id,
+            membership.user_id,
+            membership.following,
+            membership.last_viewed,
+            membership.last_updated,
+            membership.unread_mentions,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to update thread membership with postid={} userid={}",
+                membership.post_id, membership.user_id
+            ),
+            source,
+        })?;
+
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
     }
 }

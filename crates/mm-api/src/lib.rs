@@ -74,6 +74,7 @@ pub mod terms_of_service;
 pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
+pub mod typing;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
@@ -198,6 +199,9 @@ fn parameter_is_id_shaped(name: &str) -> bool {
 /// `{name}` already matches one whole segment, and every pattern in api4 is a subset of that.
 fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
     match name {
+        // `{timestamp:[0-9]+}` (api4/user.go:117) — the one non-id parameter with a digits-only
+        // class. `-1`, `1.5` and `now` are mux 404s; `0` matches and is the handler's 400.
+        "timestamp" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()),
         "group_name" => {
             let mut bytes = value.bytes();
             bytes.next().is_some_and(|b| b.is_ascii_lowercase())
@@ -532,6 +536,22 @@ pub fn router(state: AppState) -> Router {
                     .delete(thread_writes::unfollow_thread_by_user),
             ),
         )
+        // `BaseRoutes.UserThread.Handle("/read/{timestamp:[0-9]+}")` (api4/user.go:117), PUT.
+        // Two segments deeper than `{thread_id}` and a sibling of nothing, so no precedence
+        // question; the digits-only class is enforced by `segment_matches_go_mux_for`.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}",
+            partially_migrated_with_ids(
+                &state,
+                put(thread_writes::update_read_state_thread_by_user),
+            ),
+        )
+        // `BaseRoutes.UserThread.Handle("/set_unread/{post_id:[A-Za-z0-9]+}")` (api4/user.go:118),
+        // POST.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/set_unread/{post_id}",
+            partially_migrated_with_ids(&state, post(thread_writes::set_unread_thread_by_post_id)),
+        )
         // `BaseRoutes.TeamForUser.Handle("/drafts")` (api4/drafts.go:17) — the threads routes'
         // sibling under the same base, and the one route here whose `{user_id}` is decorative.
         .route(
@@ -715,6 +735,12 @@ pub fn router(state: AppState) -> Router {
                 &state,
                 get(status::get_user_status).put(status::update_user_status),
             ),
+        )
+        // `BaseRoutes.User.Handle("/typing")` (api4/user.go:101), POST only, and the only
+        // `APISessionRequiredDisableWhenBusy` handler on the user subtree.
+        .route(
+            "/api/v4/users/{user_id}/typing",
+            partially_migrated_with_ids(&state, post(typing::publish_user_typing)),
         )
         .route(
             "/api/v4/users/{user_id}/status/custom",
@@ -2843,6 +2869,24 @@ pub fn router(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
+
+    /// The mux class for `{timestamp}` is digits only (api4/user.go:117); anything else is Go's
+    /// own 404 and must be forwarded, while a digits-only zero reaches the handler for its 400.
+    #[test]
+    fn a_timestamp_segment_must_be_all_digits_to_reach_the_handler() {
+        for ok in ["0", "1", "1700000000000", "000"] {
+            assert!(super::segment_matches_go_mux_for("timestamp", ok), "{ok}");
+        }
+        for forwarded in ["", "-1", "1.5", "now", "1e3", "+1", " 1"] {
+            assert!(
+                !super::segment_matches_go_mux_for("timestamp", forwarded),
+                "{forwarded:?} must be forwarded for Go's 404"
+            );
+        }
+        // Unchanged for the id-shaped neighbours on the same route.
+        assert!(super::segment_matches_go_mux_for("post_id", "abc123"));
+        assert!(!super::segment_matches_go_mux_for("post_id", "abc-123"));
+    }
     use super::*;
 
     // `connect_lazy` still needs a reactor to exist, so this is a tokio test even though it

@@ -581,6 +581,28 @@ impl ServerBusy {
 /// This process's busy flag. See [`ServerBusy`] for why it is a global.
 static SERVER_BUSY: ServerBusy = ServerBusy::new();
 
+/// The `DisableWhenBusy` gate of `web.Handler.ServeHTTP` (web/handlers.go:349): a handler
+/// registered with `APISessionRequiredDisableWhenBusy` is refused with
+/// `api.context.server_busy.app_error` / 503 while [`SERVER_BUSY`] is set.
+///
+/// It runs **after** authentication and before the handler, so an unauthenticated caller still
+/// gets a 401 on a busy server, and a valid one gets the 503 before any body is read.
+///
+/// The flag it reads is this process's own ([D-320]): a busy state set on the Go server is not
+/// visible here and vice versa, which is a property of running two servers and ends when Go does.
+pub(crate) fn refuse_when_busy() -> Result<(), ApiError> {
+    if SERVER_BUSY.state(Utc::now()).busy {
+        return Err(ApiError::from(AppError::new(
+            "Context",
+            "api.context.server_busy.app_error",
+            None,
+            String::new(),
+            503,
+        )));
+    }
+    Ok(())
+}
+
 /// `t.UTC().Format(platform.TimestampFormat)`.
 ///
 /// The zone is always UTC here — `ToJSON` calls `.UTC()` first — so the offset and the

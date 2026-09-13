@@ -68,6 +68,12 @@ fn channel_type() -> GroupSyncableType {
 async fn sweep(pool: &PgPool) {
     for statement in [
         "DELETE FROM groupmembers WHERE groupid LIKE 'mmrsgsync%'",
+        // Links whose team or channel no longer exists: what a parity suite leaves behind when
+        // `purge_api_fixtures` deletes its team but not the `GroupTeams` rows on it. The reads
+        // below are whole-table, and Go's queries do not join `Teams`, so an orphan counts as a
+        // member to add. Measured 2026-09-13: three tests here failed on a team that was gone.
+        "DELETE FROM groupteams WHERE teamid NOT IN (SELECT id FROM teams)",
+        "DELETE FROM groupchannels WHERE channelid NOT IN (SELECT id FROM channels)",
         "DELETE FROM groupteams WHERE groupid LIKE 'mmrsgsync%'",
         "DELETE FROM groupchannels WHERE groupid LIKE 'mmrsgsync%'",
         "DELETE FROM usergroups WHERE id LIKE 'mmrsgsync%'",
@@ -259,10 +265,26 @@ async fn plant(pool: &PgPool) {
     .expect("inserts the bot");
 }
 
+/// The rows that are this file's, sorted. Every id it plants starts with `mmrsgsync`, and the
+/// reads under test are **whole-table** — `TeamMembersToAdd` and friends take no scope — so a
+/// parity suite that is mid-run in the same `cargo test` (the licensed group suite links
+/// groups to real teams through the oracle) puts its pairs into the same result. Filtering to
+/// the prefix keeps every predicate assertion below about the planted rows and stops a
+/// neighbour's rows from being counted as a port bug. Measured 2026-09-13: three tests here
+/// failed on a team another binary had created. This is [D-167]'s class.
 fn ids<T, F: Fn(&T) -> String>(rows: &[T], f: F) -> Vec<String> {
-    let mut v: Vec<String> = rows.iter().map(f).collect();
+    let mut v: Vec<String> = rows
+        .iter()
+        .map(f)
+        .filter(|id| id.starts_with("mmrsgsync"))
+        .collect();
     v.sort();
     v
+}
+
+/// [`ids`]'s count, for the assertions that only care how many of this file's rows came back.
+fn scoped_count<T, F: Fn(&T) -> String>(rows: &[T], f: F) -> usize {
+    ids(rows, f).len()
 }
 
 /// `TeamMembersToAdd` with the join switched on and off, the `since` cut-off, and the scope.
@@ -318,7 +340,10 @@ async fn team_members_to_add_switches_on_re_add_since_and_scope() {
         .team_members_to_add(0, Some(TEAM), true)
         .await
         .unwrap();
-    assert_eq!(scoped.len(), all.len());
+    assert_eq!(
+        scoped_count(&scoped, |p| p.user_id.clone()),
+        scoped_count(&all, |p| p.user_id.clone())
+    );
     sweep(&pool).await;
 }
 
@@ -366,10 +391,10 @@ async fn channel_members_to_add_reads_the_history_not_the_membership() {
         .channel_members_to_add(0, Some(DM_CHANNEL), true)
         .await
         .unwrap();
-    assert_eq!(dm.len(), 4);
+    assert_eq!(scoped_count(&dm, |p| p.user_id.clone()), 4);
     // Unscoped: both channels' pairs.
     let unscoped = store.channel_members_to_add(0, None, true).await.unwrap();
-    assert_eq!(unscoped.len(), 8);
+    assert_eq!(scoped_count(&unscoped, |p| p.user_id.clone()), 8);
     sweep(&pool).await;
 }
 
@@ -401,10 +426,13 @@ async fn members_to_remove_exempt_bots_and_non_syncable_channels() {
         .team_members_to_remove(Some(OTHER_TEAM))
         .await
         .unwrap();
-    assert!(other.is_empty(), "an unconstrained team sheds nobody");
+    assert!(
+        ids(&other, |p| p.user_id.clone()).is_empty(),
+        "an unconstrained team sheds nobody"
+    );
     let unscoped = store.team_members_to_remove(None).await.unwrap();
     assert_eq!(
-        unscoped.len(),
+        scoped_count(&unscoped, |p| p.user_id.clone()),
         team.len(),
         "only the constrained team contributes"
     );

@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 mm-app.workspace = true
 mm-model.workspace = true
+mm-markdown.workspace = true
 mm-store.workspace = true
 
 axum = { workspace = true, features = ["ws"] }
