@@ -2283,6 +2283,11 @@ pub enum ConfigError {
         #[source]
         source: serde_json::Error,
     },
+
+    /// The licence the client configuration is built over could not be read — a store failure
+    /// in `App::license`, which is a 500 there and stays one here.
+    #[error("the licence could not be read")]
+    License(Box<mm_model::utils::AppError>),
 }
 
 /// The slice of the persisted `model.Config` document this module reads.
@@ -4424,14 +4429,36 @@ fn giphy_sdk_key(settings: &mm_model::config::ServiceSettings) -> String {
     }
 }
 
-/// Port of `config.IsAuditLoggingActive` (config/logger.go:118) for an **unlicensed** server.
+/// Port of `config.IsAuditLoggingActive` (config/logger.go:118).
 ///
-/// `allowAdvancedLogging` is `license != nil && *license.Features.AdvancedLogging`, so it is
-/// false here and the function reduces to its first branch. The advanced-logging arm — parse
-/// `AdvancedLoggingJSON` and look for an audit level among the targets — is not ported because
-/// nothing unlicensed can reach it.
-fn audit_logging_active(settings: &mm_model::config::ExperimentalAuditSettings) -> bool {
-    settings.file_enabled.unwrap_or(false)
+/// True when file auditing is on; otherwise, and only with `AdvancedLogging` licensed, when the
+/// advanced audit configuration routes at least one target to an audit level. The four audit
+/// level ids are `mlog.MLvlAuditAll` (100 to 103); a document that is not a map of targets
+/// fails `json.Unmarshal` and is false, and Go's `GetAdvancedLoggingConfig` substitutes `{}`
+/// for an empty, `""`, `{}` or `[]` value before parsing — so those are false too.
+fn audit_logging_active(
+    settings: &mm_model::config::ExperimentalAuditSettings,
+    allow_advanced_logging: bool,
+) -> bool {
+    if settings.file_enabled.unwrap_or(false) {
+        return true;
+    }
+    if !allow_advanced_logging {
+        return false;
+    }
+    const AUDIT_LEVEL_IDS: [i64; 4] = [100, 101, 102, 103];
+    let Some(targets) = settings.advanced_logging_json.as_object() else {
+        return false;
+    };
+    targets.values().any(|target| {
+        target["levels"].as_array().is_some_and(|levels| {
+            levels.iter().any(|level| {
+                level["id"]
+                    .as_i64()
+                    .is_some_and(|id| AUDIT_LEVEL_IDS.contains(&id))
+            })
+        })
+    })
 }
 
 /// Port of `config.GenerateLimitedClientConfig` (config/client.go:285) for an **unlicensed**
@@ -4454,6 +4481,7 @@ fn audit_logging_active(settings: &mm_model::config::ExperimentalAuditSettings) 
 pub fn generate_limited_client_config(
     config: &mm_model::config::Config,
     telemetry_id: &str,
+    license: Option<&mm_model::license::License>,
 ) -> mm_model::utils::StringMap {
     let c = config;
     let mut props = mm_model::utils::StringMap::new();
@@ -4466,7 +4494,14 @@ pub fn generate_limited_client_config(
     put("BuildDate", String::new());
     put("BuildHash", String::new());
     put("BuildHashEnterprise", String::new());
-    put("BuildEnterpriseReady", String::new());
+    // `-ldflags` variables, all empty in a build from source; `BuildEnterpriseReady` is the one
+    // an enterprise-ready Go binary carries as `"true"`, which is why the licensed parity
+    // comparison exempts it by name — this binary answers licensed routes and is not rebuilt
+    // per edition, so the constant is whatever `MM_BUILD_ENTERPRISE_READY` was at compile time.
+    put(
+        "BuildEnterpriseReady",
+        mm_model::version::BUILD_ENTERPRISE_READY.to_owned(),
+    );
     put("ServiceEnvironment", service_environment());
     // `fips.IsEnabled` is a build tag; this binary has no FIPS mode at all.
     put("IsFipsEnabled", "false".to_owned());
@@ -4717,6 +4752,109 @@ pub fn generate_limited_client_config(
         flag(c.guest_accounts_settings.enable_guest_magic_link),
     );
 
+    // `if license != nil { … }` (client.go:390) — the licensed block, each arm keyed on a
+    // feature flag or a rung of the tier ladder. The flags are non-nil after `SetDefaults`, which
+    // `App::license` ran; a missing `features` object is impossible past the loader.
+    if let Some(license) = license {
+        let features = license.features.clone().unwrap_or_default();
+        let on = |value: Option<bool>| value.unwrap_or(false);
+        if on(features.ldap) {
+            put("EnableLdap", flag(c.ldap_settings.enable));
+            put(
+                "LdapLoginFieldName",
+                text(&c.ldap_settings.login_field_name),
+            );
+        }
+        if on(features.saml) {
+            put("EnableSaml", flag(c.saml_settings.enable));
+            put(
+                "SamlLoginButtonText",
+                text(&c.saml_settings.login_button_text),
+            );
+        }
+        if on(features.custom_terms_of_service) {
+            put(
+                "EnableCustomTermsOfService",
+                flag(c.support_settings.custom_terms_of_service_enabled),
+            );
+            put(
+                "CustomTermsOfServiceReAcceptancePeriod",
+                number(
+                    c.support_settings
+                        .custom_terms_of_service_re_acceptance_period,
+                ),
+            );
+        }
+        if on(features.mfa) {
+            put(
+                "EnforceMultifactorAuthentication",
+                flag(c.service_settings.enforce_multifactor_authentication),
+            );
+        }
+        // MM-48727: a cloud licence turns the two SSO flags on **in the licence object**. Go
+        // mutates the shared licence; the effect is the same on every call, so it is a local
+        // `||` here rather than a write through the `Arc`.
+        let cloud = license.is_cloud();
+        if on(features.google_oauth) || cloud {
+            put("EnableSignUpWithGoogle", flag(c.google_settings.enable));
+        }
+        if on(features.office365_oauth) || cloud {
+            put(
+                "EnableSignUpWithOffice365",
+                flag(c.office365_settings.enable),
+            );
+        }
+        if on(features.open_id) {
+            put("EnableSignUpWithOpenId", flag(c.open_id_settings.enable));
+            put("OpenIdButtonColor", text(&c.open_id_settings.button_color));
+            put("OpenIdButtonText", text(&c.open_id_settings.button_text));
+            put("EnableSignUpWithGitLab", flag(c.git_lab_settings.enable));
+            put("GitLabButtonColor", text(&c.git_lab_settings.button_color));
+            put("GitLabButtonText", text(&c.git_lab_settings.button_text));
+        }
+        if mm_model::license::minimum_enterprise_license(Some(license)) {
+            put(
+                "MobileEnableBiometrics",
+                flag(c.native_app_settings.mobile_enable_biometrics),
+            );
+            put(
+                "MobilePreventScreenCapture",
+                flag(c.native_app_settings.mobile_prevent_screen_capture),
+            );
+            put(
+                "MobileJailbreakProtection",
+                flag(c.native_app_settings.mobile_jailbreak_protection),
+            );
+            put(
+                "ExperimentalEnableWatermark",
+                flag(c.experimental_settings.enable_watermark),
+            );
+        }
+        if mm_model::license::minimum_enterprise_advanced_license(Some(license)) {
+            // `Enable != nil && *Enable && IsValid() == nil`.
+            let intune_enabled =
+                c.intune_settings.enable.unwrap_or(false) && c.intune_settings.is_valid().is_ok();
+            put("IntuneMAMEnabled", flag(Some(intune_enabled)));
+            if intune_enabled {
+                put(
+                    "IntuneScope",
+                    format!(
+                        "api://{}/login.mattermost",
+                        text(&c.intune_settings.client_id)
+                    ),
+                );
+                if let Some(service) = c
+                    .intune_settings
+                    .auth_service
+                    .as_deref()
+                    .filter(|service| !service.is_empty())
+                {
+                    put("IntuneAuthService", service.to_owned());
+                }
+            }
+        }
+    }
+
     // `for key, value := range c.FeatureFlags.ToMap() { props["FeatureFlag"+key] = value }`.
     if let Some(flags) = c.feature_flags.as_ref() {
         for (key, value) in flags.to_map() {
@@ -4735,9 +4873,10 @@ pub fn generate_limited_client_config(
 pub fn generate_client_config(
     config: &mm_model::config::Config,
     telemetry_id: &str,
+    license: Option<&mm_model::license::License>,
 ) -> mm_model::utils::StringMap {
     let c = config;
-    let mut props = generate_limited_client_config(config, telemetry_id);
+    let mut props = generate_limited_client_config(config, telemetry_id, license);
     let mut put = |key: &str, value: String| {
         props.insert(key.to_owned(), value);
     };
@@ -5155,9 +5294,17 @@ pub fn generate_client_config(
                 .enable_access_control_audit_logging,
         ),
     );
+    // `license != nil && license.Features != nil && *license.Features.AdvancedLogging`.
+    let allow_advanced_logging = license
+        .and_then(|l| l.features.as_ref())
+        .and_then(|f| f.advanced_logging)
+        .unwrap_or(false);
     put(
         "AuditLoggingActive",
-        flag(Some(audit_logging_active(&c.experimental_audit_settings))),
+        flag(Some(audit_logging_active(
+            &c.experimental_audit_settings,
+            allow_advanced_logging,
+        ))),
     );
     put(
         "EnableChannelPolicyIndicators",
@@ -5198,6 +5345,219 @@ pub fn generate_client_config(
                 .move_thread_from_group_message_channel_enable,
         ),
     );
+
+    // `if license != nil { … }` (client.go:177): the feature matrix over the licence body.
+    // `EnableMetrics` is gated on **`Cluster`**, not `Metrics` — Go's own `if` reads
+    // `*license.Features.Cluster` twice, and the second block is the metrics one. Reproduced.
+    if let Some(license) = license {
+        let features = license.features.clone().unwrap_or_default();
+        let on = |value: Option<bool>| value.unwrap_or(false);
+        put(
+            "ExperimentalEnableAuthenticationTransfer",
+            flag(
+                c.service_settings
+                    .experimental_enable_authentication_transfer,
+            ),
+        );
+        if on(features.ldap) {
+            let set = |attribute: &Option<String>| flag(Some(!text(attribute).is_empty()));
+            put(
+                "LdapNicknameAttributeSet",
+                set(&c.ldap_settings.nickname_attribute),
+            );
+            put(
+                "LdapFirstNameAttributeSet",
+                set(&c.ldap_settings.first_name_attribute),
+            );
+            put(
+                "LdapLastNameAttributeSet",
+                set(&c.ldap_settings.last_name_attribute),
+            );
+            put(
+                "LdapPictureAttributeSet",
+                set(&c.ldap_settings.picture_attribute),
+            );
+            put(
+                "LdapPositionAttributeSet",
+                set(&c.ldap_settings.position_attribute),
+            );
+        }
+        if on(features.compliance) {
+            put("EnableCompliance", flag(c.compliance_settings.enable));
+            put(
+                "EnableMobileFileDownload",
+                flag(c.file_settings.enable_mobile_download),
+            );
+            put(
+                "EnableMobileFileUpload",
+                flag(c.file_settings.enable_mobile_upload),
+            );
+        }
+        if on(features.saml) {
+            let set = |attribute: &Option<String>| flag(Some(!text(attribute).is_empty()));
+            put(
+                "SamlFirstNameAttributeSet",
+                set(&c.saml_settings.first_name_attribute),
+            );
+            put(
+                "SamlLastNameAttributeSet",
+                set(&c.saml_settings.last_name_attribute),
+            );
+            put(
+                "SamlNicknameAttributeSet",
+                set(&c.saml_settings.nickname_attribute),
+            );
+            put(
+                "SamlPositionAttributeSet",
+                set(&c.saml_settings.position_attribute),
+            );
+        }
+        if on(features.cluster) {
+            put("EnableCluster", flag(c.cluster_settings.enable));
+        }
+        if on(features.cluster) {
+            put("EnableMetrics", flag(c.metrics_settings.enable));
+            put(
+                "EnableClientMetrics",
+                flag(Some(
+                    c.metrics_settings.enable.unwrap_or(false)
+                        && c.metrics_settings.enable_client_metrics.unwrap_or(false),
+                )),
+            );
+            put(
+                "EnableNotificationMetrics",
+                flag(c.metrics_settings.enable_notification_metrics),
+            );
+        }
+        if on(features.announcement) {
+            put("EnableBanner", flag(c.announcement_settings.enable_banner));
+            put("BannerText", text(&c.announcement_settings.banner_text));
+            put("BannerColor", text(&c.announcement_settings.banner_color));
+            put(
+                "BannerTextColor",
+                text(&c.announcement_settings.banner_text_color),
+            );
+            put(
+                "AllowBannerDismissal",
+                flag(c.announcement_settings.allow_banner_dismissal),
+            );
+        }
+        if on(features.theme_management) {
+            put(
+                "EnableThemeSelection",
+                flag(c.theme_settings.enable_theme_selection),
+            );
+            put("DefaultTheme", text(&c.theme_settings.default_theme));
+            put(
+                "AllowCustomThemes",
+                flag(c.theme_settings.allow_custom_themes),
+            );
+            put(
+                "AllowedThemes",
+                join_commas(c.theme_settings.allowed_themes.as_deref()),
+            );
+        }
+        if on(features.data_retention) {
+            put(
+                "DataRetentionEnableMessageDeletion",
+                flag(c.data_retention_settings.enable_message_deletion),
+            );
+            put(
+                "DataRetentionMessageRetentionHours",
+                c.data_retention_settings
+                    .get_message_retention_hours()
+                    .to_string(),
+            );
+            put(
+                "DataRetentionEnableFileDeletion",
+                flag(c.data_retention_settings.enable_file_deletion),
+            );
+            put(
+                "DataRetentionFileRetentionHours",
+                c.data_retention_settings
+                    .get_file_retention_hours()
+                    .to_string(),
+            );
+        }
+        if license.has_shared_channels() {
+            put(
+                "ExperimentalSharedChannels",
+                flag(c.connected_workspaces_settings.enable_shared_channels),
+            );
+            put(
+                "ExperimentalRemoteClusterService",
+                flag(
+                    c.connected_workspaces_settings
+                        .enable_remote_cluster_service,
+                ),
+            );
+        }
+        if mm_model::license::minimum_professional_license(Some(license)) {
+            put(
+                "EnableCustomGroups",
+                flag(c.service_settings.enable_custom_groups),
+            );
+            put("PostAcknowledgements", "true".to_owned());
+            put("ScheduledPosts", flag(c.service_settings.scheduled_posts));
+        }
+        if mm_model::license::minimum_enterprise_license(Some(license)) {
+            put(
+                "MobileEnableBiometrics",
+                flag(c.native_app_settings.mobile_enable_biometrics),
+            );
+            put(
+                "MobilePreventScreenCapture",
+                flag(c.native_app_settings.mobile_prevent_screen_capture),
+            );
+            put(
+                "MobileJailbreakProtection",
+                flag(c.native_app_settings.mobile_jailbreak_protection),
+            );
+            put(
+                "ExperimentalEnableWatermark",
+                flag(c.experimental_settings.enable_watermark),
+            );
+            put(
+                "LockProfileFieldsForEmailUsers",
+                text(&c.team_settings.lock_profile_fields_for_email_users),
+            );
+        }
+        if mm_model::license::minimum_enterprise_advanced_license(Some(license)) {
+            put(
+                "MobileEnableSecureFilePreview",
+                flag(c.native_app_settings.mobile_enable_secure_file_preview),
+            );
+            put(
+                "MobileAllowPdfLinkNavigation",
+                flag(c.native_app_settings.mobile_allow_pdf_link_navigation),
+            );
+            let flags = c.feature_flags.clone().unwrap_or_default();
+            put(
+                "ContentFlaggingEnabled",
+                flag(Some(
+                    flags.content_flagging
+                        && c.content_flagging_settings
+                            .base
+                            .enable_content_flagging
+                            .unwrap_or(false),
+                )),
+            );
+            put(
+                "EnableAutoTranslation",
+                flag(Some(
+                    flags.auto_translation && c.auto_translation_settings.enable.unwrap_or(false),
+                )),
+            );
+            put(
+                "AutoTranslationLanguages",
+                if flags.auto_translation {
+                    join_commas(c.auto_translation_settings.target_languages.as_deref())
+                } else {
+                    String::new()
+                },
+            );
+        }
+    }
 
     props
 }
@@ -5340,14 +5700,15 @@ fn decimal_to_fixed_bytes(decimal: &str, width: usize) -> Option<Vec<u8>> {
 }
 
 impl crate::App {
-    /// Port of `PlatformService.LimitedClientConfigWithComputed` (platform/config.go:330) for an
-    /// **unlicensed** server — the body of `GET /api/v4/config/client` for a caller with no
-    /// session.
+    /// Port of `PlatformService.LimitedClientConfigWithComputed` (platform/config.go:330) — the
+    /// body of `GET /api/v4/config/client` for a caller with no session.
     pub async fn limited_client_config_with_computed(
         &self,
     ) -> Result<mm_model::utils::StringMap, ConfigError> {
         let config = load_model_config(self.store().config()).await?;
-        let mut props = generate_limited_client_config(&config, &self.telemetry_id().await);
+        let license = self.license().await.map_err(ConfigError::License)?;
+        let mut props =
+            generate_limited_client_config(&config, &self.telemetry_id().await, license.as_deref());
         self.add_signing_key(&mut props).await;
         props.insert(
             "NoAccounts".to_owned(),
@@ -5356,8 +5717,8 @@ impl crate::App {
         Ok(props)
     }
 
-    /// Port of `PlatformService.ClientConfigWithComputed` (platform/config.go:341) for an
-    /// **unlicensed** server — the body of `GET /api/v4/config/client` for a caller with one.
+    /// Port of `PlatformService.ClientConfigWithComputed` (platform/config.go:341) — the body of
+    /// `GET /api/v4/config/client` for a caller with a session.
     ///
     /// Every computed property here is best-effort in Go, and each failure has its **own**
     /// fallback rather than a shared one: a broken user count is `NoAccounts=false`, a broken
@@ -5368,7 +5729,9 @@ impl crate::App {
         &self,
     ) -> Result<mm_model::utils::StringMap, ConfigError> {
         let config = load_model_config(self.store().config()).await?;
-        let mut props = generate_client_config(&config, &self.telemetry_id().await);
+        let license = self.license().await.map_err(ConfigError::License)?;
+        let mut props =
+            generate_client_config(&config, &self.telemetry_id().await, license.as_deref());
         self.add_signing_key(&mut props).await;
 
         props.insert(
@@ -5907,7 +6270,7 @@ mod client_config {
         let mut config = base();
         config.service_settings.site_url = Some("https://mm.example.com///".to_owned());
         config.service_settings.websocket_url = Some("wss://mm.example.com/".to_owned());
-        let props = generate_limited_client_config(&config, "tid");
+        let props = generate_limited_client_config(&config, "tid", None);
         assert_eq!(props["SiteURL"], "https://mm.example.com");
         assert_eq!(props["WebsocketURL"], "wss://mm.example.com");
     }
@@ -5919,7 +6282,7 @@ mod client_config {
         let mut config = base();
         config.plugin_settings.enable = Some(true);
         assert_eq!(
-            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            generate_limited_client_config(&config, "", None)["AppsPluginEnabled"],
             "false",
             "no entry at all"
         );
@@ -5928,7 +6291,7 @@ mod client_config {
         states.insert(PLUGIN_ID_APPS.to_owned(), PluginState { enable: false });
         config.plugin_settings.plugin_states = Some(states.clone());
         assert_eq!(
-            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            generate_limited_client_config(&config, "", None)["AppsPluginEnabled"],
             "false",
             "entry present but disabled"
         );
@@ -5936,13 +6299,13 @@ mod client_config {
         states.insert(PLUGIN_ID_APPS.to_owned(), PluginState { enable: true });
         config.plugin_settings.plugin_states = Some(states);
         assert_eq!(
-            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            generate_limited_client_config(&config, "", None)["AppsPluginEnabled"],
             "true"
         );
 
         config.plugin_settings.enable = Some(false);
         assert_eq!(
-            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            generate_limited_client_config(&config, "", None)["AppsPluginEnabled"],
             "false",
             "plugins off beats an enabled state"
         );
@@ -5953,12 +6316,12 @@ mod client_config {
         let mut config = base();
         config.plugin_settings.marketplace_url = Some(DEFAULT_MARKETPLACE_URL.to_owned());
         assert_eq!(
-            generate_client_config(&config, "")["IsDefaultMarketplace"],
+            generate_client_config(&config, "", None)["IsDefaultMarketplace"],
             "true"
         );
         config.plugin_settings.marketplace_url = Some(format!("{DEFAULT_MARKETPLACE_URL}/"));
         assert_eq!(
-            generate_client_config(&config, "")["IsDefaultMarketplace"],
+            generate_client_config(&config, "", None)["IsDefaultMarketplace"],
             "false"
         );
     }
@@ -5970,7 +6333,7 @@ mod client_config {
         let mut config = base();
         config.team_settings.lock_profile_fields_for_email_users = Some("all".to_owned());
         assert_eq!(
-            generate_client_config(&config, "")["LockProfileFieldsForEmailUsers"],
+            generate_client_config(&config, "", None)["LockProfileFieldsForEmailUsers"],
             LOCK_PROFILE_FIELDS_NONE
         );
     }
@@ -5980,11 +6343,14 @@ mod client_config {
     #[test]
     fn string_slices_join_with_commas() {
         let mut config = base();
-        assert_eq!(generate_client_config(&config, "")["CustomUrlSchemes"], "");
+        assert_eq!(
+            generate_client_config(&config, "", None)["CustomUrlSchemes"],
+            ""
+        );
         config.display_settings.custom_url_schemes =
             Some(vec!["git".to_owned(), "smtp".to_owned()]);
         assert_eq!(
-            generate_client_config(&config, "")["CustomUrlSchemes"],
+            generate_client_config(&config, "", None)["CustomUrlSchemes"],
             "git,smtp"
         );
     }
@@ -5993,7 +6359,7 @@ mod client_config {
     /// flag whose value is passed through rather than stringified as a bool.
     #[test]
     fn every_feature_flag_is_prefixed_and_string_flags_keep_their_value() {
-        let props = generate_limited_client_config(&base(), "");
+        let props = generate_limited_client_config(&base(), "", None);
         assert_eq!(props["FeatureFlagTestFeature"], "off");
         assert_eq!(props["FeatureFlagNotificationMonitoring"], "true");
         assert_eq!(props["FeatureFlagAppsEnabled"], "false");
@@ -6006,7 +6372,7 @@ mod client_config {
     fn a_document_without_feature_flags_produces_no_flag_keys() {
         let mut config = base();
         config.feature_flags = None;
-        let props = generate_limited_client_config(&config, "");
+        let props = generate_limited_client_config(&config, "", None);
         assert!(!props.keys().any(|key| key.starts_with("FeatureFlag")));
     }
 
@@ -6016,8 +6382,8 @@ mod client_config {
     fn the_full_map_is_a_superset_of_the_limited_one() {
         let mut config = base();
         config.cloud_settings.cwsurl = Some("https://portal.example".to_owned());
-        let limited = generate_limited_client_config(&config, "tid");
-        let full = generate_client_config(&config, "tid");
+        let limited = generate_limited_client_config(&config, "tid", None);
+        let full = generate_client_config(&config, "tid", None);
 
         for key in limited.keys() {
             assert!(full.contains_key(key), "{key} is missing from the full map");
@@ -6037,7 +6403,7 @@ mod client_config {
     fn the_cross_team_search_alias_mirrors_the_setting() {
         let mut config = base();
         config.service_settings.enable_cross_team_search = Some(true);
-        let props = generate_client_config(&config, "");
+        let props = generate_client_config(&config, "", None);
         assert_eq!(props["EnableCrossTeamSearch"], "true");
         assert_eq!(props["FeatureFlagExperimentalCrossTeamSearch"], "true");
     }
@@ -6048,12 +6414,12 @@ mod client_config {
     fn audit_logging_is_active_only_when_the_audit_file_is_enabled() {
         let mut config = base();
         assert_eq!(
-            generate_client_config(&config, "")["AuditLoggingActive"],
+            generate_client_config(&config, "", None)["AuditLoggingActive"],
             "false"
         );
         config.experimental_audit_settings.file_enabled = Some(true);
         assert_eq!(
-            generate_client_config(&config, "")["AuditLoggingActive"],
+            generate_client_config(&config, "", None)["AuditLoggingActive"],
             "true"
         );
     }
@@ -6062,7 +6428,7 @@ mod client_config {
     /// and false — a client tells "the server cannot do this" from "the server did not say".
     #[test]
     fn the_licence_only_keys_are_absent_rather_than_false() {
-        let props = generate_client_config(&base(), "");
+        let props = generate_client_config(&base(), "", None);
         for key in [
             "PostAcknowledgements",
             "ScheduledPosts",
@@ -6079,5 +6445,212 @@ mod client_config {
         assert_eq!(props["EnableCompliance"], "false");
         assert_eq!(props["EnableThemeSelection"], "true");
         assert_eq!(props["ExperimentalEnableAuthenticationTransfer"], "true");
+    }
+}
+
+#[cfg(test)]
+mod licensed_client_config {
+    use super::*;
+
+    fn license(sku: &str, extra: &str) -> mm_model::license::License {
+        let body = format!(
+            r#"{{"id":"mmrslicensedtestkey0000001","issued_at":1,"starts_at":1,"expires_at":4102444800000,"customer":{{"id":"c","name":"n","email":"e","company":"co"}},"features":{{"users":10{extra}}},"sku_name":"{sku}","sku_short_name":"{sku}"}}"#
+        );
+        let mut license: mm_model::license::License = serde_json::from_str(&body).unwrap();
+        license.features.as_mut().unwrap().set_defaults();
+        license
+    }
+
+    fn config() -> mm_model::config::Config {
+        let mut config = mm_model::config::Config::default();
+        config.ldap_settings.enable = Some(true);
+        config.ldap_settings.login_field_name = Some("uid".to_owned());
+        config.ldap_settings.nickname_attribute = Some("nick".to_owned());
+        config.saml_settings.enable = Some(false);
+        config.service_settings.enforce_multifactor_authentication = Some(true);
+        config
+            .service_settings
+            .experimental_enable_authentication_transfer = Some(false);
+        config.google_settings.enable = Some(true);
+        config.office365_settings.enable = Some(true);
+        config.open_id_settings.enable = Some(true);
+        config.git_lab_settings.enable = Some(true);
+        config.git_lab_settings.button_color = Some("#123".to_owned());
+        config.metrics_settings.enable = Some(true);
+        config.metrics_settings.enable_client_metrics = Some(true);
+        config.announcement_settings.banner_text = Some("hello".to_owned());
+        config.theme_settings.allowed_themes = Some(vec!["denim".to_owned(), "onyx".to_owned()]);
+        config.data_retention_settings.message_retention_days = Some(2);
+        config.data_retention_settings.file_retention_hours = Some(7);
+        config.data_retention_settings.file_retention_days = Some(9);
+        config.team_settings.lock_profile_fields_for_email_users = Some("all".to_owned());
+        config.native_app_settings.mobile_enable_secure_file_preview = Some(true);
+        config
+    }
+
+    /// Unlicensed, none of the licensed keys appear and the defaults stand; licensed, each arm
+    /// writes its keys from the settings, and the keys of a closed arm stay absent.
+    #[test]
+    fn the_licensed_arms_write_from_the_settings_and_the_closed_ones_stay_shut() {
+        let config = config();
+        let unlicensed = generate_client_config(&config, "", None);
+        assert_eq!(unlicensed["EnableLdap"], "false");
+        assert_eq!(unlicensed["EnforceMultifactorAuthentication"], "false");
+        assert_eq!(
+            unlicensed["ExperimentalEnableAuthenticationTransfer"],
+            "true"
+        );
+        assert!(!unlicensed.contains_key("EnableSignUpWithGitLab"));
+        assert!(!unlicensed.contains_key("PostAcknowledgements"));
+        assert_eq!(
+            unlicensed["LockProfileFieldsForEmailUsers"], "none",
+            "the unconditional default (client.go:25), overridden only at the Enterprise rung"
+        );
+        assert_eq!(unlicensed["DataRetentionMessageRetentionHours"], "0");
+
+        let enterprise = license("enterprise", "");
+        let props = generate_client_config(&config, "", Some(&enterprise));
+        assert_eq!(props["EnableLdap"], "true");
+        assert_eq!(props["LdapLoginFieldName"], "uid");
+        assert_eq!(props["LdapNicknameAttributeSet"], "true");
+        assert_eq!(props["LdapFirstNameAttributeSet"], "false");
+        assert_eq!(props["EnableSaml"], "false");
+        assert_eq!(props["EnforceMultifactorAuthentication"], "true");
+        assert_eq!(props["ExperimentalEnableAuthenticationTransfer"], "false");
+        assert_eq!(props["EnableSignUpWithGitLab"], "true");
+        assert_eq!(props["GitLabButtonColor"], "#123");
+        assert_eq!(props["EnableMetrics"], "true");
+        assert_eq!(props["EnableClientMetrics"], "true");
+        assert_eq!(props["BannerText"], "hello");
+        assert_eq!(props["AllowedThemes"], "denim,onyx");
+        assert_eq!(props["DataRetentionMessageRetentionHours"], "48");
+        assert_eq!(
+            props["DataRetentionFileRetentionHours"], "7",
+            "hours win over days"
+        );
+        assert_eq!(props["PostAcknowledgements"], "true");
+        assert_eq!(props["LockProfileFieldsForEmailUsers"], "all");
+        assert!(
+            !props.contains_key("MobileEnableSecureFilePreview"),
+            "advanced only"
+        );
+        assert!(!props.contains_key("IntuneMAMEnabled"), "advanced only");
+
+        let professional = license("professional", "");
+        let props = generate_client_config(&config, "", Some(&professional));
+        assert_eq!(props["PostAcknowledgements"], "true");
+        assert_eq!(
+            props["LockProfileFieldsForEmailUsers"], "none",
+            "enterprise only"
+        );
+
+        let advanced = license("advanced", "");
+        let props = generate_client_config(&config, "", Some(&advanced));
+        assert_eq!(props["MobileEnableSecureFilePreview"], "true");
+        assert_eq!(props["IntuneMAMEnabled"], "false", "Intune is off");
+        assert_eq!(props["ContentFlaggingEnabled"], "false");
+        assert_eq!(props["AutoTranslationLanguages"], "");
+    }
+
+    /// `EnableMetrics` is behind `Features.Cluster`, not `Features.Metrics` — Go's `if` reads
+    /// `Cluster` twice. A licence with metrics on and cluster off leaves the default.
+    #[test]
+    fn metrics_are_gated_on_the_cluster_feature() {
+        let config = config();
+        let cluster_off = license("enterprise", r#","cluster":false,"metrics":true"#);
+        let props = generate_client_config(&config, "", Some(&cluster_off));
+        assert_eq!(props["EnableMetrics"], "false");
+        // The limited map writes `EnableClientMetrics` from the setting alone (client.go:317);
+        // only the cluster arm overwrites it with the `Enable && EnableClientMetrics` conjunction.
+        assert_eq!(props["EnableClientMetrics"], "true");
+        assert!(!props.contains_key("EnableNotificationMetrics"));
+        assert_eq!(props["EnableCluster"], "false");
+    }
+
+    /// A cloud licence turns Google and Office 365 sign-up on whatever the feature flags say.
+    #[test]
+    fn a_cloud_licence_forces_the_two_sso_flags() {
+        let config = config();
+        let flags_off = license(
+            "professional",
+            r#","google_oauth":false,"office365_oauth":false"#,
+        );
+        let props = generate_limited_client_config(&config, "", Some(&flags_off));
+        assert_eq!(
+            props["EnableSignUpWithGoogle"], "false",
+            "the licence default"
+        );
+        let cloud = license(
+            "professional",
+            r#","google_oauth":false,"office365_oauth":false,"cloud":true"#,
+        );
+        let props = generate_limited_client_config(&config, "", Some(&cloud));
+        assert_eq!(props["EnableSignUpWithGoogle"], "true");
+        assert_eq!(props["EnableSignUpWithOffice365"], "true");
+    }
+
+    /// Intune: enabled and valid gives the scope and the auth service; enabled and invalid is
+    /// `false` with neither.
+    #[test]
+    fn intune_keys_appear_only_when_enabled_and_valid() {
+        let mut config = config();
+        let advanced = license("advanced", "");
+        config.intune_settings.enable = Some(true);
+        config.intune_settings.tenant_id = Some("12345678-1234-1234-1234-123456789abc".to_owned());
+        config.intune_settings.client_id = Some("abcdefab-1234-1234-1234-123456789abc".to_owned());
+        config.intune_settings.auth_service = Some("saml".to_owned());
+        let props = generate_limited_client_config(&config, "", Some(&advanced));
+        assert_eq!(props["IntuneMAMEnabled"], "true");
+        assert_eq!(
+            props["IntuneScope"],
+            "api://abcdefab-1234-1234-1234-123456789abc/login.mattermost"
+        );
+        assert_eq!(props["IntuneAuthService"], "saml");
+
+        config.intune_settings.client_id = Some("not-a-uuid".to_owned());
+        let props = generate_limited_client_config(&config, "", Some(&advanced));
+        assert_eq!(props["IntuneMAMEnabled"], "false");
+        assert!(!props.contains_key("IntuneScope"));
+    }
+
+    /// `AuditLoggingActive` with advanced logging licensed: a target routed to an audit level
+    /// is active, one routed elsewhere is not, and a malformed document is not.
+    #[test]
+    fn advanced_audit_logging_counts_only_audit_levels() {
+        let mut settings = mm_model::config::ExperimentalAuditSettings {
+            advanced_logging_json: serde_json::json!({
+                "console": { "type": "console", "levels": [{ "id": 101, "name": "audit-content" }] }
+            }),
+            ..Default::default()
+        };
+        assert!(audit_logging_active(&settings, true));
+        assert!(
+            !audit_logging_active(&settings, false),
+            "unlicensed, the JSON is never read"
+        );
+        settings.advanced_logging_json = serde_json::json!({
+            "console": { "type": "console", "levels": [{ "id": 5, "name": "info" }] }
+        });
+        assert!(!audit_logging_active(&settings, true));
+        settings.advanced_logging_json = serde_json::json!("not a map");
+        assert!(!audit_logging_active(&settings, true));
+        settings.file_enabled = Some(true);
+        assert!(
+            audit_logging_active(&settings, false),
+            "file auditing needs no licence"
+        );
+    }
+
+    /// The retention helpers: hours beat days beat the 365-day default, and a zero is "unset".
+    #[test]
+    fn retention_hours_prefer_hours_then_days_then_the_default() {
+        let mut settings = mm_model::config::DataRetentionSettings::default();
+        assert_eq!(settings.get_message_retention_hours(), 8760);
+        settings.message_retention_days = Some(0);
+        assert_eq!(settings.get_message_retention_hours(), 8760);
+        settings.message_retention_days = Some(3);
+        assert_eq!(settings.get_message_retention_hours(), 72);
+        settings.message_retention_hours = Some(5);
+        assert_eq!(settings.get_message_retention_hours(), 5);
     }
 }

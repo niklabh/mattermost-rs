@@ -257,12 +257,18 @@ mod tests {
         );
         let app = crate::App::with_config(unreachable_store(), enforced);
         let limits = app.get_server_limits(false).await.expect("no count asked");
-        assert_eq!((limits.max_users_limit, limits.max_users_hard_limit), (10, 13));
+        assert_eq!(
+            (limits.max_users_limit, limits.max_users_hard_limit),
+            (10, 13)
+        );
 
         let unenforced = crate::license::test_signing::licensed_config("enterprise");
         let app = crate::App::with_config(unreachable_store(), unenforced);
         let limits = app.get_server_limits(false).await.expect("no count asked");
-        assert_eq!((limits.max_users_limit, limits.max_users_hard_limit), (0, 0));
+        assert_eq!(
+            (limits.max_users_limit, limits.max_users_hard_limit),
+            (0, 0)
+        );
         assert_eq!(limits.post_history_limit, 0);
 
         // Enforced without `users`: Go's second disjunct fails and the licence falls through to
@@ -274,7 +280,10 @@ mod tests {
         let limits = app.get_server_limits(false).await.expect("no count asked");
         // `Features.SetDefaults` fills `Users` with 0, which is `!= nil` in Go — so the limit
         // is an enforced zero, not "unset". Reproduced: both limits are 0 either way.
-        assert_eq!((limits.max_users_limit, limits.max_users_hard_limit), (0, 0));
+        assert_eq!(
+            (limits.max_users_limit, limits.max_users_hard_limit),
+            (0, 0)
+        );
     }
 
     /// A post-history limit makes the function read `Systems.LastAccessiblePostTime`; with the

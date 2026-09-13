@@ -24,8 +24,8 @@ use crate::common;
 use common::{
     ACTIVE_LICENCE_ROW, GO, LicensedPair, a_team_and_channel_the_user_is_in,
     assert_error_bodies_match_except_known_gaps, client, create_channel, create_plain_user,
-    create_team, delete_channel, delete_plain_user, fetch_licensed_pair, go_minted_token,
-    licensed, stack_enabled,
+    create_team, delete_channel, delete_plain_user, fetch_licensed_pair, go_minted_token, licensed,
+    stack_enabled,
 };
 
 /// `(status, body, served_by_rust)` from one server, any method.
@@ -55,7 +55,11 @@ async fn send(
         .get("x-mmrs-served-by")
         .and_then(|v| v.to_str().ok())
         == Some("rust");
-    (status, response.bytes().await.expect("a body").to_vec(), by_rust)
+    (
+        status,
+        response.bytes().await.expect("a body").to_vec(),
+        by_rust,
+    )
 }
 
 /// Both licensed servers, asserting the Rust one served it itself.
@@ -87,7 +91,10 @@ async fn send_pair(
         body,
     )
     .await;
-    assert!(by_rust, "{path} was forwarded by the licensed mm-api, so this proves nothing");
+    assert!(
+        by_rust,
+        "{path} was forwarded by the licensed mm-api, so this proves nothing"
+    );
     ((go_status, go), (rs_status, rs))
 }
 
@@ -493,8 +500,13 @@ async fn channel_moderations_are_served_licensed() {
     assert_eq!(parsed["id"], "api.context.permissions.app_error");
 
     // And an id that is not one: the licence gate is first, `RequireChannelId` second.
-    let ((go_status, go), (rs_status, rs)) =
-        fetch_licensed_pair(&http, &pair, Some(&admin), "/api/v4/channels/abc/moderations").await;
+    let ((go_status, go), (rs_status, rs)) = fetch_licensed_pair(
+        &http,
+        &pair,
+        Some(&admin),
+        "/api/v4/channels/abc/moderations",
+    )
+    .await;
     assert_eq!(go_status, 400, "{}", text(&go));
     assert_eq!(rs_status, 400);
     let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, "abc");
@@ -730,10 +742,231 @@ async fn the_unlicensed_pair_still_refuses() {
         ("/api/v4/ldap/groups", 501),
         ("/api/v4/trial-license/prev", 403),
     ] {
-        let ((go_status, go), (rs_status, rs)) =
-            common::fetch_both_raw(&http, &admin, path).await;
+        let ((go_status, go), (rs_status, rs)) = common::fetch_both_raw(&http, &admin, path).await;
         assert_eq!(go_status, status, "{path}: {}", text(&go));
         assert_eq!(rs_status, go_status, "{path}");
         assert_error_bodies_match_except_known_gaps(&go, &rs, path);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The client configuration's licensed blocks
+// ---------------------------------------------------------------------------------------------
+
+/// The one key that legitimately differs on the licensed pair: `BuildEnterpriseReady` is an
+/// `-ldflags` constant, `"true"` in the enterprise-ready oracle and `""` in this binary, which
+/// is not rebuilt per edition. Everything else in both maps is compared byte for byte.
+const BUILD_FLAVOUR_KEY: &str = "BuildEnterpriseReady";
+
+fn without_build_flavour(body: &[u8]) -> serde_json::Value {
+    let mut parsed: serde_json::Value = serde_json::from_slice(body).expect("a JSON map");
+    let removed = parsed.as_object_mut().unwrap().remove(BUILD_FLAVOUR_KEY);
+    assert!(removed.is_some(), "{BUILD_FLAVOUR_KEY} is in the map");
+    parsed
+}
+
+/// `GET /config/client` licensed, anonymous and as an administrator: the limited map with Go's
+/// `if license != nil` block, and the full map with its feature matrix — the Enterprise
+/// oracle's licence turns every flag on except `cloud`, so every arm below the Advanced tier is
+/// exercised and the Advanced arm's keys are absent on both.
+#[tokio::test]
+async fn the_client_config_carries_the_licensed_blocks() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_licensed_pair(&http, &pair, None, "/api/v4/config/client?format=old").await;
+    assert_eq!(go_status, 200, "{}", text(&go));
+    assert_eq!(rs_status, 200, "{}", text(&rs));
+    let go_limited = without_build_flavour(&go);
+    let rs_limited = without_build_flavour(&rs);
+    assert_eq!(go_limited, rs_limited, "the limited map, licensed");
+    assert_eq!(
+        go_limited["EnableLdap"], "false",
+        "LDAP licensed, LdapSettings.Enable off"
+    );
+    assert!(go_limited.get("EnableCustomTermsOfService").is_some());
+    assert!(
+        go_limited.get("EnableSignUpWithGitLab").is_some(),
+        "the OpenId arm adds GitLab"
+    );
+    assert!(
+        go_limited.get("MobileEnableBiometrics").is_some(),
+        "the Enterprise arm"
+    );
+    assert!(
+        go_limited.get("IntuneMAMEnabled").is_none(),
+        "the Advanced arm is closed"
+    );
+
+    let ((go_status, go), (rs_status, rs)) = fetch_licensed_pair(
+        &http,
+        &pair,
+        Some(&admin),
+        "/api/v4/config/client?format=old",
+    )
+    .await;
+    assert_eq!(go_status, 200, "{}", text(&go));
+    assert_eq!(rs_status, 200, "{}", text(&rs));
+    let go_full = without_build_flavour(&go);
+    let rs_full = without_build_flavour(&rs);
+    assert_eq!(go_full, rs_full, "the full map, licensed");
+    assert_eq!(
+        go_full["PostAcknowledgements"], "true",
+        "the Professional arm"
+    );
+    assert!(
+        go_full.get("LockProfileFieldsForEmailUsers").is_some(),
+        "the Enterprise arm"
+    );
+    assert!(
+        go_full.get("EnableClientMetrics").is_some(),
+        "the Cluster arm's metrics block"
+    );
+    assert_eq!(
+        go_full["DataRetentionMessageRetentionHours"], "8760",
+        "365 days, the default, in hours"
+    );
+    assert!(
+        go_full.get("ContentFlaggingEnabled").is_none(),
+        "the Advanced arm is closed"
+    );
+    assert!(
+        go_full.get("ExperimentalSharedChannels").is_some(),
+        "HasSharedChannels"
+    );
+}
+
+/// `GET /config` and `GET /config/environment` licensed: neither asks the licence anything a
+/// self-hosted licence changes — `getConfig` filters cloud-restrictable fields only for a cloud
+/// licence — so both are served, and identical but for the per-checkout file directory.
+#[tokio::test]
+async fn the_config_and_environment_reads_are_served_licensed() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_licensed_pair(&http, &pair, Some(&admin), "/api/v4/config").await;
+    assert_eq!(go_status, 200, "{}", text(&go));
+    assert_eq!(rs_status, 200, "{}", text(&rs));
+    let mut go: serde_json::Value = serde_json::from_slice(&go).unwrap();
+    let mut rs: serde_json::Value = serde_json::from_slice(&rs).unwrap();
+    for document in [&mut go, &mut rs] {
+        document["FileSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("Directory")
+            .expect("FileSettings.Directory is in the document");
+    }
+    assert_eq!(
+        go, rs,
+        "the configuration, licensed, but for the per-checkout directory"
+    );
+
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_licensed_pair(&http, &pair, Some(&admin), "/api/v4/config/environment").await;
+    assert_eq!(go_status, 200, "{}", text(&go));
+    assert_eq!(rs_status, 200, "{}", text(&rs));
+    assert_eq!(text(&go), text(&rs), "the environment overlay, licensed");
+}
+
+/// `login` licensed: a self-hosted licence is served — a plain user logs in on both, and a
+/// **guest** reaches Go's *second* refusal, `guest_accounts.disabled.error`, because the licence
+/// gate in front of it passes and `GuestAccountsSettings.Enable` is off.
+///
+/// **Neither guest id reaches the wire.** Both are masked by `login`'s deferred error mask to
+/// `invalid_credentials_email_username` (api4/user.go:2127) — so on the wire a licensed guest
+/// refusal and an unlicensed one are the same bytes, and the arm this exercises is visible only
+/// in the log. Asserted as what a client sees, not as what the handler chose.
+#[tokio::test]
+async fn login_is_served_licensed_and_a_guest_meets_the_second_refusal() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let plain = create_plain_user(&http, &admin, &team, "liclogin").await;
+    let me: serde_json::Value = http
+        .get(format!("{GO}/api/v4/users/me"))
+        .header("Authorization", format!("Bearer {}", plain.token))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("a user");
+    let email = me["email"].as_str().unwrap().to_owned();
+    let body = serde_json::json!({ "login_id": email, "password": common::PLAIN_USER_PASSWORD });
+    let body = serde_json::to_vec(&body).unwrap();
+
+    let ((go_status, go), (rs_status, rs)) = send_pair(
+        &http,
+        &pair,
+        reqwest::Method::POST,
+        None,
+        "/api/v4/users/login",
+        &body,
+    )
+    .await;
+    assert_eq!(go_status, 200, "{}", text(&go));
+    assert_eq!(rs_status, 200, "{}", text(&rs));
+    let go_user: serde_json::Value = serde_json::from_slice(&go).unwrap();
+    let rs_user: serde_json::Value = serde_json::from_slice(&rs).unwrap();
+    assert_eq!(go_user["id"], rs_user["id"]);
+
+    // Make the account a guest directly, as the guest suites do, and log in again on both.
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        panic!("DATABASE_URL is set under the harness");
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .expect("the shared database is reachable");
+    sqlx::query("UPDATE users SET roles = 'system_guest' WHERE id = $1")
+        .bind(&plain.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for base in [&pair.go, GO] {
+        let _ = http
+            .post(format!("{base}/api/v4/caches/invalidate"))
+            .header("Authorization", format!("Bearer {admin}"))
+            .send()
+            .await;
+    }
+    let ((go_status, go), (rs_status, rs)) = send_pair(
+        &http,
+        &pair,
+        reqwest::Method::POST,
+        None,
+        "/api/v4/users/login",
+        &body,
+    )
+    .await;
+    assert_eq!(go_status, 401, "{}", text(&go));
+    assert_eq!(rs_status, 401, "{}", text(&rs));
+    let parsed = assert_error_bodies_match_except_known_gaps(&go, &rs, "guest login, licensed");
+    assert_eq!(
+        parsed["id"], "api.user.login.invalid_credentials_email_username",
+        "both guest refusals are masked to the same id"
+    );
+
+    sqlx::query("UPDATE users SET roles = 'system_user' WHERE id = $1")
+        .bind(&plain.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    delete_plain_user(&http, &admin, &plain.id).await;
 }

@@ -658,6 +658,87 @@ pub struct IntuneSettings {
     pub auth_service: Option<String>,
 }
 
+/// `model.DataRetentionSettingsDefaultMessageRetentionDays` (config.go:256).
+pub const DATA_RETENTION_SETTINGS_DEFAULT_MESSAGE_RETENTION_DAYS: i64 = 365;
+/// `model.DataRetentionSettingsDefaultFileRetentionDays` (config.go:258).
+pub const DATA_RETENTION_SETTINGS_DEFAULT_FILE_RETENTION_DAYS: i64 = 365;
+
+impl DataRetentionSettings {
+    /// Port of `(*DataRetentionSettings).GetMessageRetentionHours` (config.go:3455): hours when
+    /// set and positive, else days times 24, else the 365-day default — in **that** order, so a
+    /// positive hours value wins over any days value.
+    pub fn get_message_retention_hours(&self) -> i64 {
+        match (self.message_retention_hours, self.message_retention_days) {
+            (Some(hours), _) if hours > 0 => hours,
+            (_, Some(days)) if days > 0 => days * 24,
+            _ => DATA_RETENTION_SETTINGS_DEFAULT_MESSAGE_RETENTION_DAYS * 24,
+        }
+    }
+
+    /// Port of `(*DataRetentionSettings).GetFileRetentionHours` (config.go:3467).
+    pub fn get_file_retention_hours(&self) -> i64 {
+        match (self.file_retention_hours, self.file_retention_days) {
+            (Some(hours), _) if hours > 0 => hours,
+            (_, Some(days)) if days > 0 => days * 24,
+            _ => DATA_RETENTION_SETTINGS_DEFAULT_FILE_RETENTION_DAYS * 24,
+        }
+    }
+}
+
+impl IntuneSettings {
+    /// Port of `(*IntuneSettings).IsValid` (config.go:1475): nothing to check when disabled;
+    /// otherwise a UUID-shaped `TenantId` and `ClientId`, and an `AuthService` of `saml` or
+    /// `office365`, each refusal with its own id. Reached by `GenerateLimitedClientConfig`'s
+    /// Enterprise Advanced block, where only `== nil` is consulted.
+    pub fn is_valid(&self) -> crate::utils::AppResult {
+        if !self.enable.unwrap_or(false) {
+            return Ok(());
+        }
+        let refuse = |id: &str, detail: &str| {
+            Err(Box::new(crate::utils::AppError::new(
+                "Config.IsValid",
+                format!("model.config.is_valid.{id}.app_error"),
+                None,
+                detail,
+                400,
+            )))
+        };
+        let tenant = self.tenant_id.as_deref().unwrap_or("");
+        if tenant.is_empty() {
+            return refuse("intune_tenant_id", "");
+        }
+        if !is_uuid_shaped(tenant) {
+            return refuse("intune_tenant_id_format", "");
+        }
+        let client = self.client_id.as_deref().unwrap_or("");
+        if client.is_empty() {
+            return refuse("intune_client_id", "");
+        }
+        if !is_uuid_shaped(client) {
+            return refuse("intune_client_id_format", "");
+        }
+        match self.auth_service.as_deref() {
+            None | Some("") => refuse("intune_auth_service", "AuthService is required"),
+            Some("saml") | Some("office365") => Ok(()),
+            Some(_) => refuse(
+                "intune_auth_service_invalid",
+                "AuthService must be 'office365' or 'saml'",
+            ),
+        }
+    }
+}
+
+/// Go's `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`, without
+/// a regex: five hex groups of 8-4-4-4-12 joined by hyphens.
+fn is_uuid_shaped(value: &str) -> bool {
+    let groups: Vec<&str> = value.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8usize, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len && group.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// Port of `model.ReplicaLagSettings` (config.go). Field names are the wire keys — see the module docs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

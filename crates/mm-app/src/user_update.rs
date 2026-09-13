@@ -473,7 +473,13 @@ impl App {
             } else {
                 "app.user.update_active.user_limit.exceeded"
             };
-            return Err(AppError::boxed("UpdateActive", id, None, String::new(), 400));
+            return Err(AppError::boxed(
+                "UpdateActive",
+                id,
+                None,
+                String::new(),
+                400,
+            ));
         }
 
         let mut user = user.clone();

@@ -54,7 +54,6 @@ pub async fn get_server_limits(
     State(state): State<AppState>,
     session: AuthenticatedSession,
 ) -> Response {
-
     // `c.IsSystemAdmin() && …` — evaluated in Go's order, and both are system-scoped.
     let is_admin = counts_are_visible_to(
         state
