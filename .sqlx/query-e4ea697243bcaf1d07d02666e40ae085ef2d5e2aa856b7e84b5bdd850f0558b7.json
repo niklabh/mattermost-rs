@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT c.id,\n               c.createat,\n               c.updateat,\n               c.deleteat,\n               c.teamid,\n               c.type::text AS \"channel_type!\",\n               c.displayname,\n               c.name,\n               c.header,\n               c.purpose,\n               c.lastpostat,\n               c.totalmsgcount,\n               c.extraupdateat,\n               c.creatorid,\n               c.schemeid,\n               c.groupconstrained,\n               c.autotranslation,\n               c.shared,\n               c.totalmsgcountroot,\n               c.lastrootpostat,\n               c.bannerinfo,\n               c.defaultcategoryname,\n               c.discoverable,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\"\n          FROM channels c\n         WHERE c.teamid = $1\n           AND c.type IN ('O', 'P', 'D', 'G')\n           AND (CASE\n                    WHEN $3 THEN c.id IN (SELECT cm.channelid\n                                            FROM channelmembers cm\n                                           WHERE cm.userid = $2)\n                    ELSE c.type <> 'P'\n                         OR c.id IN (SELECT cm.channelid\n                                       FROM channelmembers cm\n                                      WHERE cm.userid = $2)\n                         OR c.discoverable = TRUE\n                END)\n           AND (NOT $4\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'\n                OR to_tsvector($7::text::regconfig, c.name || ' ' || c.displayname || ' ' || c.purpose)\n                   @@ to_tsquery($7::text::regconfig, $6))\n         ORDER BY CASE\n                      WHEN $4 AND LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*' THEN 0\n                      ELSE 1\n                  END,\n                  c.displayname\n         LIMIT 50\n        ",
+  "query": "\n        SELECT ch.id,\n               ch.createat,\n               ch.updateat,\n               ch.deleteat,\n               ch.teamid,\n               ch.type::text AS \"channel_type!\",\n               ch.displayname,\n               ch.name,\n               ch.header,\n               ch.purpose,\n               ch.lastpostat,\n               ch.totalmsgcount,\n               ch.extraupdateat,\n               ch.creatorid,\n               ch.schemeid,\n               ch.groupconstrained,\n               ch.autotranslation,\n               ch.shared,\n               ch.totalmsgcountroot,\n               ch.lastrootpostat,\n               ch.bannerinfo,\n               ch.defaultcategoryname,\n               ch.discoverable,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = ch.id AND acp.type = 'channel'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\"\n          FROM channels ch\n          JOIN channelmembers cm ON ch.id = cm.channelid\n         WHERE ch.teamid = $1\n           AND ch.type = 'S'\n           AND cm.userid = $2\n         ORDER BY ch.id\n        ",
   "describe": {
     "columns": [
       {
@@ -132,11 +132,6 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text",
-        "Bool",
-        "Bool",
-        "Text",
-        "Text",
         "Text"
       ]
     },
@@ -168,5 +163,5 @@
       null
     ]
   },
-  "hash": "bf0297aaabe64a91a58b01da7f573f9313b9fc533a4e0715207de2621669d636"
+  "hash": "e4ea697243bcaf1d07d02666e40ae085ef2d5e2aa856b7e84b5bdd850f0558b7"
 }

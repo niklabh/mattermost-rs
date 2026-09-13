@@ -32,11 +32,13 @@ mod parity {
     pub mod bot_writes;
     pub mod bots;
     pub mod by_ids_lists;
+    pub mod channel_admin;
     pub mod channel_autocomplete;
     pub mod channel_by_name;
     pub mod channel_by_name_for_team_name;
     pub mod channel_creates;
     pub mod channel_get;
+    pub mod channel_join_requests;
     pub mod channel_member;
     pub mod channel_member_writes;
     pub mod channel_members_for_team_for_user;
@@ -47,6 +49,7 @@ mod parity {
     pub mod channel_posts_unread;
     pub mod channel_read_all;
     pub mod channel_search;
+    pub mod channel_search_all;
     pub mod channel_search_autocomplete;
     pub mod channel_stats;
     pub mod channel_timezones;
@@ -74,24 +77,31 @@ mod parity {
     pub mod emoji_get;
     pub mod emoji_list;
     pub mod emoji_search;
+    pub mod emoji_writes;
     pub mod exports_and_uploads;
     pub mod file_bytes;
     pub mod file_info;
     pub mod flagged_posts;
     pub mod gated_families;
     pub mod gated_reads;
+    pub mod group_syncables;
+    pub mod group_writes;
     pub mod groups;
+    pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
     pub mod jobs;
     pub mod licence_gated_channels;
     pub mod license_client;
     pub mod licensed_features;
+    pub mod login;
     pub mod me_alias;
     pub mod oauth_app_writes;
     pub mod oauth_apps;
     pub mod outgoing_hooks;
+    pub mod post_acks;
     pub mod post_bulk_reactions;
+    pub mod post_creates;
     pub mod post_edit_history;
     pub mod post_get;
     pub mod post_reactions;
@@ -110,6 +120,7 @@ mod parity {
     pub mod server_limits;
     pub mod session_activity;
     pub mod session_team_members;
+    pub mod session_writes;
     pub mod sessions_for_user;
     pub mod sidebar_categories;
     pub mod sidebar_category_writes;
@@ -119,6 +130,7 @@ mod parity {
     pub mod status_writes;
     pub mod system_posts;
     pub mod system_usage;
+    pub mod team_admin;
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
@@ -127,19 +139,25 @@ mod parity {
     pub mod team_name_members;
     pub mod team_stats;
     pub mod team_unread;
+    pub mod team_write_family;
     pub mod team_writes;
     pub mod teams_all;
     pub mod teams_for_user;
     pub mod teams_unread;
     pub mod terms_of_service;
+    pub mod terms_of_service_writes;
     pub mod thread_for_user;
     pub mod thread_writes;
     pub mod threads_for_user;
     pub mod token_writes;
     pub mod user_access_tokens;
     pub mod user_audits;
+    pub mod user_auth;
     pub mod user_by_email;
     pub mod user_by_username;
+    pub mod user_convert;
+    pub mod user_creates;
+    pub mod user_deletes;
     pub mod user_get;
     pub mod user_lookups;
     pub mod user_reports;
@@ -163,4 +181,7 @@ mod parity {
     // purpose — four agents were editing this file in parallel and an append conflicts with
     // nothing.
     pub mod local_mode;
+
+    // Appended 2026-09-13, same reason: the user-update family.
+    pub mod user_updates;
 }

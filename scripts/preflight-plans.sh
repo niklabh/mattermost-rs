@@ -31,6 +31,29 @@ fi
 BAD=0
 LINES=0
 for PLAN in "${PLANS[@]}"; do
+  # **Field count first, with awk, because `read` cannot see the bug this catches.**
+  #
+  # `IFS=$'\t' read` treats a run of IFS *whitespace* as one separator, so a line whose `to` is
+  # empty — `name<TAB>file<TAB>from<TAB><TAB>suite<TAB>filter` — arrives with `suite` sitting in
+  # `TO` and `filter` in `SUITE`. The suite name is then unrecognised, `set -e` aborts the batch
+  # mid-run, and the tree is left with whatever the shifted replacement wrote into it: on
+  # 2026-09-13 that was the literal string `api` where a block of Rust had been, in four separate
+  # lines of one plan. The loop below shares the same blindness, which is why this check is a
+  # separate awk pass rather than an `if` inside it.
+  #
+  # Five fields is legal (no filter); six is the norm. What is never legal is an **empty** field,
+  # and that is precisely the shape `read` hides.
+  FIELDBAD=$(awk -F'\t' '
+    /^#/ || NF <= 1 { next }
+    NF < 5 || NF > 6 { printf "%s: %s: %d tab-separated fields, expected 5 or 6\n", FILENAME, $1, NF; bad++ ; next }
+    { for (i = 1; i <= NF; i++) if ($i == "") {
+        printf "%s: %s: field %d is empty — `read` will collapse it and shift every field after it\n", FILENAME, $1, i
+        bad++
+        break
+      } }
+    END { exit (bad > 0) }
+  ' "$PLAN") || { echo "$FIELDBAD"; BAD=$((BAD + 1)); }
+
   while IFS=$'\t' read -r NAME FILE FROM TO SUITE FILTER; do
     case "$NAME" in ''|'#'*) continue ;; esac
     LINES=$((LINES + 1))
@@ -51,5 +74,5 @@ print(open(os.environ["FILE"]).read().count(os.environ["PATTERN"]))
   done < "$PLAN"
 done
 
-echo "plan lines checked: $LINES, stale anchors: $BAD"
+echo "plan lines checked: $LINES, problems: $BAD"
 [ "$BAD" -eq 0 ]

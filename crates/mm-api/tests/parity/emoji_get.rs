@@ -427,14 +427,17 @@ async fn a_name_outside_the_mux_charset_is_forwarded() {
     );
 }
 
-/// Every method but `GET` on both paths stays Go's — proved on a **throwaway** emoji.
+/// The methods these two paths do **not** claim stay Go's, and the one this server now claims —
+/// `DELETE /emoji/{emoji_id}` — is proved on a **throwaway** emoji.
 ///
-/// The obvious version of this test is destructive and quietly so: `DELETE /emoji/{id}` really
-/// is forwarded, Go really does run `deleteEmoji`, and the fixture emoji the rest of the module
-/// reads is soft-deleted out from under it. That is what happened on the first run — every other
-/// test kept passing because Go's by-name cache still answered, and only the by-id read noticed.
-/// So the delete gets its own emoji, and "Go actually deleted it" becomes the assertion that the
-/// forward reached Go's handler rather than a 404 that merely looks like one.
+/// The obvious version of this test is destructive and quietly so: the delete really does run,
+/// and the fixture emoji the rest of the module reads is soft-deleted out from under it. That is
+/// what happened on the first run — every other test kept passing because Go's by-name cache
+/// still answered, and only the by-id read noticed. So the delete gets its own emoji, and "the
+/// emoji is really gone" is what turns a 200 into evidence.
+///
+/// The delete's own cross-server assertions live in `parity::emoji_writes`; what is checked here
+/// is that claiming it did not disturb the two reads this module owns.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
     if !stack_enabled() {
@@ -481,12 +484,12 @@ async fn other_methods_are_forwarded() {
         rs.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "DELETE {path} must be forwarded"
+        Some("rust"),
+        "DELETE {path} is served here now"
     );
-    assert_eq!(rs.status(), 200, "Go's deleteEmoji answers OK");
+    assert_eq!(rs.status(), 200, "deleteEmoji answers OK");
 
-    // And the forward really reached `deleteEmoji`, rather than any 404-shaped thing.
+    // And it really deleted, rather than answering a 200-shaped thing.
     let ((go_status, _), (rs_status, _)) = fetch_both_raw(&client, &token, &path).await;
     assert_eq!(go_status, 404, "the emoji is gone from Go's own read");
     assert_eq!(rs_status, 404, "and from ours");

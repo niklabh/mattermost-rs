@@ -17,6 +17,25 @@
 //! `License().Features.LDAPGroups` — neither is ported — so a licensed installation is forwarded
 //! whole.
 //!
+//! # Twenty routes, one gate — the whole of `api4/group.go`
+//!
+//! **Extended 2026-09-12 with the seven CRUD and membership writes** — `createGroup`,
+//! `getGroupsByNames`, `patchGroup`, `deleteGroup`, `restoreGroup`, `addGroupMembers` and
+//! `deleteGroupMembers`. They open with the same `requireLicense` and in the same position: its
+//! first statement, ahead of `RequireGroupId` *and ahead of reading the request body*. So on an
+//! unlicensed server all seventeen collapse to the same 501, and a write with malformed JSON is
+//! refused for the licence rather than for the JSON.
+//!
+//! **Completed 2026-09-12 with the three syncable writes** — `linkGroupSyncable`,
+//! `unlinkGroupSyncable` and `patchGroupSyncable`. `InitGroup` registers twenty route+method
+//! pairs and every one of them is now answered here; `api4/group.go` has no handler left that
+//! this server forwards on its own account.
+//!
+//! What is *not* ported is everything behind the gate, which for the writes is the whole of the
+//! group store and the custom-group permission model ([D-360]), and for the three syncable
+//! writes the `GroupSyncable` upsert surface, the two permission verifiers and
+//! `SyncRolesAndMembership` ([D-390]).
+//!
 //! # All ten reads are the same gate
 //!
 //! Every `GET` in `api4/group.go` opens with `requireLicense(c)` as its **first statement** —
@@ -214,6 +233,259 @@ pub async fn get_groups_associated_to_channels_by_team(
     request: Request,
 ) -> Response {
     let _ = &team_id;
+    answer(&state, request).await
+}
+
+/// Port of `createGroup` (group.go:158) — `POST /api/v4/groups`.
+///
+/// # Seven writes, and the gate is still the first statement
+///
+/// `requireLicense` opens all seven of `api4/group.go`'s CRUD and membership writes exactly as it
+/// opens the ten reads, so an unlicensed server answers the same 501 to a `POST` with a valid
+/// body, a `POST` with malformed JSON and a `POST` with no body at all. **The body is never
+/// read.** That is the one thing a port can get wrong here by being helpful: parsing first and
+/// returning a 400 for bad JSON would answer a request Go refuses before it looks.
+///
+/// Behind the gate this handler alone has five more refusals — source must be `custom`,
+/// `licensedAndConfiguredForGroupBySource`, `PermissionCreateCustomGroup`, `allow_reference` must
+/// be true, and `remote_id` must be empty — then a 201 rather than a 200. None of it is reachable
+/// without a licence this stack cannot mint; see [D-360].
+#[tracing::instrument(skip_all, fields(licensed))]
+pub async fn create_group(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    answer(&state, request).await
+}
+
+/// Port of `getGroupsByNames` (group.go:920) — `POST /api/v4/groups/names`.
+///
+/// A `POST` that is a read, which is why it is in this family rather than with the other writes.
+/// `/names` is a **literal** beside `/{group_id:[A-Za-z0-9]+}`, and `names` would itself match
+/// that class — so Go's answer depends on the method: `POST /groups/names` is this handler, while
+/// `DELETE /groups/names` is [`delete_group`] with `group_id = "names"`. Both are the same 501
+/// unlicensed, from two different handlers.
+///
+// The literal shadows its parameterised sibling for **every** method, not just this one: axum
+/// prefers a static segment over `{group_id}` and does not backtrack across method routers. So
+/// registering `/names` for `POST` alone would have handed `GET /groups/names` — which
+/// [`get_group`] served until this route existed — to the fallback. [`get_group_named_names`] and
+/// [`delete_group_named_names`] re-claim the two methods gorilla *does* route there; `PUT` and the
+/// rest stay forwarded, because gorilla routes them nowhere. Measured in `parity::group_writes`.
+///
+/// Behind the gate the empty-list case short-circuits to a literal `[]` **before** the permission
+/// question — `SortedArrayFromJSON` returning nothing writes `[]` and returns — so an empty array
+/// is a 200 for a caller with no group permissions at all.
+#[tracing::instrument(skip_all, fields(licensed))]
+pub async fn get_groups_by_names(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    answer(&state, request).await
+}
+
+/// [`get_group`] at the one path where axum's static-over-parameter preference would otherwise
+/// have taken it away: `GET /api/v4/groups/names`.
+///
+/// `names` matches `{group_id:[A-Za-z0-9]+}`, so gorilla routes this to `getGroup` with
+/// `group_id = "names"` — a group id that is legal to *ask for* and can never exist, since ids
+/// are 26 characters. Behind the licence gate it would be a 404 from the store; in front of it,
+/// it is the same 501 as every other group route.
+#[tracing::instrument(skip_all, fields(licensed))]
+pub async fn get_group_named_names(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    answer(&state, request).await
+}
+
+/// [`delete_group`] at `DELETE /api/v4/groups/names`, for the reason
+/// [`get_group_named_names`] gives.
+#[tracing::instrument(skip_all, fields(licensed))]
+pub async fn delete_group_named_names(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    answer(&state, request).await
+}
+
+/// Port of `patchGroup` (group.go:220) — `PUT /api/v4/groups/{group_id}/patch`.
+///
+/// Behind the gate this is the branchiest of the seven: the required permission is chosen by the
+/// group's **source** (`PermissionEditCustomGroup` for `custom`, `PermissionSysconsoleWrite…` for
+/// everything else), and turning `allow_reference` on without supplying a name derives one by
+/// lower-casing the display name and replacing spaces with hyphens — a transform with no other
+/// caller in api4. Neither is ported; see [D-360].
+#[tracing::instrument(skip_all, fields(group_id = %group_id, licensed))]
+pub async fn patch_group(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `deleteGroup` (group.go:1295) — `DELETE /api/v4/groups/{group_id}`.
+///
+/// Shares its path with [`get_group`], and the two differ only in method.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, licensed))]
+pub async fn delete_group(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `restoreGroup` (group.go:1349) — `POST /api/v4/groups/{group_id}/restore`.
+///
+/// **Its non-custom refusal is a 501, not a 400.** Every other handler in the family answers
+/// `app.group.crud_permission` at 400 when the group is not a custom one; `restoreGroup` answers
+/// the same id at `http.StatusNotImplemented`. Recorded because it is behind the licence gate and
+/// therefore not something a parity run on this stack can catch.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, licensed))]
+pub async fn restore_group(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `addGroupMembers` (group.go:1405) — `POST /api/v4/groups/{group_id}/members`.
+///
+/// Three methods now share this path: `GET` is [`get_group_members`], `POST` is this, `DELETE` is
+/// [`delete_group_members`]. All three open with the same gate.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, licensed))]
+pub async fn add_group_members(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `deleteGroupMembers` (group.go:1473) — `DELETE /api/v4/groups/{group_id}/members`.
+///
+/// A `DELETE` that carries a JSON body (`{"user_ids":[…]}`), which is unusual enough that a proxy
+/// dropping the body on `DELETE` would break it once the gate opens. Not reachable here.
+///
+/// Its marshal-failure branch names **`Api4.addGroupMembers`** (group.go:1516) — copied from its
+/// neighbour. Faithful to record, unreachable to test.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, licensed))]
+pub async fn delete_group_members(
+    State(state): State<AppState>,
+    Path(group_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `linkGroupSyncable` (group.go:319) —
+/// `POST /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link`.
+///
+/// # The gate is still the first statement, and here it precedes *four* things
+///
+/// `requireLicense` opens this handler ahead of `RequireGroupId`, `RequireSyncableId`,
+/// `RequireSyncableType` **and** `io.ReadAll(r.Body)` — in that order in the source, all of them
+/// below the gate. So on an unlicensed server a `POST` with a malformed body, an unroutable
+/// `group_id` and an empty `syncable_id` is the same 501 as a well-formed link request, and the
+/// body is never read. Measured in `parity::group_syncables`.
+///
+/// # `RequireSyncableType` can never fail through the mux
+///
+/// `Params.SyncableType` is not the URL segment: `params.go:269` maps `teams` → `Team` and
+/// `channels` → `Channel` and leaves it **empty for anything else**, while the route pattern
+/// `{syncable_type:teams|channels}` already refused anything else. So the `syncable_type` arm of
+/// `SetInvalidURLParam` is dead code reachable only from a non-mux caller — which is why a third
+/// value is forwarded for gorilla's 404 here rather than answered with a 400.
+///
+/// # What is behind the gate
+///
+/// This is the deepest unported handler in the family: `verifyLinkUnlinkPermission` (five
+/// permission questions whose shape depends on the syncable type and, for a channel, on whether
+/// the parent *team* is already synced), `verifySchemeAdminAssignmentPermission`, the
+/// read-modify-write over `GetGroupSyncable`/`UpsertGroupSyncable` whose re-link of a
+/// soft-deleted row deliberately starts from a zero value, and the asynchronous
+/// `SyncRolesAndMembership`. None of it is reachable without a licence; see [D-390].
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn link_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+    answer(&state, request).await
+}
+
+/// Port of `unlinkGroupSyncable` (group.go:624) —
+/// `DELETE /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link`.
+///
+/// Shares its path with [`link_group_syncable`] and differs only in method, exactly as
+/// [`get_group`] and [`delete_group`] do. It is the one of the three that **never reads a body**
+/// even behind the gate, and the only one whose success is `ReturnStatusOK` rather than a
+/// marshalled syncable — so the three routes have three response shapes: a 201 with a body, a 200
+/// with a body, and a 200 with `{"status":"OK"}`.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn unlink_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+    answer(&state, request).await
+}
+
+/// Port of `patchGroupSyncable` (group.go:527) —
+/// `PUT /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/patch`.
+///
+/// The `patch` literal here sits at a **fourth** path segment under two parameters, which is a
+/// different position from `/groups/{group_id}/patch` ([`patch_group`]); the two never compete,
+/// and a request reaches this one only with a `syncable_type` and a `syncable_id` between them.
+///
+/// Behind the gate it differs from [`link_group_syncable`] in exactly one way that matters:
+/// `GetGroupSyncable` failing is fatal here (there is nothing to patch), where the link handler
+/// tolerates a 404 and creates the row. Both then run the same two permission verifiers and the
+/// same asynchronous `SyncRolesAndMembership`. See [D-390].
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn patch_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
     answer(&state, request).await
 }
 

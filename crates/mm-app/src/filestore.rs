@@ -200,6 +200,11 @@ impl FileBackend {
         self.local()?.remove_file(path).await
     }
 
+    /// Port of `FileBackend.MoveFile`.
+    pub async fn move_file(&self, old_path: &str, new_path: &str) -> Result<(), FileStoreError> {
+        self.local()?.move_file(old_path, new_path).await
+    }
+
     /// Port of `FileBackend.ListDirectory`.
     pub async fn list_directory(&self, path: &str) -> Result<Vec<String>, FileStoreError> {
         self.local()?.list_directory(path).await
@@ -321,6 +326,29 @@ impl LocalFileBackend {
         tokio::fs::remove_file(&full)
             .await
             .map_err(|err| FileStoreError::io("remove", path, err))
+    }
+
+    /// Port of `LocalFileBackend.MoveFile` (localstore.go:139): `MkdirAll(Dir(new), 0750)` then
+    /// `os.Rename`.
+    ///
+    /// **It is a rename, not a copy**, so it fails across filesystems (EXDEV) where a copy would
+    /// not — and it does not create the *source*'s parent, only the destination's. The only
+    /// caller that reaches it from a migrated route is `deleteEmojiImage`, which moves
+    /// `emoji/<id>/image` to `emoji/<id>/image_deleted` inside one directory, so the `MkdirAll` is
+    /// a no-op there and the rename cannot cross a device.
+    ///
+    /// A missing source is an ordinary error, **not** a distinguished not-found: `App.MoveFile`
+    /// flattens every failure into one 500 and `deleteEmojiImage` only logs it.
+    async fn move_file(&self, old_path: &str, new_path: &str) -> Result<(), FileStoreError> {
+        let new_full = self.resolve(new_path);
+        let parent = go_path::dir(&new_full.to_string_lossy());
+        create_dir_all_mode(&parent, 0o750)
+            .await
+            .map_err(|err| FileStoreError::io("mkdir", new_path, err))?;
+
+        tokio::fs::rename(self.resolve(old_path), &new_full)
+            .await
+            .map_err(|err| FileStoreError::io("rename", new_path, err))
     }
 
     /// Port of `LocalFileBackend.ListDirectory` (localstore.go:228).

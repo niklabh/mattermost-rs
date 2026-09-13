@@ -54,6 +54,108 @@ fn latest_terms_error(err: StoreError) -> Box<AppError> {
     )
 }
 
+impl App {
+    /// Port of `app.App.CreateTermsOfService` (terms_of_service.go:14).
+    ///
+    /// # The user lookup happens *after* the struct is built and *before* the insert
+    ///
+    /// `GetUser(userID)` is the only thing standing between an unknown author and a published
+    /// revision, and its **`AppError` is returned verbatim** — so posting terms as a deleted user
+    /// answers `app.user.get.app_error` with a 404, not a terms-of-service id. A port that moved
+    /// the check, or wrapped it, would change which error a client sees.
+    ///
+    /// # Three failures, and only one of them is reachable
+    ///
+    /// `Save` refuses a non-empty `Id` with `ErrInvalidInput` → 400
+    /// `app.terms_of_service.create.existing.app_error`; passes `IsValid`'s `AppError` through;
+    /// and turns anything else into 500 `app.terms_of_service.create.app_error`. The first cannot
+    /// fire, because the struct built here always has an empty `Id` — and Go's own handling of it
+    /// would **nil-dereference** if it did (`"id="+termsOfService.Id` reads the nil the failed
+    /// `Save` just assigned). The detail is reproduced as the empty-id string it would have been.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, text_len = text.len(), terms_id))]
+    pub async fn create_terms_of_service(
+        &self,
+        text: &str,
+        user_id: &str,
+    ) -> AppResult<TermsOfService> {
+        let terms = TermsOfService {
+            id: String::new(),
+            create_at: 0,
+            user_id: user_id.to_owned(),
+            text: text.to_owned(),
+        };
+
+        self.get_user(user_id).await?;
+
+        let saved = self
+            .store()
+            .terms_of_service()
+            .save(terms)
+            .await
+            .map_err(create_terms_error)?;
+
+        tracing::Span::current().record("terms_id", &saved.id);
+        Ok(saved)
+    }
+
+    /// Port of `app.App.GetTermsOfService` (terms_of_service.go:56).
+    ///
+    /// Shares both error ids with [`App::get_latest_terms_of_service`] — `app.terms_of_service.
+    /// get.no_rows.app_error` and `app.terms_of_service.get.app_error` — and differs only in the
+    /// `where`. `saveUserTermsOfService` calls this purely to refuse an acceptance of a revision
+    /// that does not exist, so the 404 is the one a client meets.
+    #[tracing::instrument(skip(self), fields(terms_id = %id))]
+    pub async fn get_terms_of_service(&self, id: &str) -> AppResult<TermsOfService> {
+        self.store()
+            .terms_of_service()
+            .get(id)
+            .await
+            .map_err(|err| {
+                let missing = err.is_not_found();
+                if !missing {
+                    tracing::error!(error = ?err, "terms of service lookup failed");
+                }
+                AppError::boxed(
+                    "GetTermsOfService",
+                    if missing {
+                        "app.terms_of_service.get.no_rows.app_error"
+                    } else {
+                        "app.terms_of_service.get.app_error"
+                    },
+                    None,
+                    String::new(),
+                    if missing { 404 } else { 500 },
+                )
+            })
+    }
+}
+
+/// Go's three-way `switch` on `Save`'s error (terms_of_service.go:26-34).
+fn create_terms_error(err: StoreError) -> Box<AppError> {
+    match err {
+        StoreError::InvalidInput { .. } => AppError::boxed(
+            "CreateTermsOfService",
+            "app.terms_of_service.create.existing.app_error",
+            None,
+            // See the doc comment: Go reads the id off the nil it just assigned, so the only
+            // value this can honestly carry is the empty one.
+            "id=".to_owned(),
+            400,
+        ),
+        StoreError::Invalid { app_error, .. } => app_error,
+        other => {
+            tracing::error!(error = ?other, "terms of service insert failed");
+            AppError::boxed(
+                "CreateTermsOfService",
+                "app.terms_of_service.create.app_error",
+                None,
+                "terms_of_service_id=".to_owned(),
+                500,
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

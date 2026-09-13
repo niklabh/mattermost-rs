@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT count(DISTINCT u.id) AS \"count!\"\n              FROM teammembers tm\n              JOIN teams t ON t.id = tm.teamid\n              JOIN users u ON u.id = tm.userid\n              LEFT JOIN bots b ON b.userid = tm.userid\n              LEFT JOIN groupmembers gm ON gm.userid = u.id\n              LEFT JOIN usergroups ug ON ug.id = gm.groupid\n             WHERE tm.deleteat = 0\n               AND t.deleteat = 0\n               AND u.deleteat = 0\n               AND b.userid IS NULL\n               AND t.id = $1\n               AND u.id NOT IN (\n                     SELECT igm.userid\n                       FROM groupmembers igm\n                       JOIN usergroups iug ON iug.id = igm.groupid\n                      WHERE igm.deleteat = 0\n                        AND igm.groupid = ANY($2)\n                   )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5e8d8b3a68f1ab3a7703198b1519a4ea2b06372403d370e976363cf20e93fbe8"
+}

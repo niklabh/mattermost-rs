@@ -447,6 +447,13 @@ async fn the_etag_arms_match_go_except_for_gos_two_pointer_components() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
     }
+    // See `common::USER_COUNT`. This etag is `MAX(UpdateAt)` over **every** user, so any suite
+    // that edits a user row moves it — and the retry loop below can only cope with churn that
+    // stops. `user_updates` edits users continuously for the length of its fourteen tests, which
+    // is long enough to exhaust twelve attempts; it took the lock first, and taking it here is
+    // what makes that mutual. The lock is not held by the fixture helpers, so this cannot
+    // deadlock against its own setup.
+    let _count = common::USER_COUNT.lock().await;
     let client = client();
     let f = fixture(&client, "uletag").await;
     let token = f.admin_token.clone();

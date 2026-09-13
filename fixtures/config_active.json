@@ -18,6 +18,9 @@
     "EnableSearching": false
   },
   "EmailSettings": {
+    "EnableSignInWithEmail": true,
+    "EnableSignInWithUsername": true,
+    "EnableSignUpWithEmail": true,
     "RequireEmailVerification": false
   },
   "ExperimentalSettings": {
@@ -25,29 +28,58 @@
   },
   "FileSettings": {
     "DriverName": "local",
-    "EnablePublicLink": false
+    "EnablePublicLink": false,
+    "MaxFileSize": 104857600
+  },
+  "GitLabSettings": {
+    "Enable": false
+  },
+  "GoogleSettings": {
+    "Enable": false
   },
   "GuestAccountsSettings": {
+    "Enable": false,
+    "EnableGuestMagicLink": false,
     "RestrictCreationToDomains": ""
   },
   "ImageProxySettings": {
     "Enable": false
   },
+  "LdapSettings": {
+    "Enable": false,
+    "PictureAttribute": ""
+  },
+  "LocalizationSettings": {
+    "DefaultClientLocale": "en"
+  },
   "MessageExportSettings": {
     "DownloadExportResults": false
+  },
+  "Office365Settings": {
+    "Enable": false
+  },
+  "OpenIdSettings": {
+    "Enable": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
     "ShowFullName": true
   },
+  "SamlSettings": {
+    "Enable": false,
+    "EnableSyncWithLdap": false
+  },
   "ServiceSettings": {
+    "AllowCookiesForSubdomains": false,
     "AllowPersistentNotifications": true,
     "AllowSyncedDrafts": true,
+    "EnableAPIUserDeletion": false,
     "EnableBurnOnRead": true,
     "EnableCommands": true,
     "EnableCustomEmoji": true,
     "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
+    "EnableMultifactorAuthentication": false,
     "EnableOAuthServiceProvider": true,
     "EnableOutgoingOAuthConnections": false,
     "EnableOutgoingWebhooks": true,
@@ -58,11 +90,16 @@
     "ExperimentalEnableHardenedMode": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,
+    "MaximumLoginAttempts": 10,
     "MaximumPersonalAccessTokenLifetimeDays": 0,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
+    "SessionLengthMobileInDays": 180,
+    "SessionLengthMobileInHours": 4320,
+    "SessionLengthWebInDays": 180,
+    "SessionLengthWebInHours": 4320,
     "SiteURL": "",
     "UniqueEmojiReactionLimitPerPost": 50
   },
@@ -71,6 +108,9 @@
   },
   "TeamSettings": {
     "EnableCustomUserStatuses": true,
+    "EnableUserCreation": true,
+    "EnableUserDeactivation": false,
+    "LockProfileFieldsForEmailUsers": "none",
     "RestrictCreationToDomains": "",
     "RestrictDirectMessage": "any",
     "UserStatusAwayTimeout": 300

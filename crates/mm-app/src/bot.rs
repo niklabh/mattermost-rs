@@ -21,7 +21,7 @@ use mm_model::bot::{
 };
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult, get_millis};
-use mm_store::{BotStore, SessionStore, StoreError, UserStore};
+use mm_store::{BotStore, StoreError, UserStore};
 
 use crate::App;
 use crate::license::LicenseState;
@@ -454,76 +454,10 @@ impl App {
             .map_err(update_active_error)?;
 
         if !active {
-            self.revoke_all_sessions_for_bot(&update.new.id).await?;
+            self.revoke_all_sessions(&update.new.id).await?;
         }
 
         self.send_updated_user_event(&update.new).await;
-        Ok(())
-    }
-
-    /// The slice of `PlatformService.RevokeAllSessions` (app/platform/session.go:324) that a bot
-    /// deactivation reaches, wrapped in `App.RevokeAllSessions`'s (app/session.go:253) two error
-    /// ids.
-    ///
-    /// # Why it lives beside the bot routes
-    ///
-    /// It is not bot-specific and belongs next to the other session code; it is here because the
-    /// session store is another agent's file this round and this needed no method it does not
-    /// already have. Move it when session revocation gets a route of its own.
-    ///
-    /// # The OAuth arm is not ported
-    ///
-    /// Go revokes an `IsOAuth` session through `RevokeAccessToken`, which also deletes the
-    /// `OAuthAccessData` row. A bot's sessions are personal access tokens, never OAuth grants, so
-    /// the arm is unreachable from here — but it is a real gap for the next caller and is
-    /// [D-283]. An OAuth session reaching this function is removed like any other, which revokes
-    /// it but leaves the access-data row behind.
-    ///
-    /// `sendMobileWipeSignal` is an `a.Srv().Go(...)` push notification: off the response path
-    /// and there is no push service.
-    #[tracing::instrument(skip_all, fields(user_id = %user_id, revoked))]
-    async fn revoke_all_sessions_for_bot(&self, user_id: &str) -> AppResult {
-        let sessions = self
-            .store()
-            .session()
-            .get_sessions(user_id)
-            .await
-            .map_err(|err| {
-                tracing::error!(error = %err, "the session list could not be read");
-                AppError::boxed(
-                    "RevokeAllSessions",
-                    "app.session.get_sessions.app_error",
-                    None,
-                    String::new(),
-                    500,
-                )
-            })?;
-
-        tracing::Span::current().record("revoked", sessions.len());
-        for session in &sessions {
-            if session.is_oauth {
-                tracing::warn!(
-                    session_id = %session.id,
-                    "an OAuth session is being removed without its access data (D-283)",
-                );
-            }
-            // `Remove` takes an id **or** a token; Go passes the id here, and so does this.
-            self.store()
-                .session()
-                .remove(&session.id)
-                .await
-                .map_err(|err| {
-                    tracing::error!(error = %err, "a session could not be removed");
-                    AppError::boxed(
-                        "RevokeAllSessions",
-                        "app.session.remove.app_error",
-                        None,
-                        String::new(),
-                        500,
-                    )
-                })?;
-        }
-
         Ok(())
     }
 }

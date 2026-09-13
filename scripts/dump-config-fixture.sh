@@ -65,6 +65,18 @@ MODELLED = {
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
         "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands",
         "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
+        # The mobile session length and the cookie-domain flag, read by
+        # `PUT /api/v4/users/sessions/device`. Both `SessionLengthMobile*` keys are projected
+        # because Config derives hours from days when the hours key is absent, and the fixture
+        # has to be able to show which branch the live document actually takes.
+        "SessionLengthMobileInHours", "SessionLengthMobileInDays",
+        # The web session length, read by `login` for both the session ExpiresAt and the
+        # Max-Age of all three cookies. Both keys for the same reason as the mobile pair.
+        "SessionLengthWebInHours", "SessionLengthWebInDays",
+        "MaximumLoginAttempts", "EnableMultifactorAuthentication",
+        # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
+        "EnableAPIUserDeletion",
+        "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and
@@ -74,7 +86,7 @@ MODELLED = {
     "ComplianceSettings": ["Enable"],
     "ExperimentalSettings": ["RestrictSystemAdmin"],
     "ImageProxySettings": ["Enable"],
-    "FileSettings": ["DriverName", "EnablePublicLink"],
+    "FileSettings": ["DriverName", "EnablePublicLink", "MaxFileSize"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -84,10 +96,30 @@ MODELLED = {
     "AIRecapSettings": ["Enable"],
     "TeamSettings": [
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
-        "EnableCustomUserStatuses",
+        "EnableCustomUserStatuses", "LockProfileFieldsForEmailUsers",
+        # Half of `IsUserSignUpAllowed`, read by `POST /api/v4/users`.
+        "EnableUserCreation",
+        # The self-deactivation switch, read by `DELETE /api/v4/users/{user_id}` and
+        # `PUT /api/v4/users/{user_id}/active`.
+        "EnableUserDeactivation",
     ],
-    "EmailSettings": ["RequireEmailVerification"],
-    "GuestAccountsSettings": ["RestrictCreationToDomains"],
+    "LdapSettings": ["PictureAttribute", "Enable"],
+    "SamlSettings": ["EnableSyncWithLdap", "Enable"],
+    "EmailSettings": [
+        "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",
+        # The other half of `IsUserSignUpAllowed`. Distinct from `EnableSignInWithEmail`
+        # above, which Go merely *seeds* from it.
+        "EnableSignUpWithEmail",
+    ],
+    # `users.CreateUser` replaces an unsupported submitted locale with this.
+    "LocalizationSettings": ["DefaultClientLocale"],
+    "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink"],
+    # The five flags the deferred error mask in `login` reads. Any one of them being on
+    # replaces every masked failure id with `api.user.login.invalid_credentials_sso`.
+    "GitLabSettings": ["Enable"],
+    "GoogleSettings": ["Enable"],
+    "OpenIdSettings": ["Enable"],
+    "Office365Settings": ["Enable"],
     "MessageExportSettings": ["DownloadExportResults"],
     "CloudSettings": ["PreviewModalBucketURL"],
 }

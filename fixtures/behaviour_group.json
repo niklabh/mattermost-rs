@@ -1,0 +1,1012 @@
+{
+    "is_syncable": [
+        {
+            "is_syncable": true,
+            "panicked": false,
+            "source": "ldap"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "custom"
+        },
+        {
+            "is_syncable": true,
+            "panicked": false,
+            "source": "plugin_jira"
+        },
+        {
+            "is_syncable": true,
+            "panicked": false,
+            "source": "plugin_"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "plugin"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "Plugin_x"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "LDAP"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": ""
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "ldap_extra"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "xplugin_"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": " plugin_"
+        },
+        {
+            "is_syncable": false,
+            "panicked": false,
+            "source": "saml"
+        }
+    ],
+    "is_valid_for_create": [
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_custom",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ldap\",\"remote_id\":\"t9k5cjnq6bdatxg8hiu3mwqe1o\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_ldap_with_remote_id",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin_jira\",\"remote_id\":\"t9k5cjnq6bdatxg8hiu3mwqe1o\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_plugin_with_remote_id",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":\"t9k5cjnq6bdatxg8hiu3mwqe1o\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_custom_with_remote_id",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":false,\"member_ids\":null}",
+            "name": "valid_custom_nil_name_no_reference",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"Engineering\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "bad_name_charset",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.reserved_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"here\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "bad_name_reserved",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.display_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_display_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "display_name_128",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.display_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "display_name_129",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.display_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "display_name_65_two_byte",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_description",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "description_1024",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.description.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "description_1025",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_source",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"saml\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "unknown_source",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"LDAP\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_uppercase_ldap",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_plugin_no_underscore",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin_\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_bare_plugin_prefix",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin_\",\"remote_id\":\"t9k5cjnq6bdatxg8hiu3mwqe1o\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_bare_plugin_prefix_with_remote_id",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_200_chars",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin_ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\",\"remote_id\":\"t9k5cjnq6bdatxg8hiu3mwqe1o\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "source_200_char_plugin",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ldap\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "ldap_without_remote_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ldap\",\"remote_id\":\"\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "ldap_with_empty_remote_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"plugin_jira\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "plugin_without_remote_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "custom_without_remote_id",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "remote_id_48",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "custom_remote_id_49",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ldap\",\"remote_id\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "ldap_remote_id_49",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"Bad\",\"display_name\":\"\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "bad_name_and_empty_display_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.display_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_display_name_and_long_description",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.description.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"source\":\"saml\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "long_description_and_bad_source",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.source.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"saml\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "bad_source_and_missing_remote_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        }
+    ],
+    "is_valid_for_update": [
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_update",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "app.group.id.app_error",
+            "in": "{\"id\":\"\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "app.group.id.app_error",
+            "in": "{\"id\":\"abc\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "short_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "app.group.id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6urz\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "id_27_chars",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.create_at.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":0,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "zero_create_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.update_at.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":0,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "zero_update_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":-1,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "negative_create_at",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":-1,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "negative_update_at",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":1706835475000,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "soft_deleted",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "app.group.id.app_error",
+            "in": "{\"id\":\"abc\",\"name\":\"Bad\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "bad_id_and_bad_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.create_at.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"Bad\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":0,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "zero_create_at_and_bad_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.update_at.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":0,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "zero_update_at_and_empty_display_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "app.group.id.app_error",
+            "in": "{\"id\":\"\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":0,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_id_and_zero_create_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.create_at.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "zero_create_at_and_zero_update_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForUpdate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"Bad\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_gates_bad_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.display_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_gates_empty_display_name",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.remote_id.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"ldap\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_gates_ldap_without_remote_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidForCreate"
+        }
+    ],
+    "is_valid_name": [
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "valid_name",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":false,\"member_ids\":null}",
+            "name": "nil_name_without_allow_reference",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "nil_name_with_allow_reference",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_length.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_name_with_allow_reference",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_length.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":false,\"member_ids\":null}",
+            "name": "empty_name_without_allow_reference",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_64_ascii",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_length.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_65_ascii",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_length.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"ééééééééééééééééééééééééééééééééé\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_33_two_byte_chars",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"éééééééééé\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_10_two_byte_chars",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.reserved_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"all\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "reserved_all",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.reserved_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"channel\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "reserved_channel",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.reserved_name.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"here\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "reserved_here",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"All\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "reserved_all_uppercase",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"all-hands\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "reserved_all_with_suffix",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"Engineering\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_uppercase",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"eng team\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_with_space",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"@eng\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_with_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\".-_\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_all_punctuation",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"12345\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_digits_only",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"eng/team\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_with_slash",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"eng\\nteam\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_with_newline",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_chars.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"eng+team\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_with_plus",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group.name.invalid_length.app_error",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_65_uppercase",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "Group.IsValidName"
+        }
+    ],
+    "member_is_valid": [
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"group_id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"user_id\":\"y3zh8mcpr7f3bemk9w4qsn5xdo\",\"create_at\":1701440641000,\"delete_at\":0}",
+            "name": "valid",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"group_id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"user_id\":\"y3zh8mcpr7f3bemk9w4qsn5xdo\",\"create_at\":0,\"delete_at\":0}",
+            "name": "zero_timestamps",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group_member.group_id.app_error",
+            "in": "{\"group_id\":\"\",\"user_id\":\"y3zh8mcpr7f3bemk9w4qsn5xdo\",\"create_at\":0,\"delete_at\":0}",
+            "name": "empty_group_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "GroupMember.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group_member.group_id.app_error",
+            "in": "{\"group_id\":\"abc\",\"user_id\":\"y3zh8mcpr7f3bemk9w4qsn5xdo\",\"create_at\":0,\"delete_at\":0}",
+            "name": "short_group_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "GroupMember.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group_member.user_id.app_error",
+            "in": "{\"group_id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"user_id\":\"\",\"create_at\":0,\"delete_at\":0}",
+            "name": "empty_user_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "GroupMember.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group_member.user_id.app_error",
+            "in": "{\"group_id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"user_id\":\"abc\",\"create_at\":0,\"delete_at\":0}",
+            "name": "short_user_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "GroupMember.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.group_member.group_id.app_error",
+            "in": "{\"group_id\":\"\",\"user_id\":\"\",\"create_at\":0,\"delete_at\":0}",
+            "name": "both_empty",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "GroupMember.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"group_id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"user_id\":\"y3zh8mcpr7f3bemk9w4qsn5xdo\",\"create_at\":1701440641000,\"delete_at\":1705838686000}",
+            "name": "deleted_membership",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        }
+    ],
+    "patch": [
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_patch",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":null,\"description\":null,\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "name_only",
+            "name_is_nil": false,
+            "name_value": "new.name",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"new.name\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":\"new.name\",\"display_name\":null,\"description\":null,\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "New Display",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "display_name_only",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"New Display\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":\"New Display\",\"description\":null,\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "new description",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "description_only",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"new description\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":null,\"description\":\"new description\",\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "allow_reference_true",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":null,\"description\":null,\"allow_reference\":true}"
+        },
+        {
+            "allow_reference": false,
+            "description": "the people who build it",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "allow_reference_false",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":false,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":null,\"description\":null,\"allow_reference\":false}"
+        },
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_name",
+            "name_is_nil": false,
+            "name_value": "",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":\"\",\"display_name\":null,\"description\":null,\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "the people who build it",
+            "display_name": "",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_display_name",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":\"\",\"description\":null,\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": true,
+            "description": "",
+            "display_name": "Engineering Team",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "empty_description",
+            "name_is_nil": false,
+            "name_value": "engineering.team-1_a",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":null,\"display_name\":null,\"description\":\"\",\"allow_reference\":null}"
+        },
+        {
+            "allow_reference": false,
+            "description": "every field",
+            "display_name": "All Four",
+            "in": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"engineering.team-1_a\",\"display_name\":\"Engineering Team\",\"description\":\"the people who build it\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":true,\"member_ids\":null}",
+            "name": "all_four",
+            "name_is_nil": false,
+            "name_value": "all.four",
+            "out": "{\"id\":\"wc4tnzbdb3bsfxu8srzjhqb6ur\",\"name\":\"all.four\",\"display_name\":\"All Four\",\"description\":\"every field\",\"source\":\"custom\",\"remote_id\":null,\"create_at\":1701305143000,\"update_at\":1704208730000,\"delete_at\":0,\"has_syncables\":false,\"allow_reference\":false,\"member_ids\":null}",
+            "panicked": false,
+            "patch": "{\"name\":\"all.four\",\"display_name\":\"All Four\",\"description\":\"every field\",\"allow_reference\":false}"
+        }
+    ],
+    "syncable_sources": {
+        "prefixes": [
+            "plugin_"
+        ],
+        "sources": [
+            "ldap"
+        ]
+    }
+}

@@ -1,0 +1,2477 @@
+{
+    "auto_responder": [
+        {
+            "new": null,
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": null,
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {},
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "auto_responder_active": "true"
+            },
+            "turns_off": true,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "auto_responder_active": "false"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "auto_responder_active": "True"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "auto_responder_active": "1"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "auto_responder_active": ""
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": null,
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {},
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "true"
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": true
+        },
+        {
+            "new": {
+                "auto_responder_active": "false"
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "True"
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": "1"
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "auto_responder_active": ""
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        },
+        {
+            "new": {
+                "other": "true"
+            },
+            "old": {
+                "other": "true"
+            },
+            "turns_off": false,
+            "turns_on": false
+        }
+    ],
+    "locked_profile": [
+        {
+            "field": "",
+            "name": "none locks nothing",
+            "patch": {
+                "username": "other",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "none",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "unknown setting locks nothing",
+            "patch": {
+                "username": "other",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "banana",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "username",
+            "name": "name_and_username username",
+            "patch": {
+                "username": "other",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username username unchanged",
+            "patch": {
+                "username": "lockeduser",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username username absent",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "first name",
+            "name": "name_and_username first name",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": "Other",
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "last name",
+            "name": "name_and_username last name",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "empty first name may be filled",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": "Filled",
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "",
+                "last_name": "",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "empty last name may be filled",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": "Filled",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "",
+                "last_name": "",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username leaves nickname alone",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username leaves position alone",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": "Other",
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username leaves email alone",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": "other@example.com",
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "nickname",
+            "name": "all nickname",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "position",
+            "name": "all position",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": "Other",
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "username",
+            "name": "all username wins over position",
+            "patch": {
+                "username": "other",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": "Other",
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "first name",
+            "name": "all first name wins over nickname",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": "Other",
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "last name",
+            "name": "all last name wins over nickname",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": null,
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "all leaves email alone",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": "other@example.com",
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "username",
+            "name": "all username before first name",
+            "patch": {
+                "username": "other",
+                "nickname": null,
+                "first_name": "Other",
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "first name",
+            "name": "all first name before last name",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": "Other",
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "last name",
+            "name": "all last name before nickname",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": null,
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "nickname",
+            "name": "all nickname before position",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": null,
+                "last_name": null,
+                "position": "Other",
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "all nameless first name before last name",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": "Other",
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "",
+                "last_name": "",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "",
+            "name": "name_and_username nameless names before nothing",
+            "patch": {
+                "username": null,
+                "nickname": "Other",
+                "first_name": "Other",
+                "last_name": "Other",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "name_and_username",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "",
+                "last_name": "",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "field": "username",
+            "name": "all clearing the username",
+            "patch": {
+                "username": "",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            },
+            "setting": "all",
+            "user": {
+                "id": "",
+                "delete_at": 0,
+                "username": "lockeduser",
+                "auth_service": "",
+                "email": "",
+                "nickname": "Lock",
+                "first_name": "Locked",
+                "last_name": "User",
+                "position": "Engineer",
+                "roles": "",
+                "locale": "",
+                "timezone": null,
+                "disable_welcome_email": false
+            }
+        }
+    ],
+    "map_decode": [
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user\"}",
+            "map_from_json": {
+                "roles": "system_user"
+            },
+            "roles": "system_user",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user system_admin\"}",
+            "map_from_json": {
+                "roles": "system_user system_admin"
+            },
+            "roles": "system_user system_admin",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"\"}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{}",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "null",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "[]",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "[{\"roles\":\"system_admin\"}]",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "\"roles\"",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "7",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user\",\"n\":1}",
+            "map_from_json": {
+                "n": "",
+                "roles": "system_user"
+            },
+            "roles": "system_user",
+            "string_interface_keys": [
+                "n",
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"n\":1,\"roles\":\"system_user\"}",
+            "map_from_json": {
+                "n": "",
+                "roles": "system_user"
+            },
+            "roles": "system_user",
+            "string_interface_keys": [
+                "n",
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":1}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":null}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":[\"system_user\"]}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":{\"a\":\"b\"}}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user\",\"roles\":\"system_admin\"}",
+            "map_from_json": {
+                "roles": "system_admin"
+            },
+            "roles": "system_admin",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": false
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_admin\",\"roles\":\"\"}",
+            "map_from_json": {
+                "roles": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user\"} trailing",
+            "map_from_json": {
+                "roles": "system_user"
+            },
+            "roles": "system_user",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":\"system_user\"}{\"roles\":\"system_admin\"}",
+            "map_from_json": {
+                "roles": "system_user"
+            },
+            "roles": "system_user",
+            "string_interface_keys": [
+                "roles"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"roles\":",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "",
+            "map_from_json": {},
+            "roles": "",
+            "string_interface_keys": [],
+            "valid_user_roles": true
+        },
+        {
+            "active": true,
+            "active_ok": true,
+            "in": "{\"active\":true}",
+            "map_from_json": {
+                "active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": true,
+            "in": "{\"active\":false}",
+            "map_from_json": {
+                "active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"active\":\"true\"}",
+            "map_from_json": {
+                "active": "true"
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"active\":1}",
+            "map_from_json": {
+                "active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"active\":null}",
+            "map_from_json": {
+                "active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": true,
+            "active_ok": true,
+            "in": "{\"active\":true,\"x\":[1,2]}",
+            "map_from_json": {
+                "active": "",
+                "x": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active",
+                "x"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"x\":1}",
+            "map_from_json": {
+                "x": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "x"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": true,
+            "active_ok": true,
+            "in": "{\"active\":true} trailing",
+            "map_from_json": {
+                "active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "active"
+            ],
+            "valid_user_roles": true
+        },
+        {
+            "active": false,
+            "active_ok": false,
+            "in": "{\"Active\":true}",
+            "map_from_json": {
+                "Active": ""
+            },
+            "roles": "",
+            "string_interface_keys": [
+                "Active"
+            ],
+            "valid_user_roles": true
+        }
+    ],
+    "new_system_roles": [
+        {
+            "needs_licence": false,
+            "roles": "system_user",
+            "valid": true
+        },
+        {
+            "needs_licence": false,
+            "roles": "system_admin",
+            "valid": false
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_user_manager",
+            "valid": true
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_read_only_admin",
+            "valid": true
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_manager",
+            "valid": true
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_shared_channel_manager",
+            "valid": true
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_user system_manager",
+            "valid": true
+        },
+        {
+            "needs_licence": true,
+            "roles": "system_user  system_manager  ",
+            "valid": true
+        },
+        {
+            "needs_licence": false,
+            "roles": "system_managers",
+            "valid": true
+        },
+        {
+            "needs_licence": false,
+            "roles": "System_Manager",
+            "valid": false
+        },
+        {
+            "needs_licence": false,
+            "roles": "",
+            "valid": true
+        },
+        {
+            "needs_licence": false,
+            "roles": "   ",
+            "valid": true
+        }
+    ],
+    "patch_decode": [
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "newname",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"username\":\"newname\"}",
+            "patch": {
+                "username": "newname",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"username\":null}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "null",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "failed": true,
+            "in": "[]"
+        },
+        {
+            "failed": true,
+            "in": "[\"username\"]"
+        },
+        {
+            "failed": true,
+            "in": "3"
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "",
+                "last_name": "",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"first_name\":\"\",\"last_name\":\"\"}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": "",
+                "last_name": "",
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "abcdefghijklmnopqrstuvwxyz",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"remote_id\":\"abcdefghijklmnopqrstuvwxyz\"}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": "abcdefghijklmnopqrstuvwxyz"
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "a": "b"
+                },
+                "notify_props": {
+                    "c": "d"
+                },
+                "locale": "de",
+                "timezone": {
+                    "e": "f"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"props\":{\"a\":\"b\"},\"notify_props\":{\"c\":\"d\"},\"timezone\":{\"e\":\"f\"}}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "props": {
+                    "a": "b"
+                },
+                "notify_props": {
+                    "c": "d"
+                },
+                "locale": null,
+                "timezone": {
+                    "e": "f"
+                },
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"props\":null}",
+            "patch": {
+                "username": null,
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "a@b.c",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"password\":\"hunter2\",\"email\":\"a@b.c\"}",
+            "patch": {
+                "username": null,
+                "password": "hunter2",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": "a@b.c",
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "folded",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"USERNAME\":\"folded\"}",
+            "patch": {
+                "username": "folded",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "second",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"username\":\"first\",\"username\":\"second\"}",
+            "patch": {
+                "username": "second",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "a",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"username\":\"a\"} trailing",
+            "patch": {
+                "username": "a",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        },
+        {
+            "failed": true,
+            "in": "{\"username\":"
+        },
+        {
+            "applied": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "kept",
+                "password": "seedpassword",
+                "auth_service": "",
+                "email": "seed@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "seedremote",
+                "disable_welcome_email": false
+            },
+            "failed": false,
+            "in": "{\"unknown_field\":\"x\",\"username\":\"kept\"}",
+            "patch": {
+                "username": "kept",
+                "nickname": null,
+                "first_name": null,
+                "last_name": null,
+                "position": null,
+                "email": null,
+                "locale": null,
+                "timezone": null,
+                "remote_id": null
+            }
+        }
+    ],
+    "sanitize_input": [
+        {
+            "is_admin": false,
+            "user": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_data": "",
+                "auth_service": "",
+                "email": "spaced@example.com",
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "",
+                "disable_welcome_email": false
+            }
+        },
+        {
+            "is_admin": true,
+            "user": {
+                "id": "ddddddddddddddddddddddddda",
+                "delete_at": 0,
+                "username": "seeduser",
+                "password": "seedpassword",
+                "auth_data": "seedauthdata",
+                "auth_service": "gitlab",
+                "email": "spaced@example.com",
+                "email_verified": true,
+                "nickname": "SeedNick",
+                "first_name": "SeedFirst",
+                "last_name": "SeedLast",
+                "position": "SeedPosition",
+                "roles": "system_user",
+                "props": {
+                    "seedprop": "seedvalue"
+                },
+                "notify_props": {
+                    "seednotify": "seednotifyvalue"
+                },
+                "locale": "de",
+                "timezone": {
+                    "useAutomaticTimezone": "true"
+                },
+                "remote_id": "",
+                "disable_welcome_email": false
+            }
+        }
+    ],
+    "to_patch": {
+        "patch": {
+            "username": "seeduser",
+            "password": "seedpassword",
+            "nickname": "SeedNick",
+            "first_name": "SeedFirst",
+            "last_name": "SeedLast",
+            "position": "SeedPosition",
+            "email": "seed@example.com",
+            "props": {
+                "seedprop": "seedvalue"
+            },
+            "notify_props": {
+                "seednotify": "seednotifyvalue"
+            },
+            "locale": "de",
+            "timezone": {
+                "useAutomaticTimezone": "true"
+            },
+            "remote_id": null
+        },
+        "user": {
+            "id": "ddddddddddddddddddddddddda",
+            "delete_at": 0,
+            "username": "seeduser",
+            "password": "seedpassword",
+            "auth_service": "",
+            "email": "seed@example.com",
+            "nickname": "SeedNick",
+            "first_name": "SeedFirst",
+            "last_name": "SeedLast",
+            "position": "SeedPosition",
+            "roles": "system_user",
+            "props": {
+                "seedprop": "seedvalue"
+            },
+            "notify_props": {
+                "seednotify": "seednotifyvalue"
+            },
+            "locale": "de",
+            "timezone": {
+                "useAutomaticTimezone": "true"
+            },
+            "remote_id": "seedremote",
+            "disable_welcome_email": false
+        }
+    },
+    "trying_to_change": [
+        {
+            "changed": false,
+            "patch": null,
+            "user": "a"
+        },
+        {
+            "changed": false,
+            "patch": "a",
+            "user": "a"
+        },
+        {
+            "changed": true,
+            "patch": "b",
+            "user": "a"
+        },
+        {
+            "changed": true,
+            "patch": "",
+            "user": "a"
+        },
+        {
+            "changed": false,
+            "patch": null,
+            "user": ""
+        },
+        {
+            "changed": false,
+            "patch": "",
+            "user": ""
+        },
+        {
+            "changed": true,
+            "patch": "b",
+            "user": ""
+        }
+    ]
+}

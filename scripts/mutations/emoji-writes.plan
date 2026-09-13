@@ -1,0 +1,104 @@
+# Mutation plan for the emoji writes and the terms-of-service pair — `POST /api/v4/emoji`,
+# `DELETE /api/v4/emoji/{emoji_id}`, `POST /api/v4/terms_of_service` and
+# `POST /api/v4/users/{user_id}/terms_of_service`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/emoji-writes.plan
+#
+# Four populations, each testing a different corpus.
+#
+# The thirteen **imaging** mutations and the twelve **multipart** ones test
+# `fixtures/behaviour_emoji_upload.json`: a PNG header parse and a multipart reader written out
+# by hand, both of which passed their new `go_parity` suites on the first run. What is under test
+# is whether the corpus discriminates — every `parseIHDR` refusal, the width/height read order,
+# the three forms `mime.ParseMediaType` rejects, and the four rules that decide whether a part
+# becomes a value, a file, or nothing at all.
+#
+# The four **model** mutations test `fixtures/behaviour_terms_of_service.json`, chiefly the
+# rune-vs-byte text cap and the fact that all three `UserTermsOfService` branches report the
+# *user* id.
+#
+# The eleven **store** mutations need Postgres: the soft delete's `AND DeleteAt = 0`, the
+# `UPDATE`-then-`INSERT` upsert, the reaction sweep's `COALESCE` and the `Posts.HasReactions`
+# recomputation are all invisible over REST, which is why `db_emoji_and_terms_writes.rs` exists.
+#
+# The nine **api** mutations are the ones that need both servers: the check *order* in
+# `CreateEmoji`, the two dimension thresholds (128 and 1028, each with a row on either side so an
+# off-by-one is visible), the licence gate's direction — which was genuinely wrong on the first
+# pass — and the `accepted` branch.
+#
+# The three **router** mutations exist because a route registered on the wrong method still
+# produces a byte-identical body, from Go. Only `x-mmrs-served-by` can tell.
+#
+# The two controls are a binding rename in the CRC loop and a reorder of two independent, *named*
+# SELECT columns. If either comes back CAUGHT the harness is deciding verdicts on something other
+# than the mutation and the whole batch is void.
+#
+# Three lines were repaired after the first run and are worth keeping written down:
+#
+#   - `posts-hasreactions-not-recomputed` anchored the **19-space** copy of that UPDATE, which is
+#     `SqlReactionStore::delete`'s, not the sweep's 23-space one. It passed pre-flight because it
+#     was unique — unique to the wrong function, which the filter never exercises. Indentation is
+#     part of the anchor when a query appears twice at different nesting.
+#   - `uts-delete-ignores-the-revision` dropped `AND termsofserviceid = $2` and left `$2` bound and
+#     unreferenced, which `sqlx::query!` refuses to compile. `length($2) >= 0` is vacuous and keeps
+#     the parameter used.
+#   - `upload-too-large-drops-maxheight` was an `api` line and could never have been caught there:
+#     `AppError.params` is unexported in Go and `#[serde(skip)]` here, so it is not on the wire at
+#     all. It is a `unit` line now, against the two tests written for it.
+
+png-width-and-height-swapped	crates/mm-app/src/imaging.rs	    let width = i32::from_be_bytes([ihdr[0], ihdr[1], ihdr[2], ihdr[3]]);\n    let height = i32::from_be_bytes([ihdr[4], ihdr[5], ihdr[6], ihdr[7]]);	    let width = i32::from_be_bytes([ihdr[4], ihdr[5], ihdr[6], ihdr[7]]);\n    let height = i32::from_be_bytes([ihdr[0], ihdr[1], ihdr[2], ihdr[3]]);	unit	imaging::
+png-nonpositive-becomes-negative	crates/mm-app/src/imaging.rs	    if width <= 0 || height <= 0 {	    if width < 0 || height < 0 {	unit	imaging::
+png-crc-not-checked	crates/mm-app/src/imaging.rs	    if crc != u32::from_be_bytes([data[29], data[30], data[31], data[32]]) {	    if crc == u32::from_be_bytes([data[29], data[30], data[31], data[32]]) && false {	unit	imaging::
+png-ihdr-length-under-checked	crates/mm-app/src/imaging.rs	    if u32::from_be_bytes([data[8], data[9], data[10], data[11]]) != 13 {	    if u32::from_be_bytes([data[8], data[9], data[10], data[11]]) > 13 {	unit	imaging::
+png-interlace-allows-two	crates/mm-app/src/imaging.rs	    if ihdr[12] > 1 {	    if ihdr[12] > 2 {	unit	imaging::
+png-compression-not-checked	crates/mm-app/src/imaging.rs	    if ihdr[10] != 0 {	    if ihdr[10] != 0 && false {	unit	imaging::
+png-filter-not-checked	crates/mm-app/src/imaging.rs	    if ihdr[11] != 0 {	    if ihdr[11] != 0 && false {	unit	imaging::
+png-paletted-measured-anyway	crates/mm-app/src/imaging.rs	    if colour_type == 3 {	    if colour_type == 30 {	unit	imaging::
+png-depth-pairs-widened	crates/mm-app/src/imaging.rs	        2 | 4 | 6 => matches!(depth, 8 | 16),	        2 | 4 | 6 => true,	unit	imaging::
+decode-config-format-gate-inverted	crates/mm-app/src/imaging.rs	    if format != "png" {	    if format == "png" {	unit	imaging::
+filename-png-becomes-not-gif	crates/mm-app/src/imaging.rs	    go_path_extension(filename).eq_ignore_ascii_case(".png")	    !go_path_extension(filename).eq_ignore_ascii_case(".gif")	unit	imaging::
+filename-extension-case-sensitive	crates/mm-app/src/imaging.rs	    go_path_extension(filename).eq_ignore_ascii_case(".png")	    go_path_extension(filename) == ".png"	unit	imaging::
+path-extension-takes-the-first-dot	crates/mm-app/src/imaging.rs	    match element.rfind('.') {	    match element.find('.') {	unit	imaging::
+media-type-duplicate-attribute-allowed	crates/mm-api/src/multipart.rs	        if params.insert(key, value).is_some() {\n            // "mime: duplicate parameter name" — an error, not a last-wins overwrite.\n            return None;\n        }	        params.insert(key, value);	unit	multipart::
+media-type-empty-value-allowed	crates/mm-api/src/multipart.rs	            if i == start {\n                return None;\n            }	            if i == start && false {\n                return None;\n            }	unit	multipart::
+media-type-key-not-folded	crates/mm-api/src/multipart.rs	        let key: String = chars[key_start..i]\n            .iter()\n            .collect::<String>()\n            .to_ascii_lowercase();	        let key: String = chars[key_start..i].iter().collect::<String>();	unit	multipart::
+media-type-value-folded	crates/mm-api/src/multipart.rs	            chars[start..i].iter().collect::<String>()	            chars[start..i].iter().collect::<String>().to_ascii_lowercase()	unit	multipart::
+media-type-unterminated-quote-accepted	crates/mm-api/src/multipart.rs	            if !closed {\n                return None;\n            }	            if !closed && false {\n                return None;\n            }	unit	multipart::
+form-empty-filename-is-a-file	crates/mm-api/src/multipart.rs	        match params.get("filename").filter(|f| !f.is_empty()) {	        match params.get("filename") {	unit	multipart::
+form-empty-name-kept	crates/mm-api/src/multipart.rs	        let Some(name) = params.get("name").filter(|name| !name.is_empty()) else {	        let Some(name) = params.get("name") else {	unit	multipart::
+form-disposition-type-not-checked	crates/mm-api/src/multipart.rs	        if disposition_type != "form-data" {	        if disposition_type != "form-data" && false {	unit	multipart::
+filepath-base-empty-is-empty	crates/mm-api/src/multipart.rs	        return ".".to_owned();	        return String::new();	unit	multipart::
+filepath-base-does-not-trim	crates/mm-api/src/multipart.rs	    let trimmed = path.trim_end_matches('/');	    let trimmed = path;	unit	multipart::
+max-parts-off-by-one	crates/mm-api/src/multipart.rs	        if parts_read > MAX_PARTS {	        if parts_read >= MAX_PARTS {	unit	multipart::
+part-body-terminator-drops-the-newline	crates/mm-api/src/multipart.rs	    let mut needle = nl.to_vec();\n    needle.extend_from_slice(dash_boundary);	    let mut needle = Vec::new();\n    needle.extend_from_slice(dash_boundary);	unit	multipart::
+tos-text-counted-in-bytes	crates/mm-model/src/terms_of_service.rs	        if self.text.chars().count() > POST_MESSAGE_MAX_RUNES_V2 {	        if self.text.len() > POST_MESSAGE_MAX_RUNES_V2 {	unit	terms_of_service::go_parity
+tos-presave-keeps-an-existing-create-at	crates/mm-model/src/terms_of_service.rs	        self.create_at = get_millis();\n    }	        if self.create_at == 0 {\n            self.create_at = get_millis();\n        }\n    }	unit	terms_of_service::go_parity
+uts-terms-branch-reports-the-terms-id	crates/mm-model/src/user_terms_of_service.rs	            return Err(invalid_user_terms_of_service_error(\n                "terms_of_service_id",\n                &self.user_id,\n            ));	            return Err(invalid_user_terms_of_service_error(\n                "terms_of_service_id",\n                &self.terms_of_service_id,\n            ));	unit	user_terms_of_service::go_parity
+uts-checks-the-terms-id-first	crates/mm-model/src/user_terms_of_service.rs	        if !is_valid_id(&self.user_id) {	        if !is_valid_id(&self.terms_of_service_id) {	unit	user_terms_of_service::go_parity
+should-publish-comparison-inverted	crates/mm-api/src/terms_of_service.rs	        Some(existing) => existing.text != text,	        Some(existing) => existing.text == text,	unit	terms_of_service::tests
+should-publish-empty-table-refuses	crates/mm-api/src/terms_of_service.rs	        None => true,	        None => false,	unit	terms_of_service::tests
+emoji-delete-not-registered	crates/mm-api/src/lib.rs	            partially_migrated_with_ids(&state, get(emoji::get_emoji).delete(emoji::delete_emoji)),	            partially_migrated_with_ids(&state, get(emoji::get_emoji)),	unit	the_emoji_and_terms_routes
+emoji-post-not-registered	crates/mm-api/src/lib.rs	            partially_migrated(get(emoji::get_emoji_list).post(emoji::create_emoji)),	            partially_migrated(get(emoji::get_emoji_list)),	unit	the_emoji_and_terms_routes
+emoji-names-literal-added-for-delete	crates/mm-api/src/lib.rs	            "/api/v4/emoji/names",\n            partially_migrated(post(emoji::get_emojis_by_names).get(emoji::get_emoji_name_literal)),	            "/api/v4/emoji/names",\n            partially_migrated(post(emoji::get_emojis_by_names)),	unit	the_emoji_and_terms_routes
+emoji-delete-updates-only-deleteat	crates/mm-store/src/emoji_store.rs	               SET deleteat = $1,\n                   updateat = $1	               SET deleteat = $1,\n                   updateat = 0	store	deleting_is_soft
+emoji-delete-drops-the-live-predicate	crates/mm-store/src/emoji_store.rs	             WHERE id = $2\n               AND deleteat = 0	             WHERE id = $2	store	deleting_is_soft
+emoji-save-skips-validation	crates/mm-store/src/emoji_store.rs	        if let Err(app_error) = emoji.is_valid() {	        if let Err(app_error) = Ok::<(), Box<mm_model::utils::AppError>>(()) {	store	an_invalid_emoji_never_reaches_the_table
+emoji-save-skips-presave	crates/mm-store/src/emoji_store.rs	        emoji.pre_save();\n        if let Err(app_error) = emoji.is_valid() {	        if let Err(app_error) = emoji.is_valid() {	store	saving_an_emoji_mints
+reaction-sweep-drops-the-coalesce	crates/mm-store/src/reaction_store.rs	             WHERE emojiname = $2 AND COALESCE(deleteat, 0) = 0\n            "#,\n            now,	             WHERE emojiname = $2 AND COALESCE(deleteat, 0) >= 0\n            "#,\n            now,	store	deleting_an_emoji_sweeps
+reaction-sweep-leaves-updateat	crates/mm-store/src/reaction_store.rs	               SET updateat = $1, deleteat = $1\n             WHERE emojiname = $2	               SET updateat = $1, deleteat = 0\n             WHERE emojiname = $2	store	deleting_an_emoji_sweeps
+posts-hasreactions-not-recomputed	crates/mm-store/src/reaction_store.rs	                       hasreactions = (SELECT count(0) > 0\n                                         FROM reactions\n                                        WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)	                       hasreactions = (SELECT count(0) >= 0\n                                         FROM reactions\n                                        WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)	store	deleting_an_emoji_sweeps
+tos-save-id-guard-dropped	crates/mm-store/src/terms_of_service_store.rs	        if !terms.id.is_empty() {	        if terms.id.is_empty() && false {	store	publishing_terms_mints
+tos-get-latest-order-ascending	crates/mm-store/src/terms_of_service_store.rs	             ORDER BY createat DESC\n             LIMIT 1	             ORDER BY createat ASC\n             LIMIT 1	store	the_newest_revision_wins
+uts-save-always-inserts	crates/mm-store/src/user_terms_of_service_store.rs	        if updated == 0 {	        if updated >= 0 {	store	accepting_twice
+uts-delete-ignores-the-revision	crates/mm-store/src/user_terms_of_service_store.rs	             WHERE userid = $1 AND termsofserviceid = $2	             WHERE userid = $1 AND length($2) >= 0	store	rejecting_matches
+create-emoji-keeps-a-supplied-id	crates/mm-app/src/emoji.rs	        emoji.id = String::new();	        emoji.id = emoji.id.clone();	api	emoji_writes
+create-emoji-creator-check-inverted	crates/mm-app/src/emoji.rs	        if emoji.creator_id != session_user_id {	        if emoji.creator_id == session_user_id {	api	emoji_writes
+create-emoji-duplicate-check-inverted	crates/mm-app/src/emoji.rs	        if self.store().emoji().get_by_name(&emoji.name).await.is_ok() {	        if self.store().emoji().get_by_name(&emoji.name).await.is_err() {	api	emoji_writes
+upload-original-limit-off-by-one	crates/mm-app/src/emoji.rs	        if width > MAX_EMOJI_ORIGINAL_WIDTH || height > MAX_EMOJI_ORIGINAL_HEIGHT {	        if width >= MAX_EMOJI_ORIGINAL_WIDTH || height >= MAX_EMOJI_ORIGINAL_HEIGHT {	api	emoji_writes
+upload-resize-limit-off-by-one	crates/mm-app/src/emoji.rs	        if width > MAX_EMOJI_WIDTH || height > MAX_EMOJI_HEIGHT {	        if width >= MAX_EMOJI_WIDTH || height >= MAX_EMOJI_HEIGHT {	api	emoji_writes
+upload-too-large-drops-maxheight	crates/mm-app/src/emoji.rs	            params.insert(\n                "MaxHeight".to_owned(),\n                serde_json::Value::from(MAX_EMOJI_ORIGINAL_HEIGHT),\n            );	            params.insert(\n                "MaxWidth".to_owned(),\n                serde_json::Value::from(MAX_EMOJI_ORIGINAL_HEIGHT),\n            );	unit	emoji::tests
+emoji-image-path-changed	crates/mm-app/src/emoji.rs	    format!("emoji/{id}/image")	    format!("emoji/{id}/img")	api	emoji_writes
+tos-licence-gate-inverted	crates/mm-api/src/terms_of_service.rs	    if !custom_terms_of_service {	    if custom_terms_of_service {	api	terms_of_service_writes
+save-user-tos-accepted-branch-inverted	crates/mm-app/src/user_terms_of_service.rs	        if accepted {	        if !accepted {	api	terms_of_service_writes
+CONTROL-rename-a-binding	crates/mm-app/src/imaging.rs	            let mask = 0_u32.wrapping_sub(crc & 1);\n            crc = (crc >> 1) ^ (0xedb8_8320 & mask);	            let bitmask = 0_u32.wrapping_sub(crc & 1);\n            crc = (crc >> 1) ^ (0xedb8_8320 & bitmask);	unit	imaging::
+CONTROL-reorder-two-select-columns	crates/mm-store/src/emoji_store.rs	            SELECT id        AS "id!",\n                   createat  AS "create_at!",\n                   updateat  AS "update_at!",\n                   deleteat  AS "delete_at!",\n                   creatorid AS "creator_id!",\n                   name      AS "name!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND id = $1	            SELECT id        AS "id!",\n                   updateat  AS "update_at!",\n                   createat  AS "create_at!",\n                   deleteat  AS "delete_at!",\n                   creatorid AS "creator_id!",\n                   name      AS "name!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND id = $1	store	deleting_is_soft

@@ -161,6 +161,11 @@ up_stack() {
   # plan scored 5 caught of 33 on a stack with no oracle and 33 of 33 with one.
   MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" start >/dev/null
   echo "  boards oracle up"
+  # The discoverable-on oracle, for the same reason and with the same failure mode:
+  # `initChannelJoinRequestRoutes` registers nothing without `FeatureFlags.DiscoverableChannels`,
+  # and `parity_channel_join_requests` panics rather than skipping when it is missing.
+  MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" start >/dev/null
+  echo "  discoverable oracle up"
   seed_stack "$MMRS_GO_BASE"
   echo "  eval \"\$(scripts/stack.sh env $k)\" to point a shell at it"
 }
@@ -171,6 +176,7 @@ down_stack() {
   source "$ROOT/scripts/stack-env.sh"
   MMRS_STACK="$k" "$ROOT/scripts/go-server.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" stop >/dev/null 2>&1 || true
   pkill -f "MM_API_LISTEN=127.0.0.1:$MMRS_API_PORT" 2>/dev/null || true
   mmrs_compose down -v
   rm -rf "$ROOT/reference/.build/mmroot$MMRS_RUN_SUFFIX"

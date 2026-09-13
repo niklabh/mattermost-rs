@@ -10,6 +10,7 @@ pub mod auth;
 pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_admin;
 pub mod channel_creates;
 pub mod channel_member_writes;
 pub mod channel_writes;
@@ -31,6 +32,8 @@ pub mod feature_gates;
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
 
+/// Port of `api4/view.go` — the seven integrated-boards routes.
+pub mod channel_join_requests;
 pub mod files;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
@@ -42,6 +45,8 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod login;
+pub mod multipart;
 pub mod oauth;
 pub mod permissions;
 pub mod post_writes;
@@ -60,6 +65,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod system;
+pub mod team_admin;
 pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
@@ -70,8 +76,12 @@ pub mod tokens;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
+pub mod user_auth;
+pub mod user_convert;
+pub mod user_creates;
+pub mod user_deletes;
+pub mod user_updates;
 pub mod users;
-/// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
@@ -310,6 +320,20 @@ pub(crate) async fn go_global_headers(
     response
 }
 
+/// The 400 `/api/v4/posts/{post_id}` answers for a segment that is not a 26-character id.
+///
+/// Registered on the `GET`, `PUT` and `DELETE` of the **literal** `/api/v4/posts/ephemeral` so
+/// that adding that literal does not take those three methods away from `posts::get_post`,
+/// `post_writes::update_post` and `post_writes::delete_post` — each of which refuses the
+/// nine-character segment with exactly this error, before reading a body or touching the
+/// database. axum prefers a static segment over `{param}` and does not fall back across method
+/// routers, so without this the three would silently start being forwarded. See [D-330].
+async fn invalid_post_id_param() -> axum::response::Response {
+    axum::response::IntoResponse::into_response(crate::error::ApiError::invalid_url_param(
+        "post_id",
+    ))
+}
+
 /// Build the router.
 ///
 /// The migrated routes are listed explicitly and everything else falls through to the proxy —
@@ -326,14 +350,90 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v4/websocket/", get(websocket::connect_websocket))
         .route(
             "/api/v4/users/me",
-            partially_migrated(get(users::get_user_me)),
+            // `deleteUser` reaches this spelling in Go through `{user_id}` and `RequireUserId`'s
+            // `me` substitution; here the literal wins over the parameterised route, so the
+            // method has to be registered on it explicitly or it forwards. `PUT` is not, and
+            // still forwards — see `user_deletes::delete_user_me`.
+            partially_migrated(get(users::get_user_me).delete(user_deletes::delete_user_me)),
         )
         // The parameterised sibling. `/users/me` above wins as a literal; every *other* literal
         // Go owns under /users (`stats`, `known`, `autocomplete`, `tokens`, …) lands here and is
         // forwarded by the handler's serve-only-exact-ids rule — see `users::get_user`.
+        // `BaseRoutes.User.Handle("", APISessionRequired(updateUser)).Methods(PUT)`
+        // (api4/user.go:46) shares this path with the GET above, and `deleteUser` (api4/user.go:48)
+        // shares it again on DELETE; axum requires one method router per path, so the three are
+        // chained rather than registered three times — `.route` called twice with the same path
+        // panics on the duplicated fallback, not on the methods.
         .route(
             "/api/v4/users/{user_id}",
-            partially_migrated_with_ids(&state, get(users::get_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(users::get_user)
+                    .put(user_updates::update_user)
+                    .delete(user_deletes::delete_user),
+            ),
+        )
+        // The three literal children of `{user_id}` (api4/user.go:47, :49, :50). Each is one
+        // segment deeper than `/users/{user_id}`, so none of them shadows it — but the reverse
+        // risk is real and is why they are registered explicitly: matchit prefers a **static**
+        // child to a `{param}` one and does not backtrack across method routers, so a path that
+        // reaches `/users/{id}/` and finds no matching child is a 404 here rather than a fall
+        // through to the parameterised route. Every other `/users/{id}/…` segment Go owns —
+        // `image`, `mfa`, `password`, `email`, `tokens`, `teams`, `status`, … — is still reached
+        // through its own registration or through `partially_migrated`'s fallback, and
+        // `the_user_update_routes_and_their_neighbours_are_all_still_answered_here` in
+        // `tests/parity.rs` is the regression guard over the whole neighbourhood.
+        .route(
+            "/api/v4/users/{user_id}/patch",
+            partially_migrated_with_ids(&state, put(user_updates::patch_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/active",
+            partially_migrated_with_ids(&state, put(user_updates::update_user_active)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/roles",
+            partially_migrated_with_ids(&state, put(user_updates::update_user_roles)),
+        )
+        // The authentication-data trio (api4/user.go:64, :66, :67). `/auth` and `/mfa` are
+        // siblings of `patch`, `active` and `roles` above — one segment under `{user_id}`, so
+        // none of them shadows the parameterised route or each other. `/mfa/generate` is a static
+        // **child** of `/mfa`, which is the shape that has bitten this router before: matchit
+        // prefers a static child and does not fall back across method routers, so registering
+        // `/mfa` without also registering `/mfa/generate` would turn a forwarded route into a
+        // local 404. Both are registered, and
+        // `the_user_update_routes_and_their_neighbours_are_all_still_answered_here` in
+        // `tests/parity.rs` covers the whole `/users/{id}/…` neighbourhood.
+        //
+        // `PUT /mfa` and `POST /mfa/generate` are `APISessionRequiredMfa` in Go, which differs
+        // from `APISessionRequired` in exactly one field — `RequireMfa: false` — and that field
+        // gates a check this server does not make at all. So the two wrappers are the same thing
+        // here, and will stop being the same thing the day `MfaRequired` is ported.
+        .route(
+            "/api/v4/users/{user_id}/auth",
+            partially_migrated_with_ids(&state, put(user_auth::update_user_auth)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/mfa",
+            partially_migrated_with_ids(&state, put(user_auth::update_user_mfa)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/mfa/generate",
+            partially_migrated_with_ids(&state, post(user_auth::generate_mfa_secret)),
+        )
+        // The conversion pair and the guest pair, all four `POST` and all four one segment
+        // deeper than `{user_id}`, so there is no precedence question with the route above.
+        .route(
+            "/api/v4/users/{user_id}/convert_to_bot",
+            partially_migrated_with_ids(&state, post(user_convert::convert_user_to_bot)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/promote",
+            partially_migrated_with_ids(&state, post(user_convert::promote_guest_to_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/demote",
+            partially_migrated_with_ids(&state, post(user_convert::demote_user_to_guest)),
         )
         // The literal `ids` beside `{user_id}`: axum prefers the literal, so `POST /users/ids`
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
@@ -449,6 +549,30 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
         )
+        // The session write family (api4/user.go:82-85). Three segments under `/users/`, so all
+        // three are siblings of `/users/{user_id}/sessions` rather than shadowing it, and the
+        // literal `sessions` under the parameterised `{user_id}` keeps `revoke` from colliding
+        // with anything else.
+        .route(
+            "/api/v4/users/{user_id}/sessions/revoke",
+            partially_migrated_with_ids(&state, post(sessions::revoke_session)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/sessions/revoke/all",
+            partially_migrated_with_ids(&state, post(sessions::revoke_all_sessions_for_user)),
+        )
+        // `BaseRoutes.Users`, not `.User` — the literal `sessions` here is a sibling of
+        // `{user_id}` and axum prefers it, so `POST /users/sessions/revoke/all` lands on the
+        // all-users handler rather than being read as a user called `sessions`. Go's router makes
+        // the same choice, by registration order.
+        .route(
+            "/api/v4/users/sessions/revoke/all",
+            partially_migrated(post(sessions::revoke_all_sessions_all_users)),
+        )
+        .route(
+            "/api/v4/users/sessions/device",
+            partially_migrated(put(sessions::handle_device_props)),
+        )
         // `BaseRoutes.Users.Handle("/logout", APIHandler(logout))` (api4/user.go:75) — a literal
         // sibling of `{user_id}`, so axum's static-first preference lands `POST /users/logout`
         // here while the `{user_id}` route keeps every other method and every other segment. The
@@ -457,6 +581,51 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/logout",
             partially_migrated(post(auth_writes::logout)),
+        )
+        // `BaseRoutes.Users.Handle("/login", RateLimitedHandler(APIHandler(login), …))`
+        // (api4/user.go:69) and `"/login/type"` (user.go:74), POST both.
+        //
+        // # Two literals, one nested inside the other, beside a `{param}` that is already served
+        //
+        // `/users/login` is a sibling of `/users/{user_id}`, which answers GET today; axum
+        // prefers the static segment, so `POST /users/login` lands here while every other method
+        // and every other second segment is untouched. `/users/login/type` is a literal **child**
+        // of `/users/login`, and that is the shape the image session measured as dangerous:
+        // matchit prefers a static child and a path that reaches `/users/login/` and finds no
+        // matching child does not fall back across method routers. Registering the child
+        // explicitly is what keeps it answered; `the_login_routes_and_their_neighbours_are_all_still_answered_here`
+        // is the regression guard, and it lists the whole `/users/` neighbourhood rather than
+        // only these two.
+        //
+        // Neither handler takes a session extractor: both are `APIHandler`, so an unauthenticated
+        // request is the normal case rather than a 401.
+        //
+        // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
+        // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
+        // [D-430]. `/login/sso/code-exchange`, `/login/desktop_token`, `/login/switch` and
+        // `/login/cws` are deliberately **not** registered: leaving them off this router is what
+        // keeps them forwarded, and each needs SSO, a licence or CWS.
+        .route(
+            "/api/v4/users/login",
+            partially_migrated(post(login::login)),
+        )
+        .route(
+            "/api/v4/users/login/type",
+            partially_migrated(post(login::get_login_type)),
+        )
+        // `BaseRoutes.Users.Handle("/login/switch", APIHandler(switchAccountType))`
+        // (api4/user.go:72) — the third static child of `/users/login`, beside `type`. It was
+        // deliberately left unregistered while it was forwarded; registering it now serves the
+        // branch table in `user_auth::switch_account_type` and leaves every other method on the
+        // path forwarded through `partially_migrated`.
+        //
+        // Its three unregistered neighbours — `/login/sso/code-exchange`, `/login/desktop_token`
+        // and `/login/cws` — are untouched: each needs SSO, a licence or CWS, and each is a
+        // sibling rather than a child of this path, so nothing about this registration reaches
+        // them.
+        .route(
+            "/api/v4/users/login/switch",
+            partially_migrated(post(user_auth::switch_account_type)),
         )
         // `BaseRoutes.Users.Handle("/password/reset", APIHandler(resetPassword))`
         // (api4/user.go:55). Two segments under `/users/`, so it is a sibling of
@@ -468,6 +637,13 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/password/reset",
             partially_migrated(post(auth_writes::reset_password)),
+        )
+        // `BaseRoutes.Users.Handle("/password/reset/send")` (api4/user.go:56) — a static child of
+        // the static above, with no catch-all anywhere near it, so the only thing it could shadow
+        // is a `/users/password/reset/{something}` route, and there is none in Go either.
+        .route(
+            "/api/v4/users/password/reset/send",
+            partially_migrated(post(user_creates::send_password_reset)),
         )
         // `BaseRoutes.Users.Handle("/email/verify", APIHandler(verifyUserEmail))`
         // (api4/user.go:57), and the one registration on this list with a real routing subtlety.
@@ -494,6 +670,20 @@ pub fn router(state: AppState) -> Router {
                 post(auth_writes::verify_user_email).get(auth_writes::get_user_by_email_verify),
             ),
         )
+        // `BaseRoutes.Users.Handle("/email/verify/send")` (api4/user.go:58) — a **static child of
+        // a static child** of the `{*email}` catch-all, which is the shape that has twice taken a
+        // route away in this file. Two properties have to hold at once and only a router test can
+        // show either: this path must answer here, and `/users/email/<anything else>` must still
+        // reach the catch-all beside it. Both are asserted in
+        // `the_user_creation_routes_and_their_neighbours_are_all_still_answered_here`.
+        //
+        // Its comment above — "unregistered is what keeps it forwarded" — described the state of
+        // this file before the refusals were ported, not a rule. The route now answers the two
+        // cases that precede `Token().Save` and forwards the rest; see `crate::user_creates`.
+        .route(
+            "/api/v4/users/email/verify/send",
+            partially_migrated(post(user_creates::send_verification_email)),
+        )
         // `BaseRoutes.User.Handle("/password", APISessionRequired(updatePassword))`
         // (api4/user.go:51), PUT only — a sibling of `/users/{user_id}/status` and one segment
         // deeper than `/users/{user_id}`, so it shadows nothing.
@@ -505,6 +695,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/reset_failed_attempts",
             partially_migrated_with_ids(&state, post(auth_writes::reset_password_failed_attempts)),
+        )
+        // `BaseRoutes.User.Handle("/email/verify/member")` (api4/user.go:59), POST only. Three
+        // segments deeper than `/users/{user_id}`, and note that the `{user_id}` here is the
+        // *parameter* — unlike `/users/email/verify/send` above, where `email` is a literal at
+        // the same depth. The two paths differ only in their second segment and land in different
+        // handlers; both are in the router test.
+        .route(
+            "/api/v4/users/{user_id}/email/verify/member",
+            partially_migrated_with_ids(
+                &state,
+                post(user_creates::verify_user_email_without_token),
+            ),
         )
         .route(
             "/api/v4/users/{user_id}/status",
@@ -602,7 +804,12 @@ pub fn router(state: AppState) -> Router {
         // route below applies unchanged.
         .route(
             "/api/v4/teams/{team_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team).put(teams::update_team)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team)
+                    .put(teams::update_team)
+                    .delete(teams::delete_team),
+            ),
         )
         // `BaseRoutes.Team.Handle("/patch")` (api4/team.go) — a segment deeper than `{team_id}`,
         // so no precedence question with the route above.
@@ -613,6 +820,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/restore",
             partially_migrated_with_ids(&state, post(teams::restore_team)),
+        )
+        // `BaseRoutes.Team.Handle("/privacy")` (api4/team.go:46) — PUT only, one segment deeper
+        // than `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/privacy",
+            partially_migrated_with_ids(&state, axum::routing::put(teams::update_team_privacy)),
         )
         .route(
             "/api/v4/teams/{team_id}/regenerate_invite_id",
@@ -644,6 +857,37 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
             partially_migrated(get(channels::get_channel_by_name_for_team_name)),
         )
+        // `BaseRoutes.Teams.Handle("/{team_id}/members_minus_group_members")` (api4/team.go:77) —
+        // registered on `Teams` rather than on `Team`, which makes no difference to the path. The
+        // team twin of the channel route below it, and like that one **not** licence-gated: it
+        // reads the group tables on an unlicensed server and answers 200.
+        .route(
+            "/api/v4/teams/{team_id}/members_minus_group_members",
+            partially_migrated_with_ids(&state, get(team_admin::team_members_minus_group_members)),
+        )
+        // `BaseRoutes.Teams.Handle("/{team_id}/scheme")` (api4/team.go:36). Unlicensed this is a
+        // 400 or a **501** — the channel sibling answers 403 for the same gate.
+        .route(
+            "/api/v4/teams/{team_id}/scheme",
+            partially_migrated_with_ids(&state, put(team_admin::update_team_scheme)),
+        )
+        // `BaseRoutes.Team.Handle("/invite/email")` (api4/team.go:72). One segment deeper than
+        // `/teams/invite/{invite_id}`, which is `Teams`-rooted, so the two never collide.
+        .route(
+            "/api/v4/teams/{team_id}/invite/email",
+            partially_migrated_with_ids(&state, post(team_admin::invite_users_to_team)),
+        )
+        // `BaseRoutes.Team.Handle("/invite-guests/email")` (api4/team.go:73). The hyphen is not in
+        // the id charset, so nothing here can be read as a `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/invite-guests/email",
+            partially_migrated_with_ids(&state, post(team_admin::invite_guests_to_channels)),
+        )
+        // `BaseRoutes.Team.Handle("/import")` (api4/team.go:71).
+        .route(
+            "/api/v4/teams/{team_id}/import",
+            partially_migrated_with_ids(&state, post(team_admin::import_team)),
+        )
         // gorilla registers the GET and the POST separately on `BaseRoutes.TeamMembers`
         // (api4/team.go:56, :59) and picks by method; chaining onto one `MethodRouter`
         // reproduces that, and axum panics on a second `.route()` for the same path.
@@ -671,7 +915,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team_member)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team_member).delete(team_member_writes::remove_team_member),
+            ),
         )
         // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
         // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and
@@ -730,13 +977,34 @@ pub fn router(state: AppState) -> Router {
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
-        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41) — the only method on the bare
-        // `/channels` collection that this server answers. `getAllChannels` is a `GET` on the
-        // same path and is not migrated, so there is no method to combine with here yet; a `GET`
-        // falls to `partially_migrated`'s method fallback and is forwarded.
+        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41, :42) — both methods on the bare
+        // `/channels` collection. Two `Handle("")` calls in Go, split by gorilla's method
+        // matcher; `MethodRouter::post(...).get(...)` is the same split, and a third method still
+        // falls to `partially_migrated`'s fallback and is forwarded.
         .route(
             "/api/v4/channels",
-            partially_migrated(post(channel_creates::create_channel)),
+            partially_migrated(
+                post(channel_creates::create_channel).get(channels::get_all_channels),
+            ),
+        )
+        // `BaseRoutes.Channels.Handle("/search")` and `("/group/search")` (api4/channel.go:44,
+        // :45), both **POST-only**. `search` and `group` are literals in the `{channel_id}` slot
+        // of `/channels/{channel_id}` below — the same shape as `/channels/direct` beside them,
+        // and matchit and gorilla agree on it. A `GET` to either path now falls to the method
+        // fallback and is forwarded, where it previously reached `get_channel` and got that
+        // handler's 400 for a non-id segment; Go's `{channel_id}` route answers the same 400, so
+        // the body is unchanged and only who computed it moved.
+        //
+        // `/channels/group/search` is one segment deeper than the already-registered
+        // `/channels/group`, so it shadows nothing: axum matches the longer literal path first
+        // and `/channels/group` keeps its own `POST`.
+        .route(
+            "/api/v4/channels/search",
+            partially_migrated(post(channels::search_all_channels)),
+        )
+        .route(
+            "/api/v4/channels/group/search",
+            partially_migrated(post(channels::search_group_channels)),
         )
         // `BaseRoutes.Channels.Handle("/direct")` and `("/group")` (api4/channel.go:42, :43).
         // Two literal segments in the `{channel_id}` slot of `/channels/{channel_id}` below,
@@ -846,11 +1114,13 @@ pub fn router(state: AppState) -> Router {
                     .delete(channel_member_writes::remove_channel_member),
             ),
         )
-        // The three `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-116)
-        // registers `/roles`, `/schemeRoles` and `/notify_props` as literals under the `{user_id}`
-        // parameter, so neither router has a precedence puzzle here — and `/autotranslation`, the
-        // fourth literal, is deliberately unregistered (it needs the AutoTranslation store) and
-        // falls to `Router::fallback` whole.
+        // The four `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-117)
+        // registers `/roles`, `/schemeRoles`, `/notify_props` and `/autotranslation` as literals
+        // under the `{user_id}` parameter, so neither router has a precedence puzzle here.
+        //
+        // `/autotranslation` was previously left unregistered "because it needs the
+        // AutoTranslation store". It does not: Go's handler opens with the feature gate and never
+        // reaches a store on this build. See `channel_admin::update_channel_member_autotranslation`.
         //
         // **`schemeRoles` is camelCase**, alone among these paths. gorilla matches it literally and
         // so does axum, so `/schemeroles` reaches neither and is forwarded.
@@ -873,6 +1143,13 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(
                 &state,
                 put(channel_member_writes::update_channel_member_notify_props),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/autotranslation",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_admin::update_channel_member_autotranslation),
             ),
         )
         // `BaseRoutes.PostsForChannel` (api.go:240) — a `PathPrefix("/posts")` subrouter with a
@@ -979,7 +1256,16 @@ pub fn router(state: AppState) -> Router {
         // answer: nothing that matched `{user_id}` or the `me`/`ids`/`username` literals can
         // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
         // (createUser) and the rest fall to `partially_migrated`'s method fallback.
-        .route("/api/v4/users", partially_migrated(get(users::get_users)))
+        //
+        // `POST` is `createUser` (api4/user.go:30), added later. It shares the path with the GET
+        // above and adds no segment, so it takes part in no precedence question either — but it
+        // *is* the route at the root of the `{user_id}` subtree, and every literal registered
+        // under `/users/` below is one that could have matched `{user_id}`. See
+        // `the_user_creation_routes_and_their_neighbours_are_all_still_answered_here`.
+        .route(
+            "/api/v4/users",
+            partially_migrated(get(users::get_users).post(user_creates::create_user)),
+        )
         // `BaseRoutes.Users.Handle("/known")` and `("/stats")` (api4/user.go:34, :37) — two more
         // literals beside `{user_id}`, so the same reasoning as `ids` and `autocomplete` above:
         // axum prefers a registered literal, and the `{user_id}` handler's exact-26-character
@@ -1008,17 +1294,37 @@ pub fn router(state: AppState) -> Router {
         // request to reach a handler at all.
         .route(
             "/api/v4/users/{user_id}/terms_of_service",
-            partially_migrated_with_ids(&state, get(users::get_user_terms_of_service)),
+            partially_migrated_with_ids(
+                &state,
+                get(users::get_user_terms_of_service).post(users::save_user_terms_of_service),
+            ),
         )
         // `BaseRoutes.Teams.Handle("", ...)` (api4/team.go:35) — the bare `/teams` collection,
         // and the same non-question as `/api/v4/users` above: it is one segment shorter than
         // every `/api/v4/teams/...` route registered earlier, so axum sees a distinct path and
         // there is no literal-versus-parameter precedence to settle. Nothing that matched
         // `{team_id}` or the `name` literal can match here, and nothing here could have matched
-        // them. `GET` only; `POST` (createTeam) falls to `partially_migrated`'s method fallback.
+        // them.
         .route(
             "/api/v4/teams",
-            partially_migrated(get(teams::get_all_teams)),
+            partially_migrated(get(teams::get_all_teams).post(teams::create_team)),
+        )
+        // `BaseRoutes.Teams.Handle("/search")` (api4/team.go:37). A static sibling of
+        // `{team_id}`; gorilla registered `/search` *after* `{team_id:[A-Za-z0-9]+}`, but
+        // `search` is id-shaped and would have matched it — so on Go the literal wins only
+        // because `{team_id}` carries no POST handler, and on axum the literal wins outright.
+        // Same answer either way.
+        .route(
+            "/api/v4/teams/search",
+            partially_migrated(post(teams::search_teams)),
+        )
+        // `BaseRoutes.Teams.Handle("/invites/email")` (api4/team.go:74). Two static segments
+        // under `/teams/`, so no overlap with `{team_id}` — `invites` would have matched the
+        // id class, but the path is one segment longer than `{team_id}` and matches nothing
+        // else gorilla registers.
+        .route(
+            "/api/v4/teams/invites/email",
+            partially_migrated(axum::routing::delete(teams::invalidate_all_email_invites)),
         )
         // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
         // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a
@@ -1096,6 +1402,19 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/moderations",
             partially_migrated_with_ids(&state, get(channels::get_channel_moderations)),
         )
+        // One segment deeper than `/moderations`, which is a separate `gorilla` subrouter
+        // (`BaseRoutes.ChannelModerations`, api4/channel.go:119-120) and a separate matchit node
+        // here, so registering it takes nothing away from the `GET` above.
+        .route(
+            "/api/v4/channels/{channel_id}/moderations/patch",
+            partially_migrated_with_ids(&state, put(channel_admin::patch_channel_moderations)),
+        )
+        // `Channels.Handle("/{channel_id:[A-Za-z0-9]+}/scheme")` (api4/channel.go:59) — a literal
+        // under `{channel_id}`, one of about thirty in this neighbourhood.
+        .route(
+            "/api/v4/channels/{channel_id}/scheme",
+            partially_migrated_with_ids(&state, put(channel_admin::update_channel_scheme)),
+        )
         .route(
             "/api/v4/channels/{channel_id}/bookmarks",
             // The `GET` is not licence-gated and lives in `channels`; the `POST` is, and lives in
@@ -1111,9 +1430,19 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/member_counts_by_group",
             partially_migrated_with_ids(&state, get(channels::get_channel_member_counts_by_group)),
         )
+        // `BaseRoutes.Channel.Handle("/members_minus_group_members")` (api4/channel.go:95) — a
+        // literal under `{channel_id}` and, unlike its three neighbours here, **not** licence-
+        // gated: it reads the group tables on an unlicensed server and answers 200.
+        .route(
+            "/api/v4/channels/{channel_id}/members_minus_group_members",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_admin::channel_members_minus_group_members),
+            ),
+        )
         .route(
             "/api/v4/groups",
-            partially_migrated(get(groups::get_groups)),
+            partially_migrated(get(groups::get_groups).post(groups::create_group)),
         )
         .route(
             "/api/v4/users/{user_id}/groups",
@@ -1125,7 +1454,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/terms_of_service",
-            partially_migrated(get(terms_of_service::get_latest_terms_of_service)),
+            partially_migrated(
+                get(terms_of_service::get_latest_terms_of_service)
+                    .post(terms_of_service::create_terms_of_service),
+            ),
         )
         .route(
             "/api/v4/oauth/apps",
@@ -1199,6 +1531,35 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/ids",
             partially_migrated(post(posts::get_posts_by_ids)),
         )
+        // `BaseRoutes.Posts.Handle("")` (api4/post.go:25) — the route the product is built
+        // around. One segment shorter than `{post_id}`, so it collides with nothing; the GET,
+        // PUT and DELETE Go does not register on this path keep going to Go through
+        // `partially_migrated`.
+        .route(
+            "/api/v4/posts",
+            partially_migrated(post(post_writes::create_post)),
+        )
+        // `BaseRoutes.Posts.Handle("/ephemeral")` (api4/post.go:29) — the second literal sibling
+        // of `{post_id}`, and the one that has to carry four methods rather than one.
+        //
+        // **A literal un-serves its parameterised sibling for every method, and axum does not
+        // backtrack.** `GET /posts/ephemeral` was answered here before this line existed: it
+        // reached `posts::get_post`, whose `RequirePostId` refused the nine-character segment
+        // with a **400 `api.context.invalid_url_param.app_error`**. Registering the literal with
+        // POST alone would have sent that GET — and the PUT and the DELETE — to Go instead,
+        // silently. So the other three methods are registered too, answering exactly what
+        // `{post_id}` answered: the same 400, for the same reason, because `ephemeral` is not a
+        // 26-character id. `tests/parity/post_creates.rs` re-asks all four and would fail if any
+        // of them started being forwarded.
+        .route(
+            "/api/v4/posts/ephemeral",
+            partially_migrated(
+                post(post_writes::create_ephemeral_post)
+                    .get(invalid_post_id_param)
+                    .put(invalid_post_id_param)
+                    .delete(invalid_post_id_param),
+            ),
+        )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
         // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not
@@ -1257,6 +1618,32 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/posts/{post_id}/reactions/{emoji_name}",
             partially_migrated(axum::routing::delete(reactions::delete_reaction)),
+        )
+        // `BaseRoutes.PostForUser.Handle("/set_unread")` (api4/post.go:44) — POST only, a sibling
+        // of `/ack` below at the same depth. `/reminder` (:45) is the third sibling and is **not**
+        // registered: it forwards whole, see MIGRATION.md and [D-420].
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/set_unread",
+            partially_migrated_with_ids(&state, post(post_writes::set_post_unread)),
+        )
+        // `BaseRoutes.PostForUser.Handle("/ack")` (api4/post.go:50-51) — POST and DELETE on one
+        // path, two handlers, two *different* licence-refusal ids. Four segments below
+        // `{user_id}`, a depth only the reaction delete below shares, so nothing shadows them and
+        // they shadow nothing — `flagged` sits where `{post_id}` sits but a segment shallower.
+        //
+        // `partially_migrated_with_ids` and not bare `partially_migrated`: an out-of-charset
+        // `{user_id}` or `{post_id}` does not match Go's mux **at all**, so Go 404s it from the
+        // router and never reaches the handler that would have said 501. The charset layer
+        // forwards exactly those, and everything Go's mux accepts — including a three-character
+        // id — reaches our refusal, which is what Go does with the licence test above
+        // `RequirePostId`.
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/ack",
+            partially_migrated_with_ids(
+                &state,
+                post(licensed_features::acknowledge_post)
+                    .delete(licensed_features::unacknowledge_post),
+            ),
         )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
         // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
@@ -1336,17 +1723,23 @@ pub fn router(state: AppState) -> Router {
         //
         // `/emoji/{emoji_id}/image` is one segment deeper, so it shadows nothing; registered
         // below with the other three stored-image routes.
-        // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15) — the bare `/emoji` collection, one
-        // segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is no
-        // precedence question of the kind that route's comment describes. `GET` only; `POST`
-        // (createEmoji) falls to `partially_migrated`'s method fallback.
+        // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15, :24) — the bare `/emoji` collection,
+        // one segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is
+        // no precedence question of the kind that route's comment describes. Both methods are
+        // served; the `POST` is the multipart upload.
         .route(
             "/api/v4/emoji",
-            partially_migrated(get(emoji::get_emoji_list)),
+            partially_migrated(get(emoji::get_emoji_list).post(emoji::create_emoji)),
         )
+        // The `DELETE` is added to the **existing** `{emoji_id}` entry rather than a new route, so
+        // it introduces no path segment and cannot shadow anything. That matters here: the three
+        // literals beside it (`/emoji/names`, `/emoji/search`, `/emoji/autocomplete`) are already
+        // registered, and axum prefers a registered literal for *every* method — adding a literal
+        // takes the `{emoji_id}` route out of service for that segment, which is how
+        // `GET /groups/names` was lost for a round. `emoji_routes_are_not_shadowed` pins it.
         .route(
             "/api/v4/emoji/{emoji_id}",
-            partially_migrated_with_ids(&state, get(emoji::get_emoji)),
+            partially_migrated_with_ids(&state, get(emoji::get_emoji).delete(emoji::delete_emoji)),
         )
         // `BaseRoutes.EmojiByName` (api.go:287). One segment deeper than `{emoji_id}` above, so
         // neither shadows the other, and `emoji_name` is **not** id-shaped — Go's class is
@@ -1384,7 +1777,21 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/{user_id}/image",
-            partially_migrated_with_ids(&state, get(images::get_profile_image)),
+            partially_migrated_with_ids(
+                &state,
+                get(images::get_profile_image)
+                    .post(images::set_profile_image)
+                    .delete(images::set_default_profile_image),
+            ),
+        )
+        // `BaseRoutes.User.Handle("/image/default")` (api4/user.go:42) — a **literal** segment
+        // under a parameter, one deeper than the route above. axum prefers a static segment to a
+        // `{param}` and does not backtrack across method routers, so registering it is the shape
+        // that has silently un-served a neighbour before; the router test below is what proves it
+        // did not.
+        .route(
+            "/api/v4/users/{user_id}/image/default",
+            partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
         )
         .route(
             "/api/v4/teams/{team_id}/image",
@@ -1392,11 +1799,16 @@ pub fn router(state: AppState) -> Router {
         )
         // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
         // `APIHandlerTrustRequester` — **unauthenticated** — and the DELETE is session-required
-        // with `edit_brand`; the POST between them uploads a multipart image and stays
-        // forwarded through `partially_migrated`'s method fallback.
+        // with `edit_brand`. The POST between them answers its four refusals and the 501 and
+        // forwards the re-encode; note its permission check comes *fourth*, after the body has
+        // been parsed, which is unlike every other write here.
         .route(
             "/api/v4/brand/image",
-            partially_migrated(get(images::get_brand_image).delete(images::delete_brand_image)),
+            partially_migrated(
+                get(images::get_brand_image)
+                    .post(images::upload_brand_image)
+                    .delete(images::delete_brand_image),
+            ),
         )
         // `BaseRoutes.Exports` / `BaseRoutes.Export` (api.go:302, :304) and the two import
         // routes. `{export_name}` and `{import_name}` are **not** id-shaped — gorilla's pattern
@@ -1956,13 +2368,48 @@ pub fn router(state: AppState) -> Router {
         // id-shaped, so the handler carries that charset itself; `members` and `stats` are
         // literals beside it and axum prefers a literal, which is the order gorilla registers
         // them in too.
+        // `/names` is a **literal** beside `{group_id:[A-Za-z0-9]+}`, and `names` matches that
+        // class — so in Go the method picks the handler: `POST` is `getGroupsByNames`, `DELETE` is
+        // `deleteGroup` with `group_id = "names"`.
+        //
+        // **A static route shadows its parameterised sibling for every method**, because axum
+        // prefers the literal segment and does not backtrack across method routers. Registering
+        // `/names` for `POST` alone would therefore have handed `GET /api/v4/groups/names` — which
+        // `groups::get_group` served until now — to the fallback. The two methods gorilla actually
+        // routes at that path are re-claimed here; `PUT` and the rest stay forwarded, which is
+        // also what gorilla does with them. Measured in
+        // `parity::group_writes::groups_names_is_a_literal_for_the_post_only`.
+        .route(
+            "/api/v4/groups/names",
+            partially_migrated(
+                post(groups::get_groups_by_names)
+                    .get(groups::get_group_named_names)
+                    .delete(groups::delete_group_named_names),
+            ),
+        )
         .route(
             "/api/v4/groups/{group_id}",
-            partially_migrated_with_ids(&state, get(groups::get_group)),
+            partially_migrated_with_ids(
+                &state,
+                get(groups::get_group).delete(groups::delete_group),
+            ),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/patch",
+            partially_migrated_with_ids(&state, put(groups::patch_group)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/restore",
+            partially_migrated_with_ids(&state, post(groups::restore_group)),
         )
         .route(
             "/api/v4/groups/{group_id}/members",
-            partially_migrated_with_ids(&state, get(groups::get_group_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(groups::get_group_members)
+                    .post(groups::add_group_members)
+                    .delete(groups::delete_group_members),
+            ),
         )
         .route(
             "/api/v4/groups/{group_id}/stats",
@@ -1975,6 +2422,24 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}",
             partially_migrated_with_ids(&state, get(groups::get_group_syncable)),
+        )
+        // The last three of `InitGroup`'s twenty pairs. Both literals sit at a **fourth** segment
+        // under two parameters, where nothing was registered before — so unlike `/groups/names`
+        // neither can shadow a served sibling: `/groups/{group_id}/patch` is one parameter and a
+        // literal, this is two parameters, a literal and one more segment between them. That is
+        // an argument, not evidence, so
+        // `parity::group_syncables::every_group_route_this_server_answered_still_answers` re-asks
+        // all twenty after these two registrations.
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link",
+            partially_migrated_with_ids(
+                &state,
+                post(groups::link_group_syncable).delete(groups::unlink_group_syncable),
+            ),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/patch",
+            partially_migrated_with_ids(&state, put(groups::patch_group_syncable)),
         )
         .route(
             "/api/v4/channels/{channel_id}/groups",
@@ -2224,6 +2689,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/bots/{bot_user_id}/enable",
             partially_migrated_with_ids(&state, post(bots::enable_bot)),
         )
+        .route(
+            "/api/v4/bots/{bot_user_id}/convert_to_user",
+            partially_migrated_with_ids(&state, post(user_convert::convert_bot_to_user)),
+        )
         // `{user_id:[A-Za-z0-9]+}` is the **only** id in this family Go spells with an explicit
         // charset in `InitBot`; the other two inherit it from `BaseRoutes`. Both are id-shaped, so
         // `partially_migrated_with_ids` applies the same rule to each — including to the literal
@@ -2260,6 +2729,48 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/permissions/ancillary",
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
+        )
+        // `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18), all seven — and
+        // registered here **unconditionally**, unlike Go. The `FeatureFlags.DiscoverableChannels`
+        // gate is the first statement of each handler instead, and forwards when it is off, so a
+        // dark deployment answers Go's own mux 404 rather than one reproduced here. See
+        // [`channel_join_requests`] and [D-153].
+        .route(
+            "/api/v4/channels/{channel_id}/join_request",
+            partially_migrated_with_ids(
+                &state,
+                post(channel_join_requests::request_join_channel)
+                    .get(channel_join_requests::get_my_channel_join_request)
+                    .delete(channel_join_requests::withdraw_my_channel_join_request),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::get_channel_join_requests),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests/count",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::count_pending_channel_join_requests),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests/{request_id}",
+            partially_migrated_with_ids(
+                &state,
+                patch(channel_join_requests::patch_channel_join_request),
+            ),
+        )
+        .route(
+            "/api/v4/users/{user_id}/channel_join_requests",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::get_my_channel_join_requests),
+            ),
         )
         // `api.BaseRoutes.ChannelViews` / `ChannelView` / `ChannelViewPosts` (api4/api.go), all
         // seven registered by `InitView` (api4/view.go:14) — and registered here
@@ -2350,6 +2861,810 @@ mod tests {
         assert_eq!(state.go_upstream, "http://localhost:8065");
     }
 
+    /// Every route this server answers must still be answered after a sibling is registered.
+    ///
+    /// # The failure this exists to catch
+    ///
+    /// axum prefers a **registered literal** over a `{param}` at the same position, and it does
+    /// not backtrack across method routers: once `/api/v4/x/names` is a route, a request for it
+    /// never reaches `/api/v4/x/{id}` — for *any* method, not merely the one the literal was
+    /// registered with. Registering `POST /groups/names` that way took the already-served
+    /// `GET /groups/names` out of service, silently, and the emoji family is the same shape:
+    /// `/emoji/{emoji_id}` sits beside the literals `/emoji/names`, `/emoji/search` and
+    /// `/emoji/autocomplete`.
+    ///
+    /// # How "answered here" is detected without a stack
+    ///
+    /// Every request below carries no credentials, so a handler that is reached rejects with a
+    /// **401 and `x-mmrs-served-by: rust`** before it touches the store. A request that fell
+    /// through to the proxy would instead try the (absent) Go server and come back `502` with
+    /// `x-mmrs-served-by` unset — so the header, not the status, is the assertion.
+    #[tokio::test]
+    async fn the_emoji_and_terms_routes_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        // A port nothing is listening on, so a forwarded request cannot accidentally pass.
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        let served: &[(Method, &str)] = &[
+            // The reads that were already migrated; each is a regression this test guards.
+            (Method::GET, "/api/v4/emoji"),
+            (Method::GET, "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz"),
+            (Method::GET, "/api/v4/emoji/name/mmrsname"),
+            (Method::GET, "/api/v4/emoji/autocomplete"),
+            (Method::POST, "/api/v4/emoji/names"),
+            (Method::GET, "/api/v4/emoji/names"),
+            (Method::POST, "/api/v4/emoji/search"),
+            (Method::GET, "/api/v4/emoji/search"),
+            (
+                Method::GET,
+                "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz/image",
+            ),
+            (Method::GET, "/api/v4/terms_of_service"),
+            (
+                Method::GET,
+                "/api/v4/users/abcdefghijklmnopqrstuvwxyz/terms_of_service",
+            ),
+            // The four this session adds.
+            (Method::POST, "/api/v4/emoji"),
+            (Method::DELETE, "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz"),
+            (Method::POST, "/api/v4/terms_of_service"),
+            (
+                Method::POST,
+                "/api/v4/users/abcdefghijklmnopqrstuvwxyz/terms_of_service",
+            ),
+        ];
+
+        for (method, path) in served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(*path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// Nothing the channel-listing session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// This session added three routes, and **all three are literal segments sitting in a
+    /// `{param}` slot that is already served**: `/channels/search` and `/channels/group/search`
+    /// sit where `/channels/{channel_id}` matches, and the bare `/channels` gained a second
+    /// method on a path that already had one. axum prefers a static segment to a `{param}` and
+    /// does not backtrack across method routers, so a path registered one segment too shallow —
+    /// `/channels/group` instead of `/channels/group/search`, say — would take
+    /// `POST /channels/group` out of service rather than adding anything, and only a suite that
+    /// exercised the *old* route would notice.
+    ///
+    /// The list is therefore every `/api/v4/channels` route+method pair this server registers,
+    /// generated from the router rather than from the three that changed.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `(Method::POST, "/api/v4/channels/{CHANNEL}/patch")` — a
+    /// path Go has but this server does not migrate as a POST — and confirming the assertion
+    /// fails on a missing `x-mmrs-served-by`. It does.
+    #[tokio::test]
+    async fn the_channel_routes_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const BOOKMARK: &str = "dbcdefghijklmnopqrstuvwxyz";
+        const REQUEST: &str = "ebcdefghijklmnopqrstuvwxyz";
+        const VIEW: &str = "fbcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            (Method::GET, "/api/v4/channels".to_owned()),
+            (Method::POST, "/api/v4/channels".to_owned()),
+            (Method::POST, "/api/v4/channels/search".to_owned()),
+            (Method::POST, "/api/v4/channels/group/search".to_owned()),
+            (Method::POST, "/api/v4/channels/direct".to_owned()),
+            (Method::POST, "/api/v4/channels/group".to_owned()),
+            (
+                Method::POST,
+                "/api/v4/channels/stats/member_count".to_owned(),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/view"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/mark_read"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/members/{USER}/direct/read"),
+            ),
+            (Method::DELETE, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/patch")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/privacy")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/restore")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/stats")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/members")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/members")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/members")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/members/ids"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/roles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/schemeRoles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/notify_props"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/posts")),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/common_teams"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/bookmarks")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/member_counts_by_group"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/pinned")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/timezones")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}/sort_order"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/groups")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_requests"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_requests/count"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/join_requests/{REQUEST}"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/views")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/views")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}/posts"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}/sort_order"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// Nothing the multipart-image session registered removed a route this server answers.
+    ///
+    /// # Why this route family needs its own guard
+    ///
+    /// `/users/{user_id}/image/default` is a **literal** segment sitting under a parameter whose
+    /// shorter prefix is already served. axum prefers a static segment to a `{param}` at the same
+    /// depth and does **not** backtrack across method routers, so a path registered one segment
+    /// too shallow, or a second `.route()` call for a path already registered, takes routes away
+    /// rather than adding them — and a parity suite that only exercises the new routes would not
+    /// notice.
+    ///
+    /// The list below is therefore the whole `/users/{user_id}/` neighbourhood at depths two and
+    /// three, plus every `/brand/image` method, not only the four this session added.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding a route this server forwards — `GET
+    /// /api/v4/users/{user_id}/image/default` before it was registered, and `POST
+    /// /api/v4/users/{user_id}/patch`, which is not migrated — and confirming the assertion
+    /// fails. It does: a forwarded response carries no `x-mmrs-served-by`.
+    #[tokio::test]
+    async fn the_image_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const TEAM: &str = "bbcdefghijklmnopqrstuvwxyz";
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The four this session adds.
+            (Method::POST, format!("/api/v4/users/{USER}/image")),
+            (Method::DELETE, format!("/api/v4/users/{USER}/image")),
+            (Method::GET, format!("/api/v4/users/{USER}/image/default")),
+            (Method::POST, "/api/v4/brand/image".to_owned()),
+            // The three that were already here and share a path or a prefix with them.
+            (Method::GET, format!("/api/v4/users/{USER}/image")),
+            (Method::DELETE, "/api/v4/brand/image".to_owned()),
+            (Method::GET, format!("/api/v4/teams/{TEAM}/image")),
+            // The `/users/{user_id}/` neighbourhood, two and three segments deep. Any of these
+            // going quiet is the failure mode this test exists for.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, format!("/api/v4/users/{USER}/teams")),
+            (Method::GET, format!("/api/v4/users/{USER}/teams/unread")),
+            (Method::GET, format!("/api/v4/users/{USER}/channel_members")),
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/sessions/revoke"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/preferences/display"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/audits")),
+            (Method::GET, format!("/api/v4/users/{USER}/groups")),
+            (Method::GET, format!("/api/v4/users/{USER}/channels")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/channels/{CHANNEL}/unread"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// The `/users/{user_id}/posts/{post_id}/…` family and every neighbour it could have taken
+    /// out of service.
+    ///
+    /// # The failure this exists to catch
+    ///
+    /// See [`the_emoji_and_terms_routes_are_all_still_answered_here`] for the mechanism. Here the
+    /// risk is the *other* direction: `ack` and `set_unread` are **literals** hanging off a
+    /// `{post_id}` that itself hangs off a `{user_id}`, and both of those parameter positions
+    /// already carry literals this server answers — `flagged` where `{post_id}` sits,
+    /// and `sessions`, `preferences`, `teams`, … where `{user_id}` never reaches. Registering a
+    /// deeper parameterised path must not disturb any of them.
+    ///
+    /// Every path below is asserted to reach a handler *here*, so a registration that stole one
+    /// fails this test rather than silently forwarding it to a Go server that will not always be
+    /// running.
+    #[tokio::test]
+    async fn the_per_user_post_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const POST: &str = "zyxwvutsrqponmlkjihgfedcba";
+
+        let served: &[(Method, String)] = &[
+            // The two this session adds.
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/posts/{POST}/ack"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/users/{USER}/posts/{POST}/ack"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/posts/{POST}/set_unread"),
+            ),
+            // The literal that sits exactly where `{post_id}` sits, one segment shallower. If a
+            // `{post_id}` registration ever swallowed it, this is the line that says so.
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            // The one route that already used this depth, and is the reason `{post_id}` was
+            // already in the tree under `{user_id}`.
+            (
+                Method::DELETE,
+                format!("/api/v4/users/{USER}/posts/{POST}/reactions/mmrsname"),
+            ),
+            // Shallower neighbours under `{user_id}`, none of which may move.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+            // The post subtree the same handlers live beside, addressed without a `{user_id}`.
+            (Method::GET, format!("/api/v4/posts/{POST}")),
+            (Method::GET, format!("/api/v4/posts/{POST}/thread")),
+            (Method::POST, format!("/api/v4/posts/{POST}/pin")),
+            (Method::POST, format!("/api/v4/posts/{POST}/unpin")),
+            (Method::POST, "/api/v4/posts".to_owned()),
+            (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
+        ];
+
+        for (method, path) in served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// Nothing the login session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `/users/login` is a **literal sibling** of `/users/{user_id}`, and `/users/login/type` is
+    /// a literal **child of that literal**. axum prefers a static segment to a `{param}` at the
+    /// same depth and does not backtrack across method routers, so registering either one a
+    /// segment too shallow — or registering the parent and forgetting the child — takes routes
+    /// away rather than adding them, and a parity suite that only exercised the new routes would
+    /// not notice.
+    ///
+    /// # The two new routes need a different signal from their neighbours
+    ///
+    /// Everything else on this list is behind [`crate::auth::AuthenticatedSession`] and so
+    /// answers **401** with no credentials. `login` and `login/type` are `APIHandler` — an
+    /// anonymous request is their normal case — so `x-mmrs-served-by` is the only assertion that
+    /// applies to all of them, and it is the one that matters: a forwarded response carries no
+    /// such header because there is no Go server on port 1.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token`, which this server
+    /// deliberately forwards, and confirming the assertion fails. It does.
+    #[tokio::test]
+    async fn the_login_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        // The two this session adds. No session check to stop at, so only the header is asserted.
+        let anonymous: Vec<(Method, String)> = vec![
+            (Method::POST, "/api/v4/users/login".to_owned()),
+            (Method::POST, "/api/v4/users/login/type".to_owned()),
+            // `login/switch` is the third literal child of `login`, added with the
+            // authentication-data family. It is anonymous for the same reason: `switchAccountType`
+            // is an `APIHandler`, and one of its four branches asks for a session itself.
+            (Method::POST, "/api/v4/users/login/switch".to_owned()),
+            // Already anonymous before this session, and a literal under `/users/` like the two
+            // above — so a botched registration could shadow it.
+            (Method::POST, "/api/v4/users/logout".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset".to_owned()),
+            (Method::POST, "/api/v4/users/email/verify".to_owned()),
+        ];
+
+        // The session-gated neighbourhood, two and three segments under `/users/`.
+        let authenticated: Vec<(Method, String)> = vec![
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/sessions/revoke"),
+            ),
+            (Method::POST, "/api/v4/users/sessions/revoke/all".to_owned()),
+            (Method::PUT, "/api/v4/users/sessions/device".to_owned()),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (Method::POST, "/api/v4/users/ids".to_owned()),
+            (Method::POST, "/api/v4/users/usernames".to_owned()),
+            (Method::GET, "/api/v4/users/me/preferences".to_owned()),
+        ];
+
+        for (method, path) in anonymous.iter().chain(authenticated.iter()) {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+        }
+
+        for (method, path) in &authenticated {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // `login/type` is a **404 with an empty body** on an unlicensed server with guest magic
+        // links off, which is the stock configuration and `Config::default`. Not a
+        // "not implemented" 404 — it is the answer, and the body has to be empty.
+        let response = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v4/users/login/type")
+                    .body(axum::body::Body::from(r#"{"login_id":"a@b.c"}"#))
+                    .expect("a request"),
+            )
+            .await
+            .expect("the router answers");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        assert!(body.is_empty(), "getLoginType writes no body: {body:?}");
+    }
+
+    /// Nothing the user-creation session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard, beyond the login one
+    ///
+    /// Three of the four routes added here are **static children of static children**, and one of
+    /// those statics sits directly beside a catch-all:
+    ///
+    /// ```text
+    /// /api/v4/users/email/{*email}          the catch-all, GET, served
+    /// /api/v4/users/email/verify            static child, POST + GET, served
+    /// /api/v4/users/email/verify/send       static grandchild, POST, added here
+    /// ```
+    ///
+    /// matchit prefers a static segment to a parameter and to a catch-all, and does **not**
+    /// backtrack across method routers. So the question this test answers is not only "does the
+    /// new path answer" but "does `/users/email/<anything>` still reach the catch-all now that
+    /// the static subtree is a segment deeper". Both directions are asserted below.
+    ///
+    /// `POST /api/v4/users` is the other half: it is the route at the *root* of the `{user_id}`
+    /// subtree, so every literal under `/users/` is a path that could have matched `{user_id}`
+    /// and did not.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token` — a route this
+    /// server deliberately forwards — to the `anonymous` list and confirming the `x-mmrs-served-by`
+    /// assertion fails on it. It does.
+    #[tokio::test]
+    async fn the_user_creation_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        // `APIHandler` routes: no session to stop at, so `x-mmrs-served-by` is the only assertion
+        // that applies to all of them.
+        let anonymous: Vec<(Method, String)> = vec![
+            // The three this session adds that take no session.
+            (Method::POST, "/api/v4/users".to_owned()),
+            (Method::POST, "/api/v4/users/email/verify/send".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset/send".to_owned()),
+            // Their parents and siblings, all anonymous before this session.
+            (Method::POST, "/api/v4/users/email/verify".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset".to_owned()),
+            (Method::POST, "/api/v4/users/login".to_owned()),
+            (Method::POST, "/api/v4/users/login/type".to_owned()),
+            (Method::POST, "/api/v4/users/logout".to_owned()),
+        ];
+
+        // The session-gated neighbourhood. The first is this session's fourth route.
+        let authenticated: Vec<(Method, String)> = vec![
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/email/verify/member"),
+            ),
+            (Method::GET, "/api/v4/users".to_owned()),
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, "/api/v4/users/stats".to_owned()),
+            (Method::GET, "/api/v4/users/stats/filtered".to_owned()),
+            (Method::GET, "/api/v4/users/known".to_owned()),
+            (Method::GET, "/api/v4/users/autocomplete".to_owned()),
+            (Method::POST, "/api/v4/users/ids".to_owned()),
+            (Method::POST, "/api/v4/users/usernames".to_owned()),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::GET,
+                "/api/v4/users/email/someone@example.com".to_owned(),
+            ),
+            (Method::GET, "/api/v4/users/username/someone".to_owned()),
+        ];
+
+        for (method, path) in anonymous.iter().chain(authenticated.iter()) {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+        }
+
+        for (method, path) in &authenticated {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The catch-all is still reachable *past* the new static grandchild. `verify` itself is
+        // claimed by the static route (Go reaches the same outcome by registration order), but
+        // anything else under `/users/email/` must still be read as an address — including a
+        // multi-segment one, since Go's `{email:.+}` matches slashes.
+        for path in [
+            "/api/v4/users/email/someone@example.com",
+            "/api/v4/users/email/verify/not-send",
+            "/api/v4/users/email/a/b/c",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "GET {path} no longer reaches the by-email catch-all"
+            );
+        }
+
+        // And the method fallback: the new literals answer only the method Go registers. A `GET`
+        // on either must forward rather than 405, which `partially_migrated` is what provides —
+        // no Go server on port 1, so a forward carries no `x-mmrs-served-by`.
+        for path in [
+            "/api/v4/users/password/reset/send",
+            "/api/v4/users/email/verify/send",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "DELETE {path} should have been forwarded, not answered here"
+            );
+        }
+    }
+
     /// The two privacy accessors read **different** settings.
     ///
     /// Both default to `true` and the development stack leaves them there, so a swapped wiring is
@@ -2377,5 +3692,298 @@ mod tests {
 
         assert!(state.show_full_name(), "names are shown");
         assert!(!state.show_email_address(), "emails are not");
+    }
+
+    /// Nothing the user-update session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `patch`, `active` and `roles` are **literal children of `{user_id}`**, registered under a
+    /// path whose parameterised parent this server already answers with `GET` and now `PUT`.
+    /// matchit prefers a static child to a `{param}` one and does not backtrack across method
+    /// routers, so a request that reaches `/users/{id}/` and finds no matching static child is a
+    /// 404 here rather than a fall-through — and the `/users/{id}/…` neighbourhood is one of the
+    /// busiest in api4. Registering three of its literals is exactly the shape that can silently
+    /// un-serve the rest.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `POST /api/v4/users/{id}/convert_to_bot` — a route this
+    /// server deliberately forwards — to the `served` list and confirming the assertion fails. It
+    /// does. `PUT /users/{id}/mfa` used to be that example and is now served, which is exactly the
+    /// drift a non-vacuity note has to survive: the check is the *pair* of lists, and a route
+    /// moving from one to the other is a migration rather than a regression.
+    #[tokio::test]
+    async fn the_user_update_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The four this session adds.
+            (Method::PUT, format!("/api/v4/users/{USER}")),
+            (Method::PUT, format!("/api/v4/users/{USER}/patch")),
+            (Method::PUT, format!("/api/v4/users/{USER}/active")),
+            (Method::PUT, format!("/api/v4/users/{USER}/roles")),
+            // The authentication-data trio, which moved out of the `forwarded` list below when
+            // it was added. `mfa/generate` is a static **child** of `mfa`, the one shape in this
+            // neighbourhood that can un-serve a sibling, so it is listed as well as its parent.
+            (Method::PUT, format!("/api/v4/users/{USER}/auth")),
+            (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
+            (Method::POST, format!("/api/v4/users/{USER}/mfa/generate")),
+            // The parameterised parent keeps its GET.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            // Every other `/users/{id}/…` literal this server answered before them. Each is a
+            // sibling of `patch`/`active`/`roles` at the same depth, which is the depth at which
+            // a botched registration bites.
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (Method::GET, format!("/api/v4/users/{USER}/channel_members")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/teams/{USER}/threads"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+            (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
+            (Method::POST, format!("/api/v4/users/{USER}/promote")),
+            (Method::POST, format!("/api/v4/users/{USER}/demote")),
+            // And `me`, which resolves through the same `{user_id}` slot.
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, "/api/v4/users/me/preferences".to_owned()),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The other side of the same coin: two literals Go owns under `{user_id}` that this
+        // server still forwards. There is no Go server on port 1, so a forwarded request answers
+        // without the header — and if a registration above had swallowed them, they would come
+        // back as ours.
+        //
+        // `convert_to_bot` left this list when `user_convert` landed: it is answered here now and
+        // forwards only for an account carrying an `AuthService`, which is a decision taken from
+        // the row rather than from the path.
+        let forwarded: Vec<(Method, String)> = vec![
+            // **Both sides of this merge served what the other listed as forwarded.** The
+            // authentication-data session registered `/auth` and `/mfa`, and the conversion
+            // session registered `/convert_to_bot`, `/promote` and `/demote`; each listed the
+            // other's routes here while they were still Go's. Keeping both lists would assert
+            // that five now-served routes are forwarded, so the only entry that survives the
+            // merge is the constructed one, which nothing registers by design.
+            //
+            // A sibling of `mfa/generate` that nothing registers, so the static-child
+            // registration above must not have taken `/mfa/…` whole.
+            (Method::POST, format!("/api/v4/users/{USER}/mfa/nonesuch")),
+        ];
+        for (method, path) in &forwarded {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "{method} {path} is now answered here and should still forward"
+            );
+        }
+    }
+    /// The channel-administration literals, and the neighbours a botched registration would take
+    /// away.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `scheme`, `moderations/patch` and `autotranslation` are all **literal** segments sitting
+    /// under a parameter whose shorter prefixes this server already answers heavily. axum prefers a
+    /// static segment to a `{param}` at the same depth and does not backtrack across method
+    /// routers, so registering one of these a segment too shallow — `/moderations` instead of
+    /// `/moderations/patch`, say — silently replaces the `GET` that was there rather than adding a
+    /// `PUT` beside it.
+    ///
+    /// # Non-vacuity, in both directions
+    ///
+    /// The `served` half fails if a route goes quiet: checked by temporarily moving
+    /// `PUT /channels/{id}/scheme` into the `forwarded` list below, which fails there instead. The
+    /// `forwarded` half fails if a registration swallows a path Go still owns: checked by putting
+    /// `GET /channels/{id}/moderations`, which this server does answer, into it — it fails.
+    #[tokio::test]
+    async fn the_channel_admin_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The four this session adds.
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/scheme")),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/moderations/patch"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members_minus_group_members"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/autotranslation"),
+            ),
+            // The `GET` one segment above `moderations/patch`, which is the one a shallow
+            // registration would have eaten.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations"),
+            ),
+            // The three sibling literals under `{user_id}`, beside `autotranslation`.
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/roles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/schemeRoles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/notify_props"),
+            ),
+            // And the parameterised parents of both, which must keep their own methods.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}")),
+            // The `{channel_id}` literals nearest `scheme` structurally.
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/stats")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/privacy")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/restore")),
+            // `members` as a literal in the `{channel_id}` slot still wins over `{channel_id}`.
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/view"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The other side: the three channel-administration routes this session did **not**
+        // register, plus the unregistered method on two paths it did. There is no Go server on
+        // port 1, so a forwarded request answers without the header.
+        let forwarded: Vec<(Method, String)> = vec![
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/move")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
+            ),
+            // `moderations/patch` is a `PUT` only; a `GET` there is gorilla's 405 path, forwarded.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations/patch"),
+            ),
+            // `scheme` is a `PUT` only too, and it is not `schemeRoles`.
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/scheme")),
+        ];
+        for (method, path) in &forwarded {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "{method} {path} is now answered here and should still forward"
+            );
+        }
     }
 }

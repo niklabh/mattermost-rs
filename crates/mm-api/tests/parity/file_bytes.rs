@@ -642,6 +642,9 @@ async fn the_missing_brand_image_is_an_empty_404() {
     if !stack_enabled() {
         return;
     }
+    // `image_writes` uploads a brand image and deletes it again; a read taken inside that window
+    // is a 200 that this test would report as a route regression. See `common::BRAND_IMAGE`.
+    let _guard = common::BRAND_IMAGE.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
 
@@ -669,6 +672,7 @@ async fn the_brand_image_needs_no_session() {
     if !stack_enabled() {
         return;
     }
+    let _guard = common::BRAND_IMAGE.lock().await;
     let client = client();
     // Ensure the fixture's purge has run before an unauthenticated request races it.
     let token = go_minted_token(&client).await;

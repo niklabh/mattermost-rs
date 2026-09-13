@@ -71,6 +71,8 @@ async fn the_stats_body_is_byte_identical() {
     if !stack_enabled() {
         return;
     }
+    // See `common::USER_COUNT`: the total is global and `user_creates` moves it continuously.
+    let _count = common::USER_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -118,6 +120,7 @@ async fn the_count_matches_the_database_including_bots() {
     if !stack_enabled() {
         return;
     }
+    let _count = common::USER_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let _ = fixture(&client, &token).await;
@@ -171,6 +174,7 @@ async fn a_deactivated_user_leaves_the_count() {
     if !stack_enabled() {
         return;
     }
+    let _count = common::USER_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;

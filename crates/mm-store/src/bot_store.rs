@@ -66,6 +66,21 @@ pub trait BotStore {
         &self,
         bot: &Bot,
     ) -> impl std::future::Future<Output = Result<Bot, StoreError>> + Send;
+
+    /// Port of `SqlBotStore.PermanentDelete` (bot_store.go:227) — behind
+    /// `POST /api/v4/bots/{bot_user_id}/convert_to_user`.
+    ///
+    /// **The `Users` row is left alone.** Only the `Bots` row goes, which is exactly what turns
+    /// the account back into an ordinary user: [`BotStore::get`] inner-joins `Bots`, so the bot
+    /// disappears from every read route while the person keeps their id, posts and memberships.
+    ///
+    /// Go returns `store.NewErrInvalidInput` on a driver failure and **not** on a miss: `DELETE`
+    /// matching nothing is a success there, so a double conversion's second call is silent rather
+    /// than a 404. Reproduced — `rows_affected` is deliberately not consulted.
+    fn permanent_delete(
+        &self,
+        bot_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -332,6 +347,19 @@ impl BotStore for SqlBotStore {
         }
 
         Ok(bot)
+    }
+
+    #[tracing::instrument(skip_all, fields(bot_user_id = %bot_user_id))]
+    async fn permanent_delete(&self, bot_user_id: &str) -> Result<(), StoreError> {
+        sqlx::query!("DELETE FROM bots WHERE userid = $1", bot_user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("permanent_delete: user_id={bot_user_id}"),
+                source,
+            })?;
+
+        Ok(())
     }
 }
 

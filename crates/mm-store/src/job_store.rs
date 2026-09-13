@@ -34,6 +34,41 @@ pub trait JobStore {
     /// Port of `SqlJobStore.Get` (job_store.go:301). `ErrNotFound` on a miss.
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
 
+    /// Port of `SqlJobStore.GetAllByTypeAndStatus` (job_store.go) — **unpaged**, one type and one
+    /// status, `ORDER BY CreateAt DESC`.
+    ///
+    /// Not the same method as [`JobStore::get_all_by_types_and_statuses_page`]: singular on both
+    /// arguments, no `LIMIT`, and Go initialises `jobs := []*model.Job{}` so an empty result is
+    /// `[]`. Its only reachable caller — `InvalidateAllEmailInvites` — iterates the slice rather
+    /// than marshalling it, so the empty-versus-null distinction is invisible there, but the
+    /// **missing limit** is not: it cancels every pending resend job, not the first page of them.
+    fn get_all_by_type_and_status(
+        &self,
+        job_type: &str,
+        status: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Job>, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.UpdateStatus` (job_store.go) — the **only write** this store has.
+    ///
+    /// Sets `Status` and `LastActivityAt` and returns the updated row through `RETURNING`. Two
+    /// things a reader gets wrong:
+    ///
+    /// - **`LastActivityAt` moves too.** A port that wrote only the status leaves the job looking
+    ///   stale to the watchdog that reaps abandoned work.
+    /// - **Zero rows updated is `ErrNotFound`**, not success — Go checks `len(jobs) != 1` after
+    ///   the fact. Its caller `SetJobCanceled` turns that into `app.job.update.app_error` at 500,
+    ///   and `InvalidateAllEmailInvites` then *logs and continues*, so a job cancelled twice does
+    ///   not fail the route.
+    ///
+    /// **No status-transition check.** `Job.IsValidStatusChange` exists and this path does not
+    /// consult it, so a `success` job can be moved to `canceled`. That is `UpdateStatus`;
+    /// `UpdateStatusOptimistically` is the one that guards, and nothing here calls it.
+    fn update_status(
+        &self,
+        id: &str,
+        status: &str,
+    ) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
+
     /// Port of `SqlJobStore.GetAllByTypesPage` (job_store.go:319).
     ///
     /// **Go's nil-slice method** — an empty page is `null` on the wire. See the module note.
@@ -174,6 +209,83 @@ fn rows_into_jobs(rows: Vec<JobRow>) -> Result<Vec<Job>, StoreError> {
 }
 
 impl JobStore for SqlJobStore {
+    #[tracing::instrument(skip(self), fields(job_type = %job_type, status = %status, found))]
+    async fn get_all_by_type_and_status(
+        &self,
+        job_type: &str,
+        status: &str,
+    ) -> Result<Vec<Job>, StoreError> {
+        let rows = sqlx::query_as!(
+            JobRow,
+            r#"
+            SELECT                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+              FROM jobs
+             WHERE type = $1
+               AND status = $2
+             ORDER BY createat DESC
+            "#,
+            job_type,
+            status,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Jobs with type={job_type}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows_into_jobs(rows)
+    }
+
+    #[tracing::instrument(skip(self), fields(job_id = %id, status = %status))]
+    async fn update_status(&self, id: &str, status: &str) -> Result<Job, StoreError> {
+        let row = sqlx::query_as!(
+            JobRow,
+            r#"
+            UPDATE jobs
+               SET status = $2,
+                   lastactivityat = $3
+             WHERE id = $1
+         RETURNING                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+            "#,
+            id,
+            status,
+            mm_model::utils::get_millis(),
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Job with id={id}"),
+            source,
+        })?;
+
+        match row {
+            Some(row) => row.into_job(),
+            // Go's `len(jobs) != 1` arm.
+            None => Err(StoreError::NotFound {
+                entity: "Job",
+                criteria: id.to_owned(),
+            }),
+        }
+    }
+
     #[tracing::instrument(skip_all, fields(job_id = %id))]
     async fn get(&self, id: &str) -> Result<Job, StoreError> {
         let row = sqlx::query_as!(

@@ -1,0 +1,536 @@
+{
+    "is_valid": [
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "valid_pending",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"withdrawn\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "valid_withdrawn_without_reviewer",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1701843785000}",
+            "name": "valid_approved_with_reviewer",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"denied\",\"denial_reason\":\"not now\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1701843785000}",
+            "name": "valid_denied_with_reason",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "",
+            "id": "model.channel_join_request.is_valid.id.app_error",
+            "in": "{\"id\":\"\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.channel_join_request.is_valid.id.app_error",
+            "in": "{\"id\":\"abc\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "short_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.channel_id.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_channel_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.user_id.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_user_id",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.create_at.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":0,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "zero_create_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.update_at.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "zero_update_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_status",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"queued\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "unknown_status",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"Pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "uppercase_status",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.channel_join_request.is_valid.id.app_error",
+            "in": "{\"id\":\"\",\"channel_id\":\"\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_id_and_channel",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "message_500_ascii",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.message.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "message_501_ascii",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "message_500_emoji",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.message.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "message_501_emoji",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"denied\",\"denial_reason\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1}",
+            "name": "denial_reason_500",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.denial_reason.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"denied\",\"denial_reason\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1}",
+            "name": "denial_reason_501",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.denial_reason.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "denial_reason_501_on_pending",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.denial_reason_status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"why\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "reason_on_pending",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.denial_reason_status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"approved\",\"denial_reason\":\"why\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1}",
+            "name": "reason_on_approved",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.denial_reason_status.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"withdrawn\",\"denial_reason\":\"why\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "reason_on_withdrawn",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.reviewed_by.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"nope\",\"reviewed_at\":0}",
+            "name": "bad_reviewed_by",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "empty_reviewed_by_on_pending",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.reviewer.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "approved_without_reviewer",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.reviewer.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":0}",
+            "name": "approved_without_reviewed_at",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.reviewer.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":1701843785000}",
+            "name": "approved_without_reviewed_by",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": "id=n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "id": "model.channel_join_request.is_valid.reviewer.app_error",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"denied\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "denied_without_reviewer",
+            "ok": false,
+            "panicked": false,
+            "status_code": 400,
+            "where": "ChannelJoinRequest.IsValid"
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"withdrawn\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "withdrawn_without_reviewer",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        },
+        {
+            "detailed_error": null,
+            "id": null,
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"let me in\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":1700442228000,\"update_at\":1704027533000,\"reviewed_by\":\"p4fr57zha4gsyeccjz5x3thpcy\",\"reviewed_at\":1701843785000}",
+            "name": "pending_with_reviewer",
+            "ok": true,
+            "panicked": false,
+            "status_code": null,
+            "where": null
+        }
+    ],
+    "pre_save": [
+        {
+            "create_at": 111,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"hi\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":111,\"update_at\":999,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"u4pxb4wyrg6qowch6dieyeih7y\",\"user_id\":\"zbqemsqnsnums446ozchfcpgzc\",\"message\":\"hi\",\"status\":\"approved\",\"denial_reason\":\"\",\"create_at\":111,\"update_at\":111,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "hi",
+            "name": "all_supplied",
+            "panicked": false,
+            "status": "approved",
+            "update_at": 111
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":9999999,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "update_at_rewound",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "status_defaulted",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"withdrawn\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"withdrawn\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "status_kept",
+            "panicked": false,
+            "status": "withdrawn",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a￾b￿c\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a￾b￿c\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "a￾b￿c",
+            "name": "sanitises_message",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "x￾y",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"x￾y\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"pending\",\"denial_reason\":\"x￾y\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "sanitises_denial_reason",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a🿾b\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a🿾b\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "a🿾b",
+            "name": "sanitises_astral_noncharacter",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at": 100,
+            "denial_reason": "",
+            "id": "n9p1jbxkc6jdq3g3r1n6w3w1gh",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a​b\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "json": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"a​b\",\"status\":\"pending\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "a​b",
+            "name": "keeps_zero_width_space",
+            "panicked": false,
+            "status": "pending",
+            "update_at": 100
+        },
+        {
+            "create_at_positive": true,
+            "id_is_valid": true,
+            "id_len": 26,
+            "in": "{\"id\":\"\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":0,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "name": "mints_id_and_create_at",
+            "panicked": false,
+            "status": "pending",
+            "update_at_equals_create_at": true
+        }
+    ],
+    "pre_update": [
+        {
+            "create_at_unchanged": true,
+            "denial_reason": "",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":100,\"update_at\":100,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "stamps_update_at",
+            "panicked": false,
+            "status": "",
+            "update_at_positive": true
+        },
+        {
+            "create_at_unchanged": true,
+            "denial_reason": "d￿d",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"m￾m\",\"status\":\"\",\"denial_reason\":\"d￿d\",\"create_at\":100,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "m￾m",
+            "name": "sanitises_both_fields",
+            "panicked": false,
+            "status": "",
+            "update_at_positive": true
+        },
+        {
+            "create_at_unchanged": true,
+            "denial_reason": "",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":12345,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "leaves_create_at_alone",
+            "panicked": false,
+            "status": "",
+            "update_at_positive": true
+        },
+        {
+            "create_at_unchanged": true,
+            "denial_reason": "",
+            "in": "{\"id\":\"n9p1jbxkc6jdq3g3r1n6w3w1gh\",\"channel_id\":\"\",\"user_id\":\"\",\"message\":\"\",\"status\":\"\",\"denial_reason\":\"\",\"create_at\":0,\"update_at\":0,\"reviewed_by\":\"\",\"reviewed_at\":0}",
+            "message": "",
+            "name": "leaves_status_alone",
+            "panicked": false,
+            "status": "",
+            "update_at_positive": true
+        }
+    ],
+    "status_enum": [
+        {
+            "in": "pending",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "in": "approved",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "in": "denied",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "in": "withdrawn",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "in": "",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "Pending",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "PENDING",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "pending ",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": " pending",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "queued",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "rejected",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "in": "approve",
+            "ok": false,
+            "panicked": false
+        }
+    ]
+}

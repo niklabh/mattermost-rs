@@ -11,7 +11,12 @@ use mm_model::team_search::TeamSearch;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::TeamStore;
+use mm_store::channel_store::ChannelStore;
+use mm_store::job_store::JobStore;
+use mm_store::post_store::PostStore;
+use mm_store::system_store::SystemStore;
 use mm_store::team_store::TeamMembersGetOptions;
+use mm_store::token_store::TokenStore;
 
 use crate::App;
 
@@ -642,6 +647,139 @@ mod tests {
         );
     }
 
+    /// `CreateTeam`'s six-arm error table, one case per arm. The two `InvalidInput` arms differ
+    /// only in which entity and field the store named, and they produce different ids at the same
+    /// status — so a transcription that collapsed them would still be a 400 and still be wrong.
+    #[test]
+    fn the_create_error_table_keys_on_entity_and_field() {
+        use mm_store::StoreError;
+        let cases: Vec<(StoreError, &str, i32)> = vec![
+            (
+                StoreError::InvalidInput {
+                    entity: "Team",
+                    field: "id",
+                    value: "t".to_owned(),
+                },
+                "store.sql_team.save_team.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Team",
+                    field: "Name",
+                    value: "t".to_owned(),
+                },
+                "app.team.save.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "DeleteAt",
+                    value: "1".to_owned(),
+                },
+                "store.sql_channel.save.archived_channel.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "Type",
+                    value: "D".to_owned(),
+                },
+                "store.sql_channel.save.direct_channel.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "Id",
+                    value: "c".to_owned(),
+                },
+                "store.sql_channel.save_channel.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::LimitExceeded {
+                    what: "Channel",
+                    count: 9,
+                    details: String::new(),
+                },
+                "store.sql_channel.save_channel.limit.app_error",
+                400,
+            ),
+            (
+                StoreError::OutOfBounds { limit: 1 },
+                "app.team.save.app_error",
+                500,
+            ),
+        ];
+        for (err, id, status) in cases {
+            let mapped = create_team_error(err);
+            assert_eq!(mapped.id, id);
+            assert_eq!(mapped.status_code, status, "{id}");
+            assert_eq!(mapped.where_, "CreateTeam", "{id}");
+        }
+    }
+
+    /// Go's own answer for all sixteen combinations of the four inputs to
+    /// [`privacy_change_regenerates_invite_id`].
+    ///
+    /// The corpus is transcribed rather than driven — `UpdateTeamPrivacy` needs a database — so
+    /// what this pins is the *transcription* of app/team.go:237, not a call into it. See the
+    /// header of `reference/dump/behaviour_team_privacy.go`, which says the same thing.
+    #[test]
+    fn go_parity_privacy_change_regenerates_invite_id() {
+        let raw = include_str!("../../../fixtures/behaviour_team_privacy.json");
+        let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let rows = corpus["regenerates_invite_id"].as_array().unwrap();
+        assert_eq!(rows.len(), 16, "all four booleans crossed");
+
+        let mut regenerating = 0;
+        for row in rows {
+            let got = privacy_change_regenerates_invite_id(
+                row["allow_open_invite"].as_bool().unwrap(),
+                row["team_type"].as_str().unwrap(),
+                row["old_allow_open_invite"].as_bool().unwrap(),
+                row["old_team_type"].as_str().unwrap(),
+            );
+            assert_eq!(
+                got,
+                row["regenerates"].as_bool().unwrap(),
+                "{}",
+                row["name"].as_str().unwrap()
+            );
+            if got {
+                regenerating += 1;
+            }
+        }
+        // Neither all nor none: a predicate stuck at a constant fails here even if every row
+        // above somehow agreed with it.
+        assert!(
+            regenerating > 0 && regenerating < rows.len(),
+            "the corpus must contain both answers, got {regenerating} of {}",
+            rows.len()
+        );
+    }
+
+    /// The two named cases the route can actually produce, spelled out so a reader sees them
+    /// without decoding the corpus: closing a team mints a new invite id, opening one does not.
+    #[test]
+    fn closing_a_team_regenerates_and_opening_one_does_not() {
+        assert!(
+            privacy_change_regenerates_invite_id(false, "I", true, "O"),
+            "O -> I invalidates every invite link already handed out"
+        );
+        assert!(
+            !privacy_change_regenerates_invite_id(true, "O", false, "I"),
+            "I -> O keeps the invite id"
+        );
+        assert!(
+            !privacy_change_regenerates_invite_id(false, "I", false, "I"),
+            "a no-op write changes nothing, so the left half is false"
+        );
+    }
+
     fn team() -> Team {
         Team {
             email: "owner@example.com".to_owned(),
@@ -1197,6 +1335,457 @@ impl App {
         Ok(updated)
     }
 
+    /// Port of `app.App.InvalidateAllEmailInvites` (app/team.go:2440) —
+    /// `DELETE /api/v4/teams/invites/email`.
+    ///
+    /// Three steps, **one error id between them**: every failure is
+    /// `api.team.invalidate_all_email_invites.app_error` at 500, so a client cannot tell which
+    /// half failed. Each step also runs only if the previous one succeeded, so a token delete
+    /// that fails leaves the guest tokens and the pending jobs alone.
+    ///
+    /// The two token types are `team_invitation` and `guest_invitation`, and neither delete has
+    /// an expiry predicate: **live invitations are removed too**, which is the point of the
+    /// route.
+    #[tracing::instrument(skip(self), fields(jobs_cancelled))]
+    pub async fn invalidate_all_email_invites(&self) -> AppResult<()> {
+        for token_type in [
+            mm_model::token::TOKEN_TYPE_TEAM_INVITATION,
+            mm_model::token::TOKEN_TYPE_GUEST_INVITATION,
+        ] {
+            self.store()
+                .token()
+                .remove_all_tokens_by_type(token_type)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, token_type, "token purge failed");
+                    invalidate_invites_error()
+                })?;
+        }
+
+        self.invalidate_all_resend_invite_email_jobs().await
+    }
+
+    /// Port of `app.App.InvalidateAllResendInviteEmailJobs` (app/team.go:2454).
+    ///
+    /// # The listing failure is fatal and the per-job failures are not
+    ///
+    /// `GetJobsByTypeAndStatus` propagates — and its id, `app.job.get_all_jobs_by_type_and_status
+    /// .app_error`, is then **replaced** by the caller with the invite-invalidation id, so the
+    /// job error never reaches a client. Inside the loop both writes are `Logger().Warn` and the
+    /// loop continues: a job that cannot be cancelled does not stop the next one, and the route
+    /// still answers `{"status":"OK"}`.
+    ///
+    /// The `Systems` delete is keyed on the **job id**, which is how the resend worker stores its
+    /// per-run state. Dropping it leaves a row nothing will ever read again.
+    async fn invalidate_all_resend_invite_email_jobs(&self) -> AppResult<()> {
+        let jobs = self
+            .store()
+            .job()
+            .get_all_by_type_and_status(
+                mm_model::job::JOB_TYPE_RESEND_INVITATION_EMAIL,
+                mm_model::job::JOB_STATUS_PENDING,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "pending resend-invite job lookup failed");
+                invalidate_invites_error()
+            })?;
+
+        tracing::Span::current().record("jobs_cancelled", jobs.len());
+
+        for job in &jobs {
+            match self.set_job_canceled(job).await {
+                Ok(()) => {}
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    job_id = %job.id,
+                    "Error canceling resend invitation email job during team invitation invalidation",
+                ),
+            }
+            if let Err(err) = self
+                .store()
+                .system()
+                .permanent_delete_by_name(&job.id)
+                .await
+            {
+                tracing::warn!(
+                    error = %err,
+                    job_id = %job.id,
+                    "Error deleting system values for resend invitation email job during team invitation invalidation",
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Port of `JobServer.SetJobCanceled` (jobs/jobs.go:236).
+    ///
+    /// The status write, then a `job_updated` socket event carrying the **updated** job with its
+    /// status overwritten a second time in a copy — `publishJobStatus(ret, JobStatusCanceled)`
+    /// re-assigns the field the write just set, which is redundant here and is not in
+    /// `UpdateStatusOptimistically`'s callers.
+    ///
+    /// The broadcast is **unaddressed** (no team, channel or user) and carries
+    /// `contains_sensitive_data`, which is what confines it to system admins — a port that
+    /// dropped the flag would broadcast job state to every connected client.
+    ///
+    /// The metrics decrement is not reproduced; this server has no metrics service.
+    async fn set_job_canceled(&self, job: &mm_model::job::Job) -> AppResult<()> {
+        let updated = self
+            .store()
+            .job()
+            .update_status(&job.id, mm_model::job::JOB_STATUS_CANCELED)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, job_id = %job.id, "job status update failed");
+                AppError::boxed(
+                    "SetJobCanceled",
+                    "app.job.update.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_JOB_UPDATED,
+            "",
+            "",
+            "",
+            None,
+            "",
+        );
+        match serde_json::to_string(&updated) {
+            Ok(json) => message.add("job", serde_json::Value::String(json)),
+            Err(err) => {
+                // Go logs and returns without publishing, leaving the write done.
+                tracing::warn!(error = %err, "Failed to marshal job for WebSocket event");
+                return Ok(());
+            }
+        }
+        if let Some(broadcast) = message.broadcast.as_mut() {
+            broadcast.contains_sensitive_data = true;
+        }
+        self.publish(message).await;
+        Ok(())
+    }
+
+    /// Port of `app.App.SearchAllTeams` (app/team.go:1050).
+    ///
+    /// **Two store calls behind one name.** `IsPaginated()` — both `page` *and* `per_page`
+    /// present — routes to `SearchAllPaged`, which runs a second `count(*)` query; otherwise
+    /// `SearchAll` runs alone and the count is `len(results)`, the size of the very page that was
+    /// returned. A caller that sends only `page` therefore gets a count equal to the list length
+    /// rather than the size of the match, and no error saying so.
+    ///
+    /// One error id covers both arms: `app.team.search_all_team.app_error` at 500.
+    #[tracing::instrument(skip_all, fields(paginated = opts.is_paginated(), found))]
+    pub async fn search_all_teams(&self, opts: &TeamSearch) -> AppResult<(Vec<Team>, i64)> {
+        let result = if opts.is_paginated() {
+            self.store().team().search_all_paged(opts).await
+        } else {
+            self.store().team().search_all(opts).await.map(|teams| {
+                let count = teams.len() as i64;
+                (teams, count)
+            })
+        };
+
+        match result {
+            Ok((teams, count)) => {
+                tracing::Span::current().record("found", teams.len());
+                Ok((teams, count))
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "team search failed");
+                Err(AppError::boxed(
+                    "SearchAllTeams",
+                    "app.team.search_all_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            }
+        }
+    }
+
+    /// Port of `app.App.SearchPublicTeams` (app/team.go:1066) — a pass-through to
+    /// `SearchOpen`, whose `Where` is the caller's plus three forced assignments.
+    ///
+    /// No count: the handler refuses a paginated request on this branch with a **501** before
+    /// getting here, so there is nothing to page.
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn search_public_teams(&self, opts: &TeamSearch) -> AppResult<Vec<Team>> {
+        self.store().team().search_open(opts).await.map_err(|err| {
+            tracing::error!(error = %err, "public team search failed");
+            AppError::boxed(
+                "SearchPublicTeams",
+                "app.team.search_open_team.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })
+    }
+
+    /// Port of `app.App.SearchPrivateTeams` (app/team.go:1075).
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn search_private_teams(&self, opts: &TeamSearch) -> AppResult<Vec<Team>> {
+        self.store()
+            .team()
+            .search_private(opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "private team search failed");
+                AppError::boxed(
+                    "SearchPrivateTeams",
+                    "app.team.search_private_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.CreateTeam` (app/team.go:104) wrapped around
+    /// `TeamService.CreateTeam` (app/teams/teams.go).
+    ///
+    /// # The invite id is cleared, then re-minted
+    ///
+    /// `team.InviteId = ""` is the **first** line of `TeamService.CreateTeam`, and `PreSave` mints
+    /// a new one because the field is empty. So a client-supplied `invite_id` is discarded rather
+    /// than honoured, and a port that skipped the clear would let a caller choose the invite link
+    /// for a team it creates — which anyone holding that string could then join.
+    ///
+    /// # The id guard runs **before** `PreSave`
+    ///
+    /// `Save` refuses a non-empty `Id` first, then pre-saves. `PreSave` *assigns* an id when the
+    /// field is empty, so validating after it could never see a client-supplied one. The order is
+    /// reproduced here rather than in the store, for the reason [`mm_store::team_store::save`]
+    /// sets out.
+    ///
+    /// # The default channels are part of the create, and their failures are not swallowed
+    ///
+    /// `createDefaultChannels` runs inside `TeamService.CreateTeam`, so a `town-square` that
+    /// cannot be written fails the whole request — and the **team row is already committed**.
+    /// That is Go's: there is no transaction spanning the two, so a failed create can leave a
+    /// team with no channels. Which is why `CreateTeam`'s error table carries `Channel` arms at
+    /// all.
+    #[tracing::instrument(skip_all, fields(team_id))]
+    pub async fn create_team(&self, team: &mut Team) -> AppResult<Team> {
+        team.invite_id = String::new();
+
+        if !team.id.is_empty() {
+            return Err(create_team_error(mm_store::StoreError::InvalidInput {
+                entity: "Team",
+                field: "id",
+                value: team.id.clone(),
+            }));
+        }
+
+        team.pre_save();
+        team.is_valid()?;
+
+        let saved = self
+            .store()
+            .team()
+            .save(team)
+            .await
+            .map_err(create_team_error)?;
+        tracing::Span::current().record("team_id", &saved.id);
+
+        self.create_default_channels(&saved.id).await?;
+        Ok(saved)
+    }
+
+    /// Port of `TeamService.createDefaultChannels` (app/teams/teams.go).
+    ///
+    /// # It writes through the **channel store**, not through `CreateChannel`
+    ///
+    /// So none of `CreateChannel`'s work happens: no display-name trim, no board or space guard,
+    /// no membership, no `user_added`/`channel_created` websocket event, no system post. A port
+    /// that reached for the app-layer create would publish two events per team creation that Go
+    /// does not.
+    ///
+    /// # The display names are translated, the extra channels are not
+    ///
+    /// `town-square` and `off-topic` go through `i18n.T`; anything added by
+    /// `ExperimentalDefaultChannels` is used **verbatim as its own display name**, because Go
+    /// says "if the default channel is experimental we don't have to translate". This server has
+    /// no i18n layer, so the two known ids are their English translations from
+    /// `i18n/en.json` — which is what a default-locale Go server emits.
+    ///
+    /// The first failure aborts, so a team whose `off-topic` collides keeps its `town-square`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    async fn create_default_channels(&self, team_id: &str) -> AppResult<()> {
+        let max = self.config().max_channels_per_team;
+        for name in self.default_channel_names() {
+            let display_name = match name.as_str() {
+                "town-square" => TOWN_SQUARE_DISPLAY_NAME,
+                "off-topic" => OFF_TOPIC_DISPLAY_NAME,
+                other => other,
+            }
+            .to_owned();
+            let mut channel = mm_model::channel::Channel {
+                display_name,
+                name: name.clone(),
+                channel_type: mm_model::channel::CHANNEL_TYPE_OPEN.to_owned(),
+                team_id: team_id.to_owned(),
+                ..Default::default()
+            };
+            match self.store().channel().save(&mut channel, max).await {
+                Ok(mm_store::ChannelSave::Saved) => {}
+                // Go's `saveChannelT` returns the existing channel **with** an `ErrConflict`, so
+                // this is an error on the create path, not a silent reuse.
+                Ok(mm_store::ChannelSave::Existing(_)) => {
+                    return Err(AppError::boxed(
+                        "CreateTeam",
+                        "store.sql_channel.save_channel.exists.app_error",
+                        None,
+                        String::new(),
+                        400,
+                    ));
+                }
+                Err(err) => return Err(create_team_error(err)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Port of `app.App.CreateTeamWithUser` (app/team.go:140).
+    ///
+    /// Four steps, and the **second** is the one that surprises: `team.Email = user.Email`
+    /// overwrites whatever the request body carried, *after* the handler has already lower-cased
+    /// it. So a team's contact address is always its creator's, and the `email` field of a create
+    /// request is inert — except that `JoinUserToTeam` then compares `team.Email == user.Email`
+    /// and makes the creator a **team admin** because of it.
+    ///
+    /// `IsTeamEmailAllowed` is checked here against the freshly assigned address, and its refusal
+    /// is `api.team.is_team_creation_allowed.domain.app_error` at 400 — a *different* id from the
+    /// one `JoinUserToTeam` raises for the same predicate a moment later.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn create_team_with_user(&self, team: &mut Team, user_id: &str) -> AppResult<Team> {
+        let user = self.get_user(user_id).await?;
+        team.email.clone_from(&user.email);
+
+        if !self.is_team_email_allowed(&user, team) {
+            return Err(AppError::boxed(
+                "CreateTeamWithUser",
+                "api.team.is_team_creation_allowed.domain.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        let created = self.create_team(team).await?;
+        // Go discards the membership and returns the team; a join failure still fails the
+        // request, leaving a created team the caller is not a member of.
+        self.join_user_to_team(&created, &user, "").await?;
+        Ok(created)
+    }
+
+    /// Port of `app.App.SoftDeleteTeam` (app/team.go:2113) — the archive arm of
+    /// `DELETE /api/v4/teams/{team_id}`.
+    ///
+    /// # The persistent-notification retirement comes **first**, and its failure is not swallowed
+    ///
+    /// `PostPersistentNotification().DeleteByTeam` runs before the team row is touched and answers
+    /// **500** `app.post_persistent_notification.delete_by_team.app_error`. So a failure there
+    /// leaves the team alive and un-archived, where every other cleanup on this path is either
+    /// after the write or logged. Ordering it after the update would archive a team while its
+    /// notifications kept firing.
+    ///
+    /// # `DeleteAt` and nothing else
+    ///
+    /// The row is otherwise untouched — the name stays taken, the invite id stays live, and
+    /// `restoreTeam` is the exact inverse. Contrast the *permanent* arm, which is a different
+    /// operation behind a config flag.
+    ///
+    /// # `cleanupTeamAccessControlPolicy` is not here
+    ///
+    /// Go calls it between the write and the event, and **never returns its error**. It needs the
+    /// enterprise access-control service; the handler forwards a licensed installation whole
+    /// rather than skipping it, the same rule `mm_api::channel_writes::delete_channel` follows.
+    ///
+    /// The event is `delete_team`, carrying the **sanitised** team — see [`App::send_team_event`].
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    pub async fn soft_delete_team(&self, team_id: &str) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await?;
+
+        self.store()
+            .post()
+            .delete_persistent_notifications_by_team(&team.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "persistent notification retirement failed");
+                AppError::boxed(
+                    "SoftDeleteTeam",
+                    "app.post_persistent_notification.delete_by_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        team.delete_at = mm_model::utils::get_millis();
+        let deleted = self.write_team("SoftDeleteTeam", team).await?;
+        self.send_team_event(
+            &deleted,
+            mm_model::websocket_message::WEBSOCKET_EVENT_DELETE_TEAM,
+        )
+        .await
+    }
+
+    /// Port of `app.App.UpdateTeamPrivacy` (app/team.go:231).
+    ///
+    /// # The invite id is regenerated on a narrowing, and the condition is two ANDed disjunctions
+    ///
+    /// `(allowOpenInvite != old.AllowOpenInvite || teamType != old.Type) && (!allowOpenInvite ||
+    /// teamType == model.TeamInvite)`. The left half is "something actually changed", the right
+    /// half is "the result is not an open team". So `O` → `I` mints a fresh invite id and every
+    /// link already handed out stops working; `I` → `O` does not, and neither does a no-op
+    /// `I` → `I`, because the left half is false. Dropping either half — or swapping `&&` for
+    /// `||` — silently keeps a live invite link on a team that was just closed.
+    ///
+    /// The second disjunct (`teamType == TeamInvite` with `allowOpenInvite == true`) is
+    /// unreachable from the route: the handler derives both values from one `privacy` string, so
+    /// `I` always arrives with `allow_open_invite = false`. It is kept because Go's is.
+    ///
+    /// Go reads through `GetTeam` here rather than the update-path fetch, so a missing team is
+    /// `GetTeam`'s 404 and not `UpdateTeam`'s.
+    ///
+    /// Returns nothing: the handler answers from a **second** `GetTeam`, "to be consistent with
+    /// UpdateChannelPrivacy", so a concurrent write between the two is visible in the reply.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, team_type = %team_type))]
+    pub async fn update_team_privacy(
+        &self,
+        team_id: &str,
+        team_type: &str,
+        allow_open_invite: bool,
+    ) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await?;
+
+        if privacy_change_regenerates_invite_id(
+            allow_open_invite,
+            team_type,
+            team.allow_open_invite,
+            &team.team_type,
+        ) {
+            team.invite_id = mm_model::utils::new_id();
+        }
+
+        team.team_type = team_type.to_owned();
+        team.allow_open_invite = allow_open_invite;
+
+        let updated = self.write_team("UpdateTeamPrivacy", team).await?;
+        self.send_team_event(
+            &updated,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await
+    }
+
     /// The fetch every write does first, with the **update** path's error ids rather than
     /// `GetTeam`'s: a missing team is `app.team.get.find.app_error` at 404 here.
     async fn get_team_for_update(&self, team_id: &str) -> AppResult<Team> {
@@ -1307,6 +1896,133 @@ impl App {
         }
         self.publish(message).await;
         Ok(())
+    }
+}
+
+/// The invite-id predicate of `UpdateTeamPrivacy` (team.go:237), lifted out of the two database
+/// reads so all sixteen combinations can be pinned without one — the same lift as
+/// [`apply_team_sanitize`].
+///
+/// `(changed) && (not open)`. A reader who writes `||`, or who drops the second half, leaves a
+/// live invite link on a team that was just closed; a reader who drops the *first* half mints a
+/// new invite id on every no-op `I` → `I` write, invalidating links for no reason.
+pub fn privacy_change_regenerates_invite_id(
+    allow_open_invite: bool,
+    team_type: &str,
+    old_allow_open_invite: bool,
+    old_team_type: &str,
+) -> bool {
+    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)
+        && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)
+}
+
+/// The one error `DELETE /teams/invites/email` can answer with, whichever of its three steps
+/// failed: `api.team.invalidate_all_email_invites.app_error` at 500.
+fn invalidate_invites_error() -> Box<AppError> {
+    AppError::boxed(
+        "InvalidateAllEmailInvites",
+        "api.team.invalidate_all_email_invites.app_error",
+        None,
+        String::new(),
+        500,
+    )
+}
+
+/// `i18n.T("api.channel.create_default_channels.town_square")` on a default-locale server
+/// (i18n/en.json:411). This server has no i18n layer; see [`App::create_default_channels`].
+const TOWN_SQUARE_DISPLAY_NAME: &str = "Town Square";
+
+/// `i18n.T("api.channel.create_default_channels.off_topic")` (i18n/en.json:407).
+const OFF_TOPIC_DISPLAY_NAME: &str = "Off-Topic";
+
+/// `App.CreateTeam`'s error table (app/team.go:106-134) — **six arms, and three of them are about
+/// channels**, because `createDefaultChannels` runs inside the call this wraps.
+///
+/// The discriminator is Go's nested `switch` on `invErr.Entity` and `invErr.Field`, and two of
+/// the ids differ only by where the underscore falls:
+///
+/// - `Team`/`id` → `store.sql_team.save_team.existing.app_error`, which is what a **duplicate
+///   name** produces (the store reports a name collision as an `id` field — see
+///   [`mm_store::team_store::save`]);
+/// - any other `InvalidInput` → `app.team.save.existing.app_error`, a different id at the same
+///   status.
+///
+/// Everything unrecognised is `app.team.save.app_error` at **500**, the only non-400 here.
+fn create_team_error(err: mm_store::StoreError) -> Box<AppError> {
+    use mm_store::StoreError;
+    match err {
+        StoreError::InvalidInput {
+            entity: "Channel",
+            field,
+            value,
+        } => match field {
+            "DeleteAt" => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save.archived_channel.app_error",
+                None,
+                String::new(),
+                400,
+            ),
+            "Type" => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save.direct_channel.app_error",
+                None,
+                String::new(),
+                400,
+            ),
+            _ => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save_channel.existing.app_error",
+                None,
+                format!("id={value}"),
+                400,
+            ),
+        },
+        StoreError::InvalidInput {
+            entity: "Team",
+            field: "id",
+            value,
+        } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_team.save_team.existing.app_error",
+            None,
+            format!("id={value}"),
+            400,
+        ),
+        StoreError::InvalidInput { .. } => AppError::boxed(
+            "CreateTeam",
+            "app.team.save.existing.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        // `store.ChannelExistsError` (store/constants.go:7).
+        StoreError::Conflict { .. } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_channel.save_channel.exists.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        StoreError::LimitExceeded { .. } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_channel.save_channel.limit.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        // `errors.As(err, &appErr)` — a model `IsValid` failure travelling up through the store.
+        StoreError::Invalid { app_error, .. } => app_error,
+        other => {
+            tracing::error!(error = %other, "team save failed");
+            AppError::boxed(
+                "CreateTeam",
+                "app.team.save.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        }
     }
 }
 

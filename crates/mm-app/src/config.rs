@@ -168,6 +168,56 @@ pub struct Config {
     /// meaning; the handler refuses rather than returning an empty list.
     pub enable_open_server: bool,
 
+    /// `TeamSettings.EnableUserCreation` (config.go:2545, defaulted **`true`** at :2585).
+    ///
+    /// Half of `App.IsUserSignUpAllowed`, which refuses with **501**
+    /// `api.user.create_user.signup_email_disabled.app_error` when *either* this or
+    /// [`Config::enable_sign_up_with_email`] is off. Both halves produce the **same** id, so a
+    /// client cannot tell which switch closed the door — and a port that read only one of them
+    /// would create accounts an operator had turned off.
+    ///
+    /// The refusal is skipped entirely for a system admin (`CreateUserAsAdmin` does not call
+    /// `IsUserSignUpAllowed`) and for the token/invite paths' *other* gates, so this is the
+    /// anonymous-signup switch specifically.
+    pub enable_user_creation: bool,
+
+    /// `TeamSettings.EnableUserDeactivation` (config.go:2547, defaulted **`false`** at :2609).
+    ///
+    /// The *self*-deactivation switch and nothing else. Both `deleteUser` (api4/user.go:1684)
+    /// and `updateUserActive` (api4/user.go:1918) consult it only when the target is the session
+    /// owner; an administrator deactivating somebody else never reaches it. The two routes then
+    /// disagree about the escape hatch: `deleteUser`'s refusal is additionally skipped when the
+    /// caller holds `manage_system`, `updateUserActive`'s is not. So a system admin can delete
+    /// their own account on a server where the flag is off and cannot deactivate it.
+    pub enable_user_deactivation: bool,
+
+    /// `ServiceSettings.EnableAPIUserDeletion` (config.go:454, defaulted **`false`** at :894).
+    ///
+    /// The single gate on `DELETE /api/v4/users/{user_id}?permanent=true`. Off — which is the
+    /// default and what this deployment runs — the route answers 401 with one of two ids
+    /// depending on whether the *caller* is a system admin, and writes nothing. On, it runs
+    /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
+    pub enable_api_user_deletion: bool,
+
+    /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
+    ///
+    /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
+    ///
+    /// **Not the same setting as [`Config::enable_sign_in_with_email`]**, though Go seeds the
+    /// latter from it when the latter is unset (config.go:2178). Sign-*up* gates account
+    /// creation; sign-*in* gates the login form. Reading one for the other would make turning
+    /// off registrations also turn off logins.
+    pub enable_sign_up_with_email: bool,
+
+    /// `LocalizationSettings.DefaultClientLocale` (config.go:2893, defaulted **`"en"`** at :2904).
+    ///
+    /// `users.CreateUser` **overwrites** a submitted locale that is not in
+    /// [`crate::i18n::SUPPORTED_LOCALES`] with this value (app/users/users.go:57). The check is a
+    /// membership test against the twenty-three production locales, *not*
+    /// `model.IsValidLocale` — so `"zz"` passes `User.IsValid` and is still replaced here, and
+    /// the replacement is visible in the created user's response body.
+    pub default_client_locale: String,
+
     /// `ServiceSettings.EnableUserStatuses` (config.go:445, defaulted **`true`** at :711).
     ///
     /// **`ServiceSettings`, not `TeamSettings`** — its sibling `UserStatusAwayTimeout` *is* in
@@ -227,6 +277,14 @@ pub struct Config {
     /// [`crate::channel_write`]'s delete path.
     pub enable_api_channel_deletion: bool,
 
+    /// `ServiceSettings.EnableAPITeamDeletion` (config.go:452). Go default **`false`**
+    /// (config.go:885).
+    ///
+    /// The team twin of the setting above, with the same 401-not-403 refusal and the same
+    /// admin/non-admin id split — `api.user.delete_team.not_enabled.for_admin.app_error` versus
+    /// `api.user.delete_team.not_enabled.app_error`. Read by `mm_api::teams::delete_team`.
+    pub enable_api_team_deletion: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -268,6 +326,15 @@ pub struct Config {
 
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
+
+    /// `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` (config.go:450). Go
+    /// default **`true`** (config.go:873), which is the trap: the word "Experimental" reads like
+    /// an opt-in and it is on out of the box.
+    ///
+    /// Read by [`crate::App::leave_team`], where it gates a `town-square` lookup **whose failure
+    /// fails the whole removal** as well as the system post itself. So turning it off does not
+    /// merely silence a message; it removes a 404 branch from `DELETE /teams/{id}/members/{id}`.
+    pub experimental_enable_default_channel_leave_join_messages: bool,
 
     /// `ServiceSettings.PostEditTimeLimit` (config.go:437). Go default **`-1`**, which means
     /// "no limit" and is checked for explicitly rather than compared.
@@ -316,6 +383,39 @@ pub struct Config {
     /// necessarily ours. A deployment where the two processes start in different directories has
     /// two different file backends and no error to say so; see [D-201].
     pub file_directory: String,
+
+    /// `FileSettings.MaxFileSize` (config.go:1811). Go default **`100 * 1024 * 1024`**
+    /// (config.go:1888) — 100 MiB, not 100 MB.
+    ///
+    /// Read by `setProfileImage` and `uploadBrandImage` as `r.ContentLength > MaxFileSize`, and
+    /// again by `web.Handler.ServeHTTP` (web/handlers.go:220) as the `MaxBytesReader` cap on
+    /// every `handlerParamFileAPI` route — where the cap is `MaxFileSize + bytes.MinRead`, 512
+    /// bytes *more*. The two are not the same number and the difference is observable: a body
+    /// between the two lengths with no `Content-Length` header passes the first check and fails
+    /// the read.
+    pub file_max_file_size: i64,
+
+    /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
+    ///
+    /// One of the two halves of `setProfileImage`'s 409: an LDAP user — or a SAML user on a
+    /// server syncing with LDAP — may not replace a picture that LDAP owns, and *this being
+    /// non-empty* is what makes LDAP own it. Empty on a stock server, so the 409 is unreachable
+    /// until an administrator names an attribute.
+    pub ldap_picture_attribute: String,
+
+    /// `SamlSettings.EnableSyncWithLdap` (config.go:2992, defaulted **`false`** at :3037).
+    ///
+    /// The other half: it is what brings a SAML user under
+    /// [`Config::ldap_picture_attribute`]'s rule. An LDAP user is covered whatever this says.
+    pub saml_enable_sync_with_ldap: bool,
+
+    /// `TeamSettings.LockProfileFieldsForEmailUsers` (config.go:2566, defaulted
+    /// **`"none"`** at :2668).
+    ///
+    /// `IsProfileImageLockedForUser` (app/user.go:1465) compares it against `"all"` and nothing
+    /// else, so `"name_and_username"` — the third legal value — does **not** lock the picture.
+    /// See [`crate::App::is_profile_image_locked_for_user`] for the other three conjuncts.
+    pub lock_profile_fields_for_email_users: String,
 
     /// `FileSettings.PublicLinkSalt` (config.go:1832). Go's default is
     /// **`NewRandomString(32)`** — generated, not constant.
@@ -495,6 +595,18 @@ pub struct Config {
     /// See [`Config::feature_flag_integrated_boards`].
     pub feature_flag_post_attributes: bool,
 
+    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
+    ///
+    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
+    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
+    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
+    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
+    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
+    ///
+    /// Environment-or-default like [`Config::feature_flag_burn_on_read`]: `FeatureFlags` never
+    /// reaches the persisted document, which is exactly what [D-153] records.
+    pub feature_flag_discoverable_channels: bool,
+
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -576,6 +688,28 @@ pub struct Config {
     /// that guessed `0` would never revoke anything and would accept every session Go rejects.
     pub session_idle_timeout_in_minutes: i64,
 
+    /// `ServiceSettings.SessionLengthMobileInHours` (config.go:423, defaulted at :767).
+    ///
+    /// **Its default is a two-step cascade, not a constant.** Go fills
+    /// `SessionLengthMobileInDays` first — `180` on an update, `30` on a fresh config — and then
+    /// derives hours as `days * 24`. So the reachable defaults are **4320** and **720**, and
+    /// which one applies turns on the same `isUpdate` discriminator as
+    /// [`Config::extend_session_length_with_activity`]. Reading the hours field alone and
+    /// assuming a single constant is the mistake this comment exists to prevent.
+    ///
+    /// Read only by `attachDeviceIds` (api4/user.go:2787), where it sets both the session's new
+    /// `ExpiresAt` and the `Max-Age` of the session cookie — so a client that registers a device
+    /// id has its session length **replaced**, not extended.
+    pub session_length_mobile_in_hours: i64,
+
+    /// `ServiceSettings.AllowCookiesForSubdomains` (config.go:414, defaulted **`false`** at
+    /// :839).
+    ///
+    /// The whole of `App.GetCookieDomain` (app/config.go:191): when off — the default — the
+    /// cookie carries **no `Domain` attribute at all**, which scopes it to the exact host that
+    /// served it. See [`Config::cookie_domain`].
+    pub allow_cookies_for_subdomains: bool,
+
     /// `ServiceSettings.MaximumLoginAttempts` (config.go:383, defaulted **`10`** at :671).
     ///
     /// The lockout cap, and the predicate is strictly `<` in
@@ -588,6 +722,95 @@ pub struct Config {
     /// `LdapSettings.MaximumLoginAttempts` is a **different** setting with its own default of 10;
     /// only the LDAP path reads it, and that path is forwarded.
     pub maximum_login_attempts: i64,
+
+    /// `ServiceSettings.SessionLengthWebInHours` (config.go:420, defaulted at :745).
+    ///
+    /// The web twin of [`Config::session_length_mobile_in_hours`] and the **same two-step
+    /// cascade**: `SessionLengthWebInDays` is filled first — `180` on an update, `30` on a fresh
+    /// config — and hours derived as `days * 24`, so the reachable defaults are **4320** and
+    /// **720**. The development stack's document carries 4320, which is the `Max-Age=15552000`
+    /// a real login response shows.
+    ///
+    /// Read twice by `login`: `DoLogin` sets the new session's `ExpiresAt` from it
+    /// (app/login.go:170), and `AttachSessionCookies` uses `hours * 3600` as the `Max-Age` and
+    /// `Expires` of all three cookies (app/login.go:277).
+    pub session_length_web_in_hours: i64,
+
+    /// `ServiceSettings.EnableMultifactorAuthentication` (config.go:406, defaulted **`false`**
+    /// at :571).
+    ///
+    /// `CheckUserMfa` (authentication.go:395) returns immediately when this is off **or** the
+    /// user has no MFA enrolled, so it only ever does work for `MfaActive` users on an
+    /// MFA-enabled server. `mm_api::login` reads the pair to decide whether to hand the request
+    /// to Go — and it does so **before** the failed-attempt counter moves, because Go checks MFA
+    /// *after* claiming a slot and a forward at that point would count the attempt twice.
+    pub enable_multifactor_authentication: bool,
+
+    /// `EmailSettings.EnableSignInWithEmail` (config.go:2141), defaulted at :2177 to whatever
+    /// `EnableSignUpWithEmail` is — which is itself defaulted **`true`** at :2173.
+    ///
+    /// Half of `User.GetForLogin`'s resolution rule and half of the masked-error rule, which is
+    /// why both live here. With email on and username off a failed login is
+    /// `api.user.login.invalid_credentials_email`; the other way round it is
+    /// `…_username`; with both on, `…_email_username`. Clients branch on those ids.
+    pub enable_sign_in_with_email: bool,
+
+    /// `EmailSettings.EnableSignInWithUsername` (config.go:2142, defaulted **`true`** at :2181).
+    ///
+    /// See [`Config::enable_sign_in_with_email`]. Note the store predicate is
+    /// `Username = lower(?)` — it lowercases the *submitted* id, not the column, so a row whose
+    /// `Username` is not already lowercase cannot be logged into by name at all.
+    pub enable_sign_in_with_username: bool,
+
+    /// `LdapSettings.Enable` (config.go, defaulted **`false`** at :2730).
+    ///
+    /// Not a feature this port implements — it is a **forwarding predicate**. Both
+    /// `GetUserForLogin` (app/login.go:118) and `authenticateUser` (authentication.go:454)
+    /// consult the LDAP interface when this is on, so `mm_api::login` hands any login to Go
+    /// while it is set rather than answering from the local rows alone.
+    pub ldap_enable: bool,
+
+    /// `SamlSettings.Enable` (config.go, defaulted **`false`** at :3033).
+    ///
+    /// One of the five flags `login`'s deferred error mask reads (api4/user.go:2163). Any of
+    /// them being on turns **every** masked failure into `api.user.login.invalid_credentials_sso`
+    /// regardless of which sign-in methods are enabled — so these five are wire format, not
+    /// features.
+    pub saml_enable: bool,
+
+    /// `GitLabSettings.Enable` — an `SSOSettings`, defaulted **`false`** at :1334. See
+    /// [`Config::saml_enable`].
+    pub gitlab_enable: bool,
+
+    /// `OpenIdSettings.Enable` — an `SSOSettings`, defaulted **`false`**. See
+    /// [`Config::saml_enable`].
+    pub openid_enable: bool,
+
+    /// `GoogleSettings.Enable` — an `SSOSettings`, defaulted **`false`**. See
+    /// [`Config::saml_enable`].
+    pub google_enable: bool,
+
+    /// `Office365Settings.Enable` (config.go:1393), defaulted **`false`**. Its own struct rather
+    /// than an `SSOSettings`, but the flag reads the same. See [`Config::saml_enable`].
+    pub office365_enable: bool,
+
+    /// `GuestAccountsSettings.Enable` (config.go, defaulted **`false`** at :3953).
+    ///
+    /// Read by `login` only for a user who **is** a guest, and only after the licence check that
+    /// refuses first on an unlicensed server — so on this deployment the flag is unreachable from
+    /// that branch. Its live reader is `getLoginType`, whose 404 gate is the conjunction of this,
+    /// [`Config::enable_guest_magic_link`] and the licence.
+    pub guest_accounts_enable: bool,
+
+    /// `GuestAccountsSettings.EnableGuestMagicLink` (config.go:3949, defaulted **`false`** at
+    /// :3973).
+    ///
+    /// The first term of `getLoginType`'s gate, and the reason that route answers **404 with an
+    /// empty body** on a stock server: the gate is `!magicLink || !guests || !licence` and Go
+    /// evaluates the flag before dereferencing the licence, which is what stops an unlicensed
+    /// server panicking there. Also the reason `login` forwards a body carrying
+    /// `magic_link_token`.
+    pub enable_guest_magic_link: bool,
 
     /// `ServiceSettings.TerminateSessionsOnPasswordChange` (config.go:416, defaulted
     /// **`!isUpdate`** at :733).
@@ -778,6 +1001,36 @@ impl Config {
         mm_model::go_path::clean(&String::from_utf8_lossy(&url.path))
     }
 
+    /// Port of `app.App.GetCookieDomain` (app/config.go:191).
+    ///
+    /// Returns the **hostname** of `SiteURL` when `AllowCookiesForSubdomains` is on, and `""`
+    /// otherwise — including when `SiteURL` will not parse, because Go's `if ... err == nil`
+    /// falls through to the same empty return. An empty string means the caller must omit the
+    /// `Domain` attribute entirely rather than send `Domain=`; see
+    /// [`crate::App::attach_device_ids_cookie`].
+    ///
+    /// `url.Hostname()` strips the port **and** the brackets around an IPv6 literal, which is why
+    /// this reaches for [`mm_model::go_url`]'s host splitting rather than taking the authority
+    /// verbatim.
+    pub fn cookie_domain(&self) -> String {
+        if !self.allow_cookies_for_subdomains {
+            return String::new();
+        }
+
+        let Some(site_url) = self.site_url.as_deref() else {
+            // Go dereferences a `*string` here, so a nil `SiteURL` would panic rather than
+            // return — unreachable in practice because `SetDefaults` plants `""`, which parses
+            // to an empty hostname. Empty is that same answer.
+            return String::new();
+        };
+
+        let Ok(url) = mm_model::go_url::go_parse(site_url) else {
+            return String::new();
+        };
+
+        go_hostname(&url.host)
+    }
+
     /// Port of `app.App.isBurnOnReadEnabled` (post_helpers.go:270).
     ///
     /// **Both halves default to true**, so on a stock server this is on — which is why
@@ -828,6 +1081,16 @@ impl Default for Config {
             restrict_creation_to_domains: String::new(),
             // config.go:2588 — `new(false)`.
             enable_open_server: false,
+            // config.go:2585 — `new(true)`.
+            enable_user_creation: true,
+            // config.go:2609 — `new(false)`.
+            enable_user_deactivation: false,
+            // config.go:894 — `new(false)`.
+            enable_api_user_deletion: false,
+            // config.go:2174 — `new(true)`.
+            enable_sign_up_with_email: true,
+            // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
+            default_client_locale: "en".to_owned(),
             enable_user_statuses: true,
             user_status_away_timeout: 300,
             enable_custom_user_statuses: true,
@@ -835,6 +1098,8 @@ impl Default for Config {
             guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
             enable_api_channel_deletion: false,
+            // config.go:885 — `new(false)`.
+            enable_api_team_deletion: false,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -843,6 +1108,8 @@ impl Default for Config {
             // config.go:2653 — `[]string{}`.
             experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
+            // config.go:873 — `new(true)`.
+            experimental_enable_default_channel_leave_join_messages: true,
             // config.go:870 — `new(-1)`.
             post_edit_time_limit: -1,
             // config.go:906 — `new(false)`.
@@ -851,6 +1118,13 @@ impl Default for Config {
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
+            // config.go:1888 — 100 MiB.
+            file_max_file_size: 100 * 1024 * 1024,
+            // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
+            ldap_picture_attribute: String::new(),
+            saml_enable_sync_with_ldap: false,
+            // config.go:2669 — `TeamSettingsLockProfileFieldsNone`.
+            lock_profile_fields_for_email_users: "none".to_owned(),
             // No constant default exists; see the field's documentation.
             public_link_salt: String::new(),
             dedicated_export_store: false,
@@ -874,6 +1148,8 @@ impl Default for Config {
             feature_flag_integrated_boards: false,
             feature_flag_managed_channel_categories: false,
             feature_flag_post_attributes: false,
+            // feature_flags.go:208 — `false`, like the other four.
+            feature_flag_discoverable_channels: false,
             // feature_flags.go:185 — **`true`**, and the only one of the five that is.
             feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
@@ -891,7 +1167,28 @@ impl Default for Config {
             // that plants the `""`.
             site_url: None,
             session_idle_timeout_in_minutes: 43200,
+            // `30 * 24`. The fresh-install arm, for the same reason as
+            // `extend_session_length_with_activity` below: this constructor models `SetDefaults`
+            // over an empty config, which has no `SiteURL`.
+            session_length_mobile_in_hours: 720,
+            allow_cookies_for_subdomains: false,
             maximum_login_attempts: 10,
+            // `30 * 24`, the fresh-install arm — the same cascade and the same reasoning as
+            // `session_length_mobile_in_hours` above.
+            session_length_web_in_hours: 720,
+            enable_multifactor_authentication: false,
+            // `new(*s.EnableSignUpWithEmail)`, and that is defaulted `true` immediately above it
+            // (config.go:2173), so an empty config resolves to `true` in two steps.
+            enable_sign_in_with_email: true,
+            enable_sign_in_with_username: true,
+            ldap_enable: false,
+            saml_enable: false,
+            gitlab_enable: false,
+            openid_enable: false,
+            google_enable: false,
+            office365_enable: false,
+            guest_accounts_enable: false,
+            enable_guest_magic_link: false,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
             terminate_sessions_on_password_change: true,
@@ -1023,6 +1320,28 @@ impl Config {
                 "MM_TEAMSETTINGS_ENABLEOPENSERVER",
                 default.enable_open_server,
             ),
+            enable_user_creation: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLEUSERCREATION",
+                default.enable_user_creation,
+            ),
+            enable_user_deactivation: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLEUSERDEACTIVATION",
+                default.enable_user_deactivation,
+            ),
+            enable_api_user_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPIUSERDELETION",
+                default.enable_api_user_deletion,
+            ),
+            enable_sign_up_with_email: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL",
+                default.enable_sign_up_with_email,
+            ),
+            default_client_locale: lookup("MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE")
+                .unwrap_or(default.default_client_locale),
             enable_user_statuses: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEUSERSTATUSES",
@@ -1062,6 +1381,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEAPICHANNELDELETION",
                 default.enable_api_channel_deletion,
             ),
+            enable_api_team_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPITEAMDELETION",
+                default.enable_api_team_deletion,
+            ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
                 "MM_TEAMSETTINGS_ENABLECHANNELCATEGORYSORTING",
@@ -1087,6 +1411,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
             ),
+            experimental_enable_default_channel_leave_join_messages: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALENABLEDEFAULTCHANNELLEAVEJOINMESSAGES",
+                default.experimental_enable_default_channel_leave_join_messages,
+            ),
             post_edit_time_limit: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_POSTEDITTIMELIMIT",
@@ -1107,6 +1436,22 @@ impl Config {
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
             file_directory: lookup("MM_FILESETTINGS_DIRECTORY").unwrap_or(default.file_directory),
+            file_max_file_size: lookup_int(
+                lookup,
+                "MM_FILESETTINGS_MAXFILESIZE",
+                default.file_max_file_size,
+            ),
+            ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
+                .unwrap_or(default.ldap_picture_attribute),
+            saml_enable_sync_with_ldap: lookup_bool(
+                lookup,
+                "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP",
+                default.saml_enable_sync_with_ldap,
+            ),
+            lock_profile_fields_for_email_users: lookup(
+                "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS",
+            )
+            .unwrap_or(default.lock_profile_fields_for_email_users),
             public_link_salt: lookup("MM_FILESETTINGS_PUBLICLINKSALT")
                 .unwrap_or(default.public_link_salt),
             dedicated_export_store: lookup_bool(
@@ -1244,6 +1589,11 @@ impl Config {
                 "MM_FEATUREFLAGS_POSTATTRIBUTES",
                 default.feature_flag_post_attributes,
             ),
+            feature_flag_discoverable_channels: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
+                default.feature_flag_discoverable_channels,
+            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -1282,10 +1632,60 @@ impl Config {
                 "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
                 default.session_idle_timeout_in_minutes,
             ),
+            session_length_mobile_in_hours: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONLENGTHMOBILEINHOURS",
+                default.session_length_mobile_in_hours,
+            ),
+            allow_cookies_for_subdomains: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ALLOWCOOKIESFORSUBDOMAINS",
+                default.allow_cookies_for_subdomains,
+            ),
             maximum_login_attempts: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
                 default.maximum_login_attempts,
+            ),
+            session_length_web_in_hours: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONLENGTHWEBINHOURS",
+                default.session_length_web_in_hours,
+            ),
+            enable_multifactor_authentication: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION",
+                default.enable_multifactor_authentication,
+            ),
+            enable_sign_in_with_email: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL",
+                default.enable_sign_in_with_email,
+            ),
+            enable_sign_in_with_username: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNINWITHUSERNAME",
+                default.enable_sign_in_with_username,
+            ),
+            ldap_enable: lookup_bool(lookup, "MM_LDAPSETTINGS_ENABLE", default.ldap_enable),
+            saml_enable: lookup_bool(lookup, "MM_SAMLSETTINGS_ENABLE", default.saml_enable),
+            gitlab_enable: lookup_bool(lookup, "MM_GITLABSETTINGS_ENABLE", default.gitlab_enable),
+            openid_enable: lookup_bool(lookup, "MM_OPENIDSETTINGS_ENABLE", default.openid_enable),
+            google_enable: lookup_bool(lookup, "MM_GOOGLESETTINGS_ENABLE", default.google_enable),
+            office365_enable: lookup_bool(
+                lookup,
+                "MM_OFFICE365SETTINGS_ENABLE",
+                default.office365_enable,
+            ),
+            guest_accounts_enable: lookup_bool(
+                lookup,
+                "MM_GUESTACCOUNTSSETTINGS_ENABLE",
+                default.guest_accounts_enable,
+            ),
+            enable_guest_magic_link: lookup_bool(
+                lookup,
+                "MM_GUESTACCOUNTSSETTINGS_ENABLEGUESTMAGICLINK",
+                default.enable_guest_magic_link,
             ),
             terminate_sessions_on_password_change: lookup_bool(
                 lookup,
@@ -1360,9 +1760,12 @@ impl Config {
         let client_requirements = parsed.client_requirements.unwrap_or_default();
         let team_settings = parsed.team_settings.unwrap_or_default();
         let email_settings = parsed.email_settings.unwrap_or_default();
+        let localization_settings = parsed.localization_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
+        let ldap_settings = parsed.ldap_settings.unwrap_or_default();
+        let saml_settings = parsed.saml_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -1420,6 +1823,7 @@ impl Config {
                 .feature_flag_managed_channel_categories,
             feature_flag_classification_markings: default.feature_flag_classification_markings,
             feature_flag_post_attributes: default.feature_flag_post_attributes,
+            feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),
@@ -1463,6 +1867,21 @@ impl Config {
             enable_open_server: team_settings
                 .enable_open_server
                 .unwrap_or(default.enable_open_server),
+            enable_user_creation: team_settings
+                .enable_user_creation
+                .unwrap_or(default.enable_user_creation),
+            enable_user_deactivation: team_settings
+                .enable_user_deactivation
+                .unwrap_or(default.enable_user_deactivation),
+            enable_api_user_deletion: service
+                .enable_api_user_deletion
+                .unwrap_or(default.enable_api_user_deletion),
+            enable_sign_up_with_email: email_settings
+                .enable_sign_up_with_email
+                .unwrap_or(default.enable_sign_up_with_email),
+            default_client_locale: localization_settings
+                .default_client_locale
+                .unwrap_or(default.default_client_locale),
             enable_user_statuses: service
                 .enable_user_statuses
                 .unwrap_or(default.enable_user_statuses),
@@ -1484,6 +1903,9 @@ impl Config {
             enable_api_channel_deletion: service
                 .enable_api_channel_deletion
                 .unwrap_or(default.enable_api_channel_deletion),
+            enable_api_team_deletion: service
+                .enable_api_team_deletion
+                .unwrap_or(default.enable_api_team_deletion),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -1499,6 +1921,9 @@ impl Config {
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            experimental_enable_default_channel_leave_join_messages: service
+                .experimental_enable_default_channel_leave_join_messages
+                .unwrap_or(default.experimental_enable_default_channel_leave_join_messages),
             post_edit_time_limit: service
                 .post_edit_time_limit
                 .unwrap_or(default.post_edit_time_limit),
@@ -1516,6 +1941,20 @@ impl Config {
             // (config.go:1903), which `unwrap_or` alone would not: a document holding `""` must
             // read `./data/`, not `""`.
             file_directory: non_empty_or(file_settings.directory, default.file_directory),
+            file_max_file_size: file_settings
+                .max_file_size
+                .unwrap_or(default.file_max_file_size),
+            ldap_picture_attribute: ldap_settings
+                .picture_attribute
+                .unwrap_or(default.ldap_picture_attribute),
+            ldap_enable: ldap_settings.enable.unwrap_or(default.ldap_enable),
+            saml_enable_sync_with_ldap: saml_settings
+                .enable_sync_with_ldap
+                .unwrap_or(default.saml_enable_sync_with_ldap),
+            saml_enable: saml_settings.enable.unwrap_or(default.saml_enable),
+            lock_profile_fields_for_email_users: team_settings
+                .lock_profile_fields_for_email_users
+                .unwrap_or(default.lock_profile_fields_for_email_users),
             public_link_salt: file_settings
                 .public_link_salt
                 .unwrap_or(default.public_link_salt),
@@ -1561,6 +2000,18 @@ impl Config {
             session_idle_timeout_in_minutes: service
                 .session_idle_timeout_in_minutes
                 .unwrap_or(default.session_idle_timeout_in_minutes),
+            // The two-step cascade of `SetDefaults` (config.go:767), reproduced rather than
+            // collapsed: an explicit `SessionLengthMobileInHours` wins outright; failing that,
+            // an explicit `SessionLengthMobileInDays` is multiplied by 24; failing *that*,
+            // `isUpdate` chooses 180 days or 30. A document carrying only the days field is the
+            // middle branch and is the one a collapsed port would get wrong.
+            session_length_mobile_in_hours: service
+                .session_length_mobile_in_hours
+                .or_else(|| service.session_length_mobile_in_days.map(|days| days * 24))
+                .unwrap_or(if is_update { 180 * 24 } else { 30 * 24 }),
+            allow_cookies_for_subdomains: service
+                .allow_cookies_for_subdomains
+                .unwrap_or(default.allow_cookies_for_subdomains),
             // The one setting here whose default is computed rather than looked up. `new(!isUpdate)`
             // (config.go:729), and the comment above it in the Go source says why: "Must be
             // manually enabled for existing installations." Resolving it against
@@ -1572,6 +2023,49 @@ impl Config {
             maximum_login_attempts: service
                 .maximum_login_attempts
                 .unwrap_or(default.maximum_login_attempts),
+            // The web half of the cascade at config.go:745, reproduced for the same reason the
+            // mobile one above is: a document carrying only `SessionLengthWebInDays` is the
+            // middle branch, and it decides both the session's `ExpiresAt` and the cookies'
+            // `Max-Age`.
+            session_length_web_in_hours: service
+                .session_length_web_in_hours
+                .or_else(|| service.session_length_web_in_days.map(|days| days * 24))
+                .unwrap_or(if is_update { 180 * 24 } else { 30 * 24 }),
+            enable_multifactor_authentication: service
+                .enable_multifactor_authentication
+                .unwrap_or(default.enable_multifactor_authentication),
+            enable_sign_in_with_email: email_settings
+                .enable_sign_in_with_email
+                .unwrap_or(default.enable_sign_in_with_email),
+            enable_sign_in_with_username: email_settings
+                .enable_sign_in_with_username
+                .unwrap_or(default.enable_sign_in_with_username),
+            guest_accounts_enable: guest_accounts
+                .enable
+                .unwrap_or(default.guest_accounts_enable),
+            enable_guest_magic_link: guest_accounts
+                .enable_guest_magic_link
+                .unwrap_or(default.enable_guest_magic_link),
+            gitlab_enable: parsed
+                .gitlab_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.gitlab_enable),
+            google_enable: parsed
+                .google_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.google_enable),
+            openid_enable: parsed
+                .openid_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.openid_enable),
+            office365_enable: parsed
+                .office365_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.office365_enable),
             // The second `!isUpdate` default (config.go:733), and the one that matters more: a
             // resolved-from-`default` `true` would log every other device out on a password
             // change that Go leaves alone.
@@ -1716,12 +2210,57 @@ struct Document {
     team_settings: Option<TeamSettingsDocument>,
     #[serde(rename = "EmailSettings")]
     email_settings: Option<EmailSettingsDocument>,
+    #[serde(rename = "LocalizationSettings")]
+    localization_settings: Option<LocalizationSettingsDocument>,
     #[serde(rename = "GuestAccountsSettings")]
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
     #[serde(rename = "MessageExportSettings")]
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
     cloud_settings: Option<CloudSettingsDocument>,
+    #[serde(rename = "LdapSettings")]
+    ldap_settings: Option<LdapSettingsDocument>,
+    #[serde(rename = "SamlSettings")]
+    saml_settings: Option<SamlSettingsDocument>,
+    #[serde(rename = "GitLabSettings")]
+    gitlab_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "GoogleSettings")]
+    google_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "OpenIdSettings")]
+    openid_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "Office365Settings")]
+    office365_settings: Option<EnableOnlySsoDocument>,
+}
+
+/// The two fields of `LdapSettings` a migrated route reads — `setProfileImage`'s 409, and the
+/// flag `login` forwards on.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LdapSettingsDocument {
+    #[serde(rename = "PictureAttribute")]
+    picture_attribute: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+}
+
+/// The two fields of `SamlSettings` a migrated route reads: `EnableSyncWithLdap` is only ever
+/// consulted alongside `LdapSettings.PictureAttribute`, and `Enable` is one of the five flags
+/// `login`'s error mask reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct SamlSettingsDocument {
+    #[serde(rename = "EnableSyncWithLdap")]
+    enable_sync_with_ldap: Option<bool>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+}
+
+/// `SSOSettings` (config.go:1318) — the shape `GitLabSettings`, `GoogleSettings` and
+/// `OpenIdSettings` all share — plus `Office365Settings`, which is its own struct in Go but
+/// carries an identically-named flag. Only `Enable` is modelled: it is the only field
+/// `login`'s error mask reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct EnableOnlySsoDocument {
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
 }
 
 /// The four rule flags and the minimum length `IsPasswordValidWithSettings` reads.
@@ -1756,7 +2295,7 @@ struct MessageExportSettingsDocument {
     download_export_results: Option<bool>,
 }
 
-/// The one field of `TeamSettings` a migrated route reads.
+/// The fields of `TeamSettings` a migrated route reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct TeamSettingsDocument {
     #[serde(rename = "RestrictDirectMessage")]
@@ -1765,6 +2304,10 @@ struct TeamSettingsDocument {
     restrict_creation_to_domains: Option<String>,
     #[serde(rename = "EnableOpenServer")]
     enable_open_server: Option<bool>,
+    #[serde(rename = "EnableUserCreation")]
+    enable_user_creation: Option<bool>,
+    #[serde(rename = "EnableUserDeactivation")]
+    enable_user_deactivation: Option<bool>,
     #[serde(rename = "UserStatusAwayTimeout")]
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
@@ -1777,21 +2320,44 @@ struct TeamSettingsDocument {
     max_users_per_team: Option<i64>,
     #[serde(rename = "ExperimentalDefaultChannels")]
     experimental_default_channels: Option<Vec<String>>,
+    #[serde(rename = "LockProfileFieldsForEmailUsers")]
+    lock_profile_fields_for_email_users: Option<String>,
 }
 
-/// The one field of `EmailSettings` a migrated route reads.
+/// The four fields of `EmailSettings` a migrated route reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct EmailSettingsDocument {
     #[serde(rename = "RequireEmailVerification")]
     require_email_verification: Option<bool>,
+    #[serde(rename = "EnableSignUpWithEmail")]
+    enable_sign_up_with_email: Option<bool>,
+    #[serde(rename = "EnableSignInWithEmail")]
+    enable_sign_in_with_email: Option<bool>,
+    #[serde(rename = "EnableSignInWithUsername")]
+    enable_sign_in_with_username: Option<bool>,
 }
 
-/// The one field of `GuestAccountsSettings` a migrated route reads. Its name collides with
-/// `TeamSettings.RestrictCreationToDomains`, which is exactly why it needs its own section.
+/// The one field of `LocalizationSettings` a migrated route reads.
+///
+/// `AvailableLocales` and `EnableExperimentalLocales` live in the same Go section and are *not*
+/// here: neither takes part in `users.CreateUser`'s locale reset, which tests membership of the
+/// compiled-in supported list rather than of the operator's allow-list.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LocalizationSettingsDocument {
+    #[serde(rename = "DefaultClientLocale")]
+    default_client_locale: Option<String>,
+}
+
+/// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
+/// name collides with `TeamSettings`', which is exactly why this needs its own section.
 #[derive(Debug, Default, serde::Deserialize)]
 struct GuestAccountsSettingsDocument {
     #[serde(rename = "RestrictCreationToDomains")]
     restrict_creation_to_domains: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+    #[serde(rename = "EnableGuestMagicLink")]
+    enable_guest_magic_link: Option<bool>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
@@ -1842,6 +2408,24 @@ struct ServiceSettingsDocument {
     webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "SessionLengthWebInHours")]
+    session_length_web_in_hours: Option<i64>,
+    /// Only ever read as the fallback for the field above, exactly as the mobile pair below.
+    #[serde(rename = "SessionLengthWebInDays")]
+    session_length_web_in_days: Option<i64>,
+    #[serde(rename = "EnableMultifactorAuthentication")]
+    enable_multifactor_authentication: Option<bool>,
+    #[serde(rename = "EnableAPIUserDeletion")]
+    enable_api_user_deletion: Option<bool>,
+    #[serde(rename = "SessionLengthMobileInHours")]
+    session_length_mobile_in_hours: Option<i64>,
+    /// Only ever read as the fallback for the field above — Go derives hours from days when the
+    /// hours field is absent, so a document written before the hours setting existed still
+    /// produces the operator's intended length.
+    #[serde(rename = "SessionLengthMobileInDays")]
+    session_length_mobile_in_days: Option<i64>,
+    #[serde(rename = "AllowCookiesForSubdomains")]
+    allow_cookies_for_subdomains: Option<bool>,
     #[serde(rename = "MaximumLoginAttempts")]
     maximum_login_attempts: Option<i64>,
     #[serde(rename = "TerminateSessionsOnPasswordChange")]
@@ -1890,8 +2474,12 @@ struct ServiceSettingsDocument {
     allow_synced_drafts: Option<bool>,
     #[serde(rename = "EnableAPIChannelDeletion")]
     enable_api_channel_deletion: Option<bool>,
+    #[serde(rename = "EnableAPITeamDeletion")]
+    enable_api_team_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "ExperimentalEnableDefaultChannelLeaveJoinMessages")]
+    experimental_enable_default_channel_leave_join_messages: Option<bool>,
     #[serde(rename = "PostEditTimeLimit")]
     post_edit_time_limit: Option<i64>,
     #[serde(rename = "ExperimentalEnableHardenedMode")]
@@ -1922,6 +2510,8 @@ struct ExperimentalSettingsDocument {
 struct FileSettingsDocument {
     #[serde(rename = "DriverName")]
     driver_name: Option<String>,
+    #[serde(rename = "MaxFileSize")]
+    max_file_size: Option<i64>,
     #[serde(rename = "Directory")]
     directory: Option<String>,
     #[serde(rename = "EnablePublicLink")]
@@ -2025,6 +2615,13 @@ fn clamp_unique_reactions(value: i64) -> i64 {
 
 /// `model.ServiceSettingsMaxUniqueReactionsPerPost` (config.go:141).
 const MAX_UNIQUE_REACTIONS_PER_POST: i64 = 500;
+
+/// `model.TeamSettingsLockProfileFieldsAll` (config.go:151) — the only one of the three legal
+/// values of `TeamSettings.LockProfileFieldsForEmailUsers` that locks a profile *picture*.
+///
+/// `"name_and_username"` (config.go:150) locks the other fields and leaves the picture alone;
+/// `IsProfileImageLockedForUser` compares against this constant and nothing else.
+pub const TEAM_SETTINGS_LOCK_PROFILE_FIELDS_ALL: &str = "all";
 
 /// `model.DirectMessageAny` (config.go:80).
 pub const DIRECT_MESSAGE_ANY: &str = "any";
@@ -2227,6 +2824,36 @@ mod tests {
         );
     }
 
+    /// The four settings the image routes read reach the overlay, each under its own name.
+    ///
+    /// An operator who raises `MaxFileSize` or names an LDAP picture attribute through the
+    /// environment has overridden the Go server beside us, and a variable this port does not
+    /// consult is a route answering differently on each side for a reason that has nothing to do
+    /// with the code. Two of the four are also the only readers of their whole section, so a
+    /// transposed name would silently keep the default rather than fail to compile.
+    #[test]
+    fn the_image_settings_are_overridable_by_environment() {
+        let config = Config::default().apply_env_from(&|key| match key {
+            "MM_FILESETTINGS_MAXFILESIZE" => Some("4096".to_owned()),
+            "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS" => Some("all".to_owned()),
+            "MM_LDAPSETTINGS_PICTUREATTRIBUTE" => Some("thumbnailPhoto".to_owned()),
+            "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP" => Some("true".to_owned()),
+            _ => None,
+        });
+
+        assert_eq!(config.file_max_file_size, 4096, "down from 100 MiB");
+        assert_eq!(config.lock_profile_fields_for_email_users, "all");
+        assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
+        assert!(config.saml_enable_sync_with_ldap);
+
+        // And with nothing set every one of them keeps the value the document gave it.
+        let untouched = Config::default().apply_env_from(&|_| None);
+        assert_eq!(untouched.file_max_file_size, 100 * 1024 * 1024);
+        assert_eq!(untouched.lock_profile_fields_for_email_users, "none");
+        assert_eq!(untouched.ldap_picture_attribute, "");
+        assert!(!untouched.saml_enable_sync_with_ldap);
+    }
+
     /// `MM_TEAMSETTINGS_ENABLEOPENSERVER` reaches the overlay.
     ///
     /// The Go server beside us sets this variable and nothing else does, so without the overlay
@@ -2376,6 +3003,14 @@ mod go_parity {
             extend_session_length_with_activity: false,
             terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
+            // The fifth adjustment, and the same reason as the two `!isUpdate` booleans above:
+            // `Config::default` models a *fresh* config, where the mobile length is 30 days.
+            // The live server's document is an update, so Go wrote 180 days — 4320 hours — and
+            // the fixture now carries both that and the `SessionLengthMobileInDays` it was
+            // derived from, so this is Go's own number rather than a transcribed one.
+            session_length_mobile_in_hours: 4320,
+            // And the web length, which takes the same cascade off its own pair of keys.
+            session_length_web_in_hours: 4320,
             ..Config::default()
         };
 
@@ -2487,6 +3122,114 @@ mod go_parity {
         );
     }
 
+    /// `SessionLengthMobileInHours` has a **three-step** fallback, and each step is a different
+    /// number a client's session length depends on. Every branch, in the order Go tries them.
+    #[test]
+    fn the_mobile_session_length_falls_back_through_days_then_is_update() {
+        let hours = |document: &str| {
+            Config::from_document(document)
+                .expect("valid document")
+                .session_length_mobile_in_hours
+        };
+
+        // 1. An explicit hours value wins outright, even beside a contradictory days value.
+        assert_eq!(
+            hours(
+                r#"{"ServiceSettings":{"SiteURL":"","SessionLengthMobileInHours":12,"SessionLengthMobileInDays":99}}"#
+            ),
+            12
+        );
+        // 2. Failing that, days * 24 — the branch a port that only read the hours field misses,
+        //    and the one every document written before the hours setting existed takes.
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"SiteURL":"","SessionLengthMobileInDays":7}}"#),
+            7 * 24
+        );
+        // 3. Failing both, `isUpdate` chooses 180 days or 30 — 4320 hours against 720. A
+        //    persisted document always has a SiteURL and therefore always takes the first.
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"SiteURL":""}}"#),
+            180 * 24,
+            "a persisted document is an update, so the mobile default is 180 days"
+        );
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"PostPriority":true}}"#),
+            30 * 24,
+            "no SiteURL is a fresh install, so it is 30 days"
+        );
+        // The four answers must be four distinct numbers, or the assertions above are satisfied
+        // by a function that ignores its input.
+        assert_eq!(
+            [12, 168, 4320, 720]
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+    }
+
+    /// `GetCookieDomain`'s flag arm, on the one input that matters — the flag is off by default,
+    /// so a stock server sends **no** `Domain` attribute however its SiteURL is spelled. The
+    /// per-URL hostnames are asserted against Go in `mm_api::sessions::cookie_domain_matches_go`.
+    #[test]
+    fn the_cookie_domain_is_empty_unless_subdomains_are_allowed() {
+        let site_url = Some("https://mattermost.example.com:8065/sub".to_owned());
+        assert_eq!(
+            Config {
+                site_url: site_url.clone(),
+                allow_cookies_for_subdomains: false,
+                ..Config::default()
+            }
+            .cookie_domain(),
+            ""
+        );
+        assert_eq!(
+            Config {
+                site_url,
+                allow_cookies_for_subdomains: true,
+                ..Config::default()
+            }
+            .cookie_domain(),
+            "mattermost.example.com"
+        );
+        // Default-off, which is what makes the empty answer the reachable one.
+        assert!(!Config::default().allow_cookies_for_subdomains);
+    }
+
+    /// `url.Hostname()` over Go's own answers for every raw `URL.Host` shape in the corpus.
+    ///
+    /// The two rules a naive split on the last colon gets wrong are both here: the port must be
+    /// **numeric** to be a port (`example.com:https` keeps its whole authority), and the bracket
+    /// strip runs **after** the split, so an unclosed IPv6 literal is cut inside
+    /// (`[::1` is `[:`). The second was asserted here by hand at the wrong value before this
+    /// corpus existed, which is the argument for the corpus.
+    #[test]
+    fn the_hostname_split_matches_go() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_session_write.json"
+        ))
+        .expect("the generated oracle parses");
+        let cases = oracle["split_host_port"]
+            .as_object()
+            .expect("the section is an object");
+        assert!(cases.len() >= 15, "the corpus shrank");
+
+        for (host, want) in cases {
+            assert_eq!(
+                go_hostname(host.as_bytes()),
+                want.as_str().expect("a string"),
+                "Hostname() for Host={host:?}"
+            );
+        }
+
+        // The corpus must contain at least one row where the input survives whole, one where a
+        // port comes off and one where brackets do — otherwise the loop is satisfied by an
+        // identity function or by a truncation.
+        assert_eq!(cases["example.com"], "example.com");
+        assert_eq!(cases["example.com:8065"], "example.com");
+        assert_eq!(cases["[::1]:8065"], "::1");
+    }
+
     /// Presence decides it, not truthiness. An empty `SiteURL` is a non-nil pointer in Go and it
     /// is exactly what the live row holds, so reading `""` as "unset" would invert the default on
     /// every stock server.
@@ -2544,6 +3287,14 @@ mod go_parity {
     /// struct's keys, and the number below is what the script writes: **40** — the thirty-eight
     /// modelled keys plus `ServiceSettings.SiteURL`, projected for its presence rather than its
     /// value, and counted here like any other.
+    ///
+    /// **It drifted again, the same way, and the count is why.** The four image-route settings —
+    /// `FileSettings.MaxFileSize`, `TeamSettings.LockProfileFieldsForEmailUsers`,
+    /// `LdapSettings.PictureAttribute` and `SamlSettings.EnableSyncWithLdap` — were added to
+    /// [`Config`] with their defaults transcribed from `config.go` and *not* added to the
+    /// script, so [`every_default_matches_what_go_actually_wrote`] compared four defaults against
+    /// their own fallback and passed. A hardcoded number cannot notice a missing key on its own;
+    /// what it can do is fail the moment somebody adds the key, which is what happened here.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
@@ -2555,8 +3306,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 46,
-            "the fixture covers {keys} settings and Config reads 46 from the document. \
+            keys, 72,
+            "the fixture covers {keys} settings and Config reads 72 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -2578,12 +3329,26 @@ mod go_parity {
                 "EnableOutgoingWebhooks": false,
                 "EnableOAuthServiceProvider": false,
                 "SessionIdleTimeoutInMinutes": 17,
-                "ExtendSessionLengthWithActivity": true
+                "ExtendSessionLengthWithActivity": true,
+                "SessionLengthWebInHours": 19,
+                "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
             "ImageProxySettings": { "Enable": true },
-            "FileSettings": { "DriverName": "amazons3" },
+            "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
+            "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
+            "LdapSettings": { "PictureAttribute": "thumbnailPhoto", "Enable": true },
+            "SamlSettings": { "EnableSyncWithLdap": true, "Enable": true },
+            "GitLabSettings": { "Enable": true },
+            "GoogleSettings": { "Enable": true },
+            "OpenIdSettings": { "Enable": true },
+            "Office365Settings": { "Enable": true },
+            "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
+            "EmailSettings": {
+                "EnableSignInWithEmail": false,
+                "EnableSignInWithUsername": false
+            },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
@@ -2600,6 +3365,13 @@ mod go_parity {
         assert!(config.restrict_system_admin);
         assert!(config.image_proxy_enable);
         assert_eq!(config.file_driver_name, "amazons3");
+        // The four the image routes read. Each is in its own section, and two of those sections
+        // exist in `Document` for one key each — so a wiring that dropped either would fall back
+        // to a default that every other test in this module is happy with.
+        assert_eq!(config.file_max_file_size, 4096);
+        assert_eq!(config.lock_profile_fields_for_email_users, "all");
+        assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
+        assert!(config.saml_enable_sync_with_ldap);
         assert!(!config.show_full_name);
         assert!(!config.show_email_address);
         assert_eq!(config.session_idle_timeout_in_minutes, 17);
@@ -2607,6 +3379,95 @@ mod go_parity {
         // `!isUpdate` is `true` and an unread field would also read `true`. The 17 above is what
         // makes the pair honest — an integer has no default to coincide with.
         assert!(config.extend_session_length_with_activity);
+
+        // The login vertical's settings. `session_length_web_in_hours` carries an integer for
+        // the same reason `session_idle_timeout_in_minutes` above does — no default to coincide
+        // with — and the five SSO flags are each in their **own** section, four of which exist
+        // in `Document` for one key, so a wiring that read one of them for all five would be
+        // invisible on a stock document where all five agree.
+        assert_eq!(config.session_length_web_in_hours, 19);
+        assert!(config.enable_multifactor_authentication);
+        assert!(!config.enable_sign_in_with_email);
+        assert!(!config.enable_sign_in_with_username);
+        assert!(config.ldap_enable);
+        assert!(config.saml_enable);
+        assert!(config.gitlab_enable);
+        assert!(config.google_enable);
+        assert!(config.openid_enable);
+        assert!(config.office365_enable);
+        assert!(config.guest_accounts_enable);
+        assert!(config.enable_guest_magic_link);
+    }
+
+    /// The five SSO flags the error mask reads are five **different** keys.
+    ///
+    /// `every_field_is_actually_read_from_the_document` sets all five to `true` at once, so a
+    /// port that wired `SamlSettings.Enable` into all five would pass it — and would also pass
+    /// every parity test, because the development stack leaves all five at `false`. The only
+    /// thing that separates them is a document where they disagree.
+    #[test]
+    fn the_five_sso_flags_are_five_different_keys() {
+        for (section, pick) in [
+            ("SamlSettings", 0usize),
+            ("GitLabSettings", 1),
+            ("GoogleSettings", 2),
+            ("OpenIdSettings", 3),
+            ("Office365Settings", 4),
+        ] {
+            let config = Config::from_document(&format!(r#"{{"{section}":{{"Enable":true}}}}"#))
+                .expect("valid document");
+            let flags = [
+                config.saml_enable,
+                config.gitlab_enable,
+                config.google_enable,
+                config.openid_enable,
+                config.office365_enable,
+            ];
+            for (index, on) in flags.iter().enumerate() {
+                assert_eq!(
+                    *on,
+                    index == pick,
+                    "{section} should set exactly flag {pick}, not {index}"
+                );
+            }
+        }
+    }
+
+    /// The web and mobile session lengths are **different** keys, and each carries its own
+    /// days→hours cascade.
+    ///
+    /// The live document holds 4320 for both, so nothing on the stack can tell them apart; a
+    /// login that read the mobile length would hand every browser a session of the wrong age and
+    /// cookies with the wrong `Max-Age`.
+    #[test]
+    fn the_web_and_mobile_session_lengths_are_not_the_same_key() {
+        let config = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInHours":11,"SessionLengthMobileInHours":22}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(config.session_length_web_in_hours, 11);
+        assert_eq!(config.session_length_mobile_in_hours, 22);
+
+        // The middle branch of the cascade: only the days key, multiplied by 24. A collapsed
+        // port that fell straight through to the isUpdate default would answer 720 here.
+        let days_only = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInDays":3,"SessionLengthMobileInDays":5}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(days_only.session_length_web_in_hours, 72);
+        assert_eq!(days_only.session_length_mobile_in_hours, 120);
+
+        // And the hours key wins outright over the days key when both are present.
+        let both = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInDays":3,"SessionLengthWebInHours":7}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(both.session_length_web_in_hours, 7);
+
+        // No key at all, and a `SiteURL` present: the update arm, 180 days.
+        let update =
+            Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
+        assert_eq!(update.session_length_web_in_hours, 4320);
     }
 
     /// The two privacy settings are read from **different** keys.
@@ -2744,6 +3605,10 @@ mod go_parity {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
                 terminate_sessions_on_password_change: false,
+                // Also `!isUpdate`-shaped: a document with a `SiteURL` is an update, so the
+                // mobile session length defaults to 180 days rather than 30.
+                session_length_mobile_in_hours: 4320,
+                session_length_web_in_hours: 4320,
                 ..Config::default()
             }
         );
@@ -4208,6 +5073,41 @@ pub fn generate_client_config(
 }
 
 /// `strings.Join(slice, ",")` on a Go slice that may be nil — which joins to `""`.
+/// Port of `url.URL.Hostname` over `splitHostPort` (net/url/url.go:1180).
+///
+/// `GoUrl::host` is `host` **or** `host:port`, so the port has to come off before the value can
+/// be used as a cookie `Domain`. Two details a hand-rolled `split(':')` gets wrong:
+///
+/// - **The port must be numeric to be a port.** Go takes the *last* colon and only strips it when
+///   everything after it is a digit — `strings.LastIndexByte` plus `validOptionalPort`. So
+///   `example.com:https` keeps its whole authority as the hostname rather than losing the scheme
+///   name, and an unbracketed IPv6 literal is not silently truncated at its final group.
+/// - **Brackets around an IPv6 literal are stripped**, and only when they are balanced at both
+///   ends. `[::1]:8065` is `::1`; `[::1]` alone is also `::1`.
+///
+/// Splitting first and unbracketing second is Go's order and matters: `[::1]:8065` needs the port
+/// gone before the trailing `]` is at the end of the string.
+fn go_hostname(host: &[u8]) -> String {
+    let mut host = host;
+
+    if let Some(colon) = host.iter().rposition(|&b| b == b':')
+        && host[colon + 1..].iter().all(|b| b.is_ascii_digit())
+    {
+        // `validOptionalPort(host[colon:])`: the substring is `":"` plus the rest, and Go accepts
+        // it when every byte after the colon is a digit — including **none at all**, so a
+        // trailing bare `:` is a valid empty port and comes off.
+        host = &host[..colon];
+    }
+
+    if host.len() >= 2 && host.first() == Some(&b'[') && host.last() == Some(&b']') {
+        host = &host[1..host.len() - 1];
+    }
+
+    // The host is percent-decoded by `go_parse`, so it can in principle hold bytes no `str` can.
+    // A cookie `Domain` is a header value; lossy is the only thing that could be sent anyway.
+    String::from_utf8_lossy(host).into_owned()
+}
+
 fn join_commas(values: Option<&[String]>) -> String {
     values.unwrap_or(&[]).join(",")
 }

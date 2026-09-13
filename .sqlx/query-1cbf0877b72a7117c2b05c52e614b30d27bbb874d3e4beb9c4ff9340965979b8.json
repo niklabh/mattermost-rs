@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO postreminders (postid, userid, targettime)\n                 VALUES ($1, $2, $3)\n            ON CONFLICT (postid, userid)\n              DO UPDATE SET targettime = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1cbf0877b72a7117c2b05c52e614b30d27bbb874d3e4beb9c4ff9340965979b8"
+}

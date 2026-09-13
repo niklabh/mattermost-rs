@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP, Channel, ChannelSearchOpts};
-use mm_model::channel_list::ChannelList;
+use mm_model::channel_list::{ChannelList, ChannelListWithTeamData};
 use mm_model::channel_member::{
     CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelMembersWithTeamData, ChannelUnread,
 };
@@ -560,6 +560,290 @@ impl App {
                 AppError::boxed(
                     "AutocompleteChannels",
                     "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.AutocompleteChannels` (channel.go:3379) — the cross-team switcher list.
+    ///
+    /// [`Self::autocomplete_channels_for_team`] without the team: same trim, same `GetUser` for
+    /// the guest bit, same hardcoded `includeDeleted = true`, and the same error id and `where`
+    /// (`AutocompleteChannels` — which that sibling also borrows).
+    ///
+    /// **`FilterChannelListWithTeamDataForUserVisibility` is not ported**, for the reason its
+    /// non-team twin is not: it returns its input untouched unless `FeatureFlags.
+    /// DiscoverableChannels` is on (app/channel_discoverable_visibility.go:182), and that flag is
+    /// false at the pinned SHA. See [D-153].
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, found))]
+    pub async fn autocomplete_channels(
+        &self,
+        user_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelListWithTeamData> {
+        let term = term.trim();
+
+        let user = self.get_user(user_id).await?;
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete(user_id, term, user.is_guest())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel autocomplete failed");
+                AppError::boxed(
+                    "AutocompleteChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.AutocompleteChannelsForTeamFiltered` (channel.go:3417).
+    ///
+    /// [`Self::autocomplete_channels_for_team`] with the two extra store predicates, and with its
+    /// **own** `where` — `AutocompleteChannelsForTeamFiltered`, where the unfiltered sibling
+    /// reports `AutocompleteChannels`. The error id is the same on both.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    pub async fn autocomplete_channels_for_team_filtered(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+        private_only: bool,
+        exclude_group_constrained: bool,
+    ) -> AppResult<ChannelList> {
+        let term = term.trim();
+
+        let user = self.get_user(user_id).await?;
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete_in_team_filtered(
+                team_id,
+                user_id,
+                term,
+                user.is_guest(),
+                private_only,
+                exclude_group_constrained,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "filtered channel autocomplete failed");
+                AppError::boxed(
+                    "AutocompleteChannelsForTeamFiltered",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetAllChannels` (channel.go:2444) — the system console's channel list.
+    ///
+    /// Two things happen here and nowhere else.
+    ///
+    /// **`exclude_default_channels` is resolved into names.** Go replaces
+    /// `opts.ExcludeChannelNames` wholesale with `DefaultChannelNames()` — it does not append —
+    /// so a caller who somehow set both loses their own list. Nothing in api4 sets
+    /// `ExcludeChannelNames` directly, so the overwrite is unobservable today; it is kept because
+    /// the alternative is a silent difference the moment something does.
+    ///
+    /// **The store gets a different struct.** Go copies nine fields of `model.ChannelSearchOpts`
+    /// into `store.ChannelSearchOpts` and drops the rest, so `deleted`, `team_ids`, `public`,
+    /// `private`, `page` and `per_page` never reach the query even if a caller sets them. The
+    /// paging here is the `page`/`per_page` arguments instead, multiplied into an offset by the
+    /// handler's `page*perPage`.
+    #[tracing::instrument(skip(self, opts), fields(offset, limit, found))]
+    pub async fn get_all_channels(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &ChannelSearchOpts,
+    ) -> AppResult<ChannelListWithTeamData> {
+        let store_opts = self.all_channels_store_opts(opts);
+
+        let channels = self
+            .store()
+            .channel()
+            .get_all_channels(offset, limit, &store_opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "get all channels failed");
+                AppError::boxed(
+                    "GetAllChannels",
+                    "app.channel.get_all_channels.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetAllChannelsCount` (channel.go:2467).
+    ///
+    /// # It is not the size of [`Self::get_all_channels`], and two separate things make that true
+    ///
+    /// 1. **Go's store opts here omit the two access-control fields.** `GetAllChannels` copies
+    ///    `AccessControlPolicyEnforced` and `ExcludeAccessControlPolicyEnforced` into the store
+    ///    options; `GetAllChannelsCount` (channel.go:2471-2479) does not copy either. So
+    ///    `?include_total_count=true&exclude_access_control_policy_enforced=true` returns a list
+    ///    with policy-enforced channels removed and a `total_count` that still includes them.
+    /// 2. The count query also has no `Teams` join — see
+    ///    [`mm_store::channel_store::get_all_channels`].
+    ///
+    /// Both are reproduced rather than reconciled. A port that passed the same options to both
+    /// calls would be *more* consistent than Go and would disagree with it on the wire.
+    #[tracing::instrument(skip(self, opts))]
+    pub async fn get_all_channels_count(&self, opts: &ChannelSearchOpts) -> AppResult<i64> {
+        let mut store_opts = self.all_channels_store_opts(opts);
+        // The two fields `GetAllChannelsCount` leaves at their zero value; see the doc comment.
+        store_opts.access_control_policy_enforced = false;
+        store_opts.exclude_access_control_policy_enforced = false;
+
+        self.store()
+            .channel()
+            .get_all_channels_count(&store_opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "count all channels failed");
+                AppError::boxed(
+                    "GetAllChannelsCount",
+                    "app.channel.get_all_channels_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// The `store.ChannelSearchOpts` both `GetAllChannels` and `GetAllChannelsCount` build, with
+    /// `exclude_default_channels` already resolved into names.
+    ///
+    /// The clones are field-for-field copies into a different struct, which is exactly what Go's
+    /// literal does; there is no borrow to avoid here.
+    fn all_channels_store_opts(&self, opts: &ChannelSearchOpts) -> ChannelSearchOpts {
+        ChannelSearchOpts {
+            not_associated_to_group: opts.not_associated_to_group.clone(),
+            include_deleted: opts.include_deleted,
+            exclude_channel_names: if opts.exclude_default_channels {
+                self.default_channel_names()
+            } else {
+                opts.exclude_channel_names.clone()
+            },
+            group_constrained: opts.group_constrained,
+            exclude_group_constrained: opts.exclude_group_constrained,
+            exclude_policy_constrained: opts.exclude_policy_constrained,
+            include_policy_id: opts.include_policy_id,
+            access_control_policy_enforced: opts.access_control_policy_enforced,
+            exclude_access_control_policy_enforced: opts.exclude_access_control_policy_enforced,
+            ..ChannelSearchOpts::default()
+        }
+    }
+
+    /// Port of `app.App.SearchAllChannels` (channel.go:3448).
+    ///
+    /// Unlike [`Self::get_all_channels`] this copies **every** option through, paging included,
+    /// so the store decides the page rather than the caller. The term is `strings.TrimSpace`d
+    /// here and not in the handler, so `"  town  "` and `"town"` are the same search.
+    ///
+    /// The second return value is the total, and it is `0` for an unpaginated request — the store
+    /// only runs the count query when both `page` and `per_page` are present, which is the same
+    /// condition the handler uses to decide whether to put the count on the wire at all.
+    #[tracing::instrument(skip(self, opts), fields(found, total))]
+    pub async fn search_all_channels(
+        &self,
+        term: &str,
+        opts: &ChannelSearchOpts,
+    ) -> AppResult<(ChannelListWithTeamData, i64)> {
+        let store_opts = ChannelSearchOpts {
+            exclude_channel_names: if opts.exclude_default_channels {
+                self.default_channel_names()
+            } else {
+                opts.exclude_channel_names.clone()
+            },
+            not_associated_to_group: opts.not_associated_to_group.clone(),
+            include_deleted: opts.include_deleted,
+            deleted: opts.deleted,
+            team_ids: opts.team_ids.clone(),
+            group_constrained: opts.group_constrained,
+            exclude_group_constrained: opts.exclude_group_constrained,
+            policy_id: opts.policy_id.clone(),
+            include_policy_id: opts.include_policy_id,
+            include_search_by_id: opts.include_search_by_id,
+            exclude_remote: opts.exclude_remote,
+            exclude_policy_constrained: opts.exclude_policy_constrained,
+            public: opts.public,
+            private: opts.private,
+            page: opts.page,
+            per_page: opts.per_page,
+            access_control_policy_enforced: opts.access_control_policy_enforced,
+            exclude_access_control_policy_enforced: opts.exclude_access_control_policy_enforced,
+            parent_access_control_policy_id: opts.parent_access_control_policy_id.clone(),
+            ..ChannelSearchOpts::default()
+        };
+
+        // `strings.TrimSpace` — Go trims Unicode whitespace, which is `str::trim`.
+        let term = term.trim();
+
+        let (channels, total) = self
+            .store()
+            .channel()
+            .search_all_channels(term, &store_opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "search all channels failed");
+                AppError::boxed(
+                    "SearchAllChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        tracing::Span::current().record("total", total);
+        Ok((channels, total))
+    }
+
+    /// Port of `app.App.SearchGroupChannels` (channel.go:3533).
+    ///
+    /// **The empty term short-circuits to an empty list and never reaches the store.** That is
+    /// the only guard, and it tests the raw term: a term of a single space is *not* empty, goes
+    /// through, and comes back as the caller's group messages unfiltered — see
+    /// [`mm_store::channel_store::search_group_channels`] for why. There is no `TrimSpace` here,
+    /// unlike every neighbouring search in this file.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, found))]
+    pub async fn search_group_channels(&self, user_id: &str, term: &str) -> AppResult<ChannelList> {
+        if term.is_empty() {
+            return Ok(ChannelList(Vec::new()));
+        }
+
+        let channels = self
+            .store()
+            .channel()
+            .search_group_channels(user_id, term)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "group channel search failed");
+                AppError::boxed(
+                    "SearchGroupChannels",
+                    "app.channel.search_group_channels.app_error",
                     None,
                     String::new(),
                     500,

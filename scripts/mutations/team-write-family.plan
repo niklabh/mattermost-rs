@@ -1,0 +1,94 @@
+# Mutation plan for the team write family: createTeam, updateTeamPrivacy, deleteTeam,
+# removeTeamMember, searchTeams and invalidateAllEmailInvites.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-write-family.plan
+#
+# What each group is aimed at:
+#
+#   * **privacy** — the invite-id predicate is two ANDed disjunctions, and every plausible
+#     mis-transcription (`||` for `&&`, dropping either half) leaves a live invite link on a team
+#     that was just closed.
+#   * **search** — three predicates whose "obvious" Rust is wrong: the private filter is *two*
+#     ANDed pairs, `NotEq` plus `IS NULL` is `IS DISTINCT FROM` and not `= FALSE`, and the
+#     empty-term guard reads the **raw** term rather than the sanitised one.
+#   * **create** — the invite id is cleared and re-minted, the id guard precedes `PreSave`, and
+#     the creator's email is copied onto the team (which is what makes them a team admin).
+#   * **remove** — the permission gate lives inside `if session != target`, the channel cascade
+#     skips DMs, and the three cleanups in `postProcessTeamMemberLeave` have no other trigger.
+#   * **delete** — the permanent branch's config gate and the two 401 ids, which differ by ten
+#     characters at the same status.
+#
+# **Mutations deliberately not here, because they are equivalent mutants.** Each was reasoned
+# about rather than run, and each is stated so the next reader does not re-add it:
+#
+#   * `member.roles = String::new()` in `remove_team_member`. `update_member` writes
+#     `explicit_roles` into the `Roles` column, so the assignment never reaches the database on
+#     either server — asserted in `a_removal_cascades_the_same_way_on_both_servers`, which pins
+#     the read at `team_user` *after* the removal.
+#   * the `omit_users` map on the team-wide `leave_team` event. Nothing in this suite opens a
+#     socket, so a mutation that told the departing user twice is invisible. A `SocketProbe`
+#     fixture would be needed and is not written.
+#   * the second `creator_can_invite_users_on_team` call in `create_team`. Every caller the suite
+#     has is a system admin holding `invite_user`, so the blanking branch is never taken.
+#     Reaching it needs a creator who can create teams and cannot invite, which no stock role is.
+#
+# **The `store` lines name the single test that must catch them**, and the batch is run with
+#   MUTATE_STORE_TARGETS='--test db_team_search'
+# exported. `MUTATE_FILTER` filters test *names*, not targets — `db_team_search` is a file name
+# and matches no test function, so using it as the filter runs zero tests and reports SURVIVED.
+# That is the trap `mutate.sh`'s header warns about; it was hit on the first run of this plan.
+#
+# **One line survived the first run and is counted only after the fixture was fixed.**
+# `search-term-guard-reads-the-sanitised-term` moves the empty-term guard onto the *sanitised*
+# term, so a term of nothing but escape characters drops the `ILIKE` clause entirely. The fixture
+# could not see it: with the clause the query is `ILIKE '%%'`, which matches every row, and
+# without it there is no predicate — the same ten teams either way. The right answer and the wrong
+# answer coincided, for the fourth time in this project.
+#
+# The discriminator is a team with **NULL `name` and NULL `displayname`**: `NULL ILIKE '%%'` is
+# NULL, not true, so a clause that is built drops that row and a clause that is skipped keeps it.
+# `a_term_of_nothing_but_escape_characters_matches_everything` now seeds one, and the mutation is
+# CAUGHT.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+privacy-regenerate-or-instead-of-and	crates/mm-app/src/team.rs	    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)\n        && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)	    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)\n        || (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)	unit	team::
+privacy-regenerate-drops-the-change-half	crates/mm-app/src/team.rs	    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)\n        && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)	    (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)	unit	team::
+privacy-regenerate-drops-the-not-open-half	crates/mm-app/src/team.rs	    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)\n        && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)	    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)	unit	team::
+privacy-switch-swaps-the-two-open-invite-answers	crates/mm-api/src/teams.rs	        mm_model::team::TEAM_OPEN => Some((mm_model::team::TEAM_OPEN, true)),\n        mm_model::team::TEAM_INVITE => Some((mm_model::team::TEAM_INVITE, false)),	        mm_model::team::TEAM_OPEN => Some((mm_model::team::TEAM_OPEN, false)),\n        mm_model::team::TEAM_INVITE => Some((mm_model::team::TEAM_INVITE, true)),	unit	teams::
+privacy-body-rejects-trailing-junk	crates/mm-api/src/teams.rs	    let value = decode_one_from_json::<Option<serde_json::Value>>(bytes)\n        .ok()\n        .flatten()?;	    let value = serde_json::from_slice::<Option<serde_json::Value>>(bytes)\n        .ok()\n        .flatten()?;	unit	teams::
+privacy-never-regenerates-the-invite-id	crates/mm-app/src/team.rs	        ) {\n            team.invite_id = mm_model::utils::new_id();\n        }\n\n        team.team_type = team_type.to_owned();	        ) {\n            // the invite id is left alone\n        }\n\n        team.team_type = team_type.to_owned();	api	team_write_family
+search-pagination-refusal-needs-both-fields	crates/mm-api/src/teams.rs	    let any_pagination_field = opts.page.is_some() || opts.per_page.is_some();	    let any_pagination_field = opts.page.is_some() && opts.per_page.is_some();	unit	teams::
+search-exclude-policy-checks-truth-not-presence	crates/mm-api/src/teams.rs	    if opts.exclude_policy_constrained.is_some() && !can_read_retention_policy {	    if opts.exclude_policy_constrained == Some(true) && !can_read_retention_policy {	unit	teams::
+search-keeps-the-callers-policy-id	crates/mm-api/src/teams.rs	    opts.policy_id = None;\n\n    if can_read_retention_policy {	    if can_read_retention_policy {	api	team_write_family
+search-swaps-the-private-and-public-arms	crates/mm-api/src/teams.rs	            Ok(TeamSearchPlan::Private)\n        }	            Ok(TeamSearchPlan::Public)\n        }	unit	teams::
+search-private-filter-drops-the-group-constrained-half	crates/mm-store/src/team_store.rs	                           OR (NOT $7\n                               AND t.allowopeninvite IS DISTINCT FROM TRUE\n                               AND t.groupconstrained IS DISTINCT FROM TRUE))	                           OR (NOT $7\n                               AND t.allowopeninvite IS DISTINCT FROM TRUE))	store	the_private_filter_also_excludes_group_constrained_teams
+search-group-constrained-false-is-equals-false	crates/mm-store/src/team_store.rs	                               OR (NOT $8 AND t.groupconstrained IS DISTINCT FROM TRUE))\n                          AND ($9::text IS NULL OR t.type::text = $9)	                               OR (NOT $8 AND t.groupconstrained = FALSE))\n                          AND ($9::text IS NULL OR t.type::text = $9)	store	the_group_constrained_filter_treats_null_as_not_constrained
+search-adds-a-delete-at-filter	crates/mm-store/src/team_store.rs	         WHERE ($2::text IS NULL OR rpt.policyid = $2)\n           AND (NOT $3::boolean OR rpt.teamid IS NULL)	         WHERE t.deleteat = 0\n           AND ($2::text IS NULL OR rpt.policyid = $2)\n           AND (NOT $3::boolean OR rpt.teamid IS NULL)	store	an_archived_team_is_searchable
+search-open-keeps-the-callers-group-constrained	crates/mm-store/src/team_store.rs	    opts.team_type = Some(mm_model::team::TEAM_OPEN.to_owned());\n    opts.allow_open_invite = Some(true);\n    opts.group_constrained = None;	    opts.team_type = Some(mm_model::team::TEAM_OPEN.to_owned());\n    opts.allow_open_invite = Some(true);	store	search_open_forces_its_three_fields_over_the_callers
+search-private-also-filters-on-type	crates/mm-store/src/team_store.rs	    opts.allow_open_invite = Some(false);\n    opts.group_constrained = None;\n    opts\n}	    opts.allow_open_invite = Some(false);\n    opts.group_constrained = None;\n    opts.team_type = Some(mm_model::team::TEAM_INVITE.to_owned());\n    opts\n}	store	search_private_keys_on_open_invite_and_not_on_type
+search-term-guard-reads-the-sanitised-term	crates/mm-store/src/team_store.rs	    if term.is_empty() {\n        return None;\n    }	    if term.is_empty() || term.chars().all(|c| c == 92 as char) {\n        return None;\n    }	store	a_term_of_nothing_but_escape_characters_matches_everything
+search-offset-is-the-page-not-the-product	crates/mm-store/src/team_store.rs	        (Some(per_page), Some(page.saturating_mul(per_page)))	        (Some(per_page), Some(page))	store	only_both_pagination_fields_limit_the_result
+create-keeps-the-submitted-invite-id	crates/mm-app/src/team.rs	        team.invite_id = String::new();\n\n        if !team.id.is_empty() {	        if !team.id.is_empty() {	api	team_write_family
+create-id-guard-runs-after-presave	crates/mm-app/src/team.rs	        if !team.id.is_empty() {\n            return Err(create_team_error(mm_store::StoreError::InvalidInput {\n                entity: "Team",\n                field: "id",\n                value: team.id.clone(),\n            }));\n        }\n\n        team.pre_save();	        team.pre_save();\n        if !team.id.is_empty() {\n            return Err(create_team_error(mm_store::StoreError::InvalidInput {\n                entity: "Team",\n                field: "id",\n                value: team.id.clone(),\n            }));\n        }\n	api	team_write_family
+create-duplicate-name-uses-the-other-existing-id	crates/mm-app/src/team.rs	            "store.sql_team.save_team.existing.app_error",\n            None,\n            format!("id={value}"),	            "app.team.save.existing.app_error",\n            None,\n            format!("id={value}"),	unit	team::
+create-does-not-overwrite-the-team-email	crates/mm-app/src/team.rs	        team.email.clone_from(&user.email);	        // the submitted email is kept	api	team_write_family
+create-default-channels-are-not-translated	crates/mm-app/src/team.rs	                "town-square" => TOWN_SQUARE_DISPLAY_NAME,\n                "off-topic" => OFF_TOPIC_DISPLAY_NAME,	                "town-square" => "town-square",\n                "off-topic" => "off-topic",	api	team_write_family
+create-name-conflict-not-recognised	crates/mm-store/src/team_store.rs	                .is_some_and(|name| name.eq_ignore_ascii_case("teams_name_key"));	                .is_some_and(|name| name.eq_ignore_ascii_case("teams_pkey"));	api	team_write_family
+remove-permission-gate-applies-to-self-removal	crates/mm-api/src/team_member_writes.rs	    if !self_removal\n        && !state\n            .app\n            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_REMOVE_USER_FROM_TEAM)\n            .await	    if !state\n            .app\n            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_REMOVE_USER_FROM_TEAM)\n            .await	api	team_write_family
+remove-skips-the-channel-cascade	crates/mm-app/src/team_member.rs	            if !channel.is_group_or_direct() {\n                self.remove_channel_membership(&user.id, &channel.id)\n                    .await?;\n            }	            if false {\n                self.remove_channel_membership(&user.id, &channel.id)\n                    .await?;\n            }	api	team_write_family
+remove-skips-the-sidebar-clear	crates/mm-app/src/team_member.rs	        self.store()\n            .sidebar_category()\n            .clear_sidebar_on_team_leave(&user.id, &member.team_id)\n            .await	        std::future::ready(Ok::<(), mm_store::StoreError>(()))\n            .await	api	team_write_family
+remove-sidebar-clear-drops-the-channel-rows	crates/mm-store/src/sidebar_category_store.rs	        sqlx::query!(\n            r#"\n            DELETE FROM sidebarchannels\n             WHERE categoryid IN (	        sqlx::query!(\n            r#"\n            DELETE FROM sidebarchannels\n             WHERE FALSE AND categoryid IN (	api	team_write_family
+remove-skips-the-preference-delete	crates/mm-app/src/team_member.rs	        self.store()\n            .preference()\n            .delete_category(&user.id, &member.team_id)\n            .await	        std::future::ready(Ok::<(), mm_store::StoreError>(()))\n            .await	api	team_write_family
+remove-skips-the-user-update-at-bump	crates/mm-app/src/team_member.rs	        self.store()\n            .user()\n            .update_update_at(&user.id)\n            .await	        std::future::ready(Ok::<i64, mm_store::StoreError>(0))\n            .await	api	team_write_family
+remove-leave-message-picks-the-wrong-branch	crates/mm-app/src/team_member.rs	        let (message, post_type) = if self_leave {	        let (message, post_type) = if !self_leave {	api	team_write_family
+remove-does-not-stamp-delete-at	crates/mm-app/src/team_member.rs	        member.roles = String::new();\n        member.delete_at = get_millis();	        member.roles = String::new();	api	team_write_family
+remove-missing-membership-is-not-a-400	crates/mm-app/src/team_member.rs	                    "api.team.remove_user_from_team.missing.app_error",\n                    None,\n                    String::new(),\n                    400,	                    "api.team.remove_user_from_team.missing.app_error",\n                    None,\n                    String::new(),\n                    404,	api	team_write_family
+invalidate-only-purges-team-tokens	crates/mm-app/src/team.rs	            mm_model::token::TOKEN_TYPE_TEAM_INVITATION,\n            mm_model::token::TOKEN_TYPE_GUEST_INVITATION,	            mm_model::token::TOKEN_TYPE_TEAM_INVITATION,	api	team_write_family
+delete-permanent-flag-inverted	crates/mm-api/src/teams.rs	        if state.app.config().enable_api_team_deletion {	        if !state.app.config().enable_api_team_deletion {	api	team_write_family
+delete-not-enabled-ids-swapped	crates/mm-api/src/teams.rs	    if is_system_admin {\n        "api.user.delete_team.not_enabled.for_admin.app_error"\n    } else {\n        "api.user.delete_team.not_enabled.app_error"\n    }	    if is_system_admin {\n        "api.user.delete_team.not_enabled.app_error"\n    } else {\n        "api.user.delete_team.not_enabled.for_admin.app_error"\n    }	api	team_write_family
+delete-permanent-branch-ignored	crates/mm-api/src/teams.rs	    if permanent {\n        if state.app.config().enable_api_team_deletion {	    if false {\n        if state.app.config().enable_api_team_deletion {	api	team_write_family
+delete-does-not-stamp-delete-at	crates/mm-app/src/team.rs	        team.delete_at = mm_model::utils::get_millis();\n        let deleted = self.write_team("SoftDeleteTeam", team).await?;	        let deleted = self.write_team("SoftDeleteTeam", team).await?;	api	team_write_family
+delete-permission-gate-after-the-permanent-branch	crates/mm-api/src/teams.rs	    if !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_TEAM],\n        ))\n        .into_response();\n    }\n\n    if permanent {	    if permanent {	api	team_write_family
+control-rename-the-search-like-term-binding	crates/mm-store/src/team_store.rs	    let like_term = team_search_like_term(&opts.term);\n    let allow_open_invite = opts.allow_open_invite;\n    let group_constrained = opts.group_constrained;\n    let team_type = opts.team_type.as_deref();\n    // Whether `teamFilters` is non-nil before the ABAC widening	    let needle = team_search_like_term(&opts.term);\n    let like_term = needle;\n    let allow_open_invite = opts.allow_open_invite;\n    let group_constrained = opts.group_constrained;\n    let team_type = opts.team_type.as_deref();\n    // Whether `teamFilters` is non-nil before the ABAC widening	store
+control-reorder-independent-team-insert-columns	crates/mm-store/src/team_store.rs	            (id, createat, updateat, deleteat, displayname, name, description, email, type,	            (id, updateat, createat, deleteat, displayname, name, description, email, type,	api	team_write_family

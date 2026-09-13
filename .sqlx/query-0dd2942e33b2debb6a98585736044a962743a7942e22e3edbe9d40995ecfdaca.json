@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT c.teamid                             AS \"team_id!\",\n                   cm.userid                            AS \"user_id!\",\n                   cm.channelid                         AS \"channel_id!\",\n                   cm.msgcount                          AS \"msg_count!\",\n                   cm.msgcountroot                      AS \"msg_count_root!\",\n                   cm.mentioncount                      AS \"mention_count!\",\n                   cm.mentioncountroot                  AS \"mention_count_root!\",\n                   COALESCE(cm.urgentmentioncount, 0)   AS \"urgent_mention_count!\",\n                   cm.lastviewedat                      AS \"last_viewed_at!\",\n                   cm.notifyprops\n              FROM channelmembers cm\n              LEFT JOIN channels c ON c.id = cm.channelid\n             WHERE cm.userid = $1\n               AND cm.channelid = $2\n               AND c.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "team_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "msg_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "msg_count_root!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "mention_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "mention_count_root!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "urgent_mention_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_viewed_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "0dd2942e33b2debb6a98585736044a962743a7942e22e3edbe9d40995ecfdaca"
+}

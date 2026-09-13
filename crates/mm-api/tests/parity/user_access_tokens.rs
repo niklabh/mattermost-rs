@@ -493,6 +493,12 @@ async fn a_refusal_on_a_bot_does_not_fall_through_to_the_user_check() {
     }
     let _tokens = TOKENS.lock().await;
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    // **This test sweeps the whole `mmrsbot%` prefix on the way out**, so it has to hold the lock
+    // every other bot-planting suite holds. It did not, and a full-workspace run deleted a
+    // `parity::user_convert` fixture between that suite's conversion and its read-back — a
+    // failure naming a route this file never touches. The sweep is `unplant_bots`, not
+    // `unplant_bot`, which is what makes the lock necessary rather than merely tidy.
+    let _bots = common::BOT_FIXTURES.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
     let team = create_team(&client, &admin, "tokbot").await;

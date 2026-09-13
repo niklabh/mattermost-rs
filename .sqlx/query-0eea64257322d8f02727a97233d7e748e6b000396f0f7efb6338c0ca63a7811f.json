@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                    AS \"id!\",\n                   COALESCE(createat, 0) AS \"createat!\",\n                   COALESCE(userid, '')  AS \"userid!\",\n                   COALESCE(text, '')    AS \"text!\"\n              FROM termsofservice\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "text!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0eea64257322d8f02727a97233d7e748e6b000396f0f7efb6338c0ca63a7811f"
+}

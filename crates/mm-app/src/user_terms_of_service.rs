@@ -43,6 +43,76 @@ impl App {
     }
 }
 
+impl App {
+    /// Port of `app.App.SaveUserTermsOfService` (user_terms_of_service.go:29).
+    ///
+    /// # `accepted` picks one of two different store calls, not a column value
+    ///
+    /// `true` upserts the acceptance row; `false` **deletes** it, matched on the user *and* the
+    /// revision. So rejecting revision A leaves an acceptance of revision B standing, and
+    /// rejecting a revision that was never accepted succeeds silently — the delete never checks
+    /// how many rows it removed.
+    ///
+    /// # The two branches do not share an error id
+    ///
+    /// `app.user_terms_of_service.save.app_error` and
+    /// `app.user_terms_of_service.delete.app_error`, both 500 and both under the same `where`.
+    /// The save branch additionally lets a `*model.AppError` through untouched, which is how
+    /// `UserTermsOfService.IsValid`'s **400** reaches a client — an empty `termsOfServiceId`
+    /// posted with `accepted: true` is `model.user_terms_of_service.is_valid.
+    /// terms_of_service_id.app_error`, not a 500. The delete branch has no such passthrough,
+    /// because nothing on it validates.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, terms_id = %terms_of_service_id, accepted))]
+    pub async fn save_user_terms_of_service(
+        &self,
+        user_id: &str,
+        terms_of_service_id: &str,
+        accepted: bool,
+    ) -> AppResult {
+        if accepted {
+            let row = UserTermsOfService {
+                user_id: user_id.to_owned(),
+                terms_of_service_id: terms_of_service_id.to_owned(),
+                create_at: 0,
+            };
+            self.store()
+                .user_terms_of_service()
+                .save(row)
+                .await
+                .map_err(|err| match err {
+                    mm_store::StoreError::Invalid { app_error, .. } => app_error,
+                    other => {
+                        tracing::error!(error = %other, "user terms of service save failed");
+                        AppError::boxed(
+                            "SaveUserTermsOfService",
+                            "app.user_terms_of_service.save.app_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                    }
+                })?;
+        } else {
+            self.store()
+                .user_terms_of_service()
+                .delete(user_id, terms_of_service_id)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "user terms of service delete failed");
+                    AppError::boxed(
+                        "SaveUserTermsOfService",
+                        "app.user_terms_of_service.delete.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::App;

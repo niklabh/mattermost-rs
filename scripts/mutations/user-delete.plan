@@ -1,0 +1,79 @@
+# Mutation plan for `DELETE /api/v4/users/{user_id}` and the deactivation half of
+# `PUT /api/v4/users/{user_id}/active`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-delete.plan
+#
+# The decisions worth mutating here are the ones whose wrong answer destroys an account, or
+# silently fails to:
+#
+#   * which OAuth table each of the two by-user deletes touches. The names lie —
+#     `PermanentDeleteAuthDataByUser` deletes `OAuthAccessData`, not `OAuthAuthData` — so the swap
+#     is the single most plausible reading error in this port, and both directions are mutated.
+#   * whether either delete is predicated on the user at all. Re-expressed as `length($1) >= 0`
+#     rather than dropped: `sqlx::query!` refuses a bound parameter the SQL never references, and
+#     a mutation that does not compile is a harness fault rather than a verdict.
+#   * the forward gate — `owns_bots` — in four directions: inverted, widened to disabled bots,
+#     narrowed to orphans, and unfiltered by owner. Each of the four is a different wrong reading
+#     of the same two `GetBots` call sites in `userDeactivated`.
+#   * whether `DeleteAt` is written at all, and whether the revocation and the OAuth sweep happen.
+#   * `strconv.ParseBool`, in both directions: too permissive (any non-empty value erases an
+#     account) and case-insensitive (`tRue` is not a bool in Go).
+#   * the two self-deactivation guards, which are *not* the same guard — `deleteUser`'s has a
+#     `manage_system` escape and `updateUserActive`'s does not.
+#
+# # Not mutated, and why — three of these are real gaps, not omissions
+#
+# **The `permanent` refusal's non-admin arm** (`api.user.delete_user.not_enabled.app_error`) has
+# no test. Reaching the `permanent` fork requires passing `SessionHasPermissionToUserOrBot`, which
+# for a caller who is not a system admin means the target is themselves — and the self-delete
+# guard refuses that first while `EnableUserDeactivation` is off, which it is. So the terse arm is
+# unreachable on this stack and a mutation forcing it would be a false CAUGHT.
+#
+# **`deleteUser`'s `manage_system` escape** and **the "target is a system admin" refusal** both
+# need a system administrator as the subject. The only one on this stack is the fixture account
+# the whole parity binary logs in as; a suite that deactivates it takes every other suite with it.
+# Same reasoning as [D-462].
+#
+# **"the forward precedes the write" is not observable over HTTP for a bot owner.** Moving the
+# `owns_bots` check to *after* `deactivate_user` would leave a locally-written row and then hand
+# the request to Go, which writes the same row again, revokes the same sessions and clears the
+# same OAuth grants — a superset. Nothing in the response or the database distinguishes the two
+# orders. The property is enforced by reading the handler, and is stated as a parity risk rather
+# than claimed as tested. See [D-475].
+#
+# **No line here has an empty `to`, and that is load-bearing.** `mutate-batch.sh` parses with
+# `IFS=$'\t' read`, and tab is an IFS *whitespace* character, so a run of two tabs collapses into
+# one: an empty `to` shifts `suite` into the replacement text and `filter` into `suite`, the suite
+# is then unrecognised, `mutate.sh` exits 2 and `set -e` throws away every line after it. Measured
+# on this plan's first run — it aborted at line 14 having completed thirteen. The four lines that
+# want a block *deleted* replace it with an inert `let _ = …;` instead, which is a deletion for
+# every purpose that matters and keeps the field count right.
+#
+# Field order: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.
+
+store-authdata-delete-hits-the-access-table	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthauthdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthaccessdata WHERE userid = $1", user_id)	api	user_deletes
+store-accessdata-delete-hits-the-auth-table	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthaccessdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthauthdata WHERE userid = $1", user_id)	api	user_deletes
+store-authdata-delete-keys-on-the-code	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthauthdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthauthdata WHERE code = $1", user_id)	api	user_deletes
+store-accessdata-delete-keys-on-the-token	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthaccessdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthaccessdata WHERE token = $1", user_id)	api	user_deletes
+store-authdata-delete-loses-its-predicate	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthauthdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthauthdata WHERE length($1) >= 0", user_id)	api	user_deletes
+store-accessdata-delete-loses-its-predicate	crates/mm-store/src/oauth_store.rs	sqlx::query!("DELETE FROM oauthaccessdata WHERE userid = $1", user_id)	sqlx::query!("DELETE FROM oauthaccessdata WHERE length($1) >= 0", user_id)	api	user_deletes
+app-owns-bots-is-inverted	crates/mm-app/src/user_delete.rs	let owns = !bots.0.is_empty();	let owns = bots.0.is_empty();	api	user_deletes
+app-owns-bots-counts-disabled-bots-too	crates/mm-app/src/user_delete.rs	include_deleted: false,	include_deleted: true,	api	user_deletes
+app-owns-bots-asks-only-for-orphans	crates/mm-app/src/user_delete.rs	only_orphaned: false,	only_orphaned: true,	api	user_deletes
+app-owns-bots-drops-the-owner-filter	crates/mm-app/src/user_delete.rs	owner_id: user_id.to_owned(),	owner_id: String::new(),	api	user_deletes
+app-deactivate-leaves-delete-at-at-zero	crates/mm-app/src/user_delete.rs	user.delete_at = user.update_at;	user.delete_at = 0;	api	user_deletes
+app-deactivate-skips-the-session-revocation	crates/mm-app/src/user_delete.rs	self.revoke_all_sessions(&new_user.id).await?;	let _ = &new_user.id;	api	user_deletes
+app-deactivate-skips-user-deactivated	crates/mm-app/src/user_delete.rs	self.user_deactivated(&new_user.id).await;	let _ = &new_user.id;	api	user_deletes
+app-deactivate-drops-the-auth-data-delete	crates/mm-app/src/user_delete.rs	        if let Err(err) = self\n            .store()\n            .oauth()\n            .remove_auth_data_by_user_id(user_id)\n            .await\n        {\n            tracing::warn!(error = %err, user_id, "unable to remove auth data by user id");\n        }\n	        let _ = user_id;\n	api	user_deletes
+app-deactivate-drops-the-access-data-delete	crates/mm-app/src/user_delete.rs	        if let Err(err) = self\n            .store()\n            .oauth()\n            .permanent_delete_auth_data_by_user(user_id)\n            .await\n        {\n            tracing::warn!(error = %err, user_id, "unable to remove oauth access data by user id");\n        }\n	        let _ = user_id;\n	api	user_deletes
+api-permanent-flag-is-read-in-reverse	crates/mm-api/src/user_deletes.rs	if state.app.config().enable_api_user_deletion {	if !state.app.config().enable_api_user_deletion {	api	user_deletes
+api-permanent-refusal-always-uses-the-terse-id	crates/mm-api/src/user_deletes.rs	let id = if caller_is_admin {	let id = if false {	api	user_deletes
+api-self-delete-guard-is-inverted	crates/mm-api/src/user_deletes.rs	&& !state.app.config().enable_user_deactivation	&& state.app.config().enable_user_deactivation	api	user_deletes
+api-self-delete-guard-compares-the-wrong-id	crates/mm-api/src/user_deletes.rs	if user_id == session.0.user_id\n        && !state.app.config().enable_user_deactivation	if user_id != session.0.user_id\n        && !state.app.config().enable_user_deactivation	api	user_deletes
+api-delete-drops-the-permission-gate	crates/mm-api/src/user_deletes.rs	    if let Err(err) = require_edit_target(&state, &session, &user_id).await {\n        return err.into_response();\n    }\n	    let _ = &session;\n	api	user_deletes
+api-permanent-accepts-any-non-empty-value	crates/mm-api/src/user_deletes.rs	matches!(raw, "1" | "t" | "T" | "TRUE" | "true" | "True")	!raw.is_empty()	unit	user_deletes::tests
+api-permanent-is-case-insensitive	crates/mm-api/src/user_deletes.rs	matches!(raw, "1" | "t" | "T" | "TRUE" | "true" | "True")	raw == "1" || raw.eq_ignore_ascii_case("t") || raw.eq_ignore_ascii_case("true")	unit	user_deletes::tests
+api-active-deactivation-skips-the-bot-check	crates/mm-api/src/user_updates.rs	        match state.app.owns_bots(&user_id).await {\n            Ok(true) => {\n                tracing::Span::current().record("forwarded", true);\n                return proxy::forward_to_go(State(state), request).await;\n            }\n            Ok(false) => {}\n            Err(err) => return ApiError::from(err).into_response(),\n        }\n	        let _ = &user_id;\n	api	user_deletes
+api-active-self-deactivation-refusal-is-inverted	crates/mm-api/src/user_updates.rs	if !state.app.config().enable_user_deactivation {	if state.app.config().enable_user_deactivation {	api	user_deletes
+control-rename-the-owns-bots-binding	crates/mm-app/src/user_delete.rs	        let owns = !bots.0.is_empty();\n        tracing::Span::current().record("owns_bots", owns);\n        Ok(owns)	        let any_bots = !bots.0.is_empty();\n        tracing::Span::current().record("owns_bots", any_bots);\n        Ok(any_bots)	api	user_deletes
+control-reorder-two-independent-span-records	crates/mm-api/src/user_deletes.rs	    tracing::Span::current().record("user_id", &user_id);\n    tracing::Span::current().record("permanent", permanent);	    tracing::Span::current().record("permanent", permanent);\n    tracing::Span::current().record("user_id", &user_id);	api	user_deletes

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sidebarcategories WHERE teamid = $1 AND userid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be2e160a1ff37a6d117d3a16dd0874f01969870917b3cd51f5af8220c09e14ee"
+}

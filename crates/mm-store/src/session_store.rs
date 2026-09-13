@@ -22,6 +22,47 @@ pub trait SessionStore {
         session_id_or_token: &str,
     ) -> impl std::future::Future<Output = Result<Session, StoreError>> + Send;
 
+    /// Port of `SqlSessionStore.Save` (session_store.go:41).
+    ///
+    /// # `PreSave` runs inside the store, and it overwrites
+    ///
+    /// Go mutates the session it is handed: `Id` and `Token` are filled **only if empty**, but
+    /// `CreateAt` and `LastActivityAt` are assigned unconditionally — so a caller that set
+    /// `CreateAt` has it discarded. `DoLogin` then reads `session.CreateAt` back out to pass to
+    /// `UpdateLastLogin`, which is why the login timestamp is the store's clock and not the
+    /// handler's.
+    ///
+    /// A non-empty `Id` is refused outright (`ErrInvalidInput`), which the app layer turns into
+    /// `app.session.save.existing.app_error` at **400** while every other failure is
+    /// `app.session.save.app_error` at 500.
+    ///
+    /// # The returned session is not the one you passed
+    ///
+    /// `TeamMembers` is populated from `Team().GetTeamsForUser(..., true)` and filtered to
+    /// `DeleteAt == 0` — the same hydration [`SessionStore::get`] does, so a session handed
+    /// straight back to a client carries its teams.
+    fn save(
+        &self,
+        session: Session,
+    ) -> impl std::future::Future<Output = Result<Session, StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.GetLRUSessions` (session_store.go:161).
+    ///
+    /// `ORDER BY LastActivityAt DESC` with a limit **and an offset** — so it returns the
+    /// *least* recently used by skipping the newest `offset`. `limitNumberOfSessions`
+    /// (app/session.go:155) calls it with limit 100 and offset 499 and revokes everything it
+    /// gets back, which is how a user is capped at 500 live sessions.
+    ///
+    /// Unlike [`SessionStore::get_sessions`] this does **not** hydrate `TeamMembers`: Go's
+    /// `GetLRUSessions` skips the loop `GetSessions` runs, and its only caller throws the
+    /// sessions away after reading their ids.
+    fn get_lru_sessions(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
+
     /// Port of `SqlSessionStore.GetSessions` (session_store.go:126).
     fn get_sessions(
         &self,
@@ -48,6 +89,61 @@ pub trait SessionStore {
     fn remove(
         &self,
         session_id_or_token: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.RemoveAllSessions` (session_store.go:298).
+    ///
+    /// `DELETE FROM Sessions` with no `WHERE`. There is exactly one caller — the
+    /// sysadmin-only `POST /api/v4/users/sessions/revoke/all` — and it logs out **every user on
+    /// the server, including the caller**. No id, no filter, no soft delete.
+    fn remove_all_sessions(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateDeviceId` (session_store.go:343).
+    ///
+    /// Four columns in one statement, and the fourth is the one a reader drops: `ExpiredNotify`
+    /// is reset to `false` alongside the new `ExpiresAt`. Go writes them together because the
+    /// flag records that the *old* expiry was already announced to the client; leaving it set
+    /// against a fresh expiry suppresses the next warning.
+    ///
+    /// **Both device columns are always written.** The caller is responsible for passing the
+    /// existing value back when it is only changing one of them — see `attachDeviceIds`
+    /// (api4/user.go:2810), which reads the current session to do exactly that. Omitting that
+    /// fallback here would be a silent wipe of the other column.
+    fn update_device_id(
+        &self,
+        session_id: &str,
+        device_id: &str,
+        voip_device_id: &str,
+        expires_at: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateProps` (session_store.go:353).
+    ///
+    /// Writes the **whole** `Props` object, not a merge — the caller mutates the session it holds
+    /// and passes it back. A nil map marshals to JSON `null` in Go rather than `{}`, and that is
+    /// reproduced: see [D-331], which is the same column shape read back.
+    fn update_props(
+        &self,
+        session: &Session,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateRoles` (session_store.go:331).
+    ///
+    /// **Every live session of the user**, not one row: the `WHERE` is on `UserId`, so a role
+    /// change reaches the caller's phone and desktop as well as the browser that made it. A port
+    /// keyed on `Id` would leave every other device carrying the old roles until it re-logged in.
+    ///
+    /// The length guard is `> UserRolesMaxLength` on the *bytes* of the string and it fires
+    /// **before** the statement, so an over-long list writes nothing at all. It is a plain
+    /// `fmt.Errorf` in Go rather than an `ErrInvalidInput`, and `UpdateUserRolesWithUser` only
+    /// *logs* whatever comes back — so this failing is silent to the client either way, and the
+    /// user row has already been written by then.
+    fn update_roles(
+        &self,
+        user_id: &str,
+        roles: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -200,6 +296,116 @@ impl SessionStore for SqlSessionStore {
         Ok(session)
     }
 
+    #[tracing::instrument(skip_all, fields(session_id, user_id = %session.user_id))]
+    async fn save(&self, mut session: Session) -> Result<Session, StoreError> {
+        if !session.id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "Session",
+                field: "id",
+                value: session.id,
+            });
+        }
+
+        session.pre_save();
+        session
+            .is_valid()
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Session",
+                app_error,
+            })?;
+
+        // `json.Marshal(session.Props)`. `pre_save` guarantees a map, so this is never `null`
+        // from here — but the column is nullable and `Get` reads a NULL back as an empty map,
+        // which is the shape [D-331] describes.
+        // `Decode` for a *serialise*, as `update_props` below already does and for the same
+        // reason: the direction is infallible in practice and a second variant for it is noise.
+        let props = serde_json::to_value(&session.props).map_err(|source| StoreError::Decode {
+            entity: "Session",
+            column: "props",
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO sessions
+                (id, token, createat, expiresat, lastactivityat, userid, deviceid,
+                 voipdeviceid, roles, isoauth, expirednotify, props)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            "#,
+            session.id,
+            session.token,
+            session.create_at,
+            session.expires_at,
+            session.last_activity_at,
+            session.user_id,
+            session.device_id,
+            session.voip_device_id,
+            session.roles,
+            session.is_oauth,
+            session.expired_notify,
+            props,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to save Session with id={}", session.id),
+            source,
+        })?;
+
+        tracing::Span::current().record("session_id", session.id.as_str());
+        session.team_members = Some(self.team_members_for_session(&session.user_id).await?);
+        Ok(session)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, limit, offset, count))]
+    async fn get_lru_sessions(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Session>, StoreError> {
+        let rows = sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id,
+                   token,
+                   createat,
+                   expiresat,
+                   lastactivityat,
+                   userid,
+                   deviceid,
+                   voipdeviceid,
+                   roles,
+                   isoauth,
+                   props,
+                   expirednotify
+              FROM sessions
+             WHERE userid = $1
+             ORDER BY lastactivityat DESC
+             LIMIT $2 OFFSET $3
+            "#,
+            user_id,
+            limit,
+            offset,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Sessions with userId={user_id}"),
+            source,
+        })?;
+
+        let sessions = rows
+            .into_iter()
+            .map(SessionRow::into_session)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+
+        tracing::Span::current().record("limit", limit);
+        tracing::Span::current().record("offset", offset);
+        tracing::Span::current().record("count", sessions.len());
+        Ok(sessions)
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
     async fn get_sessions(&self, user_id: &str) -> Result<Vec<Session>, StoreError> {
         // `ORDER BY LastActivityAt DESC` is Go's, and it is part of the response: the API returns
@@ -291,6 +497,103 @@ impl SessionStore for SqlSessionStore {
         })?;
 
         tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(deleted))]
+    async fn remove_all_sessions(&self) -> Result<(), StoreError> {
+        // `DELETE FROM Sessions` — verbatim, no predicate. See the trait doc for what that means.
+        let result = sqlx::query!("DELETE FROM sessions")
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to delete all Sessions".to_owned(),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session_id))]
+    async fn update_device_id(
+        &self,
+        session_id: &str,
+        device_id: &str,
+        voip_device_id: &str,
+        expires_at: i64,
+    ) -> Result<(), StoreError> {
+        // `UPDATE Sessions SET DeviceId = ?, VoIPDeviceId = ?, ExpiresAt = ?, ExpiredNotify =
+        // false WHERE Id = ?`. `ExpiredNotify = false` is a literal in Go, not a parameter.
+        sqlx::query!(
+            "UPDATE sessions SET deviceid = $1, voipdeviceid = $2, expiresat = $3, \
+             expirednotify = false WHERE id = $4",
+            device_id,
+            voip_device_id,
+            expires_at,
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with id={session_id}"),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session.id))]
+    async fn update_props(&self, session: &Session) -> Result<(), StoreError> {
+        // `json.Marshal(session.Props)`: `None` is JSON `null`, an empty map is `{}`. Both are
+        // reachable — `Session::props` is `Option<StringMap>` precisely because the column is.
+        // A `StringMap` cannot fail to serialise, but `to_value` is fallible and swallowing the
+        // result would be the "never swallow an error you could type" rule broken for nothing.
+        // `Decode` is the variant `user_store` already uses for the same infallible-in-practice
+        // direction; a second variant for it would be noise.
+        let props = serde_json::to_value(&session.props).map_err(|source| StoreError::Decode {
+            entity: "Session",
+            column: "props",
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE sessions SET props = $1 WHERE id = $2",
+            props,
+            session.id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update Session".to_owned(),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn update_roles(&self, user_id: &str, roles: &str) -> Result<(), StoreError> {
+        // `len(roles)` in Go is bytes, not characters.
+        if roles.len() > mm_model::user::USER_ROLES_MAX_LENGTH {
+            return Err(StoreError::Argument {
+                entity: "Session",
+                detail: "given session roles length exceeds max storage limit",
+            });
+        }
+
+        sqlx::query!(
+            "UPDATE sessions SET roles = $1 WHERE userid = $2",
+            roles,
+            user_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with userId={user_id}"),
+            source,
+        })?;
+
         Ok(())
     }
 }

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM usertermsofservice\n             WHERE userid = $1 AND termsofserviceid = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dec4f0921706cf52260bc7eca97c599c1dbde8c1eb775a7c9b9395da97239357"
+}

@@ -1,0 +1,102 @@
+# Mutation plan for the seven routes of `api4/channel_join_request.go`.
+#
+#   scripts/go-discoverable.sh start
+#   scripts/mutate-batch.sh scripts/mutations/channel-join-requests.plan
+#
+# **The discoverable oracle must be running.** Six of the seven parity tests assert nothing without
+# it, and `parity/channel_join_requests.rs` panics rather than skipping for exactly that reason —
+# `scripts/stack.sh up` starts it now.
+#
+# The decisions these cover: the list's `Id DESC` tiebreak (two seeded rows share a `CreateAt`, so
+# dropping it reorders the answer) and its direction; the offset being `page * per_page`; the two
+# pagination clamps, which exist **twice** — once in the app layer and once in the store — with
+# different floors; the status filter's default and the two count queries' separate predicates; the
+# partial unique index being matched by *name*; `PreSave`/`PreUpdate` running at the store rather
+# than at the caller; the seven guard refusals and their order and status codes; the review
+# accepting only two of the four statuses; both places that drop the requester's free text; the
+# conflict path answering 201 with the existing row instead of 409; the bodiless 404; the trailing
+# newline; the `edit_other_users` gate being a string comparison; and the feature flag itself.
+#
+# A `\n` in a pattern becomes a newline, so no anchor here can quote Rust's own `b'\n'` — which is
+# why `ENCODER_NEWLINE` is a named constant in `channel_join_requests.rs`.
+#
+# # Two decisions this plan deliberately does not mutate, because nothing could catch them
+#
+# * **The patch's `invalid_body_param` parameter name.** `requestJoinChannel` names `body` and
+#   `patchChannelJoinRequest` names `channel_join_request_patch`; Go interpolates the name into
+#   `message`, but until i18n lands ours *is* the raw id ([D-092]) and the name reaches the wire
+#   nowhere else — `AppError.params` is not serialised. Swapping the two is invisible by
+#   construction, not for want of a fixture.
+# * **`UpdateChannelJoinRequest`'s cross-channel 404.** Reaching it needs an admin of **two**
+#   channels reviewing one channel's request against the other, because the handler's permission
+#   check fires first for anyone else. Worth a fixture; it is not here.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+#
+# # The tally (2026-09-12)
+#
+# **41 run, 38 caught, 3 survived, 0 harness faults — both controls SURVIVED**, so the batch is
+# valid. Two of the three survivors are those controls; the third is an equivalent mutant. Two
+# lines survived the *first* run and are counted above only after the fixtures that could not see
+# them were fixed and each was re-run alone:
+#
+# * `store-list-drops-the-id-tiebreak` — the tied pair was planted **high id first**. With no
+#   tiebreak the query is a seq scan and a sort, and Postgres's sort is stable at this size, so the
+#   tied rows came back in insertion order — which was the same answer `Id DESC` gives. The right
+#   answer and the wrong answer coincided. Planting `mmm` before `zzz` separates them; CAUGHT.
+#   Measured against Postgres directly rather than reasoned about.
+# * `app-a-negative-page-survives` — the predicate is `page < 0` and the mutation loosens it to
+#   `< -1`, which `-3` cannot see. The test now drives `-1` first, and `-1` is the only value that
+#   separates the two; CAUGHT.
+#
+# The equivalent mutant is `app-review-keeps-a-stale-denial-reason`: removing
+# `current.denial_reason = String::new()` before the re-set is invisible **by construction**,
+# because the row reaching that line is always `pending` and `IsValid` refuses a non-empty
+# `DenialReason` on any status but `denied`. So a pending row can never carry one to clear. The
+# assignment stays — it is Go's, and it is the guard that makes the re-set safe if the reachable
+# set ever widens — but no fixture can catch its removal.
+#
+
+store-list-drops-the-id-tiebreak	crates/mm-store/src/channel_join_request_store.rs	WHERE channelid = $1 AND status = $2\n             ORDER BY createat DESC, id DESC	WHERE channelid = $1 AND status = $2\n             ORDER BY createat DESC	store	join_request_store
+store-list-orders-oldest-first	crates/mm-store/src/channel_join_request_store.rs	WHERE channelid = $1 AND status = $2\n             ORDER BY createat DESC, id DESC	WHERE channelid = $1 AND status = $2\n             ORDER BY createat ASC, id DESC	store	join_request_store
+store-offset-is-not-multiplied	crates/mm-store/src/channel_join_request_store.rs	    (per_page, page.saturating_mul(per_page))	    (per_page, page)	store	join_request_store
+store-clamp-lets-a-zero-per-page-through	crates/mm-store/src/channel_join_request_store.rs	    let per_page = if opts.per_page <= 0 {	    let per_page = if opts.per_page < 0 {	store	join_request_store
+store-clamp-keeps-a-negative-page	crates/mm-store/src/channel_join_request_store.rs	    let page = opts.page.max(0);	    let page = opts.page;	store	join_request_store
+store-status-default-is-approved	crates/mm-store/src/channel_join_request_store.rs	    if opts.status.is_empty() {\n        CHANNEL_JOIN_REQUEST_STATUS_PENDING	    if opts.status.is_empty() {\n        "approved"	store	join_request_store
+store-list-count-ignores-the-status	crates/mm-store/src/channel_join_request_store.rs	FROM channeljoinrequests WHERE channelid = $1 AND status = $2"#,\n            channel_id,\n            status,\n        )\n        .fetch_one(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to count ChannelJoinRequests for channel_id={channel_id}"),	FROM channeljoinrequests WHERE channelid = $1 AND ($2 = $2)"#,\n            channel_id,\n            status,\n        )\n        .fetch_one(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("failed to count ChannelJoinRequests for channel_id={channel_id}"),	store	join_request_store
+store-count-pending-counts-approved	crates/mm-store/src/channel_join_request_store.rs	            CHANNEL_JOIN_REQUEST_STATUS_PENDING,\n        )\n        .fetch_one(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!(\n                "failed to count pending	            "approved",\n        )\n        .fetch_one(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!(\n                "failed to count pending	store	join_request_store
+store-pending-lookup-ignores-the-status	crates/mm-store/src/channel_join_request_store.rs	             WHERE channelid = $1 AND userid = $2 AND status = $3	             WHERE channelid = $1 AND userid = $2 AND status <> $3	store	join_request_store
+store-update-of-nothing-is-a-success	crates/mm-store/src/channel_join_request_store.rs	        if affected == 0 {	        if affected == 1000 {	store	join_request_store
+store-save-skips-pre-save	crates/mm-store/src/channel_join_request_store.rs	        req.pre_save();\n\n        // Go returns the	        // Go returns the	store	join_request_store
+store-update-skips-pre-update	crates/mm-store/src/channel_join_request_store.rs	        req.pre_update();\n\n        req.is_valid()	        req.is_valid()	store	join_request_store
+store-conflict-matches-any-unique-violation	crates/mm-store/src/channel_join_request_store.rs	        .is_some_and(|name| name == "idx_channeljoinrequests_pending_unique")	        .is_some_and(|name| name != "idx_channeljoinrequests_pending_unique")	store	join_request_store
+store-update-swaps-message-and-denial-reason	crates/mm-store/src/channel_join_request_store.rs	               SET status = $1, message = $2, denialreason = $3,	               SET status = $1, message = $3, denialreason = $2,	api	channel_join_requests
+app-archived-is-a-403	crates/mm-app/src/channel_join_request.rs	            "api.channel.discoverable_join_request.archived.app_error",\n            format!("channel_id={}", channel.id),\n            400,	            "api.channel.discoverable_join_request.archived.app_error",\n            format!("channel_id={}", channel.id),\n            403,	unit	channel_join_request::
+app-not-discoverable-is-a-400	crates/mm-app/src/channel_join_request.rs	            "api.channel.discoverable_join_request.not_discoverable.app_error",\n            format!("channel_id={}", channel.id),\n            403,	            "api.channel.discoverable_join_request.not_discoverable.app_error",\n            format!("channel_id={}", channel.id),\n            400,	unit	channel_join_request::
+app-shared-check-is-skipped	crates/mm-app/src/channel_join_request.rs	    if channel.is_shared() {	    if channel.is_shared() && false {	unit	channel_join_request::
+app-deleted-user-is-checked-before-guest	crates/mm-app/src/channel_join_request.rs	    if user.is_guest() {	    if user.is_guest() && user.delete_at == 0 {	unit	channel_join_request::
+app-sanitize-accepts-an-unknown-status	crates/mm-app/src/channel_join_request.rs	    if opts.status.is_empty() || !is_valid_channel_join_request_status(&opts.status) {	    if opts.status.is_empty() {	unit	channel_join_request::
+app-per-page-maximum-is-the-default	crates/mm-app/src/channel_join_request.rs	    } else if opts.per_page > PAGINATION_MAX_PER_PAGE {\n        opts.per_page = PAGINATION_MAX_PER_PAGE;	    } else if opts.per_page > PAGINATION_MAX_PER_PAGE {\n        opts.per_page = PAGINATION_DEFAULT_PER_PAGE;	unit	channel_join_request::
+app-a-negative-page-survives	crates/mm-app/src/channel_join_request.rs	    if opts.page < 0 {\n        opts.page = 0;	    if opts.page < -1 {\n        opts.page = 0;	unit	channel_join_request::
+app-empty-list-is-an-empty-array	crates/mm-app/src/channel_join_request.rs	        requests: if rows.is_empty() { None } else { Some(rows) },	        requests: Some(rows),	unit	channel_join_request::
+app-review-accepts-any-valid-status	crates/mm-app/src/channel_join_request.rs	        if patch.status != CHANNEL_JOIN_REQUEST_STATUS_APPROVED\n            && patch.status != CHANNEL_JOIN_REQUEST_STATUS_DENIED\n        {	        if !is_valid_channel_join_request_status(&patch.status) {	api	channel_join_requests
+app-review-keeps-the-message	crates/mm-app/src/channel_join_request.rs	        // Drop the original message from the response; it served its purpose during review.\n        current.message = String::new();	        // Drop the original message from the response; it served its purpose during review.	api	channel_join_requests
+app-review-keeps-a-stale-denial-reason	crates/mm-app/src/channel_join_request.rs	        current.denial_reason = String::new();\n        if patch.status == CHANNEL_JOIN_REQUEST_STATUS_DENIED	        if patch.status == CHANNEL_JOIN_REQUEST_STATUS_DENIED	api	channel_join_requests
+app-withdraw-keeps-the-message	crates/mm-app/src/channel_join_request.rs	        current.status = CHANNEL_JOIN_REQUEST_STATUS_WITHDRAWN.to_owned();\n        current.message = String::new();	        current.status = CHANNEL_JOIN_REQUEST_STATUS_WITHDRAWN.to_owned();	api	channel_join_requests
+app-withdraw-serves-a-non-owner-and-refuses-the-owner	crates/mm-app/src/channel_join_request.rs	        if current.user_id != user_id {	        if current.user_id == user_id {	api	channel_join_requests
+app-a-conflicting-save-is-a-409	crates/mm-app/src/channel_join_request.rs	                    Ok(existing) => Ok(JoinRequestOutcome::Pending(Box::new(existing))),	                    Ok(_existing) => Err(AppError::boxed("RequestJoinChannel", "api.channel.discoverable_join_request.duplicate.app_error", None, String::new(), 409)),	api	channel_join_requests
+app-not-pending-is-a-400	crates/mm-app/src/channel_join_request.rs	        "api.channel.discoverable_join_request.not_pending.app_error",\n        None,\n        format!("request_id={request_id}"),\n        409,	        "api.channel.discoverable_join_request.not_pending.app_error",\n        None,\n        format!("request_id={request_id}"),\n        400,	api	channel_join_requests
+api-feature-flag-inverted-on-the-create	crates/mm-api/src/channel_join_requests.rs	    if !state.app.config().feature_flag_discoverable_channels {\n        return proxy::forward_to_go(State(state), request).await;\n    }\n    let (parts, body) = request.into_parts();\n    let body = match axum::body::to_bytes(body, usize::MAX).await {\n        Ok(body) => body,\n        Err(err) => {\n            tracing::debug!(error = %err, "could not read the join-request body");	    if state.app.config().feature_flag_discoverable_channels {\n        return proxy::forward_to_go(State(state), request).await;\n    }\n    let (parts, body) = request.into_parts();\n    let body = match axum::body::to_bytes(body, usize::MAX).await {\n        Ok(body) => body,\n        Err(err) => {\n            tracing::debug!(error = %err, "could not read the join-request body");	api	channel_join_requests
+api-create-answers-200-not-201	crates/mm-api/src/channel_join_requests.rs	            encoded("requestJoinChannel", StatusCode::CREATED, &req)	            encoded("requestJoinChannel", StatusCode::OK, &req)	api	channel_join_requests
+api-drops-the-trailing-newline	crates/mm-api/src/channel_join_requests.rs	            body.push(ENCODER_NEWLINE);	            let _ = ENCODER_NEWLINE;	api	channel_join_requests
+api-the-miss-is-an-encoded-null	crates/mm-api/src/channel_join_requests.rs	        Ok(None) => Outcome::Served(	        Ok(None) => return encoded("getMyChannelJoinRequest", StatusCode::NOT_FOUND, &serde_json::Value::Null),\n        #[allow(unreachable_patterns)]\n        Ok(None) => Outcome::Served(	api	channel_join_requests
+api-my-list-serves-another-users-requests	crates/mm-api/src/channel_join_requests.rs	    if user_id != session.0.user_id {	    if user_id != session.0.user_id && false {	api	channel_join_requests
+api-patch-skips-the-request-id-check	crates/mm-api/src/channel_join_requests.rs	    if !is_valid_id(request_id) {	    if !is_valid_id(request_id) && false {	api	channel_join_requests
+api-the-manage-gate-is-skipped	crates/mm-api/src/channel_join_requests.rs	    if allowed {\n        return Ok(());\n    }	    if allowed || true {\n        return Ok(());\n    }	api	channel_join_requests
+api-count-is-a-bare-number	crates/mm-api/src/channel_join_requests.rs	            &serde_json::json!({ "count": count }),	            &count,	api	channel_join_requests
+api-per-page-is-clamped-before-the-app-layer	crates/mm-api/src/channel_join_requests.rs	        per_page: parse_per_page(query),	        per_page: parse_per_page(query).max(1),	api	channel_join_requests
+api-status-query-key-misspelled	crates/mm-api/src/channel_join_requests.rs	        status: crate::channels::query_first(query, "status")	        status: crate::channels::query_first(query, "statuses")	api	channel_join_requests
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/channel_join_requests.rs	    let existing = match state\n        .app\n        .get_my_channel_join_request(&session.0.user_id, channel_id)\n        .await\n    {\n        Ok(Some(req)) => req,\n        Ok(None) => {\n            return Outcome::Failed(ApiError::from(AppError::new(\n                "withdrawMyChannelJoinRequest",\n                "app.channel.join_request.not_found.app_error",\n                None,\n                format!("channel_id={channel_id}"),\n                404,\n            )));\n        }\n        Err(err) => return Outcome::Failed(err.into()),\n    };\n\n    match state\n        .app\n        .withdraw_channel_join_request(&existing.id, &session.0.user_id)	    let found = match state\n        .app\n        .get_my_channel_join_request(&session.0.user_id, channel_id)\n        .await\n    {\n        Ok(Some(req)) => req,\n        Ok(None) => {\n            return Outcome::Failed(ApiError::from(AppError::new(\n                "withdrawMyChannelJoinRequest",\n                "app.channel.join_request.not_found.app_error",\n                None,\n                format!("channel_id={channel_id}"),\n                404,\n            )));\n        }\n        Err(err) => return Outcome::Failed(err.into()),\n    };\n    let existing = found;\n\n    match state\n        .app\n        .withdraw_channel_join_request(&existing.id, &session.0.user_id)	api	channel_join_requests
+control-reorder-independent-selects	crates/mm-store/src/channel_join_request_store.rs	                   createat     AS "create_at!",\n                   updateat     AS "update_at!",\n                   reviewedby   AS "reviewed_by!",\n                   reviewedat   AS "reviewed_at!"\n              FROM channeljoinrequests\n             WHERE channelid = $1 AND status = $2\n             ORDER BY createat DESC, id DESC	                   updateat     AS "update_at!",\n                   createat     AS "create_at!",\n                   reviewedby   AS "reviewed_by!",\n                   reviewedat   AS "reviewed_at!"\n              FROM channeljoinrequests\n             WHERE channelid = $1 AND status = $2\n             ORDER BY createat DESC, id DESC	api	channel_join_requests

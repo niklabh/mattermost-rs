@@ -11,6 +11,7 @@ pub mod bot;
 pub mod brand;
 pub mod channel;
 pub mod channel_create;
+pub mod channel_join_request;
 pub mod channel_member;
 pub mod channel_view;
 pub mod channel_write;
@@ -26,8 +27,12 @@ pub mod export;
 pub mod file;
 /// Port of `platform/shared/filestore` — the local driver, and a refusal for the other two.
 pub mod filestore;
+/// The one unlicensed read of `app/group.go`, for `members_minus_group_members`.
+pub mod group;
 /// The websocket connection registry and event fan-out — Go's `app/platform` hub.
 pub mod hub;
+/// The supported-locale list, for `users.CreateUser`'s locale reset.
+pub mod i18n;
 /// The format-detection half of Go's `image.DecodeConfig`.
 pub mod imaging;
 /// Port of the file-backend half of `app/import.go`.
@@ -35,9 +40,12 @@ pub mod import;
 pub mod job;
 pub mod license;
 pub mod limits;
+pub mod login;
 pub mod oauth;
 pub mod password;
 pub mod post;
+pub mod post_create;
+pub mod post_unread;
 pub mod post_write;
 pub mod preference;
 pub mod properties;
@@ -59,7 +67,13 @@ pub mod upload;
 pub mod usage;
 pub mod user;
 pub mod user_access_token;
+pub mod user_agent;
+pub mod user_auth;
+pub mod user_convert;
+pub mod user_create;
+pub mod user_delete;
 pub mod user_terms_of_service;
+pub mod user_update;
 pub mod utils;
 /// Port of `app/view.go` — the integrated-boards (kanban view) surface.
 pub mod view;
@@ -92,6 +106,16 @@ pub struct App {
     /// written. See `crate::status` and [D-191].
     status_cache: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, mm_model::status::Status>>,
+    >,
+    /// Go's `Server.seenPendingPostIdsCache` (app/post.go:28), shared across every clone of
+    /// `App` for the same reason the status cache is: a pending post id claimed by one request
+    /// must be the one the retry sees.
+    ///
+    /// A map rather than an LRU because the eviction policy is not what
+    /// `deduplicateCreatePost` reads — the three states (absent, claimed, saved) are, and each
+    /// answers differently. Entries carry their own expiry and are dropped on the way past.
+    pending_post_ids: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<String, crate::post_create::PendingPostEntry>>,
     >,
     /// Go's `platform.filestore` — the backend every file, image, emoji and brand read goes
     /// through. Built once from the configuration, like Go's, so a route never re-reads
@@ -144,6 +168,9 @@ impl App {
             export_filestore,
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            pending_post_ids: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }

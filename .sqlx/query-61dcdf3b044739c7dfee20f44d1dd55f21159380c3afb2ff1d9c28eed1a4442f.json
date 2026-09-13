@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM posts\n         WHERE channelid = $1\n           AND createat > $2\n           AND NOT (type = ANY($3))\n           AND deleteat = 0\n           AND ($4 = '' OR userid <> $4)\n           AND rootid = ''\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "61dcdf3b044739c7dfee20f44d1dd55f21159380c3afb2ff1d9c28eed1a4442f"
+}

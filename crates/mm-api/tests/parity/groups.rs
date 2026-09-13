@@ -191,7 +191,12 @@ async fn a_non_mux_segment_is_forwarded() {
     assert_eq!(ours.status().as_u16(), 404, "{p}");
 }
 
-/// Registering the `GET`s must not turn the `POST` beside them into our 405.
+/// Registering these methods must not turn the ones beside them into our 405.
+///
+/// **`POST /api/v4/groups` moved out of this test on 2026-09-12**: `createGroup` is now served
+/// here too, and `parity::group_writes` owns it. What is left is the methods gorilla registers on
+/// neither — a `PUT` and a `PATCH` on the collection — which must still reach Go for its own
+/// answer rather than axum's 405.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
     if !stack_enabled() {
@@ -201,20 +206,22 @@ async fn other_methods_are_forwarded() {
     let client = client();
     let token = go_minted_token(&client).await;
 
-    let ours = client
-        .post(format!("{RUST}{LIST}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(
-        ours.headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "POST {LIST} must be forwarded"
-    );
+    for method in [reqwest::Method::PUT, reqwest::Method::PATCH] {
+        let ours = client
+            .request(method.clone(), format!("{RUST}{LIST}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("we answer");
+        assert_eq!(
+            ours.headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("go"),
+            "{method} {LIST} must be forwarded"
+        );
+    }
 }
 
 /// Every `GET` in the file, each reaching the gate, each answering the same 501.

@@ -1,0 +1,499 @@
+{
+    "decode": [
+        {
+            "name": "bare_array_one",
+            "body": "[\"a@example.com\"]",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "bare_array_two",
+            "body": "[\"a@example.com\",\"b@example.com\"]",
+            "err": false,
+            "emails": [
+                "a@example.com",
+                "b@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "bare_array_empty",
+            "body": "[]",
+            "err": false,
+            "emails": [],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "bare_array_null_element",
+            "body": "[null]",
+            "err": false,
+            "emails": [
+                ""
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "bare_array_of_numbers",
+            "body": "[1,2]",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "bare_array_of_objects",
+            "body": "[{\"emails\":[\"a@example.com\"]}]",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "object_empty",
+            "body": "{}",
+            "err": false,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "object_emails",
+            "body": "{\"emails\":[\"a@example.com\"]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "object_every_field",
+            "body": "{\"emails\":[\"a@example.com\"],\"channelIds\":[\"abcdefghijklmnopqrstuvwxyz\"],\"message\":\"hi\",\"profiles\":[{\"email\":\"a@example.com\",\"username\":\"someone\",\"first_name\":\"Some\",\"last_name\":\"One\"}]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": [
+                "abcdefghijklmnopqrstuvwxyz"
+            ],
+            "message": "hi",
+            "profile_count": 1,
+            "profiles_present": [
+                true
+            ],
+            "first_email": "a@example.com",
+            "first_username": "someone",
+            "first_first_name": "Some",
+            "first_last_name": "One"
+        },
+        {
+            "name": "object_unknown_key",
+            "body": "{\"emails\":[\"a@example.com\"],\"nope\":1}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "object_channel_ids_snake_case_is_ignored",
+            "body": "{\"emails\":[\"a@example.com\"],\"channel_ids\":[\"abcdefghijklmnopqrstuvwxyz\"]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "whole_body_null",
+            "body": "null",
+            "err": false,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "emails_null",
+            "body": "{\"emails\":null}",
+            "err": false,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "emails_null_element",
+            "body": "{\"emails\":[null]}",
+            "err": false,
+            "emails": [
+                ""
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "emails_null_among_strings",
+            "body": "{\"emails\":[\"a@example.com\",null]}",
+            "err": false,
+            "emails": [
+                "a@example.com",
+                ""
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "message_null",
+            "body": "{\"emails\":[\"a@example.com\"],\"message\":null}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "channel_ids_null",
+            "body": "{\"emails\":[\"a@example.com\"],\"channelIds\":null}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "channel_ids_null_element",
+            "body": "{\"emails\":[\"a@example.com\"],\"channelIds\":[null]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": [
+                ""
+            ],
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "profiles_null",
+            "body": "{\"emails\":[\"a@example.com\"],\"profiles\":null}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": [],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "profiles_null_element",
+            "body": "{\"emails\":[\"a@example.com\"],\"profiles\":[null]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 1,
+            "profiles_present": [
+                false
+            ],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "profiles_two_with_a_null",
+            "body": "{\"emails\":[\"a@example.com\"],\"profiles\":[null,{\"email\":\"a@example.com\",\"username\":\"someone\"}]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 2,
+            "profiles_present": [
+                false,
+                true
+            ],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "profile_field_null",
+            "body": "{\"emails\":[\"a@example.com\"],\"profiles\":[{\"email\":null,\"username\":null,\"first_name\":null,\"last_name\":null}]}",
+            "err": false,
+            "emails": [
+                "a@example.com"
+            ],
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 1,
+            "profiles_present": [
+                true
+            ],
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "not_json",
+            "body": "garbage",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "empty_body",
+            "body": "",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "number",
+            "body": "5",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "string",
+            "body": "\"x\"",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "true",
+            "body": "true",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "emails_is_a_number",
+            "body": "{\"emails\":5}",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "emails_is_a_string",
+            "body": "{\"emails\":\"a@example.com\"}",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "message_is_a_number",
+            "body": "{\"emails\":[\"a@example.com\"],\"message\":5}",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "profiles_is_an_object",
+            "body": "{\"emails\":[\"a@example.com\"],\"profiles\":{}}",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        },
+        {
+            "name": "trailing_garbage",
+            "body": "{\"emails\":[\"a@example.com\"]} and then some",
+            "err": true,
+            "emails": null,
+            "channel_ids": null,
+            "message": "",
+            "profile_count": 0,
+            "profiles_present": null,
+            "first_email": "",
+            "first_username": "",
+            "first_first_name": "",
+            "first_last_name": ""
+        }
+    ]
+}

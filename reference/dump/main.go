@@ -48,6 +48,17 @@ import (
 var registry = map[string]any{
 	"app_error":      &model.AppError{},
 	"user":           &model.User{},
+
+	// `model.UserAuth` (user.go:225), the body and the response of
+	// `PUT /users/{user_id}/auth`. Both fields carry `omitempty`, so a
+	// zero-valued instance would marshal to `{}` and prove nothing — which is
+	// exactly why it goes through the reflective filler like everything else.
+	"user_auth": &model.UserAuth{},
+
+	// The `members_minus_group_members` pair (user.go:1118, :1139), landed with
+	// `GET /channels/{channel_id}/members_minus_group_members`.
+	"user_with_groups":             &model.UserWithGroups{},
+	"users_with_groups_and_count":  &model.UsersWithGroupsAndCount{},
 	"team":           &model.Team{},
 	"channel":        &model.Channel{},
 	"channel_member": &model.ChannelMember{},
@@ -608,6 +619,14 @@ var overrides = map[string]any{
 	// true, and Channel.IsValid only accepts Discoverable on a private channel. Pinning
 	// the type keeps every other field non-zero — pinning Discoverable to false instead
 	// would trade a real parity signal for a cosmetic one.
+	// The path root is the lowercased **Go type name**, not the registry key.
+	// `MentionCount` and `MentionCountRoot` hash to the same value mod 100, so the generated
+	// fixture gave both 54 and the round-trip test could not tell the two `rename`s apart — on a
+	// type `POST /users/{user_id}/posts/{post_id}/set_unread` now serves, where the pair is
+	// exactly what the CRT branch changes. Pinned so the five counters hold five different
+	// numbers. This rewrites `fixtures/channel_unread_at.json`; no Rust test asserted the old
+	// values, only the round trip.
+	"channelunreadat.mentioncountroot":   int64(71),
 	"channel.type":        "P",
 	"channel.displayname": "Town Square",
 	"channel.name":        "town-square",
@@ -852,6 +871,18 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_emoji.json"))
 
+	if err := writeTermsOfServiceBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: terms of service behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_terms_of_service.json"))
+
+	if err := writeEmojiUploadBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: emoji upload behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_emoji_upload.json"))
+
 	if err := writeReactionBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: reaction behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1026,6 +1057,18 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_view.json"))
 
+	if err := writeChannelJoinRequestBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel join request behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_join_request.json"))
+
+	if err := writeGroupBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: group behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_group.json"))
+
 	if err := writeChannelDataBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: channel data behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1055,6 +1098,11 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeUserUpdateBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user update behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := writeUserIsValidBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: user is_valid behaviour fixture: %v\n", err)
@@ -1108,6 +1156,16 @@ func main() {
 
 	if err := writeRoundOffBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: round-off behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeSessionWriteBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: session write behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeUserAgentBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user agent behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -1220,11 +1278,23 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_sidebar_category.json"))
 
+	if err := writeMemberInviteBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "member invite behaviour: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_member_invite.json"))
+
 	if err := writeTeamEmailBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: team email behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_email.json"))
+
+	if err := writeTeamPrivacyBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: team privacy behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_privacy.json"))
 
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.

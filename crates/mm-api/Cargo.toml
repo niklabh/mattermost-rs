@@ -33,6 +33,10 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 
 [dev-dependencies]
+# `ServiceExt::oneshot` drives the assembled `Router` in-process, which is how the route table's
+# *shape* is tested without a stack: adding a literal path segment can take a `{param}` route out
+# of service for every method, and that has cost this project a served route before.
+tower = { workspace = true, features = ["util"] }
 # The `write_file_response` corpus records bodies base64-encoded, since a range response is not
 # necessarily valid UTF-8.
 base64.workspace = true

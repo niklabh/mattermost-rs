@@ -11,6 +11,11 @@
 //! - `getTeamUnread` — `GET /api/v4/users/{user_id}/teams/{team_id}/unread`
 //! - `getAllTeams` — `GET /api/v4/teams`
 //! - `getTeamMembersByIds` — `POST /api/v4/teams/{team_id}/members/ids`
+//! - `updateTeamPrivacy` — `PUT /api/v4/teams/{team_id}/privacy`
+//! - `searchTeams` — `POST /api/v4/teams/search`
+//! - `createTeam` — `POST /api/v4/teams`
+//! - `invalidateAllEmailInvites` — `DELETE /api/v4/teams/invites/email`
+//! - `deleteTeam` — `DELETE /api/v4/teams/{team_id}` (the archive arm)
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -18,17 +23,21 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_app::team::TeamWrite;
 use mm_model::permission::{
+    PERMISSION_CREATE_TEAM, PERMISSION_INVALIDATE_EMAIL_INVITE, PERMISSION_INVITE_USER,
+    PERMISSION_MANAGE_TEAM, PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+};
+use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
     PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
     PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
-use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
 use mm_model::team::{Team, TeamPatch};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
+use mm_model::utils::decode_one_from_json;
 use mm_store::team_store::TeamMembersGetOptions;
 
 /// Port of `getTeamMembersForUser` for the `me` case.
@@ -1419,12 +1428,12 @@ pub async fn get_all_teams(
             .app
             .sanitize_teams(&session.0, &mut result.teams)
             .await;
-        serialised_team_listing(&result)?
+        serialised_team_listing("getAllTeams", &result)?
     } else {
         let mut teams = state.app.get_all_teams_page(offset, limit, &opts).await?;
         tracing::Span::current().record("count", teams.len());
         state.app.sanitize_teams(&session.0, &mut teams).await;
-        serialised_team_listing(&teams)?
+        serialised_team_listing("getAllTeams", &teams)?
     };
 
     Ok((
@@ -1438,17 +1447,21 @@ pub async fn get_all_teams(
         .into_response())
 }
 
-/// `json.Marshal` for either shape [`get_all_teams`] can return, with Go's own failure id.
+/// `json.Marshal` for either shape [`get_all_teams`] or [`search_teams`] can return, with Go's
+/// own failure id. `where_` is the handler name, which differs between the two call sites.
 ///
 /// Neither `[]*model.Team` nor `model.TeamsWithCount` can fail to marshal, so the 500 is the
 /// branch that keeps this crate free of `unwrap` rather than a behaviour claim — the same shape
 /// as `encoded_channel_list`.
 #[allow(clippy::result_large_err)]
-fn serialised_team_listing<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
+fn serialised_team_listing<T: serde::Serialize>(
+    where_: &'static str,
+    value: &T,
+) -> Result<Vec<u8>, ApiError> {
     serde_json::to_vec(value).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the team listing");
         ApiError::from(mm_model::utils::AppError::new(
-            "getAllTeams",
+            where_,
             "api.marshal_error",
             None,
             String::new(),
@@ -1775,6 +1788,710 @@ pub async fn restore_team(
     }
 }
 
+/// The two ids `deleteTeam` chooses between when permanent deletion is disabled — Go's comment
+/// is "More verbose error message for system admins".
+///
+/// The pair differs by the ten characters `for_admin.` in the middle and both are **401**, so the
+/// wrong one is invisible to any test that only checks the status. Same shape as
+/// `mm_api::channel_writes`' channel twin, with `team` where it says `channel`.
+fn team_deletion_not_enabled_id(is_system_admin: bool) -> &'static str {
+    if is_system_admin {
+        "api.user.delete_team.not_enabled.for_admin.app_error"
+    } else {
+        "api.user.delete_team.not_enabled.app_error"
+    }
+}
+
+/// Port of `deleteTeam` (api4/team.go:687) — `DELETE /api/v4/teams/{team_id}`.
+///
+/// An **archive**. `?permanent=true` is a different operation behind
+/// `ServiceSettings.EnableAPITeamDeletion`, which defaults to **false**.
+///
+/// # The permanent refusal is a 401, not a 403
+///
+/// And which id it carries depends on who asked — see [`team_deletion_not_enabled_id`]. The user
+/// lookup that decides it is `usrErr == nil && user != nil && user.IsSystemAdmin()`, so a
+/// **failed** lookup falls to the non-admin message rather than becoming an error of its own.
+/// `strconv.ParseBool` decides what "true" means and discards its error, so `?permanent=yes`
+/// archives the team.
+///
+/// # One permission, and it precedes everything
+///
+/// `manage_team`, team-scoped. There is no separate permission for the permanent arm: the config
+/// flag is the whole difference. The audit record's `GetTeam` is best-effort and its failure is
+/// ignored, so a missing team is **not** a 404 here — `SoftDeleteTeam`'s own `GetTeam` produces
+/// that, after the permission check.
+///
+/// # What is forwarded
+///
+/// - **`?permanent=true` with the flag on.** `PermanentDeleteTeam` purges every channel's posts,
+///   members and webhooks, the memberships, the slash commands and the row — ten store methods
+///   across five stores, none of them reachable on this deployment because the flag is off. See
+///   [D-370].
+/// - **A licensed installation**, on either arm: `cleanupTeamAccessControlPolicy` runs between
+///   the write and the event and needs the enterprise access-control service. Same rule as
+///   `mm_api::channel_writes::delete_channel`.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}`, no trailing newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, permanent, forwarded = false))]
+pub async fn delete_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    // `params.Permanent, _ = strconv.ParseBool(query.Get("permanent"))` (web/params.go:232).
+    let permanent = crate::channels::query_flag_is_true(request.uri().query(), "permanent");
+    tracing::Span::current().record("permanent", permanent);
+
+    match state.app.license_state().await {
+        Ok(mm_app::license::LicenseState::Licensed) => {
+            tracing::Span::current().record("forwarded", true);
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        Ok(_) => {}
+        Err(err) => return ApiError::from(err).into_response(),
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    if permanent {
+        if state.app.config().enable_api_team_deletion {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!("handing a permanent team deletion to Go");
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        let is_admin = state
+            .app
+            .get_user(&session.0.user_id)
+            .await
+            .map(|user| user.is_system_admin())
+            .unwrap_or(false);
+        return ApiError::from(mm_model::utils::AppError::new(
+            "deleteTeam",
+            team_deletion_not_enabled_id(is_admin),
+            None,
+            format!("teamId={team_id}"),
+            401,
+        ))
+        .into_response();
+    }
+
+    match state.app.soft_delete_team(&team_id).await {
+        Ok(()) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            r#"{"status":"OK"}"#,
+        )
+            .into_response(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `invalidateAllEmailInvites` (api4/team.go:2016) —
+/// `DELETE /api/v4/teams/invites/email`.
+///
+/// One permission, `invalidate_email_invite`, and no parameters at all — the route is
+/// server-wide, not team-scoped, despite living under `/teams`. Every outstanding team and guest
+/// invitation on the installation is voided and every pending resend job is cancelled.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}`, no trailing newline.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn invalidate_all_email_invites(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Response {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_INVALIDATE_EMAIL_INVITE)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVALIDATE_EMAIL_INVITE],
+        ))
+        .into_response();
+    }
+
+    match state.app.invalidate_all_email_invites().await {
+        Ok(()) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            r#"{"status":"OK"}"#,
+        )
+            .into_response(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `creatorCanInviteUsersOnTeam` (api4/team.go:158).
+///
+/// "Will the creator hold `invite_user` on the team once it exists?" — asked **twice** by
+/// `createTeam`, once as a gate and once to decide whether the reply carries an invite id, and
+/// the second call sees the *stored* team rather than the submitted one.
+///
+/// Three arms, in order:
+///
+/// 1. the session already holds `invite_user` at **system** scope → yes, without reading anything;
+/// 2. the team names a non-empty scheme → the scheme's `DefaultTeamUserRole` and
+///    `DefaultTeamAdminRole` are asked. **A scheme that cannot be read is a `false`, not an
+///    error** — Go logs and carries on, so an unreadable scheme silently strips the invite id
+///    from the reply rather than failing the create;
+/// 3. otherwise the built-in `team_user` and `team_admin`.
+///
+/// The last arm is why a create normally succeeds with an invite id: `team_user` grants
+/// `invite_user` on a stock server, and the creator is about to become a team member. The
+/// creator's *session* does not reflect that yet, which is exactly why Go asks the roles rather
+/// than the session.
+async fn creator_can_invite_users_on_team(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    team: &Team,
+) -> bool {
+    if state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_INVITE_USER)
+        .await
+    {
+        return true;
+    }
+
+    let roles = match team.scheme_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(scheme_id) => match state.app.get_scheme(scheme_id).await {
+            Ok(scheme) => vec![
+                scheme.default_team_user_role.clone(),
+                scheme.default_team_admin_role.clone(),
+            ],
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    scheme_id,
+                    "Failed to fetch scheme while checking invite permission for new team"
+                );
+                return false;
+            }
+        },
+        None => vec![
+            mm_model::role::TEAM_USER_ROLE_ID.to_owned(),
+            mm_model::role::TEAM_ADMIN_ROLE_ID.to_owned(),
+        ],
+    };
+
+    state
+        .app
+        .roles_grant_permission(&roles, &PERMISSION_INVITE_USER.id)
+        .await
+}
+
+/// Port of `createTeam` (api4/team.go:80) — `POST /api/v4/teams`.
+///
+/// # The refusal for "you may not create teams" is **not** a permission error
+///
+/// `model.NewAppError("createTeam", "api.team.is_team_creation_allowed.disabled.app_error", nil,
+/// "", http.StatusForbidden)` — a 403 with an id that names team *creation being disabled*, where
+/// every other gate on this route calls `SetPermissionError`. A client branching on the id sees
+/// the difference, and `SetPermissionError` would also fill `params` with a permission name this
+/// answer does not carry.
+///
+/// # The submitted `email` is discarded
+///
+/// The handler lower-cases it, and then `CreateTeamWithUser` overwrites the field with the
+/// creator's own address before anything is written. So the lower-casing is dead on this route —
+/// reproduced anyway, because it is one `strings.ToLower` away from mattering if the assignment
+/// ever moves.
+///
+/// # The reply's invite id is decided a second time
+///
+/// After the team exists, `creatorCanInviteUsersOnTeam(rteam)` runs **again** and blanks
+/// `InviteId` when it says no. So the 201 body of a create by a caller who cannot invite carries
+/// `"invite_id": ""` — the team has one, this caller is simply not shown it. Dropping that second
+/// call hands out a working invite link.
+///
+/// # What is deliberately not here
+///
+/// - `PrivacySettings.UseAnonymousURLs`, which randomises the team's name. Go ANDs it with
+///   `MinimumEnterpriseAdvancedLicense`, false on this Team Edition deployment for the reasons
+///   set out on [`mm_app::App::team_membership_access_control_enabled`], so the branch is dark.
+/// - The cloud team-limit check, gated on `License().IsCloud()` — likewise false.
+///
+/// Both are read from the Go source and never exercised; nothing here is a claim about them.
+///
+/// # Wire format
+///
+/// **201**, and `json.NewEncoder` leaves a trailing newline.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, team_id))]
+pub async fn create_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+    let mut team: Team = match decode_one_from_json::<Option<Team>>(&bytes) {
+        Ok(decoded) => decoded.unwrap_or_default(),
+        Err(err) => {
+            tracing::debug!(error = %err, "team body did not decode");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+
+    // `strings.ToLower`, the *simple* mapping — see `go_to_lower`. Overwritten downstream; see
+    // the note above.
+    team.email = mm_model::utils::go_to_lower(&team.email);
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_CREATE_TEAM)
+        .await
+    {
+        return ApiError::from(mm_model::utils::AppError::new(
+            "createTeam",
+            "api.team.is_team_creation_allowed.disabled.app_error",
+            None,
+            String::new(),
+            403,
+        ))
+        .into_response();
+    }
+
+    // `team.SchemeId != nil` — **presence**, so `{"scheme_id": ""}` needs the permission too.
+    if team.scheme_id.is_some()
+        && !state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+            )
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS],
+        ))
+        .into_response();
+    }
+
+    // Matching `updateTeam`/`patchTeam`: asking for open invitations or an allowed-domains list
+    // needs `invite_user`. `AllowedDomains != ""` is a value check where `SchemeId` above is a
+    // presence check, one line apart.
+    if (team.allow_open_invite || !team.allowed_domains.is_empty())
+        && !creator_can_invite_users_on_team(&state, &session, &team).await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    let mut created = match state
+        .app
+        .create_team_with_user(&mut team, &session.0.user_id)
+        .await
+    {
+        Ok(created) => created,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("team_id", &created.id);
+
+    if !creator_can_invite_users_on_team(&state, &session, &created).await {
+        created.invite_id = String::new();
+    }
+
+    match mm_model::utils::go_json_marshal(&created) {
+        Ok(json) => (
+            StatusCode::CREATED,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Which store search `searchTeams` runs, once the permissions have been read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TeamSearchPlan {
+    /// Both list permissions — the only arm that can paginate.
+    All,
+    /// `list_private` alone.
+    Private,
+    /// `list_public` alone.
+    Public,
+    /// Neither: Go does not call the store at all and answers with an empty list.
+    Neither,
+}
+
+/// The three ways `searchTeams` refuses before it searches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TeamSearchDenial {
+    /// `exclude_policy_constrained` **present** without the retention-policy read permission.
+    RetentionPolicyRead,
+    /// A paginated request on the private-only branch — 501, not 400.
+    PaginationPrivate,
+    /// A paginated request on the public-only branch — 501, with a different id.
+    PaginationPublic,
+}
+
+/// The decision half of `searchTeams` (api4/team.go:1539), lifted so every branch is testable
+/// without a database. `opts` is **mutated**, exactly as Go mutates `props`.
+///
+/// # The order of the five steps is on the wire
+///
+/// 1. **`exclude_policy_constrained` is checked for presence, not truth.** Go writes
+///    `props.ExcludePolicyConstrained != nil`, so `{"exclude_policy_constrained": false}` needs
+///    the retention-policy permission just as much as `true` does. A port that checks the value
+///    lets an unprivileged caller send the field.
+/// 2. **`policy_id` is cleared unconditionally**, whatever the caller sent. Go's comment: it "may
+///    only be used through the /data_retention/policies endpoint". Dropping this line lets any
+///    caller filter the team directory by a retention policy id.
+/// 3. `include_policy_id` is set from the same permission — so a compliance reader gets
+///    `policy_id` projected onto every team in the answer.
+/// 4. The list-permission matrix picks the store call. **Only the both-permissions arm may
+///    paginate**; the two single-permission arms answer **501** for a request carrying `page` or
+///    `per_page` — either one alone is enough, where the response *shape* later needs both.
+///    That asymmetry is Go's and is the easiest thing here to get wrong.
+/// 5. Neither permission is not an error: Go sets `teams = []` and falls through to the same
+///    sanitise-and-encode path, so the answer is `[]` with a 200.
+///
+/// `include_policy_enforced` is the ABAC widening on the public arm, gated behind
+/// [`mm_app::App::team_membership_access_control_enabled`] — a constant `false` here, so the
+/// parameter exists to keep the branch exercised by a unit test rather than unwritten.
+pub(crate) fn team_search_plan(
+    opts: &mut mm_model::team_search::TeamSearch,
+    can_read_retention_policy: bool,
+    list_private: bool,
+    list_public: bool,
+    membership_access_control_enabled: bool,
+) -> Result<TeamSearchPlan, TeamSearchDenial> {
+    if opts.exclude_policy_constrained.is_some() && !can_read_retention_policy {
+        return Err(TeamSearchDenial::RetentionPolicyRead);
+    }
+
+    opts.policy_id = None;
+
+    if can_read_retention_policy {
+        opts.include_policy_id = Some(true);
+    }
+
+    // Go's `props.Page != nil || props.PerPage != nil` — **or**, not the `IsPaginated()` **and**
+    // that decides the response shape further down.
+    let any_pagination_field = opts.page.is_some() || opts.per_page.is_some();
+
+    match (list_private, list_public) {
+        (true, true) => Ok(TeamSearchPlan::All),
+        (true, false) => {
+            if any_pagination_field {
+                return Err(TeamSearchDenial::PaginationPrivate);
+            }
+            Ok(TeamSearchPlan::Private)
+        }
+        (false, true) => {
+            if any_pagination_field {
+                return Err(TeamSearchDenial::PaginationPublic);
+            }
+            if membership_access_control_enabled {
+                opts.include_policy_enforced = Some(true);
+            }
+            Ok(TeamSearchPlan::Public)
+        }
+        (false, false) => Ok(TeamSearchPlan::Neither),
+    }
+}
+
+/// Port of `searchTeams` (api4/team.go:1539) — `POST /api/v4/teams/search`.
+///
+/// The decision table is [`team_search_plan`]; what is left here is the store call, the
+/// sanitiser and the two response shapes.
+///
+/// # The response shape and the pagination refusal disagree on purpose
+///
+/// The body is `{"teams": [...], "total_count": N}` only when **both** `page` and `per_page` are
+/// present, and a bare array otherwise — but the 501 on the single-permission arms fires when
+/// **either** is present. So `{"page": 0}` from a caller holding only `list_public` is a 501,
+/// while the same body from a caller holding both is a 200 carrying a bare array.
+///
+/// # `total_count` on the unpaginated path is the page length
+///
+/// `SearchAllTeams` returns `int64(len(results))` when it did not page, so the `total_count` a
+/// caller sees without `per_page` describes the slice it already has. Unreachable through the
+/// shape branch above, which needs both fields; kept because the app layer is shared.
+///
+/// # What is deliberately not here
+///
+/// `FilterNonQualifyingTeamsForUser` and `AnnotateRecommendedTeamsForUser`, both of which return
+/// immediately unless `TeamMembershipAccessControlEnabled()` — false on this deployment, same
+/// reasoning as [`get_all_teams`]. The `manage_system` permission that gates them is therefore
+/// not read at all; with ABAC on it would have to be.
+///
+/// # Wire format
+///
+/// `w.Write(payload)` (team.go:1619) — **no trailing newline**, on either shape.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plan, count))]
+pub async fn search_teams(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("team_search").into_response();
+        }
+    };
+    // `json.Decoder.Decode` reads one value and stops, and a `null` body leaves the struct at its
+    // zero value rather than erroring — both of which `decode_one_from_json` into an `Option`
+    // reproduce. An outright syntax error is `SetInvalidParamWithErr("team_search")`.
+    let mut opts: mm_model::team_search::TeamSearch =
+        match decode_one_from_json::<Option<mm_model::team_search::TeamSearch>>(&bytes) {
+            Ok(decoded) => decoded.unwrap_or_default(),
+            Err(err) => {
+                tracing::debug!(error = %err, "team search body did not decode");
+                return ApiError::invalid_param("team_search").into_response();
+            }
+        };
+
+    // Go polls this permission twice — once inside the `exclude_policy_constrained` branch and
+    // once after it. A pure role lookup, so one poll here; only the number of reads differs.
+    let can_read_retention_policy = state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+        )
+        .await;
+    let list_private = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_LIST_PRIVATE_TEAMS)
+        .await;
+    let list_public = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_LIST_PUBLIC_TEAMS)
+        .await;
+
+    let plan = match team_search_plan(
+        &mut opts,
+        can_read_retention_policy,
+        list_private,
+        list_public,
+        state.app.team_membership_access_control_enabled(),
+    ) {
+        Ok(plan) => plan,
+        Err(TeamSearchDenial::RetentionPolicyRead) => {
+            return ApiError::from(*make_permission_error(
+                &session.0,
+                &[&PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY],
+            ))
+            .into_response();
+        }
+        Err(denial) => {
+            let id = if denial == TeamSearchDenial::PaginationPrivate {
+                "api.team.search_teams.pagination_not_implemented.private_team_search"
+            } else {
+                "api.team.search_teams.pagination_not_implemented.public_team_search"
+            };
+            return ApiError::from(mm_model::utils::AppError::new(
+                "searchTeams",
+                id,
+                None,
+                String::new(),
+                501,
+            ))
+            .into_response();
+        }
+    };
+    tracing::Span::current().record("plan", format!("{plan:?}"));
+
+    let searched = match plan {
+        TeamSearchPlan::All => state.app.search_all_teams(&opts).await,
+        TeamSearchPlan::Private => state
+            .app
+            .search_private_teams(&opts)
+            .await
+            .map(|teams| (teams, 0)),
+        TeamSearchPlan::Public => state
+            .app
+            .search_public_teams(&opts)
+            .await
+            .map(|teams| (teams, 0)),
+        // Go never calls the store here; `totalCount` stays at its zero value.
+        TeamSearchPlan::Neither => Ok((Vec::new(), 0)),
+    };
+
+    let (mut teams, total_count) = match searched {
+        Ok(result) => result,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("count", teams.len());
+
+    state.app.sanitize_teams(&session.0, &mut teams).await;
+
+    // The shape needs **both** fields, unlike the 501 above, which needs either.
+    let body = if opts.is_paginated() {
+        serialised_team_listing(
+            "searchTeams",
+            &mm_model::team::TeamsWithCount { teams, total_count },
+        )
+    } else {
+        serialised_team_listing("searchTeams", &teams)
+    };
+
+    match body {
+        Ok(body) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The body of `updateTeamPrivacy` (api4/team.go:593), lifted so every rejection branch is
+/// testable without a server.
+///
+/// Go reads the body with `model.StringInterfaceFromJSON`, which **swallows every decode
+/// failure**: a malformed body, a JSON array, a bare `null` all become an empty map and then fall
+/// out of the `props["privacy"].(string)` type assertion as `SetInvalidParam("privacy")`. There
+/// is no "malformed body" answer on this route — one 400 covers all of it, naming `privacy`.
+///
+/// `json.Decoder.Decode` also reads **one** value and ignores whatever follows, so
+/// `{"privacy":"O"} junk` is accepted; hence [`decode_one_from_json`] rather than `from_slice`.
+///
+/// The two accepted strings each fix *both* outputs — `O` is open with `allow_open_invite = true`
+/// and `I` is invite-only with `false` — which is why the pair is returned together rather than
+/// recomputed downstream. Anything else, including `"o"`, `"P"` or a non-string, is the same 400.
+fn team_privacy_from_body(bytes: &[u8]) -> Option<(&'static str, bool)> {
+    let value = decode_one_from_json::<Option<serde_json::Value>>(bytes)
+        .ok()
+        .flatten()?;
+    match value.as_object()?.get("privacy")?.as_str()? {
+        mm_model::team::TEAM_OPEN => Some((mm_model::team::TEAM_OPEN, true)),
+        mm_model::team::TEAM_INVITE => Some((mm_model::team::TEAM_INVITE, false)),
+        _ => None,
+    }
+}
+
+/// Port of `updateTeamPrivacy` (api4/team.go:588) — `PUT /api/v4/teams/{team_id}/privacy`.
+///
+/// # Order: the body is parsed **before** either permission is checked
+///
+/// So a caller with neither permission sending `{"privacy":"X"}` gets the 400 naming `privacy`,
+/// not a 403 — the opposite of [`patch_team`], where both permissions precede the fetch. Swapping
+/// the parse and the permission check is invisible to a well-formed request and visible to every
+/// malformed one.
+///
+/// Then `manage_team`, then `invite_user`, both team-scoped and both unconditional — the same
+/// pair [`regenerate_team_invite_id`] requires, and for the same reason: this route can mint a
+/// new invite id as a side effect.
+///
+/// # The reply is a second read
+///
+/// `UpdateTeamPrivacy` returns nothing; Go re-fetches "to be consistent with
+/// UpdateChannelPrivacy" and sanitises *that*. The body is therefore not the struct that was
+/// written, and `json.NewEncoder` gives it a trailing newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
+pub async fn update_team_privacy(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        // Go's decoder sees a truncated stream and `StringInterfaceFromJSON` swallows it into an
+        // empty map, so a read failure lands on the same 400 as a malformed body.
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("privacy").into_response();
+        }
+    };
+
+    let Some((team_type, allow_open_invite)) = team_privacy_from_body(&bytes) else {
+        return ApiError::invalid_param("privacy").into_response();
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_INVITE_USER)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    if let Err(err) = state
+        .app
+        .update_team_privacy(&team_id, team_type, allow_open_invite)
+        .await
+    {
+        return ApiError::from(err).into_response();
+    }
+
+    match state.app.get_team(&team_id).await {
+        Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
 /// Port of `regenerateTeamInviteId` (api4/team.go) —
 /// `POST /api/v4/teams/{team_id}/regenerate_invite_id`.
 ///
@@ -1938,12 +2655,229 @@ pub async fn get_invite_info(
 mod tests {
     use mm_model::team_member::TeamMember;
 
+    use super::team_privacy_from_body;
     use super::{
         AllTeamsDenial, TeamMembersGetOptions, Visibility, all_teams_opts, get_team_denial,
         segment_matches_team_name_mux, team_by_name_denied, team_is_public, team_members_options,
         team_name_is_shadowed_by_team_id_route, team_unread_denied, team_view_denied,
         user_visibility, validate_team_and_user_ids, wants_collapsed_threads,
     };
+    use super::{TeamSearchDenial, TeamSearchPlan, team_search_plan};
+
+    fn plan(
+        opts: &mut mm_model::team_search::TeamSearch,
+        retention: bool,
+        private: bool,
+        public: bool,
+    ) -> Result<TeamSearchPlan, TeamSearchDenial> {
+        team_search_plan(opts, retention, private, public, false)
+    }
+
+    /// The whole list-permission matrix. `Neither` is a **200 with an empty list**, not a 403 —
+    /// the one cell a reader is most likely to turn into a refusal.
+    #[test]
+    fn the_list_matrix_picks_the_search_and_no_cell_refuses() {
+        let cases = [
+            (true, true, TeamSearchPlan::All),
+            (true, false, TeamSearchPlan::Private),
+            (false, true, TeamSearchPlan::Public),
+            (false, false, TeamSearchPlan::Neither),
+        ];
+        for (private, public, expected) in cases {
+            let mut opts = mm_model::team_search::TeamSearch::default();
+            assert_eq!(plan(&mut opts, false, private, public), Ok(expected));
+        }
+    }
+
+    /// Only the both-permissions arm may paginate, and **either** field alone trips the 501 —
+    /// where the response shape further down needs both. Each single-permission arm has its own
+    /// error id, so the two cannot be collapsed.
+    #[test]
+    fn either_pagination_field_alone_is_a_501_on_the_single_permission_arms() {
+        for (page, per_page) in [(Some(0), None), (None, Some(10)), (Some(2), Some(10))] {
+            let mut opts = mm_model::team_search::TeamSearch {
+                page,
+                per_page,
+                ..Default::default()
+            };
+            assert_eq!(
+                plan(&mut opts, false, true, false),
+                Err(TeamSearchDenial::PaginationPrivate)
+            );
+
+            let mut opts = mm_model::team_search::TeamSearch {
+                page,
+                per_page,
+                ..Default::default()
+            };
+            assert_eq!(
+                plan(&mut opts, false, false, true),
+                Err(TeamSearchDenial::PaginationPublic)
+            );
+
+            // The same body on the both-permissions arm is fine.
+            let mut opts = mm_model::team_search::TeamSearch {
+                page,
+                per_page,
+                ..Default::default()
+            };
+            assert_eq!(plan(&mut opts, false, true, true), Ok(TeamSearchPlan::All));
+
+            // And on the no-permission arm, which never looks at pagination at all.
+            let mut opts = mm_model::team_search::TeamSearch {
+                page,
+                per_page,
+                ..Default::default()
+            };
+            assert_eq!(
+                plan(&mut opts, false, false, false),
+                Ok(TeamSearchPlan::Neither)
+            );
+        }
+    }
+
+    /// `ExcludePolicyConstrained != nil` — **presence**, so `false` is refused too. The refusal
+    /// also precedes the pagination check, so a caller sending both gets the 403.
+    #[test]
+    fn exclude_policy_constrained_is_checked_for_presence_and_runs_first() {
+        for value in [Some(true), Some(false)] {
+            let mut opts = mm_model::team_search::TeamSearch {
+                exclude_policy_constrained: value,
+                page: Some(1),
+                per_page: Some(10),
+                ..Default::default()
+            };
+            assert_eq!(
+                plan(&mut opts, false, true, false),
+                Err(TeamSearchDenial::RetentionPolicyRead),
+                "the 403 precedes the 501"
+            );
+
+            let mut opts = mm_model::team_search::TeamSearch {
+                exclude_policy_constrained: value,
+                ..Default::default()
+            };
+            assert_eq!(plan(&mut opts, true, true, true), Ok(TeamSearchPlan::All));
+            assert_eq!(opts.exclude_policy_constrained, value, "carried through");
+        }
+
+        // Absent: no permission needed.
+        let mut opts = mm_model::team_search::TeamSearch::default();
+        assert_eq!(plan(&mut opts, false, true, true), Ok(TeamSearchPlan::All));
+    }
+
+    /// `props.PolicyID = nil` runs for everyone, permission or not — the field is reachable only
+    /// through `/data_retention/policies`. And `include_policy_id` is set from the retention
+    /// permission alone, on every arm including the one that never calls the store.
+    #[test]
+    fn policy_id_is_always_cleared_and_include_policy_id_follows_the_permission() {
+        for retention in [false, true] {
+            let mut opts = mm_model::team_search::TeamSearch {
+                policy_id: Some("skjy5tackbqes3cwbzdoawkhtc".to_owned()),
+                exclude_policy_constrained: None,
+                ..Default::default()
+            };
+            let _ = plan(&mut opts, retention, true, true);
+            assert_eq!(opts.policy_id, None, "cleared whatever the caller sent");
+            assert_eq!(opts.include_policy_id, retention.then_some(true));
+        }
+    }
+
+    /// The ABAC widening lands on the public arm only, and only with the licence gate on — which
+    /// it never is on this deployment. Both halves asserted so neither can drift unnoticed.
+    #[test]
+    fn include_policy_enforced_is_the_public_arm_with_abac_on() {
+        let mut opts = mm_model::team_search::TeamSearch::default();
+        assert_eq!(
+            team_search_plan(&mut opts, false, false, true, true),
+            Ok(TeamSearchPlan::Public)
+        );
+        assert_eq!(opts.include_policy_enforced, Some(true));
+
+        for (private, public) in [(true, true), (true, false), (false, false)] {
+            let mut opts = mm_model::team_search::TeamSearch::default();
+            let _ = team_search_plan(&mut opts, false, private, public, true);
+            assert_eq!(
+                opts.include_policy_enforced, None,
+                "only the public-only arm widens"
+            );
+        }
+
+        let mut opts = mm_model::team_search::TeamSearch::default();
+        let _ = team_search_plan(&mut opts, false, false, true, false);
+        assert_eq!(
+            opts.include_policy_enforced, None,
+            "the licence gate is off on this deployment"
+        );
+    }
+
+    /// Go's own answer for every input the `switch privacy` sees, including the three near-misses
+    /// a reader is most likely to accept by accident: lower case, the *channel* privacy letter
+    /// `P`, and a leading space.
+    #[test]
+    fn go_parity_the_privacy_switch() {
+        let raw = include_str!("../../../fixtures/behaviour_team_privacy.json");
+        let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+        for row in corpus["privacy_switch"].as_array().unwrap() {
+            let privacy = row["privacy"].as_str().unwrap();
+            let body = serde_json::json!({ "privacy": privacy }).to_string();
+            let got = team_privacy_from_body(body.as_bytes());
+            if row["accepted"].as_bool().unwrap() {
+                assert_eq!(
+                    got,
+                    Some((
+                        row["team_type"].as_str().unwrap(),
+                        row["open_invite"].as_bool().unwrap()
+                    )),
+                    "privacy {privacy:?}"
+                );
+            } else {
+                assert_eq!(got, None, "privacy {privacy:?} must be a 400");
+            }
+        }
+    }
+
+    /// `StringInterfaceFromJSON` swallows every decode failure into an empty map, so all of these
+    /// land on one 400 naming `privacy` — there is no distinct malformed-body answer.
+    #[test]
+    fn every_unusable_body_is_the_same_rejection() {
+        for body in [
+            &b""[..],
+            b"not json",
+            b"[]",
+            b"null",
+            b"{}",
+            br#"{"privacy":null}"#,
+            br#"{"privacy":1}"#,
+            br#"{"privacy":true}"#,
+            br#"{"privacy":["O"]}"#,
+            br#"{"Privacy":"O"}"#,
+            br#"{"privacy":"O""#,
+        ] {
+            assert_eq!(
+                team_privacy_from_body(body),
+                None,
+                "{}",
+                String::from_utf8_lossy(body)
+            );
+        }
+    }
+
+    /// `json.Decoder.Decode` reads one value and ignores the rest, so a body with trailing junk
+    /// is accepted. `serde_json::from_slice` would reject it — the reason this uses
+    /// `decode_one_from_json`.
+    #[test]
+    fn trailing_junk_after_the_first_value_is_ignored() {
+        assert_eq!(
+            team_privacy_from_body(br#"{"privacy":"I"} and then some"#),
+            Some(("I", false))
+        );
+        assert_eq!(
+            team_privacy_from_body(br#"{"privacy":"O"}{"privacy":"I"}"#),
+            Some(("O", true)),
+            "the second document is never read"
+        );
+    }
 
     /// `list_private && list_public` is Go's empty branch: **no** filter, so the listing spans
     /// public, private and archived teams alike.

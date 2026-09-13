@@ -592,6 +592,307 @@ pub async fn autocomplete_emojis(
         .into_response())
 }
 
+// -------------------------------------------------------------------------------------------
+// the two writes
+// -------------------------------------------------------------------------------------------
+
+/// Port of `createEmoji` (api4/emoji.go:34) — `POST /api/v4/emoji`.
+///
+/// # Eight refusals, in an order a reader would not guess
+///
+/// | # | check | answer |
+/// |---|---|---|
+/// | 1 | `EnableCustomEmoji` off | **501** `api.emoji.disabled.app_error` |
+/// | 2 | `Content-Length` over 512 KiB | **413** `api.emoji.create.too_large.app_error` |
+/// | 3 | the multipart body does not parse (or overruns 512 KiB) | 400 `api.emoji.create.parse.app_error` |
+/// | 4 | the `image` part is itself over 512 KiB | 413 `api.emoji.create.too_large.app_error` |
+/// | 5 | the team-membership read fails | that error |
+/// | 6 | no `create_emojis`, system-wide or on any of the caller's teams | 403 |
+/// | 7 | no `emoji` form value | 400 `invalid_body_param` naming `emoji` |
+/// | 8 | the `emoji` value is not JSON | the **same** 400, indistinguishable from 7 |
+///
+/// The two size checks are different things: 2 is the declared length of the whole request and 4
+/// is the part's own size. 4 cannot fire — `MaxBytesReader` caps the body at the same 512 KiB
+/// before 3, so a part can never exceed it — and is reproduced because it is what a client would
+/// see if the cap ever moved.
+///
+/// # The permission is a disjunction over the caller's teams
+///
+/// `create_emojis` at the **system** level passes outright; failing that, the caller's team
+/// memberships are read (`include_deleted = true`, `exclude_team_id = ""`) and the permission is
+/// tried against each until one grants. So a plain member of one team with the permission may
+/// create an emoji that is visible server-wide. The memberships are read *before* the check on
+/// both paths, so a broken team read is a 500 even for a system admin.
+///
+/// # What is forwarded
+///
+/// Everything up to and including the `1028×1028` refusal is answered here. Beyond that, a
+/// filename that is not `.png`, an image format whose header this port does not measure, and any
+/// image needing the resize-and-re-encode path all go to Go — see
+/// [`mm_app::App::upload_emoji_image`]. All three forward *before* anything is written, so a
+/// forwarded create leaves no orphan in the file backend.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(newEmoji)` — 200 with a **trailing newline**.
+#[tracing::instrument(skip_all, fields(emoji_name, bytes, forwarded))]
+pub async fn create_emoji(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    tracing::Span::current().record("forwarded", false);
+
+    if let Err(err) = custom_emoji_enabled(&state, "createEmoji") {
+        return err.into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+
+    // `r.ContentLength > app.MaxEmojiFileSize` (api4/emoji.go:44). A request with no
+    // `Content-Length` has `-1` in Go and skips this entirely — the body cap below is what
+    // catches it then.
+    let declared = parts
+        .headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<i64>().ok());
+    if declared.is_some_and(|length| length > MAX_EMOJI_FILE_SIZE) {
+        return too_large().into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the emoji upload body");
+            return parse_error().into_response();
+        }
+    };
+    // `http.MaxBytesReader(w, r.Body, MaxEmojiFileSize)` (api4/emoji.go:49): the read fails past
+    // the cap and `ParseMultipartForm` reports that failure, so an over-long body with no
+    // `Content-Length` is the **400**, not the 413 above.
+    if i64::try_from(bytes.len()).unwrap_or(i64::MAX) > MAX_EMOJI_FILE_SIZE {
+        return parse_error().into_response();
+    }
+
+    let content_type = parts
+        .headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let form = match crate::multipart::parse_form(content_type, &bytes) {
+        Ok(form) => form,
+        Err(err) => {
+            tracing::debug!(error = %err, "the emoji upload body is not multipart/form-data");
+            return parse_error().into_response();
+        }
+    };
+
+    let image = form.first_file("image");
+    if image.is_some_and(|part| part.size() > MAX_EMOJI_FILE_SIZE) {
+        return too_large().into_response();
+    }
+
+    if let Err(err) = require_emoji_permission(
+        &state,
+        &session,
+        &mm_model::permission::PERMISSION_CREATE_EMOJIS,
+    )
+    .await
+    {
+        return err.into_response();
+    }
+
+    let Some(raw) = form.first_value("emoji") else {
+        return ApiError::invalid_param("emoji").into_response();
+    };
+    let Ok(emoji) = serde_json::from_str::<mm_model::emoji::Emoji>(raw) else {
+        return ApiError::invalid_param("emoji").into_response();
+    };
+    tracing::Span::current().record("emoji_name", &emoji.name);
+    tracing::Span::current().record("bytes", bytes.len());
+
+    let upload = image.map(|part| mm_app::emoji::EmojiUpload {
+        filename: &part.filename,
+        data: &part.data,
+    });
+
+    match state
+        .app
+        .create_emoji(&session.0.user_id, emoji, upload)
+        .await
+    {
+        Ok(created) => encode_emoji(&created, "createEmoji"),
+        Err(mm_app::post::PrepareError::App(err)) => ApiError::from(err).into_response(),
+        Err(mm_app::post::PrepareError::Unreproducible(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(why, "forwarding the emoji upload to Go");
+            let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+/// Port of `deleteEmoji` (api4/emoji.go:135) — `DELETE /api/v4/emoji/{emoji_id}`.
+///
+/// # There is no `EnableCustomEmoji` check in this handler
+///
+/// Unlike `getEmoji` beside it, which answers **501** before anything else. The gate is still
+/// reached, but in the app layer, where it is a **403** — so a server with custom emoji switched
+/// off answers `GET /emoji/{id}` with 501 and `DELETE /emoji/{id}` with 403, from the same
+/// setting and the same error id.
+///
+/// # The emoji is fetched first, so a missing one is a 404 before any permission is considered
+///
+/// A caller with no permission at all deleting an emoji that does not exist gets the 404, not the
+/// 403 — information a stricter ordering would have withheld, and Go's order regardless.
+///
+/// # Two permissions, and the second only for someone else's emoji
+///
+/// `delete_emojis` is required of everyone, system-wide or on any of the caller's teams. Then, if
+/// the caller is **not** the creator, `delete_others_emojis` is required the same way. The team
+/// memberships are read once and reused for both, which is why the read sits above both checks.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}` with **no** trailing newline.
+#[tracing::instrument(skip_all, fields(emoji_id = %emoji_id, own))]
+pub async fn delete_emoji(
+    State(state): State<AppState>,
+    Path(emoji_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&emoji_id, "emoji_id")?;
+
+    let emoji = state.app.get_emoji(&emoji_id).await?;
+
+    require_emoji_permission(
+        &state,
+        &session,
+        &mm_model::permission::PERMISSION_DELETE_EMOJIS,
+    )
+    .await?;
+
+    let own = session.0.user_id == emoji.creator_id;
+    tracing::Span::current().record("own", own);
+    if !own {
+        require_emoji_permission(
+            &state,
+            &session,
+            &mm_model::permission::PERMISSION_DELETE_OTHERS_EMOJIS,
+        )
+        .await?;
+    }
+
+    state.app.delete_emoji(&emoji).await?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        br#"{"status":"OK"}"#.to_vec(),
+    )
+        .into_response())
+}
+
+/// The "system-wide, or on any team the caller belongs to" check both emoji writes make.
+///
+/// Go writes it out three times (api4/emoji.go:65, :157, :171) with three different permissions
+/// and one shape: read the memberships **first**, try the system permission, then walk the
+/// memberships until one grants. The membership read comes before the system check in Go's source
+/// order, so its failure is a 500 even for a caller the system check would have passed — worth
+/// keeping, because hoisting the cheap check would change which error a broken database produces.
+///
+/// `include_deleted = true` and `exclude_team_id = ""`: a caller's membership of an **archived**
+/// team still grants.
+async fn require_emoji_permission(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    permission: &mm_model::permission::Permission,
+) -> Result<(), ApiError> {
+    let memberships = state
+        .app
+        .get_team_members_for_user(&session.0.user_id, "", true)
+        .await?;
+
+    if state
+        .app
+        .session_has_permission_to(&session.0, permission)
+        .await
+    {
+        return Ok(());
+    }
+
+    for membership in &memberships {
+        if state
+            .app
+            .session_has_permission_to_team(&session.0, &membership.team_id, permission)
+            .await
+        {
+            return Ok(());
+        }
+    }
+
+    Err(ApiError::from(
+        *mm_model::permission::make_permission_error(&session.0, &[permission]),
+    ))
+}
+
+/// `app.MaxEmojiFileSize` (app/emoji.go:33), as the handler compares against it.
+const MAX_EMOJI_FILE_SIZE: i64 = mm_app::emoji::MAX_EMOJI_FILE_SIZE;
+
+/// `model.NewAppError("createEmoji", "api.emoji.create.too_large.app_error", nil, "", 413)`.
+fn too_large() -> ApiError {
+    ApiError::from(AppError::new(
+        "createEmoji",
+        "api.emoji.create.too_large.app_error",
+        None,
+        String::new(),
+        413,
+    ))
+}
+
+/// `model.NewAppError("createEmoji", "api.emoji.create.parse.app_error", nil, "", 400)`.
+fn parse_error() -> ApiError {
+    ApiError::from(AppError::new(
+        "createEmoji",
+        "api.emoji.create.parse.app_error",
+        None,
+        String::new(),
+        400,
+    ))
+}
+
+/// `json.NewEncoder(w).Encode(emoji)` — 200 and a trailing newline.
+fn encode_emoji(emoji: &mm_model::emoji::Emoji, where_: &'static str) -> Response {
+    match serde_json::to_vec(emoji) {
+        Ok(mut body) => {
+            body.push(b'\n');
+            (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "application/json"),
+                    ("x-mmrs-served-by", "rust"),
+                ],
+                body,
+            )
+                .into_response()
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the new emoji");
+            ApiError::from(AppError::new(
+                where_,
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

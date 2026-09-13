@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET deviceid = $1, voipdeviceid = $2, expiresat = $3, expirednotify = false WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a594e43c2f8c155d0224dc693ab22cc2c0306dcf899cc85d26f0b8de910807a"
+}

@@ -958,7 +958,7 @@ impl App {
     /// The thread-membership delete is **not** optional and its failure is a 500 with
     /// `model.NoTranslation` as the id — the one place on these routes where the client is handed
     /// an untranslated detail string instead of an id.
-    async fn remove_channel_membership(
+    pub(crate) async fn remove_channel_membership(
         &self,
         user_id: &str,
         channel_id: &str,

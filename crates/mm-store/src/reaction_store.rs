@@ -35,6 +35,26 @@ pub trait ReactionStore {
         reaction: &Reaction,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlReactionStore.DeleteAllWithEmojiName` (reaction_store.go:211).
+    ///
+    /// Called by `App.deleteEmoji` after a custom emoji is deleted, so the reactions that used it
+    /// stop rendering. Three statements in Go's order, and the order is the behaviour:
+    ///
+    /// 1. **SELECT the live reactions first**, because step 3 needs their post ids and step 2 is
+    ///    about to make them unfindable.
+    /// 2. One `UPDATE` over every live reaction with that name, stamping `UpdateAt` and
+    ///    `DeleteAt` with the *same* `now`.
+    /// 3. One `UPDATE Posts` per affected post, recomputing `HasReactions`. Go **logs and carries
+    ///    on** when one of these fails, so a post left with a stale `HasReactions` is not an
+    ///    error; only the first two statements can fail the call.
+    ///
+    /// The caller ignores the error entirely (`deleteReactionsForEmoji` warns), so nothing here
+    /// reaches a client — but the rows do, through every later post read.
+    fn delete_all_with_emoji_name(
+        &self,
+        emoji_name: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlReactionStore.ExistsOnPost` (reaction_store.go:105).
     fn exists_on_post(
         &self,
@@ -327,6 +347,85 @@ impl ReactionStore for SqlReactionStore {
             context: "unable to commit the reaction delete transaction".to_owned(),
             source,
         })
+    }
+
+    #[tracing::instrument(skip(self), fields(emoji_name = %emoji_name, reactions, posts))]
+    async fn delete_all_with_emoji_name(&self, emoji_name: &str) -> Result<(), StoreError> {
+        let now = mm_model::utils::get_millis();
+
+        // Go reads these from the **replica** and writes to the master, so a reaction created
+        // moments earlier can be missed by the SELECT, updated by the UPDATE below, and left with
+        // a stale `Posts.HasReactions` because step 3 never hears about its post. One pool here,
+        // so that window does not exist — a difference in our favour that cannot change an
+        // answer, since `HasReactions` is recomputed from the table either way.
+        let post_ids = sqlx::query_scalar!(
+            r#"
+            SELECT postid AS "post_id!"
+              FROM reactions
+             WHERE emojiname = $1 AND COALESCE(deleteat, 0) = 0
+            "#,
+            emoji_name,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Reactions with emojiName={emoji_name}"),
+            source,
+        })?;
+        tracing::Span::current().record("reactions", post_ids.len());
+
+        sqlx::query!(
+            r#"
+            UPDATE reactions
+               SET updateat = $1, deleteat = $1
+             WHERE emojiname = $2 AND COALESCE(deleteat, 0) = 0
+            "#,
+            now,
+            emoji_name,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Reactions with emojiName={emoji_name}"),
+            source,
+        })?;
+
+        // Go iterates the reactions, not a de-duplicated set, so a post carrying two reactions
+        // with this name is updated twice. Same end state; the repeat is not reproduced because
+        // nothing can observe it.
+        let mut distinct: Vec<&String> = post_ids.iter().collect();
+        distinct.sort_unstable();
+        distinct.dedup();
+        tracing::Span::current().record("posts", distinct.len());
+
+        for post_id in distinct {
+            // `now` again, **not** a fresh `GetMillis()` — Go passes the same value it stamped the
+            // reactions with, so a post and its reactions share an `UpdateAt` after this.
+            if let Err(err) = sqlx::query!(
+                r#"
+                UPDATE posts
+                   SET updateat     = $1,
+                       hasreactions = (SELECT count(0) > 0
+                                         FROM reactions
+                                        WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)
+                 WHERE id = $2
+                "#,
+                now,
+                post_id,
+            )
+            .execute(&self.pool)
+            .await
+            {
+                // Go's `mlog.Warn` — the call still succeeds.
+                tracing::warn!(
+                    error = %err,
+                    post_id = %post_id,
+                    "Unable to update Post.HasReactions while removing reactions"
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// The `COALESCE(DeleteAt, 0) = 0` here is the same NULL-tolerance the read path carries: a

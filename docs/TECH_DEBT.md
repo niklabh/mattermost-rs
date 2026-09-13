@@ -241,14 +241,16 @@ adding a drift test.
 
 ---
 
-## D-006 · `is_valid_user_auth_service` was inferred, not read
+## D-006 · `is_valid_user_auth_service` was inferred, not read — RESOLVED 2026-09-13
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Status** RESOLVED · **Severity** unverified · **Raised** 2026-08-13 (phase 1, `user.go`)
 
 The accepted set was derived from the auth-service constants without opening the Go body
-(user.go:942). It is the only function in `user.rs` not backed by either a fixture or the
-behavioural oracle. Confirm when `ldap.go` / `saml.go` are translated — or sooner, by adding it
-to `reference/dump/behaviour.go`, which is a five-line change.
+(user.go:942). Read in the authentication-data session and confirmed identical: seven services,
+`email`, `gitlab`, `ldap`, `saml`, `google`, `office365`, `openid`, and `magic_link` is **not**
+among them. It is now exercised through a route as well — `UserAuth::is_valid` calls it, and
+`parity::user_auth::the_auth_body_refusals_agree` sends `{"auth_service":"bogus"}` to both servers
+and compares the refusal.
 
 ---
 
@@ -6276,7 +6278,7 @@ pinned rather than assumed.
 
 ---
 
-## D-204 · The generated initials avatar is not reproducible, so two routes forward
+## D-204 · The generated initials avatar is not reproducible, so three routes forward
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
 
@@ -6287,7 +6289,14 @@ for a day under an etag we would have minted.
 
 Two consequences:
 
-- `GET /api/v4/users/{user_id}/image/default` is **entirely** that path and is not migrated.
+- `GET /api/v4/users/{user_id}/image/default` is **entirely** that path. It is now *registered*
+  here and answers its two refusals — the `RequireUserId` 400 and `GetUser`'s 404 — and forwards
+  the image itself. Its bot branch (`botDefaultImage`) is a `//go:embed` of a fixed PNG and would
+  be reproducible, by copying a binary out of the read-only reference tree; it is forwarded with
+  the rest. See [D-411].
+- `DELETE /api/v4/users/{user_id}/image` is the same rasteriser and forwards for the same reason,
+  which is not obvious from its name: it **generates and stores** the avatar rather than removing
+  anything.
 - `GET /api/v4/users/{user_id}/image` is migrated but forwards when the stored `profile.png`
   does not read — which is also the branch that *writes* the generated image back when
   `LastPictureUpdate == 0`, so forwarding is doubly right.
@@ -7194,3 +7203,1400 @@ never exercised. One `SQLX_OFFLINE=true cargo check --workspace --all-targets` i
 in whatever runs before a merge — is what turns the README's claim into something the tree
 asserts rather than something a reader has to trust.
 
+---
+
+## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (app/channel_join_request.go)
+
+`broadcastChannelJoinRequestCreated` and `broadcastChannelJoinRequestUpdated` publish to
+`Broadcast{ChannelId: …}` — the channel's whole membership — and then narrow the audience with
+`useOnlyChannelAdminsHook`, whose `Process` **rejects** the event for any connection whose user is
+not in the precomputed admin set (app/web_broadcast_hooks.go:519). The fan-out is the outer bound
+and the hook is the filter.
+
+[D-183] records that this server strips the hook fields and does not run the hooks. Until now that
+was a fidelity gap — the stock `posted` hook *adds* fields. This is the first ported event whose
+hook **removes recipients**, so dropping it does not degrade a payload, it widens an audience: a
+plain member of a discoverable private channel would be told that a named user has asked to join
+it, and with what status, where Go tells only the channel admins.
+
+**What is owed:** `platform.HookedWebSocketEvent`'s reject path in the hub, plus the
+`only_channel_admins` hook itself. Nothing smaller fixes it — the admin set is already computed
+correctly and attached to the event (`channel_admin_user_ids`), so the missing half is entirely in
+`mm-ws`.
+
+**Why it is not urgent, and why that is not a reason to close it.** The seven routes that raise
+these events are dark: `FeatureFlags.DiscoverableChannels` is false at the pinned SHA ([D-153]), so
+nothing on this deployment can publish either event. The moment that flag is turned on this becomes
+a disclosure bug, which is why it is recorded rather than left to the doc comment on
+`publish_channel_join_request_event`.
+
+**Where the finding lives in the code:** the module docs of
+`crates/mm-app/src/channel_join_request.rs` and the doc comment on
+`App::publish_channel_join_request_event`.
+
+---
+
+## D-350 · a session this server revokes keeps authenticating against Go
+
+**Status** OPEN · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+
+The Go server keeps sessions in an in-memory cache and invalidates it only from its own revocation
+paths — `ClearUserSessionCache` (app/platform/session.go:105), which also fans out over the cluster
+bus. This server has no session cache ([D-087]) and no way to reach Go's. So every route in the
+session write family deletes the row and leaves Go serving the dead session until its entry ages
+out.
+
+**Measured, not inferred.** Delete a `Sessions` row by hand and `GET {go}/api/v4/users/me` still
+answers **200** while `GET {rust}/api/v4/users/me` answers **401**.
+
+This is worse than [D-087], which is a bounded staleness window on a *read*. Here a **security
+control** appears to work from the client that issued it: the user sees "session revoked", their
+own server agrees, and the process next door keeps honouring the credential.
+
+What is owed is one of: a cluster message Go would accept (the enterprise bus [D-087] already
+established we cannot reach), a shared cache, or — the cheap one — driving these four routes
+through the proxy to Go for as long as Go is running, which trades the divergence for a forwarded
+route. Not done, because the Go server is scaffolding and the end state is that it is not running
+at all; the entry exists so the choice is made deliberately rather than by omission.
+
+**Where the pin lives:** `parity::session_writes::go_cache_keeps_a_session_we_revoked` asserts the
+divergence **in the direction it currently has**, so closing the gap fails that test and says so.
+
+---
+
+## D-351 · the all-users session revoke has no route-level parity test
+
+**Status** OPEN · **Severity** test-coverage · **Raised** 2026-09-12 (session write family)
+
+`POST /api/v4/users/sessions/revoke/all` is served from Rust and its **403** branch is compared
+against Go. Its **200** branch is not, and cannot be under the current harness: succeeding means
+`DELETE FROM Sessions` with no predicate, which logs out every other test running concurrently in
+the same binary and the admin token they all share.
+
+Covered instead by `mm_app::session::tests::the_all_users_revoke_removes_access_data_first`, which
+pins the thing that actually matters — access data is deleted **before** sessions, so a revoked
+client cannot trade its OAuth token for a fresh login. What is not pinned is the response bytes
+(`{"status":"OK"}`, no trailing newline) against Go's own.
+
+What would close it: a stack the suite owns exclusively for one test, or a serialised
+`#[ignore]`-by-default test run by hand. Neither is worth a flaky suite for a fifteen-byte body
+that `ReturnStatusOK` produces identically on three other routes in the same file.
+
+---
+
+## D-352 · `parity::emoji_list` fails on a different test each run
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-12 (observed during the session write family)
+
+Not caused by the session work and not in a file it touches; recorded because it was hit three
+times in a row and nothing had it written down.
+
+The suite's tests create and delete `mmrsparity*` emoji concurrently and assert on counts and on
+list membership, so each run fails on whichever test lost the race —
+`an_empty_sort_is_the_unsorted_page` saw a `mmrsparitydoomed…` row another test had not deleted
+yet, and `pagination_clamps_rather_than_refusing` found three emoji where it needs four. Running
+the suite alone does not help, because the race is *within* it.
+
+The shape is [D-284]'s and the memory note's "a failure naming a route you did not touch is usually
+a concurrent write to shared state". What is owed is per-test emoji name prefixes, or a serial
+marker on that one file.
+
+---
+
+## D-360 · the licensed half of the seven group writes is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group CRUD and membership)
+
+`crate::groups` now serves the **unlicensed** contract of all seven writes in `api4/group.go` —
+`createGroup`, `getGroupsByNames`, `patchGroup`, `deleteGroup`, `restoreGroup`, `addGroupMembers`,
+`deleteGroupMembers` — alongside the ten reads it already answered. `requireLicense`
+(api4/handlers.go:237) is the first statement of every one of them, ahead of `RequireGroupId` *and
+ahead of reading the request body*, so an unlicensed server's whole contract is one 501 and that
+501 is fully compared. Everything past it forwards.
+
+Go loads its licence at startup and re-reads it only on a save, so `set_active_licence_id` moves
+our answer and not Go's: on this stack the licensed side of these routes has no oracle beside it,
+which is a fact to route around and not a reason the work is skipped.
+
+What a licensed server reaches that this side does not have:
+
+| behind the gate | Go |
+|---|---|
+| the `GroupStore` write surface — `Create`, `Update`, `Delete`, `Restore`, `UpsertMembers`, `DeleteMembers` | `channels/store/sqlstore/group_store.go` |
+| `licensedAndConfiguredForGroupBySource` — four refusals keyed on source, two statuses | `api4/group.go:1566` |
+| the custom-group permissions — `create_custom_group`, `edit_custom_group`, `delete_custom_group`, `restore_custom_group`, `manage_custom_group_members` — and `SessionHasPermissionToGroup` | `app/authorization.go` |
+| `patchGroup`'s name derivation: `strings.ReplaceAll(strings.ToLower(DisplayName), " ", "-")` when `allow_reference` is turned on without a name, plus the user-name and mentionable-group collision checks | `api4/group.go:265` |
+| six audit records and their `Auditable`/`LogClone` payloads | `model/group.go:45` |
+
+Three branch-level facts are recorded here because no test on this stack can reach them and they
+are the ones a later port will get wrong:
+
+1. **`restoreGroup`'s non-custom refusal is a 501, not a 400.** Every other handler in the family
+   answers `app.group.crud_permission` at `http.StatusBadRequest`; `restoreGroup` answers the same
+   id at `http.StatusNotImplemented` (group.go:1367), which on the wire is indistinguishable from
+   the licence error it sits behind.
+2. **`deleteGroupMembers`' marshal-failure branch names `Api4.addGroupMembers`** (group.go:1516),
+   copied from its neighbour. `Where` carries `json:"-"`, so it is a log-line difference only.
+3. **`getGroupsByNames` short-circuits an empty list before the permission question.** An empty
+   array writes a literal `[]` and returns (group.go:934), so a caller with no group permission at
+   all gets a 200 — the `FilterAllowReference` computation happens after.
+
+**What is owed:** `mm_store::group_store`'s write half and the custom-group permission checks,
+behind whichever route needs them first. `mm_model::Group`'s validators are already ported and are
+now pinned branch-by-branch against a generated oracle (`fixtures/behaviour_group.json`), so the
+model layer is not the blocker; the store and the permission model are.
+
+---
+
+## D-370 · `deleteTeam?permanent=true` forwards when `EnableAPITeamDeletion` is on
+
+**Status** OPEN · **Severity** unported-route-arm · **Raised** 2026-09-12 (team write family)
+
+`DELETE /api/v4/teams/{team_id}` serves its **archive** arm from Rust, and the permanent arm's
+refusal — the 401 whose id depends on whether the caller is a system admin — with it. What is
+still Go's is the permanent deletion *itself*, reached only when
+`ServiceSettings.EnableAPITeamDeletion` is true. It defaults to **false** and is unset on the
+parity stack, so nothing here is reachable today.
+
+`PermanentDeleteTeam` needs ten store methods across five stores that this tree does not have:
+`Channel.GetTeamChannels`, `GetTeamSpaceChannels`, `PermanentDeleteMembersByChannel` and
+`PermanentDelete`; `Post.PermanentDeleteByChannel`; `Webhook.PermanentDeleteIncomingByChannel`
+and `…OutgoingByChannel`; `PostPersistentNotification.DeleteByChannel` for the team path;
+`Team.RemoveAllMembersByTeam` and `Team.PermanentDelete`; plus `Command.PermanentDeleteByTeam`
+and `App.PermanentDeleteChannel` to drive them. Writing that cascade blind is precisely what the
+parity oracle exists to prevent: with the flag off, **no route-level test can exercise a single
+one of those deletes**, and a wrong `DELETE` predicate destroys data silently.
+
+The channel twin (`mm_api::channel_writes::delete_channel`) already forwards its permanent arm for
+the same reason, so this is the established shape rather than a new exception.
+
+What would close it: turn the flag on for one stack, port `PermanentDeleteChannel` and the ten
+store methods, and compare the surviving rows in `Posts`, `ChannelMembers`, `Channels`,
+`TeamMembers`, `Teams`, `Commands` and both webhook tables between two teams deleted by the two
+servers.
+
+---
+
+## D-371 · the team write family forwards a licensed installation on two routes
+
+**Status** OPEN · **Severity** unported-branch · **Raised** 2026-09-12 (team write family)
+
+`deleteTeam` calls `cleanupTeamAccessControlPolicy` between the team write and the websocket
+event, on **both** the archive and the permanent arm, and it needs the enterprise access-control
+service. So `mm_api::teams::delete_team` forwards whole when `license_state()` says Licensed,
+exactly as `mm_api::channel_writes::delete_channel` does for its channel-scope twin.
+
+`searchTeams` has the same shape one step further out: `FilterNonQualifyingTeamsForUser` and
+`AnnotateRecommendedTeamsForUser` both short-circuit unless `TeamMembershipAccessControlEnabled()`,
+which is a constant `false` here — so the search is served in full rather than forwarded, and the
+ABAC directory filter is simply absent. That is correct for an unlicensed server and **untested**
+for a licensed one.
+
+Both are unreachable on a `mattermost-team-edition` image with zero `Licenses` rows. Recorded so
+the next person to install a licence knows which two routes change shape.
+
+---
+
+## D-390 · the licensed half of the three group syncable writes is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group syncables)
+
+`crate::groups` now serves the **unlicensed** contract of the last three handlers in
+`api4/group.go` — `linkGroupSyncable` (`POST .../link`), `unlinkGroupSyncable` (`DELETE .../link`)
+and `patchGroupSyncable` (`PUT .../patch`) — which completes the file: all twenty route+method
+pairs `InitGroup` registers are answered here, and `parity::group_syncables` re-measures every one
+of them. `requireLicense` is the first statement of all three, above `RequireGroupId`,
+`RequireSyncableId`, `RequireSyncableType` **and** `io.ReadAll(r.Body)`, so the unlicensed
+contract is one 501 and it is fully compared. Everything past it forwards, for the reason
+[D-360] gives: Go loads its licence at startup, so `set_active_licence_id` moves our answer and
+not Go's, and the licensed side has no oracle beside it on this stack.
+
+What a licensed server reaches that this side does not have:
+
+| behind the gate | Go |
+|---|---|
+| `verifyLinkUnlinkPermission` — `IsSyncable`, an `AllowReference` gate, then a per-type switch | `api4/group.go:679` |
+| its channel arm's **parent-team** question: a channel not yet synced via its team needs `invite_user` on the team, and the private/public channel type then picks `manage_private_channel_members` or `manage_public_channel_members` | `api4/group.go:705` |
+| `verifySchemeAdminAssignmentPermission` — `manage_team_roles` / `manage_channel_roles`, skipped entirely when `patch.SchemeAdmin` is nil | `api4/group.go:573` |
+| `GetGroupSyncable` / `UpsertGroupSyncable` / `UpdateGroupSyncable` / `DeleteGroupSyncable` | `channels/store/sqlstore/group_store.go` |
+| `SyncRolesAndMembership` and `RemoveMembershipsFromUnlinkedSyncable`, both dispatched through `Srv().Go` **after** the response is written | `app/syncables.go` |
+
+Four branch-level facts are recorded here because no test on this stack can reach them, and they
+are the ones a later port will get wrong:
+
+1. **`linkGroupSyncable`'s re-link deliberately discards the old row.** It upserts onto the
+   existing syncable only when `DeleteAt == 0`; a fresh link *or a re-link of a soft-deleted row*
+   starts from a zero-value `GroupSyncable`, so fields the caller did not set are not carried over
+   from the previous incarnation (group.go:385). A port that always patched the existing row would
+   resurrect `SchemeAdmin` from before the unlink.
+2. **The two handlers differ in exactly one place.** `GetGroupSyncable` returning 404 is tolerated
+   by `link` (it creates the row) and fatal to `patch`. Everything else — both verifiers, the
+   `Patch` call, the async sync — is identical.
+3. **Three routes, three response shapes.** `link` is a **201** with the marshalled syncable,
+   `patch` a 200 with the same, `unlink` a 200 with `ReturnStatusOK`'s `{"status":"OK"}`.
+4. **`RequireSyncableType` is unreachable through the mux.** The route pattern
+   `{syncable_type:teams|channels}` refuses a third value before any handler, and `params.go:269`
+   maps only those two strings onto `GroupSyncableType`. So its `SetInvalidURLParam("syncable_type")`
+   branch is dead code for every HTTP caller, which is why a third value is *forwarded* for
+   gorilla's own 404 rather than answered with a 400. Measured in
+   `parity::group_syncables::a_third_syncable_type_is_forwarded`.
+
+**What is owed:** `mm_store`'s `GroupSyncable` surface (the four CRUD methods plus
+`TeamMembersToAdd`/`ChannelMembersToAdd`), the two permission verifiers, and `app/syncables.go`'s
+membership reconciliation — behind whichever route needs them first. The team and channel member
+*writes* they would build on are already ported (`mm_app::team_member`, `mm_app::channel_member`),
+so the reconciliation loop is the blocker, not the membership primitives.
+
+---
+
+## D-380 · `createEmoji` forwards every image it does not measure, and every resize
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
+400, the permission 403, the model's name errors, the duplicate, the missing image part, the
+"not an image" 400 and the 1028×1028 refusal — and for the **write-through** image path, which is
+`WriteFile` on the bytes exactly as they arrived. Three cases go to Go, and each forwards *before*
+the file backend is touched, so a forwarded create leaves nothing behind:
+
+| forwarded | why |
+|---|---|
+| any image that is not a PNG this port can measure | `image.DecodeConfig` is six decoders with six header grammars; `mm_app::imaging::decode_config` reproduces PNG's `parseIHDR` in full — length, CRC, compression, filter, interlace, the depth/colour-type pairs, the signed-`int32` dimension read — and answers `Undecidable` for the rest. A dimension guessed wrong is a wrong *refusal*, or a wrong acceptance, on a route that writes. |
+| a paletted PNG (colour type 3) | `png.DecodeConfig` does **not** stop at IHDR for those: `cbPaletted(d.cb)` keeps the chunk loop going to `dsSeentRNS`, so it can fail on a PLTE chunk long after the dimensions were read. |
+| any filename whose extension is not `.png` | `isGIF` is `mime.TypeByExtension(filepath.Ext(name))` and Go's `mime` package reads the host's `/etc/mime.types` at init, so *which* extensions mean `image/gif` is a property of the machine the Go server runs on. `.png` is in the built-in table and cannot be displaced, so it is the one extension safe to claim without consulting the host — and it is never the GIF branch. |
+| any image over 128×128 | the resize path is `imaging.Fit` (Lanczos) plus `EncodePNG`, or `gif.EncodeAll` after `resizeEmojiGif`'s per-frame redraw and Floyd–Steinberg dither. A second implementation does not produce those bytes, and the emoji that lands is the resized one — so "close enough" is a different stored file. |
+
+`parity::emoji_writes::a_resize_and_a_gif_filename_are_answered_by_go` measures the boundary in
+both directions: 128×128 and 1028×1028 sit on the near side of their thresholds and are handled
+here and by Go respectively, which is what makes an off-by-one in either limit visible.
+
+**What is owed:** the GIF frame walk (`imgutils.CountGIFFrames`, an LZW decode per frame) and a
+resize whose output is byte-identical to `imaging.Fit` + Go's PNG encoder. The second is the hard
+one and may never be worth it; if it is not, the honest end state is that this route keeps a
+forward for the resize path and the strangler does not fully retire here. Recorded now rather than
+discovered later.
+
+---
+
+## D-381 · the multipart port does not decode RFC 2231 parameter continuations — CLOSED 2026-09-13
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+**Closed by `86a802c`**, which was the condition this entry set: the continuation decoder before
+the second multipart route ships. `parse_media_type` is now a function-for-function transcription
+of `mime.ParseMediaType` including the `*`-attribute side map and the stitching loop, pinned over
+46 rows rather than 23, and four refusals the first port had backwards are fixed with it. The
+second and third multipart routes — `POST /api/v4/brand/image` and
+`POST /api/v4/users/{user_id}/image` — shipped on 2026-09-13 against that decoder. What is left of
+this entry is [D-410]: a decoded filename that is not valid UTF-8 is lossy in a Rust `String`.
+
+The original text follows.
+
+`mm_api::multipart::parse_media_type` reproduces `mime.ParseMediaType` for the forms a
+`multipart/form-data` body actually carries — quoted strings with backslash escapes, lower-cased
+attribute names, the duplicate-attribute error, the empty-value error, the trailing semicolon —
+and is pinned against Go over a 23-row corpus (`fixtures/behaviour_emoji_upload.json`,
+`parse_media_type`).
+
+What it does not do is RFC 2231: `filename*=utf-8''x` and the `name*0=`/`name*1=` continuation
+form. Go decodes those into the un-starred attribute; here `filename*` stays a separate attribute
+and `filename` is absent, so such a part is read as a **value** where Go reads it as a **file**.
+For `createEmoji` that means an image part sent that way would be dropped and the request answered
+`api.context.invalid_body_param.app_error` naming `createEmoji`, where Go would have stored it.
+
+No browser sends that form in a multipart body — it belongs to `Content-Disposition` on a
+*response* — and `createEmoji` is the only route that reads multipart today. **What is owed:** the
+continuation decoder, before the second multipart route (`POST /brand/image`,
+`POST /users/{id}/image`) ships, and a corpus row for it.
+
+---
+
+## D-382 · the licensed half of `createTermsOfService` has no oracle on this stack
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`POST /api/v4/terms_of_service` is `manage_system`, then `license == nil ||
+!*license.Features.CustomTermsOfService` → **400**. This installation is unlicensed, so the 400 is
+the whole route on the wire and it is compared against Go across six bodies — including bodies that
+are not JSON, which Go never parses because the gate precedes `MapFromJSON`.
+
+Everything past the gate *is* ported — `should_publish`, `App::create_terms_of_service`,
+`TermsOfServiceStore::save` and `get`, all with tests — because licensing does not gate development
+here. What is missing is an **oracle**: Go loads its licence at startup and re-reads it only on a
+save, so planting an `ActiveLicenseId` row moves our answer and not Go's, and a licensed server to
+compare against does not exist on this stack. The same shape as [D-360].
+
+Two branch-level facts recorded because no test here can reach them:
+
+1. **`App.CreateTermsOfService`'s `ErrInvalidInput` branch would nil-dereference in Go.**
+   `termsOfService, err = Save(termsOfService)` assigns `nil` on failure, and the very next line
+   reads `"id="+termsOfService.Id`. It is unreachable — the struct built there always has an empty
+   `Id`, which is the only thing that raises `ErrInvalidInput` — and the port carries the empty-id
+   string it would have produced.
+2. **Re-posting identical text publishes nothing and returns the *existing* row**, id and
+   `create_at` included, so a client cannot tell a no-op from a publish except by the id. The
+   comparison is exact: not trimmed, not case-folded.
+
+**What is owed:** a licensed oracle, which needs a second Go process started with `MM_LICENSE` the
+way `scripts/go-discoverable.sh` starts one with a different config. Until then the licensed side
+of this route and of the seven group writes are both untested in the same way.
+
+---
+
+## D-383 · a deleted emoji's reaction sweep does not invalidate Go's reaction cache
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`DELETE /api/v4/emoji/{emoji_id}` served here soft-deletes the emoji, renames its image and sweeps
+the reactions that used it — all three in the shared database, all three verified against the
+table. Go's `LocalCacheReactionStore` memoises `GetReactionsForPost` and is invalidated by **Go's
+own** `DeleteAllWithEmojiName`, which never runs, so `GET /posts/{id}/reactions` on the Go server
+can keep listing a reaction whose row is gone until the entry expires.
+
+This is the staleness shape the emoji, terms-of-service and session ports already carry ([D-352]'s
+neighbourhood): both servers agree on a settled database and disagree only inside a cache window.
+It is ACCEPTED rather than OPEN because closing it means either reproducing Go's cache invalidation
+over a channel we do not have, or retiring the Go server — which is the project's actual end state
+and the thing that closes it.
+
+The consequence for tests, which is the part that costs time: **assert the table, not the route**,
+whenever this server writes something Go caches. `parity::emoji_writes::
+deleting_an_emoji_removes_the_reactions_that_used_it` failed on its first run for exactly this
+reason and now queries `reactions` directly.
+
+---
+
+## D-384 · `AppError.params` is on no wire, so only a unit test can pin an i18n parameter
+
+**Status** ACCEPTED · **Severity** test-harness · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`uploadEmojiImage`'s 1028×1028 refusal carries `MaxWidth` **and** `MaxHeight` as i18n parameters.
+A mutation renaming the second key to the first — collapsing the pair to one key — survived the
+entire parity suite, and it was right to: `params map[string]any` is **unexported** in Go
+(utils.go:240) and `#[serde(skip)]` in `mm_model::utils::AppError`, so the field reaches neither
+server's response body. It exists only to interpolate `Message`, and `Message` is the one field
+[D-092] already tolerates as differing until an i18n bundle lands.
+
+So a cross-server body comparison is *structurally* blind to every `params` key in the tree, and
+no amount of fixture work on the parity side can change that. `mm_app::emoji`'s
+`the_too_large_refusal_names_both_dimensions` pins the pair as a unit test instead, against the
+oracle's own `png_header_1029x1028` bytes; the values themselves stay transcribed from
+app/emoji.go:36 because Go will not hand them out. `an_over_tall_image_is_refused_by_the_height_half`
+is its companion: `width > MAX || height > MAX` short-circuits, so only an input inside the width
+limit and outside the height one ever evaluates the second comparison.
+
+ACCEPTED rather than OPEN: nothing is owed here beyond the habit. The same blindness applies to the
+three `Group*MaxLength` params already recorded in `reference/dump/behaviour_group.go`'s header and
+to `TermsOfService.IsValid`'s `MaxLength`. **When a port builds a `params` map, pin it with a unit
+test — a parity test cannot see it.**
+
+---
+
+## D-385 · a mutation on a write route leaves debris in the shared database
+
+**Status** ACCEPTED · **Severity** test-harness · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`scripts/mutate.sh` restores the **source** on every exit, including SIGINT — which its own comment
+is careful about. It cannot restore the **database**, and for a write route that is the more
+consequential half: a mutation that disables a refusal performs the write it was supposed to
+prevent, the test then fails (CAUGHT, correctly), and the row it wrote survives the rollback and
+poisons every later run.
+
+Two instances in one batch, both found by a clean `cargo test --workspace` afterwards rather than
+by the batch:
+
+1. `emoji-save-skips-validation` removed `SqlEmojiStore::save`'s `IsValid` call and inserted a live
+   emoji named `grinning`. `db_emoji_and_terms_writes`'s purge swept the `mmrsew%` prefix, which
+   that name cannot carry — it has to be a real system-emoji name to be the case under test. The
+   suite then failed on every run until the row was deleted by hand.
+2. `tos-licence-gate-inverted` published a terms-of-service revision, which became "the latest" and
+   failed `parity::terms_of_service` twice over — and Go's `"latest"` cache kept serving it after
+   the row was deleted, so the Go server had to be restarted as well.
+
+Both fixtures now sweep what their own subject would have written: the emoji purge names the two
+refused names explicitly, and `parity::terms_of_service::plant` deletes every revision newer than
+its own latest.
+
+ACCEPTED because there is nothing to build — the rule is the deliverable, and it belongs to every
+write family from here on:
+
+> **A test whose subject is "this write must not happen" has to purge the write it asserts
+> against** — including values that cannot carry the suite's name prefix, which are exactly the
+> interesting ones. And after any mutation batch over a write route, run the full suite once on a
+> clean tree before quoting a tally; the batch's own verdicts do not see the debris they leave.
+
+---
+
+## D-400 · the pending-post-id deduplication cache is per-server while Go is still running
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+
+Go's `Server.seenPendingPostIdsCache` (app/post.go:28) is in-process, and so is
+`mm_app::App::pending_post_ids`. While both servers run they are independent: a post created
+through Go — because it was forwarded, or because a client talked to Go directly — leaves no entry
+here, so a retry that this server answers creates a **second post** rather than returning the
+first. The mirror case is the same.
+
+This is [D-191]'s shape, not a new one: the status cache has the same property for the same
+reason, and the same resolution — it ends when the Go process does. It is recorded rather than
+fixed because the alternative is a shared cache (Redis, or a table), which is infrastructure
+neither server has and which Go would not read anyway.
+
+Narrower than it sounds in practice: the retry window is `pendingPostIDsCacheTTL`, thirty seconds,
+and the webapp sends a pending id only on its own retries. It is listed as a divergence and not as
+coverage because a duplicate message is user-visible.
+
+One further gap inside our own cache. Go claims the pending id at the *top* of `CreatePost` and
+holds it across the author lookup, the root fetch, `FillInPostProps`, the plugin hook and the
+embed pipeline; we claim it after `refuse_create_post_shapes`, which is much later. So two
+genuinely concurrent requests carrying the same pending id have a smaller window here in which the
+second is answered with Go's 500 `api.post.deduplicate_create_post.pending`, and outside that
+window we create two posts where Go creates one. Closing it means claiming earlier, which cannot
+be done without claiming on shapes we then forward.
+
+## D-401 · createPost serves one shape and forwards the rest
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
+
+`POST /api/v4/posts` answers a plain root-level message in an open or private channel and
+forwards everything else. `mm_app::post_create::App::refuse_create_post_shapes` is the complete
+list and carries the Go branch behind each arm; what is owed, grouped by the subsystem that would
+unblock it:
+
+| forwarded shape | what it needs |
+|---|---|
+| a reply (`root_id` set) | `updateThreadsFromPosts` — a `Threads` row and a `ThreadMemberships` row; plus `ResolvePersistentNotification` and the CRT follower fan-out |
+| `file_ids` | `FileInfoStore::attach_to_post`, and `Post().Overwrite` for the partial-attachment path |
+| a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
+| `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
+| any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
+| a DM or group message | `SendAutoResponseIfNecessary`, which writes a second post |
+| a shared channel | the shared-channel sync service |
+| a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
+| a message with `@` or `~`, or a channel with a keyword-mention recipient | the mention engine and `Channel().IncrementMentionCount` |
+| a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
+| `?silent=true` | the notification suppression the prop names |
+| the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
+
+The mention engine is the largest single unlock: it removes three rows at once and it is what
+`SendNotifications` is built around.
+
+## D-402 · email, push and plugin hooks do not fire for a post this server writes
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+
+A post served here publishes the `posted` websocket event and nothing else.
+`sendNotificationEmail`, `sendPushNotification`, `SendAutoResponseIfNecessary`,
+`MessageWillBePosted` and `MessageHasBeenPosted` are all absent.
+
+Deliberately *not* turned into forward conditions, unlike the mention fan-out. The distinction is
+whether the effect is observable: the mention fan-out writes `ChannelMembers.MentionCount`, which
+any later read diverges on, while email and push leave the database untouched and the plugin hooks
+have no environment to run in at all ([D-183], which `update_post` already ships).
+`SendAutoResponseIfNecessary` *does* write a post, which is why DMs and group messages are
+forwarded rather than covered by this entry.
+
+What that costs: on a server with `EmailSettings.SendEmailNotifications` or
+`SendPushNotifications` on, a message posted through this server notifies nobody. Both default to
+false. Closing it means the notification pipeline, which is the same unlock [D-401] names.
+
+---
+
+## D-410 · a percent-decoded multipart filename that is not valid UTF-8 is lossy here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the four image routes)
+
+`mm_api::multipart::percent_hex_unescape` (a port of `mime/mediatype.go:345`) yields arbitrary
+bytes in Go and Go stores them in a `string`, which need not be valid UTF-8. A Rust `String`
+cannot hold that, so `filename*=utf-8''%ff` decodes lossily here — the replacement character — and
+byte-exactly there.
+
+Nothing observable turns on it today. The four multipart routes this server answers read a
+filename only to decide whether a part is a *file* or a *value* (`filename` present and non-empty),
+and `createEmoji` reads its extension; none reads its content, and none puts it on the wire. The
+first route that echoes an uploaded filename back to the client — `POST /api/v4/files` is the one
+that will — makes it visible.
+
+**What is owed:** carry the parameter map as `Vec<u8>` rather than `String`, or record the
+divergence at the one call site that would show it, before a route echoes a filename.
+
+---
+
+## D-411 · every write on the four image routes is Go's; only the refusals are served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+`POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
+`GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
+from here and forward the moment none has fired. Three different reasons, none of them the same
+as the others:
+
+1. **`SetProfileImage`** decodes the upload, rotates it by its EXIF orientation, `FillCenter`s it
+   to 128×128 and re-encodes it as PNG — *every* accepted upload, PNG or not. There is no
+   write-through case as there is for `createEmoji`, because Go never stores the client's bytes.
+   Same reason as [D-380]: `imaging.Fit` plus Go's PNG encoder do not reproduce from a second
+   implementation.
+2. **`SetDefaultProfileImage`** and **`getDefaultProfileImage`** are the freetype rasteriser of
+   [D-204] and nothing else — an FNV-1a hash picks one of 26 colours and the username's first
+   character is drawn at 64pt through `fonts/nunito-bold.ttf`. The **bot** branch
+   (`botDefaultImage`) is a `//go:embed` of a fixed PNG and *is* constant, but reproducing it
+   means copying a binary out of the read-only reference tree.
+3. **`SaveBrandImage`** re-encodes with `imgEncoder.EncodePNG`, so the stored bytes are Go's for
+   every accepted upload including one that was already a PNG.
+
+Each hand-over is before the file backend is touched, and a test says so rather than a comment:
+`image_writes::a_profile_upload_that_go_refuses_is_forwarded_without_writing` sends a body every
+refusal passes and Go's own decode then rejects, and checks `LastPictureUpdate` did not move;
+`the_brand_upload_forwards_before_it_writes` does the same against `GET /api/v4/brand/image`, so
+the archive `MoveFile` and the `WriteFile` are both provably past the forward.
+
+**What is owed:** a decision about pixel-exact image work, which is the same decision [D-380]
+deferred. Until it is taken these four are refusal-only, and the `Go server that is not running`
+end state is not reached for them. The profile POST additionally needs `SetProfileImage`'s
+`Users.UpdateAt` bump, its `LastPictureUpdate` write and its `user_updated` websocket event; the
+DELETE needs `ResetLastPictureUpdate` and the same event.
+
+---
+
+## D-412 · three refusal families on the image routes have no Go oracle on this stack
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+Most of the refusals these four routes give are compared byte for byte against the live Go server —
+every invalid id, every permission denial, every unparseable body, every missing `image` part and
+the 400/404 split on a user that does not exist. Three families are not, because the stack's Go server cannot be asked for them without breaking
+every other suite in the binary, and each is measured against a **second mm-api** with the setting
+changed and expected values transcribed from the Go source instead:
+
+| family | what it needs | test |
+|---|---|---|
+| the three 501s | `FileSettings.DriverName == ""`, which `file_bytes` depends on not being | `a_driverless_server_501s_in_three_different_places` |
+| both size limits | `MaxFileSize` small enough to reach by sending bytes; it is 100 MiB here | `both_size_limits_are_where_go_puts_them` |
+| the LDAP 409 | `LdapSettings.PictureAttribute` set, and `Users.AuthService` written by SQL | `ldap_owns_the_picture_only_when_an_attribute_names_it` |
+
+Each names its transcription in its own doc comment. The *ordering* each family witnesses is
+genuinely measured — the permission ahead of the storage check, the storage check ahead of the
+body on one route and behind it on another — because those are visible from the second server
+alone. What is transcribed is the status and the error id.
+
+A fourth branch is not covered at all: `getDefaultProfileImage`'s `view_members` 403 is
+unreachable here, since `GetViewUsersRestrictions` is `None` for every pair on this stack and
+`user_can_see_other_user` forwards rather than answers when it is not.
+
+**What is owed:** a driverless Go server, the way `scripts/go-discoverable.sh` and
+`scripts/go-boards.sh` are third servers for a feature flag — it would turn the first family from
+transcribed into measured, and the same trick with `MM_FILESETTINGS_MAXFILESIZE` would do the
+second.
+
+---
+
+## D-413 · the profile-field lock forwards a licensed server
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+`IsProfileImageLockedForUser` (app/user.go:1465) is a conjunction of four predicates, and the
+third is `model.MinimumEnterpriseLicense(a.License())` — `LicenseToLicenseTier[SkuShortName] >=
+EnterpriseTier`. `App::license_state` can see *whether* a licence row exists and never its SKU
+tier, so that conjunct cannot be answered here.
+
+`is_profile_image_locked_for_user` therefore evaluates the licence **last**, which reordering a
+conjunction of pure predicates does not change: an unlicensed server is `Ok(false)` outright, and
+a licensed one is forwarded *only when the other three already hold* — the caller lacks
+`edit_other_users`, the account is email/password, and `LockProfileFieldsForEmailUsers` is `"all"`.
+On a stock server that setting is `"none"`, so the forward is unreachable without an
+administrator turning it on.
+
+Both `setProfileImage` and `setDefaultProfileImage` check the lock **last**, so this forward too is
+before any write.
+
+**What is owed:** the SKU tier on `LicenseState`, which the same gap blocks in [D-300], [D-360],
+[D-371] and [D-390]. One port of `LicenseToLicenseTier` closes all five.
+
+---
+
+## D-420 · setPostReminder forwards whole, on its ephemeral confirmation's permalink embed
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (postacks)
+
+`POST /api/v4/users/{user_id}/posts/{post_id}/reminder` is not registered in
+`mm_api::router` and falls to `Router::fallback`. Its HTTP response is `{"status":"OK"}` and its
+database write is two small queries — both of which are **ported and tested**
+(`PostStore::set_post_reminder`, `PostStore::get_post_reminder_metadata`). What is not ported is
+the part between them and the response.
+
+`App.SetPostReminder` (app/post.go:2838) ends by building an ephemeral post and pushing it down
+the requesting user's websocket. Its message is
+
+```
+You will be reminded about {siteURL}/{team}/pl/{postId} by @{author} at {RFC822 target time}
+```
+
+so it **always contains a link**, and `PreparePostForClientWithEmbedsAndImages` therefore always
+reaches `getEmbedForPost` → `getLinkMetadata` → `getLinkMetadataForPermalink`
+(post_metadata.go:902). That path reads the referenced post, its channel and its team, builds a
+`model.Permalink` carrying a `PreviewPost`, and attaches it as a `permalink` embed. None of
+`model.Permalink`, `model.PreviewPost`, the `permalink` `PostEmbed` or the link-metadata cache
+exists in this port, and `mm_app::post::message_may_contain_a_link` refuses every message with a
+`://` in it precisely so that this cannot be shipped half-done.
+
+So the route is not blocked on a decision and not blocked on a licence — it is blocked on the
+permalink-preview subsystem, which [D-401] already owes for `createPost`'s "a message with a link"
+row. Paying that one pays this one; there is nothing reminder-specific left over.
+
+Two facts worth keeping, because they are cheap to get wrong and are already in the code:
+
+- **`PostReminder.TargetTime` is Unix *seconds*.** `time.Unix(targetTime, 0)` at app/post.go:2866
+  and `time.Now().UTC().Unix()` in `CheckPostReminders`. It is the only timestamp in the migrated
+  surface that is not epoch milliseconds, and `PostStore::set_post_reminder` says so.
+- **`PostReminderMetadata.Username` is the post *author's***, not the reminded user's — the
+  sentence "reminded … by @x" names whoever wrote the post.
+
+`parity::post_acks::the_reminder_route_is_forwarded_whole` pins the forward, so registering the
+route without the embed machinery fails a test rather than shipping a websocket event with a
+missing preview. The two store methods are exercised by
+`crates/mm-store/tests/db_post_reminder_store.rs` (4 tests) rather than left for the compiler —
+the upsert, the not-found that must write nothing, and the `COALESCE` a DM needs.
+
+## D-421 · setPostUnread serves a DM or group channel and forwards the rest
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (postacks)
+
+`POST /api/v4/users/{user_id}/posts/{post_id}/set_unread` answers two of Go's three arms and
+forwards the others. `mm_app::post_unread::App::mark_channel_as_unread_from_post` is the list;
+both refusals are decided from reads alone, so a forwarded request reaches Go with nothing
+written.
+
+| forwarded shape | what it needs |
+|---|---|
+| an open or private channel | the mention engine — `MentionKeywords`, `isPostMention`, `GetPostsAfterPost` and `PostPriority().GetForPosts`. `countMentionsFromPost`'s DM/GM short circuit is the only branch that avoids it. |
+| a **reply** when the client did not send `collapsed_threads_supported` | `Thread().MaintainMembership`/`UpdateMembership`/`GetThreadForUser`, `sanitizeThreadResponse`, and `countThreadMentions` — the mention engine again. Half-porting it would write a `ThreadMemberships` row carrying a wrong `UnreadMentions` that no later request corrects. |
+
+The mention engine is the same unlock [D-401] names, and it is now owed by two routes rather than
+one.
+
+One line of `update_last_viewed_at_post` is unreachable from the served path and stays that way:
+the read-back's `c.deleteat = 0` guard. It is reached only for a DM or group channel, and Go has
+no route that archives one; an open channel, which can be archived, is forwarded before the store
+is touched. A mutation dropping the guard therefore survives, and the reason is the route shape
+rather than a missing fixture — recorded here so the next batch does not re-derive it.
+
+`App.UpdateMobileAppBadge` is deliberately absent from both served arms: there is no push
+notifications hub in this port and nothing about it reaches the HTTP response or the websocket.
+Same posture as [D-215].
+
+## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-13 (postacks)
+
+`POST` and `DELETE /api/v4/users/{user_id}/posts/{post_id}/ack` open with
+`model.MinimumProfessionalLicense` (api4/post.go:1429, :1468), *above*
+`c.RequirePostId().RequireUserId()` and above both permission gates. On an unlicensed server the
+refusal is the whole route, and that is what `mm_api::licensed_features` serves — measured against
+Go, not read off the source. `App.SaveAcknowledgementForPost` and
+`App.DeleteAcknowledgementForPost` are unreachable here and are not ported.
+
+Recorded as ACCEPTED rather than OPEN because there is nothing to *do*: a licensed installation is
+forwarded and Go applies the tier test itself. What a future session must not do is "complete" the
+route by adding the id and permission checks its neighbours in `api4/post.go` have — Go skips all
+of them, and `parity::post_acks::nothing_else_about_an_ack_request_is_ever_consulted` is the proof.
+
+---
+
+## D-430 · `POST /users/login` is not rate limited here; Go limits it to 5/s
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+
+Go registers the route as
+`RateLimitedHandler(APIHandler(login), RateLimitSettings{PerSec: 5, MaxBurst: 10})`
+(api4/user.go:69) — the only rate limit on any route this server answers, and it exists because
+`login` is the credential-guessing surface. `mm-api` implements no rate limiting at all, so a
+client that fronts this server can attempt passwords as fast as it can open sockets.
+
+The failed-attempt lockout still applies and is shared with Go, so the *account* protection is
+intact; what is missing is the per-IP throttle in front of it, which is what stops an attacker
+spreading attempts across many accounts. `RateLimitSettings` is also off by default
+(`ServiceSettings.RateLimitSettings.Enable`), so on a stock deployment Go does not throttle either
+— which is why this is a divergence to record rather than a hole that is open today.
+
+**What is owed:** a `tower` rate-limit layer keyed the way Go's is (`VaryByRemoteAddr`,
+`VaryByHeader`, `VaryByUser`), applied to this route and to `/login/desktop_token` when that one
+lands. Nothing else in api4 needs it.
+
+---
+
+## D-431 · the SSO session length is unmodelled, and so is every SSO login route
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the login vertical)
+
+`DoLogin` picks between three session lengths (app/login.go:167-173): mobile, **SSO**, and web.
+`mm_app::config::Config` carries the first and third and not `ServiceSettings.SessionLengthSSOInHours`,
+because the SSO arm is `opts.IsOAuthUser || opts.IsSaml` and `POST /users/login` sets neither —
+it is reachable only from `completeOAuth`, `completeSaml` and `loginWithDesktopToken`, none of
+which is ported.
+
+So the field is absent for the reason rule 2 of CLAUDE.md gives: no route this server answers
+reads it. It is recorded rather than left silent because the *next* route into `DoLogin` needs it
+and the omission is invisible from here — a session created through the SSO arm would silently
+take the web length.
+
+**What is owed:** add `session_length_sso_in_hours` (config.go:421, the same days→hours cascade as
+the other two) to `Config`, to `scripts/dump-config-fixture.sh` and to the third arm of
+`App::do_login`, at the same time as the first SSO login route.
+
+---
+
+## D-450 · no welcome e-mail is sent by any served account-creation branch
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+
+All four of Go's create branches end in `EmailService.SendWelcomeEmail`
+(app/user.go:240, :263, :280, :303) and all four treat its failure as a `Logger.Warn`. There is no
+e-mail service in this port ([D-238]), so `App::create_user_from_signup` and
+`App::create_user_as_admin` log where Go sends.
+
+This is **not** a reason to forward the route. The send happens strictly after the user row is
+committed, so a forward taken there would have Go allocate a second account for the same request.
+The divergence is confined to a mail that is not sent, on a stack that has no SMTP server anyway —
+which is also why no parity test can see it.
+
+**What is owed:** the e-mail service, at which point the call sites are one line each; they are
+marked with a `tracing::info!` naming this entry rather than left silent.
+
+---
+
+## D-451 · `createUser`'s token and invite-id branches are still Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+
+`POST /api/v4/users` forwards whenever the query carries `t` or `iid`. Both branches end in
+`JoinUserToTeam` plus `AddDirectChannels`, neither of which is ported, and the token branch also
+reaches `CreateGuest`, the guest-invitation licence gates and
+`ValidateUserPermissionsOnChannels`.
+
+The forward is taken from the **query string**, before the body is read and before anything is
+written, which is what makes the split safe — see `mm_api::user_creates`. The served half is the
+admin branch and the anonymous signup.
+
+**What is owed:** `App::join_user_to_team` and `App::add_direct_channels`, at which point
+`CreateUserWithInviteId` is the smaller of the two and should land first; `CreateUserWithToken`
+additionally needs `Token().GetAllTokensByType` semantics for the invitation types and
+`CreateGuest`.
+
+---
+
+## D-452 · the send half of both e-mail-token routes is still Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+
+`POST /users/email/verify/send` and `POST /users/password/reset/send` serve every refusal that
+precedes `Token().Save` and forward from there. What is not served is
+`EmailService.CreateVerifyEmailToken`, `App.CreatePasswordRecoveryToken` and
+`App.InvalidatePasswordRecoveryTokensForUser` — and, behind them, the mail itself ([D-238]).
+
+The store is not the obstacle: `TokenStore::save` and `delete` are ported.
+`InvalidatePasswordRecoveryTokensForUser` needs `GetAllTokensByType`, which is not, and
+`SendEmailVerification` branches on `GetStatus` to choose between two different templates, which
+only matters once there is a template.
+
+**What is owed:** `TokenStore::get_all_tokens_by_type`, the two token-minting functions, and the
+e-mail service. Serving the mint without the send would leave a one-shot credential nobody can
+receive, so these land together or not at all.
+
+---
+
+## D-453 · two side effects of account creation are not reproduced
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+
+`createUserOrGuest` ends with two things this port does not do:
+
+* `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` — a goroutine that writes
+  `ProductNoticeViewState`. Nothing in this tree models product notices, and the write is
+  invisible to every route that is served.
+* `a.ch.RunMultiHook(… UserHasBeenCreated …)` — the plugin host, which is not ported at all.
+
+Both run after the response is decided and neither can change it, so a client cannot tell. A
+**plugin** can: an account created through mm-api does not fire `UserHasBeenCreated`, so a plugin
+that provisions on that hook silently skips it.
+
+**What is owed:** the plugin host, which is its own vertical; the notice write is one store method
+whenever `ProductNoticeViewState` is otherwise needed.
+
+---
+
+## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
+
+The script's key list is meant to be `mm_app::config::Document`'s own keys, and
+`the_fixture_covers_every_document_sourced_setting` asserts a **hardcoded count** against the
+fixture the script wrote — so the test agrees with the list rather than with the struct, and the
+drift CLAUDE.md warns about is invisible by construction. It has now happened a third time:
+`TeamSettings` declares `EnableOpenServer`, `EnableChannelCategorySorting`, `MaxChannelsPerTeam`,
+`MaxUsersPerTeam` and `ExperimentalDefaultChannels` in `TeamSettingsDocument` and the script
+projects none of them, and `PasswordSettings`, `ExportSettings` and `ImportSettings` have no
+section in the script at all.
+
+Every one of those settings is therefore tested only against `Config::default`, comparing a
+transcribed default with itself.
+
+This session added its own three keys (`TeamSettings.EnableUserCreation`,
+`EmailSettings.EnableSignUpWithEmail`, `LocalizationSettings.DefaultClientLocale`) and moved the
+count from 67 to 70 rather than closing the gap, because regenerating the missing sections rewrites
+committed fixture values other suites assert against and that belongs in its own change.
+
+**What is owed:** derive the key list from `Document` — or, cheaper and nearly as good, assert the
+count against a `const` that lives beside the struct instead of beside the fixture — then
+regenerate and review the values that appear for the first time.
+
+---
+
+## D-460 · `model.User` and `model.UserPatch` decode case-sensitively where Go folds
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-update vertical)
+**Related** [D-040], which closed this class for `Post`'s attachment family only.
+
+`encoding/json` matches a JSON key against a struct field name **case-insensitively** when no
+exact match exists, so Go's `patchUser` takes `{"USERNAME":"folded"}` as a username change.
+`mm_api::user_creates::decode_go_struct` hands the object to serde, which is exact-match only, so
+we leave the field unset. Measured, not reasoned: the row is in
+`fixtures/behaviour_user_update.json`'s `patch_decode` section and
+`user_patch_decoding_matches_go` asserts the *divergence* rather than skipping it, so closing this
+entry will fail that test and the assertion has to be flipped deliberately.
+
+`mm_model::go_json::remap_object_keys` is the machinery that closes it, driven by a per-type
+`GoFields` schema; `MESSAGE_ATTACHMENT_FIELDS` is the worked example. `UserPatch` needs twelve
+entries and `User` about thirty-five, plus the schema-covers-the-struct test
+`message_attachment.rs` carries.
+
+**The direction of the divergence is fail-safe, which is why it is deferred rather than fixed
+here.** A folded key we ignore is a field that does not change; Go changes it. On `PUT
+/users/{id}` a folded `"Id"` leaves `user.id` empty, the `user.Id != c.Params.UserId` guard fires
+and we answer 400 where Go answers 200 — a refusal, not a privilege escalation. No real client
+sends anything but the exact tags.
+
+**What is owed:** `GoFields` schemas for `User` and `UserPatch`, wired into `decode_go_struct`,
+and the two assertions above inverted.
+
+---
+
+## D-461 · `PUT /users/{user_id}/active` serves activation and forwards deactivation
+
+**Status** CLOSED 2026-09-13 (the user-delete vertical) · **Severity** gap · **Raised** 2026-09-13
+(the user-update vertical)
+
+**Closed by** `mm_app::user_delete` and `mm_api::user_deletes`. The two `OAuthStore` deletes are
+ported; the bot notification and the bot cascade are **not**, and both are no-ops for an account
+that owns no bots — which is one `SELECT` away and therefore knowable before the `UPDATE`. So the
+deactivation is served for an owner of no bots and forwarded for an owner of one, with the
+decision taken from reads alone. The self-deactivation e-mail keeps that one arm forwarded; see
+[D-238], still open. What remains of the original entry is below, for the reader who wants the
+list of what `userDeactivated` does.
+
+`App.UpdateActive(active = false)` writes the row and *then* runs `RevokeAllSessions` and
+`userDeactivated` (app/user.go:1172), which:
+
+- sets the user offline (ported), and
+- DMs every system administrator when the account owned bots (`notifySysadminsBotOwnerDeactivated`
+  — a post, a channel lookup and a template), and
+- disables those bots when `ServiceSettings.DisableBotsWhenOwnerIsDeactivated`, and
+- deletes the user's rows from `OAuthAuthData` and `OAuthAccessData` — two store methods
+  `mm_store::OAuthStore` does not have, and
+
+then `UpdateActive` runs the `UserHasBeenDeactivated` plugin hook and the handler sends a
+deactivation e-mail ([D-238]).
+
+All of it is **after** the `UPDATE`, so there is no prefix of the deactivation that can be served:
+a forward taken part-way through would leave a deactivated row whose sessions were never revoked.
+`mm_api::user_updates::update_user_active` therefore forwards the whole request the moment it
+reads `"active": false`, before any permission check — Go re-evaluates every gate anyway.
+`parity::user_updates::deactivation_forwards_before_any_write` pins both halves: the response
+carries no `x-mmrs-served-by: rust`, and the user's session rows are gone, which only Go can do.
+
+**What was owed, and what became of it:** `OAuthStore::remove_auth_data_by_user_id` and
+`permanent_delete_auth_data_by_user` are ported. `App::disable_user_bots` and
+`notifySysadminsBotOwnerDeactivated` are not, and are now [D-472]; the two routes did land
+together, as this entry asked.
+
+---
+
+## D-462 · the last-administrator guard and the activation seat limit have no test
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-update vertical)
+
+Two branches of `App::update_user_roles_with_user` and `App::activate_user` are translated and
+unasserted, because the shared parity stack cannot produce the input that separates the right
+answer from the wrong one:
+
+- **`count <= 1`** (app/user.go:2080) refuses to demote the *last* system administrator. Reaching
+  a count of one means removing the fixture administrator every other suite in the binary logs in
+  as. No mutation for it is in `scripts/mutations/user-update.plan` for that reason — a mutation
+  whose right and wrong answers coincide is a false CAUGHT.
+- **`ActiveUserCount >= MaxUsersHardLimit`** (app/limits.go:124) refuses an activation at the
+  250-user hard limit. The stack has ~130 users and nothing sends the input that separates `>`
+  from `>=`.
+
+**What is owed:** a DB-backed `mm-app` test for each, against a pool it owns rather than the
+shared stack — the arrangement `crates/mm-app/tests/db_login_mfa_probe.rs` uses for the MFA branch
+it is in the same position about.
+
+---
+
+## D-440 · `managed_categories` is not a route on an unlicensed, flag-off server
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+
+`GET /api/v4/teams/{team_id}/channels/managed_categories` is registered by Go **only inside**
+`if api.srv.Config().FeatureFlags.ManagedChannelCategories` (api4/channel.go:72), and that flag is
+`false` at the pinned SHA (feature_flags.go:202). Its handler then refuses anything below
+`MinimumEnterpriseLicense` with a 501 `api.license_error` (api4/channel.go:3311).
+
+So on this stack the path is not a route at all: gorilla's `NotFoundHandler` answers
+`api.context.404.app_error`, measured. **Registering the handler here would be a divergence, not
+progress** — it would answer 501 where Go answers 404 — so the route stays forwarded and
+`channel_search_all::the_managed_categories_route_is_a_404_on_both` pins both the status and the
+absence of `x-mmrs-served-by`.
+
+What it would need to ship: a feature-flag surface `mm-app::config` does not have (so the router
+could register the route conditionally, as Go does), and `GetVisibleManagedCategoryMappings`,
+which is enterprise. Neither is blocked on licensing *policy* — the licence check is a refusal we
+could serve — but on the registration being conditional on a flag we cannot read.
+
+## D-441 · `parent_access_control_policy_id` is quoted with Go's `%q`, bound here as JSON
+
+**Status** ACCEPTED · **Severity** cosmetic · **Raised** 2026-09-13 (channel listing and search)
+
+`channelSearchQuery` interpolates `fmt.Sprintf("%q", opts.ParentAccessControlPolicyId)` and lets
+Postgres parse the result as `jsonb` for `Data->'imports' @> ?` (channel_store.go:3768). The port
+binds a `serde_json::Value::String` instead, which reaches the same document for every ASCII
+input. Go's `%q` and JSON's string escaping diverge only on non-ASCII — `%q` emits `é`-style
+escapes for some runes JSON leaves alone — and this field carries 26-character base32 ids, so no
+reachable input can tell them apart. Recorded rather than fixed because fixing it would mean
+reimplementing Go's quoting for a value that cannot exercise the difference.
+
+---
+
+## D-480 · `POST /channels/{channel_id}/move` is not ported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
+
+`moveChannel` (api4/channel.go:3063) is unblocked and unported. It is forwarded, and Go answers it
+normally — measured on stack 4, where a move of a public channel to its own team returned 200 and
+the channel body.
+
+**What it needs**, none of which exists yet:
+
+- `Channel().RemoveAllDeactivatedMembers` and `Channel().UpdateSidebarChannelCategoryOnMove`;
+- `Thread().UpdateTeamIdForChannelThreads`;
+- `Webhook().UpdateIncoming`/`UpdateOutgoing`, driven from the two per-team webhook page reads
+  that **are** ported — the move rewrites `TeamId` on every hook pointing at the channel;
+- `GetTeamMembersByIds`, which `App.MoveChannel` asks **twice**: once as a precondition (every
+  channel member must already be in the target team, or the whole move is an
+  `app.channel.move_channel.members_do_not_match.error` 500) and once inside
+  `RemoveUsersFromChannelNotMemberOfTeam`;
+- the `api.team.move_channel.success` i18n string for `postChannelMoveMessage`.
+
+**The ordering worth preserving when it lands:** the `force` flag removes non-members *before* the
+move, and `MoveChannel` then calls `RemoveUsersFromChannelNotMemberOfTeam` again itself and
+**logs** rather than fails on its error — so a forced move and an unforced one differ only in
+whether the precondition can be met, not in the end state.
+
+**A parity suite for it must create its own team and channel.** `moveChannel` rewrites
+`Channels.TeamId`, and the shared fixture channel is read by two dozen suites in the same binary.
+
+---
+
+## D-481 · `POST /channels/{channel_id}/convert_to_channel` is not ported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel administration)
+
+`convertGroupMessageToChannel` (api4/channel.go:3186) is unblocked and unported; forwarded.
+Measured unlicensed: a public channel id answers 400
+`app.channel.get_common_teams.incorrect_channel_type`, a mismatched body `channel_id` answers 400
+`api.context.invalid_body_param.app_error`, and a malformed body the same.
+
+Most of the machinery is already here — `mm_app::common_teams` is the validator's first step, and
+`GetSidebarCategories`/`UpdateSidebarCategories`/`UpdateChannelMemberSchemeRoles`/`UpdateChannel`
+are all ported. What is missing:
+
+- `Channel().DeleteAllSidebarChannelForChannel`, which clears the GM from every sidebar before the
+  converted channel is re-added to each member's default category;
+- `GetUsersInChannelPage` with `ChannelGroupMaxUsers`;
+- the `api.channel.group_message.converted.to_private_channel` i18n string, and `utils.JoinList`
+  for the "a, b and c" member list it interpolates.
+
+**The blocking dependency is `common_teams`' own.** `GetDirectOrGroupMessageMembersCommonTeams`
+forwards whenever an active member is a bot, because `IsBotExemptFromDMRestrictions` needs the
+plugin manifests in the running server's memory — see `mm-app/src/common_teams.rs`. This route
+calls it as its **first** validation, so it inherits that forward exactly.
+
+**Validation order, for whoever ports it:** common teams → the requested team is among them →
+`Type == 'G'` (a **404**, not a 400) → the caller's channel membership → `clone.IsValid()` on a
+copy with the new type, name and display name. The handler's own gates run first and in a
+different order: board, space, body decode, `IsGuest`, `create_private_channel` **on the body's
+team**, then `channel_id` matching the URL.
+
+---
+
+## D-470 · `?permanent=true` forwards, because `PermanentDeleteUser` is eighteen store families
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+`App.PermanentDeleteUser` (app/user.go:2134) erases a user from `Sessions`, `UserAccessTokens`,
+`OAuthAccessData`, both `Webhooks` tables, `Commands`, `Preferences`, `ChannelMembers`,
+`GroupMembers`, `Posts`, `Reactions`, `ScheduledPosts`, `Drafts`, `Bots`, `FileInfo`, `Users`,
+`Audits` and `TeamMembers`, plus the profile-image directory in the file store. `scripts/deps.py`
+scores `DELETE /api/v4/users/{user_id}` at **17 new store methods** — the most expensive unserved
+route in the tree at the time of writing — and `ScheduledPost` has no store in `mm-store` at all.
+
+It is also **unreachable on this deployment**: `ServiceSettings.EnableAPIUserDeletion` is `false`
+in the live configuration document (Go's own default, config.go:894), so the arm a client actually
+gets is the 401 refusal, which `mm_api::user_deletes` serves. The forward exists for the
+configuration that turns the flag on.
+
+**What is owed:** the seventeen store methods, the file-store sweep, and the two-arm error mapping
+`PermanentDeleteUser` gives each of them. `OAuthStore::permanent_delete_auth_data_by_user` and
+`UserStore` aside, none of them is written.
+
+---
+
+## D-471 · the `UserHasBeenDeactivated` plugin hook has no host
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (the user-delete vertical)
+
+`UpdateActive` ends with `Srv().Go(…)` running `hooks.UserHasBeenDeactivated` over every loaded
+plugin (app/user.go:1279). There is no plugin host in this tree, and none installed on the stack
+this is tested against — `reference/.build/mmroot-3/plugins` is empty, so Go's own hook fires over
+an empty list and the two servers agree by accident rather than by construction.
+
+That accident is the whole reason the deactivation could be served. On a server with a plugin
+that implements the hook, a deactivation served here would skip it silently.
+
+**What is owed:** the plugin host, which is out of scope for a route session and is the same
+dependency several other entries name. Until then, a deployment with plugins should not point at
+this server for `DELETE /users/{user_id}`.
+
+---
+
+## D-472 · `disableUserBots` and the sysadmin bot-owner DM are not ported, and gate a forward
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+`userDeactivated` DMs every system administrator when the deactivated account owned bots
+(`notifySysadminsBotOwnerDeactivated`, app/bot.go:536) and then disables those bots when
+`ServiceSettings.DisableBotsWhenOwnerIsDeactivated` — `true` by default and `true` here.
+
+The DM is the blocker, not the cascade. `disableUserBots` is `GetBots` plus a recursive
+`UpdateActive` plus `BotStore::update`, all of which exist. The DM needs `GetOrCreateDirectChannel`
+and `CreatePost` — both ported — and `app.bot.get_disable_bot_sysadmin_message`, an i18n template
+with a plural and two conditionals in it, which is [D-092]'s dependency and not ported.
+
+Porting the cascade without the DM would be *worse* than forwarding: the bots would be disabled
+and no administrator told, a divergence that lives in `Posts` rows and that no response body can
+show. So `App::owns_bots` gates the whole request to Go instead — see `mm_app::user_delete`.
+
+**What is owed:** the i18n message, then `App::disable_user_bots` and
+`App::notify_sysadmins_bot_owner_deactivated`, at which point the gate becomes unconditional.
+
+---
+
+## D-473 · `deleteUser` skips three gates `updateUserActive` applies, and two are untestable here
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-delete vertical)
+
+The two routes perform the same operation and disagree about who may ask for it:
+
+| gate | `DELETE /users/{id}` | `PUT /users/{id}/active` |
+|---|---|---|
+| target is LDAP-managed | not checked — **deactivates** | 403 |
+| target is a guest and guests are off | not checked | 401, activation only |
+| self-deactivation with `manage_system` | allowed | **refused** |
+
+The first is transcribed in `mm_api::user_deletes` and asserted nowhere: the stack has no LDAP
+account and `LdapSettings.Enable` is off, so nothing can produce `AuthService == "ldap"` through
+the API. The third needs a system administrator as the subject, and the only one on this stack is
+the account the whole parity binary logs in as — the same wall [D-462] hit.
+
+**What is owed:** an LDAP-flavoured row planted directly (`UPDATE users SET authservice='ldap'`)
+for the first, and a second system administrator for the third. Both are fixture work rather than
+port work.
+
+---
+
+## D-474 · `user_activation_status_change` carries nothing that identifies whose status changed
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-13 (the user-delete vertical)
+
+`updateUserActive` publishes `model.NewWebSocketEvent(WebsocketEventUserActivationStatusChange,
+"", "", "", nil, "")` — no team, no channel, no user id, no omit-list, and no data. It is
+reproduced exactly, and that exactness is why `parity/user_deletes.rs` asserts nothing about it:
+a wait scoped to this suite's subject is impossible to write, and an unscoped one is satisfied by
+any other suite's deactivation. Accepted rather than open — the frame is Go's, byte for byte, and
+there is nothing to fix.
+
+`sendUpdatedUserEvent`, which `UpdateActive` also fires, *is* scoped and is asserted elsewhere.
+
+---
+
+## D-475 · "the forward precedes the write" is unobservable for a bot owner
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-09-13 (the user-delete vertical)
+
+`deleting_a_bot_owner_forwards_before_any_write` asserts that the response is not served here and
+that Go did the work. It does **not** prove the ordering its name claims. Moving the `owns_bots`
+check to after `App::deactivate_user` would write the row locally and then hand the request to
+Go, which writes the same row, revokes the same sessions and clears the same OAuth grants — a
+superset of what was already done. No response byte and no database row distinguishes the two
+orders, so no mutation over that reordering can be a true CAUGHT and none is in
+`scripts/mutations/user-delete.plan`.
+
+The property is enforced by reading `mm_api::user_deletes` and `mm_api::user_updates`, where the
+gate is the last thing before the write in both. Accepted, and stated as a parity risk rather
+than dressed up as tested.
+
+---
+
+## D-490 · `POST /teams/{team_id}/invite/email` sends no mail; the send forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (team administration)
+
+`inviteUsersToTeam` (api4/team.go:1751) is registered and answers its six refusals — the two
+permission 403s, the body 400, the empty-`emails` 400 and the `profiles`-without-`graceful` 400.
+**Every request that gets past them is forwarded**, because every success on this route is an
+email: `InviteNewUsersToTeam` and `InviteNewUsersToTeamGracefully` both build and send through the
+email service, and the graceful arm then creates a `resend_invitation_email` job.
+
+The hand-over is in front of that branch and behind all six gates, so nothing has been written when
+it happens — `mm_api::team_admin` documents why, and
+`parity::team_admin::every_answer_this_server_gives_on_the_two_write_routes_is_a_refusal` is the
+assertion: **no input produces a 2xx from Rust on this route at all.**
+
+**What it needs**, none of which exists yet:
+
+- an SMTP client and the invitation templates (`SendInviteEmails`, `SendGuestInviteEmails`);
+- `Token` writes for the invite tokens each address gets;
+- `Jobs.CreateJob` for `model.JobTypeResendInvitationEmail`, and the job runner behind it;
+- `ValidateUserPermissionsOnChannels`, which narrows `channelIds` to the channels the sender may
+  invite into — a read, and the only part of the handler past the gates that is not the send.
+
+On this stack SMTP is unconfigured, and it is worth knowing what Go then does, because it is not
+what a reader expects: the **non-graceful** arm answers `200 {"status":"OK"}` and the **graceful**
+arm answers `200` with a per-address `unable_to_send_email_with_defaults` error in the body. The
+failure is invisible on the non-graceful path.
+
+---
+
+## D-491 · `POST /teams/{team_id}/import` refuses; `importFrom=slack` forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (team administration)
+
+`importTeam` (api4/team.go:1660) is registered and answers its eight refusals: the id 400, the
+`import_team` 403, the not-multipart **500**, and the four field errors including
+`unknown_import_from` for any source but `slack`. The `slack` arm forwards.
+
+`App.SlackImport` is a Slack-export reader that creates users, channels, posts and emoji from a zip
+— several thousand lines across `channels/app/slackimport/`, none of it ported, and none of it
+usefully partial. Measured through the proxy: a body that is not a zip comes back as Go's own
+`api.slackimport.slack_import.zip.app_error` 400, which is the evidence the multipart body survives
+the hand-over.
+
+**Two branches are unreachable here and are deliberately not ported.** The handler's first
+statement is `License().IsCloud()` → 403 `api.restricted_system_admin`; a cloud installation is
+licensed by construction and a licensed server is forwarded whole before anything else runs.
+`len(fileInfoArray) <= 0` → `…array.app_error` is reproduced but cannot fire:
+`ParseMultipartForm` never builds an empty list under a present key.
+
+---
+
+## D-500 · The MFA pair serves only refusals; anything that touches a secret forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+
+`PUT /users/{user_id}/mfa` and `POST /users/{user_id}/mfa/generate` are registered and answer
+every refusal: the id 400, the OAuth-app 403, the `edit_other_users` 403, the `activate` and
+`code` body 400s, `GetUser`'s 404, `api.user.activate_mfa.email_and_ldap_only.app_error` and
+`mfa.mfa_disabled.app_error`. **No input produces a 2xx from Rust on either route.** Two forwards
+carry the rest, and both are taken from reads and the configuration, before any write:
+
+- `{"activate": false}` — `DeactivateMfa` has no configuration gate. It writes `MfaActive = false`
+  and `MfaSecret = ''` (two `UPDATE`s, `UpdateAt` bumped twice, `MfaUsedTimestamps` zeroed) and
+  then sends an MFA-change e-mail from a goroutine. The e-mail is [D-238]: there is no e-mail
+  service here and the side effect follows the write, so the whole request goes to Go after the
+  `GetUser` whose 404 is served.
+- `ServiceSettings.EnableMultifactorAuthentication` on — past that flag Go mints 160 bits from
+  `crypto/rand`, renders a QR PNG with `github.com/mattermost/rsc/qr`, and validates tokens with
+  `dgryski/dgoogauth` at a window size of 3 against a replay list in `Users.MfaUsedTimestamps`.
+
+**The second forward is not a matter of effort.** A TOTP secret generated here could not be
+compared against one Go generated — they are different random numbers — so a Rust implementation
+of `mfa.GenerateSecret` would be unverifiable by construction, which is the failure this project
+exists to prevent. What would make it portable is a seam that lets a test fix the randomness on
+both sides; nothing like that exists in the Go code, which calls `crypto/rand.Read` inline.
+
+**What is untested rather than unported:** the flag forward itself. The flag is off stack-wide and
+`PUT /api/v4/config` is not served here, so no parity test flips it; the forward is asserted by
+reading the configuration in the handler, and the branch is covered by a mutation
+(`api-mfa-forwards-the-wrong-arm`) rather than by a request. `Users.MfaActive` likewise cannot be
+set through any api4 route with the flag off, so no test in the tree has ever seen a row with MFA
+active — the same gap the login vertical recorded and probed with SQL (`db_login_mfa_probe.rs`).
+
+---
+
+## D-501 · `POST /users/login/switch` serves its refusals; three of four branches forward
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+
+`switchAccountType` (api4/user.go:2919) is registered. What it answers and what it hands on:
+
+| branch | served | forwarded |
+|---|---|---|
+| no matching from/to pair, or a body that will not decode | the 400 naming `switch_request` | — |
+| `email` → `saml`/`gitlab`/`google`/`office365`/`openid` | the unknown-address 404 | everything past it |
+| `email` → `ldap` | the unknown-address 404 | everything past it |
+| one of the five → `email` | the 401, the OAuth-app 403, both sign-in 403s, the 404, the magic-link 400, the owner 403, `not_oauth_user` | the password change |
+| `ldap` → `email` | **the whole branch**, unlicensed | the whole branch, licensed |
+
+Three things are owed:
+
+1. **`ServiceSettings.ExperimentalEnableAuthenticationTransfer` is not in this port's
+   configuration.** It gates all four branches, but only behind `License() != nil`, so on an
+   unlicensed server the whole gate is skipped by its first conjunct and nothing observable is
+   missing. A licence makes the gate live and this server cannot read it, which is why every
+   branch forwards when licensed. Adding the field is a four-line change (struct, default,
+   `lookup_bool`, the document parse) and would close this half.
+2. **`CheckPasswordAndAllCriteria` writes before it compares.** It claims a `FailedAttempts` slot,
+   which is why `email → oauth` and `email → ldap` forward one gate after they start: the only
+   thing ahead of the claim is `GetUserByEmail`. The function itself *is* ported
+   (`mm_app::login`), so these two branches could be served as far as Go's next step — a SAML
+   relay token for `email → saml`, `GetAuthorizationCode`'s 501 for the other four, and
+   `RevokeAllSessions` then the LDAP 501 for `email → ldap`. That is real work with real writes
+   and it was not done here.
+3. **`SwitchOAuthToEmail`'s tail.** `UpdatePassword` hashes, writes, sends a sign-in-change e-mail
+   ([D-238]) and revokes every session. Every gate ahead of it is served; the write is not.
+
+**One thing served here is a property of the build, not of the configuration, and it should be
+said plainly.** `ldap → email` terminates at `ldapInterface == nil` → 501
+`api.user.ldap_to_email.not_available.app_error`, and `a.Ldap()` is nil because
+`RegisterLdapInterface` is called only from the enterprise import package, which is not in the
+pinned reference tree. So the 501 is correct for *this* Go binary and would stop being correct
+against an enterprise build, licensed or not. The licensed case forwards for reason 1 above, which
+covers the likely half of that; an unlicensed enterprise build with LDAP registered would
+diverge. `parity::user_auth::ldap_to_email_refuses_a_non_ldap_account_and_then_has_no_ldap`
+measures it against the binary the strangler actually pairs with.
+
+---
+
+## D-510 · `convertUserToBot` forwards an account that has an `AuthService`
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (account conversion)
+
+`App.ConvertUserToBot` (app/bot.go:648) opens with a branch nothing else in this tree needs:
+
+```go
+if user.AuthService != "" {
+    _, err := a.UpdateUserAuth(rctx, user.Id, &model.UserAuth{AuthService: "", AuthData: &emptyString})
+    ...
+}
+```
+
+`App.UpdateUserAuth` (app/user.go:1488) and `SqlUserStore.UpdateAuthData` (user_store.go:467) are
+both unported, and `UpdateAuthData` is the subject of `PUT /api/v4/users/{user_id}/auth`, which
+belongs to the authentication-data work rather than this one. The statement it issues blanks six
+columns at once — `Password`, `LastPasswordUpdate`, `UpdateAt`, `FailedAttempts`, `AuthService`,
+`AuthData` — and has a unique-constraint arm (`users_authdata_key`) that maps to a 400, so it is
+not a one-line fill-in.
+
+`mm_api::user_convert::convert_user_to_bot` therefore reads `user.auth_service` off the row it has
+already fetched and forwards when it is non-empty. **All three refusals above it are served**, so a
+forwarded request is always one Go would have accepted, and the forward happens before the `Bots`
+insert. `parity::user_convert::an_account_with_an_auth_service_is_handed_to_go` proves the second
+half the only way it can be proved: Go's own conversion answers **200**, which it could not do if
+this server had already written the row its primary key guards.
+
+Closing this needs `UserStore::update_auth_data` — already the second-most-wanted unserved store
+method by `scripts/deps.py`, and named as the next step by the user-deletion session too.
+
+## D-511 · every branch of `demoteUserToGuest` past the licence is unreachable on this stack
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (account conversion)
+
+`demoteUserToGuest` (api4/user.go:3540) checks `Channels().License() == nil` as its **second**
+statement, before the permission and before the user is fetched. On an unlicensed server every
+request is therefore the same 501 `api.team.demote_user_to_guest.license.error` — measured, for a
+plain user, for a system administrator, for `me` and for an id that names nothing. That 501 and
+the `RequireUserId` 400 above it are what `mm_api::user_convert::demote_user_to_guest` serves.
+
+Six things sit behind the gate and none can be compared against Go here:
+
+1. `GuestAccountsSettings.Enable` → 501 `api.team.demote_user_to_guest.disabled.error`;
+2. `Features.GuestAccounts` → **403** `api.team.invite_guests_to_channels.disabled.error` — the
+   only 403 in the handler that is not a permission error, and a different status for what reads
+   like the same refusal;
+3. the `demote_to_guest` permission;
+4. a `manage_system` escalation guard for demoting a system administrator;
+5. the already-a-guest 501;
+6. `App.DemoteUserToGuest` itself, whose store half is `SqlUserStore.DemoteUserToGuest` — the
+   mirror of the promotion transaction, plus a `Bot` refusal
+   (`api.user.demote_user_to_guest.bot_not_allowed.app_error`, 400) with no promotion counterpart.
+
+Planting `Systems.ActiveLicenseId` moves **this** side only; Go loaded its licence at startup and
+re-reads only on a save. So a licensed fixture cannot produce a Go answer to compare against, and
+porting the six would mean writing them against the source with no oracle — the failure mode
+`fixtures/` exists to prevent. The route forwards when licensed instead, and
+`parity::user_convert::a_licensed_demote_is_handed_to_go` pins that.
+
+The promotion half is fully ported and is not blocked by any of this: `promoteGuestToUser` checks
+neither the licence nor the config, which is what stops a lapsed licence stranding the guests it
+created.
+
+---
+
+## D-520 · `team_admin` compares two sequentially-fetched bodies, and the shared admin's row moves between them
+
+**Status** OPEN · **Severity** test reliability · **Raised** 2026-09-13 (closing the parallel-agent session)
+
+Five of `parity::team_admin`'s tests fail on a full run and pass in isolation, every time. It is
+not an order tie and not a route regression — the diagnosis is exact.
+
+`common::fetch_both` queries **Go first, then Rust**, and the tests compare the two bodies
+byte-for-byte. The fixture's team is created by the shared fixture administrator, so that
+account is a member and its row is in every `members_minus_group_members` response. Any suite
+that touches the administrator's profile between the two fetches changes `Users.UpdateAt`, and
+the comparison fails on that field alone.
+
+Measured on the final run of 2026-09-13, decoding the two byte arrays:
+
+    first difference at byte 2814, both bodies 3309 bytes
+    GO  …"id":"6rtg4qbe5bn55mw5t6gphxyaxa",…,"update_at":1789278355253,…,"username":"sliceuser"…
+    RS  …"id":"6rtg4qbe5bn55mw5t6gphxyaxa",…,"update_at":1789278355423,…,"username":"sliceuser"…
+
+170 milliseconds apart, same row, same user: `sliceuser`, the account the whole binary logs in as.
+
+**Why no existing lock helps.** `USER_COUNT` serialises count comparisons and `ACTIVE_LICENCE_ROW`
+serialises the licence row; neither covers "anything, anywhere, that writes the administrator's
+profile". The window is between two HTTP requests inside one helper, so a lock would have to be
+held by every suite that can touch that account — which is most of them.
+
+**What is owed — three options, and the choice belongs to whoever picks this up:**
+
+1. **Keep the administrator out of the fixture's team.** Cleanest for the byte comparison, but the
+   creator is a member by construction, so it means removing it afterwards and adjusting the
+   expected counts in several tests. The route needs `manage_system`, not membership, so the
+   administrator can still query a team it does not belong to.
+2. **Mint a second system administrator for this fixture** (`PUT /users/{id}/roles` is served
+   now) and have it create the team. Nothing else in the suite touches that account, so its row
+   is stable.
+3. **Normalise `update_at` before comparing.** Cheapest and weakest — it gives up the byte-for-byte
+   property on the one field most likely to drift.
+
+Option 2 preserves the most and costs the least in expected-count churn.
+
+**Not a new class.** It is the fourth shape of the same underlying problem this session: one
+database, one Go server and one fixture administrator shared by a massively parallel suite. The
+others were a count captured for equality across concurrent creates ([D-352]-family, fixed), an
+unscoped websocket wait satisfied by another suite's event (fixed), and a bot-prefix sweep run
+without `BOT_FIXTURES` deleting a sibling's fixture (fixed). Each was patched where it appeared.
+A deliberate pass on suite isolation — per-suite fixture accounts, or a schema per suite — would
+retire the category instead of the instance.

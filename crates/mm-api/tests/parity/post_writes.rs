@@ -321,14 +321,39 @@ async fn a_pin_publishes_post_edited_and_moves_the_channel() {
     assert_eq!(status, 200, "the pin succeeded: {body}");
 
     let arrived = socket
+        // **The wait is scoped to this channel, like the count below it.** An unscoped predicate
+        // is satisfied by *any* `post_edited` on the shared admin's stream — including one from a
+        // suite editing its own post in another channel — so `collect_until` returned on somebody
+        // else's frame and this pin's event had not arrived yet. That is what made the test fail
+        // in the suite and pass alone, and while the count was unscoped too it hid the problem by
+        // counting the stranger's frame as the one.
         .collect_until(Duration::from_millis(2_000), |frames| {
-            frames.iter().any(|frame| frame["event"] == "post_edited")
+            frames.iter().any(|frame| {
+                frame["event"] == "post_edited"
+                    && frame["broadcast"]["channel_id"] == channel.as_str()
+            })
         })
         .await;
     assert!(arrived, "no post_edited arrived: {:?}", socket.raw);
 
-    let edited = socket.events_named("post_edited");
-    assert_eq!(edited.len(), 1, "exactly one post_edited: {:?}", socket.raw);
+    // **Scoped to this test's own channel, not to the whole stream.** `events_named` returns every
+    // frame the shared admin's connection saw, and the admin is the account other suites create
+    // and delete users with — `login.rs` alone does it a dozen times without taking
+    // `BROADCAST_STREAM`, because it is not a socket test and the lock only excludes other socket
+    // tests. An unscoped count therefore fails whenever an unrelated suite happens to edit a post
+    // in the same window, which is what "failed in the suite, passes alone" meant here. Filtering
+    // keeps the assertion — exactly one `post_edited` for *this* pin — and drops the coupling.
+    let edited: Vec<_> = socket
+        .events_named("post_edited")
+        .into_iter()
+        .filter(|frame| frame["broadcast"]["channel_id"] == channel.as_str())
+        .collect();
+    assert_eq!(
+        edited.len(),
+        1,
+        "exactly one post_edited for this channel: {:?}",
+        socket.raw
+    );
     let event = &edited[0];
     assert_eq!(
         event["broadcast"]["channel_id"],
@@ -1364,8 +1389,11 @@ async fn deleting_a_post_publishes_two_events_to_two_audiences() {
     assert_eq!(status, 200, "the delete succeeded: {raw}");
 
     let arrived = admin_socket
+        // Scoped for the reason given on the pin test above.
         .collect_until(Duration::from_millis(2_000), |frames| {
-            frames.iter().any(|f| f["event"] == "post_deleted")
+            frames.iter().any(|f| {
+                f["event"] == "post_deleted" && f["broadcast"]["channel_id"] == channel.as_str()
+            })
         })
         .await;
     assert!(
@@ -1375,8 +1403,18 @@ async fn deleting_a_post_publishes_two_events_to_two_audiences() {
     );
     member_socket.collect_for(Duration::from_millis(600)).await;
 
-    let admin_events = admin_socket.events_named("post_deleted");
-    let member_events = member_socket.events_named("post_deleted");
+    // Scoped to this test's own channel for the reason given on the pin test above: these are
+    // counts on streams the rest of the suite also writes to.
+    let admin_events: Vec<_> = admin_socket
+        .events_named("post_deleted")
+        .into_iter()
+        .filter(|frame| frame["broadcast"]["channel_id"] == channel.as_str())
+        .collect();
+    let member_events: Vec<_> = member_socket
+        .events_named("post_deleted")
+        .into_iter()
+        .filter(|frame| frame["broadcast"]["channel_id"] == channel.as_str())
+        .collect();
     assert_eq!(
         admin_events.len(),
         1,

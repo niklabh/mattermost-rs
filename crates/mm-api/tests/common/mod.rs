@@ -282,6 +282,34 @@ pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 /// re-run and wrong under `--workspace`.
 pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **`brand/image.png` is one file for the whole installation**, and two suites care about it:
+/// `image_writes` uploads one through the forwarded `POST /api/v4/brand/image` to see the 201 and
+/// then deletes it again, while `file_bytes` asserts on what `GET /api/v4/brand/image` answers.
+///
+/// Held exclusively by everything that touches the route, for the reason [`ACTIVE_LICENCE_ROW`]
+/// gives: a read taken between the upload and the delete is a 200 where the reader expected a
+/// 404, and the failure names a route the writer never mentioned.
+pub static BRAND_IMAGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// **`Users` is one table and `GET /api/v4/users/stats` counts it**, so a suite that creates
+/// accounts and a suite that compares that number across two servers cannot run at the same time.
+///
+/// `users_stats` already brackets its reads — it takes Go's answer twice and accepts ours if it
+/// matches either — and that is enough against the *occasional* `create_plain_user` in some other
+/// fixture, which happens once per module behind a `OnceCell`. It is not enough against
+/// `user_creates`, whose subject **is** account creation: fourteen tests creating and hard-deleting
+/// twenty-odd accounts move the total continuously, and a full-workspace run produced
+/// `total_users_count: 131` from Go and `130` from us, naming a route neither suite had changed.
+///
+/// So both sides take this: every `user_creates` test that creates an account holds it for the
+/// duration, and every `users_stats` test that compares or brackets the total holds it too. One
+/// lock rather than one per module, for the reason [`ACTIVE_LICENCE_ROW`] gives.
+///
+/// It does **not** make the count stable in general — fifty other suites still create users — and
+/// `users_stats`'s bracketing is still what covers those. This removes the one writer that made
+/// the bracketing insufficient.
+pub static USER_COUNT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
 /// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
@@ -985,6 +1013,47 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
+        // Accounts `parity/user_creates.rs` creates through the route under test. It scrubs its
+        // own, hard — but a panicked assertion skips the scrub, and a leftover here is worse than
+        // most: the username and the e-mail stay reserved, so the *next* run of that file gets
+        // `app.user.save.username_exists.app_error` from both servers and reads as a port bug.
+        // It is also a row `users_stats` counts.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsnewuser%'",
+        // `parity/user_updates.rs`. Its own prefix, so an abandoned run of that file cannot be
+        // mistaken for one of the two above — and a hard delete, because a row it left behind is
+        // an off-by-one in `users_stats`.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsupduser%'",
+        // `parity/user_auth.rs`. Its own prefix, and it needs no extra tables — but a leftover
+        // row there is worse than most: the route under test writes `Users.AuthData`, which
+        // carries a **unique constraint**, so an abandoned run keeps `mmrsauth-…` reserved and
+        // the next run's switch is a 400 that reads as a port bug rather than as debris.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsauthuser%'",
+        // `parity/user_deletes.rs`. Its own prefix again, and it needs three tables the two
+        // sweeps above do not: it plants `Bots` rows over its own users and `OAuth*` grants for
+        // them, and both are what the route under test is asked to clear. A leftover `Bots` row
+        // would make the *next* run's owner forward when it meant to serve.
+        "DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM bots WHERE ownerid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM oauthauthdata WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM oauthaccessdata WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsdeluser%'",
         // Rows keyed on a *post* id, which nothing below reaches — the channel subquery is the
         // only handle on them, and it stops resolving once the posts are gone. These used to
         // live in each suite's own purge, which is a race rather than a cleanup: the parity
@@ -1624,6 +1693,35 @@ pub async fn count_countable_users() -> Option<i64> {
 ///
 /// Per-user by construction, so it cannot disturb a concurrently running suite — unlike editing
 /// the `system_user` role itself, which is global and would.
+/// Write `Users.AuthService` straight into Postgres.
+///
+/// `setProfileImage`'s 409 turns on `user.IsLDAPUser() || (user.IsSAMLUser() && …)`, and there is
+/// no API on either server that makes an email account into an LDAP one — `PUT /users/{id}/auth`
+/// is enterprise-gated and wants an auth service Go can actually talk to. The column is the only
+/// input the branch reads, so it is written directly and put back by the caller.
+///
+/// **Go caches users**, so its own answer for such a row may be stale; every assertion that uses
+/// this looks at what *this* server does, never at a comparison.
+pub async fn set_user_auth_service(user_id: &str, auth_service: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query("UPDATE users SET authservice = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(auth_service)
+        .execute(&pool)
+        .await
+        .expect("the fixture user's auth service is written");
+    true
+}
+
 pub async fn set_user_roles(user_id: &str, roles: &str) -> bool {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return false;
@@ -1804,7 +1902,7 @@ pub async fn invalidate_go_caches_locked(client: &reqwest::Client, admin_token: 
 ///
 /// Five helpers below plant rows no REST call can create. They each opened their own pool; this
 /// is that, once.
-pub(crate) async fn fixture_pool() -> Option<sqlx::PgPool> {
+pub async fn fixture_pool() -> Option<sqlx::PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)

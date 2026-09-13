@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauthaccessdata",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "c6d8080bc8690747b76ae928368d81fd5863529e72de92a44bc7045b4d4e9b2b"
+}

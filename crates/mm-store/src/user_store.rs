@@ -12,6 +12,22 @@ pub trait UserStore {
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateUpdateAt` (user_store.go) — one column, no read, no
+    /// validation.
+    ///
+    /// **The timestamp is minted before the write and returned even when the write fails**
+    /// (`return curTime, errors.Wrapf(...)`), and Go's caller only checks the error. It is also
+    /// not an upsert: an unknown id updates zero rows and is reported as success, which is why
+    /// `postProcessTeamMemberLeave` cannot notice a user that vanished under it.
+    ///
+    /// What it is *for* is `GET /users/{id}`'s etag: every client caching a user re-fetches after
+    /// this runs. Skipping it leaves the caches stale — which is exactly what [D-242] records for
+    /// the join path.
+    fn update_update_at(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlUserStore.Count` (user_store.go:1471) for the **one** options shape reachable
     /// today: `UserCountOptions{IncludeBotAccounts: true}` with nil view restrictions, which is
     /// what `App.GetTotalUsersStats` passes.
@@ -28,6 +44,33 @@ pub trait UserStore {
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
     fn count_total_users(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// `SqlUserStore.Count` under the exact options `UpdateUserRolesWithUser` passes it
+    /// (app/user.go:2074): `{IncludeBotAccounts: false, Roles: ["system_admin"]}`.
+    ///
+    /// A dedicated method rather than a `roles` field on [`UserCountOptions`][mm_model::user_count::UserCountOptions],
+    /// because `applyMultiRoleFilters` (user_store.go:729) is a seven-way switch over role names
+    /// with a *different* predicate per name, and only one of its arms is reachable from any
+    /// route this server answers. The one arm is reproduced here verbatim:
+    /// `Users.Roles ILIKE '%system_admin%'` — Go's `sq.ILike` over
+    /// `wildcardSearchTerm` (team_store.go:88), which lower-cases the *term* and leaves the
+    /// column to `ILIKE`.
+    ///
+    /// # It is a substring match, and that is load-bearing
+    ///
+    /// The `system_admin` arm is the wildcard one, not the equality one — `system_user` is the
+    /// only role compared with `sq.Eq`. So a user whose roles are `"system_user system_admin"`
+    /// counts, which is what makes the last-admin guard work at all: a sole administrator always
+    /// carries `system_user` beside the admin role.
+    ///
+    /// # The three filters that are not the role
+    ///
+    /// `DeleteAt = 0` (a deactivated administrator does not hold the door open), the remote-user
+    /// exclusion, and the `Bots` anti-join from `IncludeBotAccounts: false`. Dropping any one of
+    /// them makes the guard count somebody who cannot log in to use the permission.
+    fn count_system_admins(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
@@ -315,6 +358,129 @@ pub trait UserStore {
         hashed_password: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.PromoteGuestToUser` (user_store.go:2195) — behind
+    /// `POST /api/v4/users/{user_id}/promote`.
+    ///
+    /// # Three statements in one transaction, and the first one is a read
+    ///
+    /// Go reads the user *inside* the transaction to get its roles, rewrites every `system_guest`
+    /// token to `system_user` **in place**, and writes the list back joined by a single space.
+    /// The substitution is per element of `strings.Fields`, not a `strings.Replace` over the
+    /// whole string: a role called `system_guest_reviewer` is left alone, and the relative order
+    /// of the caller's other roles is preserved. A port that rebuilt the list — dropping
+    /// `system_guest` and appending `system_user` — would reorder roles for every guest that
+    /// holds more than one, and `Roles` is on the wire.
+    ///
+    /// A guest with **no** `system_guest` token writes its own roles back unchanged and still
+    /// bumps `UpdateAt`; the handler's `IsGuest()` gate is what normally stops that.
+    ///
+    /// # `SchemeUser` and `SchemeGuest` move for *every* membership, unscoped by team
+    ///
+    /// Both `ChannelMembers` and `TeamMembers` are updated by `UserId` alone, so promotion is
+    /// installation-wide — there is no per-team promotion. `SchemeUser` is set true and
+    /// `SchemeGuest` false even on rows where neither was a guest's, which is a no-op in value
+    /// terms but still rewrites the row.
+    ///
+    /// A miss is [`StoreError::NotFound`] from the read, before anything is written.
+    fn promote_guest_to_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetForLogin` (user_store.go:1422).
+    ///
+    /// # The two flags choose the predicate, and neither being set is an error
+    ///
+    /// `username && email` matches `Username = lower($1) OR Email = lower($1)`; either alone
+    /// drops the other side; **neither returns an error before a query is issued**. That last
+    /// branch is reachable — an administrator can switch both sign-in methods off — and it is not
+    /// the same as "no such user": Go's `GetUserForLogin` only calls this at all when one of the
+    /// two is set, so the error arm is dead from `login` and live from nothing else. Reproduced
+    /// because the next caller may not have that guard.
+    ///
+    /// # `lower()` is applied to the parameter, not the column
+    ///
+    /// So the comparison is case-**sensitive on the stored value**. `PreSave` normalises both
+    /// `Username` and `Email` to lower case, so this is equivalent to a case-insensitive lookup
+    /// for any row the server itself wrote — but a row inserted by hand with an uppercase
+    /// username cannot be logged into by name at all, on either server. A port that lowered the
+    /// column instead would let that row in and diverge.
+    ///
+    /// # Zero rows and two rows are **different** errors in Go, and both are refusals
+    ///
+    /// With both flags on, one account may hold another's username as its email address, which
+    /// is the two-row case. Go distinguishes them in the message only; both reach
+    /// `GetUserForLogin`'s single `store.sql_user.get_for_login.app_error`, so both surface as
+    /// [`StoreError::NotFound`] here with different criteria.
+    fn get_for_login(
+        &self,
+        login_id: &str,
+        allow_sign_in_with_username: bool,
+        allow_sign_in_with_email: bool,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateLastLogin` (user_store.go:498).
+    ///
+    /// `SET LastLogin = $1, UpdateAt = GetMillis()` — **two different instants**. `DoLogin` passes
+    /// the new session's `CreateAt` as the login time, while `UpdateAt` is taken fresh inside the
+    /// store, so the two columns differ by however long the session insert took. Collapsing them
+    /// onto one value would be tidier and would not be Go.
+    ///
+    /// Bumping `UpdateAt` matters beyond bookkeeping: it is the etag input for `GET /users/{id}`,
+    /// so logging in invalidates every cached copy of your own profile.
+    ///
+    /// A miss writes nothing and is not an error — Go discards the row count.
+    fn update_last_login(
+        &self,
+        user_id: &str,
+        last_login: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateAuthData` (user_store.go:467), as `updateUserAuth` calls it.
+    ///
+    /// # This is how an account's credentials are replaced, and it blanks the password
+    ///
+    /// One statement sets six columns: `Password = ''`, `LastPasswordUpdate` and `UpdateAt` to
+    /// **one** `GetMillis()` read, `FailedAttempts = 0`, and the two auth columns. The blanked
+    /// password is the point — an account moved to SSO must not keep a password that still works
+    /// — and it is irreversible through this route, so a caller that means to *read* the auth
+    /// method must not come here.
+    ///
+    /// # Go has two more parameters and this does not
+    ///
+    /// The Go signature is `(userID, service string, authData *string, email string, resetMfa
+    /// bool)`. `email != ""` adds `Email = lower(?)`, and `resetMfa` adds `MfaActive = false`,
+    /// `MfaSecret = ''` and `MfaUsedTimestamps = []`. Both are dead for the one call site this
+    /// server has: `App.UpdateUserAuth` passes `""` and `false` (app/user.go:1489). The other
+    /// three callers — `CreateOAuthUser` (app/user.go:490), `completeOAuth`'s SSO merge
+    /// (app/oauth.go:913, the only `resetMfa: true`) and the bulk importer
+    /// (import_functions.go:606) — are not ported, so the parameters are left off rather than
+    /// shipped untested. Adding either means adding the `SET` clause and a test for it.
+    ///
+    /// # A miss is a success
+    ///
+    /// There is no existence check and Go discards the row count, so an id that matches nothing
+    /// returns `Ok` and the handler answers **200** with the submitted `UserAuth` echoed back.
+    /// Measured against the running server, not inferred: `PUT /users/aaaa…aa/auth` with a valid
+    /// body is a 200.
+    ///
+    /// # Its unique violations are `InvalidInput`
+    ///
+    /// `Users.AuthData` carries a unique constraint, so moving two accounts onto one
+    /// `auth_data` fails the second. Go names five strings —
+    /// `Email`, `users_email_key`, `idx_users_email_unique`, `AuthData`, `users_authdata_key` —
+    /// and substring-matches them against the driver's message; the two that exist in this
+    /// schema are `users_email_key` and `users_authdata_key`. Either raises
+    /// `ErrInvalidInput("User", "id", userId)`, which the app layer renders as
+    /// `app.user.update_auth_data.email_exists.app_error` at **400** — a message about e-mail for
+    /// what is nearly always an `AuthData` collision.
+    fn update_auth_data(
+        &self,
+        user_id: &str,
+        service: &str,
+        auth_data: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<String, StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdateFailedPasswordAttempts` (user_store.go:420).
     ///
     /// An unconditional `SET FailedAttempts = ?`. Every caller passes `0`, so in practice this is
@@ -408,6 +574,29 @@ pub trait UserStore {
         user: &User,
         hasher: &(dyn mm_model::user::UserPasswordHasher + Sync),
     ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.IsEmpty` (user_store.go:2379).
+    ///
+    /// # The bot exclusion is the whole point of the call site
+    ///
+    /// `users.CreateUser` calls it as `IsEmpty(true)` to decide whether the account being created
+    /// is the **first** one and should therefore be granted `system_admin system_user` rather
+    /// than plain `system_user`. On a fresh install the plugin-created bots can be the only rows
+    /// in `Users`, so counting them would silently deny the first human administrator their
+    /// role — which is why Go left-joins `Bots` and requires `Bots.UserId IS NULL`.
+    ///
+    /// # Deleted users still count
+    ///
+    /// There is no `DeleteAt = 0` predicate. A server whose only account has been deactivated is
+    /// *not* empty, so the next signup does not become an admin.
+    ///
+    /// Go spells it `SELECT EXISTS (SELECT 1 FROM Users …)` and negates the answer; the negation
+    /// is kept here rather than flipped into a `NOT EXISTS`, so the SQL reads the same in both
+    /// trees.
+    fn is_empty(
+        &self,
+        exclude_bots: bool,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
 
     /// Port of `SqlUserStore.PermanentDelete` (user_store.go:1464).
     ///
@@ -628,38 +817,38 @@ impl SqlUserStore {
 /// One row of Go's `usersQuery` — `getUsersColumns()` plus `getBotInfoColumns()` over
 /// `Users LEFT JOIN Bots` (user_store.go:120-126). Both ported lookups select exactly this
 /// shape, so the mapping lives once in [`user_from_row`].
-struct UserRow {
-    id: String,
-    createat: Option<i64>,
-    updateat: Option<i64>,
-    deleteat: Option<i64>,
-    username: Option<String>,
-    password: Option<String>,
-    authdata: Option<String>,
-    authservice: Option<String>,
-    email: Option<String>,
-    emailverified: Option<bool>,
-    nickname: Option<String>,
-    firstname: Option<String>,
-    lastname: Option<String>,
-    position: Option<String>,
-    roles: Option<String>,
-    allowmarketing: Option<bool>,
-    props: Option<serde_json::Value>,
-    notifyprops: Option<serde_json::Value>,
-    lastpasswordupdate: Option<i64>,
-    lastpictureupdate: Option<i64>,
-    failedattempts: Option<i64>,
-    locale: Option<String>,
-    timezone: Option<serde_json::Value>,
-    mfaactive: Option<bool>,
-    mfasecret: Option<String>,
-    mfausedtimestamps: Option<serde_json::Value>,
-    remoteid: Option<String>,
-    lastlogin: i64,
-    isbot: bool,
-    botdescription: String,
-    botlasticonupdate: i64,
+pub(crate) struct UserRow {
+    pub(crate) id: String,
+    pub(crate) createat: Option<i64>,
+    pub(crate) updateat: Option<i64>,
+    pub(crate) deleteat: Option<i64>,
+    pub(crate) username: Option<String>,
+    pub(crate) password: Option<String>,
+    pub(crate) authdata: Option<String>,
+    pub(crate) authservice: Option<String>,
+    pub(crate) email: Option<String>,
+    pub(crate) emailverified: Option<bool>,
+    pub(crate) nickname: Option<String>,
+    pub(crate) firstname: Option<String>,
+    pub(crate) lastname: Option<String>,
+    pub(crate) position: Option<String>,
+    pub(crate) roles: Option<String>,
+    pub(crate) allowmarketing: Option<bool>,
+    pub(crate) props: Option<serde_json::Value>,
+    pub(crate) notifyprops: Option<serde_json::Value>,
+    pub(crate) lastpasswordupdate: Option<i64>,
+    pub(crate) lastpictureupdate: Option<i64>,
+    pub(crate) failedattempts: Option<i64>,
+    pub(crate) locale: Option<String>,
+    pub(crate) timezone: Option<serde_json::Value>,
+    pub(crate) mfaactive: Option<bool>,
+    pub(crate) mfasecret: Option<String>,
+    pub(crate) mfausedtimestamps: Option<serde_json::Value>,
+    pub(crate) remoteid: Option<String>,
+    pub(crate) lastlogin: i64,
+    pub(crate) isbot: bool,
+    pub(crate) botdescription: String,
+    pub(crate) botlasticonupdate: i64,
 }
 
 /// The row-to-model mapping both lookups share.
@@ -674,7 +863,7 @@ struct UserRow {
 /// shapes mean "absent" and only a *type* mismatch is an error. Treating JSON null as a decode
 /// failure made `GET /users/me` a 500 for every user except the one the parity tests happen to
 /// log in as — see [D-135].
-fn user_from_row(row: UserRow) -> Result<User, StoreError> {
+pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
     let decode_map = |value: Option<serde_json::Value>,
                       column: &'static str|
      -> Result<Option<StringMap>, StoreError> {
@@ -748,6 +937,19 @@ fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    async fn update_update_at(&self, user_id: &str) -> Result<i64, StoreError> {
+        let now = mm_model::utils::get_millis();
+        sqlx::query!("UPDATE users SET updateat = $1 WHERE id = $2", now, user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to update User with userId={user_id}"),
+                source,
+            })?;
+        Ok(now)
+    }
+
     /// # Two predicates, and one of them is three-valued
     ///
     /// `DeleteAt = 0` excludes deactivated users. `RemoteId = '' OR RemoteId IS NULL` excludes
@@ -809,6 +1011,30 @@ impl UserStore for SqlUserStore {
             options.include_bot_accounts,
             options.team_id,
             options.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count_system_admins(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.deleteat = 0
+               AND (u.remoteid = '' OR u.remoteid IS NULL)
+               AND b.userid IS NULL
+               AND u.roles ILIKE '%system_admin%'
+            "#
         )
         .fetch_one(&self.pool)
         .await
@@ -2697,6 +2923,264 @@ impl UserStore for SqlUserStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, roles))]
+    async fn promote_guest_to_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go's `us.Get(rctx, userId)` inside the transaction, of which only `GetRoles()` is used.
+        // A miss there is `ErrNotFound` and nothing has been written yet.
+        let roles: String = sqlx::query_scalar!("SELECT roles FROM users WHERE id = $1", user_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to get User with userId={user_id}"),
+                source,
+            })?
+            .flatten()
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "User",
+                criteria: format!("id={user_id}"),
+            })?;
+
+        // `strings.Fields` then an in-place substitution, then `strings.Join(roles, " ")`.
+        let promoted = roles
+            .split_whitespace()
+            .map(|role| {
+                if role == mm_model::user::external::SYSTEM_GUEST_ROLE_ID {
+                    mm_model::bot::external::SYSTEM_USER_ROLE_ID
+                } else {
+                    role
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        tracing::Span::current().record("roles", &promoted);
+
+        let cur_time = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1",
+            user_id,
+            promoted,
+            cur_time,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE channelmembers SET schemeuser = true, schemeguest = false WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update ChannelMembers with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE teammembers SET schemeuser = true, schemeguest = false WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update TeamMembers with userId={user_id}"),
+            source,
+        })?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(by_username, by_email, found))]
+    async fn get_for_login(
+        &self,
+        login_id: &str,
+        allow_sign_in_with_username: bool,
+        allow_sign_in_with_email: bool,
+    ) -> Result<User, StoreError> {
+        tracing::Span::current().record("by_username", allow_sign_in_with_username);
+        tracing::Span::current().record("by_email", allow_sign_in_with_email);
+
+        // Go builds one query with a squirrel `Where` per arm; sqlx's compile-time checking wants
+        // three literal statements. The predicate is the only thing that differs, so the three
+        // are folded into one statement guarded by the flags themselves: `$2`/`$3` carry them
+        // into SQL rather than into Rust. That keeps a single checked query *and* keeps the
+        // three-way choice in one place — a reader changing the `OR` cannot forget a copy.
+        //
+        // `lower($1)` on the **parameter**, as Go writes it.
+        if !allow_sign_in_with_username && !allow_sign_in_with_email {
+            return Err(StoreError::Argument {
+                entity: "User",
+                detail: "sign in with username and email are disabled",
+            });
+        }
+
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE ($2 AND u.username = lower($1))
+                OR ($3 AND u.email = lower($1))
+            "#,
+            login_id,
+            allow_sign_in_with_username,
+            allow_sign_in_with_email,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        // Go's two refusals, kept apart. The criteria never carries `login_id`: it is a
+        // credential-adjacent value and this error is logged.
+        if rows.is_empty() {
+            tracing::Span::current().record("found", 0);
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "user not found".to_owned(),
+            });
+        }
+        if rows.len() > 1 {
+            tracing::Span::current().record("found", rows.len());
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "multiple users found".to_owned(),
+            });
+        }
+        tracing::Span::current().record("found", 1);
+
+        let Some(row) = rows.into_iter().next() else {
+            // Unreachable: `rows` is neither empty nor longer than one here.
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "user not found".to_owned(),
+            });
+        };
+        user_from_row(row)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, last_login, updated))]
+    async fn update_last_login(&self, user_id: &str, last_login: i64) -> Result<(), StoreError> {
+        // `Set("UpdateAt", model.GetMillis())` — read here and **not** from `last_login`, so the
+        // two columns legitimately differ. See the trait doc.
+        let now = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastlogin = $1, updateat = $2 WHERE id = $3",
+            last_login,
+            now,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("last_login", last_login);
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, service = %service, updated))]
+    async fn update_auth_data(
+        &self,
+        user_id: &str,
+        service: &str,
+        auth_data: Option<&str>,
+    ) -> Result<String, StoreError> {
+        // `updateAt := model.GetMillis()` — read **once** and used for both `LastPasswordUpdate`
+        // and `UpdateAt`, so the two columns are exactly equal afterwards. Reading the clock twice
+        // would leave them a millisecond apart on a slow machine and nowhere else.
+        let update_at = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users
+                SET password = '',
+                    lastpasswordupdate = $1,
+                    updateat = $1,
+                    failedattempts = 0,
+                    authservice = $2,
+                    authdata = $3
+              WHERE id = $4",
+            update_at,
+            service,
+            auth_data,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| {
+            if auth_data_unique_constraint(&source) {
+                StoreError::InvalidInput {
+                    entity: "User",
+                    field: "id",
+                    value: user_id.to_owned(),
+                }
+            } else {
+                StoreError::Db {
+                    context: format!("failed to update User with userId={user_id}"),
+                    source,
+                }
+            }
+        })?;
+
+        // Go returns the id it was handed, not the id of a row it found — the row count is never
+        // consulted. Recorded on the span so a miss is visible in a trace even though it is not
+        // visible in the answer.
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(user_id.to_owned())
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %user_id, attempts, updated))]
     async fn update_failed_password_attempts(
         &self,
@@ -2918,6 +3402,32 @@ impl UserStore for SqlUserStore {
         })?;
 
         Ok(user)
+    }
+
+    #[tracing::instrument(skip(self), fields(exclude_bots = exclude_bots, empty))]
+    async fn is_empty(&self, exclude_bots: bool) -> Result<bool, StoreError> {
+        // Two statements rather than one with a bound flag: `sqlx::query_scalar!` needs the SQL
+        // at compile time, and Go builds the same two shapes from its squirrel builder.
+        let has_rows: Option<bool> = if exclude_bots {
+            sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM users LEFT JOIN bots ON users.id = bots.userid \
+                 WHERE bots.userid IS NULL)"
+            )
+            .fetch_one(&self.pool)
+            .await
+        } else {
+            sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM users)")
+                .fetch_one(&self.pool)
+                .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: "failed to check if table is empty".to_owned(),
+            source,
+        })?;
+
+        let empty = !has_rows.unwrap_or(false);
+        tracing::Span::current().record("empty", empty);
+        Ok(empty)
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
@@ -3200,6 +3710,28 @@ fn unique_constraint(err: &sqlx::Error) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// Port of `IsUniqueConstraintError(err, []string{"Email", "users_email_key",
+/// "idx_users_email_unique", "AuthData", "users_authdata_key"})` — the list
+/// `SqlUserStore.UpdateAuthData` names, and a **different list** from the one
+/// [`unique_constraint`] carries for `Update`: `Username` is not on it and `AuthData` is.
+///
+/// Go substring-matches those five strings against the driver's whole message, so the bare
+/// column names `Email` and `AuthData` match a Postgres error that mentions the column at all.
+/// Matching the constraint name is the narrower, precise version of the same test: the two
+/// constraints that exist in this schema are `users_email_key` and `users_authdata_key`, and this
+/// statement can violate only the second — it does not write `Email` at all, because the `email`
+/// parameter is not ported. The e-mail names are kept because Go's error id says "email_exists"
+/// and a reader who drops them would have to rediscover why.
+fn auth_data_unique_constraint(err: &sqlx::Error) -> bool {
+    let Some(constraint) = err.as_database_error().and_then(|db| db.constraint()) else {
+        return false;
+    };
+    matches!(
+        constraint,
+        "users_email_key" | "idx_users_email_unique" | "users_authdata_key"
+    )
 }
 
 #[cfg(test)]

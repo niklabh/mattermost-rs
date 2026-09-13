@@ -30,13 +30,14 @@ use std::collections::{BTreeMap, HashMap};
 
 use mm_model::channel::{
     CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP, CHANNEL_TYPE_SPACE, Channel, ChannelBannerInfo,
-    ChannelSearchOpts,
+    ChannelSearchOpts, ChannelWithTeamData,
 };
-use mm_model::channel_list::ChannelList;
+use mm_model::channel_list::{ChannelList, ChannelListWithTeamData};
 use mm_model::channel_member::{
     CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES, CHANNEL_NOTIFY_DEFAULT, ChannelMember,
-    ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread,
+    ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread, ChannelUnreadAt,
 };
+use mm_model::post::Post;
 use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::user::{PUSH_NOTIFY_PROP, USER_NOTIFY_ALL, USER_NOTIFY_MENTION};
@@ -205,6 +206,86 @@ pub trait ChannelStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<ChannelUnread, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.CountPostsAfter` (channel_store.go:2922) — **two** counts from
+    /// one builder, the second with `RootId = ''` added.
+    ///
+    /// # `Gt`, not `Gte`
+    ///
+    /// "created after but not including the given timestamp", and every caller passes
+    /// `post.CreateAt - 1` so that the post itself falls inside the window. An off-by-one here
+    /// moves the new-messages line by exactly one post.
+    ///
+    /// # The type filter is a `NOT IN`, and it is the join/leave set, not the system set
+    ///
+    /// Ten types, the same ones `Post.IsJoinLeaveMessage` checks — so `system_header_change` and
+    /// every other `system_*` post **is** counted. Reading the list as "system messages" and
+    /// reaching for a `LIKE 'system_%'` would change the count on any channel whose header has
+    /// been edited.
+    ///
+    /// `excluded_user_id` empty means "no filter"; non-empty adds `UserId <> ?`, which is how the
+    /// DM branch of `countMentionsFromPost` counts *the other person's* posts as mentions while
+    /// [`ChannelStore::update_last_viewed_at_post`] counts everybody's.
+    fn count_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(i64, i64), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.CountUrgentPostsAfter` (channel_store.go:2896).
+    ///
+    /// Joins `PostsPriority` to `Posts` and counts the urgent ones in the same window
+    /// [`ChannelStore::count_posts_after`] uses — but **without** the join/leave type filter,
+    /// which is moot: a join/leave post cannot carry a priority row.
+    fn count_urgent_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateLastViewedAtPost` (channel_store.go:2976) — the write
+    /// behind `POST /api/v4/users/{user_id}/posts/{post_id}/set_unread`.
+    ///
+    /// # `MsgCount` is written as a subtraction against a live column
+    ///
+    /// `MsgCount = (SELECT TotalMsgCount FROM Channels WHERE Id = …) - unread`, where `unread` is
+    /// what [`ChannelStore::count_posts_after`] just returned for the same window. Go's own
+    /// comment says why it is not `SELECT count(*) FROM Posts`: on an old channel the total is
+    /// large and the unread tail is small. The consequence is that the two reads are **not**
+    /// atomic with the write — a post landing between them moves the result — which is Go's
+    /// behaviour and not something to "fix" with a single statement.
+    ///
+    /// # `set_unread_count_root` zeroes the root count *before* the update, not after
+    ///
+    /// `if !setUnreadCountRoot { unreadRoot = 0 }`, so `MsgCountRoot` is written as
+    /// `TotalMsgCountRoot - 0` — the member is marked **fully caught up on roots** while being
+    /// marked unread on the channel. That is the CRT-unsupported reply branch of
+    /// `markChannelAsUnreadFromPostCRTUnsupported`, and it is the whole reason the flag exists.
+    /// Inverting it is invisible in any channel whose posts are all roots, because then
+    /// `unreadRoot == unread` on one side and the caller passes `0` on the other only when they
+    /// happen to coincide — see the behaviour fixture.
+    ///
+    /// # `LastViewedAt` is the post's `CreateAt - 1`, and `LastUpdateAt` is *now*
+    ///
+    /// Two different timestamps in the same `SET`, one derived from the post and one stamped. A
+    /// reader who used `GetMillis()` for both would make every marked-unread channel look read.
+    ///
+    /// # The read-back is from the **master**, and a deleted channel returns no row
+    ///
+    /// `c.DeleteAt = 0` in the read-back, over a `LEFT JOIN` that the predicate turns into an
+    /// inner one — so marking a post unread in a deleted channel performs the `UPDATE` and then
+    /// fails on the `SELECT`. Reproduced: the write is not conditional on the channel being live.
+    fn update_last_viewed_at_post(
+        &self,
+        unread_post: &Post,
+        user_id: &str,
+        mention_count: i64,
+        mention_count_root: i64,
+        urgent_mention_count: i64,
+        set_unread_count_root: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelUnreadAt, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetByNames` (channel_store.go:1634).
     ///
     /// Go's third parameter, `allowFromCache`, is dropped: this port has no channel-by-name
@@ -262,6 +343,59 @@ pub trait ChannelStore {
         term: &str,
         is_guest: bool,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetAllChannels` (channel_store.go:1341) — the system console's
+    /// unfiltered list of every open and private channel, with its team's data beside it.
+    fn get_all_channels(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &ChannelSearchOpts,
+    ) -> impl std::future::Future<Output = Result<ChannelListWithTeamData, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetAllChannelsCount` (channel_store.go:1363). **Not** the size of
+    /// [`Self::get_all_channels`]: the count query omits the `Teams` join, so a channel with a
+    /// dangling `TeamId` is counted and never listed.
+    fn get_all_channels_count(
+        &self,
+        opts: &ChannelSearchOpts,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SearchAllChannels` (channel_store.go:3778). The total is `0`
+    /// unless `opts` carries **both** `page` and `per_page`; see the implementation.
+    fn search_all_channels(
+        &self,
+        term: &str,
+        opts: &ChannelSearchOpts,
+    ) -> impl std::future::Future<Output = Result<(ChannelListWithTeamData, i64), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SearchGroupChannels` (channel_store.go:3977) — the caller's group
+    /// messages, matched on the aggregated usernames of their members.
+    fn search_group_channels(
+        &self,
+        user_id: &str,
+        term: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.AutocompleteInTeamFiltered` (channel_store.go:3447).
+    fn autocomplete_in_team_filtered(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+        private_only: bool,
+        exclude_group_constrained: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.Autocomplete` (channel_store.go:3333) — every team the caller is
+    /// still a member of, not one.
+    fn autocomplete(
+        &self,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelListWithTeamData, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.SearchInTeam` (channel_store.go:3598).
     fn search_in_team(
@@ -521,6 +655,29 @@ pub trait ChannelStore {
 
     /// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802), which is
     /// `RemoveMembers` (channel_store.go:2771) with a one-element list.
+    /// Port of `SqlChannelStore.GetTeamSpaceChannelsForUser` (channel_store.go) — the space
+    /// channels of one team that one user belongs to, in `Channels.Id` order.
+    ///
+    /// # Why a separate query exists at all
+    ///
+    /// `messageChannelTypes` is `('O','P','D','G')`, so [`get_channels`] — and every other
+    /// membership listing — **cannot see a space channel**. Its `ChannelMembers` row therefore
+    /// survives an ordinary team leave and keeps authorising space-scoped websocket delivery to a
+    /// former member. That is the bug this function exists to prevent, and it is invisible in any
+    /// test that only looks at the four message types.
+    ///
+    /// Zero rows is an empty list, **not** `ErrNotFound` — unlike [`get_channels`], whose empty
+    /// result is an error. The caller does not special-case it.
+    ///
+    /// Spaces need `FeatureFlags.EnableDocs`, off on this deployment, so this returns nothing in
+    /// practice today; the cascade is written because the flag is the only thing between here
+    /// and a leaked membership.
+    fn get_team_space_channels_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     fn remove_member(
         &self,
         channel_id: &str,
@@ -657,6 +814,14 @@ impl SqlChannelStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// The `'urgent'` written into [`ChannelStore::count_urgent_posts_after`]'s SQL.
+    ///
+    /// `sqlx::query_scalar!` takes a string literal, so the value cannot be interpolated from
+    /// [`mm_model::post::POST_PRIORITY_URGENT`]; this names it so a test can hold the two
+    /// together.
+    #[cfg(test)]
+    const URGENT_PRIORITY_IN_SQL: &'static str = "urgent";
 }
 
 impl ChannelStore for SqlChannelStore {
@@ -727,6 +892,65 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
     async fn get_many(&self, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
         get_many(&self.pool, ids).await
+    }
+
+    async fn get_all_channels(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &ChannelSearchOpts,
+    ) -> Result<ChannelListWithTeamData, StoreError> {
+        get_all_channels(&self.pool, offset, limit, opts).await
+    }
+
+    async fn get_all_channels_count(&self, opts: &ChannelSearchOpts) -> Result<i64, StoreError> {
+        get_all_channels_count(&self.pool, opts).await
+    }
+
+    async fn search_all_channels(
+        &self,
+        term: &str,
+        opts: &ChannelSearchOpts,
+    ) -> Result<(ChannelListWithTeamData, i64), StoreError> {
+        search_all_channels(&self.pool, term, opts).await
+    }
+
+    async fn search_group_channels(
+        &self,
+        user_id: &str,
+        term: &str,
+    ) -> Result<ChannelList, StoreError> {
+        search_group_channels(&self.pool, user_id, term).await
+    }
+
+    async fn autocomplete_in_team_filtered(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+        private_only: bool,
+        exclude_group_constrained: bool,
+    ) -> Result<ChannelList, StoreError> {
+        autocomplete_in_team_filtered(
+            &self.pool,
+            team_id,
+            user_id,
+            term,
+            is_guest,
+            private_only,
+            exclude_group_constrained,
+        )
+        .await
+    }
+
+    async fn autocomplete(
+        &self,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+    ) -> Result<ChannelListWithTeamData, StoreError> {
+        autocomplete(&self.pool, user_id, term, is_guest).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, found))]
@@ -833,6 +1057,170 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<ChannelUnread, StoreError> {
         get_channel_unread(&self.pool, channel_id, user_id).await
+    }
+
+    async fn count_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> Result<(i64, i64), StoreError> {
+        count_posts_after(&self.pool, channel_id, timestamp, excluded_user_id).await
+    }
+
+    async fn count_urgent_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> Result<i64, StoreError> {
+        // `PostsPriority.Priority = 'urgent'` is [`mm_model::post::POST_PRIORITY_URGENT`], inline
+        // rather than bound because it is a constant of the *query*, not of the request. Asserted
+        // against the model constant in the test below, so a rename upstream fails a test rather
+        // than silently counting nothing.
+        //
+        // **Nothing in the parity suite exercises this.** `POST /api/v4/posts` carrying a
+        // `metadata.priority` is a 403 on the development stack, so no urgent post exists, the
+        // count is always 0, and both arms of the `post_priority` config gate in
+        // [`mm_app::App::count_mentions_from_post`] answer the same body. Measured, not assumed.
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT count(*) AS "count!"
+              FROM postspriority
+              JOIN posts ON posts.id = postspriority.postid
+             WHERE postspriority.priority = 'urgent'
+               AND posts.channelid = $1
+               AND posts.createat > $2
+               AND posts.deleteat = 0
+               AND ($3 = '' OR posts.userid <> $3)
+            "#,
+            channel_id,
+            timestamp,
+            excluded_user_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count urgent Posts".to_owned(),
+            source,
+        })?;
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip(self, unread_post), fields(channel_id = %unread_post.channel_id, user_id = %user_id, set_unread_count_root))]
+    async fn update_last_viewed_at_post(
+        &self,
+        unread_post: &Post,
+        user_id: &str,
+        mention_count: i64,
+        mention_count_root: i64,
+        urgent_mention_count: i64,
+        set_unread_count_root: bool,
+    ) -> Result<ChannelUnreadAt, StoreError> {
+        let unread_date = unread_post.create_at - 1;
+
+        // The excluded user is the **empty string** here — every author's posts count towards
+        // the channel's unread total, including the caller's own. `countMentionsFromPost` is the
+        // call that excludes a user, and it is a different call.
+        let (unread, unread_root) =
+            count_posts_after(&self.pool, &unread_post.channel_id, unread_date, "").await?;
+
+        let unread_root = if set_unread_count_root {
+            unread_root
+        } else {
+            0
+        };
+        let updated_at = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            r#"
+            UPDATE channelmembers
+               SET mentioncount       = $1,
+                   mentioncountroot   = $2,
+                   urgentmentioncount = $3,
+                   msgcount     = (SELECT totalmsgcount     FROM channels WHERE id = $7) - $4,
+                   msgcountroot = (SELECT totalmsgcountroot FROM channels WHERE id = $7) - $5,
+                   lastviewedat = $6,
+                   lastupdateat = $8
+             WHERE userid = $9
+               AND channelid = $7
+            "#,
+            mention_count,
+            mention_count_root,
+            urgent_mention_count,
+            unread,
+            unread_root,
+            unread_date,
+            unread_post.channel_id,
+            updated_at,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update ChannelMembers".to_owned(),
+            source,
+        })?;
+
+        // `UrgentMentionCount` is the one coalesced column, exactly as in [`get_channel_unread`];
+        // the rest scan into plain integers and a NULL there is a 500 on both servers.
+        let row = sqlx::query!(
+            r#"
+            SELECT c.teamid                             AS "team_id!",
+                   cm.userid                            AS "user_id!",
+                   cm.channelid                         AS "channel_id!",
+                   cm.msgcount                          AS "msg_count!",
+                   cm.msgcountroot                      AS "msg_count_root!",
+                   cm.mentioncount                      AS "mention_count!",
+                   cm.mentioncountroot                  AS "mention_count_root!",
+                   COALESCE(cm.urgentmentioncount, 0)   AS "urgent_mention_count!",
+                   cm.lastviewedat                      AS "last_viewed_at!",
+                   cm.notifyprops
+              FROM channelmembers cm
+              LEFT JOIN channels c ON c.id = cm.channelid
+             WHERE cm.userid = $1
+               AND cm.channelid = $2
+               AND c.deleteat = 0
+            "#,
+            user_id,
+            unread_post.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get ChannelMember with channelId={}",
+                unread_post.channel_id
+            ),
+            source,
+        })?;
+
+        // `json:"-"`, so this never reaches a client — carried for the same reason
+        // [`get_channel_unread`] carries it, and split on SQL-NULL-versus-JSON-null the same way.
+        let notify_props =
+            match row.notifyprops {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
+                    |source| StoreError::Decode {
+                        entity: "ChannelUnreadAt",
+                        column: "notifyprops",
+                        source,
+                    },
+                )?),
+            };
+
+        Ok(ChannelUnreadAt {
+            team_id: row.team_id,
+            user_id: row.user_id,
+            channel_id: row.channel_id,
+            msg_count: row.msg_count,
+            msg_count_root: row.msg_count_root,
+            mention_count: row.mention_count,
+            mention_count_root: row.mention_count_root,
+            urgent_mention_count: row.urgent_mention_count,
+            last_viewed_at: row.last_viewed_at,
+            notify_props,
+        })
     }
 
     async fn get_channels_with_unreads_and_with_mentions(
@@ -1079,6 +1467,15 @@ impl ChannelStore for SqlChannelStore {
         props: &StringMap,
     ) -> Result<ChannelMember, StoreError> {
         update_member_notify_props(&self.pool, channel_id, user_id, props).await
+    }
+
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    async fn get_team_space_channels_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<ChannelList, StoreError> {
+        get_team_space_channels_for_user(&self.pool, team_id, user_id).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id))]
@@ -2284,13 +2681,62 @@ fn build_fulltext_term(term: &str) -> String {
 /// first, then alphabetical within each group, by the **database's** collation (both servers ask
 /// the same Postgres, so they agree by construction). With no search term the `CASE` is dropped
 /// in Go and short-circuits to 1 here, which is the same single-group ordering.
-#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, is_guest, found))]
 pub async fn autocomplete_in_team(
     pool: &PgPool,
     team_id: &str,
     user_id: &str,
     term: &str,
     is_guest: bool,
+) -> Result<ChannelList, StoreError> {
+    autocomplete_in_team_query(pool, team_id, user_id, term, is_guest, false, false).await
+}
+
+/// Port of `SqlChannelStore.AutocompleteInTeamFiltered` (channel_store.go:3447) — the same query
+/// with the two extra predicates `searchAllChannels`' non-console branch adds.
+///
+/// - **`private_only`** is `c.Type = 'P'` **and** `Shared` not true. The membership half is
+///   already in the shared query, so this narrows rather than replaces it; the `Shared` clause is
+///   there because Go's comment says a shared channel is ineligible for team-scoped access
+///   control. `Shared` is nullable, so "not true" has to be spelled as two disjuncts.
+/// - **`exclude_group_constrained`** drops the LDAP-group-synced channels, again with the
+///   nullable column spelled out.
+///
+/// Go writes the second as `GroupConstrained = false OR GroupConstrained IS NULL`, not the
+/// `<> true` its neighbour in [`search_all_channels`] uses; the two are the same truth table on a
+/// boolean column and are kept apart only to match each call site.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, found))]
+pub async fn autocomplete_in_team_filtered(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    term: &str,
+    is_guest: bool,
+    private_only: bool,
+    exclude_group_constrained: bool,
+) -> Result<ChannelList, StoreError> {
+    autocomplete_in_team_query(
+        pool,
+        team_id,
+        user_id,
+        term,
+        is_guest,
+        private_only,
+        exclude_group_constrained,
+    )
+    .await
+}
+
+/// Port of `buildAutocompleteInTeamQuery` (channel_store.go:3405) plus the two filters
+/// `AutocompleteInTeamFiltered` hangs off it — one query text, as Go has one builder.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, is_guest, found))]
+async fn autocomplete_in_team_query(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    term: &str,
+    is_guest: bool,
+    private_only: bool,
+    exclude_group_constrained: bool,
 ) -> Result<ChannelList, StoreError> {
     let sanitized = sanitize_search_term(term);
     let has_search = !sanitized.is_empty();
@@ -2356,6 +2802,8 @@ pub async fn autocomplete_in_team(
                 OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'
                 OR to_tsvector($7::text::regconfig, c.name || ' ' || c.displayname || ' ' || c.purpose)
                    @@ to_tsquery($7::text::regconfig, $6))
+           AND (NOT $8 OR (c.type = 'P' AND (c.shared IS NULL OR c.shared = false)))
+           AND (NOT $9 OR (c.groupconstrained = false OR c.groupconstrained IS NULL))
          ORDER BY CASE
                       WHEN $4 AND LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*' THEN 0
                       ELSE 1
@@ -2370,6 +2818,8 @@ pub async fn autocomplete_in_team(
         like_term,
         fulltext_term,
         text_config,
+        private_only,
+        exclude_group_constrained,
     )
     .fetch_all(pool)
     .await
@@ -2385,6 +2835,136 @@ pub async fn autocomplete_in_team(
             .map(channel_from_row)
             .collect::<Result<Vec<_>, _>>()?,
     ))
+}
+
+/// Port of `SqlChannelStore.Autocomplete` (channel_store.go:3333) — [`autocomplete_in_team`]
+/// without the team, and with the team's data returned beside each channel.
+///
+/// # The team is not a filter, it is a **membership join**
+///
+/// `FROM Channels c, Teams t, TeamMembers tm` with `c.TeamId = t.Id AND t.Id = tm.TeamId AND
+/// tm.UserId = ?`: a channel is a candidate only if the caller is a member of its *team*. Two
+/// consequences a reader could miss:
+///
+/// - **`tm.DeleteAt = 0` is applied unconditionally**, and Go's comment says why — a user removed
+///   from a team must not see its channels "regardless of includeDeleted". The channel's own
+///   `DeleteAt` is a separate, optional predicate; the membership's is not.
+/// - **Direct and group messages are never rows.** They are in `messageChannelTypes`, so the type
+///   filter admits them, but their `TeamId` is the empty string and the inner join to `Teams`
+///   drops them. The switcher's cross-team list is teams-only for that reason alone.
+///
+/// Everything else — the guest split, the search clause, the display-name-match ordering and the
+/// limit of 50 — is [`autocomplete_in_team`]'s, and that function documents it.
+///
+/// `include_deleted` is not a parameter here either: `App.AutocompleteChannels`
+/// (app/channel.go:3379) hardcodes it to `true`, so the channel `DeleteAt` predicate is never
+/// added and archived channels are listed.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, is_guest, found))]
+pub async fn autocomplete(
+    pool: &PgPool,
+    user_id: &str,
+    term: &str,
+    is_guest: bool,
+) -> Result<ChannelListWithTeamData, StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let rows = sqlx::query_as!(
+        ChannelWithTeamDataRow,
+        r#"
+        SELECT c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!",
+               NULL::varchar AS "policyid",
+               COALESCE(t.displayname, '') AS "teamdisplayname!",
+               COALESCE(t.name, '') AS "teamname!",
+               COALESCE(t.updateat, 0) AS "teamupdateat!"
+          FROM channels c, teams t, teammembers tm
+         WHERE c.teamid = t.id
+           AND t.id = tm.teamid
+           AND tm.userid = $1
+           AND tm.deleteat = 0
+           AND c.type IN ('O', 'P', 'D', 'G')
+           AND (CASE
+                    WHEN $2 THEN c.id IN (SELECT cm.channelid
+                                            FROM channelmembers cm
+                                           WHERE cm.userid = $1)
+                    ELSE c.type <> 'P'
+                         OR c.id IN (SELECT cm.channelid
+                                       FROM channelmembers cm
+                                      WHERE cm.userid = $1)
+                         OR c.discoverable = TRUE
+                END)
+           AND (NOT $3
+                OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*'
+                OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'
+                OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*'
+                OR to_tsvector($6::text::regconfig,
+                               c.name || ' ' || c.displayname || ' ' || c.purpose)
+                   @@ to_tsquery($6::text::regconfig, $5))
+         ORDER BY CASE
+                      WHEN $3 AND LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*' THEN 0
+                      ELSE 1
+                  END,
+                  c.displayname
+         LIMIT 50
+        "#,
+        user_id,
+        is_guest,
+        has_search,
+        like_term,
+        fulltext_term,
+        text_config,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("could not find channel with term={term}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_with_team_data_from_row)
+        .collect::<Result<_, _>>()?;
+    Ok(ChannelListWithTeamData(channels))
 }
 
 /// Port of `SqlChannelStore.AutocompleteInTeamForSearch` (channel_store.go:3464) — the search
@@ -3158,6 +3738,74 @@ pub async fn get_channels(
     Ok(ChannelList(channels))
 }
 
+/// Port of `SqlChannelStore.GetTeamSpaceChannelsForUser` — see the trait.
+pub async fn get_team_space_channels_for_user(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT ch.id,
+               ch.createat,
+               ch.updateat,
+               ch.deleteat,
+               ch.teamid,
+               ch.type::text AS "channel_type!",
+               ch.displayname,
+               ch.name,
+               ch.header,
+               ch.purpose,
+               ch.lastpostat,
+               ch.totalmsgcount,
+               ch.extraupdateat,
+               ch.creatorid,
+               ch.schemeid,
+               ch.groupconstrained,
+               ch.autotranslation,
+               ch.shared,
+               ch.totalmsgcountroot,
+               ch.lastrootpostat,
+               ch.bannerinfo,
+               ch.defaultcategoryname,
+               ch.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels ch
+          JOIN channelmembers cm ON ch.id = cm.channelid
+         WHERE ch.teamid = $1
+           AND ch.type = 'S'
+           AND cm.userid = $2
+         ORDER BY ch.id
+        "#,
+        team_id,
+        user_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find space Channels with teamId={team_id} and userId={user_id}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
 /// Port of `SqlChannelStore.GetChannelsByUser` (channel_store.go:1264) — every message channel
 /// the user is a member of, **in every team**, as one keyset page in `ORDER BY Channels.Id ASC`.
 /// That order is on the wire: `getChannelsForUser` streams the pages back to back, so the
@@ -3834,6 +4482,100 @@ pub async fn get_all_channel_members_for_user(
 /// `NotifyProps` carries `json:"-"`, so it never reaches a client. It is selected because the
 /// **app** layer branches on it: `mark_unread = mention` zeroes the two message counts
 /// (channel.go:2712).
+#[cfg(test)]
+mod urgent_priority_literal {
+    /// The `'urgent'` literal in [`ChannelStore::count_urgent_posts_after`]'s SQL is
+    /// `model.PostPriorityUrgent` (post.go:123). A `query_scalar!` cannot interpolate a constant,
+    /// so the string is written out — and this is the only thing that notices if the model's value
+    /// moves and the query keeps counting a priority that no longer exists.
+    #[test]
+    fn the_urgent_literal_is_the_model_constant() {
+        assert_eq!(mm_model::post::POST_PRIORITY_URGENT, "urgent");
+        assert!(
+            super::SqlChannelStore::URGENT_PRIORITY_IN_SQL == mm_model::post::POST_PRIORITY_URGENT,
+            "the SQL literal and the model constant must agree"
+        );
+    }
+}
+
+/// Port of `SqlChannelStore.CountPostsAfter` (channel_store.go:2922). A free function because
+/// [`ChannelStore::update_last_viewed_at_post`] needs it on the same pool without going back
+/// through the trait.
+///
+/// The two counts come from **one** builder in Go, the second adding `RootId = ''` — so every
+/// other predicate is shared by construction. Spelled as two queries here; the `WHERE` clauses
+/// must stay in step, which is what the behaviour fixture asserts.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, timestamp))]
+pub async fn count_posts_after(
+    pool: &PgPool,
+    channel_id: &str,
+    timestamp: i64,
+    excluded_user_id: &str,
+) -> Result<(i64, i64), StoreError> {
+    // `Post.IsJoinLeaveMessage`'s ten types (post.go), as `NotEq` over a slice — Postgres
+    // `NOT IN`. Every other `system_*` type is counted.
+    const JOIN_LEAVE_TYPES: [&str; 10] = [
+        mm_model::post::POST_TYPE_JOIN_LEAVE,
+        mm_model::post::POST_TYPE_ADD_REMOVE,
+        mm_model::post::POST_TYPE_JOIN_CHANNEL,
+        mm_model::post::POST_TYPE_LEAVE_CHANNEL,
+        mm_model::post::POST_TYPE_JOIN_TEAM,
+        mm_model::post::POST_TYPE_LEAVE_TEAM,
+        mm_model::post::POST_TYPE_ADD_TO_CHANNEL,
+        mm_model::post::POST_TYPE_REMOVE_FROM_CHANNEL,
+        mm_model::post::POST_TYPE_ADD_TO_TEAM,
+        mm_model::post::POST_TYPE_REMOVE_FROM_TEAM,
+    ];
+    let excluded_types: Vec<String> = JOIN_LEAVE_TYPES.iter().map(|t| (*t).to_owned()).collect();
+
+    let unread = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM posts
+         WHERE channelid = $1
+           AND createat > $2
+           AND NOT (type = ANY($3))
+           AND deleteat = 0
+           AND ($4 = '' OR userid <> $4)
+        "#,
+        channel_id,
+        timestamp,
+        &excluded_types,
+        excluded_user_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count Posts".to_owned(),
+        source,
+    })?;
+
+    let unread_root = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM posts
+         WHERE channelid = $1
+           AND createat > $2
+           AND NOT (type = ANY($3))
+           AND deleteat = 0
+           AND ($4 = '' OR userid <> $4)
+           AND rootid = ''
+        "#,
+        channel_id,
+        timestamp,
+        &excluded_types,
+        excluded_user_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count root Posts".to_owned(),
+        source,
+    })?;
+
+    Ok((unread, unread_root))
+}
+
 #[tracing::instrument(skip(pool), fields(channel_id = %channel_id, user_id = %user_id))]
 pub async fn get_channel_unread(
     pool: &PgPool,
@@ -5918,6 +6660,725 @@ pub async fn count_team_channels(pool: &PgPool, team_id: &str) -> Result<i64, St
         context: format!("failed to find Channels with teamId={team_id}"),
         source,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Admin channel listing and search — `getAllChannels`, `searchAllChannels`,
+// `searchGroupChannels` (api4/channel.go:1147, :1600, :739)
+// ---------------------------------------------------------------------------
+
+/// A [`ChannelRow`] with the three `Teams` columns and the optional retention `PolicyId` beside
+/// it — the scan target for the two queries that build a `model.ChannelListWithTeamData`.
+struct ChannelWithTeamDataRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    teamid: Option<String>,
+    channel_type: String,
+    displayname: Option<String>,
+    name: Option<String>,
+    header: Option<String>,
+    purpose: Option<String>,
+    lastpostat: Option<i64>,
+    totalmsgcount: Option<i64>,
+    extraupdateat: Option<i64>,
+    creatorid: Option<String>,
+    schemeid: Option<String>,
+    groupconstrained: Option<bool>,
+    autotranslation: bool,
+    shared: Option<bool>,
+    totalmsgcountroot: Option<i64>,
+    lastrootpostat: Option<i64>,
+    bannerinfo: Option<serde_json::Value>,
+    defaultcategoryname: String,
+    discoverable: bool,
+    policy_enforced: bool,
+    policy_is_active: bool,
+    policyid: Option<String>,
+    teamdisplayname: String,
+    teamname: String,
+    teamupdateat: i64,
+}
+
+/// Port of scanning `getAllChannelsQuery`'s row into a `model.ChannelWithTeamData`.
+///
+/// **`policy_id` is only ever set here.** Go adds the `RetentionPoliciesChannels.PolicyId`
+/// column only when `IncludePolicyID` is on, so every other channel query leaves the field nil
+/// and it serialises as `"policy_id":null` (no `omitempty`). The query below selects NULL for
+/// that column when the flag is off, which reaches the same place.
+fn channel_with_team_data_from_row(
+    row: ChannelWithTeamDataRow,
+) -> Result<ChannelWithTeamData, StoreError> {
+    let (team_display_name, team_name, team_update_at, policy_id) = (
+        row.teamdisplayname,
+        row.teamname,
+        row.teamupdateat,
+        row.policyid,
+    );
+    let mut channel = channel_from_row(ChannelRow {
+        id: row.id,
+        createat: row.createat,
+        updateat: row.updateat,
+        deleteat: row.deleteat,
+        teamid: row.teamid,
+        channel_type: row.channel_type,
+        displayname: row.displayname,
+        name: row.name,
+        header: row.header,
+        purpose: row.purpose,
+        lastpostat: row.lastpostat,
+        totalmsgcount: row.totalmsgcount,
+        extraupdateat: row.extraupdateat,
+        creatorid: row.creatorid,
+        schemeid: row.schemeid,
+        groupconstrained: row.groupconstrained,
+        autotranslation: row.autotranslation,
+        shared: row.shared,
+        totalmsgcountroot: row.totalmsgcountroot,
+        lastrootpostat: row.lastrootpostat,
+        bannerinfo: row.bannerinfo,
+        defaultcategoryname: row.defaultcategoryname,
+        discoverable: row.discoverable,
+        policy_enforced: row.policy_enforced,
+        policy_is_active: row.policy_is_active,
+    })?;
+    channel.policy_id = policy_id;
+
+    Ok(ChannelWithTeamData {
+        channel,
+        team_display_name,
+        team_name,
+        team_update_at,
+    })
+}
+
+/// Port of `SqlChannelStore.GetAllChannels` (channel_store.go:1341) and the
+/// `getAllChannelsQuery` behind it (channel_store.go:1380) — the system console's channel list.
+///
+/// # This is not a search: there is no term and no visibility filter
+///
+/// Every open and private channel on the server, on every team, whether or not the caller is a
+/// member. `c.Type IN ('P','O')` is the only type filter, so DMs, group messages, spaces and
+/// board channels are never rows. The gate is entirely in the handler
+/// (`getAllChannels`, api4/channel.go:1147), which demands one of three sysconsole permissions.
+///
+/// # `ORDER BY c.DisplayName, Teams.DisplayName` has no tie-break, and that is Go's
+///
+/// Two channels with the same display name on two teams with the same display name come back in
+/// whatever order the plan produced. Adding `c.Id` would make this port *more* deterministic than
+/// the server it must match, which is the wrong direction: a client that pages through the list
+/// sees Go's order, ties and all. The parity fixture therefore gives every row a distinct display
+/// name rather than relying on a tie-break that neither server has.
+///
+/// # The `Teams` join is in the list and **not** in the count
+///
+/// `getAllChannelsQuery` adds `JOIN Teams` only when `forCount` is false. A channel whose
+/// `TeamId` names no `Teams` row is therefore counted by
+/// [`get_all_channels_count`] and never listed — so `total_count` can exceed the number of
+/// channels any amount of paging will yield. That is Go's arithmetic and it is reproduced, not
+/// corrected.
+///
+/// # Which options this reaches
+///
+/// `getAllChannels` sets six of `ChannelSearchOpts`' fields and leaves the rest zero:
+/// `not_associated_to_group`, `exclude_channel_names` (from `exclude_default_channels`),
+/// `include_deleted`, `exclude_policy_constrained`, `access_control_policy_enforced` and
+/// `exclude_access_control_policy_enforced`, plus `include_policy_id` from the caller's
+/// retention-policy permission. `group_constrained`/`exclude_group_constrained` are in Go's
+/// query builder but no path into this route sets them, so they are carried here too — the
+/// predicate is shared with [`search_all_channels`], where the request body *can* set them, and
+/// leaving it out of one of the two would be a difference a reader could not see.
+#[tracing::instrument(skip(pool, opts), fields(offset, limit, found))]
+pub async fn get_all_channels(
+    pool: &PgPool,
+    offset: i64,
+    limit: i64,
+    opts: &ChannelSearchOpts,
+) -> Result<ChannelListWithTeamData, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelWithTeamDataRow,
+        r#"
+        SELECT
+               c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!",
+               CASE WHEN $3 THEN (
+                   SELECT rpc.policyid FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id
+               ) END AS "policyid",
+               COALESCE(t.displayname, '') AS "teamdisplayname!",
+               COALESCE(t.name, '') AS "teamname!",
+               COALESCE(t.updateat, 0) AS "teamupdateat!"
+          FROM channels c
+          JOIN teams t ON t.id = c.teamid
+         WHERE c.type IN ('P', 'O')
+           AND ($4 OR c.deleteat = 0)
+           AND ($5 = '' OR c.id NOT IN (
+                   SELECT gc.channelid FROM groupchannels gc
+                    WHERE gc.groupid = $5 AND gc.deleteat = 0))
+           AND (NOT $6 OR c.groupconstrained = true)
+           AND ($6 OR NOT $7 OR c.groupconstrained IS DISTINCT FROM true)
+           AND (cardinality($8::text[]) = 0 OR c.name <> ALL($8::text[]))
+           AND (NOT $9 OR NOT EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id))
+           AND (NOT $10 OR c.id NOT IN (
+                   SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel'))
+           AND ($10 OR NOT $11 OR EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id))
+         ORDER BY c.displayname, t.displayname
+         LIMIT $1 OFFSET $2
+        "#,
+        limit,
+        offset,
+        opts.include_policy_id,
+        opts.include_deleted,
+        opts.not_associated_to_group,
+        opts.group_constrained,
+        opts.exclude_group_constrained,
+        &opts.exclude_channel_names[..],
+        opts.exclude_policy_constrained,
+        opts.exclude_access_control_policy_enforced,
+        opts.access_control_policy_enforced,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to get all channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_with_team_data_from_row)
+        .collect::<Result<_, _>>()?;
+    Ok(ChannelListWithTeamData(channels))
+}
+
+/// Port of `SqlChannelStore.GetAllChannelsCount` (channel_store.go:1363) — the same query with
+/// `count(c.Id)` and **without the `Teams` join**; see [`get_all_channels`] for what that costs.
+///
+/// The `LEFT JOIN RetentionPoliciesChannels` Go adds when `IncludePolicyID` is set cannot change
+/// a count (`ChannelId` is that table's primary key), so it has no counterpart here.
+#[tracing::instrument(skip(pool, opts))]
+pub async fn get_all_channels_count(
+    pool: &PgPool,
+    opts: &ChannelSearchOpts,
+) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(c.id) AS "count!"
+          FROM channels c
+         WHERE c.type IN ('P', 'O')
+           AND ($1 OR c.deleteat = 0)
+           AND ($2 = '' OR c.id NOT IN (
+                   SELECT gc.channelid FROM groupchannels gc
+                    WHERE gc.groupid = $2 AND gc.deleteat = 0))
+           AND (NOT $3 OR c.groupconstrained = true)
+           AND ($3 OR NOT $4 OR c.groupconstrained IS DISTINCT FROM true)
+           AND (cardinality($5::text[]) = 0 OR c.name <> ALL($5::text[]))
+           AND (NOT $6 OR NOT EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id))
+           AND (NOT $7 OR c.id NOT IN (
+                   SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel'))
+           AND ($7 OR NOT $8 OR EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id))
+        "#,
+        opts.include_deleted,
+        opts.not_associated_to_group,
+        opts.group_constrained,
+        opts.exclude_group_constrained,
+        &opts.exclude_channel_names[..],
+        opts.exclude_policy_constrained,
+        opts.exclude_access_control_policy_enforced,
+        opts.access_control_policy_enforced,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count all channels".to_owned(),
+        source,
+    })
+}
+
+/// The default page size `channelSearchQuery` falls back to when `PerPage` is nil
+/// (channel_store.go:3649) — **100**, not [`mm_model::channel_search::CHANNEL_SEARCH_DEFAULT_LIMIT`],
+/// which is 50 and belongs to `searchGroupChannels`.
+const CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT: i64 = 100;
+
+/// Port of `SqlChannelStore.SearchAllChannels` (channel_store.go:3778) and `channelSearchQuery`
+/// (channel_store.go:3644) — the system console's channel search.
+///
+/// Returns the page and the total. **The total means two different things**: Go runs the second
+/// `count(*)` query only when `IsPaginated()` — both `Page` and `PerPage` present — and
+/// otherwise sets it to `len(channels)`, the size of the page it already has
+/// (channel_store.go:3802). So an unpaginated search reports the number of rows returned, which
+/// is a ceiling rather than a total whenever the limit bit. The handler writes the count on the
+/// wire only under the paginated condition, so the difference is not observable through
+/// `searchAllChannels`; it is the store's contract all the same.
+///
+/// # Order, and the absence of a tie-break
+///
+/// `ORDER BY c.DisplayName, t.DisplayName`, exactly as [`get_all_channels`], with the same
+/// missing third key. See that function.
+///
+/// # `Deleted` beats `IncludeDeleted`
+///
+/// Go's chain is `if Deleted { DeleteAt <> 0 } else if !IncludeDeleted { DeleteAt = 0 }`. So
+/// `deleted` alone gives the archived channels *only*, and `deleted` with `include_deleted` is
+/// still archived-only — the second flag never gets a say. The predicate below keeps that order.
+///
+/// # `public` and `private` are three cases, not two flags
+///
+/// `public && !private` joins `PublicChannels`, Go's denormalised shadow of the open channels;
+/// `private && !public` is `c.Type = 'P'`; **everything else**, including both set and neither
+/// set, is `c.Type IN ('O','P')`. Setting both is therefore the same request as setting neither.
+///
+/// # `policy_id` filtering is not reached from the REST API
+///
+/// `channelSearchQuery`'s first branch — `PolicyID != ""`, an inner join that narrows to one
+/// retention policy — has no caller in api4: `searchAllChannels` never sets the field, and
+/// `ChannelSearch` has no json tag for it. Only the `exclude_policy_constrained` and
+/// `include_policy_id` branches below are reachable, so only those are ported; a future data
+/// retention route wanting the first must add it and a test that sends it.
+#[tracing::instrument(skip(pool, opts), fields(term_len = term.len(), found, total))]
+pub async fn search_all_channels(
+    pool: &PgPool,
+    term: &str,
+    opts: &ChannelSearchOpts,
+) -> Result<(ChannelListWithTeamData, i64), StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let limit = opts.per_page.unwrap_or(CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT);
+    let paginated = opts.page.is_some() && opts.per_page.is_some();
+    let offset = match (opts.page, opts.per_page) {
+        (Some(page), Some(per_page)) => page.saturating_mul(per_page),
+        _ => 0,
+    };
+    // Go interpolates `fmt.Sprintf("%q", ...)` (channel_store.go:3768) and lets Postgres parse
+    // the result as jsonb; binding the same value as a JSON string reaches the identical
+    // document. For the 26-character base32 ids this field carries, Go's quoting and JSON's are
+    // the same bytes anyway — they diverge only on non-ASCII, which no policy id contains.
+    let parent_policy_json =
+        serde_json::Value::String(opts.parent_access_control_policy_id.clone());
+
+    let rows = sqlx::query_as!(
+        ChannelWithTeamDataRow,
+        r#"
+        SELECT
+               c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!",
+               CASE WHEN $3 THEN (
+                   SELECT rpc.policyid FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id
+               ) END AS "policyid",
+               COALESCE(t.displayname, '') AS "teamdisplayname!",
+               COALESCE(t.name, '') AS "teamname!",
+               COALESCE(t.updateat, 0) AS "teamupdateat!"
+          FROM channels c
+          JOIN teams t ON t.id = c.teamid
+         WHERE (($5 AND c.deleteat <> 0) OR (NOT $5 AND ($6 OR c.deleteat = 0)))
+           AND (NOT $4 OR NOT EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id))
+           AND (NOT $7
+                OR LOWER(c.name) LIKE LOWER($8) ESCAPE '*'
+                OR LOWER(c.displayname) LIKE LOWER($8) ESCAPE '*'
+                OR LOWER(c.purpose) LIKE LOWER($8) ESCAPE '*'
+                OR ($9 AND LOWER(c.id) LIKE LOWER($8) ESCAPE '*')
+                OR to_tsvector($10::text::regconfig,
+                               c.name || ' ' || c.displayname || ' ' || c.purpose)
+                   @@ to_tsquery($10::text::regconfig, $11))
+           AND (cardinality($12::text[]) = 0 OR c.name <> ALL($12::text[]))
+           AND ($13 = '' OR c.id NOT IN (
+                   SELECT gc.channelid FROM groupchannels gc
+                    WHERE gc.groupid = $13 AND gc.deleteat = 0))
+           AND (cardinality($14::text[]) = 0 OR c.teamid = ANY($14::text[]))
+           AND (NOT $15 OR c.groupconstrained = true)
+           AND ($15 OR NOT $16 OR c.groupconstrained IS DISTINCT FROM true)
+           AND (CASE
+                  WHEN $17 AND NOT $18
+                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)
+                  WHEN $18 AND NOT $17 THEN c.type = 'P'
+                  ELSE c.type IN ('O', 'P')
+                END)
+           AND (NOT $19
+                OR EXISTS (SELECT 1 FROM sharedchannels sc
+                            WHERE sc.channelid = c.id AND sc.home = true)
+                OR NOT EXISTS (SELECT 1 FROM sharedchannels sc WHERE sc.channelid = c.id))
+           AND (CASE
+                  WHEN $20 THEN c.id NOT IN (
+                      SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel')
+                  WHEN $21 <> '' THEN c.id IN (
+                      SELECT acp.id FROM accesscontrolpolicies acp
+                       WHERE acp.type = 'channel' AND acp.data->'imports' @> $22::jsonb)
+                  WHEN $23
+                    THEN EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)
+                  ELSE true
+                END)
+         ORDER BY c.displayname, t.displayname
+         LIMIT $1 OFFSET $2
+        "#,
+        limit,
+        offset,
+        opts.include_policy_id,
+        opts.exclude_policy_constrained,
+        opts.deleted,
+        opts.include_deleted,
+        has_search,
+        like_term,
+        opts.include_search_by_id,
+        text_config,
+        fulltext_term,
+        &opts.exclude_channel_names[..],
+        opts.not_associated_to_group,
+        &opts.team_ids[..],
+        opts.group_constrained,
+        opts.exclude_group_constrained,
+        opts.public,
+        opts.private,
+        opts.exclude_remote,
+        opts.exclude_access_control_policy_enforced,
+        opts.parent_access_control_policy_id,
+        &parent_policy_json,
+        opts.access_control_policy_enforced,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_with_team_data_from_row)
+        .collect::<Result<_, _>>()?;
+
+    if !paginated {
+        // Go's `else` branch (channel_store.go:3802): the total of an unpaginated search is the
+        // **length of the page**, not zero and not a second query. Unobservable through
+        // `searchAllChannels`, whose handler writes the count only when the same condition holds
+        // — but this is the store's contract, and a future caller reading it would be told 0
+        // where Go says 4.
+        let total = i64::try_from(channels.len()).unwrap_or(i64::MAX);
+        tracing::Span::current().record("total", total);
+        return Ok((ChannelListWithTeamData(channels), total));
+    }
+
+    let total = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) AS "count!"
+          FROM channels c
+          JOIN teams t ON t.id = c.teamid
+         WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)))
+           AND (NOT $3 OR NOT EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id))
+           AND (NOT $4
+                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'
+                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'
+                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'
+                OR ($6 AND LOWER(c.id) LIKE LOWER($5) ESCAPE '*')
+                OR to_tsvector($7::text::regconfig,
+                               c.name || ' ' || c.displayname || ' ' || c.purpose)
+                   @@ to_tsquery($7::text::regconfig, $8))
+           AND (cardinality($9::text[]) = 0 OR c.name <> ALL($9::text[]))
+           AND ($10 = '' OR c.id NOT IN (
+                   SELECT gc.channelid FROM groupchannels gc
+                    WHERE gc.groupid = $10 AND gc.deleteat = 0))
+           AND (cardinality($11::text[]) = 0 OR c.teamid = ANY($11::text[]))
+           AND (NOT $12 OR c.groupconstrained = true)
+           AND ($12 OR NOT $13 OR c.groupconstrained IS DISTINCT FROM true)
+           AND (CASE
+                  WHEN $14 AND NOT $15
+                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)
+                  WHEN $15 AND NOT $14 THEN c.type = 'P'
+                  ELSE c.type IN ('O', 'P')
+                END)
+           AND (NOT $16
+                OR EXISTS (SELECT 1 FROM sharedchannels sc
+                            WHERE sc.channelid = c.id AND sc.home = true)
+                OR NOT EXISTS (SELECT 1 FROM sharedchannels sc WHERE sc.channelid = c.id))
+           AND (CASE
+                  WHEN $17 THEN c.id NOT IN (
+                      SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel')
+                  WHEN $18 <> '' THEN c.id IN (
+                      SELECT acp.id FROM accesscontrolpolicies acp
+                       WHERE acp.type = 'channel' AND acp.data->'imports' @> $19::jsonb)
+                  WHEN $20
+                    THEN EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)
+                  ELSE true
+                END)
+        "#,
+        opts.deleted,
+        opts.include_deleted,
+        opts.exclude_policy_constrained,
+        has_search,
+        like_term,
+        opts.include_search_by_id,
+        text_config,
+        fulltext_term,
+        &opts.exclude_channel_names[..],
+        opts.not_associated_to_group,
+        &opts.team_ids[..],
+        opts.group_constrained,
+        opts.exclude_group_constrained,
+        opts.public,
+        opts.private,
+        opts.exclude_remote,
+        opts.exclude_access_control_policy_enforced,
+        opts.parent_access_control_policy_id,
+        &parent_policy_json,
+        opts.access_control_policy_enforced,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("total", total);
+    Ok((ChannelListWithTeamData(channels), total))
+}
+
+/// Port of `SqlChannelStore.SearchGroupChannels` and `searchGroupChannelsQuery`
+/// (channel_store.go:3977, :3943) — the group-message channels the caller is in whose **member
+/// usernames** match every word of the term.
+///
+/// # The term matches a joined roster, not a channel name
+///
+/// A group message has no meaningful `DisplayName`, so the predicate is built over
+/// `ARRAY_TO_STRING(ARRAY_AGG(u.Username), ', ')` — the aggregated usernames of *all* the
+/// channel's members, the caller's included — and every whitespace-separated word of the term
+/// must be a substring of that one string. So "alice bob" finds the conversation containing both,
+/// in either order, and "ali ob" finds it too.
+///
+/// The term is lower-cased **before** it is split, and the LIKE has no `lower()` on either side:
+/// Mattermost usernames are already lower-case, so the comparison works, but a term is only
+/// matched case-insensitively because it was folded here.
+///
+/// # A whitespace-only term returns every group message, up to 50
+///
+/// `strings.Fields` of `"   "` is empty, so the `HAVING` is squirrel's empty `And{}`, which
+/// renders as **`(1=1)`** (squirrel expr.go:14) rather than disappearing. The result is an
+/// unfiltered list of the caller's group messages. The empty term never gets this far —
+/// `App.SearchGroupChannels` (app/channel.go:3533) short-circuits `""` to an empty list before
+/// the store is called — but a single space does. Both are pinned by tests.
+///
+/// # Escaping is `\`, not `*`
+///
+/// `sanitizeSearchTerm(term, "\\")` and a LIKE with **no `ESCAPE` clause**, so Postgres' default
+/// backslash applies. Every other channel search in this file escapes with `*` and says so in the
+/// clause; copying that here would leave `%` and `_` in a username search unescaped.
+///
+/// # The outer query has no `ORDER BY`
+///
+/// `SELECT … FROM Channels WHERE Id IN (…)` and nothing more, so the order is the plan's. The
+/// inner `LIMIT 50` is applied to the id subquery, whose own order is equally unspecified —
+/// which means *which* 50 is unspecified once a caller has more than fifty group messages.
+/// Reproduced as written; a test that depended on the order would be testing the planner.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, terms, found))]
+pub async fn search_group_channels(
+    pool: &PgPool,
+    user_id: &str,
+    term: &str,
+) -> Result<ChannelList, StoreError> {
+    let terms: Vec<String> = mm_model::utils::go_to_lower(term)
+        .split_whitespace()
+        .map(|word| format!("%{}%", sanitize_search_term_with_backslash(word)))
+        .collect();
+    tracing::Span::current().record("terms", terms.len());
+
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT
+               ch.id AS "id!",
+               ch.createat,
+               ch.updateat,
+               ch.deleteat,
+               ch.teamid,
+               ch.type::text AS "channel_type!",
+               ch.displayname,
+               ch.name,
+               ch.header,
+               ch.purpose,
+               ch.lastpostat,
+               ch.totalmsgcount,
+               ch.extraupdateat,
+               ch.creatorid,
+               ch.schemeid,
+               ch.groupconstrained,
+               ch.autotranslation AS "autotranslation!",
+               ch.shared,
+               ch.totalmsgcountroot,
+               ch.lastrootpostat,
+               ch.bannerinfo,
+               ch.defaultcategoryname AS "defaultcategoryname!",
+               ch.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels ch
+         WHERE ch.id IN (
+                   SELECT cc.id
+                     FROM (SELECT c.id
+                             FROM channels c
+                             JOIN channelmembers cm ON c.id = cm.channelid
+                             JOIN users u ON u.id = cm.userid
+                            WHERE c.type = 'G' AND u.id = $1
+                            GROUP BY c.id) cc
+                     JOIN channelmembers cm ON cc.id = cm.channelid
+                     JOIN users u ON u.id = cm.userid
+                    GROUP BY cc.id
+                   HAVING ARRAY_TO_STRING(ARRAY_AGG(u.username), ', ') ~~ ALL($2::text[])
+                    LIMIT 50)
+        "#,
+        user_id,
+        &terms[..],
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with userId={user_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<_, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// [`sanitize_search_term`] with Go's **other** escape character.
+///
+/// `sanitizeSearchTerm(term, "\\")` (sqlstore/utils.go:62) — the same two steps, removing every
+/// backslash first and then escaping `%` and `_` with one. Only `searchGroupChannelsQuery` uses
+/// it; everything else in this file escapes with `*` and spells `ESCAPE '*'` in the clause.
+fn sanitize_search_term_with_backslash(term: &str) -> String {
+    let mut out = term.replace('\\', "");
+    for c in ['%', '_'] {
+        out = out.replace(c, &format!("\\{c}"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod search_term_tests {
+    use super::*;
+
+    /// `sanitizeSearchTerm(term, "\\")` — the group-channel search's escape character, which is
+    /// not the `*` every other search in this file uses.
+    ///
+    /// The order is Go's and it is the whole point: every backslash is **removed first**, and
+    /// only then are `%` and `_` escaped with one. A term of a single backslash therefore
+    /// sanitises to the empty string rather than to an escaped backslash.
+    #[test]
+    fn the_backslash_variant_strips_before_it_escapes() {
+        assert_eq!(sanitize_search_term_with_backslash("alice"), "alice");
+        assert_eq!(sanitize_search_term_with_backslash(""), "");
+        // Stripped, not escaped.
+        assert_eq!(sanitize_search_term_with_backslash("\\"), "");
+        assert_eq!(sanitize_search_term_with_backslash("a\\b"), "ab");
+        // The two LIKE metacharacters, escaped with the backslash Postgres defaults to.
+        assert_eq!(sanitize_search_term_with_backslash("50%"), "50\\%");
+        assert_eq!(sanitize_search_term_with_backslash("a_b"), "a\\_b");
+        assert_eq!(sanitize_search_term_with_backslash("%_%"), "\\%\\_\\%");
+        // A backslash the caller supplied cannot smuggle an escape through: it goes first, so
+        // `\\%` is `%` escaped by *this* function rather than a literal percent sign.
+        assert_eq!(sanitize_search_term_with_backslash("\\%"), "\\%");
+        // `*` is not special here, unlike in its sibling.
+        assert_eq!(sanitize_search_term_with_backslash("*"), "*");
+    }
+
+    /// Its sibling, for contrast — same two steps, different character, and `*` is what vanishes.
+    #[test]
+    fn the_star_variant_is_the_same_shape_with_a_different_character() {
+        assert_eq!(sanitize_search_term("*"), "");
+        assert_eq!(sanitize_search_term("50%"), "50*%");
+        assert_eq!(sanitize_search_term("\\"), "\\");
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,85 @@
+# Mutation plan for the four image routes — `POST` and `DELETE
+# /api/v4/users/{user_id}/image`, `GET /api/v4/users/{user_id}/image/default` and
+# `POST /api/v4/brand/image`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/image-writes.plan
+#
+# Every success on these four routes is Go's, so what is under test is the refusals and the
+# *position* of each hand-over. Three populations.
+#
+# The twenty-three **api** mutations run against `parity::image_writes`. Half of them are check
+# order rather than check direction, because order is what this family gets wrong: the storage
+# check sits in a different place on each of the three writes, the brand route tests `edit_brand`
+# fourth, and the same failed `GetUser` is a 400 on one route and a 404 on its neighbour. Four
+# more are the two size limits — 512 bytes apart, each with a row on either side of the boundary,
+# which is only reachable at all because `both_size_limits_are_where_go_puts_them` runs against a
+# second mm-api with the cap at 1 KiB.
+#
+# The four **router** mutations exist because a route registered on the wrong method, or one
+# segment short, still answers — from Go, byte-identically. Only `x-mmrs-served-by` can tell.
+#
+# The five **app** mutations are `IsProfileImageLockedForUser`'s four conjuncts and
+# `SaveBrandImage`'s guard, none of which is reachable over REST on an unlicensed stack with a
+# file driver configured.
+#
+# The two controls are a closure-binding rename in `declared_content_length` and a reorder of two
+# independent struct-literal fields in the environment overlay. If either comes back CAUGHT the
+# harness is deciding verdicts on something other than the mutation and the whole batch is void.
+#
+# **First run: 34 run, 29 caught, 4 survived, 1 harness fault.** Three lines were repaired and
+# re-run to 3/3 caught; the final tally is 34 run, 32 caught, 2 controls survived. All three are
+# worth keeping written down.
+#
+#   - `profile-require-id-dropped` survived because every case the suite sent it was a 400 either
+#     way: with a *well-formed* id that names nobody, dropping `RequireUserId` just moves the same
+#     `invalid_url_param` from the id check to `GetUser`'s discarded error. The two orderings are
+#     separated only by a malformed id in a **plain** user's hands, where the id check answers 400
+#     and the permission check behind it would answer 403. That row is now in
+#     `a_plain_user_may_not_replace_someone_elses_picture`.
+#   - `profile-missing-user-propagates-the-404` was a harness fault, not a verdict: `Err(err) =>
+#     return Err(err)` does not compile, because `App::get_user` is `AppResult<User>` and the
+#     handler's error is `ApiError` — the `?` on the DELETE's copy of the same call is doing the
+#     conversion. Re-expressed as `Err(ApiError::from(*err))`, which is a behaviour change rather
+#     than a type error, it is caught.
+#   - `lock-unlicensed-forwards-instead-of-false` survived the whole **api** suite and could never
+#     have been caught there. Both callers spell the check `… == Some(true)`, so `Ok(false)` and
+#     the `Unreproducible` forward reach the same place: no status, no body and not even
+#     `x-mmrs-served-by` differs. And no *unit* test reaches the arm either — every one is built on
+#     an unreachable pool, so it short-circuits at one of the first three conjuncts or dies on the
+#     store. `crates/mm-app/tests/db_profile_image_lock.rs` is where the branch is observable, and
+#     the line is an `app` mutation now.
+
+profile-require-id-dropped	crates/mm-api/src/images.rs	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = resolve_me(user_id, session);\n    require_id(user_id, "user_id")?;	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = resolve_me(user_id, session);	api	image_writes
+profile-me-not-resolved	crates/mm-api/src/images.rs	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = resolve_me(user_id, session);\n    require_id(user_id, "user_id")?;	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = user_id;\n    require_id(user_id, "user_id")?;	api	image_writes
+profile-permission-inverted	crates/mm-api/src/images.rs	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = resolve_me(user_id, session);\n    require_id(user_id, "user_id")?;\n\n    if !state	    const WHERE: &str = "uploadProfileImage";\n\n    let user_id = resolve_me(user_id, session);\n    require_id(user_id, "user_id")?;\n\n    if state	api	image_writes
+profile-storage-checked-before-the-permission	crates/mm-api/src/images.rs	    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    if let Some(err) = storage_not_configured(state, WHERE) {\n        return Err(err);\n    }\n\n    let (bytes, form) = match read_multipart_body(state, parts, body).await {	    if let Some(err) = storage_not_configured(state, WHERE) {\n        return Err(err);\n    }\n\n    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let (bytes, form) = match read_multipart_body(state, parts, body).await {	api	image_writes
+profile-storage-check-dropped	crates/mm-api/src/images.rs	    if let Some(err) = storage_not_configured(state, WHERE) {\n        return Err(err);\n    }\n\n    let (bytes, form) = match read_multipart_body(state, parts, body).await {	    let (bytes, form) = match read_multipart_body(state, parts, body).await {	api	image_writes
+profile-no-file-check-dropped	crates/mm-api/src/images.rs	    if form.first_file("image").is_none() {\n        return Err(profile_image_error(\n            WHERE,\n            "api.user.upload_profile_user.no_file.app_error",	    if false {\n        return Err(profile_image_error(\n            WHERE,\n            "api.user.upload_profile_user.no_file.app_error",	api	image_writes
+profile-missing-user-propagates-the-404	crates/mm-api/src/images.rs	        Err(_) => return Err(ApiError::invalid_url_param("user_id")),	        Err(err) => return Err(ApiError::from(*err)),	api	image_writes
+default-missing-user-discarded-for-a-400	crates/mm-api/src/images.rs	    // Propagated, unlike `setProfileImage`'s.\n    let user = state.app.get_user(user_id).await?;	    // Propagated, unlike `setProfileImage`'s.\n    let Ok(user) = state.app.get_user(user_id).await else {\n        return Err(ApiError::invalid_url_param("user_id"));\n    };	api	image_writes
+ldap-outer-conjunction-becomes-or	crates/mm-api/src/images.rs	    if picture_comes_from_ldap && !config.ldap_picture_attribute.is_empty() {	    if picture_comes_from_ldap || !config.ldap_picture_attribute.is_empty() {	api	image_writes
+ldap-attribute-emptiness-inverted	crates/mm-api/src/images.rs	    if picture_comes_from_ldap && !config.ldap_picture_attribute.is_empty() {	    if picture_comes_from_ldap && config.ldap_picture_attribute.is_empty() {	api	image_writes
+ldap-saml-conjunction-becomes-or	crates/mm-api/src/images.rs	        user.is_ldap_user() || (user.is_saml_user() && config.saml_enable_sync_with_ldap);	        user.is_ldap_user() || (user.is_saml_user() || config.saml_enable_sync_with_ldap);	api	image_writes
+profile-lock-check-inverted	crates/mm-api/src/images.rs	    if profile_image_locked(state, session, &user).await? == Some(true) {\n        return Err(profile_image_error(\n            WHERE,\n            "api.user.upload_profile_user.profile_field_locked.app_error",\n            409,\n        ));\n    }\n\n    Ok(None)	    if profile_image_locked(state, session, &user).await? != Some(true) {\n        return Err(profile_image_error(\n            WHERE,\n            "api.user.upload_profile_user.profile_field_locked.app_error",\n            409,\n        ));\n    }\n\n    Ok(None)	api	image_writes
+declared-length-off-by-one	crates/mm-api/src/images.rs	    if declared_content_length(&parts.headers).is_some_and(|length| length > max_file_size) {	    if declared_content_length(&parts.headers).is_some_and(|length| length >= max_file_size) {	api	image_writes
+read-cap-drops-the-min-read	crates/mm-api/src/images.rs	    if i64::try_from(bytes.len()).unwrap_or(i64::MAX) > max_file_size + BYTES_MIN_READ {	    if i64::try_from(bytes.len()).unwrap_or(i64::MAX) > max_file_size {	api	image_writes
+read-cap-off-by-one	crates/mm-api/src/images.rs	    if i64::try_from(bytes.len()).unwrap_or(i64::MAX) > max_file_size + BYTES_MIN_READ {	    if i64::try_from(bytes.len()).unwrap_or(i64::MAX) >= max_file_size + BYTES_MIN_READ {	api	image_writes
+bytes-min-read-is-not-512	crates/mm-api/src/images.rs	const BYTES_MIN_READ: i64 = 512;	const BYTES_MIN_READ: i64 = 1024;	api	image_writes
+profile-readcap-not-wrapped	crates/mm-api/src/images.rs	        Err(BodyRefusal::ReadCapExceeded) => return Err(request_body_too_large(WHERE)),	        Err(BodyRefusal::ReadCapExceeded) => {\n            return Err(profile_image_error(\n                WHERE,\n                "api.user.upload_profile_user.parse.app_error",\n                500,\n            ));\n        }	api	image_writes
+brand-readcap-promoted-to-413	crates/mm-api/src/images.rs	        Err(BodyRefusal::ReadCapExceeded | BodyRefusal::Unparseable) => return Err(parse_error()),	        Err(BodyRefusal::ReadCapExceeded) => return Err(request_body_too_large(WHERE)),\n        Err(BodyRefusal::Unparseable) => return Err(parse_error()),	api	image_writes
+brand-permission-hoisted-above-the-body	crates/mm-api/src/images.rs	    let parse_error =\n        || profile_image_error(WHERE, "api.admin.upload_brand_image.parse.app_error", 400);	    let parse_error =\n        || profile_image_error(WHERE, "api.admin.upload_brand_image.parse.app_error", 400);\n\n    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_EDIT_BRAND)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_BRAND],\n        )));\n    }	api	image_writes
+brand-no-file-check-dropped	crates/mm-api/src/images.rs	    if form.first_file("image").is_none() {\n        return Err(profile_image_error(\n            WHERE,\n            "api.admin.upload_brand_image.no_file.app_error",	    if false {\n        return Err(profile_image_error(\n            WHERE,\n            "api.admin.upload_brand_image.no_file.app_error",	api	image_writes
+brand-permission-inverted	crates/mm-api/src/images.rs	            "api.admin.upload_brand_image.no_file.app_error",\n            400,\n        ));\n    }\n\n    if !state	            "api.admin.upload_brand_image.no_file.app_error",\n            400,\n        ));\n    }\n\n    if state	api	image_writes
+default-read-can-see-inverted	crates/mm-api/src/images.rs	    };\n    if !can_see {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_VIEW_MEMBERS],\n        )));\n    }\n\n    state.app.get_user(user_id).await?;	    };\n    if can_see {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_VIEW_MEMBERS],\n        )));\n    }\n\n    state.app.get_user(user_id).await?;	api	image_writes
+default-read-user-lookup-dropped	crates/mm-api/src/images.rs	    state.app.get_user(user_id).await?;\n    Ok(())	    Ok(())	api	image_writes
+profile-post-not-registered	crates/mm-api/src/lib.rs	                get(images::get_profile_image)\n                    .post(images::set_profile_image)\n                    .delete(images::set_default_profile_image),	                get(images::get_profile_image).delete(images::set_default_profile_image),	unit	the_image_routes_and_their_neighbours
+profile-delete-not-registered	crates/mm-api/src/lib.rs	                get(images::get_profile_image)\n                    .post(images::set_profile_image)\n                    .delete(images::set_default_profile_image),	                get(images::get_profile_image).post(images::set_profile_image),	unit	the_image_routes_and_their_neighbours
+default-image-route-registered-one-segment-short	crates/mm-api/src/lib.rs	            "/api/v4/users/{user_id}/image/default",\n            partially_migrated_with_ids(&state, get(images::get_default_profile_image)),	            "/api/v4/users/{user_id}/imagedefault",\n            partially_migrated_with_ids(&state, get(images::get_default_profile_image)),	unit	the_image_routes_and_their_neighbours
+brand-post-not-registered	crates/mm-api/src/lib.rs	                get(images::get_brand_image)\n                    .post(images::upload_brand_image)\n                    .delete(images::delete_brand_image),	                get(images::get_brand_image).delete(images::delete_brand_image),	unit	the_image_routes_and_their_neighbours
+lock-permission-conjunct-inverted	crates/mm-app/src/user.rs	            .session_has_permission_to(session, &mm_model::permission::PERMISSION_EDIT_OTHER_USERS)\n            .await\n        {\n            return Ok(false);\n        }	            .session_has_permission_to(session, &mm_model::permission::PERMISSION_EDIT_OTHER_USERS)\n            .await\n            && false\n        {\n            return Ok(false);\n        }	unit	user::tests::
+lock-auth-service-conjunct-inverted	crates/mm-app/src/user.rs	        if !user.auth_service.is_empty() {\n            return Ok(false);\n        }	        if user.auth_service.is_empty() {\n            return Ok(false);\n        }	unit	user::tests::
+lock-compares-against-the-wrong-constant	crates/mm-app/src/config.rs	pub const TEAM_SETTINGS_LOCK_PROFILE_FIELDS_ALL: &str = "all";	pub const TEAM_SETTINGS_LOCK_PROFILE_FIELDS_ALL: &str = "name_and_username";	unit	user::tests::
+lock-unlicensed-forwards-instead-of-false	crates/mm-app/src/user.rs	            crate::license::LicenseState::Unlicensed => Ok(false),	            crate::license::LicenseState::Unlicensed => Err(PrepareError::Unreproducible(\n                "unlicensed",\n            )),	app	profile_image_lock
+save-brand-driver-check-inverted	crates/mm-app/src/brand.rs	    pub async fn save_brand_image(&self) -> Result<(), PrepareError> {\n        if self.config().file_driver_name.is_empty() {	    pub async fn save_brand_image(&self) -> Result<(), PrepareError> {\n        if !self.config().file_driver_name.is_empty() {	unit	brand::
+CONTROL-rename-a-binding	crates/mm-api/src/images.rs	        .and_then(|value| value.to_str().ok())\n        .and_then(|value| value.parse::<i64>().ok())	        .and_then(|raw| raw.to_str().ok())\n        .and_then(|raw| raw.parse::<i64>().ok())	api	image_writes
+CONTROL-reorder-two-struct-literal-fields	crates/mm-app/src/config.rs	            ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")\n                .unwrap_or(default.ldap_picture_attribute),\n            saml_enable_sync_with_ldap: lookup_bool(\n                lookup,\n                "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP",\n                default.saml_enable_sync_with_ldap,\n            ),	            saml_enable_sync_with_ldap: lookup_bool(\n                lookup,\n                "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP",\n                default.saml_enable_sync_with_ldap,\n            ),\n            ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")\n                .unwrap_or(default.ldap_picture_attribute),	unit	config::

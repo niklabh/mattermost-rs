@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM tokens WHERE type = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37be5fff4a81179193159ea9740dd9d5499c19a2ed4f9b28bfdfd008f7cfc790"
+}

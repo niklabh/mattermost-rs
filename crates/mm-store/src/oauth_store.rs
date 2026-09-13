@@ -1,8 +1,10 @@
 //! Port of `SqlOAuthStore` (channels/store/sqlstore/oauth_store.go) — the three app reads the
 //! `GET /api/v4/oauth/apps` routes need.
 //!
-//! The access-token and auth-code halves are not ported: nothing migrated performs an OAuth flow,
-//! and a store function with no caller is a guess about a query nothing can falsify.
+//! The access-token and auth-code halves are not ported as *reads*: nothing migrated performs an
+//! OAuth flow, and a store function with no caller is a guess about a query nothing can falsify.
+//! Their two by-user **deletes** are here, because `userDeactivated` runs both on every
+//! deactivation and `DELETE /api/v4/users/{user_id}` serves that.
 
 use mm_model::oauth::OAuthApp;
 use mm_model::utils::StringArray;
@@ -69,6 +71,49 @@ pub trait OAuthStore {
         offset: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<OAuthApp>, StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.RemoveAllAccessData` (oauth_store.go:262).
+    ///
+    /// `DELETE FROM OAuthAccessData`, no predicate. The only caller is
+    /// `RevokeSessionsFromAllUsers`, and Go's comment there says why it runs **first**: "revoke
+    /// tokens before sessions so they can't be used to relogin" (platform/session.go:169). An
+    /// OAuth access token outlives the session it minted, so deleting the sessions first would
+    /// leave a window in which every revoked client can trade its token for a new one. The order
+    /// is the security property; see [`crate::SessionStore::remove_all_sessions`] for the
+    /// other half.
+    fn remove_all_access_data(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.RemoveAuthDataByUserId` (oauth_store.go:319).
+    ///
+    /// `DELETE FROM OAuthAuthData WHERE UserId = ?` — the **authorization codes** a user has
+    /// outstanding, not their tokens. Half of the pair `userDeactivated` runs (app/user.go:1194);
+    /// the other half is [`OAuthStore::permanent_delete_auth_data_by_user`], and the two names
+    /// do not say which table each touches, which is the trap. Go logs and continues on failure
+    /// at that call site, so a deactivation whose grant sweep fails still deactivates.
+    fn remove_auth_data_by_user_id(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.PermanentDeleteAuthDataByUser` (oauth_store.go:327).
+    ///
+    /// **The name says `AuthData` and the statement says `OAuthAccessData`.** It deletes the
+    /// user's OAuth *access tokens*, not their auth codes — Go's own call site in
+    /// `PermanentDeleteUser` (app/user.go:2153) maps it to the error id
+    /// `app.oauth.permanent_delete_auth_data_by_user.app_error` while `userDeactivated`
+    /// (app/user.go:1198) logs "unable to remove oauth access data by user id" for the same
+    /// call. Reading the name instead of the statement swaps the two tables and leaves every
+    /// live OAuth token of a deactivated account working.
+    ///
+    /// It does **not** delete the `Sessions` rows those tokens minted; `RevokeAllSessions` runs
+    /// before it and is what ends the sessions. Contrast
+    /// [`OAuthStore::delete_app`], which does join the two.
+    fn permanent_delete_auth_data_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -458,6 +503,49 @@ impl OAuthStore for SqlOAuthStore {
 
         tracing::Span::current().record("found", rows.len());
         rows.into_iter().map(OAuthAppRow::into_model).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(deleted))]
+    async fn remove_all_access_data(&self) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM oauthaccessdata")
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to delete OAuthAccessData".to_owned(),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn remove_auth_data_by_user_id(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM oauthauthdata WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete AuthData with userId={user_id}"),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_auth_data_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        // `oauthaccessdata`, not `oauthauthdata` — see the trait doc.
+        let result = sqlx::query!("DELETE FROM oauthaccessdata WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete OAuthAccessData with userId={user_id}"),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 
