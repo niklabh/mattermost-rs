@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE usergroups\n               SET name = $2, displayname = $3, description = $4, source = $5, remoteid = $6,\n                   createat = $7, updateat = $8, deleteat = $9, allowreference = $10\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3bb3dfa43b25126fd251466495eb0606b6f7903941141c9b2ffa1b89e43f77b"
+}

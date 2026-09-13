@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE groupmembers SET deleteat = $1 WHERE groupid = $2 AND userid = ANY($3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b55a10b195f1ecac7149232a53669552b5b9ab1d2689b8b072a152ade062aa10"
+}

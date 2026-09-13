@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, name, displayname, description, source, remoteid, createat, updateat,\n                   deleteat, allowreference\n              FROM usergroups\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "remoteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "allowreference",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "721c961c607e59ba1c4a4c3dd09c70873d8cbf24b4d2edaface9ac3784a8f2e6"
+}

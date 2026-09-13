@@ -688,3 +688,112 @@ fn group_member_write_error(err: StoreError, where_: &str, fallback_id: &str) ->
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// The group half of the mention engine: which groups an `@name` in a channel can resolve to.
+// ---------------------------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+
+use mm_model::channel::Channel;
+use mm_model::group::GroupSearchOpts;
+use mm_model::team::Team;
+
+impl App {
+    /// Port of `App.getGroupsAllowedForReferenceInChannel` (app/notification.go:1498): the
+    /// groups a mention in `channel` may refer to, keyed by group id.
+    ///
+    /// Two shapes, decided by `IsGroupConstrained` on the channel and then the team:
+    ///
+    /// - **Neither is constrained**: every live group with `AllowReference`, from
+    ///   [`mm_store::GroupStore::get_groups`] with `FilterAllowReference` and
+    ///   `IncludeMemberCount` set and **no page** (`0, 0`).
+    /// - **Either is constrained**: the groups linked to the channel — or, only when the channel
+    ///   itself is not constrained, to the team — through
+    ///   [`mm_store::GroupStore::get_groups_by_channel`] / `get_groups_by_team`, **plus every
+    ///   custom group** (`Source: custom`) from the same `get_groups` call. A channel-constrained
+    ///   channel in a team-constrained team reads the channel's links only.
+    ///
+    /// In every branch a group whose `Name` is nil is dropped — an LDAP group that was never given
+    /// a mention name cannot be mentioned — and the `GroupWithSchemeAdmin` wrapper is discarded,
+    /// so the map holds plain `Group`s with their `member_count` set.
+    ///
+    /// `team` is Go's `*model.Team`, which `countThreadMentions` (app/post.go:2505) leaves nil
+    /// for a channel with no team. Go's `team != nil && team.IsGroupConstrained()` is the
+    /// `Option` here.
+    ///
+    /// # The error is not one of Go's `AppError`s
+    ///
+    /// Go returns a plain `error` ("unable to get groups", "unable to get custom groups") and
+    /// every caller wraps it in its own id — `countThreadMentions` uses
+    /// `app.channel.count_posts_since.app_error` at 500 (post.go:2547). This answers
+    /// `app.select_error` at 500 with the Go message as detail, the way the other store failures
+    /// in this module do; a caller that must match Go's id on the wire re-wraps it.
+    #[tracing::instrument(skip(self, channel, team), fields(channel_id = %channel.id, groups))]
+    pub async fn get_groups_allowed_for_reference_in_channel(
+        &self,
+        channel: &Channel,
+        team: Option<&Team>,
+    ) -> AppResult<BTreeMap<String, Group>> {
+        let mut groups_map = BTreeMap::new();
+        let mut opts = GroupSearchOpts {
+            filter_allow_reference: true,
+            include_member_count: true,
+            ..GroupSearchOpts::default()
+        };
+        let store = self.store.group();
+        let failed = |detail: &str, source: StoreError| {
+            AppError::boxed(
+                "getGroupsAllowedForReferenceInChannel",
+                "app.select_error",
+                None,
+                format!("{detail}: {source}"),
+                500,
+            )
+        };
+
+        if channel.is_group_constrained() || team.is_some_and(Team::is_group_constrained) {
+            let linked = if channel.is_group_constrained() {
+                store.get_groups_by_channel(&channel.id, &opts).await
+            } else {
+                // `team` is `Some` here: the `||` above fell through to the team's own flag.
+                let team_id = team.map(|t| t.id.as_str()).unwrap_or_default();
+                store.get_groups_by_team(team_id, &opts).await
+            }
+            .map_err(|source| failed("unable to get groups", source))?;
+            for group in linked {
+                if group.group.name.is_some() {
+                    // The key is the map's own copy of the id; the value keeps the other.
+                    groups_map.insert(group.group.id.clone(), group.group);
+                }
+            }
+
+            opts.source = GroupSource::from(GroupSource::CUSTOM);
+            let custom = store
+                .get_groups(0, 0, &opts, None)
+                .await
+                .map_err(|source| failed("unable to get custom groups", source))?;
+            for group in custom {
+                if group.name.is_some() {
+                    // As above: the key is the map's copy of the id.
+                    groups_map.insert(group.id.clone(), group);
+                }
+            }
+            tracing::Span::current().record("groups", groups_map.len());
+            return Ok(groups_map);
+        }
+
+        let groups = store
+            .get_groups(0, 0, &opts, None)
+            .await
+            .map_err(|source| failed("unable to get groups", source))?;
+        for group in groups {
+            if group.name.is_some() {
+                // As above: the key is the map's copy of the id.
+                groups_map.insert(group.id.clone(), group);
+            }
+        }
+        tracing::Span::current().record("groups", groups_map.len());
+        Ok(groups_map)
+    }
+}

@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT groupid AS \"groupid!\", userid AS \"userid!\",\n                   COALESCE(createat, 0) AS \"createat!\", COALESCE(deleteat, 0) AS \"deleteat!\"\n              FROM groupmembers\n             WHERE userid = $1 AND groupid = $2 AND deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "groupid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "8433701095d71d9caef2af093ac5f2b7b9848791b71d28179f0e6dee4128c450"
+}

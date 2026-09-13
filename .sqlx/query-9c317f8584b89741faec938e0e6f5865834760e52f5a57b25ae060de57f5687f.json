@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT ug.id,\n                   ug.name,\n                   ug.displayname,\n                   ug.description,\n                   ug.source,\n                   ug.remoteid,\n                   ug.createat,\n                   ug.updateat,\n                   ug.deleteat,\n                   ug.allowreference,\n                   COALESCE(members.membercount, 0) AS \"membercount!\",\n                   COALESCE(channelmembers.channelmembercount, 0) AS \"channelmembercount!\",\n                   COALESCE(channelmembers.channelmembertimezonescount, 0)\n                       AS \"channelmembertimezonescount!\"\n              FROM usergroups ug\n              LEFT JOIN (\n                    SELECT gm.groupid, COUNT(DISTINCT u.id) AS membercount\n                      FROM groupmembers gm\n                      LEFT JOIN users u ON u.id = gm.userid\n                     WHERE gm.deleteat = 0\n                       AND u.deleteat = 0\n                       AND NOT $1::boolean\n                       AND (cardinality($2::text[]) = 0 OR EXISTS (\n                             SELECT 1 FROM teammembers rtm\n                              WHERE rtm.userid = u.id\n                                AND rtm.deleteat = 0\n                                AND rtm.teamid = ANY($2::text[])))\n                       AND (cardinality($3::text[]) = 0 OR EXISTS (\n                             SELECT 1 FROM channelmembers rcm\n                              WHERE rcm.userid = u.id\n                                AND rcm.channelid = ANY($3::text[])))\n                     GROUP BY gm.groupid\n                   ) AS members ON members.groupid = ug.id\n              LEFT JOIN (\n                    SELECT gm.groupid,\n                           COUNT(cm.userid) AS channelmembercount,\n                           COUNT(DISTINCT (\n                               CASE WHEN u.timezone->>'useAutomaticTimezone' = 'true'\n                                     AND length(u.timezone->>'automaticTimezone') > 0\n                                    THEN u.timezone->>'automaticTimezone'\n                                    WHEN u.timezone->>'useAutomaticTimezone' = 'false'\n                                     AND length(u.timezone->>'manualTimezone') > 0\n                                    THEN u.timezone->>'manualTimezone'\n                               END)) AS channelmembertimezonescount\n                      FROM channelmembers cm\n                      LEFT JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat = 0\n                      LEFT JOIN users u ON u.id = gm.userid\n                     WHERE cm.channelid = $4::text\n                     GROUP BY gm.groupid\n                   ) AS channelmembers ON channelmembers.groupid = ug.id\n             WHERE ($5::text = '' OR EXISTS (\n                       SELECT 1 FROM groupmembers hm\n                        WHERE hm.groupid = ug.id AND hm.userid = $5::text AND hm.deleteat = 0))\n               AND ($6::bigint <= 0 OR ug.updateat > $6::bigint)\n               AND (NOT $7::boolean OR ug.deleteat > 0)\n               AND (NOT $8::boolean OR ug.deleteat = 0)\n               AND (NOT $9::boolean OR ug.allowreference = TRUE)\n               AND ($10::text = '' OR ug.name ILIKE $11::text OR ug.displayname ILIKE $11::text)\n               AND (NOT $12::boolean OR ug.id NOT IN (\n                       SELECT iug.id\n                         FROM usergroups iug\n                         JOIN groupteams gt ON gt.groupid = iug.id\n                        WHERE gt.deleteat = 0\n                          AND iug.deleteat = 0\n                          AND gt.teamid = $13::text))\n               AND (NOT $14::boolean OR ug.id NOT IN (\n                       SELECT iug.id\n                         FROM usergroups iug\n                         JOIN groupchannels gc ON gc.groupid = iug.id\n                        WHERE gc.deleteat = 0\n                          AND iug.deleteat = 0\n                          AND gc.channelid = $15::text))\n               AND (NOT $16::boolean OR CASE\n                       WHEN (SELECT t.groupconstrained\n                               FROM teams t\n                               JOIN channels c ON c.teamid = t.id\n                              WHERE c.id = $15::text)\n                       THEN ug.id IN (\n                            SELECT gt.groupid\n                              FROM groupteams gt\n                             WHERE gt.deleteat = 0\n                               AND gt.teamid = (SELECT c.teamid FROM channels c WHERE c.id = $15::text))\n                       ELSE TRUE\n                    END)\n               AND ($17::text = '' OR ug.source = $17::text)\n               AND (NOT $18::boolean\n                    OR ug.source = ANY($19::text[])\n                    OR ug.source LIKE ANY($20::text[]))\n             ORDER BY CASE WHEN NOT $21::boolean OR ug.deleteat = 0 THEN ug.displayname END,\n                      CASE WHEN $21::boolean AND ug.deleteat <> 0 THEN ug.displayname END\n             LIMIT $22::bigint OFFSET $23::bigint\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "remoteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "allowreference",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "membercount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "channelmembercount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "channelmembertimezonescount!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "Text",
+        "Text",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9c317f8584b89741faec938e0e6f5865834760e52f5a57b25ae060de57f5687f"
+}
