@@ -18,7 +18,13 @@
 //!   and the channel/team membership tests;
 //! - the slow-queue drop for `typing` / `status_change` / `multiple_channels_viewed`, which is a
 //!   *visible* behaviour: those events are silently discarded once a connection's queue is half
-//!   full.
+//!   full;
+//! - the broadcast-hook runner (`web_broadcast_hook.go`): [`Hub::run_broadcast_hooks`] and
+//!   [`HookedWebSocketEvent`], run **per connection** inside the fan-out where Go runs them
+//!   (`web_hub.go:731`). A hook that modifies the event makes a copy, and the copy leaves through
+//!   the non-precomputed encoding — see [`OutgoingFrame`]. The hooks themselves live in
+//!   [`crate::broadcast_hooks`]: three of Go's nine are registered, and an id the registry does
+//!   not know is logged and skipped, which is the seam for the other six ([D-183]).
 //!
 //! Not ported, each for a stated reason:
 //!
@@ -29,10 +35,9 @@
 //!   (`cluster.go:189`); there is one node, and the strangler's *other* process is the Go server,
 //!   which has its own hub. See [D-182] — a client connected to this server does not see events
 //!   raised by a route still served by Go.
-//! - **Broadcast hooks** (`web_broadcast_hook.go`). They rewrite an event per connection — the
-//!   only stock hook adds the recipient's own mention count to a `posted` event. Modelled in
-//!   `mm-model` (`without_broadcast_hooks`) and stripped before send here, but not run: see
-//!   [D-183].
+//! - **`Reject`** (`web_conn.go:577`). A rejected event is skipped by Go's write pump. None of
+//!   the three registered hooks rejects, so [`HookedWebSocketEvent`] has no `reject` and the pump
+//!   does not check the flag; both arrive with the first hook that needs them ([D-183]).
 //! - **The MFA arm of `IsAuthenticated`.** `MFARequired` is not ported, so a connection whose user
 //!   owes MFA is treated as authenticated. See [D-184].
 //! - **`ShouldSendEventToGuest`.** Needs `UserCanSeeOtherUser`, not ported; guests therefore see
@@ -46,6 +51,7 @@
 //! moment two hubs' broadcasts interleave on one connection.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -61,6 +67,7 @@ use mm_store::ChannelStore;
 use tokio::sync::mpsc;
 
 use crate::App;
+use crate::broadcast_hooks::BroadcastHookError;
 
 /// Port of `platform.sendQueueSize` (web_conn.go:34).
 pub const SEND_QUEUE_SIZE: usize = 256;
@@ -121,6 +128,11 @@ pub struct WebConn {
     pub connection_id: String,
     pub user_id: String,
 
+    /// Go's `WebConn.PostedAck`: the client connected with `?posted_ack=true`
+    /// (api4/websocket.go:81). Read by one thing only — the `posted_ack` broadcast hook — and it
+    /// is the client's promise to acknowledge `posted` frames that carry `should_ack`.
+    pub posted_ack: bool,
+
     /// The session this connection authenticated with. Replaced wholesale when the connection
     /// re-authenticates, which is why it is a lock over the whole struct rather than per field.
     session: RwLock<Session>,
@@ -152,11 +164,13 @@ impl WebConn {
     pub fn new(
         connection_id: String,
         session: Session,
+        posted_ack: bool,
     ) -> (Arc<WebConn>, mpsc::Receiver<OutgoingFrame>) {
         let (tx, rx) = mpsc::channel(SEND_QUEUE_SIZE);
         let conn = Arc::new(WebConn {
             connection_id,
             user_id: session.user_id.clone(),
+            posted_ack,
             session: RwLock::new(session),
             active: AtomicBool::new(true),
             send: tx,
@@ -276,7 +290,7 @@ impl WebConn {
         self.active.load(Ordering::Acquire)
     }
 
-    fn set_active(&self, value: bool) {
+    pub(crate) fn set_active(&self, value: bool) {
         self.active.store(value, Ordering::Release);
     }
 
@@ -298,6 +312,93 @@ pub enum Presence {
     ThreadViewThreadChannel,
 }
 
+/// Port of `platform.BroadcastHook` (web_broadcast_hook.go:11).
+///
+/// Implementations are in [`crate::broadcast_hooks`]. `args` is the map the raiser passed to
+/// `WebsocketBroadcast::add_hook` for this hook, positionally paired with its id.
+pub trait BroadcastHook: Send + Sync {
+    /// Modify `msg` for this connection, or leave it alone. An error is logged by the runner and
+    /// does not stop the broadcast.
+    fn process(
+        &self,
+        msg: &mut HookedWebSocketEvent<'_>,
+        conn: &WebConn,
+        args: &StringInterface,
+    ) -> Result<(), BroadcastHookError>;
+}
+
+/// Port of `platform.HookedWebSocketEvent` (web_broadcast_hook.go:42).
+///
+/// A hook sees the event through this and never directly, so the shared event every other
+/// connection is about to receive cannot be modified by accident: the first mutating call makes
+/// a copy (Go's `RemovePrecomputedJSON`) and later calls work on that.
+///
+/// **The copy is the wire difference.** The shared event carries precomputed JSON and leaves in
+/// the spaced, unterminated form; the copy has none and leaves through `json.Encoder` — compact,
+/// newline-terminated. So a connection whose hooks changed nothing gets a different encoding of
+/// the same bytes than a connection whose hooks added a key. [`Hub::run_broadcast_hooks`]
+/// reports which happened by returning the copy, and [`broadcast_frame`] turns that into the
+/// [`OutgoingFrame::Event`] `precomputed` flag.
+#[derive(Debug)]
+pub struct HookedWebSocketEvent<'a> {
+    original: &'a WebSocketEvent,
+    copy: Option<WebSocketEvent>,
+}
+
+impl<'a> HookedWebSocketEvent<'a> {
+    /// Port of `MakeHookedWebSocketEvent` (web_broadcast_hook.go:47).
+    pub fn new(original: &'a WebSocketEvent) -> Self {
+        Self {
+            original,
+            copy: None,
+        }
+    }
+
+    /// Port of `(*HookedWebSocketEvent).Add` (web_broadcast_hook.go:53).
+    pub fn add(&mut self, key: impl Into<String>, value: serde_json::Value) {
+        self.copy_if_necessary();
+        if let Some(copy) = self.copy.as_mut() {
+            copy.add(key, value);
+        }
+    }
+
+    /// Port of `(*HookedWebSocketEvent).EventType` (web_broadcast_hook.go:59).
+    pub fn event_type(&self) -> &str {
+        self.copy
+            .as_ref()
+            .map_or(self.original, |copy| copy)
+            .event_type()
+    }
+
+    /// Port of `(*HookedWebSocketEvent).Get` (web_broadcast_hook.go:68) — a value from the event
+    /// data as the hooks so far have left it. Never mutate through this.
+    ///
+    /// `None` for an absent key **and** for a JSON `null`: Go's callers compare the result to
+    /// `nil`, and a decoded `null` is `nil` there.
+    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+        self.copy
+            .as_ref()
+            .map_or(self.original, |copy| copy)
+            .get_data()?
+            .get(key)
+            .filter(|value| !value.is_null())
+    }
+
+    /// Port of `copyIfNecessary` (web_broadcast_hook.go:77).
+    fn copy_if_necessary(&mut self) {
+        if self.copy.is_none() {
+            self.copy = Some(self.original.deep_copy_like_go());
+        }
+    }
+
+    /// Port of `(*HookedWebSocketEvent).Event` (web_broadcast_hook.go:83), which returns the
+    /// copy if one was made and the original otherwise. Here the caller holds the original
+    /// already, so only the copy comes back: `Some` means a hook modified the event.
+    pub fn into_copy(self) -> Option<WebSocketEvent> {
+        self.copy
+    }
+}
+
 /// Port of `platform.hubConnectionIndex` (web_hub.go:854), with the channel index omitted —
 /// `EnableWebHubChannelIteration` defaults to **false** (config.go:1061), so the live path is the
 /// membership query, not the index.
@@ -312,14 +413,88 @@ struct HubIndex {
 /// Go runs one goroutine per hub and serialises every operation through channels; here a
 /// `RwLock` over the index does the same job. The difference is not observable: Go's hub loop
 /// holds no state across iterations that a lock would not protect.
-#[derive(Debug, Default)]
 pub struct Hub {
     index: RwLock<HubIndex>,
+    /// Go's `Hub.broadcastHooks`, handed to every hub by `hubStart` (web_hub.go:136) from
+    /// `Server.makeBroadcastHooks`.
+    broadcast_hooks: HashMap<&'static str, Box<dyn BroadcastHook>>,
+}
+
+impl fmt::Debug for Hub {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut hook_ids: Vec<&str> = self.broadcast_hooks.keys().copied().collect();
+        hook_ids.sort_unstable();
+        f.debug_struct("Hub")
+            .field("index", &self.index)
+            .field("broadcast_hooks", &hook_ids)
+            .finish()
+    }
+}
+
+impl Default for Hub {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Hub {
+    /// A hub with the stock hooks — `hubStart(s.makeBroadcastHooks())`.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_hooks(crate::broadcast_hooks::make_broadcast_hooks())
+    }
+
+    /// A hub with exactly these hooks. Tests use it to see the runner without the registry.
+    pub fn with_hooks(broadcast_hooks: HashMap<&'static str, Box<dyn BroadcastHook>>) -> Self {
+        Self {
+            index: RwLock::new(HubIndex::default()),
+            broadcast_hooks,
+        }
+    }
+
+    /// Port of `Hub.runBroadcastHooks` (web_broadcast_hook.go:17).
+    ///
+    /// Runs each hook in `hook_ids`, in order, against `msg` for `conn`. Returns the modified
+    /// copy if any hook changed the event, and `None` when none did — in which case the caller
+    /// sends the shared `msg` itself, precomputed. An id the registry does not know is logged and
+    /// skipped, as is a hook that fails; neither stops the broadcast or the later hooks.
+    ///
+    /// Go indexes `hookArgs[i]` unconditionally and would panic past the end. `add_hook` appends
+    /// to both slices, so only a hand-built broadcast can get here with fewer args than ids; such
+    /// a hook sees an empty map and reports its missing key through the ordinary error path.
+    pub fn run_broadcast_hooks(
+        &self,
+        msg: &WebSocketEvent,
+        conn: &WebConn,
+        hook_ids: &[String],
+        hook_args: &[StringInterface],
+    ) -> Option<WebSocketEvent> {
+        if hook_ids.is_empty() {
+            return None;
+        }
+
+        let mut hooked = HookedWebSocketEvent::new(msg);
+        let no_args = StringInterface::new();
+
+        for (i, hook_id) in hook_ids.iter().enumerate() {
+            let args = hook_args.get(i).unwrap_or(&no_args);
+            let Some(hook) = self.broadcast_hooks.get(hook_id.as_str()) else {
+                tracing::warn!(
+                    hook_id = %hook_id,
+                    "runBroadcastHooks: Unable to find broadcast hook"
+                );
+                continue;
+            };
+
+            if let Err(err) = hook.process(&mut hooked, conn, args) {
+                tracing::warn!(
+                    hook_id = %hook_id,
+                    error = %err,
+                    "runBroadcastHooks: Error processing hook"
+                );
+            }
+        }
+
+        hooked.into_copy()
     }
 
     /// Port of `Hub.Register` (web_hub.go:378) plus the register arm of the hub loop
@@ -447,10 +622,9 @@ impl App {
     /// [`App::should_send_event`].
     #[tracing::instrument(skip(self, event), fields(event = %event.event_type()))]
     pub async fn publish(&self, event: WebSocketEvent) {
-        // Go strips the hook fields before precomputing the JSON so they never reach a client.
-        // The hooks themselves are not run — see [D-183] — but the stripping is not optional:
-        // `broadcast_hooks` on the wire would be a field Go never sends.
-        let (event, _hooks, _hook_args) = event.without_broadcast_hooks();
+        // Go strips the hook fields before precomputing the JSON so they never reach a client
+        // (web_hub.go:721); the hooks come back out and are run per connection below.
+        let (event, hooks, hook_args) = event.without_broadcast_hooks();
 
         let broadcast = event.get_broadcast().cloned().unwrap_or_default();
 
@@ -472,12 +646,11 @@ impl App {
             if !self.should_send_event(&conn, &event).await {
                 continue;
             }
-            let frame = OutgoingFrame::Event {
-                event: Box::new(event.clone()),
-                // `Hub.Broadcast` precomputes before fanning out (web_hub.go:718).
-                precomputed: true,
-            };
-            if conn.try_send(frame).is_err() {
+            // `webConn.send <- h.runBroadcastHooks(msg, webConn, ...)` (web_hub.go:731).
+            let hooked = self
+                .hub()
+                .run_broadcast_hooks(&event, &conn, &hooks, &hook_args);
+            if conn.try_send(broadcast_frame(&event, hooked)).is_err() {
                 if conn.is_active() {
                     tracing::error!(
                         user_id = %conn.user_id,
@@ -745,6 +918,26 @@ pub fn guest_visibility(event_type: &str) -> bool {
     )
 }
 
+/// The frame a broadcast leaves in, given what the hooks did to it.
+///
+/// `Hub.Broadcast` precomputes the event before fanning out (web_hub.go:723), so the shared event
+/// goes out precomputed; a copy a hook made has had that precomputation removed
+/// (`RemovePrecomputedJSON`) and goes out through `json.Encoder`. Two encodings, one bit — and a
+/// client can see which it got.
+pub fn broadcast_frame(event: &WebSocketEvent, hooked: Option<WebSocketEvent>) -> OutgoingFrame {
+    match hooked {
+        Some(modified) => OutgoingFrame::Event {
+            event: Box::new(modified),
+            precomputed: false,
+        },
+        None => OutgoingFrame::Event {
+            // One clone per connection, as Go shares one pointer: the queue owns its frame.
+            event: Box::new(event.clone()),
+            precomputed: true,
+        },
+    }
+}
+
 fn verdict(send: bool) -> Verdict {
     if send { Verdict::Send } else { Verdict::Skip }
 }
@@ -814,7 +1007,7 @@ mod tests {
     /// that is permanently "slow". Hence `conn(USER).0` at the call sites: the temporary tuple
     /// lives to the end of the statement, which is exactly as long as the assertion needs.
     fn conn(user_id: &str) -> (Arc<WebConn>, mpsc::Receiver<OutgoingFrame>) {
-        WebConn::new(CONN.to_owned(), session(user_id))
+        WebConn::new(CONN.to_owned(), session(user_id), false)
     }
 
     fn event(event_type: &str) -> WebSocketEvent {
@@ -955,6 +1148,7 @@ mod tests {
                 }]),
                 ..session(USER)
             },
+            false,
         );
         assert_eq!(
             addressing_verdict(&member_conn, &event, None),
@@ -1126,7 +1320,7 @@ mod tests {
     fn a_guest_with_an_unaddressed_event_falls_through_to_the_guest_rule() {
         let mut guest_session = session(USER);
         guest_session.add_prop("is_guest", "true");
-        let (guest, _queue) = WebConn::new(CONN.to_owned(), guest_session);
+        let (guest, _queue) = WebConn::new(CONN.to_owned(), guest_session, false);
         assert_eq!(
             addressing_verdict(&guest, &event(WEBSOCKET_EVENT_USER_UPDATED), None),
             Verdict::GuestVisibility
@@ -1149,7 +1343,7 @@ mod tests {
             "Go's sendSlowWarn is half the queue"
         );
 
-        let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER));
+        let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER), false);
         for _ in 0..HALF_A_QUEUE {
             conn.try_send(OutgoingFrame::Event {
                 event: Box::new(event(WEBSOCKET_EVENT_POSTED)),
@@ -1190,7 +1384,7 @@ mod tests {
     #[test]
     fn register_queues_hello_and_unregister_removes_the_connection() {
         let hub = Hub::new();
-        let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER));
+        let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER), false);
         hub.register(
             conn.clone(),
             event(mm_model::websocket_message::WEBSOCKET_EVENT_HELLO),
@@ -1220,5 +1414,227 @@ mod tests {
         // Unregistering twice is a no-op, as Go's is.
         hub.unregister(CONN);
         assert_eq!(hub.conn_count(), 0);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // the broadcast-hook runner
+    // -----------------------------------------------------------------------------------------
+
+    use crate::broadcast_hooks::{
+        BROADCAST_ADD_MENTIONS, BROADCAST_POSTED_ACK, BroadcastHookError,
+    };
+    use serde_json::json;
+
+    const POSTER: &str = "p0sterp0sterp0sterp0sterp0";
+
+    fn posted_event() -> WebSocketEvent {
+        let mut event = WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", CHANNEL, "", None, "");
+        event.add("post", json!("{}"));
+        event
+    }
+
+    fn map(value: serde_json::Value) -> StringInterface {
+        match value {
+            serde_json::Value::Object(map) => map,
+            other => panic!("not an object: {other}"),
+        }
+    }
+
+    /// `add_mentions` naming `USER`, then `posted_ack` for an open channel that lists nobody: the
+    /// second hook acks only because the first one wrote `mentions`.
+    fn mentions_then_ack() -> (Vec<String>, Vec<StringInterface>) {
+        (
+            vec![
+                BROADCAST_ADD_MENTIONS.to_owned(),
+                BROADCAST_POSTED_ACK.to_owned(),
+            ],
+            vec![
+                map(json!({ "mentions": [USER] })),
+                map(json!({ "posted_user_id": POSTER, "channel_type": "O", "users": [] })),
+            ],
+        )
+    }
+
+    #[test]
+    fn hooks_run_in_the_order_attached_and_posted_ack_sees_what_add_mentions_wrote() {
+        let hub = Hub::new();
+        let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), true);
+        let event = posted_event();
+
+        let (ids, args) = mentions_then_ack();
+        let out = hub
+            .run_broadcast_hooks(&event, &conn, &ids, &args)
+            .expect("add_mentions modified the event");
+        let data = out.get_data().unwrap();
+        assert_eq!(data["mentions"], json!(format!("[\"{USER}\"]")));
+        assert_eq!(data["should_ack"], json!(true), "{data:?}");
+
+        // Reversed, `posted_ack` runs first, finds no `mentions`, and — open channel, nobody
+        // listed — adds nothing. `add_mentions` still writes its key afterwards.
+        let (mut ids, mut args) = mentions_then_ack();
+        ids.reverse();
+        args.reverse();
+        let out = hub
+            .run_broadcast_hooks(&event, &conn, &ids, &args)
+            .expect("add_mentions still modifies the event");
+        let data = out.get_data().unwrap();
+        assert_eq!(data["mentions"], json!(format!("[\"{USER}\"]")));
+        assert!(
+            data.get("should_ack").is_none(),
+            "posted_ack before add_mentions cannot see the mention: {data:?}"
+        );
+    }
+
+    #[test]
+    fn a_connection_the_hooks_do_not_touch_gets_no_copy() {
+        let hub = Hub::new();
+        // Not mentioned, and no ack flag.
+        let (conn, _rx) = WebConn::new(CONN.to_owned(), session(OTHER_USER), false);
+        let (ids, args) = mentions_then_ack();
+        assert!(
+            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args)
+                .is_none()
+        );
+        // No hooks at all: the early return.
+        assert!(
+            hub.run_broadcast_hooks(&posted_event(), &conn, &[], &[])
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_unknown_hook_id_is_skipped_and_the_rest_still_run() {
+        let hub = Hub::new();
+        let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        let event = posted_event();
+
+        // Alone: nothing happens, no copy.
+        assert!(
+            hub.run_broadcast_hooks(
+                &event,
+                &conn,
+                &["no_such_hook".to_owned()],
+                &[StringInterface::new()]
+            )
+            .is_none()
+        );
+
+        // Ahead of a known hook: the known hook still runs, with *its own* args — the pairing
+        // is by index, so a skipped id must not shift the args of the one after it.
+        let out = hub
+            .run_broadcast_hooks(
+                &event,
+                &conn,
+                &["no_such_hook".to_owned(), BROADCAST_ADD_MENTIONS.to_owned()],
+                &[
+                    map(json!({ "mentions": [OTHER_USER] })),
+                    map(json!({ "mentions": [USER] })),
+                ],
+            )
+            .expect("add_mentions ran");
+        assert_eq!(
+            out.get_data().unwrap()["mentions"],
+            json!(format!("[\"{USER}\"]"))
+        );
+    }
+
+    #[test]
+    fn a_failing_hook_is_logged_and_the_rest_still_run() {
+        let hub = Hub::new();
+        let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        // `add_mentions` with no args fails; the `add_followers` after it runs.
+        let out = hub
+            .run_broadcast_hooks(
+                &posted_event(),
+                &conn,
+                &[
+                    BROADCAST_ADD_MENTIONS.to_owned(),
+                    crate::broadcast_hooks::BROADCAST_ADD_FOLLOWERS.to_owned(),
+                ],
+                &[StringInterface::new(), map(json!({ "followers": [USER] }))],
+            )
+            .expect("add_followers ran");
+        let data = out.get_data().unwrap();
+        assert!(data.get("mentions").is_none());
+        assert_eq!(data["followers"], json!(format!("[\"{USER}\"]")));
+
+        // Fewer args than ids: the hook sees an empty map, not a panic.
+        assert!(
+            hub.run_broadcast_hooks(
+                &posted_event(),
+                &conn,
+                &[BROADCAST_ADD_MENTIONS.to_owned()],
+                &[]
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_hooked_copy_leaves_unprecomputed_and_an_untouched_event_precomputed() {
+        let event = posted_event();
+
+        match broadcast_frame(&event, None) {
+            OutgoingFrame::Event {
+                event: sent,
+                precomputed,
+            } => {
+                assert!(precomputed, "the shared event takes Go's precompute path");
+                assert_eq!(*sent, event);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let mut modified = event.deep_copy_like_go();
+        modified.add("should_ack", json!(true));
+        match broadcast_frame(&event, Some(modified.clone())) {
+            OutgoingFrame::Event {
+                event: sent,
+                precomputed,
+            } => {
+                assert!(
+                    !precomputed,
+                    "a copy has had its precomputed JSON removed and goes through json.Encoder"
+                );
+                assert_eq!(*sent, modified);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_hooked_event_copies_on_first_write_and_reads_through_to_the_copy() {
+        let mut original = posted_event();
+        original.add("mentions", json!(null));
+        let mut hooked = HookedWebSocketEvent::new(&original);
+
+        assert_eq!(hooked.event_type(), WEBSOCKET_EVENT_POSTED);
+        assert_eq!(hooked.get("post"), Some(&json!("{}")));
+        // A JSON null reads as absent, as Go's `!= nil` would have it.
+        assert!(hooked.get("mentions").is_none());
+        assert!(hooked.get("absent").is_none());
+
+        hooked.add("should_ack", json!(true));
+        assert_eq!(hooked.get("should_ack"), Some(&json!(true)));
+        // The original is untouched — it is the frame every other connection gets.
+        assert!(original.get_data().unwrap().get("should_ack").is_none());
+
+        let copy = hooked.into_copy().expect("a write made a copy");
+        assert_eq!(copy.get_data().unwrap()["should_ack"], json!(true));
+        assert_eq!(copy.get_data().unwrap()["post"], json!("{}"));
+    }
+
+    #[test]
+    fn a_hub_without_a_registry_knows_no_hook() {
+        // `with_hooks` is what the tests above bypass; make sure the registry is the only source.
+        let hub = Hub::with_hooks(HashMap::new());
+        let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), true);
+        let (ids, args) = mentions_then_ack();
+        assert!(
+            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args)
+                .is_none()
+        );
+        // And the error type is nameable from here, which is all the trait needs of it.
+        let _: Option<BroadcastHookError> = None;
     }
 }

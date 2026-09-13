@@ -12545,3 +12545,41 @@ no hub ([D-215]); the condition is evaluated and traced in `update_thread_read_f
 `countMentionsFromPost`'s public-channel branch in `mm_app::post_unread` — the refusal there
 names exactly what `mention.rs` now provides plus `GetPostsAfterPost` — and after that
 `SendNotifications` for `createPost` ([D-221]).
+
+## The websocket broadcast-hook runner and the three `posted` hooks (2026-09-14)
+
+`crates/mm-app/src/hub.rs` (runner, `HookedWebSocketEvent`, `WebConn::posted_ack`,
+`broadcast_frame`), `crates/mm-app/src/broadcast_hooks.rs` (new — `add_mentions`, `add_followers`,
+`posted_ack`; the other six ids declared, not registered), `crates/mm-model/src/websocket_message.rs`
+(`deep_copy_like_go`), `crates/mm-api/src/websocket.rs` (`?posted_ack=true`),
+`crates/mm-api/tests/parity/websocket_hooks.rs`. Closes the hub half of [D-183]; the six
+unregistered hooks and the `Reject` path stay on it. Mutation: 14 run, 14 caught, 2 controls
+survived (`scripts/mutate-batch.sh`, one `api` line for the wire flag).
+
+### Notes
+
+- **A hook that writes changes the frame's encoding, not just its keys.** The copy it writes to
+  has no precomputed JSON, so it leaves compact and newline-terminated where the shared frame is
+  spaced and unterminated. `broadcast_frame` carries that as `OutgoingFrame::Event::precomputed`,
+  and the parity suite asserts it raw on both servers.
+- **`posted_ack` acks nobody on a plain open-channel post.** Its `users` are the members whose
+  desktop level notifies them of every post; the default is `mention`, so a default member is
+  not acked even with `?posted_ack=true`, and every frame leaves precomputed. Measured on Go.
+  `parity::websocket_hooks::a_post_that_acks_nobody_leaves_precomputed_for_every_connection_on_both`.
+- **`mentions` and `followers` are JSON strings holding a one-element array**, not arrays:
+  `"[\"<user>\"]"`. `broadcast_hooks::AddMentionsBroadcastHook`.
+- **Go's channel-members-notify-props cache is not invalidated by a join.** Warmed by the
+  channel's creation post, it lacks a later member for its lifetime, so Go acked nobody in a
+  fresh channel until the fixture invalidated its caches. `websocket_hooks::fixture`.
+- **The raiser is not here.** `publish_user_posted_event` (`post_create.rs`) does not attach the
+  hooks yet, so `should_ack` is unreachable over HTTP from this server; the cross-server acking
+  test is `#[ignore]`d with that reason and the Go half stands as the oracle.
+
+### What `SendNotifications`' port attaches
+
+`message.broadcast.add_hook(id, args)`, in this order, with `args` a `StringInterface`:
+`BROADCAST_ADD_MENTIONS` `{ "mentions": [ids] }` (only when non-empty), `BROADCAST_ADD_FOLLOWERS`
+`{ "followers": [ids] }` (only when non-empty), then `BROADCAST_POSTED_ACK`
+`{ "posted_user_id": post.user_id, "channel_type": channel.type, "users": [ids] }` always. Ids
+are `serde_json::Value::String`s in a `Value::Array`; `users` is the `shouldAckWebsocketNotification`
+set. Consts in `mm_app::broadcast_hooks`.

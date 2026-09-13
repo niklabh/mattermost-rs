@@ -5921,22 +5921,34 @@ Two ways to close it, and the choice is not obvious:
 Recorded rather than solved because (2) is the plan and (1) would be scaffolding on scaffolding.
 It stops being a hole when the last publishing route is migrated.
 
-## D-183 · Broadcast hooks are stripped but not run
+## D-183 · Broadcast hooks: the runner and three of nine hooks run; six are still skipped
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
+**Narrowed** 2026-09-14 — the runner, `add_mentions`, `add_followers` and `posted_ack` are ported.
 
-`web_broadcast_hooks.go` rewrites an event *per connection* on the way out. The stock hook adds
-the recipient's own mention count and follow state to a `posted` event, so two users receive
-different bytes for the same post.
+`web_broadcast_hooks.go` rewrites an event *per connection* on the way out. That now happens:
+`mm_app::hub::Hub::run_broadcast_hooks` runs inside the fan-out where Go's does (web_hub.go:731),
+a hook that writes gets the per-connection copy (`HookedWebSocketEvent`), and the copy leaves
+non-precomputed — the encoding difference a client can see (`hub::broadcast_frame`). The three
+hooks `SendNotifications` attaches to `posted` are in `mm_app::broadcast_hooks`; `posted_ack`
+reads `WebConn::posted_ack`, set from `?posted_ack=true` on connect.
 
-`mm_model::WebSocketEvent::without_broadcast_hooks` is ported and `App::publish` calls it, so the
-hook fields never reach a client — that part is correct and is wire format. The hooks themselves
-are dropped on the floor. Every recipient of a `posted` event from this server therefore gets the
-*unhooked* payload, which is missing the fields the webapp uses to decide whether to badge the
-channel.
+**Still owed — the six hooks `makeBroadcastHooks` registers that this server does not:**
+`permalink`, `channel_mentions`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`,
+`only_channel_admins`; plus the `Reject` path (`msg.Event().Reject()`, skipped by the write pump
+at web_conn.go:577) that `burn_on_read_reaction`, `abac_files` and `only_channel_admins` use. An
+event carrying one of their ids is logged (`Unable to find broadcast hook`) and leaves unmodified,
+precomputed. Their ids are declared in `broadcast_hooks` so a raiser can attach them now —
+`channel_join_request` attaches `only_channel_admins` already, and that one *widens an audience*
+when skipped ([D-340]). Each of the six lands with the first served route that needs it:
+`permalink` and `channel_mentions` with the permalink-preview and channel-mention passes of
+`SendNotifications`, `abac_files` with attribute-based access control, the `burn_on_read` pair
+with burn-on-read posts.
 
-**Owed with the first write route that publishes `posted`** — which is the route this becomes
-visible on. Until then no event this server raises has a hook attached.
+**Not a hub gap, but the reason `should_ack` is not on the wire yet:** `posted_ack` is attached
+by `SendNotifications`, whose port (`post_create::publish_user_posted_event`) does not attach it.
+`parity::websocket_hooks::a_desktop_all_member_is_acked_on_a_flagged_connection_the_same_way_on_both`
+is `#[ignore]`d until it does; the Go half of that exchange is pinned by the test before it.
 
 ## D-184 · The MFA half of a websocket connection's authentication is not checked
 

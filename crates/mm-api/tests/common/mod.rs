@@ -2827,7 +2827,17 @@ impl SocketProbe {
     /// rejects a non-OAuth session presented as `?access_token=` with a 401, so a probe that used
     /// the query string would be testing that rejection instead of the socket.
     pub async fn connect(base: &str, token: &str) -> SocketProbe {
-        let url = format!("{}/api/v4/websocket", base.replace("http://", "ws://"));
+        Self::connect_with_query(base, token, "").await
+    }
+
+    /// [`SocketProbe::connect`] with a query string on the upgrade — `posted_ack=true` is the one
+    /// the hub reads. Still the header for the token, for the reason given there.
+    pub async fn connect_with_query(base: &str, token: &str, query: &str) -> SocketProbe {
+        let separator = if query.is_empty() { "" } else { "?" };
+        let url = format!(
+            "{}/api/v4/websocket{separator}{query}",
+            base.replace("http://", "ws://")
+        );
         let request =
             tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
                 url.as_str(),

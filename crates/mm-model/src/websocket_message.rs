@@ -530,6 +530,26 @@ impl WebSocketEvent {
         (copy, hooks, hook_args)
     }
 
+    /// Port of `(*WebSocketEvent).DeepCopy` (websocket_message.go:316) — and, since this struct
+    /// caches no precomputed JSON, of `RemovePrecomputedJSON` (websocket_message.go:262) too,
+    /// which is `DeepCopy` with that cache cleared. The hub's broadcast-hook runner takes its
+    /// per-connection copy through this.
+    ///
+    /// The broadcast goes through [`WebsocketBroadcast::copy_like_go`], so `connection_id` is
+    /// dropped here as it is there. `rejected` is **not** copied: Go's `DeepCopy` assigns five
+    /// fields by name and `rejected` is not one of them, so the copy of a rejected event is not
+    /// rejected.
+    #[must_use]
+    pub fn deep_copy_like_go(&self) -> WebSocketEvent {
+        WebSocketEvent {
+            event: self.event.clone(),
+            data: self.data.clone(),
+            broadcast: self.broadcast.as_ref().map(|b| Box::new(b.copy_like_go())),
+            sequence: self.sequence,
+            rejected: false,
+        }
+    }
+
     /// Port of `(*WebSocketEvent).IsValid` (websocket_message.go:362) — **only** that the event
     /// type is non-empty.
     pub fn is_valid(&self) -> bool {
@@ -688,5 +708,37 @@ mod wire_parity {
     #[test]
     fn web_socket_response_round_trips_the_fixture() {
         assert_fixture_round_trips!(WebSocketResponse, "web_socket_response");
+    }
+
+    #[test]
+    fn deep_copy_like_go_clones_the_data_and_drops_what_go_drops() {
+        let mut event = WebSocketEvent::new("posted", "team", "chan", "user", None, "omit");
+        event.add("post", serde_json::Value::String("{}".to_owned()));
+        let event = event.set_sequence(7);
+        let mut event = event;
+        event.rejected = true;
+        if let Some(b) = event.broadcast.as_mut() {
+            b.connection_id = "conn".to_owned();
+        }
+
+        let copy = event.deep_copy_like_go();
+        assert_eq!(copy.event, "posted");
+        assert_eq!(copy.data, event.data);
+        assert_eq!(copy.sequence, 7);
+        // `DeepCopy` names five fields and `rejected` is not among them.
+        assert!(!copy.rejected, "a deep copy is never rejected");
+        let b = copy.get_broadcast().unwrap();
+        assert_eq!(b.channel_id, "chan");
+        assert_eq!(b.omit_connection_id, "omit");
+        // `broadcast.copy()` drops `ConnectionId`, and `DeepCopy` goes through it.
+        assert_eq!(
+            b.connection_id, "",
+            "connection_id does not survive Go's copy"
+        );
+
+        // The copy is detached: writing to it leaves the original alone.
+        let mut copy = copy;
+        copy.add("should_ack", serde_json::Value::Bool(true));
+        assert!(event.get_data().unwrap().get("should_ack").is_none());
     }
 }

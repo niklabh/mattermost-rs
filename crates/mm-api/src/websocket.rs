@@ -56,6 +56,9 @@ const SOCKET_MAX_MESSAGE_SIZE: usize = 8 * 1024;
 /// repeated rather than imported — the same choice `mm-model` made for `StatusFail`.
 const STATUS_OK: &str = "OK";
 
+/// `postedAckParam` (api4/websocket.go:21).
+const POSTED_ACK_PARAM: &str = "posted_ack";
+
 /// Port of `connectWebSocket` (api4/websocket.go:56).
 ///
 /// # Why this takes the whole request
@@ -89,9 +92,24 @@ pub async fn connect_websocket(
     // id, which is exactly the branch Go takes when the id is absent (websocket.go:99).
     let connection_id = new_connection_id();
 
+    // `PostedAck: r.URL.Query().Get(postedAckParam) == "true"` (websocket.go:81). The only
+    // reader is the `posted_ack` broadcast hook.
+    let posted_ack = query_flag_is_true(parts.uri.query(), POSTED_ACK_PARAM);
+
     Ok(upgrade
         .max_message_size(SOCKET_MAX_MESSAGE_SIZE)
-        .on_upgrade(move |socket| serve_socket(state, socket, connection_id, session)))
+        .on_upgrade(move |socket| serve_socket(state, socket, connection_id, session, posted_ack)))
+}
+
+/// Go's `r.URL.Query().Get(key) == "true"`: the **first** value under `key`, percent-decoded,
+/// compared exactly. `1`, `True` and `t` are false here — this is not the `strconv.ParseBool`
+/// rule the REST query parsers use.
+fn query_flag_is_true(query: Option<&str>, key: &str) -> bool {
+    query.is_some_and(|query| {
+        form_urlencoded::parse(query.as_bytes())
+            .find(|(k, _)| k == key)
+            .is_some_and(|(_, v)| v == "true")
+    })
 }
 
 /// The session block of `Handler.ServeHTTP` (handlers.go:268-286) as it applies to a handler with
@@ -143,9 +161,14 @@ async fn serve_socket(
     mut socket: WebSocket,
     connection_id: String,
     session: Option<Session>,
+    posted_ack: bool,
 ) {
     let authenticated = session.as_ref().is_some_and(|s| !s.user_id.is_empty());
-    let (conn, mut queue) = WebConn::new(connection_id.clone(), session.unwrap_or_default());
+    let (conn, mut queue) = WebConn::new(
+        connection_id.clone(),
+        session.unwrap_or_default(),
+        posted_ack,
+    );
 
     // Go registers only when the session carries a user (websocket.go:113). An unregistered
     // connection still runs both pumps: it can authenticate later over the socket.
@@ -433,4 +456,39 @@ fn bad_action_error() -> AppError {
         String::new(),
         500,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn posted_ack_is_the_exact_string_true_and_the_first_value_wins() {
+        assert!(query_flag_is_true(Some("posted_ack=true"), "posted_ack"));
+        assert!(query_flag_is_true(
+            Some("connection_id=abc&posted_ack=true&sequence_number=0"),
+            "posted_ack"
+        ));
+        // Percent-decoded before the comparison, as `url.Values` is.
+        assert!(query_flag_is_true(Some("posted_ack=%74rue"), "posted_ack"));
+        // Go's `Get` returns the first value.
+        assert!(!query_flag_is_true(
+            Some("posted_ack=false&posted_ack=true"),
+            "posted_ack"
+        ));
+        assert!(query_flag_is_true(
+            Some("posted_ack=true&posted_ack=false"),
+            "posted_ack"
+        ));
+        // Not ParseBool.
+        for not_true in ["1", "True", "TRUE", "t", "", "yes"] {
+            assert!(
+                !query_flag_is_true(Some(&format!("posted_ack={not_true}")), "posted_ack"),
+                "{not_true:?} must not read as true"
+            );
+        }
+        assert!(!query_flag_is_true(None, "posted_ack"));
+        assert!(!query_flag_is_true(Some("posted_ack"), "posted_ack"));
+        assert!(!query_flag_is_true(Some("other=true"), "posted_ack"));
+    }
 }
