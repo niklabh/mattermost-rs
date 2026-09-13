@@ -50,6 +50,7 @@ pub mod post_unread;
 pub mod post_write;
 pub mod preference;
 pub mod properties;
+pub mod property_hooks;
 pub mod reaction;
 pub mod report;
 pub mod role;

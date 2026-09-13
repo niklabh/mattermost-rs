@@ -84,6 +84,18 @@ pub enum StoreError {
     /// and 500 to that one: `App.UpdateUser` maps it to `app.user.update.find.app_error`. Go
     /// raises it for a row that vanished between the caller's read and the store's, and for an
     /// LDAP user whose username or email the caller tried to change.
+    /// The row changed between the read that decided the write and the write itself.
+    ///
+    /// Go's `store.NewErrConflict` from an optimistic-concurrency `UPDATE … WHERE UpdateAt = ?`
+    /// that touched no row (`SqlPropertyFieldStore.Update`, property_field_store.go:440). Not
+    /// [`StoreError::Conflict`], which carries a driver error from a unique index; there is no
+    /// driver error here, only a row count of zero.
+    #[error("{entity} was modified concurrently: {detail}")]
+    Stale {
+        entity: &'static str,
+        detail: &'static str,
+    },
+
     #[error("invalid {entity}.{field}: {value}")]
     InvalidInput {
         entity: &'static str,

@@ -51,14 +51,13 @@ use mm_model::property_field::{
     PROPERTY_FIELD_TARGET_LEVEL_CHANNEL, PROPERTY_FIELD_TARGET_LEVEL_SYSTEM,
     PROPERTY_FIELD_TARGET_LEVEL_TEAM, PermissionLevel, PropertyField, PropertyFieldSearchOpts,
 };
-use mm_model::property_group::{ACCESS_CONTROL_PROPERTY_GROUP_NAME, PropertyGroup};
+use mm_model::property_group::PropertyGroup;
 use mm_model::property_value::{PropertyValue, PropertyValueSearchOpts};
 use mm_model::session::Session;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::PropertyStore;
 
 use crate::App;
-use crate::custom_profile_attributes::property_licence_refusal;
 
 impl App {
     /// Port of `App.GetPropertyGroup` (app/property_group.go:25) for an arbitrary group name.
@@ -98,16 +97,10 @@ impl App {
         Ok(group)
     }
 
-    /// Port of `App.SearchPropertyFields` (app/property_field.go:192) plus the one hook arm that
-    /// can fire on this deployment, `LicenseCheckHook.PostGetPropertyFields`.
-    ///
-    /// # Precondition the type cannot hold
-    ///
-    /// The caller must already have decided that no unported hook applies: either `group` is not
-    /// `access_control`, or the installation is unlicensed. `api4/properties.go`'s handlers make
-    /// that decision before they get here, because the alternative — a licensed `access_control`
-    /// read — runs the access-control hook's per-caller option filtering and the
-    /// attribute-validation hook, neither of which exists on this side.
+    /// Port of `App.SearchPropertyFields` (app/property_field.go:192) with the post-get hooks:
+    /// `LicenseCheckHook.PostGetPropertyFields` and the access-control hook's read filtering,
+    /// both of which fire only on the `access_control` group
+    /// ([`App::managed_post_get_fields`]).
     ///
     /// # The empty short-circuit is the whole behaviour, not an optimisation
     ///
@@ -120,6 +113,7 @@ impl App {
         &self,
         group: &PropertyGroup,
         opts: &PropertyFieldSearchOpts,
+        caller: &crate::property_hooks::PropertyCaller,
     ) -> AppResult<Vec<PropertyField>> {
         let fields = self
             .store()
@@ -138,10 +132,8 @@ impl App {
             })?;
 
         tracing::Span::current().record("found", fields.len());
-        if licence_hook_refuses(group, fields.is_empty()) {
-            return Err(property_licence_refusal("SearchPropertyFields"));
-        }
-        Ok(fields)
+        self.managed_post_get_fields(group, fields, caller, "SearchPropertyFields")
+            .await
     }
 
     /// Port of `App.SearchPropertyValues` (app/property_value.go:101) and
@@ -152,6 +144,7 @@ impl App {
         &self,
         group: &PropertyGroup,
         opts: &PropertyValueSearchOpts,
+        caller: &crate::property_hooks::PropertyCaller,
     ) -> AppResult<Vec<PropertyValue>> {
         let values = self
             .store()
@@ -170,10 +163,8 @@ impl App {
             })?;
 
         tracing::Span::current().record("found", values.len());
-        if licence_hook_refuses(group, values.is_empty()) {
-            return Err(property_licence_refusal("SearchPropertyValues"));
-        }
-        Ok(values)
+        self.managed_post_get_values(group, values, caller, "SearchPropertyValues")
+            .await
     }
 
     /// Port of `App.GetPropertyField` (app/property_field.go:137) for a group that carries no
@@ -182,16 +173,17 @@ impl App {
     /// The store collapses every failure into not-found, so this is 404
     /// `app.property.not_found.app_error` or a row — `mapPropertyServiceError`'s `*ErrNotFound`
     /// arm, not `GetPropertyField`'s own 500 fallback, which is unreachable from here.
-    #[tracing::instrument(skip_all, fields(group_id = %group_id, field_id = %field_id, found))]
+    #[tracing::instrument(skip_all, fields(group_id = %group.id, field_id = %field_id, found))]
     pub async fn get_property_field(
         &self,
-        group_id: &str,
+        group: &PropertyGroup,
         field_id: &str,
+        caller: &crate::property_hooks::PropertyCaller,
     ) -> AppResult<PropertyField> {
         let field = self
             .store()
             .property()
-            .get_field(group_id, field_id)
+            .get_field(&group.id, field_id)
             .await
             .map_err(|err| {
                 if !err.is_not_found() {
@@ -207,7 +199,8 @@ impl App {
             })?;
 
         tracing::Span::current().record("found", true);
-        Ok(field)
+        self.managed_post_get_field(group, field, caller, "GetPropertyField")
+            .await
     }
 
     /// Port of `App.DeletePropertyField` (app/property_field.go:425) composed with the service's
@@ -322,11 +315,59 @@ impl App {
         Ok(())
     }
 
+    /// Port of `publishPropertyFieldEvent` (app/property_field.go:47) for the created and
+    /// updated events: the **whole field as a JSON string** under `property_field`, plus
+    /// `object_type`, addressed by [`property_field_broadcast_params`]. A PSAv1 field publishes
+    /// nothing.
+    pub async fn publish_property_field_event(
+        &self,
+        event: &str,
+        field: &PropertyField,
+        connection_id: &str,
+    ) {
+        if field.is_psav1() {
+            return;
+        }
+        let Some((team_id, channel_id)) = property_field_broadcast_params(field) else {
+            tracing::warn!(
+                target_type = %field.target_type,
+                field_id = %field.id,
+                "Unrecognized property field TargetType, skipping broadcast"
+            );
+            return;
+        };
+        let field_json = match mm_model::utils::go_json_marshal(field) {
+            Ok(json) => json,
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to encode property field to JSON");
+                return;
+            }
+        };
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            event,
+            team_id,
+            channel_id,
+            "",
+            None,
+            connection_id,
+        );
+        message.add("property_field", serde_json::Value::String(field_json));
+        message.add(
+            "object_type",
+            serde_json::Value::String(field.object_type.clone()),
+        );
+        self.publish(message).await;
+    }
+
     /// The `property_field_deleted` half of `publishPropertyFieldEvent`, which for a delete is
     /// written out inline in Go (app/property_field.go:463) rather than sharing the helper.
     ///
     /// Guarded on `IsPSAv2()` exactly as Go is: a v1 field is deleted silently.
-    async fn publish_property_field_deleted(&self, field: &PropertyField, connection_id: &str) {
+    pub(crate) async fn publish_property_field_deleted(
+        &self,
+        field: &PropertyField,
+        connection_id: &str,
+    ) {
         if !field.is_psav2() {
             return;
         }
@@ -377,6 +418,179 @@ impl App {
         }
         self.has_property_field_permission_level(&session.user_id, field, level)
             .await
+    }
+
+    /// Port of `App.SessionHasPermissionToManagePropertyFieldOptions` (app/authorization.go:550).
+    ///
+    /// Unlike the field edit, a **protected** field is not refused outright here — only a nil
+    /// `PermissionOptions` is, and then the unrestricted session passes.
+    pub async fn session_has_permission_to_manage_property_field_options(
+        &self,
+        session: &Session,
+        field: &PropertyField,
+    ) -> bool {
+        let Some(level) = field.permission_options.as_ref() else {
+            return false;
+        };
+        if session.is_unrestricted() {
+            return true;
+        }
+        self.has_property_field_permission_level(&session.user_id, field, level)
+            .await
+    }
+
+    /// Port of `App.SessionHasPermissionToSetPropertyFieldValues` (app/authorization.go:535):
+    /// the level is evaluated against the **value's target**, not the field's.
+    pub async fn session_has_permission_to_set_property_field_values(
+        &self,
+        session: &Session,
+        field: &PropertyField,
+        value_target_id: &str,
+    ) -> bool {
+        let Some(level) = field.permission_values.as_ref() else {
+            return false;
+        };
+        if session.is_unrestricted() {
+            return true;
+        }
+        self.has_property_field_value_permission_level(
+            &session.user_id,
+            field,
+            value_target_id,
+            level,
+        )
+        .await
+    }
+
+    /// Port of `App.hasPropertyFieldValuePermissionLevel` (app/authorization.go:642): `admin`
+    /// and `member` dispatch on the field's **object type** against the value's target;
+    /// `sysadmin` and `none` are the same as at field level.
+    async fn has_property_field_value_permission_level(
+        &self,
+        user_id: &str,
+        field: &PropertyField,
+        value_target_id: &str,
+        level: &PermissionLevel,
+    ) -> bool {
+        match level.as_str() {
+            PermissionLevel::SYSADMIN => {
+                self.has_permission_to(user_id, &PERMISSION_MANAGE_SYSTEM)
+                    .await
+            }
+            PermissionLevel::ADMIN => {
+                self.has_property_field_value_admin(user_id, field, value_target_id)
+                    .await
+            }
+            PermissionLevel::MEMBER => {
+                self.has_property_field_value_scope_access(user_id, field, value_target_id)
+                    .await
+            }
+            _ => false,
+        }
+    }
+
+    /// Port of `App.hasPropertyFieldValueAdmin` (app/authorization.go:665). A channel- or
+    /// post-object field asks for `manage_channel_roles` on the value's channel; the user,
+    /// system and template object types have no per-target admin and defer to the field's own
+    /// `admin` dispatch.
+    async fn has_property_field_value_admin(
+        &self,
+        user_id: &str,
+        field: &PropertyField,
+        value_target_id: &str,
+    ) -> bool {
+        match field.object_type.as_str() {
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {
+                self.has_permission_to_channel(
+                    user_id,
+                    value_target_id,
+                    &PERMISSION_MANAGE_CHANNEL_ROLES,
+                )
+                .await
+                .0
+            }
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
+                match self.get_single_post(value_target_id, false).await {
+                    Ok(post) => {
+                        self.has_permission_to_channel(
+                            user_id,
+                            &post.channel_id,
+                            &PERMISSION_MANAGE_CHANNEL_ROLES,
+                        )
+                        .await
+                        .0
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            post_id = %value_target_id,
+                            user_id = %user_id,
+                            field_id = %field.id,
+                            error = ?err,
+                            "Failed to look up post for property value admin check"
+                        );
+                        false
+                    }
+                }
+            }
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_USER
+            | mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_SYSTEM
+            | mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_TEMPLATE => {
+                self.has_property_field_permission_level(
+                    user_id,
+                    field,
+                    &PermissionLevel(PermissionLevel::ADMIN.to_owned()),
+                )
+                .await
+            }
+            _ => false,
+        }
+    }
+
+    /// Port of `App.hasPropertyFieldValueScopeAccess` (app/authorization.go:696): membership of
+    /// the value's channel (or the post's channel); the other object types defer to the
+    /// field's target scope.
+    async fn has_property_field_value_scope_access(
+        &self,
+        user_id: &str,
+        field: &PropertyField,
+        value_target_id: &str,
+    ) -> bool {
+        match field.object_type.as_str() {
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {
+                self.has_permission_to_channel(user_id, value_target_id, &PERMISSION_READ_CHANNEL)
+                    .await
+                    .0
+            }
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
+                match self.get_single_post(value_target_id, false).await {
+                    Ok(post) => {
+                        self.has_permission_to_channel(
+                            user_id,
+                            &post.channel_id,
+                            &PERMISSION_READ_CHANNEL,
+                        )
+                        .await
+                        .0
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            post_id = %value_target_id,
+                            user_id = %user_id,
+                            field_id = %field.id,
+                            error = ?err,
+                            "Failed to look up post for property value scope check"
+                        );
+                        false
+                    }
+                }
+            }
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_USER
+            | mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_SYSTEM
+            | mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_TEMPLATE => {
+                self.has_property_field_scope_access(user_id, field).await
+            }
+            _ => false,
+        }
     }
 
     /// Port of `App.hasPropertyFieldPermissionLevel` (app/authorization.go:607).
@@ -459,22 +673,10 @@ fn property_field_broadcast_params(field: &PropertyField) -> Option<(&str, &str)
     }
 }
 
-/// `LicenseCheckHook.requireLicense` (app/properties/license_check.go:45) folded together with the
-/// empty short-circuit both post-get arms open with.
-///
-/// The group test is by **name**, where Go's is by id: the hook is constructed with
-/// `cpaGroup.ID` (app/server.go:325), and that id is whatever row `access_control` occupies. Same
-/// predicate, one lookup fewer, and it cannot go stale if the row is ever recreated.
-///
-/// The licence half is the caller's — see [`App::search_property_fields`] — so reaching this with
-/// a licensed server and the managed group would be a bug in the handler, not here.
-fn licence_hook_refuses(group: &PropertyGroup, result_is_empty: bool) -> bool {
-    !result_is_empty && group.name == ACCESS_CONTROL_PROPERTY_GROUP_NAME
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::custom_profile_attributes::is_managed_group;
+    use mm_model::property_group::PropertyGroup;
 
     fn group(name: &str, version: i64) -> PropertyGroup {
         PropertyGroup {
@@ -485,27 +687,14 @@ mod tests {
         }
     }
 
-    /// The empty short-circuit runs **before** the group is even looked at, so an unlicensed
-    /// search of the managed group that matches nothing is a 200 and not a 403. Inverting this is
-    /// the single most plausible mistake in the module and it turns five reachable 200s into
-    /// refusals.
+    /// A row in the managed group runs the hook chain; the same row in any other group does not.
+    /// This is the whole reason the two families are separate modules.
     #[test]
-    fn an_empty_result_is_never_refused_even_on_the_managed_group() {
-        assert!(!licence_hook_refuses(&group("access_control", 2), true));
-        assert!(!licence_hook_refuses(&group("boards", 2), true));
-    }
-
-    /// A row in the managed group is a 403; the same row in any other group is not. This is the
-    /// whole reason the two families are separate modules.
-    #[test]
-    fn only_the_access_control_group_is_licence_managed() {
-        assert!(licence_hook_refuses(&group("access_control", 2), false));
-        assert!(!licence_hook_refuses(&group("boards", 2), false));
-        assert!(!licence_hook_refuses(&group("post_attributes", 2), false));
-        assert!(!licence_hook_refuses(
-            &group("session_attributes", 2),
-            false
-        ));
+    fn only_the_access_control_group_is_managed() {
+        assert!(is_managed_group(&group("access_control", 2)));
+        assert!(!is_managed_group(&group("boards", 2)));
+        assert!(!is_managed_group(&group("post_attributes", 2)));
+        assert!(!is_managed_group(&group("session_attributes", 2)));
     }
 
     /// The deprecated CPA name is **not** the managed group. `custom_profile_attributes` is
@@ -514,9 +703,6 @@ mod tests {
     /// holds one id.
     #[test]
     fn the_deprecated_cpa_name_is_not_the_managed_group() {
-        assert!(!licence_hook_refuses(
-            &group("custom_profile_attributes", 2),
-            false
-        ));
+        assert!(!is_managed_group(&group("custom_profile_attributes", 2)));
     }
 }
