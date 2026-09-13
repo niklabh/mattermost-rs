@@ -610,20 +610,10 @@ pub async fn update_user_active(
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    // The licensed seat-limit message, `CreateGuest` and the licensed activation warning all read
-    // the licence, which is not visible here. **Activation only**: `isAtUserLimit` and the
-    // post-write seat warning both sit inside `if active` (app/user.go:1230, :1287), so a
-    // deactivation neither consults the licence nor can be refused by a limit.
-    if active {
-        match state.app.license_state().await {
-            Ok(mm_app::license::LicenseState::Licensed) => {
-                tracing::Span::current().record("forwarded", true);
-                return proxy::forward_to_go(State(state), request).await;
-            }
-            Ok(_) => {}
-            Err(err) => return ApiError::from(err).into_response(),
-        }
-    }
+    // No licence question here since 2026-09-13: the seat-limit refusal and its two ids are
+    // `App::activate_user`'s, read from the parsed licence, and the post-write seat warning is a
+    // log line. Both sit inside `if active` (app/user.go:1230, :1287), so a deactivation neither
+    // consults the licence nor can be refused by a limit.
 
     // Required of everyone except a self-deactivator, who returned above — including the
     // account's own owner reactivating itself.

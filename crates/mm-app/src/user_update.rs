@@ -463,19 +463,17 @@ impl App {
     /// # The user-limit refusal is the first thing, and it is a licensed/unlicensed fork
     ///
     /// Two error ids for the same condition — `app.user.update_active.license_user_limit.exceeded`
-    /// when a licence is installed and `…user_limit.exceeded` when not. Only the unlicensed one
-    /// is reachable here, because [`App::get_server_limits`] speaks for an unlicensed server and
-    /// the handler forwards a licensed one.
+    /// when a licence is installed and `…user_limit.exceeded` when not. Both reachable since
+    /// 2026-09-13, when [`App::get_server_limits`] learned to read a seat-enforcing licence.
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
     pub async fn activate_user(&self, user: &User) -> AppResult<User> {
         if self.is_at_user_limit().await? {
-            return Err(AppError::boxed(
-                "UpdateActive",
-                "app.user.update_active.user_limit.exceeded",
-                None,
-                String::new(),
-                400,
-            ));
+            let id = if self.license().await?.is_some() {
+                "app.user.update_active.license_user_limit.exceeded"
+            } else {
+                "app.user.update_active.user_limit.exceeded"
+            };
+            return Err(AppError::boxed("UpdateActive", id, None, String::new(), 400));
         }
 
         let mut user = user.clone();

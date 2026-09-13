@@ -186,16 +186,21 @@ impl App {
     /// administrator here and does not on Go.
     #[tracing::instrument(skip_all, fields(username = %user.username, roles, locale_reset = false))]
     pub async fn create_user(&self, user: &User) -> AppResult<User> {
-        // `isAtUserLimit` (app/limits.go:114). The licensed arm of the error is unreachable here:
-        // `GetServerLimits` only sets a hard limit from a licence when one is installed, and the
-        // api layer forwards a licensed server before it gets this far.
+        // `isAtUserLimit` (app/limits.go:114), and two ids for the one condition: the licensed
+        // one when a licence is installed — reachable here since 2026-09-13, when
+        // `GetServerLimits` learned to read a seat-enforcing licence.
         let limits = self.get_server_limits(true).await?;
         if limits.max_users_hard_limit != 0
             && limits.active_user_count >= limits.max_users_hard_limit
         {
+            let id = if self.license().await?.is_some() {
+                "api.user.create_user.license_user_limits.exceeded"
+            } else {
+                "api.user.create_user.user_limits.exceeded"
+            };
             return Err(AppError::boxed(
                 "createUserOrGuest",
-                "api.user.create_user.user_limits.exceeded",
+                id,
                 None,
                 String::new(),
                 400,
