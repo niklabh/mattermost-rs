@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE channels\n               SET lastpostat        = GREATEST($1, lastpostat),\n                   lastrootpostat    = GREATEST($2, lastrootpostat),\n                   totalmsgcount     = totalmsgcount + $3,\n                   totalmsgcountroot = totalmsgcountroot + $4\n             WHERE id = $5\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8137490d8250e2be09eab4525ca241cff19981960ef778de45010c15cdc8f6e8"
+}

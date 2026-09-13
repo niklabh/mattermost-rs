@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT posts.userid AS \"user_id!\"\n                  FROM posts\n                 WHERE posts.rootid = $1\n                   AND posts.deleteat = 0\n                 GROUP BY posts.userid\n                 ORDER BY MAX(posts.createat) ASC\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9436df631c110b48940128973980b508fbd256347ebceed74f39c9030a3a2965"
+}

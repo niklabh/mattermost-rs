@@ -37,6 +37,7 @@ use mm_model::channel_member::{
     CHANNEL_NOTIFY_DEFAULT, CHANNEL_NOTIFY_MENTION, CHANNEL_NOTIFY_NONE,
 };
 use mm_model::config::COLLAPSED_THREADS_DISABLED;
+use mm_model::file_info::FileInfo;
 use mm_model::group::Group;
 use mm_model::license::minimum_professional_license;
 use mm_model::permission::{PERMISSION_USE_CHANNEL_MENTIONS, PERMISSION_USE_GROUP_MENTIONS};
@@ -60,7 +61,7 @@ use mm_model::websocket_message::{
     WEBSOCKET_EVENT_POSTED, WEBSOCKET_EVENT_THREAD_UPDATED, WebSocketEvent,
 };
 use mm_store::thread_store::ThreadMembershipOpts;
-use mm_store::{ChannelStore, StatusStore, ThreadStore, UserStore};
+use mm_store::{ChannelStore, FileInfoStore, StatusStore, ThreadStore, UserStore};
 
 use crate::App;
 use crate::broadcast_hooks::{
@@ -661,7 +662,26 @@ impl App {
         );
         message.add("team_id", serde_json::Value::String(team.id.clone()));
         message.add("set_online", serde_json::Value::Bool(set_online));
-        // `otherFile`/`image` need file ids, which the create route refuses.
+
+        // Go reads `FileInfo().GetForPost(post.Id, true, false, true)` on a goroutine started at
+        // the top of `SendNotifications`; the read happens here, and the keys are the strings
+        // `"true"`, not booleans. The gate is `post.FileIds` — the list *after*
+        // `attachFilesToPost` — so a post none of whose files attached says neither, while the
+        // rows are read by `PostId` and without deleted ones, so an attached but soft-deleted
+        // image says `otherFile` without `image`.
+        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
+            message.add("otherFile", serde_json::Value::String("true".to_owned()));
+            let infos = match self.store().file_info().get_for_post(&post.id, false).await {
+                Ok(infos) => infos,
+                Err(err) => {
+                    tracing::warn!(error = %err, post_id = %post.id, "Unable to get fileInfo for push notifications.");
+                    Vec::new()
+                }
+            };
+            if infos.iter().any(FileInfo::is_image) {
+                message.add("image", serde_json::Value::String("true".to_owned()));
+            }
+        }
 
         if !mentioned_users_list.is_empty() {
             let mut args = StringInterface::new();

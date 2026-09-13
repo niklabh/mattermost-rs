@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE threads\n                   SET channelid = $1,\n                       replycount = $2,\n                       lastreplyat = $3,\n                       participants = $4\n                 WHERE postid = $5\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3a1ba193f23df70e1aff7018ddaabf872b22a9b2a466d3e6bc8c1534e5e53a3"
+}

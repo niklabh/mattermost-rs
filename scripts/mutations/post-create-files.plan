@@ -1,0 +1,28 @@
+# Mutation plan for `file_ids` on `POST /api/v4/posts` — attachFilesToPost.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-files.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The parity suite uploads through Go, claims the file on each server and reads the FileInfo
+# and Posts rows back; the `posted` frames carry `otherFile`/`image`. The last two lines are
+# the no-op controls and must SURVIVE.
+
+attach-postid-predicate-dropped	crates/mm-store/src/file_info_store.rs	               AND postid = ''	               AND (postid = '' OR TRUE)	api	post_create_files
+attach-creator-predicate-dropped	crates/mm-store/src/file_info_store.rs	               AND (creatorid = $4 OR creatorid = 'nouser')	               AND (creatorid = $4 OR creatorid = 'nouser' OR $4 <> '')	api	post_create_files
+attach-nouser-arm-dropped	crates/mm-store/src/file_info_store.rs	               AND (creatorid = $4 OR creatorid = 'nouser')	               AND (creatorid = $4 OR creatorid = $4)	api	post_create_files
+attach-tests-deleteat	crates/mm-store/src/file_info_store.rs	               AND postid = ''	               AND postid = '' AND deleteat = 0	api	post_create_files
+attach-zero-rows-ignored	crates/mm-store/src/file_info_store.rs	        if result.rows_affected() == 0 {	        if result.rows_affected() > 1 {	api	post_create_files
+overwrite-when-lengths-equal	crates/mm-app/src/post_create.rs	        if file_ids.len() != attached.as_ref().map_or(0, Vec::len) {	        if file_ids.len() == attached.as_ref().map_or(0, Vec::len) {	api	post_create_files
+captured-list-unsorted	crates/mm-app/src/post_create.rs	            .map(file_ids_as_go_captured_them)	            .map(<[String]>::to_vec)	api	post_create_files
+captured-list-deduped	crates/mm-app/src/post_create.rs	            .map(file_ids_as_go_captured_them)	            .map(|ids| { let mut ids = ids.to_vec(); ids.sort(); ids.dedup(); ids })	api	post_create_files
+attached-empty-not-nil	crates/mm-app/src/post_create.rs	        let mut attached: Option<Vec<String>> = None;	        let mut attached: Option<Vec<String>> = Some(Vec::new());	api	post_create_files
+update-at-not-propagated	crates/mm-app/src/post_create.rs	            post.update_at = overwritten.update_at;	            let _ = overwritten.update_at;	api	post_create_files
+overwrite-threads-by-root	crates/mm-store/src/post_store.rs	                "UPDATE threads SET lastreplyat = $1 WHERE postid = $2",\n                update_at,\n                post.id,	                "UPDATE threads SET lastreplyat = $1 WHERE postid = $2",\n                update_at,\n                post.root_id,	api	post_create_files
+overwrite-fileids-not-written	crates/mm-store/src/post_store.rs	            array_to_json(post.file_ids.as_deref()),	            array_to_json(Some(&post.filenames)),	api	post_create_files
+decode-null-rejected	crates/mm-store/src/post_store.rs	    raw.map(|raw| serde_json::from_str::<Option<StringArray>>(&raw))	    raw.map(|raw| serde_json::from_str::<StringArray>(&raw).map(Some))	api	post_create_files
+otherfile-gate-inverted	crates/mm-app/src/notification.rs	        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {	        if post.file_ids.as_deref().is_none_or(|ids| ids.is_empty()) {	api	post_create_files
+image-counts-deleted	crates/mm-app/src/notification.rs	get_for_post(&post.id, false)	get_for_post(&post.id, true)	api	post_create_files
+image-requires-all	crates/mm-app/src/notification.rs	            if infos.iter().any(FileInfo::is_image) {	            if infos.iter().all(FileInfo::is_image) {	api	post_create_files
+control-swap-set-columns	crates/mm-store/src/file_info_store.rs	               SET postid = $1, channelid = $2	               SET channelid = $2, postid = $1	api	post_create_files
+control-redundant-predicate	crates/mm-store/src/file_info_store.rs	               AND postid = ''	               AND postid = '' AND $3 <> ''	api	post_create_files

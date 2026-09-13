@@ -7610,8 +7610,8 @@ be done without claiming on shapes we then forward.
 ## D-401 · createPost serves one shape and forwards the rest
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
-**Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed); the rows below are
-what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
+**Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
+(`attachFilesToPost`); the rows below are what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
 `App::notification_forward_reason` carry the Go branch behind each arm.
 
 `POST /api/v4/posts` answers a message or a reply, mentions included, in an open or private
@@ -7621,7 +7621,6 @@ it:
 | forwarded shape | what it needs |
 |---|---|
 | a reply to a live persistent-notification root | `ResolvePersistentNotification` after the save — the [D-551] scan |
-| `file_ids` | `FileInfoStore::attach_to_post`, and `Post().Overwrite` for the partial-attachment path |
 | a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |

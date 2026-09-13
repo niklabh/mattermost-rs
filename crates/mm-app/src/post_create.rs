@@ -5,8 +5,8 @@
 //! # `CreatePost` is 300 lines of branches on shapes; this reproduces the ones a client sends
 //!
 //! Served: a **message or a reply in an open or private channel**, mentions included — `@user`,
-//! `@channel`, `@here`, `@all`, mention keys and first names — with no `file_ids`, no priority,
-//! no metadata, the default post type, no props that name an integration or an embed, and a
+//! `@channel`, `@here`, `@all`, mention keys and first names — with or without `file_ids`, with
+//! no priority, no metadata, the default post type, no props that name an integration or an embed, and a
 //! message with no link and no `~`. Everything else is forwarded, and two functions decide, both
 //! **before the pending-post id is claimed and before `Post().Save`** so that no forward leaves a
 //! half-written row behind: [`App::refuse_create_post_shapes`] on the request's shape, and
@@ -52,7 +52,7 @@ use mm_model::utils::{AppError, get_millis, new_id, parse_hashtags};
 use mm_model::websocket_message::{WEBSOCKET_EVENT_EPHEMERAL_MESSAGE, WebSocketEvent};
 
 use mm_store::post_store::{GetPostThreadOptions, ThreadDirection};
-use mm_store::{ChannelStore, PostStore, ThreadStore, WebhookStore};
+use mm_store::{ChannelStore, FileInfoStore, PostStore, ThreadStore, WebhookStore};
 
 use crate::App;
 use crate::channel::RestrictedDm;
@@ -272,12 +272,6 @@ impl App {
         if !post.post_type.is_empty() {
             return Err(PrepareError::Unreproducible(
                 "a non-default post type takes a branch of its own in CreatePost",
-            ));
-        }
-        // `attachFilesToPost` re-parents FileInfo rows and can `Overwrite` the post.
-        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
-            return Err(PrepareError::Unreproducible(
-                "attachFilesToPost writes FileInfo.PostId, which has no port",
             ));
         }
         // `savePostsPriority` and `savePostsPersistentNotifications` write two more tables.
@@ -685,7 +679,16 @@ impl App {
         // `getEmbedsAndImages` leaves `Embeds` empty and `Images` empty on a message with no
         // link, and `omitempty` drops both — so there is no `previewed_post` prop to add either.
 
-        let saved = self.store().post().save(post).await.map_err(|err| {
+        // Go: `fileIDs := post.FileIds` — captured **before** `Save`, and it is the same
+        // backing array `PreSave` then sorts and compacts in place. See
+        // [`file_ids_as_go_captured_them`] for what that list holds after the save.
+        let file_ids = post
+            .file_ids
+            .as_deref()
+            .map(file_ids_as_go_captured_them)
+            .unwrap_or_default();
+
+        let mut saved = self.store().post().save(post).await.map_err(|err| {
             if let mm_store::StoreError::Invalid { app_error, .. } = err {
                 // `errors.As(nErr, &appErr)` — `IsValid`'s own error reaches the client verbatim.
                 return PrepareError::App(app_error);
@@ -707,7 +710,23 @@ impl App {
             ))
         })?;
 
-        // `attachFilesToPost` — no file ids, refused above.
+        // `seenPendingPostIdsCache.SetWithExpiry` — the pending id was claimed before the save.
+        if !file_ids.is_empty() {
+            match self.attach_files_to_post(&mut saved, &file_ids).await {
+                Ok(attached) => {
+                    // `else if post.Type != model.PostTypeBurnOnRead` — that type is refused.
+                    saved.file_ids = attached;
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        post_id = %saved.id,
+                        ?file_ids,
+                        "Encountered error attaching files to post"
+                    );
+                }
+            }
+        }
         // `MessageHasBeenPosted` — no plugin environment, [D-183].
 
         // `PreparePostForClient`, *not* the embeds-and-images variant: Go relies on
@@ -968,6 +987,80 @@ impl App {
         Ok(sanitized)
     }
 
+    /// Port of `app.App.attachFilesToPost` (app/post.go:529).
+    ///
+    /// Every id is tried and the ones the store accepted are returned. When that is fewer than
+    /// were listed — a file the poster does not own, an id that is not a file, a file already
+    /// attached, or the same id listed twice — the post is **overwritten** with the attached
+    /// list, which is when `update_at` parts from `create_at` on a post that was never edited.
+    /// Nothing attached is a nil list, not an empty one: `var attachedIds []string` with no
+    /// `append` is nil, and `Overwrite` writes it as the JSON `null`.
+    ///
+    /// The remote-origin arm (`post.GetRemoteID() != ""` keeps the listed ids and skips the
+    /// overwrite) is unreachable from the REST route, whose `SanitizeInput` empties
+    /// `remote_id`; it is kept because the function is Go's, not the route's.
+    ///
+    /// The overwrite writes `update_at` onto `post` — Go's `Overwrite` mutates the post it is
+    /// handed, and `CreatePost` answers with that post.
+    #[tracing::instrument(skip_all, fields(post_id = %post.id, listed = file_ids.len(), attached))]
+    async fn attach_files_to_post(
+        &self,
+        post: &mut Post,
+        file_ids: &[String],
+    ) -> Result<Option<Vec<String>>, Box<AppError>> {
+        let attached = self
+            .attach_file_ids_to_post(&post.id, &post.channel_id, &post.user_id, file_ids)
+            .await;
+        tracing::Span::current().record("attached", attached.as_ref().map_or(0, Vec::len));
+
+        if file_ids.len() != attached.as_ref().map_or(0, Vec::len) {
+            // Remote-origin posts have a concurrent file-receive path that performs its own
+            // binding; stripping here can clobber a binding that path just made.
+            if !post.get_remote_id().is_empty() {
+                return Ok(Some(file_ids.to_vec()));
+            }
+            post.file_ids.clone_from(&attached);
+            let overwritten = self.store().post().overwrite(post).await.map_err(|err| {
+                tracing::error!(error = %err, "post overwrite failed");
+                AppError::boxed(
+                    "attachFilesToPost",
+                    "app.post.overwrite.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+            post.update_at = overwritten.update_at;
+        }
+
+        Ok(attached)
+    }
+
+    /// Port of `app.App.attachFileIDsToPost` (app/post.go:548): one `AttachToPost` per id, a
+    /// refused id logged and skipped, the rest returned in the order they were tried.
+    async fn attach_file_ids_to_post(
+        &self,
+        post_id: &str,
+        channel_id: &str,
+        user_id: &str,
+        file_ids: &[String],
+    ) -> Option<Vec<String>> {
+        let mut attached: Option<Vec<String>> = None;
+        for file_id in file_ids {
+            if let Err(err) = self
+                .store()
+                .file_info()
+                .attach_to_post(file_id, post_id, channel_id, user_id)
+                .await
+            {
+                tracing::warn!(error = %err, file_id, post_id, "Failed to attach file to post");
+                continue;
+            }
+            attached.get_or_insert_with(Vec::new).push(file_id.clone());
+        }
+        attached
+    }
+
     /// Port of `PostBurnOnReadCheckWithApp` (app/post_permission_utils.go:130) for the arms a
     /// create can reach with the channel already in hand.
     ///
@@ -1081,8 +1174,58 @@ fn invalid_param(where_: &'static str, name: &'static str) -> PrepareError {
     ))
 }
 
+/// The `fileIDs` list `CreatePost` captured before `Save`, as it reads **after** the save.
+///
+/// `fileIDs := post.FileIds` copies a slice header, not the array; `PreSave` then runs
+/// `RemoveDuplicateStrings` (utils.go:818), which `sort.Strings` the shared array **in place**
+/// and compacts the distinct values to its front, returning a shorter slice over the same
+/// memory. The captured header keeps its original length, so `attachFilesToPost` iterates a
+/// sorted list whose tail is whatever the compaction left behind — duplicates of the last
+/// distinct ids. Each of those fails to attach (`PostId` is no longer empty), so a request that
+/// lists an id twice attaches it once **and overwrites the post**, because the lengths differ.
+///
+/// The same algorithm on a copy, kept at full length, is that list.
+fn file_ids_as_go_captured_them(ids: &[String]) -> Vec<String> {
+    let mut list = ids.to_vec();
+    if list.is_empty() {
+        return list;
+    }
+    list.sort();
+    let mut j = 0;
+    for i in 1..list.len() {
+        if list[j] == list[i] {
+            continue;
+        }
+        j += 1;
+        let next = list[i].clone();
+        list[j] = next;
+    }
+    list
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_captured_file_id_list_is_sorted_and_keeps_its_length() {
+        // ["c","a","c"]: sorted ["a","c","c"], compacted in place to ["a","c" | "c"].
+        let ids = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            super::file_ids_as_go_captured_them(&ids(&["c", "a", "c"])),
+            ids(&["a", "c", "c"])
+        );
+        // ["b","a","b","a"]: sorted ["a","a","b","b"], compacted to ["a","b" | "b","b"].
+        assert_eq!(
+            super::file_ids_as_go_captured_them(&ids(&["b", "a", "b", "a"])),
+            ids(&["a", "b", "b", "b"])
+        );
+        // Distinct ids are only sorted.
+        assert_eq!(
+            super::file_ids_as_go_captured_them(&ids(&["z", "m"])),
+            ids(&["m", "z"])
+        );
+        assert!(super::file_ids_as_go_captured_them(&[]).is_empty());
+    }
+
     use super::*;
 
     fn post_with_message(message: &str) -> Post {

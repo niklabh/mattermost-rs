@@ -1,5 +1,5 @@
-//! Port of `SqlFileInfoStore` (channels/store/sqlstore/file_info_store.go): `GetByIds` and
-//! `Get`.
+//! Port of `SqlFileInfoStore` (channels/store/sqlstore/file_info_store.go): `GetByIds`,
+//! `Get`, `GetForPost`, `AttachToPost` and `DeleteForPost`.
 //!
 //! `GetByIds` unblocks `metadata.files` on `GET /api/v4/posts/{post_id}` and the whole of
 //! `GET /api/v4/posts/{post_id}/files/info`; `Get` unblocks `GET /api/v4/files/{file_id}/info`.
@@ -58,6 +58,44 @@ pub trait FileInfoStore {
         &self,
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.GetForPost` (file_info_store.go:354) — the rows whose `PostId`
+    /// **is** `post_id`, oldest first, which is not the same set as `get_by_ids(post.file_ids)`:
+    /// a file re-parented by `attach_to_post` is in both, a file id a client listed but never
+    /// attached is only in the second, and a file attached under an earlier version of the post
+    /// is only in the first.
+    ///
+    /// `SendNotifications` reads this one for the `otherFile`/`image` keys on the `posted` event,
+    /// with `includeDeleted` false — so a soft-deleted image that was nonetheless attached
+    /// (`attach_to_post` does not test `DeleteAt`) is counted by `FileIds` but not by this read,
+    /// and the event says `otherFile` without `image`.
+    ///
+    /// Go's `readFromMaster` and `allowFromCache` are dropped: one pool, no cache ([D-087]).
+    fn get_for_post(
+        &self,
+        post_id: &str,
+        include_deleted: bool,
+    ) -> impl std::future::Future<Output = Result<Vec<FileInfo>, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.AttachToPost` (file_info_store.go:405) — the write behind a
+    /// `file_ids` list on `POST /posts`.
+    ///
+    /// One `UPDATE` with three predicates and a row count: the id, an **empty** `PostId` (a file
+    /// attaches once; a second attempt, including the same id listed twice, matches no row), and a
+    /// `CreatorId` that is either the poster or the literal `nouser` an upload with no user
+    /// carries (app/file.go:628). It writes `ChannelId` as well as `PostId` — the upload already
+    /// wrote the same channel, so for a REST upload the second column is a repeat. `DeleteAt` is
+    /// not tested, so a soft-deleted file attaches.
+    ///
+    /// No row matched is [`StoreError::InvalidInput`], which `App.attachFileIDsToPost` logs and
+    /// skips — the file is left out of the post rather than the post refused.
+    fn attach_to_post(
+        &self,
+        file_id: &str,
+        post_id: &str,
+        channel_id: &str,
+        creator_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
     /// Port of `SqlFileInfoStore.DeleteForPost` (file_info_store.go:457) — the soft delete
     /// `App.DeletePost` runs for a deleted post's own attachments.
@@ -143,6 +181,119 @@ impl FileInfoStore for SqlFileInfoStore {
             context: format!("failed to update FileInfo with postId={post_id}"),
             source,
         })
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, include_deleted))]
+    async fn get_for_post(
+        &self,
+        post_id: &str,
+        include_deleted: bool,
+    ) -> Result<Vec<FileInfo>, StoreError> {
+        // The same twenty-one columns as `get_by_ids`, scanned into `model.FileInfo` directly in
+        // Go — so here, unlike there, `archived` survives.
+        let rows = sqlx::query!(
+            r#"
+            SELECT fileinfo.id                            AS "id!",
+                   fileinfo.creatorid                     AS "creator_id!",
+                   fileinfo.postid                        AS "post_id!",
+                   COALESCE(fileinfo.channelid, '')       AS "channel_id!",
+                   fileinfo.createat                      AS "create_at!",
+                   fileinfo.updateat                      AS "update_at!",
+                   fileinfo.deleteat                      AS "delete_at!",
+                   fileinfo.path                          AS "path!",
+                   fileinfo.thumbnailpath                 AS "thumbnail_path!",
+                   fileinfo.previewpath                   AS "preview_path!",
+                   fileinfo.name                          AS "name!",
+                   fileinfo.extension                     AS "extension!",
+                   fileinfo.size                          AS "size!",
+                   fileinfo.mimetype                      AS "mime_type!",
+                   fileinfo.width                         AS "width!",
+                   fileinfo.height                        AS "height!",
+                   fileinfo.haspreviewimage               AS "has_preview_image!",
+                   fileinfo.minipreview                   AS "mini_preview?",
+                   COALESCE(fileinfo.content, '')         AS "content!",
+                   COALESCE(fileinfo.remoteid, '')        AS "remote_id!",
+                   fileinfo.archived                      AS "archived!"
+              FROM fileinfo
+             WHERE fileinfo.postid = $1
+               AND ($2 OR fileinfo.deleteat = 0)
+             ORDER BY fileinfo.createat
+            "#,
+            post_id,
+            include_deleted
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find FileInfos with postId={post_id}"),
+            source,
+        })?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| FileInfo {
+                id: row.id,
+                creator_id: row.creator_id,
+                post_id: row.post_id,
+                channel_id: row.channel_id,
+                create_at: row.create_at,
+                update_at: row.update_at,
+                delete_at: row.delete_at,
+                path: row.path,
+                thumbnail_path: row.thumbnail_path,
+                preview_path: row.preview_path,
+                name: row.name,
+                extension: row.extension,
+                size: row.size,
+                mime_type: row.mime_type,
+                width: i64::from(row.width),
+                height: i64::from(row.height),
+                has_preview_image: row.has_preview_image,
+                mini_preview: row.mini_preview,
+                content: row.content,
+                remote_id: Some(row.remote_id),
+                archived: row.archived,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip(self), fields(file_id = %file_id, post_id = %post_id))]
+    async fn attach_to_post(
+        &self,
+        file_id: &str,
+        post_id: &str,
+        channel_id: &str,
+        creator_id: &str,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE fileinfo
+               SET postid = $1, channelid = $2
+             WHERE id = $3
+               AND postid = ''
+               AND (creatorid = $4 OR creatorid = 'nouser')
+            "#,
+            post_id,
+            channel_id,
+            file_id,
+            creator_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update FileInfo with id={file_id} and postId={post_id}"),
+            source,
+        })?;
+
+        if result.rows_affected() == 0 {
+            // Could not attach the file to the post.
+            return Err(StoreError::InvalidInput {
+                entity: "FileInfo",
+                field: "<id, postId, creatorId>",
+                value: format!("<{file_id}, {post_id}, {creator_id}>"),
+            });
+        }
+        Ok(())
     }
 
     /// # `ORDER BY CreateAt DESC` is not the order a client sees

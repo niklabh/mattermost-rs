@@ -1564,15 +1564,18 @@ pub async fn pin_post(client: &reqwest::Client, token: &str, post_id: &str) {
 ///   upload path has filled it in ever since (app/file.go:774). A NULL here is what a
 ///   pre-migration row looks like, and it is the only way to reach `getFileInfo`'s
 ///   `GetChannel("")` branch.
+/// - `creatorid` — the literal `nouser` is what `UploadFileX` writes for an upload with no user
+///   (app/file.go:628 — a plugin's), and `AttachToPost` accepts it for any poster. No REST
+///   route writes it.
 ///
 /// Returns `false` when `DATABASE_URL` is unset so the caller can skip rather than fail.
 pub async fn set_fileinfo_column(file_id: &str, column: &str, value: &str) -> bool {
     assert!(
         matches!(
             column,
-            "archived" | "minipreview" | "deleteat" | "channelid"
+            "archived" | "minipreview" | "deleteat" | "channelid" | "creatorid"
         ),
-        "only the three columns the REST API cannot reach are allowed here; widening this needs a reason"
+        "only the columns the REST API cannot reach are allowed here; widening this needs a reason"
     );
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return false;

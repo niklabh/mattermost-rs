@@ -12700,3 +12700,41 @@ The one DM write this server does not do is the auto-response: `App::auto_respon
 largest remaining create shape; the notification pass already carries the `otherFile`/`image`
 keys' inputs.
 
+## File attachments on `POST /api/v4/posts` — `attachFilesToPost` (2026-09-14)
+
+Route count unchanged at 463 of 764. A `file_ids` list is now served: each id is claimed by
+`FileInfoStore::attach_to_post` (one guarded `UPDATE`, a miss logged and skipped), and when fewer
+attached than were listed the post is rewritten by `PostStore::overwrite` with the attached list
+— which is where `update_at` leaves `create_at` on a post nobody edited. The `posted` event's
+`otherFile`/`image` keys read `FileInfoStore::get_for_post`.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/file_info_store.rs` — `attach_to_post`, `get_for_post` | DONE |
+| store | `crates/mm-store/src/post_store.rs` — `overwrite`; `decode_string_array` accepts `null` | DONE |
+| app | `crates/mm-app/src/post_create.rs` — `attach_files_to_post`, `file_ids_as_go_captured_them` | DONE |
+| app | `crates/mm-app/src/notification.rs` — `otherFile`/`image` | DONE |
+| test | `crates/mm-api/tests/parity/post_create_files.rs` — 7 | DONE |
+| mutation | `scripts/mutations/post-create-files.plan` — 18 run, 16 caught, 2 controls survived | DONE |
+
+- **A duplicated id overwrites the post even though everything attached**: `CreatePost` captures
+  `post.FileIds` before `Save`, and `PreSave`'s `RemoveDuplicateStrings` sorts and compacts that
+  same array in place — so the captured list keeps its length and its tail is duplicates that
+  fail to attach. `file_ids_as_go_captured_them` is that algorithm on a copy. Measured.
+- **Nothing attached is `"file_ids":null`**, and the column holds `null`; the reads decode it.
+- **`Overwrite`'s `Threads` update matches no row** (`WHERE PostId = <the reply's id>`). Ported as
+  written; a reply whose files only partly attach keeps `LastReplyAt = CreateAt`.
+- **A soft-deleted file attaches** (`AttachToPost` does not test `DeleteAt`) and then says
+  `otherFile` without `image`, because `GetForPost` excludes it.
+
+[D-401] narrowed: the `file_ids` row is closed. Not covered: a poster without `upload_file` in
+the channel (the handler's check predates this unit and has no parity test — it would need a
+role edit that every concurrent suite would see).
+
+### The next route in this family
+
+`createPost` with a `PostPriority` — `savePostsPriority` and the `PostsPriority` table — or the
+`~channel` mention (`FillInPostProps` and the `channel_mentions` hook). Either is a create shape
+that still forwards; the priority one also unblocks `GET /posts/{id}/priority` parity on a
+served write.
+

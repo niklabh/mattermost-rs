@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT rootid AS \"root_id!\" FROM posts WHERE id = $1",
+  "query": "SELECT COALESCE(channels.teamid, '') AS \"team_id!\" FROM channels WHERE channels.id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "root_id!",
+        "name": "team_id!",
         "type_info": "Varchar"
       }
     ],
@@ -15,8 +15,8 @@
       ]
     },
     "nullable": [
-      true
+      null
     ]
   },
-  "hash": "da9d3da3eebe4be4cfd8d91c610f4f9f4c95f09f68f02394fbd6865178a98b9b"
+  "hash": "515e8539f4349723f01dfe48e26d138077562b3e679c43d60c44da966af72203"
 }

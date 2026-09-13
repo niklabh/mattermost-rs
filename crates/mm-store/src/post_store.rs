@@ -308,6 +308,27 @@ pub trait PostStore {
         old_post: &Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.Overwrite` (post_store.go:513), which is `OverwriteMultiple` of
+    /// one — the write `App.attachFilesToPost` makes when fewer files attached than the client
+    /// listed, so the row's `FileIds` says what is actually attached.
+    ///
+    /// Not [`PostStore::update`]: no history row, no `LastPostAt` bump, no root bump, and no
+    /// `PreCommit` — `FileIds` is written as handed over, so a **nil** list reaches the column
+    /// as the JSON `null`, and `UpdateAt` is a fresh clock read the caller sees on the returned
+    /// post. `IsValid` runs first, with the same unwrapped error as `update`.
+    ///
+    /// # The `Threads` statement matches no row
+    ///
+    /// For a reply Go runs `UPDATE Threads SET LastReplyAt = ? WHERE PostId = ?` with the
+    /// **reply's** id — and `Threads.PostId` is the root's. So the statement is executed, in the
+    /// same transaction, and changes nothing; a reply whose files only partly attached keeps a
+    /// `LastReplyAt` equal to its `CreateAt`. Reproduced as written, because "fixing" it would
+    /// move a timestamp Go leaves alone.
+    fn overwrite(
+        &self,
+        post: &Post,
+    ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
+
     /// Port of `SqlPostStore.Delete` (post_store.go:972) — the **soft** delete behind
     /// `DELETE /api/v4/posts/{post_id}`, narrowed to a **root** post.
     ///
@@ -1461,12 +1482,17 @@ fn threaded_post_from_row(row: ThreadedPostRow) -> Result<Post, StoreError> {
 /// `StringArray.Scan` (model/utils.go:118): NULL stays nil, anything else is parsed as JSON.
 ///
 /// The column is a `varchar` holding JSON text, not a `jsonb`, so the parse is ours to do.
+/// A NULL column and the JSON `null` both scan to a nil slice: `StringArray.Scan` returns early
+/// on a nil value and otherwise `json.Unmarshal`s, which sets the slice to nil on `null`. The
+/// second shape is what `overwrite` writes for a post none of whose files attached
+/// (`ArrayToJSON(nil)` is `"null"`), so it is a column this store itself produces.
 fn decode_string_array(
     column: &'static str,
     raw: Option<String>,
 ) -> Result<Option<StringArray>, StoreError> {
-    raw.map(|raw| serde_json::from_str::<StringArray>(&raw))
+    raw.map(|raw| serde_json::from_str::<Option<StringArray>>(&raw))
         .transpose()
+        .map(Option::flatten)
         .map_err(|source| StoreError::Decode {
             entity: "Post",
             column,
@@ -2938,6 +2964,98 @@ impl PostStore for SqlPostStore {
             })?;
 
         Ok(new_post)
+    }
+
+    #[tracing::instrument(skip(self, post), fields(post_id = %post.id))]
+    async fn overwrite(&self, post: &Post) -> Result<Post, StoreError> {
+        // Owned because Go writes `UpdateAt` onto the post it was handed and returns that post.
+        let mut post = post.clone();
+        let update_at = get_millis();
+        post.update_at = update_at;
+
+        let max_post_size = self.max_post_size().await?;
+        post.is_valid(max_post_size)
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Post",
+                app_error,
+            })?;
+        // `ValidateProps` would run here. It only logs — see the trait docs on `update`.
+
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        let props = props_for_column(&post);
+        sqlx::query!(
+            r#"
+            UPDATE posts
+               SET createat     = $1,
+                   updateat     = $2,
+                   editat       = $3,
+                   deleteat     = $4,
+                   ispinned     = $5,
+                   userid       = $6,
+                   channelid    = $7,
+                   rootid       = $8,
+                   originalid   = $9,
+                   message      = $10,
+                   type         = $11,
+                   props        = $12,
+                   hashtags     = $13,
+                   filenames    = $14,
+                   fileids      = $15,
+                   hasreactions = $16,
+                   remoteid     = $17
+             WHERE id = $18
+            "#,
+            post.create_at,
+            post.update_at,
+            post.edit_at,
+            post.delete_at,
+            post.is_pinned,
+            post.user_id,
+            post.channel_id,
+            post.root_id,
+            post.original_id,
+            post.message,
+            post.post_type,
+            props,
+            post.hashtags,
+            array_to_json(Some(&post.filenames)),
+            array_to_json(post.file_ids.as_deref()),
+            post.has_reactions,
+            post.remote_id,
+            post.id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Post with id={}", post.id),
+            source,
+        })?;
+
+        if !post.root_id.is_empty() {
+            // `WHERE PostId = <the reply's id>` — see the trait docs: this matches nothing.
+            sqlx::query!(
+                "UPDATE threads SET lastreplyat = $1 WHERE postid = $2",
+                update_at,
+                post.id,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to update Threads with postid={}", post.id),
+                source,
+            })?;
+        }
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })?;
+
+        Ok(post)
     }
 
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]

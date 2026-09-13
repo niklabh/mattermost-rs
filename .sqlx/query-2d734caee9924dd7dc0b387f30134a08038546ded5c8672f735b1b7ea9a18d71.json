@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE threads\n               SET participants = participants - $2::text,\n                   lastreplyat = (SELECT COALESCE(MAX(createat), 0) FROM posts WHERE rootid = $1 AND deleteat = 0),\n                   replycount = (SELECT COUNT(*) FROM posts WHERE rootid = $1 AND deleteat = 0)\n             WHERE postid = $1\n               AND replycount > 0\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2d734caee9924dd7dc0b387f30134a08038546ded5c8672f735b1b7ea9a18d71"
+}

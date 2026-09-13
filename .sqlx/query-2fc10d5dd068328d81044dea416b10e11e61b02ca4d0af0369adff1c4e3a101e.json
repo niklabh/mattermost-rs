@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT postid                             AS \"post_id!\",\n               COALESCE(replycount, 0)            AS \"reply_count!\",\n               COALESCE(lastreplyat, 0)           AS \"last_reply_at!\",\n               participants                       AS \"participants?\"\n          FROM threads\n         WHERE postid = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_reply_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "participants?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "2fc10d5dd068328d81044dea416b10e11e61b02ca4d0af0369adff1c4e3a101e"
+}
