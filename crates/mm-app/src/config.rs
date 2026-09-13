@@ -134,6 +134,10 @@ pub struct Config {
     /// `App::save_reaction_for_post` for what this server does about that.
     pub allow_persistent_notifications: bool,
 
+    /// `ServiceSettings.AllowPersistentNotificationsForGuests` (config.go:1001), default `false`.
+    /// The last test in `postPriorityCheck`, reached only with a Professional-or-better licence.
+    pub allow_persistent_notifications_for_guests: bool,
+
     /// `ServiceSettings.UniqueEmojiReactionLimitPerPost` (config.go:489).
     ///
     /// Defaulted to **50** and *clamped* to 500 at :1025 — the clamp is a `SetDefaults` step, so
@@ -931,6 +935,32 @@ pub struct Config {
     /// `/system/ping` back to Go rather than confidently reporting the wrong backend.
     pub elasticsearch_enable_searching: bool,
 
+    /// `ElasticsearchSettings.EnableIndexing` (config.go:3295), default `false`.
+    ///
+    /// The other half of the same boundary. An enterprise-ready build registers the
+    /// Elasticsearch engine (`enterprise/local_imports.go`), and that engine reports itself active
+    /// on `EnableIndexing && ready` (elasticsearch.go:116) — so this is the setting under which
+    /// `ActiveSearchBackend` can stop being `"database"`, and `/system/ping` is handed to Go when
+    /// it is on. The licence is not in that predicate and is no longer consulted for it.
+    pub elasticsearch_enable_indexing: bool,
+
+    /// `ServiceSettings.ExperimentalEnableAuthenticationTransfer` (config.go:865), default `true`.
+    ///
+    /// Read by the three `switchAccountType` branches as `License() != nil && !flag` — the one
+    /// licence question those routes ask, answered here since 2026-09-13.
+    pub experimental_enable_authentication_transfer: bool,
+
+    /// `PrivacySettings.UseAnonymousURLs` (config.go:2365), default `false`.
+    ///
+    /// With an Enterprise **Advanced** licence, `createChannel` mints an anonymous URL for a
+    /// non-DM channel when this is on (api4/channel.go:144). Read so the forward there is on
+    /// Go's exact conjunction rather than on "any licence".
+    pub use_anonymous_urls: bool,
+
+    /// `AccessControlSettings.EnableAttributeBasedAccessControl` (config.go:4089), default
+    /// `false`. The second half of every `MinimumEnterpriseAdvancedLicense && …` ABAC gate.
+    pub enable_attribute_based_access_control: bool,
+
     /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
     ///
     /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
@@ -1083,6 +1113,7 @@ impl Default for Config {
             post_priority: true,
             // config.go:997 — `new(true)`.
             allow_persistent_notifications: true,
+            allow_persistent_notifications_for_guests: false,
             // config.go:1021 — `ServiceSettingsDefaultUniqueReactionsPerPost` is 50.
             unique_emoji_reaction_limit_per_post: 50,
             // config.go:2620 — `new(DirectMessageAny)`.
@@ -1230,6 +1261,10 @@ impl Default for Config {
             goroutine_health_threshold: -1,
             disable_database_search: false,
             elasticsearch_enable_searching: false,
+            elasticsearch_enable_indexing: false,
+            experimental_enable_authentication_transfer: true,
+            use_anonymous_urls: false,
+            enable_attribute_based_access_control: false,
             feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
             license_public_key: None,
@@ -1316,6 +1351,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ALLOWPERSISTENTNOTIFICATIONS",
                 default.allow_persistent_notifications,
+            ),
+            allow_persistent_notifications_for_guests: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ALLOWPERSISTENTNOTIFICATIONSFORGUESTS",
+                default.allow_persistent_notifications_for_guests,
             ),
             unique_emoji_reaction_limit_per_post: clamp_unique_reactions(lookup_int(
                 lookup,
@@ -1527,6 +1567,26 @@ impl Config {
                 lookup,
                 "MM_ELASTICSEARCHSETTINGS_ENABLESEARCHING",
                 default.elasticsearch_enable_searching,
+            ),
+            elasticsearch_enable_indexing: lookup_bool(
+                lookup,
+                "MM_ELASTICSEARCHSETTINGS_ENABLEINDEXING",
+                default.elasticsearch_enable_indexing,
+            ),
+            experimental_enable_authentication_transfer: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALENABLEAUTHENTICATIONTRANSFER",
+                default.experimental_enable_authentication_transfer,
+            ),
+            use_anonymous_urls: lookup_bool(
+                lookup,
+                "MM_PRIVACYSETTINGS_USEANONYMOUSURLS",
+                default.use_anonymous_urls,
+            ),
+            enable_attribute_based_access_control: lookup_bool(
+                lookup,
+                "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
+                default.enable_attribute_based_access_control,
             ),
             enable_incoming_webhooks: lookup_bool(
                 lookup,
@@ -1878,6 +1938,9 @@ impl Config {
             allow_persistent_notifications: service
                 .allow_persistent_notifications
                 .unwrap_or(default.allow_persistent_notifications),
+            allow_persistent_notifications_for_guests: service
+                .allow_persistent_notifications_for_guests
+                .unwrap_or(default.allow_persistent_notifications_for_guests),
             // The clamp is Go's, and it is applied on *load*: `SetDefaults` rewrites a document
             // value above 500 down to 500 (config.go:1025), so a running server never operates on
             // the number the document holds. Reading it without the clamp would let a
@@ -2024,6 +2087,7 @@ impl Config {
                 .unwrap_or(default.show_full_name),
             show_email_address: parsed
                 .privacy_settings
+                .as_ref()
                 .and_then(|p| p.show_email_address)
                 .unwrap_or(default.show_email_address),
             session_idle_timeout_in_minutes: service
@@ -2136,9 +2200,27 @@ impl Config {
                 .unwrap_or(default.disable_database_search),
             elasticsearch_enable_searching: parsed
                 .elasticsearch_settings
-                .unwrap_or_default()
-                .enable_searching
+                .as_ref()
+                .and_then(|e| e.enable_searching)
                 .unwrap_or(default.elasticsearch_enable_searching),
+            elasticsearch_enable_indexing: parsed
+                .elasticsearch_settings
+                .as_ref()
+                .and_then(|e| e.enable_indexing)
+                .unwrap_or(default.elasticsearch_enable_indexing),
+            experimental_enable_authentication_transfer: service
+                .experimental_enable_authentication_transfer
+                .unwrap_or(default.experimental_enable_authentication_transfer),
+            use_anonymous_urls: parsed
+                .privacy_settings
+                .as_ref()
+                .and_then(|p| p.use_anonymous_urls)
+                .unwrap_or(default.use_anonymous_urls),
+            enable_attribute_based_access_control: parsed
+                .access_control_settings
+                .unwrap_or_default()
+                .enable_attribute_based_access_control
+                .unwrap_or(default.enable_attribute_based_access_control),
             // Same rule as `feature_flag_burn_on_read` above: `FeatureFlags` is cleared before
             // the document is persisted, so reading it here would turn an absence into a value.
             feature_flag_test_feature: default.feature_flag_test_feature,
@@ -2214,6 +2296,8 @@ struct Document {
     service_settings: Option<ServiceSettingsDocument>,
     #[serde(rename = "ComplianceSettings")]
     compliance_settings: Option<EnableOnlyDocument>,
+    #[serde(rename = "AccessControlSettings")]
+    access_control_settings: Option<AccessControlSettingsDocument>,
     #[serde(rename = "ExperimentalSettings")]
     experimental_settings: Option<ExperimentalSettingsDocument>,
     #[serde(rename = "ImageProxySettings")]
@@ -2424,6 +2508,16 @@ struct SqlSettingsDocument {
 struct ElasticsearchSettingsDocument {
     #[serde(rename = "EnableSearching")]
     enable_searching: Option<bool>,
+    #[serde(rename = "EnableIndexing")]
+    enable_indexing: Option<bool>,
+}
+
+/// The one field of `AccessControlSettings` a migrated route reads — the config half of every
+/// `MinimumEnterpriseAdvancedLicense && EnableAttributeBasedAccessControl` gate.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AccessControlSettingsDocument {
+    #[serde(rename = "EnableAttributeBasedAccessControl")]
+    enable_attribute_based_access_control: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -2436,6 +2530,8 @@ struct ServiceSettingsDocument {
     site_url: Option<String>,
     #[serde(rename = "WebserverMode")]
     webserver_mode: Option<String>,
+    #[serde(rename = "ExperimentalEnableAuthenticationTransfer")]
+    experimental_enable_authentication_transfer: Option<bool>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
     #[serde(rename = "SessionLengthWebInHours")]
@@ -2498,6 +2594,8 @@ struct ServiceSettingsDocument {
     post_priority: Option<bool>,
     #[serde(rename = "AllowPersistentNotifications")]
     allow_persistent_notifications: Option<bool>,
+    #[serde(rename = "AllowPersistentNotificationsForGuests")]
+    allow_persistent_notifications_for_guests: Option<bool>,
     #[serde(rename = "UniqueEmojiReactionLimitPerPost")]
     unique_emoji_reaction_limit_per_post: Option<i64>,
     #[serde(rename = "AllowSyncedDrafts")]
@@ -2576,6 +2674,8 @@ struct PrivacySettingsDocument {
     show_full_name: Option<bool>,
     #[serde(rename = "ShowEmailAddress")]
     show_email_address: Option<bool>,
+    #[serde(rename = "UseAnonymousURLs")]
+    use_anonymous_urls: Option<bool>,
 }
 
 /// `SetDefaults`' `if s.X == nil || *s.X == ""` shape — an absent key **and** an empty string both
@@ -3336,8 +3436,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 72,
-            "the fixture covers {keys} settings and Config reads 72 from the document. \
+            keys, 77,
+            "the fixture covers {keys} settings and Config reads 77 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

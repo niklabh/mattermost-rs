@@ -47,7 +47,6 @@ use mm_model::utils::{AppError, AppResult};
 use mm_store::{SessionStore, UserStore};
 
 use crate::App;
-use crate::license::LicenseState;
 use crate::post::PrepareError;
 
 /// `model.TeamSettingsLockProfileFieldsNone` (config.go:149).
@@ -142,15 +141,15 @@ impl App {
     /// server without the enterprise providers can still answer in full, and it is the arm a
     /// reader is most likely to fold into the LDAP branch below it.
     ///
-    /// # Why an LDAP or SAML user forwards on a licensed server and not on this one
+    /// # An LDAP or SAML user is "no conflict" on every build from this tree
     ///
-    /// `a.Ldap()` and `a.Saml()` are enterprise interfaces, `nil` until the corresponding
-    /// licensed module registers itself. With both nil, Go's `if / else if / else if` chain falls
+    /// `a.Ldap()` and `a.Saml()` are enterprise interfaces, `nil` until the corresponding module
+    /// registers itself — and that module lives in the enterprise repository, not here, so a
+    /// licence does not make it appear. With both nil, Go's `if / else if / else if` chain falls
     /// straight through to `user.IsOAuthUser()`, which an LDAP or SAML account is not — so the
-    /// answer is "no conflict". That is a genuine Go behaviour on an unlicensed server, not an
-    /// approximation of one. On a licensed server the branch calls into the LDAP/SAML attribute
-    /// map, which is not visible from this process, so those two accounts are
-    /// [`PrepareError::Unreproducible`] and the handler forwards.
+    /// answer is "no conflict", licensed or not (re-measured 2026-09-13 against the licensed
+    /// oracle). Until that forward was removed the function handed a licensed server to Go here;
+    /// the provider attribute maps are owed with the providers themselves, [D-571].
     ///
     /// The OAuth arm is portable either way: it is `"full name"` — one string for two fields,
     /// with a space — when either name field is being changed.
@@ -166,15 +165,10 @@ impl App {
             return Ok(Some("username"));
         }
 
+        // `a.Ldap() != nil && (…)` and `a.Saml() != nil && …` — both interfaces are nil on this
+        // build, so both arms are skipped and an LDAP or SAML account reaches the OAuth test,
+        // which it fails. Written as the empty arm it is, so the shape matches Go's chain.
         if user.is_ldap_user() || user.is_saml_user() {
-            match self.license_state().await? {
-                LicenseState::Unlicensed => {}
-                LicenseState::Licensed => {
-                    return Err(PrepareError::Unreproducible(
-                        "the LDAP and SAML provider-attribute maps are not visible here",
-                    ));
-                }
-            }
         } else if user.is_oauth_user()
             && (trying_to_change(&user.first_name, patch.first_name.as_ref())
                 || trying_to_change(&user.last_name, patch.last_name.as_ref()))

@@ -2,6 +2,9 @@
   "AIRecapSettings": {
     "Enable": true
   },
+  "AccessControlSettings": {
+    "EnableAttributeBasedAccessControl": false
+  },
   "ClientRequirements": {
     "AndroidLatestVersion": "",
     "AndroidMinVersion": "",
@@ -15,6 +18,7 @@
     "Enable": false
   },
   "ElasticsearchSettings": {
+    "EnableIndexing": false,
     "EnableSearching": false
   },
   "EmailSettings": {
@@ -63,7 +67,8 @@
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
-    "ShowFullName": true
+    "ShowFullName": true,
+    "UseAnonymousURLs": false
   },
   "SamlSettings": {
     "Enable": false,
@@ -72,6 +77,7 @@
   "ServiceSettings": {
     "AllowCookiesForSubdomains": false,
     "AllowPersistentNotifications": true,
+    "AllowPersistentNotificationsForGuests": false,
     "AllowSyncedDrafts": true,
     "EnableAPIUserDeletion": false,
     "EnableBurnOnRead": true,
@@ -87,6 +93,7 @@
     "EnablePostUsernameOverride": false,
     "EnableTesting": false,
     "EnableUserStatuses": true,
+    "ExperimentalEnableAuthenticationTransfer": true,
     "ExperimentalEnableHardenedMode": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,

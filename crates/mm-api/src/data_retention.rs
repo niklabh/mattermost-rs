@@ -51,7 +51,6 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::ME;
 use crate::error::ApiError;
-use crate::proxy;
 
 /// `model.PayloadParseError` (model/utils.go:42).
 const PAYLOAD_PARSE_ERROR: &str = "api.payload.parse.error";
@@ -198,24 +197,20 @@ fn body_error(body: Body) -> ApiError {
     }
 }
 
-/// The 501, or the proxy when a licence is installed.
+/// The 501 — on every build from this tree, licensed or not.
+///
+/// The refusal is `newLicenseError` behind `a.DataRetention() == nil` in every app function
+/// (app/data_retention.go:13), and the data-retention interface is registered by the enterprise
+/// repository, which is not here: the licensed oracle answers the same 501 (measured
+/// 2026-09-13). Until then a licensed installation was forwarded on "any licence"; the retention
+/// policies themselves are owed with the module, [D-571].
 async fn refuse_or_forward(
-    state: &AppState,
+    _state: &AppState,
     name: &'static str,
-    parts: axum::http::request::Parts,
-    body: axum::body::Bytes,
+    _parts: axum::http::request::Parts,
+    _body: axum::body::Bytes,
 ) -> Response {
-    let licensed = match state.app.license_state().await {
-        Ok(state) => state == mm_app::license::LicenseState::Licensed,
-        Err(err) => return ApiError::from(err).into_response(),
-    };
-    tracing::Span::current().record("licensed", licensed);
-
-    if licensed {
-        let request = Request::from_parts(parts, axum::body::Body::from(body));
-        return proxy::forward_to_go(State(state.clone()), request).await;
-    }
-
+    tracing::Span::current().record("licensed", false);
     ApiError::from(AppError::new(name, LICENSE_ERROR, None, String::new(), 501)).into_response()
 }
 

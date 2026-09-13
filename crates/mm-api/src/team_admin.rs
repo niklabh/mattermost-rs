@@ -445,10 +445,20 @@ async fn refuse_import(
     parts: &axum::http::request::Parts,
     bytes: &[u8],
 ) -> Option<ApiError> {
-    // The licence decides the *first* statement of the handler, so it is asked first here too.
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Licensed) => return None,
-        Ok(mm_app::license::LicenseState::Unlicensed) => {}
+    // `c.App.Channels().License().IsCloud()` — the first statement, and a question about the
+    // licence *body*, not its presence: `IsCloud` is `Features.Cloud` and is false for `nil`.
+    // Answered from the parsed licence since 2026-09-13; a cloud licence is a 403 here too.
+    match state.app.license().await {
+        Ok(license) if license.as_deref().is_some_and(|l| l.is_cloud()) => {
+            return Some(ApiError::from(AppError::new(
+                "importTeam",
+                "api.restricted_system_admin",
+                None,
+                String::new(),
+                403,
+            )));
+        }
+        Ok(_) => {}
         Err(err) => return Some(ApiError::from(err)),
     }
 
