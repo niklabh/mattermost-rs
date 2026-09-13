@@ -242,7 +242,13 @@ async fn purge() {
 
 /// Give the implicit `custom_group_user` role a permission — through the licensed Go server's
 /// own role API, because that is the only write that also refreshes its role cache
-/// (`POST /caches/invalidate` was measured to leave `GET /roles/name/…` stale).
+/// (`POST /caches/invalidate` was measured to leave `GET /roles/name/…` stale), **and then
+/// through the stack's main Go server with the same body**, for the same reason in the other
+/// direction: the main server caches roles for thirty minutes and refreshes only on its own
+/// save, so a patch made here alone left its copy of this role stale for the rest of the run
+/// and the `roles` suite compared that stale copy against the row (measured 2026-09-13: one
+/// `update_at` apart). The main server's save is last, so its cache holds the row every
+/// unlicensed comparison reads.
 ///
 /// **The stock role is empty** (`model.MakeDefaultRoles`, role.go:926): being a member of a
 /// custom group grants nothing until an administrator edits this role. So the membership branch
@@ -280,6 +286,24 @@ async fn set_custom_group_user_permissions(
         200,
         "patching custom_group_user: {}",
         response.text().await.unwrap_or_default()
+    );
+    // The main server's cached copy still holds the previous permissions, so this is a real
+    // change from its point of view and it saves — which is what refreshes its cache.
+    let response = client
+        .put(format!(
+            "{}/api/v4/roles/{}/patch",
+            GO,
+            role["id"].as_str().expect("an id")
+        ))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "permissions": permissions }))
+        .send()
+        .await
+        .expect("the role is patched on the main server too");
+    assert_eq!(
+        response.status(),
+        200,
+        "patching custom_group_user on the main server"
     );
 }
 
