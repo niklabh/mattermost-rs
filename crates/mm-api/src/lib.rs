@@ -10,6 +10,7 @@ pub mod auth;
 pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_admin;
 pub mod channel_creates;
 pub mod channel_member_writes;
 pub mod channel_writes;
@@ -1017,11 +1018,13 @@ pub fn router(state: AppState) -> Router {
                     .delete(channel_member_writes::remove_channel_member),
             ),
         )
-        // The three `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-116)
-        // registers `/roles`, `/schemeRoles` and `/notify_props` as literals under the `{user_id}`
-        // parameter, so neither router has a precedence puzzle here — and `/autotranslation`, the
-        // fourth literal, is deliberately unregistered (it needs the AutoTranslation store) and
-        // falls to `Router::fallback` whole.
+        // The four `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-117)
+        // registers `/roles`, `/schemeRoles`, `/notify_props` and `/autotranslation` as literals
+        // under the `{user_id}` parameter, so neither router has a precedence puzzle here.
+        //
+        // `/autotranslation` was previously left unregistered "because it needs the
+        // AutoTranslation store". It does not: Go's handler opens with the feature gate and never
+        // reaches a store on this build. See `channel_admin::update_channel_member_autotranslation`.
         //
         // **`schemeRoles` is camelCase**, alone among these paths. gorilla matches it literally and
         // so does axum, so `/schemeroles` reaches neither and is forwarded.
@@ -1044,6 +1047,13 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(
                 &state,
                 put(channel_member_writes::update_channel_member_notify_props),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/autotranslation",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_admin::update_channel_member_autotranslation),
             ),
         )
         // `BaseRoutes.PostsForChannel` (api.go:240) — a `PathPrefix("/posts")` subrouter with a
@@ -1295,6 +1305,19 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/moderations",
             partially_migrated_with_ids(&state, get(channels::get_channel_moderations)),
+        )
+        // One segment deeper than `/moderations`, which is a separate `gorilla` subrouter
+        // (`BaseRoutes.ChannelModerations`, api4/channel.go:119-120) and a separate matchit node
+        // here, so registering it takes nothing away from the `GET` above.
+        .route(
+            "/api/v4/channels/{channel_id}/moderations/patch",
+            partially_migrated_with_ids(&state, put(channel_admin::patch_channel_moderations)),
+        )
+        // `Channels.Handle("/{channel_id:[A-Za-z0-9]+}/scheme")` (api4/channel.go:59) — a literal
+        // under `{channel_id}`, one of about thirty in this neighbourhood.
+        .route(
+            "/api/v4/channels/{channel_id}/scheme",
+            partially_migrated_with_ids(&state, put(channel_admin::update_channel_scheme)),
         )
         .route(
             "/api/v4/channels/{channel_id}/bookmarks",
@@ -3656,6 +3679,157 @@ mod tests {
             (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
             (Method::PUT, format!("/api/v4/users/{USER}/auth")),
             (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
+        ];
+        for (method, path) in &forwarded {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "{method} {path} is now answered here and should still forward"
+            );
+        }
+    }
+    /// The channel-administration literals, and the neighbours a botched registration would take
+    /// away.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `scheme`, `moderations/patch` and `autotranslation` are all **literal** segments sitting
+    /// under a parameter whose shorter prefixes this server already answers heavily. axum prefers a
+    /// static segment to a `{param}` at the same depth and does not backtrack across method
+    /// routers, so registering one of these a segment too shallow — `/moderations` instead of
+    /// `/moderations/patch`, say — silently replaces the `GET` that was there rather than adding a
+    /// `PUT` beside it.
+    ///
+    /// # Non-vacuity, in both directions
+    ///
+    /// The `served` half fails if a route goes quiet: checked by temporarily moving
+    /// `PUT /channels/{id}/scheme` into the `forwarded` list below, which fails there instead. The
+    /// `forwarded` half fails if a registration swallows a path Go still owns: checked by putting
+    /// `GET /channels/{id}/moderations`, which this server does answer, into it — it fails.
+    #[tokio::test]
+    async fn the_channel_admin_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The three this session adds.
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/scheme")),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/moderations/patch"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/autotranslation"),
+            ),
+            // The `GET` one segment above `moderations/patch`, which is the one a shallow
+            // registration would have eaten.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations"),
+            ),
+            // The three sibling literals under `{user_id}`, beside `autotranslation`.
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/roles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/schemeRoles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/notify_props"),
+            ),
+            // And the parameterised parents of both, which must keep their own methods.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}")),
+            // The `{channel_id}` literals nearest `scheme` structurally.
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/stats")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/privacy")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/restore")),
+            // `members` as a literal in the `{channel_id}` slot still wins over `{channel_id}`.
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/view"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The other side: the three channel-administration routes this session did **not**
+        // register, plus the unregistered method on two paths it did. There is no Go server on
+        // port 1, so a forwarded request answers without the header.
+        let forwarded: Vec<(Method, String)> = vec![
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/move")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members_minus_group_members"),
+            ),
+            // `moderations/patch` is a `PUT` only; a `GET` there is gorilla's 405 path, forwarded.
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations/patch"),
+            ),
+            // `scheme` is a `PUT` only too, and it is not `schemeRoles`.
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/scheme")),
         ];
         for (method, path) in &forwarded {
             let response = router(state.clone())

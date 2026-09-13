@@ -32,6 +32,7 @@ mod parity {
     pub mod bot_writes;
     pub mod bots;
     pub mod by_ids_lists;
+    pub mod channel_admin;
     pub mod channel_autocomplete;
     pub mod channel_by_name;
     pub mod channel_by_name_for_team_name;
