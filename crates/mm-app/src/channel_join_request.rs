@@ -56,6 +56,7 @@ use mm_store::channel_join_request_store::ChannelJoinRequestStore;
 use mm_store::channel_store::ChannelStore;
 
 use crate::App;
+use crate::broadcast_hooks::BROADCAST_ONLY_CHANNEL_ADMINS;
 use crate::channel_member::{ChannelMemberOpts, MemberWrite};
 
 /// `channelJoinRequestPaginationDefaultPerPage` (channel_join_request.go:18) — the public
@@ -68,9 +69,6 @@ const PAGINATION_MAX_PER_PAGE: i64 = 200;
 
 /// `channelMembersPageSize` inside `channelAdminUserIDs` (channel_join_request.go:378).
 const CHANNEL_MEMBERS_PAGE_SIZE: i64 = 200;
-
-/// `broadcastOnlyChannelAdmins` (app/web_broadcast_hooks.go:28).
-const BROADCAST_ONLY_CHANNEL_ADMINS: &str = "only_channel_admins";
 
 /// Port of `sanitizeJoinRequestListOpts` (channel_join_request.go:270).
 ///

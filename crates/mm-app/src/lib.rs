@@ -10,6 +10,8 @@ pub mod authorization;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
+/// Port of `app/web_broadcast_hooks.go` — the per-connection rewrites the hub runs on the way out.
+pub mod broadcast_hooks;
 pub mod channel;
 pub mod channel_create;
 pub mod channel_join_request;
