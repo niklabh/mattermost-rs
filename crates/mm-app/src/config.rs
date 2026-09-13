@@ -892,6 +892,11 @@ pub struct Config {
     /// below alone.
     pub feature_flag_enable_ai_recaps: bool,
 
+    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
+    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
+    /// create a `rank` user field or to convert one. Environment-only, like every feature flag.
+    pub feature_flag_property_field_rank: bool,
+
     /// `AIRecapSettings.Enable` (ai_recap_settings.go:88).
     ///
     /// The other half of `AIRecapsEnabled()`, and it is `Option<bool>` for a reason that changes
@@ -1228,6 +1233,7 @@ impl Default for Config {
             scheduled_posts: true,
             // `f.EnableAIRecaps = false` (feature_flags.go:192).
             feature_flag_enable_ai_recaps: false,
+            feature_flag_property_field_rank: true,
             // Absent, and absent means **enabled** — see the field's note.
             ai_recap_settings_enable: None,
             // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
@@ -1522,6 +1528,11 @@ impl Config {
                 lookup,
                 "MM_FEATUREFLAGS_ENABLEAIRECAPS",
                 default.feature_flag_enable_ai_recaps,
+            ),
+            feature_flag_property_field_rank: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_PROPERTYFIELDRANK",
+                default.feature_flag_property_field_rank,
             ),
             // An overlay can only ever *set* this, never restore it to absent — which matches
             // Go, whose environment layer writes a pointer to the parsed value.
@@ -2163,6 +2174,7 @@ impl Config {
             // the document is persisted, so reading it here would turn an absence into a value.
             feature_flag_test_feature: default.feature_flag_test_feature,
             feature_flag_enable_ai_recaps: default.feature_flag_enable_ai_recaps,
+            feature_flag_property_field_rank: default.feature_flag_property_field_rank,
             // **Not** `unwrap_or(default)`: the field is `Option` on purpose and an absent
             // `Enable` is a different input from `false`. Carried through as it arrived.
             ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,
