@@ -1030,6 +1030,20 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
         "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
         "DELETE FROM users WHERE username LIKE 'mmrsupduser%'",
+        // `parity/user_deletes.rs`. Its own prefix again, and it needs three tables the two
+        // sweeps above do not: it plants `Bots` rows over its own users and `OAuth*` grants for
+        // them, and both are what the route under test is asked to clear. A leftover `Bots` row
+        // would make the *next* run's owner forward when it meant to serve.
+        "DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM bots WHERE ownerid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM oauthauthdata WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM oauthaccessdata WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsdeluser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsdeluser%'",
         // Rows keyed on a *post* id, which nothing below reaches — the channel subquery is the
         // only handle on them, and it stops resolving once the posts are gone. These used to
         // live in each suite's own purge, which is a race rather than a cleanup: the parity
