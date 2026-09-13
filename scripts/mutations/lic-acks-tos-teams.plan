@@ -1,0 +1,35 @@
+# Mutation plan for the 2026-09-13 licensed halves of the acknowledgement pair (D-422), createTermsOfService
+# (D-382) and the team/channel archive cleanup (D-371).
+#
+#   scripts/mutate-batch.sh scripts/mutations/lic-acks-tos-teams.plan
+#
+# The decisions a reader gets wrong: the deadline's direction, which archived-channel check fires on
+# which half, that a delete zeroes rather than removes, that a re-acknowledgement moves the timestamp,
+# that both writes stamp the post, which rung the gate tests, the order of the id and permission
+# checks, the feature flag's default on an unlicensed server, the ABAC gate's direction, and whether
+# the two archives clean up their policy row at all. The last two lines are the controls and must SURVIVE.
+#
+# `gate-user-id-before-post-id` is expected to SURVIVE: the two `invalid_url_param` refusals share an id
+# and differ only in the translated `message`, which the suite tolerates until [D-092] lands. It is kept
+# so the day messages are compared it starts biting.
+ack-deadline-direction	crates/mm-app/src/post_acknowledgement.rs	        if get_millis() - old.acknowledged_at > UNACKNOWLEDGE_DEADLINE_MS {	        if get_millis() - old.acknowledged_at < UNACKNOWLEDGE_DEADLINE_MS {	api	post_acks_licensed
+ack-save-archived-check-dropped	crates/mm-app/src/post_acknowledgement.rs	        if channel.delete_at > 0 {\n            return Err(AppError::boxed(\n                "SaveAcknowledgementForPost",	        if channel.delete_at < 0 {\n            return Err(AppError::boxed(\n                "SaveAcknowledgementForPost",	api	post_acks_licensed
+ack-delete-archived-id-is-the-saves	crates/mm-app/src/post_acknowledgement.rs	                "api.acknowledgement.delete.archived_channel.app_error",	                "api.acknowledgement.save.archived_channel.app_error",	api	post_acks_licensed
+ack-delete-removes-nothing	crates/mm-store/src/post_acknowledgement_store.rs	            "UPDATE postacknowledgements SET acknowledgedat = 0 WHERE postid = $1 AND userid = $2",	            "UPDATE postacknowledgements SET acknowledgedat = acknowledgedat WHERE postid = $1 AND userid = $2",	api	post_acks_licensed
+ack-upsert-keeps-old-timestamp	crates/mm-store/src/post_acknowledgement_store.rs	            ON CONFLICT (postid, userid) DO UPDATE SET acknowledgedat = $4	            ON CONFLICT (postid, userid) DO UPDATE SET channelid = $3	api	post_acks_licensed
+# The stamp is mutated on the bound value, not the SQL: `sqlx::query!` type-checks the statement
+# at compile time and every rewrite of the text that kept `$1` in play failed to infer its type.
+ack-post-not-stamped	crates/mm-store/src/post_acknowledgement_store.rs	        get_millis(),\n        post_id\n    )\n    .execute(&mut **tx)	        0_i64,\n        post_id\n    )\n    .execute(&mut **tx)	api	post_acks_licensed
+ack-get-counts-zeroed-rows	crates/mm-store/src/post_acknowledgement_store.rs	             WHERE postid = $1 AND userid = $2 AND acknowledgedat <> 0	             WHERE postid = $1 AND userid = $2	api	post_acks_licensed
+gate-tier-is-advanced	crates/mm-api/src/post_acks.rs	    let licensed = mm_model::license::minimum_professional_license(license.as_deref());	    let licensed = mm_model::license::minimum_enterprise_advanced_license(license.as_deref());	api	post_acks_licensed
+gate-user-permission-dropped	crates/mm-api/src/post_acks.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	    if false {	api	post_acks_licensed
+gate-read-permission-dropped	crates/mm-api/src/post_acks.rs	    if !may_read {	    if may_read && false {	api	post_acks_licensed
+gate-user-id-before-post-id	crates/mm-api/src/post_acks.rs	    if !is_valid_id(post_id) {\n        return Err(ApiError::invalid_url_param("post_id"));\n    }\n    let user_id = resolve_me(user_id, session);\n    if !is_valid_id(user_id) {\n        return Err(ApiError::invalid_url_param("user_id"));\n    }	    let user_id = resolve_me(user_id, session);\n    if !is_valid_id(user_id) {\n        return Err(ApiError::invalid_url_param("user_id"));\n    }\n    if !is_valid_id(post_id) {\n        return Err(ApiError::invalid_url_param("post_id"));\n    }	api	post_acks_licensed
+gate-refusal-ids-swapped	crates/mm-api/src/post_acks.rs	const ACKNOWLEDGE_POST_LICENSE_ERROR: &str = mm_model::utils::NO_TRANSLATION;	const ACKNOWLEDGE_POST_LICENSE_ERROR: &str = "license_error.feature_unavailable";	unit	post_acks::
+tos-unlicensed-passes	crates/mm-api/src/terms_of_service.rs	                .and_then(|f| f.custom_terms_of_service)\n                .unwrap_or(false)	                .and_then(|f| f.custom_terms_of_service)\n                .unwrap_or(true)	api	terms_of_service_writes
+team-abac-gate-inverted	crates/mm-app/src/team.rs	        if !mm_model::license::minimum_enterprise_advanced_license(license.as_deref()) {\n            return Ok(false);	        if mm_model::license::minimum_enterprise_advanced_license(license.as_deref()) {\n            return Ok(false);	unit	team::
+team-cleanup-dropped	crates/mm-app/src/team.rs	        self.cleanup_team_access_control_policy(&deleted, "archive")\n            .await;	        let _ = &deleted;	api	team_channel_delete_licensed
+channel-cleanup-dropped	crates/mm-app/src/channel_write.rs	        if let Err(err) = self\n            .store()\n            .access_control_policy()\n            .delete(&channel.id)\n            .await\n        {	        if let Err(err) = Ok::<(), mm_store::StoreError>(()) {	api	team_channel_delete_licensed
+policy-delete-skips-history	crates/mm-store/src/access_control_policy_store.rs	            INSERT INTO accesscontrolpolicyhistory (id, name, type, createat, revision, version, data, props)\n            SELECT id, name, type, createat, revision, version, data, props\n              FROM accesscontrolpolicies\n             WHERE id = $1	            INSERT INTO accesscontrolpolicyhistory (id, name, type, createat, revision, version, data, props)\n            SELECT id, name, type, createat, revision, version, data, props\n              FROM accesscontrolpolicies\n             WHERE id = $1 AND revision < 0	store	delete_moves_the_row_to_history
+control-rename-binding	crates/mm-api/src/post_acks.rs	    let (may_read, _) = state	    let (may_read, _is_member) = state	api	post_acks_licensed
+control-reorder-columns	crates/mm-store/src/post_acknowledgement_store.rs	            SELECT postid                    AS "postid!",\n                   userid                    AS "userid!",	            SELECT userid                    AS "userid!",\n                   postid                    AS "postid!",	api	post_acks_licensed
