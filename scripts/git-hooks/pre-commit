@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuse to commit the two reference symlinks. In a worktree, `reference/.build` and
+# `reference/mattermost` are symlinks to the main checkout; a `git add -A` there stages them, and
+# merging that into main replaces the real clone and build directory with self-referential links —
+# git treats ignored paths as expendable when a tracked file lands on them. This happened twice on
+# 2026-09-13. `.gitignore` covers the symlinks now, but an explicit `git add` or a merge-time
+# `git add -A` still gets past it; this does not.
+#
+# Installed by scripts/worktree.sh into the shared .git/hooks, so every worktree runs it.
+if git diff --cached --name-only --diff-filter=A | grep -qxE 'reference/(\.build|mattermost)'; then
+  echo "pre-commit: refusing to commit reference/.build or reference/mattermost (worktree symlinks)" >&2
+  echo "            git rm --cached reference/.build reference/mattermost" >&2
+  exit 1
+fi

@@ -242,15 +242,13 @@ async fn other_methods_are_forwarded() {
     );
 }
 
-/// **The boundary.** This route answers only what it can see is unlicensed; the moment
-/// `Systems.ActiveLicenseId` holds a valid id, the request goes back to the proxy — because behind
-/// the licence gate is an attribute-based scan this port does not implement.
-///
-/// Go is unmoved by the row (it loaded its licence at startup), so the *body* stays `[]` and the
-/// observable difference is `x-mmrs-served-by`. Holds the shared lock exclusively: the same row
-/// decides `license_client`'s answers.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn an_active_license_id_hands_the_route_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -289,8 +287,8 @@ async fn an_active_license_id_hands_the_route_back_to_go() {
 
     assert_eq!(
         forwarded.as_deref(),
-        Some("go"),
-        "a licensed installation means an ABAC scan we do not implement, so Go answers"
+        Some("rust"),
+        "an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
     );
     assert_eq!(
         cleared.as_deref(),

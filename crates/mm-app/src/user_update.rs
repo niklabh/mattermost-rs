@@ -47,7 +47,6 @@ use mm_model::utils::{AppError, AppResult};
 use mm_store::{SessionStore, UserStore};
 
 use crate::App;
-use crate::license::LicenseState;
 use crate::post::PrepareError;
 
 /// `model.TeamSettingsLockProfileFieldsNone` (config.go:149).
@@ -142,15 +141,15 @@ impl App {
     /// server without the enterprise providers can still answer in full, and it is the arm a
     /// reader is most likely to fold into the LDAP branch below it.
     ///
-    /// # Why an LDAP or SAML user forwards on a licensed server and not on this one
+    /// # An LDAP or SAML user is "no conflict" on every build from this tree
     ///
-    /// `a.Ldap()` and `a.Saml()` are enterprise interfaces, `nil` until the corresponding
-    /// licensed module registers itself. With both nil, Go's `if / else if / else if` chain falls
+    /// `a.Ldap()` and `a.Saml()` are enterprise interfaces, `nil` until the corresponding module
+    /// registers itself — and that module lives in the enterprise repository, not here, so a
+    /// licence does not make it appear. With both nil, Go's `if / else if / else if` chain falls
     /// straight through to `user.IsOAuthUser()`, which an LDAP or SAML account is not — so the
-    /// answer is "no conflict". That is a genuine Go behaviour on an unlicensed server, not an
-    /// approximation of one. On a licensed server the branch calls into the LDAP/SAML attribute
-    /// map, which is not visible from this process, so those two accounts are
-    /// [`PrepareError::Unreproducible`] and the handler forwards.
+    /// answer is "no conflict", licensed or not (re-measured 2026-09-13 against the licensed
+    /// oracle). Until that forward was removed the function handed a licensed server to Go here;
+    /// the provider attribute maps are owed with the providers themselves, [D-571].
     ///
     /// The OAuth arm is portable either way: it is `"full name"` — one string for two fields,
     /// with a space — when either name field is being changed.
@@ -166,15 +165,10 @@ impl App {
             return Ok(Some("username"));
         }
 
+        // `a.Ldap() != nil && (…)` and `a.Saml() != nil && …` — both interfaces are nil on this
+        // build, so both arms are skipped and an LDAP or SAML account reaches the OAuth test,
+        // which it fails. Written as the empty arm it is, so the shape matches Go's chain.
         if user.is_ldap_user() || user.is_saml_user() {
-            match self.license_state().await? {
-                LicenseState::Unlicensed => {}
-                LicenseState::Licensed => {
-                    return Err(PrepareError::Unreproducible(
-                        "the LDAP and SAML provider-attribute maps are not visible here",
-                    ));
-                }
-            }
         } else if user.is_oauth_user()
             && (trying_to_change(&user.first_name, patch.first_name.as_ref())
                 || trying_to_change(&user.last_name, patch.last_name.as_ref()))
@@ -197,10 +191,10 @@ impl App {
     /// The *whole* field scan is hoisted above the licence for the same reason. It is below the
     /// licence in Go and it is pure, so a server left at the default `"none"` — and any patch
     /// that touches no locked field on any server — answers `None` without asking about the
-    /// licence at all. Only a patch Go would actually refuse reaches the licence question, and
-    /// that is the one this process cannot answer: `MinimumEnterpriseLicense` needs the SKU tier,
-    /// so a Professional licence locks nothing and an Enterprise one locks everything, and the
-    /// two are indistinguishable from here.
+    /// licence at all. Only a patch Go would actually refuse reaches the licence question, which
+    /// is `MinimumEnterpriseLicense`: a Professional licence locks nothing and an Enterprise one
+    /// locks the field the scan found. (Until 2026-09-13 that question was a hand-over to Go,
+    /// because the SKU tier was not readable here — [D-413].)
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
     pub async fn check_locked_profile_fields(
         &self,
@@ -228,12 +222,13 @@ impl App {
             return Ok(None);
         }
 
-        match self.license_state().await? {
-            // `MinimumEnterpriseLicense(nil)` is false, so the lock never applies.
-            LicenseState::Unlicensed => Ok(None),
-            LicenseState::Licensed => Err(PrepareError::Unreproducible(
-                "the profile-field lock needs the licence SKU tier, which is not visible here",
-            )),
+        // `MinimumEnterpriseLicense(nil)` is false, so without a licence the lock never applies;
+        // a Professional licence is below the tier and does not apply it either.
+        let license = self.license().await?;
+        if mm_model::license::minimum_enterprise_license(license.as_deref()) {
+            Ok(locked_profile_field(&setting, user, patch))
+        } else {
+            Ok(None)
         }
     }
 
@@ -468,15 +463,19 @@ impl App {
     /// # The user-limit refusal is the first thing, and it is a licensed/unlicensed fork
     ///
     /// Two error ids for the same condition — `app.user.update_active.license_user_limit.exceeded`
-    /// when a licence is installed and `…user_limit.exceeded` when not. Only the unlicensed one
-    /// is reachable here, because [`App::get_server_limits`] speaks for an unlicensed server and
-    /// the handler forwards a licensed one.
+    /// when a licence is installed and `…user_limit.exceeded` when not. Both reachable since
+    /// 2026-09-13, when [`App::get_server_limits`] learned to read a seat-enforcing licence.
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
     pub async fn activate_user(&self, user: &User) -> AppResult<User> {
         if self.is_at_user_limit().await? {
+            let id = if self.license().await?.is_some() {
+                "app.user.update_active.license_user_limit.exceeded"
+            } else {
+                "app.user.update_active.user_limit.exceeded"
+            };
             return Err(AppError::boxed(
                 "UpdateActive",
-                "app.user.update_active.user_limit.exceeded",
+                id,
                 None,
                 String::new(),
                 400,
@@ -740,6 +739,56 @@ mod go_parity {
             assert!(
                 rows.iter().any(|row| row["name"] == name),
                 "the corpus still has the {name:?} row"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod licence_tier_tests {
+    use mm_model::session::Session;
+    use mm_model::user::{User, UserPatch};
+
+    fn unreachable_store() -> mm_store::SqlStore {
+        mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(250))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+                .expect("a lazy pool is built without connecting"),
+        )
+    }
+
+    /// `CheckLockedProfileFields` tests `MinimumEnterpriseLicense` — the **enterprise** rung, not
+    /// professional below it and not advanced above it. A patch that would be refused is driven
+    /// through all three SKUs: `professional` is below the rung and locks nothing; `enterprise`
+    /// and `advanced` both lock, which is what separates "at least enterprise" from "exactly
+    /// advanced". The mutation that tested the advanced rung survived until this existed.
+    #[tokio::test]
+    async fn the_lock_applies_from_the_enterprise_rung_upwards() {
+        let user = User {
+            username: "before".to_owned(),
+            ..User::default()
+        };
+        let patch = UserPatch {
+            username: Some("after".to_owned()),
+            ..UserPatch::default()
+        };
+        for (sku, locked) in [
+            ("professional", None),
+            ("enterprise", Some("username")),
+            ("advanced", Some("username")),
+        ] {
+            let config = crate::config::Config {
+                lock_profile_fields_for_email_users: "all".to_owned(),
+                ..crate::license::test_signing::licensed_config(sku)
+            };
+            let app = crate::App::with_config(unreachable_store(), config);
+            assert_eq!(
+                app.check_locked_profile_fields(&Session::default(), &user, &patch)
+                    .await
+                    .expect("MM_LICENSE answers without a query"),
+                locked,
+                "sku {sku}"
             );
         }
     }

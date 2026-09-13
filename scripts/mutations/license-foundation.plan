@@ -1,0 +1,25 @@
+# Mutation plan for the 2026-09-13 licence surface — `App::license`, the validator, the client map,
+# and the first two gates ported onto the tier (the profile-field locks).
+#
+#   scripts/mutate-batch.sh scripts/mutations/license-foundation.plan
+#
+# The decisions a reader gets wrong here: the null strip and the `<=` in the length check (both
+# measured against Go's own refusals in behaviour_license.json), which key is tried second and what
+# a match on it means, whether `SetDefaults` ran before the map was built, which keys the sanitized
+# map loses, which rung of the ladder the lock tests, and whether an invalid MM_LICENSE hides the
+# database the way Go's early return does. The last two lines are the no-op controls and must SURVIVE.
+lic-null-strip-dropped	crates/mm-app/src/license.rs	    while decoded.last() == Some(&0) {	    while decoded.last() == Some(&1) {	unit	license::
+lic-length-check-off-by-one	crates/mm-app/src/license.rs	    if decoded.len() <= SIGNATURE_LENGTH {	    if decoded.len() < SIGNATURE_LENGTH {	unit	license::
+lic-alternate-match-is-forged	crates/mm-app/src/license.rs	                Ok(()) => Err(wrong_environment(&keys.environment)),	                Ok(()) => Err(LicenseValidationError::InvalidSignature),	unit	license::
+lic-wrong-environment-direction	crates/mm-app/src/license.rs	        LicenseValidationError::TestInProductionEnvironment\n    } else {\n        LicenseValidationError::ProductionInTestEnvironment	        LicenseValidationError::ProductionInTestEnvironment\n    } else {\n        LicenseValidationError::TestInProductionEnvironment	unit	license::
+lic-set-defaults-skipped	crates/mm-app/src/license.rs	        Some(features) => features.set_defaults(),	        Some(_) => {}	unit	license::
+lic-sanitize-keeps-email	crates/mm-app/src/license.rs	        sanitized.remove(key);	        if key != "Email" {\n            sanitized.remove(key);\n        }	unit	license::
+lic-client-map-ldap-reads-saml	crates/mm-app/src/license.rs	    put("LDAP", flag(features.ldap));	    put("LDAP", flag(features.saml));	unit	license::
+lic-invalid-env-licence-reads-db	crates/mm-app/src/license.rs	                tracing::Span::current().record("source", "MM_LICENSE (invalid)");\n                return Ok(None);	                tracing::Span::current().record("source", "MM_LICENSE (invalid)");	unit	license::
+lic-cache-ignores-id	crates/mm-app/src/license.rs	            .filter(|(cached_id, _)| cached_id == id)	            .filter(|_| true)	app	license_loading
+lock-tests-professional-rung	crates/mm-app/src/user.rs	        Ok(mm_model::license::minimum_enterprise_license(	        Ok(mm_model::license::minimum_professional_license(	unit	user::
+patchlock-tests-advanced-rung	crates/mm-app/src/user_update.rs	        if mm_model::license::minimum_enterprise_license(license.as_deref()) {	        if mm_model::license::minimum_enterprise_advanced_license(license.as_deref()) {	unit	user_update::
+route-permission-ignored	crates/mm-api/src/license.rs	    let map = if may_read_everything {	    let map = if true {	api	license_client
+route-anonymous-reads-everything	crates/mm-api/src/license.rs	        None => false,\n    };\n    tracing::Span::current().record("sanitized", !may_read_everything);	        None => true,\n    };\n    tracing::Span::current().record("sanitized", !may_read_everything);	api	license_client
+control-rename-binding	crates/mm-app/src/license.rs	    let (plaintext, signature) = decoded.split_at(decoded.len() - SIGNATURE_LENGTH);\n    let digest = sha2::Sha512::digest(plaintext);	    let (plaintext, sig) = decoded.split_at(decoded.len() - SIGNATURE_LENGTH);\n    let signature = sig;\n    let digest = sha2::Sha512::digest(plaintext);	unit	license::
+control-reorder-columns	crates/mm-store/src/license_store.rs	            SELECT id                    AS "id!",\n                   COALESCE(createat, 0) AS "createat!",\n                   COALESCE(bytes, '')   AS "bytes!"	            SELECT COALESCE(bytes, '')   AS "bytes!",\n                   COALESCE(createat, 0) AS "createat!",\n                   id                    AS "id!"	app	license_loading

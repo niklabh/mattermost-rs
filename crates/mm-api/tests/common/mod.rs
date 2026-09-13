@@ -251,6 +251,15 @@ pub async fn a_team_and_channel_the_user_is_in(
 /// `x-mmrs-served-by: go` where it asserted `rust`.
 pub static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **The built-in `Roles` rows are one resource, and byte-comparing them is shared while patching
+/// one is exclusive.** `roles` compares every built-in role between the two servers — `update_at`
+/// included — and the licensed group suite patches `custom_group_user` through the licensed Go
+/// to prove the permission model, then restores it. Measured 2026-09-13 in the same full run:
+/// `roles_by_names_matches_for_every_builtin_role` fetched Go before the patch and Rust after it,
+/// and the two bodies differed in one `update_at`. Readers hold this shared; the patch holds it
+/// exclusively from the edit to the restore.
+pub static ROLE_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **The shared admin's broadcast stream is one resource, and counting frames on it is exclusive.**
 ///
 /// A websocket sees everything the server publishes to that connection, so a test asserting
@@ -312,10 +321,12 @@ pub static USER_COUNT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(()
 
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
-/// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
-/// licence up — so the row alone is enough to make this side believe the installation is licensed.
-/// **Go is unmoved by it**: it loaded its licence at startup and re-reads only on a save, so its
-/// answers do not change and the observable difference is which server produced them.
+/// A 26-character value passes `IsValidId`, which is what `LoadLicense` checks before it looks
+/// the licence up in `Licenses` — and since 2026-09-13 this side looks it up too, so an id that
+/// names **no row** is "no licence" on both servers, not a licence on one. The stack's Go server
+/// is Team Edition and never loads a licence at all; a real licensed answer comes from the
+/// licensed pair (`licensed`), never from this row. `Some("")` is the shape `RemoveLicense`
+/// leaves behind: it blanks the value rather than deleting the row.
 pub async fn set_active_licence_id(id: Option<&str>) {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return;
@@ -333,7 +344,10 @@ pub async fn set_active_licence_id(id: Option<&str>) {
         .expect("the active licence id is cleared");
 
     if let Some(id) = id {
-        assert_eq!(id.len(), 26, "`IsValidId` requires 26 characters");
+        assert!(
+            id.is_empty() || id.len() == 26,
+            "`IsValidId` requires 26 characters (or blank, the de-licensed shape)"
+        );
         sqlx::query("INSERT INTO systems (name, value) VALUES ('ActiveLicenseId', $1)")
             .bind(id)
             .execute(&pool)
@@ -2474,6 +2488,295 @@ impl Drop for SecondServer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The licensed pair
+//
+// The stack's Go server is built without `BuildEnterpriseReady` and never loads a licence, so
+// the licensed half of a route had no Go answer to compare against until `scripts/go-licensed.sh`
+// existed: an enterprise-ready build whose validator trusts a stack-local key, on `GO`'s port
+// + 32, with an Enterprise licence signed by that key in `MM_LICENSE`. This starts an mm-api
+// beside it with the same licence and the same key, forwarding to it, so a suite can compare the
+// two licensed servers the way the rest of the harness compares the two unlicensed ones.
+// ---------------------------------------------------------------------------------------------
+
+/// Base URLs of the licensed Go oracle and the licensed mm-api, plus the licence they share.
+#[derive(Debug, Clone)]
+pub struct LicensedPair {
+    pub go: String,
+    pub rust: String,
+    /// The signed licence, as `MM_LICENSE` carries it.
+    pub signed: String,
+    /// The path of the public key both sides verify it with.
+    pub key_file: String,
+}
+
+/// Where `scripts/go-licensed.sh` leaves the key pair and the signed licence.
+fn stack_license_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../reference/.build/license")
+}
+
+/// The port `GO` listens on, so the oracle ports can be derived from it rather than repeated.
+fn go_port() -> u16 {
+    GO.rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .expect("GO names a port")
+}
+
+/// The licensed Go oracle's base URL — `scripts/go-licensed.sh port`.
+pub fn licensed_go() -> String {
+    format!("http://localhost:{}", go_port() + 32)
+}
+
+/// The mm-api port for the licensed pair: 8090 on stack 0, shifted like every other
+/// `SecondServer` port. Nothing else in the suite uses 809x.
+const LICENSED_RUST_PORT: u16 = 8090;
+
+static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+static LICENSED_GUEST: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+
+/// The signed licence and the key file `scripts/go-licensed.sh` left, or a panic naming the
+/// script — a suite whose oracle is absent must not pass quietly.
+fn stack_license_files() -> (String, String) {
+    let dir = stack_license_dir();
+    let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
+        panic!(
+            "no signed licence at {}: run `scripts/go-licensed.sh start` ({e})",
+            dir.display()
+        )
+    });
+    let key_file = dir.join("public.pem");
+    assert!(key_file.exists(), "no public key at {}", key_file.display());
+    (signed, key_file.to_string_lossy().into_owned())
+}
+
+/// Assert a licensed Go oracle is listening on `go`, by the one answer only a licensed server
+/// gives.
+async fn require_licensed_go(go: &str, what: &str) {
+    let alive = client()
+        .get(format!("{go}/api/v4/license/client?format=old"))
+        .send()
+        .await;
+    let body = match alive {
+        Ok(response) => response.text().await.unwrap_or_default(),
+        Err(e) => panic!("the {what} Go oracle is not listening on {go}: {e}"),
+    };
+    assert!(
+        body.contains(r#""IsLicensed":"true""#),
+        "the Go process on {go} is not licensed: {body}"
+    );
+}
+
+/// Start an mm-api carrying the stack's licence beside the licensed Go at `go`, with the same
+/// overlay `scripts/mm-api-env.sh` gives the stack's mm-api, plus `extra`.
+async fn start_licensed_rust(
+    port: u16,
+    go: &str,
+    go_port: u16,
+    signed: &str,
+    key_file: &str,
+    extra: &[(&str, &str)],
+) -> SecondServer {
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let suffix = if offset == 0 {
+        String::new()
+    } else {
+        format!("-{}", offset / 100)
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let data_dir = root
+        .join(format!("reference/.build/mmroot{suffix}/data/"))
+        .to_string_lossy()
+        .into_owned();
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let listen = format!(":{go_port}");
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MM_LICENSE", signed),
+        ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file),
+        ("MM_GO_UPSTREAM", go),
+        ("MM_FILESETTINGS_DIRECTORY", data_dir.as_str()),
+        ("MM_TEAMSETTINGS_ENABLEOPENSERVER", "true"),
+        ("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true"),
+        ("MM_SERVICESETTINGS_SITEURL", go),
+        ("MM_SERVICESETTINGS_LISTENADDRESS", listen.as_str()),
+        ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
+        ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
+        ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+    ];
+    env.extend_from_slice(extra);
+    SecondServer::start(port, &env)
+        .await
+        .expect("the licensed mm-api starts — is target/debug/mm-api built?")
+}
+
+/// The licensed pair, started once per test binary.
+///
+/// **Panics rather than skips** when the stack is enabled and the oracle is missing. A suite whose
+/// oracle is absent passes every test while asserting nothing, and cargo hides the output of a
+/// passing test — `parity_views` did exactly that for twelve tests before its oracle was made
+/// mandatory. `scripts/stack.sh up` starts the oracle; this checks it is there.
+///
+/// One server per binary rather than one per test because every test would otherwise race for
+/// the port: `SecondServer::start` frees it first, so two concurrent starts kill each other. The
+/// child is never dropped — a static cannot be — and `scripts/parity.sh` frees the port when the
+/// run ends; the next start frees it again before binding, so a leftover can never answer for a
+/// fresh binary.
+pub async fn licensed() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            let go = licensed_go();
+            require_licensed_go(&go, "licensed").await;
+            let server = start_licensed_rust(
+                LICENSED_RUST_PORT,
+                &go,
+                go_port() + 32,
+                &signed,
+                &key_file,
+                &[],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// The licensed **guest** oracle's base URL — `MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh
+/// port`: the same licence, `GuestAccountsSettings.Enable` on as an environment override.
+pub fn licensed_guest_go() -> String {
+    format!("http://localhost:{}", go_port() + 33)
+}
+
+/// The mm-api port for the guest pair: 8091 on stack 0.
+const LICENSED_GUEST_RUST_PORT: u16 = 8091;
+
+/// The licensed pair with `GuestAccountsSettings.Enable` on, for the routes that refuse on that
+/// setting before anything else (`demoteUserToGuest`, api4/user.go:3551). Same rules as
+/// [`licensed`]: one per binary, panics when its oracle is missing.
+pub async fn licensed_guest() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED_GUEST
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            let go = licensed_guest_go();
+            require_licensed_go(&go, "licensed guest").await;
+            let server = start_licensed_rust(
+                LICENSED_GUEST_RUST_PORT,
+                &go,
+                go_port() + 33,
+                &signed,
+                &key_file,
+                &[("MM_GUESTACCOUNTSSETTINGS_ENABLE", "true")],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_guest_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// One request to one base: `(status, body, x-mmrs-served-by)`. The general-purpose sibling of
+/// [`fetch_licensed_pair`] for the writes — a caller names the base, so the same helper drives
+/// `GO`, `RUST` and both halves of the licensed pair.
+pub async fn request_raw(
+    client: &reqwest::Client,
+    base: &str,
+    method: reqwest::Method,
+    token: Option<&str>,
+    path: &str,
+    body: Option<&[u8]>,
+) -> (u16, Vec<u8>, Option<String>) {
+    let mut request = client.request(method, format!("{base}{path}"));
+    if let Some(token) = token {
+        request = request.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(body) = body {
+        request = request
+            .header("Content-Type", "application/json")
+            .body(body.to_vec());
+    }
+    let response = request
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served_by = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    (
+        status,
+        response.bytes().await.expect("body reads").to_vec(),
+        served_by,
+    )
+}
+
+/// `POST /caches/invalidate` against the licensed Go oracle, which keeps its own caches — a row
+/// written through the unlicensed pair or straight into the table is invisible to it until then.
+pub async fn invalidate_licensed_go_caches(
+    client: &reqwest::Client,
+    pair: &LicensedPair,
+    admin_token: &str,
+) {
+    let (status, body, _) = request_raw(
+        client,
+        &pair.go,
+        reqwest::Method::POST,
+        Some(admin_token),
+        "/api/v4/caches/invalidate",
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "the licensed oracle's caches invalidate: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+/// Fetch `path` from both servers of the licensed pair, with an optional bearer token, and
+/// assert the Rust side served it itself.
+pub async fn fetch_licensed_pair(
+    client: &reqwest::Client,
+    pair: &LicensedPair,
+    token: Option<&str>,
+    path: &str,
+) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let get = async |base: &str, ours: bool| {
+        let mut request = client.get(format!("{base}{path}"));
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        let response = request
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+        let status = response.status().as_u16();
+        if ours {
+            assert_served_by_rust(response.headers(), path);
+        }
+        (status, response.bytes().await.expect("body reads").to_vec())
+    };
+    (get(&pair.go, false).await, get(&pair.rust, true).await)
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                    AS \"id!\",\n                   COALESCE(createat, 0) AS \"createat!\",\n                   COALESCE(bytes, '')   AS \"bytes!\"\n              FROM licenses\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "bytes!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ec7e349c1dccb4eea3e6f5dbe047905ad9b7ea899cc65f26f6d11e3e8c7d2b0a"
+}

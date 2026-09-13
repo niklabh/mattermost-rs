@@ -85,15 +85,20 @@ fn created(handler: &'static str, channel: &Channel) -> Result<Response, ApiErro
         .into_response())
 }
 
-/// Whether the installation carries a licence.
-///
-/// Not [`crate::channels::licence_gate`]: that helper forwards for you and therefore consumes the
-/// request, and `create_channel` still owns a second forwarding branch below it.
-async fn licensed(state: &AppState) -> Result<bool, ApiError> {
-    let state_of_licence = state.app.license_state().await?;
-    let licensed = state_of_licence == mm_app::license::LicenseState::Licensed;
-    tracing::Span::current().record("licensed", licensed);
-    Ok(licensed)
+/// `createChannel`'s one licence question (api4/channel.go:143):
+/// `!channel.IsGroupOrDirect() && *PrivacySettings.UseAnonymousURLs &&
+/// MinimumEnterpriseAdvancedLicense(license)` — when all three hold Go mints an anonymous URL
+/// for the channel, which this port does not, so that conjunction and only that conjunction is
+/// handed over. Until 2026-09-13 "any licence" was.
+async fn mints_anonymous_url(state: &AppState, channel: &Channel) -> Result<bool, ApiError> {
+    if channel.is_group_or_direct() || !state.app.config().use_anonymous_urls {
+        tracing::Span::current().record("licensed", false);
+        return Ok(false);
+    }
+    let license = state.app.license().await?;
+    let advanced = mm_model::license::minimum_enterprise_advanced_license(license.as_deref());
+    tracing::Span::current().record("licensed", advanced);
+    Ok(advanced)
 }
 
 /// Read the whole body, keeping the parts so the request can still be forwarded.
@@ -160,7 +165,7 @@ pub async fn create_channel(
         return ApiError::invalid_param("type").into_response();
     }
 
-    match licensed(&state).await {
+    match mints_anonymous_url(&state, &channel).await {
         Ok(true) => {
             tracing::Span::current().record("forwarded", true);
             return proxy::forward_to_go(State(state), request).await;

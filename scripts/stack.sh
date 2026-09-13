@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Bring up, seed and tear down a numbered development stack.
 #
-#   scripts/stack.sh up 1            postgres + the pinned Go server, seeded, on stack 1
+#   scripts/stack.sh up 1            postgres + the pinned Go server and its three oracles, seeded, on stack 1
 #   scripts/stack.sh up 1 2 3        three of them
 #   scripts/stack.sh down 1          stop the Go server and remove the containers and volume
 #   scripts/stack.sh status          what is running, per stack
@@ -166,6 +166,13 @@ up_stack() {
   # and `parity_channel_join_requests` panics rather than skipping when it is missing.
   MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" start >/dev/null
   echo "  discoverable oracle up"
+  # The licensed oracle — the one that gives the licensed half of a route a Go answer at all.
+  # `common::licensed` panics rather than skips when it is missing, for the reason above.
+  MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" start >/dev/null
+  echo "  licensed oracle up"
+  # And its guest-accounts variant, for the routes that refuse on that setting first.
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=guest "$ROOT/scripts/go-licensed.sh" start >/dev/null
+  echo "  licensed guest oracle up"
   seed_stack "$MMRS_GO_BASE"
   echo "  eval \"\$(scripts/stack.sh env $k)\" to point a shell at it"
 }
@@ -177,9 +184,11 @@ down_stack() {
   MMRS_STACK="$k" "$ROOT/scripts/go-server.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=guest "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   pkill -f "MM_API_LISTEN=127.0.0.1:$MMRS_API_PORT" 2>/dev/null || true
   mmrs_compose down -v
-  rm -rf "$ROOT/reference/.build/mmroot$MMRS_RUN_SUFFIX"
+  rm -rf "$ROOT/reference/.build/mmroot$MMRS_RUN_SUFFIX" "$ROOT/reference/.build/mmlic$MMRS_RUN_SUFFIX" "$ROOT/reference/.build/mmlicguest$MMRS_RUN_SUFFIX"
   echo "stack $k down"
 }
 

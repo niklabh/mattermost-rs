@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT gm.userid AS \"userid!\", gc.channelid AS \"channelid!\"\n              FROM groupmembers gm\n              JOIN groupchannels gc ON gc.groupid = gm.groupid\n              JOIN usergroups ug ON ug.id = gm.groupid\n              JOIN channels c ON c.id = gc.channelid\n              LEFT OUTER JOIN channelmemberhistory cmh\n                     ON cmh.channelid = gc.channelid AND cmh.userid = gm.userid\n             WHERE ug.deleteat = 0\n               AND gc.deleteat = 0\n               AND gc.autoadd = true\n               AND gm.deleteat = 0\n               AND c.deleteat = 0\n               AND ($3 OR (cmh.userid IS NULL AND cmh.leavetime IS NULL\n                           AND (gm.createat >= $1 OR gc.updateat >= $1)))\n               AND ($2::text IS NULL OR c.id = $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "852a422cabcfe6752099c4c94010cfce7c5501d5c8294769987a5f87c1e5fc8f"
+}

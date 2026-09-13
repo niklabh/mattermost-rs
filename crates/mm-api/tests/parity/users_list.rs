@@ -656,7 +656,6 @@ async fn forwarded_variants() {
         format!("{PATH}?in_team={team}&team_roles=team_admin"),
         format!("{PATH}?not_in_team={team}&group_constrained=true"),
         format!("{PATH}?in_team={team}&not_in_channel={channel}&group_constrained=true"),
-        format!("{PATH}?not_in_team={team}&abac_match_only=true"),
         format!("{PATH}?in_team={team}&active=true&inactive=true"),
     ];
     // Each one differs from a forwarded neighbour by exactly the thing the rule is about.
@@ -666,6 +665,9 @@ async fn forwarded_variants() {
         format!("{PATH}?in_team={team}&sort="),
         format!("{PATH}?in_team={team}&role="),
         format!("{PATH}?in_team={team}&group_constrained=true&abac_match_only=true"),
+        // Served since 2026-09-13: below the Enterprise Advanced rung Go reads the flag and
+        // ignores it, and this stack has no licence at all. See [D-154].
+        format!("{PATH}?not_in_team={team}&abac_match_only=true"),
         format!("{PATH}?not_in_team={team}&group_constrained=false"),
         format!("{PATH}?in_team={team}&active=true&inactive=false"),
     ];
@@ -728,4 +730,47 @@ async fn a_plain_caller_gets_the_non_admin_sanitisation() {
         "the admin override must make an observable difference, or this proves nothing about \
          IsSystemAdmin — {admin_row}"
     );
+}
+
+/// **An Enterprise licence is below the Advanced rung, so attribute-based access control cannot
+/// apply and both `not_in_*` arms are served** — `abac_match_only=true` included, which Go reads
+/// and ignores below the gate. Until 2026-09-13 the flag was forwarded unconditionally and the
+/// unflagged `not_in_channel` arm could diverge on a licensed server ([D-154]); the gate is now
+/// Go's own conjunction, and the licensed pair is where the served side is measured.
+#[tokio::test]
+async fn the_not_in_arms_are_served_on_an_enterprise_licence() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = common::licensed().await;
+    let client = client();
+    let f = fixture(&client, "abaclic").await;
+    let token = f.admin_token.clone();
+
+    for path in [
+        format!(
+            "{PATH}?in_team={}&not_in_channel={}&per_page=200",
+            f.team, f.channel
+        ),
+        format!(
+            "{PATH}?in_team={}&not_in_channel={}&abac_match_only=true&per_page=200",
+            f.team, f.channel
+        ),
+        format!(
+            "{PATH}?not_in_team={}&abac_match_only=true&per_page=5",
+            f.team
+        ),
+    ] {
+        let ((go_status, go), (rs_status, rs)) =
+            common::fetch_licensed_pair(&client, &pair, Some(&token), &path).await;
+        assert_eq!(go_status, 200, "{path}: {}", String::from_utf8_lossy(&go));
+        assert_eq!(rs_status, 200, "{path}");
+        assert_eq!(
+            ids_of(&rs, &path),
+            ids_of(&go, &path),
+            "{path}: the same listing from a licensed server"
+        );
+    }
+
+    teardown(&client, &f).await;
 }

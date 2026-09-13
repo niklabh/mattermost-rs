@@ -679,7 +679,7 @@ async fn refuse_profile_image(
         ));
     }
 
-    if profile_image_locked(state, session, &user).await? == Some(true) {
+    if profile_image_locked(state, session, &user).await? {
         return Err(profile_image_error(
             WHERE,
             "api.user.upload_profile_user.profile_field_locked.app_error",
@@ -690,30 +690,19 @@ async fn refuse_profile_image(
     Ok(None)
 }
 
-/// `IsProfileImageLockedForUser`, with its one unanswerable case turned into the forward that
-/// both callers want.
-///
-/// A licensed server whose other three conjuncts all hold is handed over rather than guessed at;
-/// see [`mm_app::App::is_profile_image_locked_for_user`]. The forward happens before any write on
-/// both routes, because both check the lock last.
+/// `IsProfileImageLockedForUser`, answered here on every server since 2026-09-13 — the licence
+/// tier it needs is readable now ([D-413]). Both routes check the lock last, after every other
+/// refusal, which is why it is the last thing before the write on each.
 async fn profile_image_locked(
     state: &AppState,
     session: &AuthenticatedSession,
     user: &mm_model::user::User,
-) -> Result<Option<bool>, ApiError> {
-    match state
+) -> Result<bool, ApiError> {
+    state
         .app
         .is_profile_image_locked_for_user(&session.0, user)
         .await
-    {
-        Ok(locked) => Ok(Some(locked)),
-        Err(PrepareError::App(err)) => Err(ApiError::from(*err)),
-        // `None` is the hand-over: a licensed server whose other three conjuncts hold.
-        Err(PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, "forwarding to Go");
-            Ok(None)
-        }
-    }
+        .map_err(|err| ApiError::from(*err))
 }
 
 /// Port of `setDefaultProfileImage` (api4/user.go:694), reached as
@@ -788,7 +777,7 @@ async fn refuse_default_profile_image(
     // Propagated, unlike `setProfileImage`'s.
     let user = state.app.get_user(user_id).await?;
 
-    if profile_image_locked(state, session, &user).await? == Some(true) {
+    if profile_image_locked(state, session, &user).await? {
         return Err(profile_image_error(
             WHERE,
             "api.user.upload_profile_user.profile_field_locked.app_error",

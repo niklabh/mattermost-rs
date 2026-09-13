@@ -287,17 +287,13 @@ async fn listing_bookmarks_is_the_same_refusal_as_writing_one() {
     );
 }
 
-/// **A licence row hands every one of them back to Go.**
-///
-/// Added because a mutation making the licensed branch answer 501 as well — that is, never
-/// forwarding — **survived** the first run: every test here runs unlicensed, so "refuse" and
-/// "refuse or forward" are the same program. The work behind these gates is not ported and never
-/// will be from this side, so answering a licensed server ourselves would be silently wrong on a
-/// deployment that has a licence.
-///
-/// Holds the shared lock exclusively, like the other licence-flipping tests.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licence_row_hands_every_route_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -348,8 +344,8 @@ async fn a_licence_row_hands_every_route_back_to_go() {
     for (route, served) in &forwarded {
         assert_eq!(
             served.as_deref(),
-            Some("go"),
-            "licensed, {route} must be forwarded — the feature behind the gate is not ported"
+            Some("rust"),
+            "{route}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
         );
     }
     for (route, served) in &cleared {
@@ -404,4 +400,73 @@ async fn other_methods_are_forwarded() {
             "{method} {path} must be forwarded"
         );
     }
+}
+
+/// **An Enterprise licence is below the Advanced rung**, so every content-flagging route is still
+/// the 501 on a licensed server — and it is *ours*, byte for byte against the licensed oracle.
+/// The bookmark writes need only a licence, so on the same pair they are handed to that oracle,
+/// which answers something other than the refusal ([D-561]).
+#[tokio::test]
+async fn an_enterprise_licence_is_below_the_advanced_rung() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = common::licensed().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let call = async |base: &str, method: &reqwest::Method, path: &str| {
+        let response = client
+            .request(method.clone(), format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body(b"{}".to_vec())
+            .send()
+            .await
+            .expect("reachable");
+        let status = response.status().as_u16();
+        let served_by = response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        (
+            status,
+            served_by,
+            response.bytes().await.expect("reads").to_vec(),
+        )
+    };
+
+    let mut flagging = 0;
+    let mut bookmarks = 0;
+    for (method, path, id) in routes() {
+        let label = format!("{method} {path}");
+        let (go_status, _, go) = call(&pair.go, &method, &path).await;
+        let (rs_status, served_by, rs) = call(&pair.rust, &method, &path).await;
+        if id == FLAGGING_ERROR {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "{label}: ours on a licence too"
+            );
+            assert_eq!(go_status, 501, "{label}: Enterprise is below Advanced");
+            assert_eq!(rs_status, go_status, "{label}");
+            let parsed = common::assert_error_bodies_match_except_known_gaps(&go, &rs, &label);
+            assert_eq!(parsed["id"], FLAGGING_ERROR, "{label}");
+            flagging += 1;
+        } else {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("go"),
+                "{label}: a licence opens the gate, and the store behind it is not ported"
+            );
+            assert_ne!(
+                go_status, 501,
+                "{label}: the licensed oracle is past the refusal"
+            );
+            assert_eq!(rs_status, go_status, "{label}: forwarded, so Go's answer");
+            bookmarks += 1;
+        }
+    }
+    assert_eq!((flagging, bookmarks), (13, 4));
 }

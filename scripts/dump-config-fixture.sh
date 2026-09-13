@@ -60,11 +60,13 @@ MODELLED = {
         "EnableBurnOnRead", "PostEditTimeLimit", "ExperimentalEnableHardenedMode",
         "EnableIncomingWebhooks", "EnableOutgoingWebhooks",
         "EnableOAuthServiceProvider", "SessionIdleTimeoutInMinutes",
+        "ExperimentalEnableAuthenticationTransfer",
         "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
         "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
-        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands",
-        "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
+        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands", "EnableCustomGroups",
+        "AllowPersistentNotifications", "AllowPersistentNotificationsForGuests",
+        "UniqueEmojiReactionLimitPerPost",
         # The mobile session length and the cookie-domain flag, read by
         # `PUT /api/v4/users/sessions/device`. Both `SessionLengthMobile*` keys are projected
         # because Config derives hours from days when the hours key is absent, and the fixture
@@ -87,12 +89,13 @@ MODELLED = {
     "ExperimentalSettings": ["RestrictSystemAdmin"],
     "ImageProxySettings": ["Enable"],
     "FileSettings": ["DriverName", "EnablePublicLink", "MaxFileSize"],
-    "PrivacySettings": ["ShowFullName", "ShowEmailAddress"],
+    "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
     ],
     "SqlSettings": ["DisableDatabaseSearch"],
-    "ElasticsearchSettings": ["EnableSearching"],
+    "ElasticsearchSettings": ["EnableSearching", "EnableIndexing"],
+    "AccessControlSettings": ["EnableAttributeBasedAccessControl"],
     "AIRecapSettings": ["Enable"],
     "TeamSettings": [
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
@@ -103,7 +106,7 @@ MODELLED = {
         # `PUT /api/v4/users/{user_id}/active`.
         "EnableUserDeactivation",
     ],
-    "LdapSettings": ["PictureAttribute", "Enable"],
+    "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
     "EmailSettings": [
         "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",

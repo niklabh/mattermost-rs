@@ -2,6 +2,9 @@
   "AIRecapSettings": {
     "Enable": true
   },
+  "AccessControlSettings": {
+    "EnableAttributeBasedAccessControl": false
+  },
   "ClientRequirements": {
     "AndroidLatestVersion": "",
     "AndroidMinVersion": "",
@@ -15,6 +18,7 @@
     "Enable": false
   },
   "ElasticsearchSettings": {
+    "EnableIndexing": false,
     "EnableSearching": false
   },
   "EmailSettings": {
@@ -47,7 +51,8 @@
   },
   "LdapSettings": {
     "Enable": false,
-    "PictureAttribute": ""
+    "PictureAttribute": "",
+    "ReAddRemovedMembers": false
   },
   "LocalizationSettings": {
     "DefaultClientLocale": "en"
@@ -63,7 +68,8 @@
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
-    "ShowFullName": true
+    "ShowFullName": true,
+    "UseAnonymousURLs": false
   },
   "SamlSettings": {
     "Enable": false,
@@ -72,11 +78,13 @@
   "ServiceSettings": {
     "AllowCookiesForSubdomains": false,
     "AllowPersistentNotifications": true,
+    "AllowPersistentNotificationsForGuests": false,
     "AllowSyncedDrafts": true,
     "EnableAPIUserDeletion": false,
     "EnableBurnOnRead": true,
     "EnableCommands": true,
     "EnableCustomEmoji": true,
+    "EnableCustomGroups": true,
     "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
     "EnableMultifactorAuthentication": false,
@@ -87,6 +95,7 @@
     "EnablePostUsernameOverride": false,
     "EnableTesting": false,
     "EnableUserStatuses": true,
+    "ExperimentalEnableAuthenticationTransfer": true,
     "ExperimentalEnableHardenedMode": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,

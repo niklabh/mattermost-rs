@@ -349,11 +349,13 @@ async fn download_job_checks_the_id_before_the_setting() {
     }
 }
 
-/// The boundary: a licence row hands the licence-gated members of the family back to Go, and the
-/// two that are **not** licence questions — the feature flag and the config setting — keep
-/// answering, because a licence changes neither.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_moves_only_the_licence_gated_ones() {
+async fn a_planted_id_without_a_row_moves_nothing() {
     if !stack_enabled() {
         return;
     }
@@ -391,12 +393,13 @@ async fn a_license_row_moves_only_the_licence_gated_ones() {
     set_active_licence_id(None).await;
 
     for (path, answer) in &observed {
-        let expected = if licence_gated.contains(path) {
-            "go"
-        } else {
-            "rust"
-        };
-        assert_eq!(answer.as_deref(), Some(expected), "{path} while licensed");
+        // Licence-gated or not, the row names no licence, so every one of them is still ours.
+        let expected = "rust";
+        assert_eq!(
+            answer.as_deref(),
+            Some(expected),
+            "{path}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
+        );
     }
 
     for path in licence_gated.iter().chain(not_licence_gated.iter()) {

@@ -118,9 +118,13 @@ async fn the_query_string_is_not_consulted() {
     }
 }
 
-/// **The boundary.** A valid `Systems.ActiveLicenseId` sends both routes back to the proxy.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_hands_both_routes_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -154,10 +158,10 @@ async fn a_license_row_hands_both_routes_back_to_go() {
 
     set_active_licence_id(None).await;
 
-    assert_eq!(forwarded[0].as_deref(), Some("go"), "{LIST}");
+    assert_eq!(forwarded[0].as_deref(), Some("rust"), "{LIST}");
     assert_eq!(
         forwarded[1].as_deref(),
-        Some("go"),
+        Some("rust"),
         "{}",
         by_user(logged_in_user_id())
     );
@@ -357,9 +361,13 @@ async fn members_and_stats_are_literals_not_syncable_types() {
     }
 }
 
-/// The boundary, for the eight added routes: a licence row hands every one back to the proxy.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_hands_every_group_read_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence_for_reads() {
     if !stack_enabled() {
         return;
     }
@@ -391,7 +399,11 @@ async fn a_license_row_hands_every_group_read_back_to_go() {
     set_active_licence_id(None).await;
 
     for (p, answer) in &forwarded {
-        assert_eq!(answer.as_deref(), Some("go"), "{p} must be forwarded");
+        assert_eq!(
+            answer.as_deref(),
+            Some("rust"),
+            "{p}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
+        );
     }
 
     for p in &paths {

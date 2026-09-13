@@ -988,16 +988,9 @@ pub async fn delete_channel(
     let permanent = query_flag_is_true(request.uri().query(), "permanent");
     tracing::Span::current().record("permanent", permanent);
 
-    // `cleanupChannelAccessControlPolicy` runs on this path under an Enterprise Advanced licence.
-    match licensed(&state).await {
-        Ok(true) => {
-            tracing::Span::current().record("forwarded", true);
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(false) => {}
-        Err(err) => return err.into_response(),
-    }
-
+    // `cleanupChannelAccessControlPolicy` runs on this path on every server; its store fallback
+    // is ported in `App::delete_channel`, so a licensed installation is no longer forwarded here
+    // ([D-371], closed 2026-09-13).
     match serve_delete_channel(&state, &session.0, &channel_id, permanent).await {
         Ok(Some(response)) => response,
         Ok(None) => {

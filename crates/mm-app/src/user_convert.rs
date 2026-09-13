@@ -336,6 +336,117 @@ impl App {
         Ok(())
     }
 
+    /// Port of `App.DemoteUserToGuest` (app/user.go:2850).
+    ///
+    /// # The bot refusal has no promotion counterpart
+    ///
+    /// `api.user.demote_user_to_guest.bot_not_allowed.app_error`, **400**, before any write. A
+    /// bot cannot be a guest; a bot cannot be promoted either, but that side is refused by the
+    /// handler's `IsGuest()` gate rather than here.
+    ///
+    /// # Everything after the store write is a warning and a 200
+    ///
+    /// The mirror of [`App::promote_guest_to_user`] minus `JoinDefaultChannels` — a guest keeps
+    /// the channels it was in, it just loses its scheme roles there — and with `continue` on a
+    /// team whose channel members cannot be listed, where the promotion has no `continue`. The
+    /// one hard error past the write is the `json.Marshal` of a channel member, which a
+    /// `ChannelMember` cannot produce; it is a log line here.
+    ///
+    /// Not ported: `InvalidateCacheForUser`, `invalidateCacheForChannelMembers` and
+    /// `ClearSessionCacheForUser` — this process keeps none of those caches, so there is nothing
+    /// to clear. The Go server beside it does, which is what
+    /// `common::invalidate_go_caches` is for in the parity suite.
+    #[tracing::instrument(skip_all, fields(user_id = %user.id, teams))]
+    pub async fn demote_user_to_guest(&self, user: &User) -> AppResult<()> {
+        if user.is_bot {
+            return Err(AppError::boxed(
+                "DemoteUserToGuest",
+                "api.user.demote_user_to_guest.bot_not_allowed.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        let demoted = self
+            .store()
+            .user()
+            .demote_user_to_guest(&user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "demoting the user failed");
+                AppError::boxed(
+                    "DemoteUserToGuest",
+                    "app.user.demote_user_to_guest.user_update.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        // The store's own answer, not a re-read: `demotedUser` carries `system_guest` and the
+        // new `UpdateAt`, and both the event and the session roles come from it.
+        self.send_updated_user_event(&demoted).await;
+        let is_guest = demoted.is_guest();
+        if let Err(err) = self.update_sessions_is_guest(&demoted, is_guest).await {
+            tracing::warn!(user_id = %demoted.id, error = %err, "Unable to update user sessions");
+        }
+
+        // `excludeTeamId = ""`, `includeDeleted = true`, as in the promotion.
+        let team_members = match self.get_team_members_for_user(&user.id, "", true).await {
+            Ok(members) => members,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "Failed to get team members for users on demote user to guest",
+                );
+                Vec::new()
+            }
+        };
+        tracing::Span::current().record("teams", team_members.len());
+
+        for member in &team_members {
+            self.send_updated_team_member_event(member).await;
+
+            let channel_members = match self
+                .get_channel_members_for_user(&member.team_id, &user.id)
+                .await
+            {
+                Ok(members) => members,
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "Failed to get channel members for users on demote user to guest",
+                    );
+                    // Go `continue`s here, where `PromoteGuestToUser` does not. Invisible
+                    // either way — see the note in the promotion.
+                    continue;
+                }
+            };
+
+            for channel_member in &channel_members {
+                let mut event = WebSocketEvent::new(
+                    WEBSOCKET_EVENT_CHANNEL_MEMBER_UPDATED,
+                    "",
+                    "",
+                    &user.id,
+                    None,
+                    "",
+                );
+                match serde_json::to_string(channel_member) {
+                    Ok(json) => event.add("channelMember", serde_json::Value::String(json)),
+                    Err(err) => {
+                        tracing::warn!(error = %err, "failed to encode a ChannelMember for the socket");
+                        continue;
+                    }
+                }
+                self.publish(event).await;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Port of `PlatformService.UpdateSessionsIsGuest` (app/platform/session.go:299).
     ///
     /// # The roles write is unscoped and comes first

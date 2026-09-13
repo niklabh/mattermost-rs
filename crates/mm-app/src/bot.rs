@@ -24,7 +24,6 @@ use mm_model::utils::{AppError, AppResult, get_millis};
 use mm_store::{BotStore, StoreError, UserStore};
 
 use crate::App;
-use crate::license::LicenseState;
 
 /// `app.MissingAccountError` (channels/app/constants.go:7).
 const MISSING_ACCOUNT_ERROR: &str = "app.user.missing_account.const";
@@ -425,7 +424,7 @@ impl App {
             let at_limit = limits.max_users_hard_limit != 0
                 && limits.active_user_count >= limits.max_users_hard_limit;
             if at_limit {
-                let id = if self.license_state().await? == LicenseState::Licensed {
+                let id = if self.license().await?.is_some() {
                     "app.user.update_active.license_user_limit.exceeded"
                 } else {
                     "app.user.update_active.user_limit.exceeded"

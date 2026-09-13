@@ -1,8 +1,8 @@
-//! Three route families whose entire behaviour on an unlicensed server is one refusal, taken
-//! **before every other check**: `api4/content_flagging.go`, the four write halves of
-//! `api4/channel_bookmark.go`, and the two post-acknowledgement routes of `api4/post.go`.
+//! Two route families whose entire behaviour on a server without the licence they need is one
+//! refusal, taken **before every other check**: `api4/content_flagging.go` and the four write
+//! halves of `api4/channel_bookmark.go`.
 //!
-//! # Why these three are in one module
+//! # Why these two are in one module
 //!
 //! They share a shape that nothing else migrated so far does. `data_retention.rs` is a family of
 //! refusals with *live* checks in front of them — a body decode, a permission, an id — and
@@ -15,41 +15,19 @@
 //! more handlers in `channels.rs` would invite someone to add a permission check "for symmetry"
 //! with the neighbours, which would be a divergence on every request.
 //!
-//! The acknowledgement pair is the sharpest case of that. `acknowledgePost` and
-//! `unacknowledgePost` sit in `api4/post.go` between handlers that all begin with
-//! `c.RequirePostId().RequireUserId()`, and both of *these* put the licence test **above** that
-//! line — so a malformed `{post_id}`, a `{user_id}` the caller may not act for, and a post in a
-//! channel the caller cannot read all answer the same 501. Ported beside their shape-mates rather
-//! than beside their path-mates in `post_writes.rs`, where the neighbours would have argued for
-//! the checks Go skips.
+//! The post-acknowledgement pair used to be the third family here. Its gate is a **tier** test
+//! (`MinimumProfessionalLicense`) that the stack's Enterprise licence passes, and everything past
+//! it is ported and compared since 2026-09-13 — it lives in `post_acks.rs` now, beside the work
+//! it gates ([D-422]).
 //!
-//! # The three gates are not the same test, and the difference is invisible here
+//! # The two gates are not the same test, and since 2026-09-13 the difference is visible
 //!
 //! Content flagging needs `MinimumEnterpriseAdvancedLicense` — a licence **tier**, not merely a
-//! licence (license.go:515), so an Enterprise licence below the Advanced tier is still refused.
-//! Acknowledgements need `MinimumProfessionalLicense` (license.go:504), a lower rung of the same
-//! ladder. Channel bookmarks need only `License() != nil`. All three collapse to "refuse" when
-//! there is no licence at all, which is the only case this server answers; a licensed
-//! installation is forwarded and Go applies whichever test is really its own.
-//!
-//! # The acknowledgement pair does not share an error id, and one of them has no id at all
-//!
-//! The two handlers are four lines apart and their refusals differ:
-//!
-//! | route | `id` on the wire |
-//! |---|---|
-//! | `POST   /users/{user_id}/posts/{post_id}/ack` | `<untranslated>` — `model.NoTranslation` |
-//! | `DELETE /users/{user_id}/posts/{post_id}/ack` | `license_error.feature_unavailable` |
-//!
-//! Both carry the same `detailed_error` in Go ("feature is not available for the current
-//! license"), and both have it wiped before it reaches a client, so the id is the *only* thing
-//! separating them. A port that assumed the pair matched would be wrong on exactly one of the
-//! two, in the field clients branch on. `<untranslated>` also contains `<` and `>`, so it
-//! reaches the wire as `\u003cuntranslated\u003e` — see [`crate::error::ApiError::into_wire`].
-//!
-//! Go passes `""` as the `where` for both, not the handler name. `AppError.Where` is
-//! `json:"-"`, so this is invisible to a client; the handler names are kept here because they
-//! are what a trace needs.
+//! licence (license.go:515), so an Enterprise licence below the Advanced tier is still refused,
+//! and that is what the licensed pair measures: its Enterprise licence gets the 501 from both
+//! servers. Channel bookmarks need only `License() != nil`, so on the pair they are the one
+//! family here that Go serves — and they are forwarded to it, because the bookmark store is not
+//! ported ([D-561]).
 //!
 //! # The `GET` on the bookmark collection is gated too, and is already ported
 //!
@@ -86,15 +64,6 @@ const CONTENT_FLAGGING_DISABLED_ERROR: &str = "api.data_spillage.error.disabled"
 /// `createChannelBookmark` and its three siblings (api4/channel_bookmark.go:28, :122, :239, :343).
 const CHANNEL_BOOKMARK_LICENSE_ERROR: &str = "api.channel.bookmark.channel_bookmark.license.error";
 
-/// `acknowledgePost` (api4/post.go:1429) refuses with `model.NoTranslation` as its **id**, so the
-/// literal `<untranslated>` lands in both `id` and `message`. Not a placeholder this port chose —
-/// it is the id Go sends.
-const ACKNOWLEDGE_POST_LICENSE_ERROR: &str = mm_model::utils::NO_TRANSLATION;
-
-/// `unacknowledgePost` (api4/post.go:1468) — four lines below its twin and a different id. See
-/// the module note; the pair is the reason these two are not one `refusal!` invocation.
-const UNACKNOWLEDGE_POST_LICENSE_ERROR: &str = "license_error.feature_unavailable";
-
 /// Refuse with `id`, or hand the request to Go if this installation has a licence.
 ///
 /// The decision itself is [`crate::channels::licence_gate`], which three channel routes already
@@ -119,6 +88,33 @@ async fn refuse_or_forward(
     }
 }
 
+/// `requireContentFlaggingAvailable` (api4/content_flagging.go:38): refuse below the **Enterprise
+/// Advanced** rung, forward at or above it.
+///
+/// The rung is the whole point. An Enterprise licence — the one the parity harness's licensed
+/// pair carries — is a licence, and a gate that asked only "is there one" would forward every
+/// flagging route to a Go that answers the same 501 we do. `MinimumEnterpriseAdvancedLicense`
+/// is the ladder at `license.go:42`, read here through [`mm_app::App::license`]; the work behind
+/// the gate, and the `EnableContentFlagging` arm after it, are reached only by a licence this
+/// stack cannot mint.
+async fn refuse_below_advanced_or_forward(
+    state: AppState,
+    where_: &'static str,
+    id: &'static str,
+    request: Request,
+) -> Response {
+    let license = match state.app.license().await {
+        Ok(license) => license,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let advanced = mm_model::license::minimum_enterprise_advanced_license(license.as_deref());
+    tracing::Span::current().record("advanced", advanced);
+    if advanced {
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    ApiError::from(AppError::new(where_, id, None, String::new(), 501)).into_response()
+}
+
 macro_rules! refusal {
     ($fn_name:ident, $go:literal, $id:ident) => {
         #[doc = concat!("Port of `", $go, "`, whose first statement is the licence test.")]
@@ -133,64 +129,82 @@ macro_rules! refusal {
     };
 }
 
+macro_rules! advanced_refusal {
+    ($fn_name:ident, $go:literal, $id:ident) => {
+        #[doc = concat!(
+                            "Port of `",
+                            $go,
+                            "`, whose first statement is the **Enterprise Advanced** tier test."
+                        )]
+        #[tracing::instrument(skip_all, fields(advanced))]
+        pub async fn $fn_name(
+            State(state): State<AppState>,
+            _session: AuthenticatedSession,
+            request: Request,
+        ) -> Response {
+            refuse_below_advanced_or_forward(state, $go, $id, request).await
+        }
+    };
+}
+
 // --- content flagging: every route, including the two `/config` ones ---
-refusal!(
+advanced_refusal!(
     get_flagging_configuration,
     "getFlaggingConfiguration",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     get_content_flagging_fields,
     "getContentFlaggingFields",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     get_content_flagging_settings,
     "getContentFlaggingSettings",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     save_content_flagging_settings,
     "saveContentFlaggingSettings",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     get_team_post_flagging_feature_status,
     "getTeamPostFlaggingFeatureStatus",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     search_reviewers,
     "searchReviewers",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     get_flagged_post,
     "getFlaggedPost",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(flag_post, "flagPost", CONTENT_FLAGGING_LICENSE_ERROR);
-refusal!(
+advanced_refusal!(flag_post, "flagPost", CONTENT_FLAGGING_LICENSE_ERROR);
+advanced_refusal!(
     get_post_property_values,
     "getPostPropertyValues",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     remove_flagged_post,
     "removeFlaggedPost",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     keep_flagged_post,
     "keepFlaggedPost",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     generate_flagged_post_report,
     "generateFlaggedPostReport",
     CONTENT_FLAGGING_LICENSE_ERROR
 );
-refusal!(
+advanced_refusal!(
     assign_flagged_post_reviewer,
     "assignFlaggedPostReviewer",
     CONTENT_FLAGGING_LICENSE_ERROR
@@ -217,18 +231,6 @@ refusal!(
     delete_channel_bookmark,
     "deleteChannelBookmark",
     CHANNEL_BOOKMARK_LICENSE_ERROR
-);
-
-// --- the post-acknowledgement pair. Same path, same gate, two different ids.
-refusal!(
-    acknowledge_post,
-    "acknowledgePost",
-    ACKNOWLEDGE_POST_LICENSE_ERROR
-);
-refusal!(
-    unacknowledge_post,
-    "unacknowledgePost",
-    UNACKNOWLEDGE_POST_LICENSE_ERROR
 );
 
 #[cfg(test)]
@@ -261,62 +263,6 @@ mod tests {
         assert_ne!(
             CONTENT_FLAGGING_LICENSE_ERROR,
             CHANNEL_BOOKMARK_LICENSE_ERROR
-        );
-    }
-
-    /// The acknowledgement pair's two ids, and that they are **not** the same string.
-    ///
-    /// This is the whole parity risk of those two routes. They are four lines apart in
-    /// `api4/post.go`, they share a gate, a status and a (wiped) detail, and a reader who copied
-    /// one into the other would produce a server that is right on `POST` and wrong on `DELETE`
-    /// with nothing else on the wire to show it.
-    #[test]
-    fn the_acknowledgement_pair_refuses_with_two_different_ids() {
-        assert_eq!(ACKNOWLEDGE_POST_LICENSE_ERROR, "<untranslated>");
-        assert_eq!(
-            UNACKNOWLEDGE_POST_LICENSE_ERROR,
-            "license_error.feature_unavailable"
-        );
-        assert_ne!(
-            ACKNOWLEDGE_POST_LICENSE_ERROR, UNACKNOWLEDGE_POST_LICENSE_ERROR,
-            "the POST and the DELETE do not share an id"
-        );
-        // The id is `model.NoTranslation` itself, not a string that merely looks like it — if the
-        // model constant moved, this route's wire format moves with it.
-        assert_eq!(
-            ACKNOWLEDGE_POST_LICENSE_ERROR,
-            mm_model::utils::NO_TRANSLATION
-        );
-    }
-
-    /// `<untranslated>` survives to the wire **escaped**, because Go's `json.Marshal` escapes
-    /// `<` and `>` and this project reproduces that. Asserted on the real response rather than on
-    /// the constant, since the escaping happens in `into_wire` and not here.
-    #[test]
-    fn the_acknowledge_refusal_escapes_its_angle_brackets() {
-        let err = ApiError::from(AppError::new(
-            "acknowledgePost",
-            ACKNOWLEDGE_POST_LICENSE_ERROR,
-            None,
-            "feature is not available for the current license".to_owned(),
-            501,
-        ));
-        let (status, body) = err.into_wire();
-        assert_eq!(status.as_u16(), 501);
-        let body = String::from_utf8(body.expect("a body")).expect("utf8");
-        assert!(
-            body.contains(r"\u003cuntranslated\u003e"),
-            "angle brackets must be escaped as Go escapes them: {body}"
-        );
-        assert!(
-            !body.contains("<untranslated>"),
-            "the raw form must not appear: {body}"
-        );
-        // `detailed_error` is wiped for every error this server sends, so the sentence Go writes
-        // into it is not on the wire and cannot be used to tell the pair apart.
-        assert!(
-            !body.contains("feature is not available"),
-            "the detail is wiped: {body}"
         );
     }
 

@@ -71,7 +71,6 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_app::license::LicenseState;
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, make_permission_error,
 };
@@ -540,15 +539,13 @@ async fn switch_oauth_to_email(
         return oauth_app_refusal(&AuthenticatedSession(session));
     }
 
-    match state.app.license_state().await {
-        // `License() != nil && !ExperimentalEnableAuthenticationTransfer` — the flag is not
-        // ported, so a licence means this decision is not ours to take.
-        Ok(LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(_) => {}
-        Err(err) => return ApiError::from(err).into_response(),
+    // `License() != nil && !ExperimentalEnableAuthenticationTransfer` (app/oauth.go:1209) — a
+    // 403 on a licensed server whose operator has turned transfers off, and nothing otherwise.
+    // Both halves are readable here since 2026-09-13.
+    if let Some(refusal) =
+        authentication_transfer_refusal(&state, "oauthToEmail", "oauth_to_email").await
+    {
+        return refusal;
     }
 
     if let Some(refusal) = email_signin_refusals(&state, "SwitchOAuthToEmail") {
@@ -604,16 +601,49 @@ async fn switch_oauth_to_email(
     proxy::forward_to_go(State(state), request).await
 }
 
+/// The gate every `Switch*` branch opens with: a licensed server refuses the transfer outright
+/// when `ServiceSettings.ExperimentalEnableAuthenticationTransfer` is off. `where_` and `route`
+/// are the branch's own — `oauthToEmail`/`oauth_to_email`, `ldapToEmail`/`ldap_to_email` — since
+/// the ids differ by branch (`api.user.<route>.not_available.app_error`, 403).
+async fn authentication_transfer_refusal(
+    state: &AppState,
+    where_: &'static str,
+    route: &str,
+) -> Option<Response> {
+    let licensed = match state.app.license().await {
+        Ok(license) => license.is_some(),
+        Err(err) => return Some(ApiError::from(err).into_response()),
+    };
+    if licensed
+        && !state
+            .app
+            .config()
+            .experimental_enable_authentication_transfer
+    {
+        tracing::Span::current().record("outcome", "transfer_disabled");
+        return Some(
+            ApiError::from(AppError::new(
+                where_,
+                format!("api.user.{route}.not_available.app_error"),
+                None,
+                String::new(),
+                403,
+            ))
+            .into_response(),
+        );
+    }
+    None
+}
+
 /// Port of `App.SwitchLdapToEmail` (app/ldap.go:149) — the whole branch, because it cannot get
 /// past `ldapInterface == nil` in this build. See [`switch_account_type`].
 async fn switch_ldap_to_email(state: AppState, request: Request, email: &str) -> Response {
-    match state.app.license_state().await {
-        Ok(LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(_) => {}
-        Err(err) => return ApiError::from(err).into_response(),
+    // `License() != nil && !ExperimentalEnableAuthenticationTransfer` (app/ldap.go:150), the
+    // same gate as the OAuth branch with its own id and `where`.
+    if let Some(refusal) =
+        authentication_transfer_refusal(&state, "ldapToEmail", "ldap_to_email").await
+    {
+        return refusal;
     }
 
     // Both ids say `SwitchEmailToLdap`, in `SwitchLdapToEmail`. Go's copy-paste, reproduced —

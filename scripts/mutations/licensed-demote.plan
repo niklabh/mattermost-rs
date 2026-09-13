@@ -1,0 +1,26 @@
+# Mutation plan for the 2026-09-13 licensed demote, the ABAC gate on getUsers, and the content-flagging
+# rung — the licensed halves of D-511 and D-154, measured against the licensed pair and its guest
+# variant (`common::licensed`, `common::licensed_guest`).
+#
+#   scripts/mutate-batch.sh scripts/mutations/licensed-demote.plan
+#
+# The decisions a reader gets wrong: the direction of each of the six demote gates, which rung of the
+# ladder each licence test reads, that demotion *replaces* the role string and clears SchemeAdmin, that
+# sessions are re-rolled, and that the two not_in_* arms differ in what the ABAC flag means. The last
+# two lines are the no-op controls and must SURVIVE.
+demote-setting-gate-inverted	crates/mm-api/src/user_convert.rs	    if !state.app.config().guest_accounts_enable {	    if state.app.config().guest_accounts_enable {	api	user_convert
+demote-feature-gate-inverted	crates/mm-api/src/user_convert.rs	    if !guest_enabled {	    if guest_enabled {	api	user_convert
+demote-wrong-permission	crates/mm-api/src/user_convert.rs	        .session_has_permission_to(&session.0, &PERMISSION_DEMOTE_TO_GUEST)	        .session_has_permission_to(&session.0, &PERMISSION_PROMOTE_GUEST)	api	user_convert
+demote-escalation-guard-dropped	crates/mm-api/src/user_convert.rs	    if user.is_system_admin()	    if false	api	user_convert
+demote-already-guest-inverted	crates/mm-api/src/user_convert.rs	    if user.is_guest() {	    if !user.is_guest() {	api	user_convert
+demote-sessions-not-rerolled	crates/mm-app/src/user_convert.rs	        if let Err(err) = self.update_sessions_is_guest(&demoted, is_guest).await {	        if let Err(err) = Ok::<(), Box<mm_model::utils::AppError>>(()) {	api	user_convert
+demote-roles-substituted-not-replaced	crates/mm-store/src/user_store.rs	            mm_model::user::external::SYSTEM_GUEST_ROLE_ID,	            "system_guest system_user",	api	user_convert
+demote-channel-admin-kept	crates/mm-store/src/user_store.rs	            "UPDATE channelmembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",	            "UPDATE channelmembers SET schemeuser = false, schemeguest = true WHERE userid = $1",	api	user_convert
+demote-team-admin-kept	crates/mm-store/src/user_store.rs	            "UPDATE teammembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",	            "UPDATE teammembers SET schemeuser = false, schemeguest = true WHERE userid = $1",	api	user_convert
+abac-enterprise-rung	crates/mm-api/src/users.rs	    setting_on && mm_model::license::minimum_enterprise_advanced_license(license)	    setting_on && mm_model::license::minimum_enterprise_license(license)	unit	users::
+abac-team-arm-ignores-flag	crates/mm-api/src/users.rs	            } else if access_control_possible && query.abac_match_only {	            } else if access_control_possible || query.abac_match_only {	api	users_list
+abac-channel-arm-always-forwards	crates/mm-api/src/users.rs	            } else if access_control_possible {	            } else if access_control_possible || !query.abac_match_only {	api	users_list
+flagging-enterprise-rung	crates/mm-api/src/licensed_features.rs	    let advanced = mm_model::license::minimum_enterprise_advanced_license(license.as_deref());	    let advanced = mm_model::license::minimum_enterprise_license(license.as_deref());	api	licensed_features
+flagging-rung-inverted	crates/mm-api/src/licensed_features.rs	    if advanced {	    if !advanced {	api	licensed_features
+control-rename-binding	crates/mm-api/src/user_convert.rs	    let guest_enabled = license\n        .features\n        .as_ref()\n        .and_then(|f| f.guest_accounts)\n        .unwrap_or(false);\n    if !guest_enabled {	    let guests_on = license\n        .features\n        .as_ref()\n        .and_then(|f| f.guest_accounts)\n        .unwrap_or(false);\n    if !guests_on {	api	user_convert
+control-reorder-set-clauses	crates/mm-store/src/user_store.rs	            "UPDATE channelmembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",	            "UPDATE channelmembers SET schemeadmin = false, schemeuser = false, schemeguest = true WHERE userid = $1",	api	user_convert

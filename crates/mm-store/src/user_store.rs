@@ -43,6 +43,26 @@ pub trait UserStore {
         options: &mm_model::user_count::UserCountOptions,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.AnalyticsActiveCount` (user_store.go:1518): accounts whose `Status`
+    /// row shows activity in the last `time_period_ms` milliseconds.
+    ///
+    /// Counts **`Status` rows**, not users — an account that has never connected has no row and
+    /// is not "active" however recently it was created. Only three of the options are read
+    /// (bots, remote, deleted); Go joins `Users` only when one of the last two is off, which a
+    /// `LEFT JOIN` on the primary key reproduces without changing the count.
+    fn analytics_active_count(
+        &self,
+        time_period_ms: i64,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.AnalyticsGetSingleChannelGuestCount` (user_store.go:1856): live
+    /// guests who belong to exactly **one** live open-or-private channel. Direct and group
+    /// channels do not count towards the one.
+    fn analytics_get_single_channel_guest_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
@@ -386,6 +406,31 @@ pub trait UserStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.DemoteUserToGuest` (user_store.go:2264) — the mirror of
+    /// [`UserStore::promote_guest_to_user`], with two differences a reader would miss.
+    ///
+    /// # `Roles` is **replaced**, not substituted
+    ///
+    /// Promotion rewrites `system_guest` to `system_user` inside whatever role string the row
+    /// holds; demotion sets the whole column to `system_guest`. An administrator who is demoted
+    /// loses `system_admin` along with everything else, which is why the handler guards that
+    /// case behind `manage_system`.
+    ///
+    /// # `SchemeAdmin` is cleared too
+    ///
+    /// Both membership tables get `SchemeUser = false, SchemeAdmin = false, SchemeGuest = true`
+    /// by `UserId` alone; promotion touches only `SchemeUser` and `SchemeGuest`. A channel
+    /// administrator demoted to guest is a plain guest everywhere.
+    ///
+    /// Returns the demoted user. Go returns the row it read **before** the writes with `Roles`
+    /// and `UpdateAt` patched in; this re-reads after the commit, which differs only if another
+    /// writer touched the row inside the window — the same values, one read later. A miss is
+    /// [`StoreError::NotFound`] before anything is written.
+    fn demote_user_to_guest(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetForLogin` (user_store.go:1422).
     ///
@@ -987,6 +1032,68 @@ impl UserStore for SqlUserStore {
     /// `getFilteredUsersStats` never sets it, and with `IncludeBotAccounts` off Go **returns an
     /// error** rather than a count for that combination (user_store.go:1491). Nothing reachable
     /// from the wire produces either half.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_active_count(
+        &self,
+        time_period_ms: i64,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> Result<i64, StoreError> {
+        let since = mm_model::utils::get_millis() - time_period_ms;
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM status s
+              LEFT JOIN bots b ON s.userid = b.userid
+              LEFT JOIN users u ON s.userid = u.id
+             WHERE s.lastactivityat > $1
+               AND ($2 OR b.userid IS NULL)
+               AND ($3 OR u.remoteid = '' OR u.remoteid IS NULL)
+               AND ($4 OR u.deleteat = 0)
+            "#,
+            since,
+            options.include_bot_accounts,
+            options.include_remote_users,
+            options.include_deleted,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_get_single_channel_guest_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM (
+                SELECT cm.userid
+                  FROM channelmembers cm
+                  JOIN users u ON cm.userid = u.id
+                  JOIN channels c ON cm.channelid = c.id
+                 WHERE u.roles ILIKE '%system_guest%'
+                   AND u.deleteat = 0
+                   AND c.deleteat = 0
+                   AND c.type IN ('O', 'P')
+                 GROUP BY cm.userid
+                HAVING COUNT(cm.channelid) = 1
+              ) AS single_channel_guests
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count single-channel guest Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
     #[tracing::instrument(skip_all, fields(count))]
     async fn count(
         &self,
@@ -3005,6 +3112,78 @@ impl UserStore for SqlUserStore {
             })?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn demote_user_to_guest(&self, user_id: &str) -> Result<User, StoreError> {
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go's `us.Get(rctx, userID)` inside the transaction: a miss is `ErrNotFound` and nothing
+        // has been written yet.
+        let exists: Option<String> =
+            sqlx::query_scalar!("SELECT id FROM users WHERE id = $1", user_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: format!("failed to get User with userId={user_id}"),
+                    source,
+                })?;
+        if exists.is_none() {
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("id={user_id}"),
+            });
+        }
+
+        let cur_time = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1",
+            user_id,
+            mm_model::user::external::SYSTEM_GUEST_ROLE_ID,
+            cur_time,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE channelmembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update ChannelMembers with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE teammembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update TeamMembers with userId={user_id}"),
+            source,
+        })?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+
+        self.get(user_id).await
     }
 
     #[tracing::instrument(skip_all, fields(by_username, by_email, found))]

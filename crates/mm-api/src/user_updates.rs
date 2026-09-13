@@ -610,20 +610,10 @@ pub async fn update_user_active(
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    // The licensed seat-limit message, `CreateGuest` and the licensed activation warning all read
-    // the licence, which is not visible here. **Activation only**: `isAtUserLimit` and the
-    // post-write seat warning both sit inside `if active` (app/user.go:1230, :1287), so a
-    // deactivation neither consults the licence nor can be refused by a limit.
-    if active {
-        match state.app.license_state().await {
-            Ok(mm_app::license::LicenseState::Licensed) => {
-                tracing::Span::current().record("forwarded", true);
-                return proxy::forward_to_go(State(state), request).await;
-            }
-            Ok(_) => {}
-            Err(err) => return ApiError::from(err).into_response(),
-        }
-    }
+    // No licence question here since 2026-09-13: the seat-limit refusal and its two ids are
+    // `App::activate_user`'s, read from the parsed licence, and the post-write seat warning is a
+    // log line. Both sit inside `if active` (app/user.go:1230, :1287), so a deactivation neither
+    // consults the licence nor can be refused by a limit.
 
     // Required of everyone except a self-deactivator, who returned above — including the
     // account's own owner reactivating itself.
@@ -765,7 +755,8 @@ pub async fn update_user_roles(
     }
     tracing::Span::current().record("user_id", &user_id);
 
-    let (request, bytes) = match split_body(request, "roles").await {
+    // The parts are kept by `split_body` for a forward this route no longer makes.
+    let (_request, bytes) = match split_body(request, "roles").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
     };
@@ -778,24 +769,26 @@ pub async fn update_user_roles(
     }
 
     if roles_need_custom_permissions_schemes(&new_roles) {
-        match state.app.license_state().await {
-            // `license == nil` — Go's first disjunct, so the 400 is reached without ever reading
-            // `Features.CustomPermissionsSchemes`.
-            Ok(mm_app::license::LicenseState::Unlicensed) => {
-                return ApiError::from(AppError::new(
-                    "updateUserRoles",
-                    "api.user.update_user_roles.license.app_error",
-                    None,
-                    String::new(),
-                    400,
-                ))
-                .into_response();
-            }
-            Ok(mm_app::license::LicenseState::Licensed) => {
-                tracing::Span::current().record("forwarded", true);
-                return proxy::forward_to_go(State(state), request).await;
-            }
+        // `license == nil || !*license.Features.CustomPermissionsSchemes` — one 400 for both
+        // disjuncts. Read from the parsed licence since 2026-09-13; a licence with the feature
+        // on falls through to the permission check and the write like any other roles string.
+        let custom_schemes = match state.app.license().await {
+            Ok(license) => license
+                .as_ref()
+                .and_then(|l| l.features.as_ref())
+                .and_then(|f| f.custom_permissions_schemes)
+                .unwrap_or(false),
             Err(err) => return ApiError::from(err).into_response(),
+        };
+        if !custom_schemes {
+            return ApiError::from(AppError::new(
+                "updateUserRoles",
+                "api.user.update_user_roles.license.app_error",
+                None,
+                String::new(),
+                400,
+            ))
+            .into_response();
         }
     }
 

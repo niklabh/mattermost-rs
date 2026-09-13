@@ -67,6 +67,7 @@ mod parity {
     /// insertion in the middle of it is a merge conflict for somebody else.
     pub mod config_reads;
     pub mod config_source;
+    pub mod cpa_licensed;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;
@@ -86,6 +87,7 @@ mod parity {
     pub mod gated_reads;
     pub mod group_syncables;
     pub mod group_writes;
+    pub mod group_writes_licensed;
     pub mod groups;
     pub mod image_writes;
     pub mod incoming_hooks;
@@ -94,12 +96,14 @@ mod parity {
     pub mod licence_gated_channels;
     pub mod license_client;
     pub mod licensed_features;
+    pub mod licensed_sweep;
     pub mod login;
     pub mod me_alias;
     pub mod oauth_app_writes;
     pub mod oauth_apps;
     pub mod outgoing_hooks;
     pub mod post_acks;
+    pub mod post_acks_licensed;
     pub mod post_bulk_reactions;
     pub mod post_creates;
     pub mod post_edit_history;
@@ -131,6 +135,7 @@ mod parity {
     pub mod system_posts;
     pub mod system_usage;
     pub mod team_admin;
+    pub mod team_channel_delete_licensed;
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
@@ -145,6 +150,7 @@ mod parity {
     pub mod teams_for_user;
     pub mod teams_unread;
     pub mod terms_of_service;
+    pub mod terms_of_service_licensed;
     pub mod terms_of_service_writes;
     pub mod thread_for_user;
     pub mod thread_writes;

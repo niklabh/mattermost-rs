@@ -216,17 +216,9 @@ pub async fn create_user(
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    // A licensed installation is Go's: the guest-invitation licence gates, the licensed
-    // user-limit message and `CreateGuest` all live behind it, and none is ported.
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            tracing::Span::current().record("branch", "licensed");
-            return proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(_) => {}
-        Err(err) => return ApiError::from(err).into_response(),
-    }
+    // No licence question on this path since 2026-09-13. The two branches that read the
+    // licence are the guest-invitation token (forwarded above with every token) and the
+    // seat-limit refusal's id, which `App::create_user` picks from the parsed licence.
 
     // `c.IsSystemAdmin()` is `SessionHasPermissionTo(session, manage_system)` over whatever
     // session the request carried — and this route is an `APIHandler`, so there may be none.

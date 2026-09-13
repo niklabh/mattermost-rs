@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT ug.id AS \"id!\"\n              FROM usergroups ug\n              JOIN groupteams gs ON gs.groupid = ug.id\n             WHERE gs.teamid = $1 AND gs.deleteat = 0 AND ug.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c059c4d87daf3892c53c0268a34736b7edb755830a1353ff347c95471c49148f"
+}

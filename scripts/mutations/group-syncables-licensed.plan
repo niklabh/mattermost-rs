@@ -1,0 +1,28 @@
+# Mutation plan for the licensed half of the three group syncable writes (D-390), 2026-09-13.
+#
+#   scripts/mutate-batch.sh scripts/mutations/group-syncables-licensed.plan
+#
+# Two kinds of decision: the translated SQL of the four membership queries and the two
+# `UpdateMembersRole`s (store lines, held by `db_group_syncable_store`), and the branch-level
+# facts of the handlers and the app layer (api lines, held by the licensed half of
+# `parity::group_syncables` against the licensed pair). The last two lines are the no-op
+# controls and must SURVIVE.
+sync-toadd-readd-join-inverted	crates/mm-store/src/group_syncable_store.rs	               AND ($3 OR (tm.userid IS NULL AND (gm.createat >= $1 OR gt.updateat >= $1)))	               AND ($3 OR (tm.userid IS NOT NULL AND (gm.createat >= $1 OR gt.updateat >= $1)))	store	team_members_to_add
+sync-toadd-since-strict	crates/mm-store/src/group_syncable_store.rs	               AND ($3 OR (tm.userid IS NULL AND (gm.createat >= $1 OR gt.updateat >= $1)))	               AND ($3 OR (tm.userid IS NULL AND (gm.createat > $1 OR gt.updateat > $1)))	store	team_members_to_add
+sync-toadd-scope-inverted	crates/mm-store/src/group_syncable_store.rs	               AND ($2::text IS NULL OR t.id = $2)	               AND ($2::text IS NULL OR t.id <> $2)	store	team_members_to_add
+sync-chadd-leavers-readded	crates/mm-store/src/group_syncable_store.rs	               AND ($3 OR (cmh.userid IS NULL AND cmh.leavetime IS NULL	               AND ($3 OR ((cmh.userid IS NULL OR cmh.leavetime IS NOT NULL)	store	channel_members_to_add
+sync-toremove-bots-not-exempt	crates/mm-store/src/group_syncable_store.rs	               AND b.userid IS NULL\n               AND (tm.teamid, tm.userid) NOT IN (	               AND (tm.teamid, tm.userid) NOT IN (	store	members_to_remove
+sync-chremove-dm-included	crates/mm-store/src/group_syncable_store.rs	               AND c.type IN ('O', 'P')	               AND c.type IN ('O', 'P', 'D')	store	members_to_remove
+sync-permitted-deleted-membership-counts	crates/mm-store/src/group_syncable_store.rs	                       AND gt.schemeadmin = true AND gt.deleteat = 0 AND gm.deleteat = 0	                       AND gt.schemeadmin = true AND gt.deleteat = 0	store	permitted_syncable_admins
+sync-role-guests-touched	crates/mm-store/src/group_syncable_store.rs	               AND deleteat = 0\n               AND (schemeguest = false OR schemeguest IS NULL)	               AND deleteat = 0	store	update_members_role
+sync-role-channel-demote-dropped	crates/mm-store/src/group_syncable_store.rs	                    OR (schemeadmin = true AND NOT (userid = ANY($2))))\n            RETURNING channelid,	                    OR false)\n            RETURNING channelid,	store	update_members_role
+sync-relink-keeps-deleted-row	crates/mm-api/src/groups.rs	        Some(existing) if existing.delete_at == 0 => existing,	        Some(existing) => existing,	api	licensed_team_link
+sync-link-answers-200	crates/mm-api/src/groups.rs	        StatusCode::CREATED,\n        "Api4.createGroupSyncable",	        StatusCode::OK,\n        "Api4.createGroupSyncable",	api	licensed_team_link
+sync-channel-link-skips-team	crates/mm-app/src/syncables.rs	            } else {\n                self.upsert_group_syncable(GroupSyncable::new_group_team(\n                    &group_syncable.group_id,\n                    &team.id,\n                    group_syncable.auto_add,\n                ))\n                .await?;\n            }	            }	api	licensed_channel_link
+sync-team-unlink-no-cascade	crates/mm-app/src/syncables.rs	            for group_channel in &all_group_channels {	            for group_channel in &all_group_channels[..0] {	api	licensed_channel_link
+sync-roles-never-synced	crates/mm-app/src/syncables.rs	        if sync_roles {	        if !sync_roles {	api	licensed_link_syncs
+sync-channel-arm-asks-the-team	crates/mm-api/src/groups.rs	                        .session_has_permission_to_team(\n                            session,\n                            syncable_id,\n                            &PERMISSION_INVITE_USER,	                        .session_has_permission_to_team(\n                            session,\n                            &channel.team_id,\n                            &PERMISSION_INVITE_USER,	api	licensed_refusals
+sync-hidden-group-served	crates/mm-api/src/groups.rs	    if !group.allow_reference {	    if !group.allow_reference && false {	api	licensed_refusals
+sync-custom-group-allowed	crates/mm-api/src/groups.rs	    if !group.is_syncable() {	    if group.is_syncable() {	api	licensed_refusals
+control-reorder-columns	crates/mm-store/src/group_syncable_store.rs	            SELECT gm.userid AS "userid!", gt.teamid AS "teamid!"\n              FROM groupmembers gm\n              JOIN groupteams gt	            SELECT gt.teamid AS "teamid!", gm.userid AS "userid!"\n              FROM groupmembers gm\n              JOIN groupteams gt	store	team_members_to_add
+control-rename-binding	crates/mm-app/src/syncables.rs	                let permitted = store\n                    .group()\n                    .group_ids_synced_to_team(&channel.team_id)\n                    .await\n                    .map_err(|err| store_error("UpsertGroupSyncable", "app.select_error", err))?;\n                if !permitted.contains(&group_syncable.group_id) {	                let synced_ids = store\n                    .group()\n                    .group_ids_synced_to_team(&channel.team_id)\n                    .await\n                    .map_err(|err| store_error("UpsertGroupSyncable", "app.select_error", err))?;\n                if !synced_ids.contains(&group_syncable.group_id) {	api	licensed_channel_link

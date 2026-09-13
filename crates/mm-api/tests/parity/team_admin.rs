@@ -1021,10 +1021,13 @@ async fn invite_guests_answers_the_licence_error_before_anything_else() {
     }
 }
 
-/// A licence row hands both licence-gated routes back to Go — and the 400 in front of `scheme`'s
-/// gate is **not** licence-dependent, which is the branch a "forward when licensed" shortcut loses.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_hands_the_two_licence_routes_back() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -1086,8 +1089,8 @@ async fn a_license_row_hands_the_two_licence_routes_back() {
     for ((_, p, _), served) in cases.iter().zip(&forwarded) {
         assert_eq!(
             served.as_deref(),
-            Some("go"),
-            "{p}: a licence means work we have not ported"
+            Some("rust"),
+            "{p}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
         );
     }
     assert_eq!(

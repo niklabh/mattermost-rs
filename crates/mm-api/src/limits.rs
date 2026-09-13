@@ -13,7 +13,7 @@
 //! same call answers differently depending on who asked, and the difference is applied twice, in
 //! two places. Both are ported where Go put them.
 
-use axum::extract::{Request, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::limits::ServerLimits;
@@ -25,7 +25,6 @@ use mm_model::utils::AppError;
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
-use crate::proxy;
 
 /// Port of `getServerLimits` (limits.go:19).
 ///
@@ -41,29 +40,20 @@ use crate::proxy;
 /// Every session gets a 200. A non-admin's answer is all zeros rather than a 403, which is what
 /// lets the webapp call this unconditionally at login.
 ///
-/// # Licensed installations are forwarded
+/// # Served for every licence since 2026-09-13
 ///
-/// Every non-zero field a licence would produce comes from the licence body — seat limits from
-/// `Features.Users`, the history limit from `Limits.PostHistory` — and none of it is readable
-/// from here. Same boundary as `getClientLicense`.
+/// Every non-zero field a licence produces comes from the licence body — seat limits from
+/// `Features.Users` and `ExtraUsers`, the history limit from `Limits.PostHistory` — and
+/// [`mm_app::App::get_server_limits`] reads all of it now. The licensed pair's Enterprise
+/// licence enforces no seat count and carries no limits, so on it the body is a count and six
+/// zeros; the seat-enforcing arms are held by that function's unit tests.
 ///
 /// `json.NewEncoder(w).Encode`, so a trailing newline.
-#[tracing::instrument(skip_all, fields(admin, licensed))]
+#[tracing::instrument(skip_all, fields(admin))]
 pub async fn get_server_limits(
     State(state): State<AppState>,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    let licence = match state.app.license_state().await {
-        Ok(licence) => licence,
-        Err(err) => return ApiError::from(err).into_response(),
-    };
-    if licence == mm_app::license::LicenseState::Licensed {
-        tracing::Span::current().record("licensed", true);
-        return proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("licensed", false);
-
     // `c.IsSystemAdmin() && …` — evaluated in Go's order, and both are system-scoped.
     let is_admin = counts_are_visible_to(
         state

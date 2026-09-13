@@ -65,6 +65,7 @@ use mm_model::permission::{
     PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_GROUPS, make_permission_error,
 };
 use mm_model::utils::{AppError, is_valid_id};
+use mm_store::UserStore;
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -112,22 +113,17 @@ pub async fn handle_signup_available(_session: AuthenticatedSession) -> Response
 /// Port of `getPrevTrialLicense` (api4/license.go:273).
 ///
 /// `Platform().LicenseManager()` is an `einterfaces` implementation that exists only in the
-/// enterprise tree, so it is nil on this build regardless of any licence row — the same class of
-/// fact as the cluster interface in [D-087]. **403**, not the 501 most licence refusals use.
-#[tracing::instrument(skip_all, fields(licensed))]
-pub async fn get_prev_trial_license(
-    State(state): State<AppState>,
-    _session: AuthenticatedSession,
-    request: Request,
-) -> Response {
-    refuse_or_forward(
-        state,
+/// enterprise repository, so it is nil on every build from this tree regardless of the licence —
+/// the same class of fact as the cluster interface in [D-087]. **403**, not the 501 most licence
+/// refusals use. Served unconditionally since 2026-09-13; the licensed oracle answers the same
+/// 403, and the previous trial itself is owed with the licence manager ([D-571]).
+#[tracing::instrument(skip_all)]
+pub async fn get_prev_trial_license(_session: AuthenticatedSession) -> Response {
+    refusal(
         "getPrevTrialLicense",
         "api.license.upgrade_needed.app_error",
         403,
-        request,
     )
-    .await
 }
 
 /// Port of `getSamlMetadata` (api4/saml.go:39) via `App.GetSamlMetadata` (app/saml.go:27).
@@ -138,16 +134,17 @@ pub async fn get_prev_trial_license(
 ///
 /// On success this route writes XML with a `Content-Disposition` — not JSON — which is another
 /// reason it is only ever forwarded rather than served on a licensed server.
-#[tracing::instrument(skip_all, fields(licensed))]
-pub async fn get_saml_metadata(State(state): State<AppState>, request: Request) -> Response {
-    refuse_or_forward(
-        state,
+///
+/// `a.Saml()` is nil on every build from this tree, licensed or not (the SAML module is in the
+/// enterprise repository), so the 501 is the whole route here — measured against the licensed
+/// oracle 2026-09-13. The metadata document is owed with the module, [D-571].
+#[tracing::instrument(skip_all)]
+pub async fn get_saml_metadata() -> Response {
+    refusal(
         "GetSamlMetadata",
         "api.admin.saml.not_available.app_error",
         501,
-        request,
     )
-    .await
 }
 
 /// Port of `getLdapGroups` (api4/ldap.go:152).
@@ -178,14 +175,24 @@ pub async fn get_ldap_groups(
         .into_response();
     }
 
-    refuse_or_forward(
-        state,
-        "api4.getLdapGroups",
-        "api.ldap_groups.license_error",
-        501,
-        request,
-    )
-    .await
+    // `License() == nil || !*License.Features.LDAPGroups` — the licence refusal; and past it
+    // `GetAllLdapGroupsPage` answers `ent.ldap.app_error`, also a 501, because `a.Ldap()` is nil
+    // on every build from this tree. Both measured against the licensed oracle 2026-09-13. The
+    // group listing itself is owed with the LDAP module, [D-571].
+    let _ = request;
+    let ldap_groups = match state.app.license().await {
+        Ok(license) => license
+            .as_ref()
+            .and_then(|l| l.features.as_ref())
+            .and_then(|f| f.ldap_groups)
+            .unwrap_or(false),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("licensed", ldap_groups);
+    if !ldap_groups {
+        return refusal("api4.getLdapGroups", "api.ldap_groups.license_error", 501);
+    }
+    refusal("GetAllLdapGroupsPage", "ent.ldap.app_error", 501)
 }
 
 /// Port of `generateSupportPacket` (api4/system.go:83).
@@ -231,20 +238,43 @@ pub async fn generate_support_packet(
 /// property service's `LicenseCheckHook`, and `GetPropertyGroup` is not hooked, so this one
 /// enforces `MinimumEnterpriseLicense` inline — at **403**, with a `detailed_error` of "an
 /// Enterprise license is required" that `WipeDetailed` removes before it reaches a client.
+///
+/// Served on both sides of the gate since 2026-09-13: `MinimumEnterpriseLicense` is answered
+/// from the parsed licence, and the group row is one read — `{"id": …}` through
+/// `json.NewEncoder`, so with a trailing newline.
 #[tracing::instrument(skip_all, fields(licensed))]
 pub async fn get_cpa_group(
     State(state): State<AppState>,
     _session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    refuse_or_forward(
-        state,
-        "getCPAGroup",
-        "app.property.license_error",
-        403,
-        request,
+    let enterprise = match state.app.license().await {
+        Ok(license) => mm_model::license::minimum_enterprise_license(license.as_deref()),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("licensed", enterprise);
+    if !enterprise {
+        return refusal("getCPAGroup", "app.property.license_error", 403);
+    }
+    let group = match state
+        .app
+        .get_property_group(mm_model::property_group::ACCESS_CONTROL_PROPERTY_GROUP_NAME)
+        .await
+    {
+        Ok(group) => group,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let mut body = serde_json::to_vec(&serde_json::json!({ "id": group.id }))
+        .unwrap_or_else(|_| b"{}".to_vec());
+    body.push(b'\n');
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
     )
-    .await
+        .into_response()
 }
 
 /// Port of `getSessionAttributesManifest` (api4/user.go:2695) via
@@ -487,25 +517,68 @@ pub async fn get_preview_modal_data(
 ///
 /// `map[string]int` with one key, `json.NewEncoder(w).Encode` — so a trailing newline — and an
 /// explicit `Content-Type` that Go sets by hand a line earlier.
-#[tracing::instrument(skip_all, fields(licensed))]
+///
+/// Licensed, `licenseUsers` is `Features.Users` and the metric is
+/// `round(MAU / licenseUsers * 1000)`, where MAU is `AnalyticsActiveCount` over the last 31 days
+/// with bots and deleted accounts excluded. Served since 2026-09-13, and the only route in this
+/// module with a database read behind its gate.
+#[tracing::instrument(skip_all, fields(license_users))]
 pub async fn get_license_load_metric(
     State(state): State<AppState>,
     _session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
-    match licence_gate(&state, request).await {
-        LicenceGate::Forward(response) => response,
-        LicenceGate::Unlicensed => (
-            StatusCode::OK,
-            [
-                ("Content-Type", "application/json"),
-                ("x-mmrs-served-by", "rust"),
-            ],
-            b"{\"load\":0}\n".to_vec(),
-        )
-            .into_response(),
-        LicenceGate::Failed(err) => err.into_response(),
+    let license_users = match state.app.license().await {
+        Ok(license) => license
+            .as_ref()
+            .and_then(|l| l.features.as_ref())
+            .and_then(|f| f.users)
+            .unwrap_or(0),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("license_users", license_users);
+
+    let mut load_metric: i64 = 0;
+    if license_users > 0 {
+        let options = mm_model::user_count::UserCountOptions {
+            include_bot_accounts: false,
+            include_deleted: false,
+            ..mm_model::user_count::UserCountOptions::default()
+        };
+        let monthly_active_users = match state
+            .app
+            .store()
+            .user()
+            .analytics_active_count(mm_app::analytics::MONTH_MILLISECONDS, &options)
+            .await
+        {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!(error = ?err, "the monthly active user count failed");
+                return ApiError::from(AppError::new(
+                    "getLicenseLoad",
+                    "api.license.load_metric.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+                .into_response();
+            }
+        };
+        // `int(math.Round(float64(mau) / float64(users) * 1000))` — Go rounds half away from
+        // zero, and so does `f64::round`.
+        load_metric =
+            ((monthly_active_users as f64) / (license_users as f64) * 1000.0).round() as i64;
     }
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        format!("{{\"load\":{load_metric}}}\n").into_bytes(),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

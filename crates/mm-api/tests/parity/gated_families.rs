@@ -384,10 +384,13 @@ async fn disabling_scheduled_posts_changes_the_error_id() {
     assert_eq!(parsed["id"], SCHEDULED_POSTS_ERROR);
 }
 
-/// A licence hands the licence-gated ones back to Go — and **not** the AI-bridge routes, whose
-/// gate is a setting.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licence_forwards_only_the_licence_gated_families() {
+async fn a_planted_id_without_a_row_moves_nothing() {
     if !stack_enabled() {
         return;
     }
@@ -431,8 +434,8 @@ async fn a_licence_forwards_only_the_licence_gated_families() {
         } else {
             assert_eq!(
                 served.as_deref(),
-                Some("go"),
-                "{route} is licence-gated and must be forwarded"
+                Some("rust"),
+                "{route}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
             );
         }
     }

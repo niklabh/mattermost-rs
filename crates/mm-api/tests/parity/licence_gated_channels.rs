@@ -160,11 +160,13 @@ async fn a_plain_user_gets_the_licence_error_and_not_a_permission_one() {
     assert_error_bodies_match_except_known_gaps(&go, &rs, &p);
 }
 
-/// **The boundary.** A valid `Systems.ActiveLicenseId` sends both routes back to the proxy, since
-/// everything behind the gate is unported. Holds the shared lock exclusively — the same row
-/// decides `license_client` and `recommended_channels`.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_hands_both_routes_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -215,8 +217,8 @@ async fn a_license_row_hands_both_routes_back_to_go() {
     ] {
         assert_eq!(
             served.as_deref(),
-            Some("go"),
-            "{p}: a licence means work we have not ported"
+            Some("rust"),
+            "{p}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
         );
     }
 }

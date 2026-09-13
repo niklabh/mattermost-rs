@@ -1,0 +1,25 @@
+# Mutation plan for the licensed half of the seven group writes (D-360), 2026-09-13.
+#
+#   scripts/mutate-batch.sh scripts/mutations/group-writes-licensed.plan
+#
+# Every line but the unit one runs `parity::group_writes_licensed` against the licensed pair. The
+# decisions mutated: the source rule and the tier rung, the restore 501, the own-name collision,
+# the referenceable filter on the name check, the null body of an empty removal, the length check
+# that turns a non-member into user_not_found, the upsert's resurrection of a removed row, the
+# membership grant, and the config half of the licence-by-source gate. Last two are controls.
+grp-restore-refusal-is-400	crates/mm-api/src/groups.rs	crud_permission_error(WHERE, 501)	crud_permission_error(WHERE, 400)	api	group_writes_licensed
+grp-create-source-inverted	crates/mm-api/src/groups.rs	if group.group.source.as_str() != GroupSource::CUSTOM {	if group.group.source.as_str() == GroupSource::CUSTOM {	api	group_writes_licensed
+grp-patch-allows-unreferenceable	crates/mm-api/src/groups.rs	patch.allow_reference == Some(false)	patch.allow_reference == Some(true)	api	group_writes_licensed
+grp-patch-own-name-exempt	crates/mm-api/src/groups.rs	if state.app.get_group_by_name(name, true).await.is_ok() {	if state\n                    .app\n                    .get_group_by_name(name, true)\n                    .await\n                    .is_ok_and(|g| g.id != group.id)\n                {	api	group_writes_licensed
+grp-patch-name-check-unfiltered	crates/mm-api/src/groups.rs	get_group_by_name(name, true).await.is_ok()	get_group_by_name(name, false).await.is_ok()	api	group_writes_licensed
+grp-names-filter-inverted	crates/mm-api/src/groups.rs	let filter_allow_reference = !state	let filter_allow_reference = state	api	group_writes_licensed
+grp-remove-empty-is-list	crates/mm-api/src/groups.rs	Ok(members) if members.is_empty() =>	Ok(members) if members.len() > 1000 =>	api	group_writes_licensed
+grp-remove-length-check-dropped	crates/mm-store/src/group_store.rs	if members.len() != user_ids.len() {	if members.len() > user_ids.len() {	api	group_writes_licensed
+grp-upsert-does-nothing-on-conflict	crates/mm-store/src/group_store.rs	ON CONFLICT (groupid, userid) DO UPDATE SET createat = $3, deleteat = 0	ON CONFLICT (groupid, userid) DO NOTHING	api	group_writes_licensed
+grp-count-includes-deactivated	crates/mm-store/src/group_store.rs	WHERE gm.groupid = $1 AND u.deleteat = 0 AND gm.deleteat = 0	WHERE gm.groupid = $1 AND gm.deleteat = 0	api	group_writes_licensed
+grp-membership-grant-inverted	crates/mm-app/src/authorization.rs	if member.is_some()	if member.is_none()	api	group_writes_licensed
+grp-tier-is-advanced	crates/mm-app/src/group.rs	&& !minimum_professional_license(Some(&license))	&& !mm_model::license::minimum_enterprise_advanced_license(Some(&license))	api	group_writes_licensed
+grp-config-gate-inverted	crates/mm-app/src/group.rs	&& !self.config().enable_custom_groups	&& self.config().enable_custom_groups	api	group_writes_licensed
+grp-derive-underscore	crates/mm-api/src/groups.rs	mm_model::utils::go_to_lower(display_name).replace(' ', "-")	mm_model::utils::go_to_lower(display_name).replace(' ', "_")	unit	groups::
+control-rename-param	crates/mm-api/src/groups.rs	fn patch_name_error(where_: &str, id: &str) -> Response {\n    crate::error::ApiError::from(AppError::new(where_, id, None, String::new(), 400))	fn patch_name_error(where_: &str, error_id: &str) -> Response {\n    crate::error::ApiError::from(AppError::new(where_, error_id, None, String::new(), 400))	api	group_writes_licensed
+control-reorder-predicates	crates/mm-store/src/group_store.rs	WHERE gm.groupid = $1 AND u.deleteat = 0 AND gm.deleteat = 0	WHERE u.deleteat = 0 AND gm.groupid = $1 AND gm.deleteat = 0	api	group_writes_licensed
