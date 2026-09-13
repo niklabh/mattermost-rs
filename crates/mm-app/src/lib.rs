@@ -128,6 +128,14 @@ pub struct App {
     /// because that is what Go holds: two names for one object, and the branch taken once at
     /// startup.
     export_filestore: crate::filestore::FileBackend,
+    /// The keys a stored or environment licence must verify against — Mattermost's own, or the
+    /// operator's override. See [`crate::license`].
+    license_keys: crate::license::LicenseKeys,
+    /// `MM_LICENSE`, resolved once at construction the way Go resolves it once at startup.
+    env_license: crate::license::EnvLicense,
+    /// The verified licence for the current `Licenses.Id`, shared across clones so the RSA work
+    /// happens once per licence rather than once per request.
+    license_cache: std::sync::Arc<crate::license::LicenseCache>,
 }
 
 impl App {
@@ -161,11 +169,17 @@ impl App {
             filestore.clone()
         };
 
+        let license_keys = crate::license::LicenseKeys::from_config(&config);
+        let env_license = crate::license::EnvLicense::resolve(&config.license, &license_keys);
+
         Self {
             store,
             config,
             filestore,
             export_filestore,
+            license_keys,
+            env_license,
+            license_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),

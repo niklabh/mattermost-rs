@@ -27,6 +27,7 @@ pub mod file_info_store;
 /// The one `GroupStore` read the channel-member add path needs.
 pub mod group_store;
 pub mod job_store;
+pub mod license_store;
 pub mod oauth_store;
 pub mod post_store;
 pub mod preference_store;
@@ -66,6 +67,7 @@ pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
 pub use group_store::{GroupStore, SqlGroupStore};
 pub use job_store::{JobStore, SqlJobStore};
+pub use license_store::{LicenseStore, SqlLicenseStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
@@ -112,6 +114,7 @@ pub struct SqlStore {
     file_info: SqlFileInfoStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
+    license: SqlLicenseStore,
     oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
@@ -174,6 +177,7 @@ impl SqlStore {
             file_info: SqlFileInfoStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
+            license: SqlLicenseStore::new(pool.clone()),
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
@@ -358,6 +362,11 @@ impl SqlStore {
     /// Port of `store.Store.Status()`.
     pub fn status(&self) -> &SqlStatusStore {
         &self.status
+    }
+
+    /// Port of `store.Store.License()`.
+    pub fn license(&self) -> &SqlLicenseStore {
+        &self.license
     }
 
     /// Port of `store.Store.System()`.

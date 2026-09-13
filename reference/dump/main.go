@@ -871,6 +871,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_emoji.json"))
 
+	if err := writeLicenseBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: license behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_license.json"))
+
 	if err := writeTermsOfServiceBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: terms of service behaviour fixture: %v\n", err)
 		os.Exit(1)

@@ -136,7 +136,14 @@ base64 = "0.22"
 # password-hash crate PHC strings, and Go writes its OWN PHC dialect, which we build by hand.
 pbkdf2 = { version = "0.12", default-features = false }
 hmac = "0.12"
-sha2 = "0.10"
+# `oid`: `rsa::Pkcs1v15Sign::new::<Sha512>()` needs the digest's OID to build the DigestInfo
+# prefix that PKCS#1 v1.5 signatures carry — the same prefix Go's `rsa.VerifyPKCS1v15` checks.
+sha2 = { version = "0.10", features = ["oid"] }
+# Licence verification: Mattermost signs a licence with RSA PKCS#1 v1.5 over SHA-512 and appends
+# the 256-byte signature (channels/utils/license.go:71). `rsa` is the RustCrypto implementation;
+# only the public-key verify path is used, so the timing caveats on its private-key operations do
+# not apply here.
+rsa = { version = "0.9", features = ["getrandom"] }
 
 # `bcrypt` is the LEGACY hasher, kept because rows written before Mattermost's PBKDF2 migration
 # are still bcrypt and `GetHasherFromPHCString` still routes to it. Chosen over rolling blowfish

@@ -1129,14 +1129,13 @@ async fn demote_is_a_licence_refusal_before_anything_else() {
     delete_plain_user(&http, &admin, &user.id).await;
 }
 
-/// A licensed server is handed the whole request, before any read past the licence itself.
-///
-/// Planting `Systems.ActiveLicenseId` moves **this** side only — Go loaded its licence at startup
-/// — so what this asserts is the forward: the answer comes back stamped `x-mmrs-served-by: go`
-/// and is Go's own unlicensed 501. That is also why [D-511] exists: the licensed body cannot be
-/// compared against Go on this stack at all.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licensed_demote_is_handed_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -1158,12 +1157,15 @@ async fn a_licensed_demote_is_handed_to_go() {
         .headers()
         .get("x-mmrs-served-by")
         .and_then(|v| v.to_str().ok())
-        == Some("go");
+        == Some("rust");
     let body = response.bytes().await.expect("a body").to_vec();
 
     common::set_active_licence_id(None).await;
 
-    assert!(forwarded, "a licensed demote must be forwarded");
+    assert!(
+        forwarded,
+        "an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
+    );
     assert_eq!(status, 501, "which is Go's own unlicensed answer");
     let (go_status, go) = send(&http, GO, &admin, &path, None).await;
     assert_eq!(go_status, 501);
@@ -1172,7 +1174,7 @@ async fn a_licensed_demote_is_handed_to_go() {
     let ours: serde_json::Value = serde_json::from_slice(&body).expect("an error");
     assert_eq!(
         ours["id"], parsed["id"],
-        "the forwarded body is Go's, not one we built",
+        "an ActiveLicenseId naming no Licenses row is not a licence, so still ours",
     );
 }
 

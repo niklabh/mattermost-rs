@@ -4,20 +4,25 @@
 //! scripts/parity.sh -p mm-api --test parity license_client
 //! ```
 //!
-//! # What this suite can and cannot reach
+//! # Two pairs of servers
 //!
-//! The development stack is **Team Edition with no licence**, so `ClientLicense()` takes its
-//! `nil` branch on both servers and the whole reachable surface is: the two 400s, the one 200,
-//! and the forward. The *licensed* map — and with it the `read_license_information` branch and
-//! the sanitize list — cannot be produced without a signed licence, and is not asserted here.
-//! [`an_active_license_id_hands_the_route_back_to_go`] pins the boundary instead: the moment the
-//! shared database says this installation is licensed, we stop answering.
+//! The stack's own pair is **Team Edition with no licence**, so `ClientLicense()` takes its
+//! `nil` branch on both and the reachable surface there is the two 400s and the one 200. The
+//! *licensed* map — the `read_license_information` branch and the sanitize list — is compared
+//! against the licensed pair (`common::licensed`): the enterprise-ready Go oracle with the
+//! stack's signed licence, and an mm-api carrying the same licence. Three callers there — an
+//! administrator, a plain user, nobody — and two different maps between them.
+//!
+//! [`a_planted_id_without_a_verifying_row_is_not_a_licence`] pins the other boundary: a
+//! `Systems.ActiveLicenseId` that names no `Licenses` row is what `LoadLicense` reads as "no
+//! licence", on both servers, so it changes nothing on the wire.
 
 use crate::common;
 
 use common::{
-    GO, RUST, assert_error_bodies_match_except_known_gaps, client, fetch_both_raw, go_minted_token,
-    stack_enabled,
+    GO, RUST, a_team_and_channel_the_user_is_in, assert_error_bodies_match_except_known_gaps,
+    client, create_plain_user, delete_plain_user, fetch_both_raw, fetch_licensed_pair,
+    go_minted_token, licensed, stack_enabled,
 };
 
 const PATH: &str = "/api/v4/license/client";
@@ -238,98 +243,138 @@ async fn a_percent_encoded_old_is_still_old() {
     assert_eq!(go, rs);
 }
 
-/// **The boundary.** We answer only what we can see is unlicensed; the moment
-/// `Systems.ActiveLicenseId` holds a valid id, the route goes back to the proxy.
-///
-/// Go is unmoved by the row — it loaded its licence at startup and re-reads only on a save — so
-/// the *body* stays the unlicensed map and the observable difference is which server produced it.
-/// That is the assertion: `x-mmrs-served-by`, not the bytes.
-///
-/// The row is cleared on the way **in** as well as out: an assertion panics past any teardown,
-/// and a leftover row would silently forward this route for every later run, turning the suite
-/// above into a comparison of Go against Go.
+/// **The other boundary.** A `Systems.ActiveLicenseId` that names no `Licenses` row is not a
+/// licence: `LoadLicense` looks the row up (platform/license.go:104) and finds nothing, and the
+/// licence stays `nil`. Until 2026-09-13 this side read the id alone and forwarded on it; now it
+/// reads the row, verifies it, and answers exactly what Go answers — the fallback map — itself.
+/// Holds the shared lock exclusively, because the row is one for the whole installation.
 #[tokio::test]
-async fn an_active_license_id_hands_the_route_back_to_go() {
+async fn a_planted_id_without_a_verifying_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
     let _exclusive = ACTIVE_LICENCE_ROW.write().await;
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        return;
-    };
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(std::time::Duration::from_secs(5))
-        .connect(&url)
-        .await
-        .expect("the shared database is reachable");
-
-    let clear = async || {
-        sqlx::query("DELETE FROM systems WHERE name = 'ActiveLicenseId'")
-            .execute(&pool)
-            .await
-            .expect("the active licence id is cleared");
-    };
-    clear().await;
-
     let client = client();
     let token = go_minted_token(&client).await;
+    let path = format!("{PATH}?format=old");
 
-    let served_by = async |token: &str| {
-        client
-            .get(format!("{RUST}{PATH}?format=old"))
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .await
-            .expect("we answer")
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned)
-    };
+    common::set_active_licence_id(None).await;
+    // A 26-character id that passes `IsValidId` and matches no `Licenses` row. The length is
+    // asserted by `set_active_licence_id`: a 25-character literal reads as valid, silently fails
+    // `IsValidId`, and turns this test into one that proves the opposite of what it says.
+    common::set_active_licence_id(Some("mmrslicence000000000000001")).await;
+    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, &path).await;
+    // Malformed ids are *not* a licence either: `RemoveLicense` blanks the value rather than
+    // deleting the row, so an empty string is the shape a de-licensed server actually leaves.
+    common::set_active_licence_id(Some("")).await;
+    let ((_, go_blanked), (_, rs_blanked)) = fetch_both_raw(&client, &token, &path).await;
+    common::set_active_licence_id(None).await;
 
+    assert_eq!((go_status, rs_status), (200, 200));
     assert_eq!(
-        served_by(&token).await.as_deref(),
-        Some("rust"),
-        "with no licence row we answer the route ourselves"
+        go, UNLICENSED,
+        "Go finds no row for the id and stays unlicensed"
     );
+    assert_eq!(rs, go, "and so do we, served rather than forwarded");
+    assert_eq!(go_blanked, UNLICENSED);
+    assert_eq!(rs_blanked, go_blanked);
+}
 
-    // A 26-character id that passes `IsValidId` and matches no `Licenses` row — which is all
-    // `LoadLicense` checks before it looks the licence up. The length is asserted rather than
-    // counted by eye: a 25-character literal here reads as valid, silently fails `IsValidId`, and
-    // turns this test into one that proves the opposite of what it says.
-    const FAKE_LICENCE_ID: &str = "mmrslicence000000000000001";
+// ---------------------------------------------------------------------------------------------
+// The licensed pair
+// ---------------------------------------------------------------------------------------------
+
+/// Nobody: the sanitized map, on both licensed servers, byte for byte. `APIHandler` needs no
+/// session, and the zero-valued session Go carries for an anonymous caller has no roles, so
+/// `read_license_information` is false and the seven keys are gone.
+#[tokio::test]
+async fn a_licensed_anonymous_caller_gets_the_sanitized_map() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let client = client();
+    let path = format!("{PATH}?format=old");
+    let ((go_status, go), (rs_status, rs)) = fetch_licensed_pair(&client, &pair, None, &path).await;
+    assert_eq!(go_status, 200);
+    assert_eq!(rs_status, 200);
     assert_eq!(
-        FAKE_LICENCE_ID.len(),
-        26,
-        "`IsValidId` requires 26 characters"
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "the sanitized client licence must be byte-identical"
     );
-    sqlx::query("INSERT INTO systems (name, value) VALUES ('ActiveLicenseId', $1)")
-        .bind(FAKE_LICENCE_ID)
-        .execute(&pool)
-        .await
-        .expect("the active licence id is written");
+    let map: serde_json::Value = serde_json::from_slice(&go).unwrap();
+    assert_eq!(map["IsLicensed"], "true", "the oracle is licensed");
+    assert_eq!(map["SkuShortName"], "enterprise");
+    for key in [
+        "Id",
+        "Name",
+        "Email",
+        "IssuedAt",
+        "StartsAt",
+        "ExpiresAt",
+        "SkuName",
+    ] {
+        assert!(map.get(key).is_none(), "{key} is sanitized out");
+    }
+    assert!(!rs.ends_with(b"\n"), "no encoder, no newline");
+}
 
-    let forwarded = served_by(&token).await;
-
-    // Malformed ids are *not* a licence: `RemoveLicense` blanks the value rather than deleting
-    // the row, so an empty string is the shape a de-licensed server actually leaves behind.
-    sqlx::query("UPDATE systems SET value = '' WHERE name = 'ActiveLicenseId'")
-        .execute(&pool)
-        .await
-        .expect("the active licence id is blanked");
-    let blanked = served_by(&token).await;
-
-    clear().await;
-
+/// The administrator: `read_license_information` is granted to `system_admin`, so the full map —
+/// all forty keys, the customer's name and email and the three timestamps included.
+#[tokio::test]
+async fn a_licensed_administrator_gets_the_full_map() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let path = format!("{PATH}?format=old");
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_licensed_pair(&client, &pair, Some(&token), &path).await;
+    assert_eq!(go_status, 200);
+    assert_eq!(rs_status, 200);
     assert_eq!(
-        forwarded.as_deref(),
-        Some("go"),
-        "a valid ActiveLicenseId means a licence we cannot render, so Go answers"
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "the full client licence must be byte-identical"
     );
+    let map: serde_json::Value = serde_json::from_slice(&go).unwrap();
+    assert_eq!(map["Id"], "mmrslicensedoracle00000001");
+    assert_eq!(map["SkuName"], "Enterprise");
+    assert_eq!(map["Email"], "oracle@mmrs.invalid");
     assert_eq!(
-        blanked.as_deref(),
-        Some("rust"),
-        "a blanked id is what RemoveLicense leaves; that is not a licence"
+        map.as_object().unwrap().len(),
+        40,
+        "every key GetClientLicense writes"
+    );
+}
+
+/// A plain user: a session, but not the permission — the sanitized map, same as nobody. This is
+/// the case that separates "has a session" from "may read everything", which the anonymous test
+/// alone cannot.
+#[tokio::test]
+async fn a_licensed_plain_user_gets_the_sanitized_map() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
+    let plain = create_plain_user(&client, &admin, &team_id, "licmap").await;
+    let path = format!("{PATH}?format=old");
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_licensed_pair(&client, &pair, Some(&plain.token), &path).await;
+    let ((_, anonymous), _) = fetch_licensed_pair(&client, &pair, None, &path).await;
+    delete_plain_user(&client, &admin, &plain.id).await;
+
+    assert_eq!(go_status, 200);
+    assert_eq!(rs_status, 200);
+    assert_eq!(String::from_utf8_lossy(&go), String::from_utf8_lossy(&rs));
+    assert_eq!(
+        go, anonymous,
+        "a plain user and nobody get the same sanitized map"
     );
 }

@@ -197,10 +197,10 @@ impl App {
     /// The *whole* field scan is hoisted above the licence for the same reason. It is below the
     /// licence in Go and it is pure, so a server left at the default `"none"` — and any patch
     /// that touches no locked field on any server — answers `None` without asking about the
-    /// licence at all. Only a patch Go would actually refuse reaches the licence question, and
-    /// that is the one this process cannot answer: `MinimumEnterpriseLicense` needs the SKU tier,
-    /// so a Professional licence locks nothing and an Enterprise one locks everything, and the
-    /// two are indistinguishable from here.
+    /// licence at all. Only a patch Go would actually refuse reaches the licence question, which
+    /// is `MinimumEnterpriseLicense`: a Professional licence locks nothing and an Enterprise one
+    /// locks the field the scan found. (Until 2026-09-13 that question was a hand-over to Go,
+    /// because the SKU tier was not readable here — [D-413].)
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
     pub async fn check_locked_profile_fields(
         &self,
@@ -228,12 +228,13 @@ impl App {
             return Ok(None);
         }
 
-        match self.license_state().await? {
-            // `MinimumEnterpriseLicense(nil)` is false, so the lock never applies.
-            LicenseState::Unlicensed => Ok(None),
-            LicenseState::Licensed => Err(PrepareError::Unreproducible(
-                "the profile-field lock needs the licence SKU tier, which is not visible here",
-            )),
+        // `MinimumEnterpriseLicense(nil)` is false, so without a licence the lock never applies;
+        // a Professional licence is below the tier and does not apply it either.
+        let license = self.license().await?;
+        if mm_model::license::minimum_enterprise_license(license.as_deref()) {
+            Ok(locked_profile_field(&setting, user, patch))
+        } else {
+            Ok(None)
         }
     }
 
@@ -740,6 +741,56 @@ mod go_parity {
             assert!(
                 rows.iter().any(|row| row["name"] == name),
                 "the corpus still has the {name:?} row"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod licence_tier_tests {
+    use mm_model::session::Session;
+    use mm_model::user::{User, UserPatch};
+
+    fn unreachable_store() -> mm_store::SqlStore {
+        mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(250))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+                .expect("a lazy pool is built without connecting"),
+        )
+    }
+
+    /// `CheckLockedProfileFields` tests `MinimumEnterpriseLicense` — the **enterprise** rung, not
+    /// professional below it and not advanced above it. A patch that would be refused is driven
+    /// through all three SKUs: `professional` is below the rung and locks nothing; `enterprise`
+    /// and `advanced` both lock, which is what separates "at least enterprise" from "exactly
+    /// advanced". The mutation that tested the advanced rung survived until this existed.
+    #[tokio::test]
+    async fn the_lock_applies_from_the_enterprise_rung_upwards() {
+        let user = User {
+            username: "before".to_owned(),
+            ..User::default()
+        };
+        let patch = UserPatch {
+            username: Some("after".to_owned()),
+            ..UserPatch::default()
+        };
+        for (sku, locked) in [
+            ("professional", None),
+            ("enterprise", Some("username")),
+            ("advanced", Some("username")),
+        ] {
+            let config = crate::config::Config {
+                lock_profile_fields_for_email_users: "all".to_owned(),
+                ..crate::license::test_signing::licensed_config(sku)
+            };
+            let app = crate::App::with_config(unreachable_store(), config);
+            assert_eq!(
+                app.check_locked_profile_fields(&Session::default(), &user, &patch)
+                    .await
+                    .expect("MM_LICENSE answers without a query"),
+                locked,
+                "sku {sku}"
             );
         }
     }

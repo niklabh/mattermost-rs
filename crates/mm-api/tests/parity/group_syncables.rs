@@ -492,10 +492,13 @@ async fn every_group_route_this_server_answered_still_answers() {
     }
 }
 
-/// The boundary: a licence row hands all three syncable writes back to the proxy, and removing it
-/// takes them back.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licence_row_hands_every_syncable_write_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -515,7 +518,11 @@ async fn a_licence_row_hands_every_syncable_write_back_to_go() {
     set_active_licence_id(None).await;
 
     for (label, answer) in &forwarded {
-        assert_eq!(answer.as_deref(), Some("go"), "{label} must be forwarded");
+        assert_eq!(
+            answer.as_deref(),
+            Some("rust"),
+            "{label}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
+        );
     }
 
     for (method, path, body) in &routes {

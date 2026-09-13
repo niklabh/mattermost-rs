@@ -153,4 +153,8 @@ else
 fi
 echo "  full log: $LOG"
 echo "================================================================"
+# The licensed mm-api that `common::licensed` starts is a static in each test binary and is not
+# dropped when the binary exits; it belongs to this run, so it ends with it. (The next run's
+# `SecondServer::start` would free the port anyway — this keeps `ss -ltnp` honest in between.)
+mmrs_free_port "$((MMRS_API_PORT + 24))" >/dev/null
 exit "$RC"

@@ -12105,3 +12105,54 @@ a request. That is the same gap the login vertical recorded; it is [D-500], not 
 5. **`parity::user_access_tokens` was sweeping `mmrsbot%` without `BOT_FIXTURES`.** It calls
    `unplant_bots`, the whole-prefix sweep, and a full-workspace run deleted a `user_convert`
    fixture mid-test — a failure naming a route that file never touches. The lock is there now.
+
+## The licence surface: `App::license`, the licensed Go oracle, and the first tier gates (2026-09-13)
+
+Not a route session: the thing five ledger entries (D-300, D-360, D-371, D-390, D-413) were all
+waiting on. Route count unchanged at 460 of 764. What changed is that a licensed installation is
+now *readable* here and *comparable* against Go, which neither was before.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/license_store.rs` — `LicenseStore::get` | DONE | via `db_license_loading` | Go turns a driver error into `ErrNotFound` and `LoadLicense` reads that as "unlicensed"; here it is a 500, for the reason `mm_app::license` gives. |
+| app | `crates/mm-app/src/license.rs` — `validate_license`, `load_license`, `client_license`, `App::license` | DONE | 14 unit + 2 DB + 3 parity | Port of `LicenseValidatorImpl.ValidateLicense` and `LoadLicense`'s three sources. **The row has to verify**: until now `license_state` read `ActiveLicenseId` alone and called a planted id "licensed", which Go never does. RSA PKCS#1 v1.5 over SHA-512 against the two Mattermost keys compiled in from `license_keys/`, or the operator's key via `MMRS_LICENSE_PUBLIC_KEY_FILE`. |
+| app | `crates/mm-app/src/user.rs`, `user_update.rs` — the two profile-field locks | DONE | 4 unit + 3 DB | `MinimumEnterpriseLicense` evaluated, no longer forwarded — [D-413] closed. `professional` locks nothing, `enterprise` locks; held by test. |
+| api | `crates/mm-api/src/license.rs` — `getClientLicense` | DONE | 11 parity | The licensed map is served: `read_license_information` selects full against sanitized, and an anonymous caller (no session, `APIHandler`) is the sanitized branch. Byte-identical to the licensed oracle for all three callers. |
+| oracle | `reference/licensed/main.go`, `scripts/go-licensed.sh` | DONE | — | See note 1. |
+| harness | `crates/mm-api/tests/common/mod.rs` — `licensed`, `fetch_licensed_pair` | DONE | — | One licensed mm-api per test binary on :8090 (+ stack offset), forwarding to the licensed oracle. Panics rather than skips when the oracle is missing. |
+| corpus | `reference/dump/behaviour_license.go` → `fixtures/behaviour_license.json` | DONE | 4 go_parity | Tier ladder over fourteen SKUs, the three gates, eight `License` predicates on each side of every comparison, `GetClientLicense` full and sanitized over the oracle's licence and a sparse one, and the validator's refusals on eleven malformed inputs. |
+
+### Notes
+
+1. **The stack's Go server cannot be licensed, and never could.** `scripts/go-server.sh` builds
+   with no `-ldflags`, so `model.BuildEnterpriseReady` is empty and `LoadLicense` is never
+   called (platform/service.go:371). Every "Go loads its licence at startup and re-reads only on
+   a save" sentence in the ledger was describing a server that loads nothing at all. And a
+   licence it *would* load must verify against a key whose private half is not in the tree. So
+   `reference/licensed/main.go` is `cmd/mattermost` with `utils.LicenseValidator` swapped for one
+   that trusts `MMRS_LICENSE_PUBLIC_KEY_FILE`, built enterprise-ready; the script generates a key
+   pair once per machine, signs an Enterprise licence with it the way Mattermost signs theirs
+   (`openssl dgst -sha512 -sign`, signature appended, base64), and starts the server on `GO`'s
+   port + 32 with the licence in `MM_LICENSE` — **never** in the database, which the stack's
+   unlicensed pair shares. `mm-api` reads the same two variables, so the harness's licensed
+   mm-api verifies the very bytes the oracle loaded. `scripts/stack.sh up` starts it.
+2. **Enterprise SKU, `cloud` off, everything else on.** One process loads one licence. Tier 20
+   opens `requireLicense`, `MinimumProfessionalLicense` and `MinimumEnterpriseLicense`, and leaves
+   `MinimumEnterpriseAdvancedLicense` closed — which is also where the open-source tree runs out
+   of code (the access-control service). The ladder's arithmetic is a pure function with its own
+   corpus; the oracle is for what sits behind the gates.
+3. **Fifteen "a licence row hands the route back to Go" tests changed meaning.** They planted an
+   `ActiveLicenseId` naming no `Licenses` row and asserted a forward. Go's `LoadLicense` looks
+   the row up and finds nothing, so that was never a licence; the tests now assert what both
+   servers do — serve the unlicensed answer — and the licensed half of each family is owed a
+   comparison against the licensed pair instead. The row-planting helper accepts `""`, the shape
+   `RemoveLicense` leaves.
+4. **Go strips trailing NULs before it checks the length**, on the whole decoded buffer, so a
+   signature whose last byte is `0x00` fails to load one time in 256. Reproduced, and the corpus
+   holds a case for it.
+5. **An invalid `MM_LICENSE` hides a valid row.** `LoadLicense` returns as soon as the variable
+   is set, parsed or not. `EnvLicense` has three states for this reason, and the DB test proves
+   the row behind a broken variable is never read.
+6. **`Features.SetDefaults` runs at load**, in `SetLicense`, so a sparse licence body has every
+   flag by the time `GetClientLicense` dereferences them — and a licence with no `features` object
+   at all would be a nil-pointer panic in Go's loader. Refused here instead.

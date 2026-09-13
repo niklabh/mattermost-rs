@@ -312,10 +312,12 @@ pub static USER_COUNT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(()
 
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
-/// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
-/// licence up — so the row alone is enough to make this side believe the installation is licensed.
-/// **Go is unmoved by it**: it loaded its licence at startup and re-reads only on a save, so its
-/// answers do not change and the observable difference is which server produced them.
+/// A 26-character value passes `IsValidId`, which is what `LoadLicense` checks before it looks
+/// the licence up in `Licenses` — and since 2026-09-13 this side looks it up too, so an id that
+/// names **no row** is "no licence" on both servers, not a licence on one. The stack's Go server
+/// is Team Edition and never loads a licence at all; a real licensed answer comes from the
+/// licensed pair (`licensed`), never from this row. `Some("")` is the shape `RemoveLicense`
+/// leaves behind: it blanks the value rather than deleting the row.
 pub async fn set_active_licence_id(id: Option<&str>) {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return;
@@ -333,7 +335,10 @@ pub async fn set_active_licence_id(id: Option<&str>) {
         .expect("the active licence id is cleared");
 
     if let Some(id) = id {
-        assert_eq!(id.len(), 26, "`IsValidId` requires 26 characters");
+        assert!(
+            id.is_empty() || id.len() == 26,
+            "`IsValidId` requires 26 characters (or blank, the de-licensed shape)"
+        );
         sqlx::query("INSERT INTO systems (name, value) VALUES ('ActiveLicenseId', $1)")
             .bind(id)
             .execute(&pool)
@@ -2474,6 +2479,166 @@ impl Drop for SecondServer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The licensed pair
+//
+// The stack's Go server is built without `BuildEnterpriseReady` and never loads a licence, so
+// the licensed half of a route had no Go answer to compare against until `scripts/go-licensed.sh`
+// existed: an enterprise-ready build whose validator trusts a stack-local key, on `GO`'s port
+// + 32, with an Enterprise licence signed by that key in `MM_LICENSE`. This starts an mm-api
+// beside it with the same licence and the same key, forwarding to it, so a suite can compare the
+// two licensed servers the way the rest of the harness compares the two unlicensed ones.
+// ---------------------------------------------------------------------------------------------
+
+/// Base URLs of the licensed Go oracle and the licensed mm-api, plus the licence they share.
+#[derive(Debug, Clone)]
+pub struct LicensedPair {
+    pub go: String,
+    pub rust: String,
+    /// The signed licence, as `MM_LICENSE` carries it.
+    pub signed: String,
+    /// The path of the public key both sides verify it with.
+    pub key_file: String,
+}
+
+/// Where `scripts/go-licensed.sh` leaves the key pair and the signed licence.
+fn stack_license_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../reference/.build/license")
+}
+
+/// The port `GO` listens on, so the oracle ports can be derived from it rather than repeated.
+fn go_port() -> u16 {
+    GO.rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .expect("GO names a port")
+}
+
+/// The licensed Go oracle's base URL — `scripts/go-licensed.sh port`.
+pub fn licensed_go() -> String {
+    format!("http://localhost:{}", go_port() + 32)
+}
+
+/// The mm-api port for the licensed pair: 8090 on stack 0, shifted like every other
+/// `SecondServer` port. Nothing else in the suite uses 809x.
+const LICENSED_RUST_PORT: u16 = 8090;
+
+static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+
+/// The licensed pair, started once per test binary.
+///
+/// **Panics rather than skips** when the stack is enabled and the oracle is missing. A suite whose
+/// oracle is absent passes every test while asserting nothing, and cargo hides the output of a
+/// passing test — `parity_views` did exactly that for twelve tests before its oracle was made
+/// mandatory. `scripts/stack.sh up` starts the oracle; this checks it is there.
+///
+/// One server per binary rather than one per test because every test would otherwise race for
+/// the port: `SecondServer::start` frees it first, so two concurrent starts kill each other. The
+/// child is never dropped — a static cannot be — and `scripts/parity.sh` frees the port when the
+/// run ends; the next start frees it again before binding, so a leftover can never answer for a
+/// fresh binary.
+pub async fn licensed() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED
+        .get_or_init(|| async {
+            let dir = stack_license_dir();
+            let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
+                panic!(
+                    "no signed licence at {}: run `scripts/go-licensed.sh start` ({e})",
+                    dir.display()
+                )
+            });
+            let key_file = dir.join("public.pem");
+            assert!(key_file.exists(), "no public key at {}", key_file.display());
+            let key_file = key_file.to_string_lossy().into_owned();
+
+            let go = licensed_go();
+            let alive = client()
+                .get(format!("{go}/api/v4/license/client?format=old"))
+                .send()
+                .await;
+            let body = match alive {
+                Ok(response) => response.text().await.unwrap_or_default(),
+                Err(e) => panic!("the licensed Go oracle is not listening on {go}: {e}"),
+            };
+            assert!(
+                body.contains(r#""IsLicensed":"true""#),
+                "the Go process on {go} is not licensed: {body}"
+            );
+
+            // The same overlay `scripts/mm-api-env.sh` gives the stack's mm-api, pointed at the
+            // licensed oracle, plus the licence itself.
+            let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let suffix = if offset == 0 {
+                String::new()
+            } else {
+                format!("-{}", offset / 100)
+            };
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let data_dir = root
+                .join(format!("reference/.build/mmroot{suffix}/data/"))
+                .to_string_lossy()
+                .into_owned();
+            let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
+            let listen = format!(":{}", go_port() + 32);
+            let server = SecondServer::start(
+                LICENSED_RUST_PORT,
+                &[
+                    ("MM_LICENSE", signed.as_str()),
+                    ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
+                    ("MM_GO_UPSTREAM", go.as_str()),
+                    ("MM_FILESETTINGS_DIRECTORY", data_dir.as_str()),
+                    ("MM_TEAMSETTINGS_ENABLEOPENSERVER", "true"),
+                    ("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true"),
+                    ("MM_SERVICESETTINGS_SITEURL", go.as_str()),
+                    ("MM_SERVICESETTINGS_LISTENADDRESS", listen.as_str()),
+                    ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
+                    ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
+                    ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+                ],
+            )
+            .await
+            .expect("the licensed mm-api starts — is target/debug/mm-api built?");
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// Fetch `path` from both servers of the licensed pair, with an optional bearer token, and
+/// assert the Rust side served it itself.
+pub async fn fetch_licensed_pair(
+    client: &reqwest::Client,
+    pair: &LicensedPair,
+    token: Option<&str>,
+    path: &str,
+) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let get = async |base: &str, ours: bool| {
+        let mut request = client.get(format!("{base}{path}"));
+        if let Some(token) = token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        let response = request
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+        let status = response.status().as_u16();
+        if ours {
+            assert_served_by_rust(response.headers(), path);
+        }
+        (status, response.bytes().await.expect("body reads").to_vec())
+    };
+    (get(&pair.go, false).await, get(&pair.rust, true).await)
 }
 
 // ---------------------------------------------------------------------------------------------

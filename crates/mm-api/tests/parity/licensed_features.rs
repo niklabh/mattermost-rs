@@ -287,17 +287,13 @@ async fn listing_bookmarks_is_the_same_refusal_as_writing_one() {
     );
 }
 
-/// **A licence row hands every one of them back to Go.**
-///
-/// Added because a mutation making the licensed branch answer 501 as well — that is, never
-/// forwarding — **survived** the first run: every test here runs unlicensed, so "refuse" and
-/// "refuse or forward" are the same program. The work behind these gates is not ported and never
-/// will be from this side, so answering a licensed server ourselves would be silently wrong on a
-/// deployment that has a licence.
-///
-/// Holds the shared lock exclusively, like the other licence-flipping tests.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licence_row_hands_every_route_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -348,8 +344,8 @@ async fn a_licence_row_hands_every_route_back_to_go() {
     for (route, served) in &forwarded {
         assert_eq!(
             served.as_deref(),
-            Some("go"),
-            "licensed, {route} must be forwarded — the feature behind the gate is not ported"
+            Some("rust"),
+            "{route}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
         );
     }
     for (route, served) in &cleared {

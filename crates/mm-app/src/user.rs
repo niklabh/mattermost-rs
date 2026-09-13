@@ -1122,15 +1122,13 @@ impl App {
     ///
     /// # Why the licence conjunct is evaluated last here
     ///
-    /// All four are pure predicates over values this process can read, except the licence: what
-    /// [`crate::App::license_state`] can see is *whether* a licence exists, never its SKU tier,
-    /// and `MinimumEnterpriseLicense` is a question about the tier. So a licensed server would
-    /// have to be handed to Go — for a function whose answer is `false` on a stock server
-    /// regardless, because `LockProfileFieldsForEmailUsers` defaults to `"none"`.
-    ///
-    /// Reordering a conjunction of pure predicates changes no answer, and it turns "licensed"
-    /// from a forward into a forward *only when the other three already hold*. An unlicensed
-    /// server is [`Ok(false)`] outright, since `MinimumEnterpriseLicense(nil)` is false.
+    /// Three of the four are pure predicates over values already in hand; the licence is a
+    /// store read ([`crate::App::license`]). Reordering a conjunction of pure predicates changes
+    /// no answer, and putting the read last means a stock server — where
+    /// `LockProfileFieldsForEmailUsers` is `"none"` — never asks. Until 2026-09-13 the licence
+    /// arm was a hand-over to Go because the SKU tier was not readable here ([D-413]); it is
+    /// `MinimumEnterpriseLicense` now, so a Professional licence locks nothing and an Enterprise
+    /// one locks the picture, exactly as in Go.
     ///
     /// # `"name_and_username"` does not lock the picture
     ///
@@ -1141,9 +1139,7 @@ impl App {
         &self,
         session: &mm_model::session::Session,
         user: &mm_model::user::User,
-    ) -> Result<bool, crate::post::PrepareError> {
-        use crate::post::PrepareError;
-
+    ) -> AppResult<bool> {
         if self
             .session_has_permission_to(session, &mm_model::permission::PERMISSION_EDIT_OTHER_USERS)
             .await
@@ -1160,12 +1156,10 @@ impl App {
             return Ok(false);
         }
 
-        match self.license_state().await? {
-            crate::license::LicenseState::Unlicensed => Ok(false),
-            crate::license::LicenseState::Licensed => Err(PrepareError::Unreproducible(
-                "the profile-field lock needs the licence SKU tier, which is not visible here",
-            )),
-        }
+        let license = self.license().await?;
+        Ok(mm_model::license::minimum_enterprise_license(
+            license.as_deref(),
+        ))
     }
 }
 
@@ -1261,35 +1255,43 @@ mod tests {
         );
     }
 
-    /// Conjunct 2, both ways.
+    /// Conjunct 2: the **tier**, not the presence of a licence.
     ///
-    /// With `MM_LICENSE` set — which [`crate::App::license_state`] reads as "licensed" without a
-    /// query — the other three conjuncts all hold and the tier is the only thing left, so the
-    /// answer is the hand-over rather than a guess. `MinimumEnterpriseLicense` is false for
-    /// `nil`, so an unlicensed server is a served `false` from the same configuration.
+    /// With `MM_LICENSE` set to a licence that verifies — [`crate::App::license`] resolves it
+    /// without a query — the other three conjuncts all hold and the SKU is the only thing left.
+    /// `MinimumEnterpriseLicense` is the ladder at `license.go:42`: `professional` (10) is below
+    /// `enterprise` (20), so the same request locks on one and not the other. A port that had
+    /// tested "any licence" would lock on both.
     #[tokio::test]
-    async fn only_a_licensed_server_with_every_other_conjunct_forwards() {
-        let licensed = Config {
-            license: "a-signed-licence-blob".to_owned(),
-            ..locking_config()
-        };
-        let app = crate::App::with_config(unreachable_store(), licensed);
-        let err = app
-            .is_profile_image_locked_for_user(&Session::default(), &email_user())
-            .await
-            .expect_err("the SKU tier is not visible from here");
-        assert!(matches!(err, crate::post::PrepareError::Unreproducible(_)));
+    async fn the_licence_tier_decides_the_last_conjunct() {
+        for (sku, locked) in [
+            ("enterprise", true),
+            ("professional", false),
+            ("advanced", true),
+        ] {
+            let config = Config {
+                lock_profile_fields_for_email_users: "all".to_owned(),
+                ..crate::license::test_signing::licensed_config(sku)
+            };
+            let app = crate::App::with_config(unreachable_store(), config);
+            assert_eq!(
+                app.is_profile_image_locked_for_user(&Session::default(), &email_user())
+                    .await
+                    .expect("MM_LICENSE answers without a query"),
+                locked,
+                "sku {sku}"
+            );
+        }
 
-        // The same request on a server with no licence is answered, not forwarded: the store is
-        // consulted for `ActiveLicenseId` and its failure is a 500, so this asserts the *shape*
-        // of the licensed branch rather than re-deriving it.
+        // The same request on a server with no `MM_LICENSE` goes to the store for
+        // `ActiveLicenseId`, and its failure is a 500 — never a silent `false`.
         let app = crate::App::with_config(unreachable_store(), locking_config());
         let err = app
             .is_profile_image_locked_for_user(&Session::default(), &email_user())
             .await
             .expect_err("the store is unreachable");
-        assert!(
-            matches!(err, crate::post::PrepareError::App(ref e) if e.status_code == 500),
+        assert_eq!(
+            err.status_code, 500,
             "a store failure is a 500, never a silent unlicensed"
         );
     }

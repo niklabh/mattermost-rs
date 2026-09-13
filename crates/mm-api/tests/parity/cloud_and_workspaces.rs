@@ -382,9 +382,13 @@ async fn the_id_checks_are_where_go_puts_them() {
     }
 }
 
-/// A licence hands all twenty-five back to Go.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_licence_row_hands_every_route_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -428,9 +432,8 @@ async fn a_licence_row_hands_every_route_back_to_go() {
     for (route, served) in &forwarded {
         assert_eq!(
             served.as_deref(),
-            Some("go"),
-            "licensed, {route} must be forwarded — neither the cloud interface nor the remote \
-             cluster service exists on this side"
+            Some("rust"),
+            "{route}: an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
         );
     }
     for (route, served) in &cleared {

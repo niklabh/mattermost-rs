@@ -5571,6 +5571,12 @@ porting an Enterprise surface this build cannot exercise.
 
 **Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.
 
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
+
 ## D-156 · The two config settings the permission checks read cannot be read from Go's config
 
 **Status** CLOSED · **Severity** divergence · **Raised** 2026-08-21 (phase 2, authorization.go)
@@ -7090,6 +7096,12 @@ route needs them first. Nothing here is blocked on the licence — a licence is 
 not a reason to skip the work, only a reason nothing on this stack can *compare* it. When it lands
 the comparison oracle has to be something other than the Go server beside it.
 
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
+
 ---
 
 ## D-301 · `property_store`'s two searches implement a subset of the predicates — CLOSED 2026-09-12
@@ -7348,6 +7360,12 @@ behind whichever route needs them first. `mm_model::Group`'s validators are alre
 now pinned branch-by-branch against a generated oracle (`fixtures/behaviour_group.json`), so the
 model layer is not the blocker; the store and the permission model are.
 
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
+
 ---
 
 ## D-370 · `deleteTeam?permanent=true` forwards when `EnableAPITeamDeletion` is on
@@ -7396,6 +7414,12 @@ for a licensed one.
 
 Both are unreachable on a `mattermost-team-edition` image with zero `Licenses` rows. Recorded so
 the next person to install a licence knows which two routes change shape.
+
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
 
 ---
 
@@ -7448,6 +7472,12 @@ are the ones a later port will get wrong:
 membership reconciliation — behind whichever route needs them first. The team and channel member
 *writes* they would build on are already ported (`mm_app::team_member`, `mm_app::channel_member`),
 so the reconciliation loop is the blocker, not the membership primitives.
+
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
 
 ---
 
@@ -7542,6 +7572,12 @@ Two branch-level facts recorded because no test here can reach them:
 **What is owed:** a licensed oracle, which needs a second Go process started with `MM_LICENSE` the
 way `scripts/go-discoverable.sh` starts one with a different config. Until then the licensed side
 of this route and of the seven group writes are both untested in the same way.
+
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
 
 ---
 
@@ -7792,27 +7828,20 @@ second.
 
 ---
 
-## D-413 · the profile-field lock forwards a licensed server
+## D-413 · the profile-field lock forwards a licensed server — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (the four image routes) ·
+**Closed** 2026-09-13 by the licence surface (`mm_app::license`)
 
-`IsProfileImageLockedForUser` (app/user.go:1465) is a conjunction of four predicates, and the
-third is `model.MinimumEnterpriseLicense(a.License())` — `LicenseToLicenseTier[SkuShortName] >=
-EnterpriseTier`. `App::license_state` can see *whether* a licence row exists and never its SKU
-tier, so that conjunct cannot be answered here.
-
-`is_profile_image_locked_for_user` therefore evaluates the licence **last**, which reordering a
-conjunction of pure predicates does not change: an unlicensed server is `Ok(false)` outright, and
-a licensed one is forwarded *only when the other three already hold* — the caller lacks
-`edit_other_users`, the account is email/password, and `LockProfileFieldsForEmailUsers` is `"all"`.
-On a stock server that setting is `"none"`, so the forward is unreachable without an
-administrator turning it on.
-
-Both `setProfileImage` and `setDefaultProfileImage` check the lock **last**, so this forward too is
-before any write.
-
-**What is owed:** the SKU tier on `LicenseState`, which the same gap blocks in [D-300], [D-360],
-[D-371] and [D-390]. One port of `LicenseToLicenseTier` closes all five.
+`App::license` now loads and verifies the licence body — `MM_LICENSE` or the `Licenses` row
+behind `Systems.ActiveLicenseId`, PKCS#1 v1.5 over SHA-512 against Mattermost's keys — so
+`MinimumEnterpriseLicense` is answered here. `is_profile_image_locked_for_user` and
+`check_locked_profile_fields` (app/user.go:1425, :1465) evaluate the tier as their last conjunct
+and forward nothing; `user::tests::the_licence_tier_decides_the_last_conjunct` holds
+`professional` against `enterprise`, and `db_profile_image_lock` locks on the stack's real signed
+licence. The rest of what this entry pointed at — the licensed halves of [D-300], [D-360], [D-371]
+and [D-390] — is unblocked by the same surface and by `scripts/go-licensed.sh`, the licensed Go
+oracle; each is closed by its own route work.
 
 ---
 
@@ -7901,6 +7930,11 @@ Recorded as ACCEPTED rather than OPEN because there is nothing to *do*: a licens
 forwarded and Go applies the tier test itself. What a future session must not do is "complete" the
 route by adding the id and permission checks its neighbours in `api4/post.go` have — Go skips all
 of them, and `parity::post_acks::nothing_else_about_an_ack_request_is_ever_consulted` is the proof.
+
+**2026-09-13 — the precondition is met.** A licence exists on the stack now (`scripts/go-licensed.sh`,
+Enterprise SKU, so `MinimumProfessionalLicense` holds) and `App::license` reads its tier, so
+"nothing to do" no longer describes this pair: `SaveAcknowledgementForPost` and
+`DeleteAcknowledgementForPost` have an oracle and are owed. Treat as OPEN.
 
 ---
 
@@ -8550,6 +8584,12 @@ porting the six would mean writing them against the source with no oracle — th
 The promotion half is fully ported and is not blocked by any of this: `promoteGuestToUser` checks
 neither the licence nor the config, which is what stops a lapsed licence stranding the guests it
 created.
+
+**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
+reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
+enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
+that every paragraph above says was missing. `common::licensed` in the parity harness starts the
+matching mm-api. What remains is the route work itself, compared against that pair.
 
 ---
 

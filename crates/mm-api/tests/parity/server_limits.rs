@@ -151,10 +151,13 @@ async fn the_two_answers_differ() {
     );
 }
 
-/// **The boundary.** Every non-zero field a licence would produce comes from the licence body, so
-/// a licensed installation goes back to the proxy. Holds the shared lock exclusively.
+/// **The boundary, as `LoadLicense` draws it.** A `Systems.ActiveLicenseId` that names no
+/// `Licenses` row is not a licence: Go looks the row up (platform/license.go:104) and finds
+/// nothing, and since 2026-09-13 so do we. Planting one therefore changes nothing on the wire —
+/// still served here, still the unlicensed answer. The licensed half is compared against the
+/// licensed pair (`common::licensed`), never against this row. Holds the shared lock exclusively.
 #[tokio::test]
-async fn a_license_row_hands_the_route_back_to_go() {
+async fn a_planted_id_without_a_row_is_not_a_licence() {
     if !stack_enabled() {
         return;
     }
@@ -186,8 +189,8 @@ async fn a_license_row_hands_the_route_back_to_go() {
 
     assert_eq!(
         forwarded.as_deref(),
-        Some("go"),
-        "the seat limits would come from the licence body, which we cannot read"
+        Some("rust"),
+        "an ActiveLicenseId naming no Licenses row is not a licence, so still ours"
     );
     assert_eq!(cleared.as_deref(), Some("rust"));
 }

@@ -1,4 +1,5 @@
-//! `App::is_profile_image_locked_for_user`'s **unlicensed** answer, against a real Postgres.
+//! `App::is_profile_image_locked_for_user`'s **unlicensed** answer against a real Postgres, and
+//! its licensed answer against the stack's real signed licence.
 //!
 //! ```sh
 //! docker compose up -d
@@ -116,29 +117,47 @@ async fn profile_image_lock_answers_false_without_a_licence() {
     );
 }
 
-/// The same call with `MM_LICENSE` set **is** the forward, so the test above is not passing
-/// because the function forwards everything.
+/// The same call with the stack's licence in `MM_LICENSE` **locks**, so the test above is not
+/// passing because the function answers `false` for everything.
 ///
-/// This half needs no database — `license_state` short-circuits on the configured licence — but it
-/// lives here so the pair is read together: the difference between them is the only observable
-/// consequence of the licence conjunct anywhere in the tree.
+/// The licence is the one `scripts/go-licensed.sh` signs for the licensed Go oracle — Enterprise
+/// SKU, verified here against the same stack-local key — so this is the real loader on real
+/// bytes, not a stub. It needs no database (`App::license` resolves `MM_LICENSE` without a query)
+/// but lives here so the pair is read together: the tier is the only difference between them.
 #[tokio::test]
-async fn profile_image_lock_forwards_a_licensed_server() {
+async fn profile_image_lock_locks_an_enterprise_licensed_server() {
     if !enabled() {
         return;
     }
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../reference/.build/license");
+    let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
+        panic!(
+            "no signed licence at {}: run `scripts/go-licensed.sh start` ({e})",
+            dir.display()
+        )
+    });
+    let key = std::fs::read_to_string(dir.join("public.pem")).expect("the public key is beside it");
     let app = app_with(Config {
-        license: "a-signed-licence-blob".to_owned(),
+        license: signed,
+        license_public_key: Some(key),
         ..every_conjunct_but_the_licence()
     })
     .await;
-    let err = app
-        .is_profile_image_locked_for_user(&Session::default(), &User::default())
+    let license = app
+        .license()
         .await
-        .expect_err("the SKU tier is not visible from here");
+        .expect("MM_LICENSE resolves without a query");
+    assert_eq!(
+        license.as_ref().map(|l| l.sku_short_name.as_str()),
+        Some("enterprise"),
+        "the stack's licence loaded and is the Enterprise SKU"
+    );
     assert!(
-        matches!(err, mm_app::post::PrepareError::Unreproducible(_)),
-        "a licensed server is handed over, not guessed at: {err:?}"
+        app.is_profile_image_locked_for_user(&Session::default(), &User::default())
+            .await
+            .expect("answered, not forwarded"),
+        "MinimumEnterpriseLicense holds, and so does every other conjunct"
     );
 }
 

@@ -948,6 +948,16 @@ pub struct Config {
     /// question anything ported asks of it is whether it is empty: validating a licence needs the
     /// signing key, which is not ported. Read by [`crate::App::license_state`].
     pub license: String,
+
+    /// The PEM text of the public key licences verify against, when `MMRS_LICENSE_PUBLIC_KEY_FILE`
+    /// names a file; `None` means Mattermost's own keys, chosen by [`service_environment`].
+    ///
+    /// **Not a Mattermost setting**, hence the prefix. It is the mirror of the substitution
+    /// `reference/licensed/main.go` makes in the Go server's validator, so that a licence signed
+    /// with a stack-local key is honoured by both sides of a comparison — and it is the only way a
+    /// licence not signed by Mattermost is ever honoured here. Read by
+    /// [`crate::license::LicenseKeys::from_config`].
+    pub license_public_key: Option<String>,
 }
 
 impl Config {
@@ -1222,6 +1232,7 @@ impl Default for Config {
             elasticsearch_enable_searching: false,
             feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
+            license_public_key: None,
         }
     }
 }
@@ -1725,6 +1736,24 @@ impl Config {
             // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
             // any non-empty value as "a licence was supplied" before it ever tries to parse it.
             license: lookup("MM_LICENSE").unwrap_or(default.license),
+            // The variable names a file and the file holds the key: read here, once, so a
+            // misnamed path fails at startup rather than on the first licence check. An
+            // unreadable file is an error and a fallback to Mattermost's keys — under which a
+            // stack-local licence will not verify, which is visible, rather than a crash.
+            license_public_key: match lookup("MMRS_LICENSE_PUBLIC_KEY_FILE") {
+                Some(path) => match std::fs::read_to_string(&path) {
+                    Ok(pem) => Some(pem),
+                    Err(err) => {
+                        tracing::error!(
+                            path = %path,
+                            error = %err,
+                            "MMRS_LICENSE_PUBLIC_KEY_FILE could not be read; using Mattermost's keys"
+                        );
+                        default.license_public_key
+                    }
+                },
+                None => default.license_public_key,
+            },
         }
     }
 
@@ -2120,6 +2149,7 @@ impl Config {
             // Not a config field on either server — `MM_LICENSE` is its own variable, read by
             // `apply_env`.
             license: default.license,
+            license_public_key: default.license_public_key,
         })
     }
 

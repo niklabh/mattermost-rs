@@ -11,32 +11,37 @@
 //! between the full and the sanitized map — but its absence is not an error, which is why nothing
 //! here takes [`crate::auth::AuthenticatedSession`].
 //!
-//! # Only the unlicensed answer is ours
+//! # Both maps are ours
 //!
-//! `c.App.Srv().ClientLicense()` reads a map Go built **at startup** from the licence body. That
-//! body is signed, its client map is derived from the enterprise feature set, and neither is
-//! ported — so a licensed installation is forwarded and Go answers it. See
-//! [`mm_app::license::LicenseState`] for how a second process can tell the difference.
+//! `c.App.Srv().ClientLicense()` reads a map Go built **at startup** from the licence body
+//! (`utils.GetClientLicense`); [`mm_app::App::client_license`] builds the same map from the same
+//! body, verified the same way, on demand. Until 2026-09-13 only the unlicensed fallback was
+//! served and a licensed installation was forwarded — the licence could be detected but not read.
 //!
-//! On the unlicensed path the two branches of the permission check **converge**: Go's fallback map
-//! is `{"IsLicensed": "false"}`, and `GetSanitizedClientLicense` only ever deletes keys
-//! (`utils.GetSanitizedClientLicense`, utils/license.go:273) — `Id`, `Name`, `Email`, `IssuedAt`,
-//! `StartsAt`, `ExpiresAt`, `SkuName`, none of which is present. So an admin and an anonymous
-//! caller get identical bytes, and `read_license_information` is not consulted here at all. That
-//! is not a shortcut: a permission check whose two outcomes are indistinguishable cannot be
-//! tested, and writing one would be an untested claim about a branch this server never reaches.
-//! When a licensed installation stops being forwarded, the check lands with the map it gates.
+//! # The permission decides the map, and only on a licensed server
+//!
+//! `read_license_information` selects the full map; everyone else — a plain user, and an
+//! anonymous caller, since `APIHandler` requires no session — gets `GetSanitizedClientLicense`,
+//! which deletes seven keys (`Id`, `Name`, `Email`, `IssuedAt`, `StartsAt`, `ExpiresAt`,
+//! `SkuName`; utils/license.go:273). On an unlicensed server the two branches **converge**: the
+//! fallback map is `{"IsLicensed": "false"}` and sanitising only deletes, so an admin and an
+//! anonymous caller get identical bytes. The check is made regardless, because the answer is the
+//! same and the code path is then the one a licensed server takes.
+//!
+//! An anonymous caller has no session, and `SessionHasPermissionTo` on the zero-valued session
+//! Go carries for one is false: no roles, not unrestricted. [`OptionalSession`] reproduces the
+//! zero session as `None`, and `None` is the sanitized branch.
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_app::license::LicenseState;
+use mm_model::permission::PERMISSION_READ_LICENSE_INFORMATION;
 use mm_model::utils::AppError;
 
 use crate::AppState;
+use crate::auth_writes::OptionalSession;
 use crate::channels::query_first;
 use crate::error::ApiError;
-use crate::proxy;
 
 /// The query parameter, and the only value Go accepts for it.
 const FORMAT_PARAM: &str = "format";
@@ -55,8 +60,12 @@ const FORMAT_OLD: &str = "old";
 /// The empty case is checked first, so `?format=` cannot reach the second branch. Getting that
 /// order backwards changes the id a client sees for the commonest mistake — omitting the
 /// parameter — which is exactly the sort of thing the webapp branches on.
-#[tracing::instrument(skip_all, fields(format, licensed))]
-pub async fn get_client_license(State(state): State<AppState>, request: Request) -> Response {
+#[tracing::instrument(skip_all, fields(format, sanitized))]
+pub async fn get_client_license(
+    State(state): State<AppState>,
+    session: OptionalSession,
+    request: Request,
+) -> Response {
     let format = query_first(request.uri().query(), FORMAT_PARAM).unwrap_or_default();
     tracing::Span::current().record("format", &format);
 
@@ -67,17 +76,26 @@ pub async fn get_client_license(State(state): State<AppState>, request: Request)
         return ApiError::invalid_param(FORMAT_PARAM).into_response();
     }
 
-    let state_of_licence = match state.app.license_state().await {
-        Ok(state_of_licence) => state_of_licence,
+    let may_read_everything = match &session.0 {
+        Some(session) => {
+            state
+                .app
+                .session_has_permission_to(session, &PERMISSION_READ_LICENSE_INFORMATION)
+                .await
+        }
+        None => false,
+    };
+    tracing::Span::current().record("sanitized", !may_read_everything);
+
+    let map = if may_read_everything {
+        state.app.client_license().await
+    } else {
+        state.app.sanitized_client_license().await
+    };
+    let map = match map {
+        Ok(map) => map,
         Err(err) => return ApiError::from(err).into_response(),
     };
-    tracing::Span::current().record("licensed", state_of_licence == LicenseState::Licensed);
-
-    if state_of_licence == LicenseState::Licensed {
-        return proxy::forward_to_go(State(state), request).await;
-    }
-
-    let map = LicenseState::unlicensed_client_license();
     match serde_json::to_vec(&map) {
         // `model.MapToJSON` + `w.Write` (license.go:51) — no encoder, so **no trailing newline**.
         Ok(body) => (
