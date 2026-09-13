@@ -8550,3 +8550,53 @@ porting the six would mean writing them against the source with no oracle — th
 The promotion half is fully ported and is not blocked by any of this: `promoteGuestToUser` checks
 neither the licence nor the config, which is what stops a lapsed licence stranding the guests it
 created.
+
+---
+
+## D-520 · `team_admin` compares two sequentially-fetched bodies, and the shared admin's row moves between them
+
+**Status** OPEN · **Severity** test reliability · **Raised** 2026-09-13 (closing the parallel-agent session)
+
+Five of `parity::team_admin`'s tests fail on a full run and pass in isolation, every time. It is
+not an order tie and not a route regression — the diagnosis is exact.
+
+`common::fetch_both` queries **Go first, then Rust**, and the tests compare the two bodies
+byte-for-byte. The fixture's team is created by the shared fixture administrator, so that
+account is a member and its row is in every `members_minus_group_members` response. Any suite
+that touches the administrator's profile between the two fetches changes `Users.UpdateAt`, and
+the comparison fails on that field alone.
+
+Measured on the final run of 2026-09-13, decoding the two byte arrays:
+
+    first difference at byte 2814, both bodies 3309 bytes
+    GO  …"id":"6rtg4qbe5bn55mw5t6gphxyaxa",…,"update_at":1789278355253,…,"username":"sliceuser"…
+    RS  …"id":"6rtg4qbe5bn55mw5t6gphxyaxa",…,"update_at":1789278355423,…,"username":"sliceuser"…
+
+170 milliseconds apart, same row, same user: `sliceuser`, the account the whole binary logs in as.
+
+**Why no existing lock helps.** `USER_COUNT` serialises count comparisons and `ACTIVE_LICENCE_ROW`
+serialises the licence row; neither covers "anything, anywhere, that writes the administrator's
+profile". The window is between two HTTP requests inside one helper, so a lock would have to be
+held by every suite that can touch that account — which is most of them.
+
+**What is owed — three options, and the choice belongs to whoever picks this up:**
+
+1. **Keep the administrator out of the fixture's team.** Cleanest for the byte comparison, but the
+   creator is a member by construction, so it means removing it afterwards and adjusting the
+   expected counts in several tests. The route needs `manage_system`, not membership, so the
+   administrator can still query a team it does not belong to.
+2. **Mint a second system administrator for this fixture** (`PUT /users/{id}/roles` is served
+   now) and have it create the team. Nothing else in the suite touches that account, so its row
+   is stable.
+3. **Normalise `update_at` before comparing.** Cheapest and weakest — it gives up the byte-for-byte
+   property on the one field most likely to drift.
+
+Option 2 preserves the most and costs the least in expected-count churn.
+
+**Not a new class.** It is the fourth shape of the same underlying problem this session: one
+database, one Go server and one fixture administrator shared by a massively parallel suite. The
+others were a count captured for equality across concurrent creates ([D-352]-family, fixed), an
+unscoped websocket wait satisfied by another suite's event (fixed), and a bot-prefix sweep run
+without `BOT_FIXTURES` deleting a sibling's fixture (fixed). Each was patched where it appeared.
+A deliberate pass on suite isolation — per-suite fixture accounts, or a schema per suite — would
+retire the category instead of the instance.
