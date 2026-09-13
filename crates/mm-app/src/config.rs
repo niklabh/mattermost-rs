@@ -181,6 +181,24 @@ pub struct Config {
     /// anonymous-signup switch specifically.
     pub enable_user_creation: bool,
 
+    /// `TeamSettings.EnableUserDeactivation` (config.go:2547, defaulted **`false`** at :2609).
+    ///
+    /// The *self*-deactivation switch and nothing else. Both `deleteUser` (api4/user.go:1684)
+    /// and `updateUserActive` (api4/user.go:1918) consult it only when the target is the session
+    /// owner; an administrator deactivating somebody else never reaches it. The two routes then
+    /// disagree about the escape hatch: `deleteUser`'s refusal is additionally skipped when the
+    /// caller holds `manage_system`, `updateUserActive`'s is not. So a system admin can delete
+    /// their own account on a server where the flag is off and cannot deactivate it.
+    pub enable_user_deactivation: bool,
+
+    /// `ServiceSettings.EnableAPIUserDeletion` (config.go:454, defaulted **`false`** at :894).
+    ///
+    /// The single gate on `DELETE /api/v4/users/{user_id}?permanent=true`. Off — which is the
+    /// default and what this deployment runs — the route answers 401 with one of two ids
+    /// depending on whether the *caller* is a system admin, and writes nothing. On, it runs
+    /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
+    pub enable_api_user_deletion: bool,
+
     /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
     ///
     /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
@@ -1065,6 +1083,10 @@ impl Default for Config {
             enable_open_server: false,
             // config.go:2585 — `new(true)`.
             enable_user_creation: true,
+            // config.go:2609 — `new(false)`.
+            enable_user_deactivation: false,
+            // config.go:894 — `new(false)`.
+            enable_api_user_deletion: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
             // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
@@ -1302,6 +1324,16 @@ impl Config {
                 lookup,
                 "MM_TEAMSETTINGS_ENABLEUSERCREATION",
                 default.enable_user_creation,
+            ),
+            enable_user_deactivation: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLEUSERDEACTIVATION",
+                default.enable_user_deactivation,
+            ),
+            enable_api_user_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPIUSERDELETION",
+                default.enable_api_user_deletion,
             ),
             enable_sign_up_with_email: lookup_bool(
                 lookup,
@@ -1838,6 +1870,12 @@ impl Config {
             enable_user_creation: team_settings
                 .enable_user_creation
                 .unwrap_or(default.enable_user_creation),
+            enable_user_deactivation: team_settings
+                .enable_user_deactivation
+                .unwrap_or(default.enable_user_deactivation),
+            enable_api_user_deletion: service
+                .enable_api_user_deletion
+                .unwrap_or(default.enable_api_user_deletion),
             enable_sign_up_with_email: email_settings
                 .enable_sign_up_with_email
                 .unwrap_or(default.enable_sign_up_with_email),
@@ -2268,6 +2306,8 @@ struct TeamSettingsDocument {
     enable_open_server: Option<bool>,
     #[serde(rename = "EnableUserCreation")]
     enable_user_creation: Option<bool>,
+    #[serde(rename = "EnableUserDeactivation")]
+    enable_user_deactivation: Option<bool>,
     #[serde(rename = "UserStatusAwayTimeout")]
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
@@ -2375,6 +2415,8 @@ struct ServiceSettingsDocument {
     session_length_web_in_days: Option<i64>,
     #[serde(rename = "EnableMultifactorAuthentication")]
     enable_multifactor_authentication: Option<bool>,
+    #[serde(rename = "EnableAPIUserDeletion")]
+    enable_api_user_deletion: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -3264,8 +3306,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 70,
-            "the fixture covers {keys} settings and Config reads 70 from the document. \
+            keys, 72,
+            "the fixture covers {keys} settings and Config reads 72 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

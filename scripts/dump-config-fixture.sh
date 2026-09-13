@@ -74,6 +74,8 @@ MODELLED = {
         # Max-Age of all three cookies. Both keys for the same reason as the mobile pair.
         "SessionLengthWebInHours", "SessionLengthWebInDays",
         "MaximumLoginAttempts", "EnableMultifactorAuthentication",
+        # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
+        "EnableAPIUserDeletion",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
@@ -97,6 +99,9 @@ MODELLED = {
         "EnableCustomUserStatuses", "LockProfileFieldsForEmailUsers",
         # Half of `IsUserSignUpAllowed`, read by `POST /api/v4/users`.
         "EnableUserCreation",
+        # The self-deactivation switch, read by `DELETE /api/v4/users/{user_id}` and
+        # `PUT /api/v4/users/{user_id}/active`.
+        "EnableUserDeactivation",
     ],
     "LdapSettings": ["PictureAttribute", "Enable"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
