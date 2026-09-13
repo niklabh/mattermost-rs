@@ -1902,7 +1902,7 @@ pub async fn invalidate_go_caches_locked(client: &reqwest::Client, admin_token: 
 ///
 /// Five helpers below plant rows no REST call can create. They each opened their own pool; this
 /// is that, once.
-pub(crate) async fn fixture_pool() -> Option<sqlx::PgPool> {
+pub async fn fixture_pool() -> Option<sqlx::PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)

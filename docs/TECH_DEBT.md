@@ -8485,3 +8485,68 @@ against an enterprise build, licensed or not. The licensed case forwards for rea
 covers the likely half of that; an unlicensed enterprise build with LDAP registered would
 diverge. `parity::user_auth::ldap_to_email_refuses_a_non_ldap_account_and_then_has_no_ldap`
 measures it against the binary the strangler actually pairs with.
+
+---
+
+## D-510 · `convertUserToBot` forwards an account that has an `AuthService`
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (account conversion)
+
+`App.ConvertUserToBot` (app/bot.go:648) opens with a branch nothing else in this tree needs:
+
+```go
+if user.AuthService != "" {
+    _, err := a.UpdateUserAuth(rctx, user.Id, &model.UserAuth{AuthService: "", AuthData: &emptyString})
+    ...
+}
+```
+
+`App.UpdateUserAuth` (app/user.go:1488) and `SqlUserStore.UpdateAuthData` (user_store.go:467) are
+both unported, and `UpdateAuthData` is the subject of `PUT /api/v4/users/{user_id}/auth`, which
+belongs to the authentication-data work rather than this one. The statement it issues blanks six
+columns at once — `Password`, `LastPasswordUpdate`, `UpdateAt`, `FailedAttempts`, `AuthService`,
+`AuthData` — and has a unique-constraint arm (`users_authdata_key`) that maps to a 400, so it is
+not a one-line fill-in.
+
+`mm_api::user_convert::convert_user_to_bot` therefore reads `user.auth_service` off the row it has
+already fetched and forwards when it is non-empty. **All three refusals above it are served**, so a
+forwarded request is always one Go would have accepted, and the forward happens before the `Bots`
+insert. `parity::user_convert::an_account_with_an_auth_service_is_handed_to_go` proves the second
+half the only way it can be proved: Go's own conversion answers **200**, which it could not do if
+this server had already written the row its primary key guards.
+
+Closing this needs `UserStore::update_auth_data` — already the second-most-wanted unserved store
+method by `scripts/deps.py`, and named as the next step by the user-deletion session too.
+
+## D-511 · every branch of `demoteUserToGuest` past the licence is unreachable on this stack
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (account conversion)
+
+`demoteUserToGuest` (api4/user.go:3540) checks `Channels().License() == nil` as its **second**
+statement, before the permission and before the user is fetched. On an unlicensed server every
+request is therefore the same 501 `api.team.demote_user_to_guest.license.error` — measured, for a
+plain user, for a system administrator, for `me` and for an id that names nothing. That 501 and
+the `RequireUserId` 400 above it are what `mm_api::user_convert::demote_user_to_guest` serves.
+
+Six things sit behind the gate and none can be compared against Go here:
+
+1. `GuestAccountsSettings.Enable` → 501 `api.team.demote_user_to_guest.disabled.error`;
+2. `Features.GuestAccounts` → **403** `api.team.invite_guests_to_channels.disabled.error` — the
+   only 403 in the handler that is not a permission error, and a different status for what reads
+   like the same refusal;
+3. the `demote_to_guest` permission;
+4. a `manage_system` escalation guard for demoting a system administrator;
+5. the already-a-guest 501;
+6. `App.DemoteUserToGuest` itself, whose store half is `SqlUserStore.DemoteUserToGuest` — the
+   mirror of the promotion transaction, plus a `Bot` refusal
+   (`api.user.demote_user_to_guest.bot_not_allowed.app_error`, 400) with no promotion counterpart.
+
+Planting `Systems.ActiveLicenseId` moves **this** side only; Go loaded its licence at startup and
+re-reads only on a save. So a licensed fixture cannot produce a Go answer to compare against, and
+porting the six would mean writing them against the source with no oracle — the failure mode
+`fixtures/` exists to prevent. The route forwards when licensed instead, and
+`parity::user_convert::a_licensed_demote_is_handed_to_go` pins that.
+
+The promotion half is fully ported and is not blocked by any of this: `promoteGuestToUser` checks
+neither the licence nor the config, which is what stops a lapsed licence stranding the guests it
+created.

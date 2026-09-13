@@ -12074,3 +12074,34 @@ gap plainly rather than hiding it behind the measurement.
 `Users.MfaActive` cannot be set through any api4 route with the flag off. So no test in this tree
 has ever seen a row with MFA active, and the flag forward is covered by a mutation rather than by
 a request. That is the same gap the login vertical recorded; it is [D-500], not a claim of parity.
+
+
+## Account conversion and the guest pair (2026-09-13)
+
+| File | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| api4/user.go (`convertUserToBot`), app/bot.go | `mm-api/src/user_convert.rs`, `mm-app/src/user_convert.rs` | PARTIAL | 2 pass + 5 parity | The user is fetched **before** `manage_system`, so a caller with neither gets 404 — the opposite of `promote` fifty lines away. Converting an account that is already a bot is a **500** `app.bot.createbot.internal_error` from the primary key, not a 400. The body has **no trailing newline** (`w.Write`). An account carrying an `AuthService` forwards, because `UserStore::update_auth_data` is not ported — [D-510]. |
+| api4/bot.go (`convertBotToUser`), app/user.go | `mm-api/src/user_convert.rs`, `mm-app/src/user_convert.rs`, `mm-store/src/bot_store.rs` | DONE | 2 pass + 5 parity | Bot, then body, then permission. Four bodies reach one 400; a password that decodes but is too short fails **after** the patch is written, leaving the account patched and still a bot — reproduced, see note 2. The answer says `is_bot: true` and carries a stale `last_password_update`. One trailing newline, unlike its sibling. |
+| api4/user.go (`promoteGuestToUser`), app/user.go, sqlstore/user_store.go | `mm-api/src/user_convert.rs`, `mm-app/src/user_convert.rs`, `mm-store/src/user_store.rs` | DONE | 5 parity | **No licence gate and no config gate** — the only half of the guest pair any server can run. Permission first, then the fetch, then two different 501s. The store's three statements are one transaction; `JoinDefaultChannels` runs outside it and re-adds the account as a **guest**, see note 3. |
+| api4/user.go (`demoteUserToGuest`) | `mm-api/src/user_convert.rs` | PARTIAL | 2 parity | The licence is the second statement, ahead of the permission and the fetch, so on an unlicensed server every demote is the same 501 whoever asks and whatever id they name — measured. Only `RequireUserId` precedes it. Licensed forwards, before any read past the licence; the body behind it is [D-511]. |
+
+### Notes
+
+1. **Measured, not read.** Every gate order in the table came from a request to the running Go
+   server, because all four differ and none is guessable: the same "no permission, no such user"
+   request is a 404 on `convert_to_bot`, a 403 on `promote` and a 501 on `demote`.
+2. **`ConvertBotToUser` has five writes and no transaction**, and one intermediate state is
+   reachable from a client: roles, patch, password, bot-delete, in that order.
+   `parity::user_convert::a_short_password_is_refused_after_the_patch_is_already_written` is the
+   only test that can tell the port apart from one that validated the password up front.
+3. **A promoted guest rejoins a default channel as a guest.** `JoinDefaultChannels` is handed the
+   `*model.User` the handler read *before* the promotion, so the new `ChannelMembers` row is
+   written with `SchemeGuest = true` after the transaction cleared every other one. Go's own
+   staleness; the parity test compares the two servers rather than asserting zero.
+4. **No stock role separates `promote_guest` from `manage_system`**, so a plain user's 403 pins
+   nothing about *which* permission a route names.
+   `parity::user_convert::each_route_names_its_own_permission` plants a role holding exactly
+   `promote_guest` and drives all three permissioned routes with it.
+5. **`parity::user_access_tokens` was sweeping `mmrsbot%` without `BOT_FIXTURES`.** It calls
+   `unplant_bots`, the whole-prefix sweep, and a full-workspace run deleted a `user_convert`
+   fixture mid-test — a failure naming a route that file never touches. The lock is there now.
