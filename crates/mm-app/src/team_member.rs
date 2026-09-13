@@ -851,15 +851,14 @@ impl App {
         )
     }
 
-    /// Port of `app.App.TeamAccessControlled` (team.go:949).
+    /// Port of `app.App.TeamAccessControlled` (team.go:949), as far as its gate.
     ///
-    /// [`App::team_membership_access_control_enabled`] is a constant `false` on this deployment —
-    /// Team Edition, no licence — so this is a constant `false` too and the `HydrateTeamPolicyActions`
-    /// branch below it is unreachable. Kept as a function so the *call sites* read like Go's and
-    /// so pointing the licence check at a real read makes them all correct at once.
-    #[must_use]
-    pub fn team_access_controlled(&self, _team_id: &str) -> bool {
-        self.team_membership_access_control_enabled()
+    /// `false` whenever [`App::team_membership_access_control_enabled`] is — which covers every
+    /// licence below Enterprise Advanced. Past the gate Go asks the team's policy
+    /// (`HydrateTeamPolicyActions`), which is not ported, so a caller that sees `true` forwards
+    /// rather than guessing; the team id is unused until then.
+    pub async fn team_access_controlled(&self, _team_id: &str) -> AppResult<bool> {
+        self.team_membership_access_control_enabled().await
     }
 
     /// `model.NewWebSocketEvent(WebsocketEventAddedToTeam, "", "", userID, nil, "")` with

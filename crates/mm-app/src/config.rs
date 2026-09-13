@@ -285,6 +285,15 @@ pub struct Config {
     /// `api.user.delete_team.not_enabled.app_error`. Read by `mm_api::teams::delete_team`.
     pub enable_api_team_deletion: bool,
 
+    /// `AccessControlSettings.EnableAttributeBasedAccessControl` (config.go). Go default
+    /// **`false`**.
+    ///
+    /// One of the three terms of `TeamMembershipAccessControlEnabled` (app/team.go:932) — the
+    /// other two are a feature flag that defaults on and `MinimumEnterpriseAdvancedLicense`. Read
+    /// by [`crate::App::team_membership_access_control_enabled`], which forwards a request to Go
+    /// when all three hold, because the attribute-based filtering behind them is not ported.
+    pub enable_attribute_based_access_control: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -802,15 +811,6 @@ pub struct Config {
     /// [`Config::enable_guest_magic_link`] and the licence.
     pub guest_accounts_enable: bool,
 
-    /// `AccessControlSettings.EnableAttributeBasedAccessControl` (config.go), defaulted
-    /// **`false`**.
-    ///
-    /// Half of the gate on every attribute-based access-control branch — `ChannelAccessControlled`
-    /// (app/channel.go:4522) and `TeamMembershipAccessControlEnabled` (app/team.go:932) both read
-    /// it after `MinimumEnterpriseAdvancedLicense`. Read by `users::get_users` to decide whether
-    /// Go could narrow a `not_in_channel` or `not_in_team` listing, which is [D-154].
-    pub enable_attribute_based_access_control: bool,
-
     /// `GuestAccountsSettings.EnableGuestMagicLink` (config.go:3949, defaulted **`false`** at
     /// :3973).
     ///
@@ -1119,6 +1119,7 @@ impl Default for Config {
             enable_api_channel_deletion: false,
             // config.go:885 — `new(false)`.
             enable_api_team_deletion: false,
+            enable_attribute_based_access_control: false,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -1207,7 +1208,6 @@ impl Default for Config {
             google_enable: false,
             office365_enable: false,
             guest_accounts_enable: false,
-            enable_attribute_based_access_control: false,
             enable_guest_magic_link: false,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
@@ -1406,6 +1406,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEAPITEAMDELETION",
                 default.enable_api_team_deletion,
+            ),
+            enable_attribute_based_access_control: lookup_bool(
+                lookup,
+                "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
+                default.enable_attribute_based_access_control,
             ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
@@ -1703,11 +1708,6 @@ impl Config {
                 "MM_GUESTACCOUNTSSETTINGS_ENABLE",
                 default.guest_accounts_enable,
             ),
-            enable_attribute_based_access_control: lookup_bool(
-                lookup,
-                "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
-                default.enable_attribute_based_access_control,
-            ),
             enable_guest_magic_link: lookup_bool(
                 lookup,
                 "MM_GUESTACCOUNTSSETTINGS_ENABLEGUESTMAGICLINK",
@@ -1950,6 +1950,11 @@ impl Config {
             enable_api_team_deletion: service
                 .enable_api_team_deletion
                 .unwrap_or(default.enable_api_team_deletion),
+            enable_attribute_based_access_control: parsed
+                .access_control_settings
+                .unwrap_or_default()
+                .enable_attribute_based_access_control
+                .unwrap_or(default.enable_attribute_based_access_control),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -2087,11 +2092,6 @@ impl Config {
             guest_accounts_enable: guest_accounts
                 .enable
                 .unwrap_or(default.guest_accounts_enable),
-            enable_attribute_based_access_control: parsed
-                .access_control_settings
-                .unwrap_or_default()
-                .enable_attribute_based_access_control
-                .unwrap_or(default.enable_attribute_based_access_control),
             enable_guest_magic_link: guest_accounts
                 .enable_guest_magic_link
                 .unwrap_or(default.enable_guest_magic_link),
@@ -2418,6 +2418,7 @@ struct GuestAccountsSettingsDocument {
     enable_guest_magic_link: Option<bool>,
 }
 
+/// The one field of `AccessControlSettings` a migrated route reads.
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
 /// absent means **enabled**.
 #[derive(Debug, Default, serde::Deserialize)]

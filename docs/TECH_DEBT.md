@@ -7378,29 +7378,26 @@ servers.
 
 ---
 
-## D-371 · the team write family forwards a licensed installation on two routes
+## D-371 · the team write family forwards a licensed installation on two routes — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** unported-branch · **Raised** 2026-09-12 (team write family)
+**Status** CLOSED · **Severity** unported-branch · **Raised** 2026-09-12 (team write family) ·
+**Closed** 2026-09-13 by the licensed halves of the archive pair and the two listings
 
-`deleteTeam` calls `cleanupTeamAccessControlPolicy` between the team write and the websocket
-event, on **both** the archive and the permanent arm, and it needs the enterprise access-control
-service. So `mm_api::teams::delete_team` forwards whole when `license_state()` says Licensed,
-exactly as `mm_api::channel_writes::delete_channel` does for its channel-scope twin.
+The premise was wrong: `cleanupTeamAccessControlPolicy` (team.go:2160) and its channel twin ask
+the access-control service first, but that service is nil on every build without the enterprise
+tree, so the **store fallback is the whole function** — `AccessControlPolicyStore.Delete`, a
+copy-to-history-then-delete that is a no-op without a policy row. Ported
+(`mm_store::access_control_policy_store`, called from `App::soft_delete_team` and
+`App::delete_channel`); `deleteTeam` and `deleteChannel` no longer forward a licensed
+installation, and `parity::team_channel_delete_licensed` archives through both licensed servers
+with a planted policy row on each. The audit record Go writes for a `PolicyEnforced` team is not
+written — audit records are not ported ([D-028]).
 
-`searchTeams` has the same shape one step further out: `FilterNonQualifyingTeamsForUser` and
-`AnnotateRecommendedTeamsForUser` both short-circuit unless `TeamMembershipAccessControlEnabled()`,
-which is a constant `false` here — so the search is served in full rather than forwarded, and the
-ABAC directory filter is simply absent. That is correct for an unlicensed server and **untested**
-for a licensed one.
-
-Both are unreachable on a `mattermost-team-edition` image with zero `Licenses` rows. Recorded so
-the next person to install a licence knows which two routes change shape.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+`searchTeams` and `getAllTeams`: `TeamMembershipAccessControlEnabled` now reads the licence
+(`App::team_membership_access_control_enabled`) — feature flag, `MinimumEnterpriseAdvancedLicense`,
+`AccessControlSettings.EnableAttributeBasedAccessControl` — and both routes **forward** when it is
+true rather than serving a listing Go would have filtered ([D-552]). On the stack's Enterprise
+licence it is false, and both are measured served and identical to the oracle.
 
 ---
 
@@ -7524,41 +7521,18 @@ continuation decoder, before the second multipart route (`POST /brand/image`,
 
 ---
 
-## D-382 · the licensed half of `createTermsOfService` has no oracle on this stack
+## D-382 · the licensed half of `createTermsOfService` has no oracle on this stack — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair) ·
+**Closed** 2026-09-13 by `parity::terms_of_service_licensed`
 
-`POST /api/v4/terms_of_service` is `manage_system`, then `license == nil ||
-!*license.Features.CustomTermsOfService` → **400**. This installation is unlicensed, so the 400 is
-the whole route on the wire and it is compared against Go across six bodies — including bodies that
-are not JSON, which Go never parses because the gate precedes `MapFromJSON`.
-
-Everything past the gate *is* ported — `should_publish`, `App::create_terms_of_service`,
-`TermsOfServiceStore::save` and `get`, all with tests — because licensing does not gate development
-here. What is missing is an **oracle**: Go loads its licence at startup and re-reads it only on a
-save, so planting an `ActiveLicenseId` row moves our answer and not Go's, and a licensed server to
-compare against does not exist on this stack. The same shape as [D-360].
-
-Two branch-level facts recorded because no test here can reach them:
-
-1. **`App.CreateTermsOfService`'s `ErrInvalidInput` branch would nil-dereference in Go.**
-   `termsOfService, err = Save(termsOfService)` assigns `nil` on failure, and the very next line
-   reads `"id="+termsOfService.Id`. It is unreachable — the struct built there always has an empty
-   `Id`, which is the only thing that raises `ErrInvalidInput` — and the port carries the empty-id
-   string it would have produced.
-2. **Re-posting identical text publishes nothing and returns the *existing* row**, id and
-   `create_at` included, so a client cannot tell a no-op from a publish except by the id. The
-   comparison is exact: not trimmed, not case-folded.
-
-**What is owed:** a licensed oracle, which needs a second Go process started with `MM_LICENSE` the
-way `scripts/go-discoverable.sh` starts one with a different config. Until then the licensed side
-of this route and of the seven group writes are both untested in the same way.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+The gate reads `Features.CustomTermsOfService` off the loaded licence (`App::license`; `SetDefaults`
+fills it at load, so it is never nil) instead of forwarding. Both facts the entry could only
+transcribe are measured against the licensed oracle: a publish is a **200** carrying the new row,
+and identical text returns the existing row byte for byte — a revision published through Go and
+re-posted through us comes back with Go's id and `create_at`. The suite holds `common::GO_CACHE`,
+deletes what it published and invalidates both Go servers' caches, because every row it writes is
+"the latest" for the unlicensed pair too.
 
 ---
 
@@ -7896,26 +7870,18 @@ rather than a missing fixture — recorded here so the next batch does not re-de
 notifications hub in this port and nothing about it reaches the HTTP response or the websocket.
 Same posture as [D-215].
 
-## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists
+## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists — CLOSED 2026-09-13
 
-**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-13 (postacks)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (postacks) ·
+**Closed** 2026-09-13 by `mm_api::post_acks`, `mm_app::post_acknowledgement`, `mm_store::post_acknowledgement_store`
 
-`POST` and `DELETE /api/v4/users/{user_id}/posts/{post_id}/ack` open with
-`model.MinimumProfessionalLicense` (api4/post.go:1429, :1468), *above*
-`c.RequirePostId().RequireUserId()` and above both permission gates. On an unlicensed server the
-refusal is the whole route, and that is what `mm_api::licensed_features` serves — measured against
-Go, not read off the source. `App.SaveAcknowledgementForPost` and
-`App.DeleteAcknowledgementForPost` are unreachable here and are not ported.
-
-Recorded as ACCEPTED rather than OPEN because there is nothing to *do*: a licensed installation is
-forwarded and Go applies the tier test itself. What a future session must not do is "complete" the
-route by adding the id and permission checks its neighbours in `api4/post.go` have — Go skips all
-of them, and `parity::post_acks::nothing_else_about_an_ack_request_is_ever_consulted` is the proof.
-
-**2026-09-13 — the precondition is met.** A licence exists on the stack now (`scripts/go-licensed.sh`,
-Enterprise SKU, so `MinimumProfessionalLicense` holds) and `App::license` reads its tier, so
-"nothing to do" no longer describes this pair: `SaveAcknowledgementForPost` and
-`DeleteAcknowledgementForPost` have an oracle and are owed. Treat as OPEN.
+The pair is served past the gate: `MinimumProfessionalLicense` read off `App::license`, then
+`RequirePostId`/`RequireUserId` (with `me`), `edit_other_users`, `read_channel_content`,
+`SaveAcknowledgementForPost` / `DeleteAcknowledgementForPost` with their archived-channel 403s,
+the 404 for nothing to remove, the five-minute deadline, the upsert-and-stamp transaction, and
+the two websocket events each write publishes. All of it compared against the licensed pair in
+`parity::post_acks_licensed`; the unlicensed refusal stays measured in `parity::post_acks`. One
+forward remains, [D-551].
 
 ---
 
@@ -8614,3 +8580,37 @@ answers something other than the 501" (`parity::licensed_features::an_enterprise
 **What is owed:** a `ChannelBookmarkStore`, the app layer, the four handlers and the list route in
 `channels.rs`, compared against `common::licensed`.
 
+---
+
+## D-551 · an acknowledgement on a persistent-notification post is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (licensed acknowledgements)
+
+`saveAcknowledgementForPostWithPost` (app/post_acknowledgements.go:44) runs
+`ResolvePersistentNotification` **after** the upsert and returns its error, which would leave the
+row written and the request failed. That order cannot be reproduced by declining afterwards, so
+`App::save_acknowledgement_for_post` decides before the write and hands the whole request to Go
+when the post is a live persistent-notification post (`PostStore::has_persistent_notification`),
+exactly as the reaction path does. Go's function gives up on its first lines for every other post
+— the author's own, the feature off, no row — so nearly every request is served.
+
+**What is owed:** `forEachPersistentNotificationPost` and the mention scan behind it
+(app/post_persistent_notification.go), shared with reactions. Reachable on the licensed pair by
+creating a post with `priority.persistent_notifications` through the oracle; not attempted here.
+
+---
+
+## D-552 · the team listings forward when attribute-based access control is on
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (licensed team archive)
+
+`getAllTeams`, `searchTeams` and `TeamAccessControlled` (through `addTeamMember`) short-circuit on
+`TeamMembershipAccessControlEnabled` — an Enterprise **Advanced** licence and
+`AccessControlSettings.EnableAttributeBasedAccessControl`. `App::team_membership_access_control_enabled`
+reads both now, and the three callers **forward** when it is true: past the gate Go runs
+`FilterNonQualifyingTeamsForUser`, `AnnotateRecommendedTeamsForUser` and `HydrateTeamPolicyActions`
+against the access-control service, which is enterprise-only and not in the tree. The stack's
+oracle is Enterprise (tier 20), so the served side is measured and the forward is not reachable.
+
+**What is owed:** nothing this stack can compare. Recorded so the forward is known to be a
+forward on that exact predicate, not on "licensed".

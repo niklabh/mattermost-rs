@@ -12191,3 +12191,41 @@ is now ours, measured against the licensed pair and its guest variant.
    signs has the flag on; the 403 it guards is pinned by a mutation, not by a comparison.
 4. **The miss id is `app.user.missing_account.const`**, not `.app_error` — measured on both
    licensed servers after the port had guessed the neighbour's suffix.
+## The licensed halves of the acknowledgement pair, `createTermsOfService`, and the archive cleanup (2026-09-13)
+
+Three ledger entries the licence surface unblocked, each now served and compared against the
+licensed pair (`common::licensed`): D-422, D-382 and D-371. Route count unchanged at 460 of 764
+relative to 80162e4 — every route here was already answered; what changed is that the licensed
+half of each is answered too.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/post_acknowledgement_store.rs` — `get`, `save_with_model`, `delete` | DONE | via parity | A delete is `AcknowledgedAt = 0`, and both writes stamp `Posts.UpdateAt` in the same transaction. |
+| store | `crates/mm-store/src/access_control_policy_store.rs` — `delete` | DONE | 1 DB | Copy to history, then delete, or nothing; the history key refuses a second copy of the same revision and the live row survives the rollback. |
+| app | `crates/mm-app/src/post_acknowledgement.rs` | DONE | 1 unit | The persistent-notification branch forwards before the write, [D-551]; the `post_edited` shape is checked before the write too. |
+| app | `crates/mm-app/src/team.rs`, `team_member.rs`, `channel_write.rs` | DONE | 1 unit | `team_membership_access_control_enabled` reads the licence tier and `AccessControlSettings`; both archives call the policy cleanup. |
+| app | `crates/mm-app/src/config.rs` — `enable_attribute_based_access_control` | DONE | — | `MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL`. |
+| api | `crates/mm-api/src/post_acks.rs` | DONE | 2 unit + 6 parity | The pair, moved out of `licensed_features.rs`. See note 1. |
+| api | `crates/mm-api/src/terms_of_service.rs` | DONE | 2 parity | `Features.CustomTermsOfService` off the loaded licence. |
+| api | `crates/mm-api/src/teams.rs`, `channel_writes.rs`, `team_member_writes.rs` | DONE | 3 parity | `deleteTeam`/`deleteChannel` no longer forward a licence; `getAllTeams`/`searchTeams` forward on the ABAC predicate, [D-552]. |
+
+### Notes
+
+1. **Who gets which refusal past the licence is decided by the read-post fallback.**
+   `SessionHasPermissionToReadPost` on a post that does not exist falls back to the caller's own
+   `read_channel_content`, which a system administrator holds — so the admin passes the gate and
+   meets `GetSinglePost`'s **404**, while a plain user gets the gate's 403. Measured on the oracle
+   after the first version of the test expected 403 for both.
+2. **An open channel the caller is not in is readable.** The same fallback grants
+   `read_public_channel` on the team, so the "channel the reader is not in" case has to be a
+   private channel or Go answers 200. Measured.
+3. **`acknowledged_at` is the one field the two servers cannot agree on** — each stamps its own
+   millisecond — and it is the field the five-minute deadline is decided on, so that test plants
+   the row six minutes old and both servers refuse it.
+4. **The two Go servers each cache the latest terms of service.** A revision published through
+   the licensed pair is the unlicensed pair's latest too; the suite purges it and invalidates both
+   caches under `GO_CACHE`, or the unlicensed `terms_of_service` suite compares a cached deleted
+   row against a live table.
+5. **`cleanupTeamAccessControlPolicy` never needed the enterprise service.** It asks for it, gets
+   nil, and takes the store fallback — on Team Edition, on the licensed oracle, on any build without
+   the private tree. [D-371] forwarded on a premise the source did not support.

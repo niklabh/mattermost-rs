@@ -44,6 +44,7 @@ pub mod login;
 pub mod oauth;
 pub mod password;
 pub mod post;
+pub mod post_acknowledgement;
 pub mod post_create;
 pub mod post_unread;
 pub mod post_write;

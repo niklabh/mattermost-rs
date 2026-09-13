@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM accesscontrolpolicies WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "caa4e70a959738ac9c8e2ef8959e515a81dc47a8c6c9b5e00682c3a4f9ccafa8"
+}
