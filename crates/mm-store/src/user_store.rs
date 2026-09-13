@@ -387,6 +387,31 @@ pub trait UserStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.DemoteUserToGuest` (user_store.go:2264) — the mirror of
+    /// [`UserStore::promote_guest_to_user`], with two differences a reader would miss.
+    ///
+    /// # `Roles` is **replaced**, not substituted
+    ///
+    /// Promotion rewrites `system_guest` to `system_user` inside whatever role string the row
+    /// holds; demotion sets the whole column to `system_guest`. An administrator who is demoted
+    /// loses `system_admin` along with everything else, which is why the handler guards that
+    /// case behind `manage_system`.
+    ///
+    /// # `SchemeAdmin` is cleared too
+    ///
+    /// Both membership tables get `SchemeUser = false, SchemeAdmin = false, SchemeGuest = true`
+    /// by `UserId` alone; promotion touches only `SchemeUser` and `SchemeGuest`. A channel
+    /// administrator demoted to guest is a plain guest everywhere.
+    ///
+    /// Returns the demoted user. Go returns the row it read **before** the writes with `Roles`
+    /// and `UpdateAt` patched in; this re-reads after the commit, which differs only if another
+    /// writer touched the row inside the window — the same values, one read later. A miss is
+    /// [`StoreError::NotFound`] before anything is written.
+    fn demote_user_to_guest(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetForLogin` (user_store.go:1422).
     ///
     /// # The two flags choose the predicate, and neither being set is an error
@@ -3005,6 +3030,78 @@ impl UserStore for SqlUserStore {
             })?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn demote_user_to_guest(&self, user_id: &str) -> Result<User, StoreError> {
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go's `us.Get(rctx, userID)` inside the transaction: a miss is `ErrNotFound` and nothing
+        // has been written yet.
+        let exists: Option<String> =
+            sqlx::query_scalar!("SELECT id FROM users WHERE id = $1", user_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: format!("failed to get User with userId={user_id}"),
+                    source,
+                })?;
+        if exists.is_none() {
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("id={user_id}"),
+            });
+        }
+
+        let cur_time = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            "UPDATE users SET roles = $2, updateat = $3 WHERE id = $1",
+            user_id,
+            mm_model::user::external::SYSTEM_GUEST_ROLE_ID,
+            cur_time,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE channelmembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update ChannelMembers with userId={user_id}"),
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE teammembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",
+            user_id,
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update TeamMembers with userId={user_id}"),
+            source,
+        })?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+
+        self.get(user_id).await
     }
 
     #[tracing::instrument(skip_all, fields(by_username, by_email, found))]

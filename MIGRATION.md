@@ -12156,3 +12156,38 @@ now *readable* here and *comparable* against Go, which neither was before.
 6. **`Features.SetDefaults` runs at load**, in `SetLicense`, so a sparse licence body has every
    flag by the time `GetClientLicense` dereferences them — and a licence with no `features` object
    at all would be a nil-pointer panic in Go's loader. Refused here instead.
+
+## The licensed demote, the ABAC gate on `getUsers`, and the content-flagging rung (2026-09-13)
+
+Base 80162e4 (the licence surface). Route count unchanged at 460 of 764 — `POST /users/{id}/demote`
+was already counted as served for its refusal; what changed is that every branch past the licence
+is now ours, measured against the licensed pair and its guest variant.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/user_store.rs` — `demote_user_to_guest` | DONE | via parity | The mirror of the promotion with two differences a reader misses: `Roles` is **replaced** with `system_guest`, and both membership tables lose `SchemeAdmin` too. Returns the demoted user, re-read after the commit. |
+| app | `crates/mm-app/src/user_convert.rs` — `demote_user_to_guest` | DONE | via parity | The bot 400 first; then the store, the `user_updated` event and the session re-roll from the store's own answer, and the team/channel member events with Go's `continue`. No caches to clear here. |
+| api | `crates/mm-api/src/user_convert.rs` — `demote_user_to_guest` | DONE | 5 parity | Six gates in Go's order, three of them 501. The licence and the setting precede the permission and the fetch, so with guest accounts off every demote is the same 501 whoever asks. [D-511] closed. |
+| api | `crates/mm-api/src/users.rs` — `access_control_possible` | DONE | 2 unit + 1 parity | The ABAC forward fires on Go's own conjunction — Advanced rung **and** the setting — and the `not_in_*` arms are served below it, `abac_match_only` included. [D-154] closed. |
+| app | `crates/mm-app/src/config.rs` — `enable_attribute_based_access_control` | DONE | 2 unit | `AccessControlSettings.EnableAttributeBasedAccessControl`, from the document and the environment. |
+| api | `crates/mm-api/src/licensed_features.rs` — `refuse_below_advanced_or_forward` | DONE | 1 parity | Content flagging refuses below the **Advanced** rung, so an Enterprise licence gets the 501 from both servers and it is ours. Bookmarks still forward on any licence — [D-561]. |
+| oracle | `scripts/go-licensed.sh` — `MMRS_LICENSED_VARIANT=guest`, port +33 | DONE | — | See note 1. |
+| harness | `crates/mm-api/tests/common/mod.rs` — `licensed_guest` | DONE | — | The guest pair, on :8091 + the stack offset; the licensed start is factored so both pairs share one overlay. |
+
+### Notes
+
+1. **`GuestAccountsSettings.Enable` is off in the shared configuration document**, and
+   `demoteUserToGuest` refuses on it before the permission and the user. Turning it on in the
+   document would move `getLoginType`, `login` and every guest-gated route under suites that
+   assert the stock value, so the setting is an environment override on a **second** licensed Go
+   — the same binary, the same licence, one variable different — exactly as `go-discoverable.sh`
+   handles a flag. `scripts/stack.sh up` starts it; `common::licensed_guest` starts the matching
+   mm-api with the same override.
+2. **The escalation guard is invisible on the wire.** The 403 a `demote_to_guest` holder gets for
+   demoting a system administrator is byte-identical to the 403 a caller without the permission
+   gets — the permission name is in `detailed_error`, which is wiped. What tells the two apart in
+   the suite is that the same caller then demotes a plain target and gets a 200.
+3. **`Features.GuestAccounts` off is the one branch no oracle reaches.** Every licence the script
+   signs has the flag on; the 403 it guards is pinned by a mutation, not by a comparison.
+4. **The miss id is `app.user.missing_account.const`**, not `.app_error` — measured on both
+   licensed servers after the port had guessed the neighbour's suffix.

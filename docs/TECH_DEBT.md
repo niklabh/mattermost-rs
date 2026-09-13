@@ -5540,42 +5540,23 @@ agrees with Go when the operator sets flags that way — the same weaker guarant
 change was meant to escape. The deployment constraint therefore stands unchanged: run Go with this
 flag at its default.
 
-## D-154 · `getUsers` cannot see the licence, so ABAC-narrowed `not_in_channel` would diverge
+## D-154 · `getUsers` cannot see the licence, so ABAC-narrowed `not_in_channel` would diverge — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** deferred-feature · **Raised** 2026-08-21 (api4/user.go `getUsers`)
+**Status** CLOSED · **Severity** deferred-feature · **Raised** 2026-08-21 (api4/user.go `getUsers`) ·
+**Closed** 2026-09-13 by the ABAC forward on Go's own predicate
 
-Go's `not_in_channel` arm asks `ChannelAccessControlled` (app/channel.go:4522) and, for a
-policy-enforced **private** channel, replaces the listing with
-`GetUsersNotInAbacChannel` — a narrowed candidate set. The `not_in_team` arm does the same when
-`abac_match_only=true`. Both gates return false without an Enterprise Advanced licence *and*
-`AccessControlSettings.EnableAttributeBasedAccessControl`, which is this deployment, so the
-served arms match Go today and the parity suite measures that.
+The gate is `MinimumEnterpriseAdvancedLicense && AccessControlSettings.EnableAttributeBasedAccessControl`
+(app/channel.go:4523, app/team.go:936), and both halves are readable now — the tier through
+`App::license`, the setting as `Config::enable_attribute_based_access_control`. Below it the
+`not_in_*` arms are served, `abac_match_only=true` included (Go reads the flag and ignores it
+there); at or above it `not_in_channel` is forwarded outright, because Go narrows a private
+policy-enforced channel with no parameter set, and `not_in_team` is forwarded with the flag. The
+divergence this entry described — an unnarrowed listing from a licensed server — no longer
+exists, since the forward fires on exactly the conjunction that lets Go narrow. The served side is
+compared against the licensed pair (`parity::users_list::the_not_in_arms_are_served_on_an_enterprise_licence`);
+the forwarded side is unreachable here (no Advanced licence, no access-control service) and is
+pinned by `users::tests::access_control_needs_the_advanced_rung_and_the_setting`.
 
-The port has neither a licence surface nor an access-control service, so it cannot detect the
-enforced case. `abac_match_only=true` is forwarded on both `not_in_*` arms, which closes the
-half a query parameter can name. The half it cannot: on a licensed server with ABAC on, a
-policy-enforced private channel's `not_in_channel` list would come back **unnarrowed** from this
-port — a listing Go was configured to restrict.
-
-**What is owed:** `License()` plus `AccessControlSettings`, and then either the ABAC query or a
-forward on `ChannelAccessControlled`. Until then this route must not be deployed against a licensed
-Enterprise Advanced server with attribute-based access control enabled.
-
-**2026-09-06 — half unblocked.** The config gap this entry pointed at ([D-085]) is closed:
-`AccessControlSettings` is an ordinary section of the document `mm_app::config` now reads, so
-`EnableAttributeBasedAccessControl` is two fields away rather than a subsystem away. The licence is
-already reachable too, via `App::license_state`. What remains is genuinely the access-control
-service, not the plumbing — so the honest next step here is a **forward** on
-`ChannelAccessControlled` rather than the ABAC query, which would close the divergence without
-porting an Enterprise surface this build cannot exercise.
-
-**Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
 
 ## D-156 · The two config settings the permission checks read cannot be read from Go's config
 
@@ -8552,44 +8533,21 @@ this server had already written the row its primary key guards.
 Closing this needs `UserStore::update_auth_data` — already the second-most-wanted unserved store
 method by `scripts/deps.py`, and named as the next step by the user-deletion session too.
 
-## D-511 · every branch of `demoteUserToGuest` past the licence is unreachable on this stack
+## D-511 · every branch of `demoteUserToGuest` past the licence is unreachable on this stack — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (account conversion)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-13 (account conversion) ·
+**Closed** 2026-09-13 by the licensed demote (`mm_api::user_convert::demote_user_to_guest`)
 
-`demoteUserToGuest` (api4/user.go:3540) checks `Channels().License() == nil` as its **second**
-statement, before the permission and before the user is fetched. On an unlicensed server every
-request is therefore the same 501 `api.team.demote_user_to_guest.license.error` — measured, for a
-plain user, for a system administrator, for `me` and for an id that names nothing. That 501 and
-the `RequireUserId` 400 above it are what `mm_api::user_convert::demote_user_to_guest` serves.
-
-Six things sit behind the gate and none can be compared against Go here:
-
-1. `GuestAccountsSettings.Enable` → 501 `api.team.demote_user_to_guest.disabled.error`;
-2. `Features.GuestAccounts` → **403** `api.team.invite_guests_to_channels.disabled.error` — the
-   only 403 in the handler that is not a permission error, and a different status for what reads
-   like the same refusal;
-3. the `demote_to_guest` permission;
-4. a `manage_system` escalation guard for demoting a system administrator;
-5. the already-a-guest 501;
-6. `App.DemoteUserToGuest` itself, whose store half is `SqlUserStore.DemoteUserToGuest` — the
-   mirror of the promotion transaction, plus a `Bot` refusal
-   (`api.user.demote_user_to_guest.bot_not_allowed.app_error`, 400) with no promotion counterpart.
-
-Planting `Systems.ActiveLicenseId` moves **this** side only; Go loaded its licence at startup and
-re-reads only on a save. So a licensed fixture cannot produce a Go answer to compare against, and
-porting the six would mean writing them against the source with no oracle — the failure mode
-`fixtures/` exists to prevent. The route forwards when licensed instead, and
-`parity::user_convert::a_licensed_demote_is_handed_to_go` pins that.
-
-The promotion half is fully ported and is not blocked by any of this: `promoteGuestToUser` checks
-neither the licence nor the config, which is what stops a lapsed licence stranding the guests it
-created.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+All six branches are ported and measured against the licensed pair — the Enterprise oracle for the
+`GuestAccountsSettings.Enable` 501, and its guest variant (`MMRS_LICENSED_VARIANT=guest
+scripts/go-licensed.sh`, the same licence with the setting on) for everything past it: the
+`demote_to_guest` 403, the 404 from the fetch, the `manage_system` escalation guard, the
+already-a-guest 501, the bot 400, and the demotion itself, whose store half is
+`UserStore::demote_user_to_guest`. Two facts the entry could not state: the role column is
+**replaced** with `system_guest`, not substituted like the promotion, and both membership tables
+lose `SchemeAdmin` as well as `SchemeUser`. `parity::user_convert` holds all of it; the `Features.
+GuestAccounts` 403 is the one branch no oracle on this stack reaches (every licence the script
+signs has the flag on) and is pinned by a mutation instead.
 
 ---
 
@@ -8640,3 +8598,19 @@ unscoped websocket wait satisfied by another suite's event (fixed), and a bot-pr
 without `BOT_FIXTURES` deleting a sibling's fixture (fixed). Each was patched where it appeared.
 A deliberate pass on suite isolation — per-suite fixture accounts, or a schema per suite — would
 retire the category instead of the instance.
+
+## D-561 · the four channel-bookmark writes are forwarded on any licence
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (licensed demote)
+
+`createChannelBookmark`, `updateChannelBookmark`, `updateChannelBookmarkSortOrder` and
+`deleteChannelBookmark` (api4/channel_bookmark.go) open with `License() == nil` — a licence, not a
+tier — so on the licensed pair Go serves them and this side hands them over. The family behind the
+gate is `app/channel_bookmark.go`, `sqlstore/channel_bookmark_store.go` and `model/channel_bookmark.go`,
+about 1,400 lines with a store of its own, and it was not tractable in the session that ported the
+demote. The unlicensed refusal is served and compared; the licensed side is measured only as "Go
+answers something other than the 501" (`parity::licensed_features::an_enterprise_licence_is_below_the_advanced_rung`).
+
+**What is owed:** a `ChannelBookmarkStore`, the app layer, the four handlers and the list route in
+`channels.rs`, compared against `common::licensed`.
+

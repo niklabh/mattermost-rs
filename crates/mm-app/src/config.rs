@@ -802,6 +802,15 @@ pub struct Config {
     /// [`Config::enable_guest_magic_link`] and the licence.
     pub guest_accounts_enable: bool,
 
+    /// `AccessControlSettings.EnableAttributeBasedAccessControl` (config.go), defaulted
+    /// **`false`**.
+    ///
+    /// Half of the gate on every attribute-based access-control branch — `ChannelAccessControlled`
+    /// (app/channel.go:4522) and `TeamMembershipAccessControlEnabled` (app/team.go:932) both read
+    /// it after `MinimumEnterpriseAdvancedLicense`. Read by `users::get_users` to decide whether
+    /// Go could narrow a `not_in_channel` or `not_in_team` listing, which is [D-154].
+    pub enable_attribute_based_access_control: bool,
+
     /// `GuestAccountsSettings.EnableGuestMagicLink` (config.go:3949, defaulted **`false`** at
     /// :3973).
     ///
@@ -1198,6 +1207,7 @@ impl Default for Config {
             google_enable: false,
             office365_enable: false,
             guest_accounts_enable: false,
+            enable_attribute_based_access_control: false,
             enable_guest_magic_link: false,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
@@ -1693,6 +1703,11 @@ impl Config {
                 "MM_GUESTACCOUNTSSETTINGS_ENABLE",
                 default.guest_accounts_enable,
             ),
+            enable_attribute_based_access_control: lookup_bool(
+                lookup,
+                "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
+                default.enable_attribute_based_access_control,
+            ),
             enable_guest_magic_link: lookup_bool(
                 lookup,
                 "MM_GUESTACCOUNTSSETTINGS_ENABLEGUESTMAGICLINK",
@@ -2072,6 +2087,11 @@ impl Config {
             guest_accounts_enable: guest_accounts
                 .enable
                 .unwrap_or(default.guest_accounts_enable),
+            enable_attribute_based_access_control: parsed
+                .access_control_settings
+                .unwrap_or_default()
+                .enable_attribute_based_access_control
+                .unwrap_or(default.enable_attribute_based_access_control),
             enable_guest_magic_link: guest_accounts
                 .enable_guest_magic_link
                 .unwrap_or(default.enable_guest_magic_link),
@@ -2244,6 +2264,8 @@ struct Document {
     localization_settings: Option<LocalizationSettingsDocument>,
     #[serde(rename = "GuestAccountsSettings")]
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
+    #[serde(rename = "AccessControlSettings")]
+    access_control_settings: Option<AccessControlSettingsDocument>,
     #[serde(rename = "MessageExportSettings")]
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
@@ -2380,6 +2402,12 @@ struct LocalizationSettingsDocument {
 
 /// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
 /// name collides with `TeamSettings`', which is exactly why this needs its own section.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AccessControlSettingsDocument {
+    #[serde(rename = "EnableAttributeBasedAccessControl")]
+    enable_attribute_based_access_control: Option<bool>,
+}
+
 #[derive(Debug, Default, serde::Deserialize)]
 struct GuestAccountsSettingsDocument {
     #[serde(rename = "RestrictCreationToDomains")]
@@ -2868,6 +2896,7 @@ mod tests {
             "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS" => Some("all".to_owned()),
             "MM_LDAPSETTINGS_PICTUREATTRIBUTE" => Some("thumbnailPhoto".to_owned()),
             "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP" => Some("true".to_owned()),
+            "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL" => Some("true".to_owned()),
             _ => None,
         });
 
@@ -2875,6 +2904,8 @@ mod tests {
         assert_eq!(config.lock_profile_fields_for_email_users, "all");
         assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
         assert!(config.saml_enable_sync_with_ldap);
+        // The fifth, the ABAC gate's setting: the only reader of its whole section.
+        assert!(config.enable_attribute_based_access_control);
 
         // And with nothing set every one of them keeps the value the document gave it.
         let untouched = Config::default().apply_env_from(&|_| None);
@@ -3375,6 +3406,7 @@ mod go_parity {
             "OpenIdSettings": { "Enable": true },
             "Office365Settings": { "Enable": true },
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
+            "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false
@@ -3402,6 +3434,9 @@ mod go_parity {
         assert_eq!(config.lock_profile_fields_for_email_users, "all");
         assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
         assert!(config.saml_enable_sync_with_ldap);
+        // Its section exists in `Document` for this one key; a dropped wiring would fall back
+        // to the default `false` that every other test here is happy with.
+        assert!(config.enable_attribute_based_access_control);
         assert!(!config.show_full_name);
         assert!(!config.show_email_address);
         assert_eq!(config.session_idle_timeout_in_minutes, 17);

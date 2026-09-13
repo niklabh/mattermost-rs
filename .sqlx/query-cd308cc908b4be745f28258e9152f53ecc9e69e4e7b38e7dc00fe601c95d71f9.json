@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE channelmembers SET schemeuser = false, schemeadmin = false, schemeguest = true WHERE userid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cd308cc908b4be745f28258e9152f53ecc9e69e4e7b38e7dc00fe601c95d71f9"
+}

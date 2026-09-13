@@ -401,3 +401,72 @@ async fn other_methods_are_forwarded() {
         );
     }
 }
+
+/// **An Enterprise licence is below the Advanced rung**, so every content-flagging route is still
+/// the 501 on a licensed server — and it is *ours*, byte for byte against the licensed oracle.
+/// The bookmark writes need only a licence, so on the same pair they are handed to that oracle,
+/// which answers something other than the refusal ([D-561]).
+#[tokio::test]
+async fn an_enterprise_licence_is_below_the_advanced_rung() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = common::licensed().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let call = async |base: &str, method: &reqwest::Method, path: &str| {
+        let response = client
+            .request(method.clone(), format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body(b"{}".to_vec())
+            .send()
+            .await
+            .expect("reachable");
+        let status = response.status().as_u16();
+        let served_by = response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        (
+            status,
+            served_by,
+            response.bytes().await.expect("reads").to_vec(),
+        )
+    };
+
+    let mut flagging = 0;
+    let mut bookmarks = 0;
+    for (method, path, id) in routes() {
+        let label = format!("{method} {path}");
+        let (go_status, _, go) = call(&pair.go, &method, &path).await;
+        let (rs_status, served_by, rs) = call(&pair.rust, &method, &path).await;
+        if id == FLAGGING_ERROR {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "{label}: ours on a licence too"
+            );
+            assert_eq!(go_status, 501, "{label}: Enterprise is below Advanced");
+            assert_eq!(rs_status, go_status, "{label}");
+            let parsed = common::assert_error_bodies_match_except_known_gaps(&go, &rs, &label);
+            assert_eq!(parsed["id"], FLAGGING_ERROR, "{label}");
+            flagging += 1;
+        } else {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("go"),
+                "{label}: a licence opens the gate, and the store behind it is not ported"
+            );
+            assert_ne!(
+                go_status, 501,
+                "{label}: the licensed oracle is past the refusal"
+            );
+            assert_eq!(rs_status, go_status, "{label}: forwarded, so Go's answer");
+            bookmarks += 1;
+        }
+    }
+    assert_eq!((flagging, bookmarks), (13, 4));
+}

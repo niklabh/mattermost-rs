@@ -37,8 +37,8 @@
 use crate::common;
 
 use common::{
-    ACTIVE_LICENCE_ROW, GO, RUST, client, create_plain_user, create_team, delete_plain_user,
-    go_minted_token, stack_enabled,
+    ACTIVE_LICENCE_ROW, GO, LicensedPair, RUST, client, create_plain_user, create_team,
+    delete_plain_user, go_minted_token, licensed, licensed_guest, stack_enabled,
 };
 
 /// An id that is well-formed and names nothing.
@@ -1247,4 +1247,365 @@ async fn each_route_names_its_own_permission() {
 
     common::unplant_bot(&bot).await;
     delete_plain_user(&http, &admin, &user.id).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// demoteUserToGuest, licensed — against the licensed pair and its guest variant
+// ---------------------------------------------------------------------------------------------
+
+/// `POST {path}` to both servers of a licensed pair, asserting the Rust side served it.
+async fn pair_both(
+    http: &reqwest::Client,
+    pair: &LicensedPair,
+    token: &str,
+    path: &str,
+) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let call = async |base: &str, ours: bool| {
+        let response = http
+            .post(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} unreachable: {e}"));
+        let status = response.status().as_u16();
+        if ours {
+            common::assert_served_by_rust(response.headers(), path);
+        }
+        (status, response.bytes().await.expect("a body").to_vec())
+    };
+    (call(&pair.go, false).await, call(&pair.rust, true).await)
+}
+
+/// The same refusal from both licensed servers; returns Go's parsed body.
+async fn pair_same_refusal(
+    http: &reqwest::Client,
+    pair: &LicensedPair,
+    token: &str,
+    path: &str,
+    expected_status: u16,
+    expected_id: &str,
+) -> serde_json::Value {
+    let ((go_status, go), (rs_status, rs)) = pair_both(http, pair, token, path).await;
+    assert_eq!(rs_status, go_status, "status for {path}");
+    assert_eq!(go_status, expected_status, "Go's status for {path}");
+    let parsed = common::assert_error_bodies_match_except_known_gaps(&go, &rs, path);
+    assert_eq!(parsed["id"], expected_id, "error id for {path}");
+    parsed
+}
+
+/// `(roles, isGuest prop)` of every session the user holds, on the shared table.
+async fn session_guest_shape(user_id: &str) -> Vec<(String, Option<String>)> {
+    let Some(pool) = common::fixture_pool().await else {
+        return Vec::new();
+    };
+    let rows: Vec<(String, Option<serde_json::Value>)> =
+        sqlx::query_as("SELECT roles, props FROM sessions WHERE userid = $1 ORDER BY createat")
+            .bind(user_id)
+            .fetch_all(&pool)
+            .await
+            .expect("the sessions read");
+    rows.into_iter()
+        .map(|(roles, props)| {
+            // `model.SessionPropIsGuest` is `is_guest` (session.go) — not the camel case the
+            // websocket and the client use for the same fact.
+            let is_guest = props.and_then(|p| {
+                p.get("is_guest")
+                    .and_then(|v| v.as_str().map(str::to_owned))
+            });
+            (roles, is_guest)
+        })
+        .collect()
+}
+
+/// **With a licence and guest accounts off, the second gate is the whole route** — a 501 that
+/// is not the licence error, still ahead of the permission and the user. A plain user, an
+/// administrator, a missing id and `me` all get it, on both licensed servers.
+#[tokio::test]
+async fn a_licensed_demote_with_guest_accounts_off_is_the_disabled_501() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "demolic").await;
+    let user = create_plain_user(&http, &admin, &team, "demolic").await;
+
+    for (token, path) in [
+        (&user.token, format!("/api/v4/users/{MISSING}/demote")),
+        (&user.token, format!("/api/v4/users/{}/demote", user.id)),
+        (&admin, format!("/api/v4/users/{MISSING}/demote")),
+        (&admin, "/api/v4/users/me/demote".to_owned()),
+    ] {
+        pair_same_refusal(
+            &http,
+            &pair,
+            token,
+            &path,
+            501,
+            "api.team.demote_user_to_guest.disabled.error",
+        )
+        .await;
+    }
+    // And `RequireUserId` still runs first.
+    pair_same_refusal(
+        &http,
+        &pair,
+        &admin,
+        "/api/v4/users/notanid/demote",
+        400,
+        "api.context.invalid_url_param.app_error",
+    )
+    .await;
+
+    assert_eq!(
+        guest_shape(&user.id).await.map(|shape| shape.0),
+        Some("system_user".to_owned()),
+        "four refusals must have demoted nobody",
+    );
+    delete_plain_user(&http, &admin, &user.id).await;
+}
+
+/// **Past the setting, in Go's order**: the permission, then the fetch, then the escalation
+/// guard, then the already-a-guest refusal, then the bot refusal from the app layer — every one
+/// measured against the guest oracle, whose only difference from the licensed one is the setting.
+#[tokio::test]
+async fn on_the_guest_pair_the_gates_past_the_setting_fire_in_gos_order() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed_guest().await;
+    let _bots = common::BOT_FIXTURES.lock().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let team = create_team(&http, &admin, "demogst").await;
+    let user = create_plain_user(&http, &admin, &team, "demogst").await;
+
+    // A plain user holds no `demote_to_guest`: 403, the permission error, whoever the target.
+    for path in [
+        format!("/api/v4/users/{MISSING}/demote"),
+        format!("/api/v4/users/{}/demote", user.id),
+    ] {
+        pair_same_refusal(
+            &http,
+            &pair,
+            &user.token,
+            &path,
+            403,
+            "api.context.permissions.app_error",
+        )
+        .await;
+    }
+
+    // The permission precedes the fetch: an administrator naming a missing id reaches `GetUser`.
+    pair_same_refusal(
+        &http,
+        &pair,
+        &admin,
+        &format!("/api/v4/users/{MISSING}/demote"),
+        404,
+        // `.const`, not `.app_error`: the id `App.GetUser` builds for a miss (app/user.go),
+        // measured on both licensed servers rather than assumed from its neighbours.
+        "app.user.missing_account.const",
+    )
+    .await;
+
+    // The escalation guard: a caller with exactly `demote_to_guest` may not demote a system
+    // administrator, and the 403 names `manage_system`.
+    let Some(role) = common::plant_role("demogst", "demote_to_guest").await else {
+        panic!("no DATABASE_URL");
+    };
+    let demoter = create_plain_user(&http, &admin, &team, "demogstd").await;
+    common::set_user_roles(&demoter.id, &format!("system_user {role}")).await;
+    common::invalidate_go_caches(&http, &admin).await;
+    invalidate_pair_caches(&http, &pair, &admin).await;
+    let demoter_token = common::login_plain_user(&http, "demogstd").await;
+    // The permission name is in `detailed_error`, which is wiped before it reaches a client, so
+    // the 403 is the same bytes as the one a caller without `demote_to_guest` gets. What tells
+    // them apart is the demotion that follows: the same caller, the same token, a plain target.
+    pair_same_refusal(
+        &http,
+        &pair,
+        &demoter_token,
+        &format!("/api/v4/users/{me}/demote"),
+        403,
+        "api.context.permissions.app_error",
+    )
+    .await;
+    let demoted = http
+        .post(format!("{}/api/v4/users/{}/demote", pair.rust, user.id))
+        .header("Authorization", format!("Bearer {demoter_token}"))
+        .send()
+        .await
+        .expect("we answer");
+    common::assert_served_by_rust(demoted.headers(), "demote by a demoter");
+    assert_eq!(
+        demoted.status().as_u16(),
+        200,
+        "`demote_to_guest` alone is enough for a plain target: {}",
+        demoted.text().await.unwrap_or_default()
+    );
+    assert_eq!(
+        guest_shape(&user.id).await.map(|shape| shape.0),
+        Some("system_guest".to_owned())
+    );
+
+    // Already a guest: 501, and its own id — on both, now that the account really is one.
+    common::invalidate_go_caches(&http, &admin).await;
+    invalidate_pair_caches(&http, &pair, &admin).await;
+    pair_same_refusal(
+        &http,
+        &pair,
+        &admin,
+        &format!("/api/v4/users/{}/demote", user.id),
+        501,
+        "api.user.demote_user_to_guest.already_guest.app_error",
+    )
+    .await;
+
+    // A bot: the app layer's 400, with no promotion counterpart.
+    let bot = common::plant_bot("demogst", me, 0).await.expect("a bot");
+    invalidate_pair_caches(&http, &pair, &admin).await;
+    pair_same_refusal(
+        &http,
+        &pair,
+        &admin,
+        &format!("/api/v4/users/{bot}/demote"),
+        400,
+        "api.user.demote_user_to_guest.bot_not_allowed.app_error",
+    )
+    .await;
+
+    common::unplant_bot(&bot).await;
+    delete_plain_user(&http, &admin, &demoter.id).await;
+    delete_plain_user(&http, &admin, &user.id).await;
+}
+
+/// `POST /caches/invalidate` on the pair's Go, which keeps its own user cache.
+async fn invalidate_pair_caches(http: &reqwest::Client, pair: &LicensedPair, admin: &str) {
+    let response = http
+        .post(format!("{}/api/v4/caches/invalidate", pair.go))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("the licensed Go answers");
+    assert!(
+        response.status().is_success(),
+        "cache invalidation on the pair"
+    );
+}
+
+/// **The demotion itself**, one account through each licensed server: the role column is
+/// *replaced* with `system_guest`, every membership row loses `SchemeUser` **and** `SchemeAdmin`
+/// and gains `SchemeGuest`, every session of the account is re-rolled and carries `isGuest`, and
+/// the answer is `{"status":"OK"}`. The two accounts must end up shaped identically.
+#[tokio::test]
+async fn a_user_is_demoted_to_guest_identically_through_either_licensed_server() {
+    if !stack_enabled() {
+        return;
+    }
+    let pair = licensed_guest().await;
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "demook").await;
+    let go_user = create_plain_user(&http, &admin, &team, "demooka").await;
+    let rs_user = create_plain_user(&http, &admin, &team, "demookb").await;
+    // A channel-administrator membership, so `SchemeAdmin = false` is visible: the fixture channel
+    // row for each user is made an admin row first.
+    let Some(pool) = common::fixture_pool().await else {
+        panic!("no DATABASE_URL");
+    };
+    let team_admin_rows = async |user_id: &str| -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM teammembers WHERE userid = $1 AND schemeadmin")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the team rows read")
+    };
+    for user in [&go_user, &rs_user] {
+        for table in ["channelmembers", "teammembers"] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET schemeadmin = true WHERE userid = $1"
+            ))
+            .bind(&user.id)
+            .execute(&pool)
+            .await
+            .expect("the admin rows are planted");
+        }
+        assert!(
+            guest_shape(&user.id).await.expect("a shape").4 > 0,
+            "the fixture has an admin channel row to clear"
+        );
+        assert!(team_admin_rows(&user.id).await > 0, "and an admin team row");
+    }
+    invalidate_pair_caches(&http, &pair, &admin).await;
+
+    let go_call = http
+        .post(format!("{}/api/v4/users/{}/demote", pair.go, go_user.id))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers");
+    let go_status = go_call.status().as_u16();
+    let go_body = go_call.bytes().await.expect("a body").to_vec();
+
+    let rs_call = http
+        .post(format!("{}/api/v4/users/{}/demote", pair.rust, rs_user.id))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("we answer");
+    common::assert_served_by_rust(rs_call.headers(), "demote");
+    let rs_status = rs_call.status().as_u16();
+    let rs_body = rs_call.bytes().await.expect("a body").to_vec();
+
+    assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
+    assert_eq!(rs_status, 200, "{}", String::from_utf8_lossy(&rs_body));
+    assert_eq!(rs_body, go_body, "ReturnStatusOK, byte for byte");
+
+    let go_shape = guest_shape(&go_user.id).await.expect("a shape");
+    let rs_shape = guest_shape(&rs_user.id).await.expect("a shape");
+    assert_eq!(
+        rs_shape, go_shape,
+        "(roles, guest team rows, guest channel rows, user channel rows, admin channel rows)"
+    );
+    assert_eq!(
+        go_shape.0, "system_guest",
+        "the role column is replaced outright"
+    );
+    assert!(
+        go_shape.1 > 0 && go_shape.2 > 0,
+        "memberships became guest rows"
+    );
+    assert_eq!(go_shape.3, 0, "no SchemeUser row survives");
+    assert_eq!(
+        go_shape.4, 0,
+        "no SchemeAdmin row survives — the difference from promotion"
+    );
+    assert_eq!(
+        (
+            team_admin_rows(&rs_user.id).await,
+            team_admin_rows(&go_user.id).await
+        ),
+        (0, 0),
+        "nor on the team rows"
+    );
+
+    let go_sessions = session_guest_shape(&go_user.id).await;
+    let rs_sessions = session_guest_shape(&rs_user.id).await;
+    assert!(!go_sessions.is_empty(), "the fixture user is logged in");
+    assert_eq!(
+        rs_sessions, go_sessions,
+        "every session re-rolled, isGuest set"
+    );
+    assert!(
+        go_sessions
+            .iter()
+            .all(|(roles, is_guest)| roles == "system_guest" && is_guest.as_deref() == Some("true")),
+        "{go_sessions:?}"
+    );
+
+    delete_plain_user(&http, &admin, &go_user.id).await;
+    delete_plain_user(&http, &admin, &rs_user.id).await;
 }

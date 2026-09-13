@@ -2527,6 +2527,85 @@ const LICENSED_RUST_PORT: u16 = 8090;
 
 static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
     tokio::sync::OnceCell::const_new();
+static LICENSED_GUEST: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+
+/// The signed licence and the key file `scripts/go-licensed.sh` left, or a panic naming the
+/// script — a suite whose oracle is absent must not pass quietly.
+fn stack_license_files() -> (String, String) {
+    let dir = stack_license_dir();
+    let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
+        panic!(
+            "no signed licence at {}: run `scripts/go-licensed.sh start` ({e})",
+            dir.display()
+        )
+    });
+    let key_file = dir.join("public.pem");
+    assert!(key_file.exists(), "no public key at {}", key_file.display());
+    (signed, key_file.to_string_lossy().into_owned())
+}
+
+/// Assert a licensed Go oracle is listening on `go`, by the one answer only a licensed server
+/// gives.
+async fn require_licensed_go(go: &str, what: &str) {
+    let alive = client()
+        .get(format!("{go}/api/v4/license/client?format=old"))
+        .send()
+        .await;
+    let body = match alive {
+        Ok(response) => response.text().await.unwrap_or_default(),
+        Err(e) => panic!("the {what} Go oracle is not listening on {go}: {e}"),
+    };
+    assert!(
+        body.contains(r#""IsLicensed":"true""#),
+        "the Go process on {go} is not licensed: {body}"
+    );
+}
+
+/// Start an mm-api carrying the stack's licence beside the licensed Go at `go`, with the same
+/// overlay `scripts/mm-api-env.sh` gives the stack's mm-api, plus `extra`.
+async fn start_licensed_rust(
+    port: u16,
+    go: &str,
+    go_port: u16,
+    signed: &str,
+    key_file: &str,
+    extra: &[(&str, &str)],
+) -> SecondServer {
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let suffix = if offset == 0 {
+        String::new()
+    } else {
+        format!("-{}", offset / 100)
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let data_dir = root
+        .join(format!("reference/.build/mmroot{suffix}/data/"))
+        .to_string_lossy()
+        .into_owned();
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let listen = format!(":{go_port}");
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MM_LICENSE", signed),
+        ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file),
+        ("MM_GO_UPSTREAM", go),
+        ("MM_FILESETTINGS_DIRECTORY", data_dir.as_str()),
+        ("MM_TEAMSETTINGS_ENABLEOPENSERVER", "true"),
+        ("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true"),
+        ("MM_SERVICESETTINGS_SITEURL", go),
+        ("MM_SERVICESETTINGS_LISTENADDRESS", listen.as_str()),
+        ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
+        ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
+        ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+    ];
+    env.extend_from_slice(extra);
+    SecondServer::start(port, &env)
+        .await
+        .expect("the licensed mm-api starts — is target/debug/mm-api built?")
+}
 
 /// The licensed pair, started once per test binary.
 ///
@@ -2543,72 +2622,61 @@ static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
 pub async fn licensed() -> LicensedPair {
     let (server, signed, key_file) = LICENSED
         .get_or_init(|| async {
-            let dir = stack_license_dir();
-            let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
-                panic!(
-                    "no signed licence at {}: run `scripts/go-licensed.sh start` ({e})",
-                    dir.display()
-                )
-            });
-            let key_file = dir.join("public.pem");
-            assert!(key_file.exists(), "no public key at {}", key_file.display());
-            let key_file = key_file.to_string_lossy().into_owned();
-
+            let (signed, key_file) = stack_license_files();
             let go = licensed_go();
-            let alive = client()
-                .get(format!("{go}/api/v4/license/client?format=old"))
-                .send()
-                .await;
-            let body = match alive {
-                Ok(response) => response.text().await.unwrap_or_default(),
-                Err(e) => panic!("the licensed Go oracle is not listening on {go}: {e}"),
-            };
-            assert!(
-                body.contains(r#""IsLicensed":"true""#),
-                "the Go process on {go} is not licensed: {body}"
-            );
-
-            // The same overlay `scripts/mm-api-env.sh` gives the stack's mm-api, pointed at the
-            // licensed oracle, plus the licence itself.
-            let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            let suffix = if offset == 0 {
-                String::new()
-            } else {
-                format!("-{}", offset / 100)
-            };
-            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let data_dir = root
-                .join(format!("reference/.build/mmroot{suffix}/data/"))
-                .to_string_lossy()
-                .into_owned();
-            let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
-            let listen = format!(":{}", go_port() + 32);
-            let server = SecondServer::start(
+            require_licensed_go(&go, "licensed").await;
+            let server = start_licensed_rust(
                 LICENSED_RUST_PORT,
-                &[
-                    ("MM_LICENSE", signed.as_str()),
-                    ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
-                    ("MM_GO_UPSTREAM", go.as_str()),
-                    ("MM_FILESETTINGS_DIRECTORY", data_dir.as_str()),
-                    ("MM_TEAMSETTINGS_ENABLEOPENSERVER", "true"),
-                    ("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true"),
-                    ("MM_SERVICESETTINGS_SITEURL", go.as_str()),
-                    ("MM_SERVICESETTINGS_LISTENADDRESS", listen.as_str()),
-                    ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
-                    ("MM_SQLSETTINGS_DATASOURCE", database_url.as_str()),
-                    ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
-                ],
+                &go,
+                go_port() + 32,
+                &signed,
+                &key_file,
+                &[],
             )
-            .await
-            .expect("the licensed mm-api starts — is target/debug/mm-api built?");
+            .await;
             (server, signed, key_file)
         })
         .await;
     LicensedPair {
         go: licensed_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// The licensed **guest** oracle's base URL — `MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh
+/// port`: the same licence, `GuestAccountsSettings.Enable` on as an environment override.
+pub fn licensed_guest_go() -> String {
+    format!("http://localhost:{}", go_port() + 33)
+}
+
+/// The mm-api port for the guest pair: 8091 on stack 0.
+const LICENSED_GUEST_RUST_PORT: u16 = 8091;
+
+/// The licensed pair with `GuestAccountsSettings.Enable` on, for the routes that refuse on that
+/// setting before anything else (`demoteUserToGuest`, api4/user.go:3551). Same rules as
+/// [`licensed`]: one per binary, panics when its oracle is missing.
+pub async fn licensed_guest() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED_GUEST
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            let go = licensed_guest_go();
+            require_licensed_go(&go, "licensed guest").await;
+            let server = start_licensed_rust(
+                LICENSED_GUEST_RUST_PORT,
+                &go,
+                go_port() + 33,
+                &signed,
+                &key_file,
+                &[("MM_GUESTACCOUNTSSETTINGS_ENABLE", "true")],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_guest_go(),
         rust: server.base.clone(),
         signed: signed.clone(),
         key_file: key_file.clone(),
