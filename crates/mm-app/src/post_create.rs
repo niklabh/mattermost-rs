@@ -36,7 +36,7 @@
 //! Outgoing webhooks are *not* in that list: a matching outgoing webhook makes Go write a second
 //! post, so [`App::refuse_create_post_shapes`] forwards any channel that has one.
 
-use mm_model::channel::{CHANNEL_TYPE_OPEN, CHANNEL_TYPE_PRIVATE, Channel};
+use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_OPEN, Channel};
 use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
     POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_CURRENT_TEAM_ID,
@@ -305,14 +305,14 @@ impl App {
                 "a shared channel needs the shared-channel sync service",
             ));
         }
-        // A DM or group message adds `SendAutoResponseIfNecessary` (which writes a second post),
-        // the self-DM and bot-DM burn-on-read arms, and a `channel_display_name` built from the
-        // sorted member list.
-        if channel.channel_type != CHANNEL_TYPE_OPEN && channel.channel_type != CHANNEL_TYPE_PRIVATE
-        {
-            return Err(PrepareError::Unreproducible(
-                "a DM or group message adds the auto-responder, which writes a second post",
-            ));
+        // A DM adds `SendAutoResponseIfNecessary`, which writes a **second post** when the
+        // receiver's auto-responder is on; that arm is forwarded and the rest of a DM or group
+        // message is served — the DM and GM mentions, the sorted `channel_display_name`, the
+        // empty team on the event. The burn-on-read DM arms are for a type this refuses above.
+        if channel.channel_type == CHANNEL_TYPE_DIRECT {
+            if let Some(reason) = self.auto_responder_forward_reason(channel, post).await? {
+                return Err(PrepareError::Unreproducible(reason));
+            }
         }
 
         for prop in REFUSED_CREATE_PROPS {
@@ -372,6 +372,43 @@ impl App {
         // by the notification pass. What that pass cannot say is decided by
         // [`App::notification_forward_reason`], after the root is resolved.
         Ok(())
+    }
+
+    /// The gate of `SendAutoResponseIfNecessary` (app/auto_responder.go:24), asked **before**
+    /// the write: a DM whose receiver has the auto-responder switched on makes Go create a second
+    /// post — the auto-response, as a reply — and that write is forwarded whole. Everything up to
+    /// the switch is reproduced: a bot sender never triggers it, a self-DM's receiver is the
+    /// sender, and the receiver is looked up with Go's own error.
+    ///
+    /// Go additionally skips the response when one was already sent today
+    /// (`checkIfRespondedToday`); this forwards regardless, since the day boundary is the
+    /// server's clock and a forward is never wrong.
+    async fn auto_responder_forward_reason(
+        &self,
+        channel: &Channel,
+        post: &Post,
+    ) -> Result<Option<&'static str>, PrepareError> {
+        let sender = self.get_user(&post.user_id).await?;
+        if sender.is_bot {
+            return Ok(None);
+        }
+        let mut receiver_id = channel.get_other_user_id_for_dm(&sender.id);
+        if receiver_id.is_empty() {
+            // User direct messaged themself, let them test their auto-responder.
+            receiver_id = &sender.id;
+        }
+        let receiver = self.get_user(receiver_id).await?;
+        let notify = |key: &str| -> &str {
+            receiver
+                .notify_props
+                .as_ref()
+                .and_then(|props| props.get(key))
+                .map_or("", String::as_str)
+        };
+        let active = notify(mm_model::user::AUTO_RESPONDER_ACTIVE_NOTIFY_PROP) == "true";
+        let message = notify(mm_model::user::AUTO_RESPONDER_MESSAGE_NOTIFY_PROP);
+        Ok((active && !message.is_empty())
+            .then_some("the receiver's auto-responder writes a second post"))
     }
 
     // -- the write --------------------------------------------------------------------------

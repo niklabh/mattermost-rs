@@ -12674,3 +12674,29 @@ second thing [D-221] forwarded; it is served now. Two pieces, both in files that
 A DM or group message on create — `SendAutoResponseIfNecessary` and the GM
 `channel_display_name` — is the last client-hot create-post shape still forwarded.
 
+## Direct and group messages on `POST /api/v4/posts` (2026-09-14)
+
+Route count unchanged at 463 of 764. The last client-hot create shape that forwarded. A DM
+mentions the other side and a group message mentions every member (both already in
+`get_explicit_mentions_and_keywords`); the `posted` event names the channel by the sender or by
+the sorted member list and carries an empty `team_id` (`PostNotification`, `handle_post_events`).
+The one DM write this server does not do is the auto-response: `App::auto_responder_forward_reason`
+(`post_create.rs`) forwards a DM whose receiver has it switched on, before anything is written.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/post_create.rs` — `auto_responder_forward_reason` replaces the DM/GM refusal | DONE |
+| test | `crates/mm-api/tests/parity/post_create_dm.rs` — 5 | DONE |
+
+- **A self-DM mentions nobody**: `GetBothUsersForDM` names the sender twice. Measured.
+- **The auto-responder forward ignores "already responded today"**: Go skips a second response
+  within the receiver's day; forwarding regardless is never wrong.
+
+[D-401] narrowed again: the DM row is now the auto-responder alone.
+
+### The next route in this family
+
+`createPost` with `file_ids` — `attachFilesToPost` and `FileInfoStore::attach_to_post` — is the
+largest remaining create shape; the notification pass already carries the `otherFile`/`image`
+keys' inputs.
+

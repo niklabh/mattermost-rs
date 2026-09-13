@@ -7625,7 +7625,7 @@ it:
 | a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
 | `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
-| a DM or group message | `SendAutoResponseIfNecessary`, which writes a second post |
+| a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
 | a shared channel | the shared-channel sync service |
 | a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
 | a message with `~` | `FillInPostProps` resolving the channel names into the `channel_mentions` prop, and the `channel_mentions` broadcast hook |

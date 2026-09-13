@@ -1,0 +1,17 @@
+# Mutation plan for a direct or group message on `POST /api/v4/posts`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-dm.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+
+dm-mention-only-when-poster	crates/mm-app/src/notification.rs	            if post.user_id != user1 || is_webhook {	            if post.user_id == user1 || is_webhook {	api	post_create_dm
+dm-second-user-never-mentioned	crates/mm-app/src/notification.rs	            if !user2.is_empty() && (post.user_id != user2 || is_webhook) {	            if user2.is_empty() && (post.user_id != user2 || is_webhook) {	api	post_create_dm
+gm-members-not-mentioned	crates/mm-app/src/notification.rs	                    mentions.add_mention(id, MentionType::GmMention);	                    let _ = (id, MentionType::GmMention);	api	post_create_dm
+gm-name-includes-nobody	crates/mm-app/src/notification.rs	                    .filter(|user| user.id != exclude_id)	                    .filter(|user| user.id == exclude_id)	api	post_create_dm
+dm-name-is-the-channel	crates/mm-app/src/notification.rs	            CHANNEL_TYPE_DIRECT => self\n                .sender\n                .get_display_name_with_prefix(user_name_format, "@"),	            CHANNEL_TYPE_DIRECT => self.channel.display_name.clone(),	api	post_create_dm
+autoresponder-forward-inverted	crates/mm-app/src/post_create.rs	        Ok((active && !message.is_empty())	        Ok((!active && !message.is_empty())	api	post_create_dm
+autoresponder-self-dm-not-self	crates/mm-app/src/post_create.rs	            receiver_id = &sender.id;	            receiver_id = "";	api	post_create_dm
+event-team-not-blank	crates/mm-app/src/notification.rs	        let team = if channel.team_id.is_empty() {\n            Team::default()\n        } else {\n            self.get_team(&channel.team_id).await?\n        };\n        self.send_notifications(	        let team = Team {\n            id: channel.id.clone(),\n            ..Team::default()\n        };\n        self.send_notifications(	api	post_create_dm
+control-swap-adds	crates/mm-app/src/notification.rs	        message.add("team_id", serde_json::Value::String(team.id.clone()));\n        message.add("set_online", serde_json::Value::Bool(set_online));	        message.add("set_online", serde_json::Value::Bool(set_online));\n        message.add("team_id", serde_json::Value::String(team.id.clone()));	api	post_create_dm
+control-rename-binding	crates/mm-app/src/post_create.rs	        let mut receiver_id = channel.get_other_user_id_for_dm(&sender.id);\n        if receiver_id.is_empty() {	        let mut receiver_id = channel.get_other_user_id_for_dm(&sender.id);\n        if receiver_id.is_empty() && receiver_id.len() < 1 {	api	post_create_dm
