@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE usergroups SET deleteat = $1, updateat = $2 WHERE id = $3 AND deleteat = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9dd9ccc67c0bb859017781414642adb235d08e0272c20be9715e92faf519dc4d"
+}

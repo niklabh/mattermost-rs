@@ -40,14 +40,17 @@
 //! Go's `Join` of an empty slice yields `IN ('')`, which matches no group; `= ANY(ARRAY[]::text[])`
 //! is also empty. They agree. The handler's `len(groupIDsParam) < 26` check makes it moot.
 
-use mm_model::group::{Group, GroupSource, GroupWithUserIds};
+use mm_model::group::{
+    Group, GroupSearchOpts, GroupSource, GroupWithSchemeAdmin, GroupWithUserIds,
+    get_syncable_group_source_prefixes, get_syncable_group_sources,
+};
 use mm_model::group_member::GroupMember;
-use mm_model::user::UserWithGroups;
+use mm_model::user::{UserWithGroups, ViewUsersRestrictions};
 use mm_model::utils::{get_millis, new_id};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
-use crate::user_store::{UserRow, user_from_row};
+use crate::user_store::{UserRow, sanitize_search_term, user_from_row};
 
 /// The row-to-model half of `teamMembersMinusGroupMembersQuery` and its channel twin.
 ///
@@ -308,6 +311,57 @@ pub trait GroupStore {
         group_id: &str,
         user_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<GroupMember>, StoreError>> + Send;
+
+    // --- The three list reads behind `getGroupsAllowedForReferenceInChannel`
+    // (app/notification.go:1498), ported 2026-09-13 with the licensed Go oracle as the parity
+    // oracle (`parity/group_reads_licensed`). They are also what `GET /api/v4/groups`,
+    // `GET /channels/{id}/groups` and `GET /teams/{id}/groups` read, so every option branch of
+    // Go's builders is ported, not only the two combinations that caller passes.
+
+    /// Port of `SqlGroupStore.GetGroups` (group_store.go:1472).
+    ///
+    /// **`per_page == 0` means no `LIMIT` at all** — Go adds `Limit`/`Offset` only when
+    /// `perPage != 0`, and `getGroupsAllowedForReferenceInChannel` passes `0, 0` to read every
+    /// group. `page` is a page number, not an offset (`Offset(page * perPage)`).
+    ///
+    /// Every option of `GroupSearchOpts` that Go's builder reads is honoured; the ones it does
+    /// **not** read are `page_opts` (this method takes the page as arguments) and
+    /// `include_member_ids`, which `App.GetGroups` (app/group.go:660) resolves with a query per
+    /// group after the fact. The optional `view_restrictions` narrows **only the member count**
+    /// (`applyViewRestrictionsFilter` on the count subquery, user_store.go:2162), never which
+    /// groups are returned.
+    ///
+    /// `member_count`, `channel_member_count` and `channel_member_timezones_count` are `Some`
+    /// exactly when their option was set, since each is `omitempty` on the wire.
+    fn get_groups(
+        &self,
+        page: i64,
+        per_page: i64,
+        opts: &GroupSearchOpts,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> impl std::future::Future<Output = Result<Vec<Group>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetGroupsByChannel` (group_store.go:1234): the **live** groups
+    /// linked to `channel_id` by a **live** `GroupChannels` row, each carrying that row's
+    /// `SchemeAdmin` (`false` when the column is null — Go's `ToModel` substitutes it).
+    ///
+    /// Of `GroupSearchOpts`, `groupsBySyncableBaseQuery` reads four: `include_member_count`,
+    /// `filter_allow_reference`, `q` and `page_opts`. **There is no `ORDER BY` unless one of
+    /// `include_member_count` or `page_opts` is set** — a caller with neither gets Postgres's
+    /// order, in Go as here.
+    fn get_groups_by_channel(
+        &self,
+        channel_id: &str,
+        opts: &GroupSearchOpts,
+    ) -> impl std::future::Future<Output = Result<Vec<GroupWithSchemeAdmin>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetGroupsByTeam` (group_store.go:1433) — [`GroupStore::get_groups_by_channel`]
+    /// over `GroupTeams`/`TeamId`; the same four options, the same conditional ordering.
+    fn get_groups_by_team(
+        &self,
+        team_id: &str,
+        opts: &GroupSearchOpts,
+    ) -> impl std::future::Future<Output = Result<Vec<GroupWithSchemeAdmin>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1273,6 +1327,394 @@ impl GroupStore for SqlGroupStore {
         })?;
         Ok(members)
     }
+
+    #[tracing::instrument(skip(self, opts, view_restrictions), fields(page, per_page, found))]
+    async fn get_groups(
+        &self,
+        page: i64,
+        per_page: i64,
+        opts: &GroupSearchOpts,
+        view_restrictions: Option<&ViewUsersRestrictions>,
+    ) -> Result<Vec<Group>, StoreError> {
+        // Go assembles this statement a clause at a time from `opts`; this is the same statement
+        // with every optional clause guarded by the flag that would have added it, so it stays
+        // compile-checked. The three places the shape differs, and why they are the same set:
+        //
+        //   - The `Members` and `ChannelMembers` subqueries are joined unconditionally. Each is
+        //     `GROUP BY GroupId`, so a LEFT JOIN onto it adds no rows; when its option is off
+        //     the column is dropped in the mapping below, and when `include_channel_member_count`
+        //     is `""` the subquery is empty. Go's timezone-off variant also omits the `Users`
+        //     join inside the channel subquery; joining it changes nothing because the join is
+        //     LEFT and one-to-one, and `COUNT(ChannelMembers.UserId)` never sees it.
+        //   - `filter_has_member` is Go's `LEFT JOIN GroupMembers … WHERE UserId = ? AND
+        //     DeleteAt = 0`, which is an `EXISTS` in all but spelling: `(GroupId, UserId)` is
+        //     the table's primary key, so the join matches at most one row per group and cannot
+        //     multiply them.
+        //   - `LIMIT NULL OFFSET NULL` is "no limit" in Postgres, which is Go's `perPage == 0`.
+        //     `wrapping_mul` for the offset, as the members-minus-group-members reads do.
+        //
+        // The `DeleteAt` predicate is Go's three-way `if`: `FilterArchived` wins, otherwise
+        // `DeleteAt = 0` **unless** `IncludeArchived` or a positive `Since` ("mobile needs to
+        // return archived groups when the since parameter is set").
+        let only_archived = opts.filter_archived;
+        let only_live = !opts.filter_archived && !opts.include_archived && opts.since <= 0;
+        let pattern = like_pattern(&opts.q);
+        // `len(opts.NotAssociatedToTeam) == 26` — a length check, not `IsValidId`.
+        let not_team = opts.not_associated_to_team.len() == 26;
+        let not_channel = opts.not_associated_to_channel.len() == 26;
+        let parent_permitted = opts.filter_parent_team_permitted && not_channel;
+        // `if opts.Source != "" { … } else if opts.OnlySyncableSources { … }`: the syncable
+        // filter is reached only with no explicit source.
+        let only_syncable = opts.source.as_str().is_empty() && opts.only_syncable_sources;
+        let syncable_sources: Vec<String> = get_syncable_group_sources()
+            .into_iter()
+            .map(|s| s.0)
+            .collect();
+        // `sq.Like{"UserGroups.Source": prefix + "%"}` — `plugin_%`, in which the underscore is
+        // LIKE's single-character wildcard. Reproduced, not escaped: Go matches `pluginXfoo`.
+        let syncable_patterns: Vec<String> = get_syncable_group_source_prefixes()
+            .into_iter()
+            .map(|p| format!("{}%", p.0))
+            .collect();
+        // `applyViewRestrictionsFilter(countQuery, viewRestrictions, false)`: two INNER JOINs
+        // under a `COUNT(DISTINCT Users.Id)`, which is what makes an `EXISTS` per list the same
+        // count. Go's `1 = 0` for "non-nil and both empty" is the shape `GetViewUsersRestrictions`
+        // (app/user.go:2756) always builds — `[]string{}`, never nil — so `Some` with two empty
+        // lists counts nobody, and `None` is Go's nil.
+        let (restricted_to_nobody, teams, channels) = match view_restrictions {
+            None => (false, Vec::new(), Vec::new()),
+            Some(r) => (
+                r.teams.is_empty() && r.channels.is_empty(),
+                r.teams.clone(), // bound as a `text[]` parameter, which sqlx takes by value
+                r.channels.clone(),
+            ),
+        };
+        let limit: Option<i64> = (per_page != 0).then_some(per_page);
+        let offset: Option<i64> = (per_page != 0).then_some(page.wrapping_mul(per_page));
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT ug.id,
+                   ug.name,
+                   ug.displayname,
+                   ug.description,
+                   ug.source,
+                   ug.remoteid,
+                   ug.createat,
+                   ug.updateat,
+                   ug.deleteat,
+                   ug.allowreference,
+                   COALESCE(members.membercount, 0) AS "membercount!",
+                   COALESCE(channelmembers.channelmembercount, 0) AS "channelmembercount!",
+                   COALESCE(channelmembers.channelmembertimezonescount, 0)
+                       AS "channelmembertimezonescount!"
+              FROM usergroups ug
+              LEFT JOIN (
+                    SELECT gm.groupid, COUNT(DISTINCT u.id) AS membercount
+                      FROM groupmembers gm
+                      LEFT JOIN users u ON u.id = gm.userid
+                     WHERE gm.deleteat = 0
+                       AND u.deleteat = 0
+                       AND NOT $1::boolean
+                       AND (cardinality($2::text[]) = 0 OR EXISTS (
+                             SELECT 1 FROM teammembers rtm
+                              WHERE rtm.userid = u.id
+                                AND rtm.deleteat = 0
+                                AND rtm.teamid = ANY($2::text[])))
+                       AND (cardinality($3::text[]) = 0 OR EXISTS (
+                             SELECT 1 FROM channelmembers rcm
+                              WHERE rcm.userid = u.id
+                                AND rcm.channelid = ANY($3::text[])))
+                     GROUP BY gm.groupid
+                   ) AS members ON members.groupid = ug.id
+              LEFT JOIN (
+                    SELECT gm.groupid,
+                           COUNT(cm.userid) AS channelmembercount,
+                           COUNT(DISTINCT (
+                               CASE WHEN u.timezone->>'useAutomaticTimezone' = 'true'
+                                     AND length(u.timezone->>'automaticTimezone') > 0
+                                    THEN u.timezone->>'automaticTimezone'
+                                    WHEN u.timezone->>'useAutomaticTimezone' = 'false'
+                                     AND length(u.timezone->>'manualTimezone') > 0
+                                    THEN u.timezone->>'manualTimezone'
+                               END)) AS channelmembertimezonescount
+                      FROM channelmembers cm
+                      LEFT JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat = 0
+                      LEFT JOIN users u ON u.id = gm.userid
+                     WHERE cm.channelid = $4::text
+                     GROUP BY gm.groupid
+                   ) AS channelmembers ON channelmembers.groupid = ug.id
+             WHERE ($5::text = '' OR EXISTS (
+                       SELECT 1 FROM groupmembers hm
+                        WHERE hm.groupid = ug.id AND hm.userid = $5::text AND hm.deleteat = 0))
+               AND ($6::bigint <= 0 OR ug.updateat > $6::bigint)
+               AND (NOT $7::boolean OR ug.deleteat > 0)
+               AND (NOT $8::boolean OR ug.deleteat = 0)
+               AND (NOT $9::boolean OR ug.allowreference = TRUE)
+               AND ($10::text = '' OR ug.name ILIKE $11::text OR ug.displayname ILIKE $11::text)
+               AND (NOT $12::boolean OR ug.id NOT IN (
+                       SELECT iug.id
+                         FROM usergroups iug
+                         JOIN groupteams gt ON gt.groupid = iug.id
+                        WHERE gt.deleteat = 0
+                          AND iug.deleteat = 0
+                          AND gt.teamid = $13::text))
+               AND (NOT $14::boolean OR ug.id NOT IN (
+                       SELECT iug.id
+                         FROM usergroups iug
+                         JOIN groupchannels gc ON gc.groupid = iug.id
+                        WHERE gc.deleteat = 0
+                          AND iug.deleteat = 0
+                          AND gc.channelid = $15::text))
+               AND (NOT $16::boolean OR CASE
+                       WHEN (SELECT t.groupconstrained
+                               FROM teams t
+                               JOIN channels c ON c.teamid = t.id
+                              WHERE c.id = $15::text)
+                       THEN ug.id IN (
+                            SELECT gt.groupid
+                              FROM groupteams gt
+                             WHERE gt.deleteat = 0
+                               AND gt.teamid = (SELECT c.teamid FROM channels c WHERE c.id = $15::text))
+                       ELSE TRUE
+                    END)
+               AND ($17::text = '' OR ug.source = $17::text)
+               AND (NOT $18::boolean
+                    OR ug.source = ANY($19::text[])
+                    OR ug.source LIKE ANY($20::text[]))
+             ORDER BY CASE WHEN NOT $21::boolean OR ug.deleteat = 0 THEN ug.displayname END,
+                      CASE WHEN $21::boolean AND ug.deleteat <> 0 THEN ug.displayname END
+             LIMIT $22::bigint OFFSET $23::bigint
+            "#,
+            restricted_to_nobody,
+            &teams,
+            &channels,
+            opts.include_channel_member_count,
+            opts.filter_has_member,
+            opts.since,
+            only_archived,
+            only_live,
+            opts.filter_allow_reference,
+            opts.q,
+            pattern,
+            not_team,
+            opts.not_associated_to_team,
+            not_channel,
+            opts.not_associated_to_channel,
+            parent_permitted,
+            opts.source.as_str(),
+            only_syncable,
+            &syncable_sources,
+            &syncable_patterns,
+            opts.include_archived,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Groups".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        let with_channel_count = !opts.include_channel_member_count.is_empty();
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let mut group = GroupRow {
+                    id: row.id,
+                    name: row.name,
+                    displayname: row.displayname,
+                    description: row.description,
+                    source: row.source,
+                    remoteid: row.remoteid,
+                    createat: row.createat,
+                    updateat: row.updateat,
+                    deleteat: row.deleteat,
+                    allowreference: row.allowreference,
+                }
+                .into_group();
+                group.member_count = opts.include_member_count.then_some(row.membercount);
+                group.channel_member_count = with_channel_count.then_some(row.channelmembercount);
+                group.channel_member_timezones_count = (with_channel_count
+                    && opts.include_timezones)
+                    .then_some(row.channelmembertimezonescount);
+                group
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip(self, opts), fields(channel_id = %channel_id, found))]
+    async fn get_groups_by_channel(
+        &self,
+        channel_id: &str,
+        opts: &GroupSearchOpts,
+    ) -> Result<Vec<GroupWithSchemeAdmin>, StoreError> {
+        // `groupsBySyncableBaseQuery(GroupSyncableTypeChannel, selectGroups, …)`
+        // (group_store.go:1309), then the `PageOpts` block of `GetGroupsByChannel`.
+        //
+        // The `Members` subquery is Go's `COUNT(*)` over live memberships of live users, joined
+        // unconditionally for the reason `get_groups` gives, and dropped from the model when
+        // `include_member_count` is off. The `ORDER BY` is conditional in Go twice over —
+        // `IncludeMemberCount` adds one and `PageOpts` adds the same one again — so it is
+        // applied when either is set and **absent otherwise**, as the CASE with a null key is.
+        let ordered = opts.include_member_count || opts.page_opts.is_some();
+        let pattern = like_pattern(&opts.q);
+        let limit: Option<i64> = opts.page_opts.map(|p| p.per_page);
+        let offset: Option<i64> = opts.page_opts.map(|p| p.page.wrapping_mul(p.per_page));
+        let rows = sqlx::query!(
+            r#"
+            SELECT ug.id,
+                   ug.name,
+                   ug.displayname,
+                   ug.description,
+                   ug.source,
+                   ug.remoteid,
+                   ug.createat,
+                   ug.updateat,
+                   ug.deleteat,
+                   ug.allowreference,
+                   gs.schemeadmin AS syncableschemeadmin,
+                   COALESCE(members.membercount, 0) AS "membercount!"
+              FROM usergroups ug
+              JOIN groupchannels gs ON gs.groupid = ug.id
+              LEFT JOIN (
+                    SELECT gm.groupid, COUNT(*) AS membercount
+                      FROM groupmembers gm
+                      LEFT JOIN users u ON u.id = gm.userid
+                     WHERE gm.deleteat = 0 AND u.deleteat = 0
+                     GROUP BY gm.groupid
+                   ) AS members ON members.groupid = ug.id
+             WHERE gs.channelid = $1::text
+               AND gs.deleteat = 0
+               AND ug.deleteat = 0
+               AND (NOT $2::boolean OR ug.allowreference = TRUE)
+               AND ($3::text = '' OR ug.name ILIKE $4::text OR ug.displayname ILIKE $4::text)
+             ORDER BY CASE WHEN $5::boolean THEN ug.displayname END
+             LIMIT $6::bigint OFFSET $7::bigint
+            "#,
+            channel_id,
+            opts.filter_allow_reference,
+            opts.q,
+            pattern,
+            ordered,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Groups with channelId={channel_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                with_scheme_admin(
+                    GroupRow {
+                        id: row.id,
+                        name: row.name,
+                        displayname: row.displayname,
+                        description: row.description,
+                        source: row.source,
+                        remoteid: row.remoteid,
+                        createat: row.createat,
+                        updateat: row.updateat,
+                        deleteat: row.deleteat,
+                        allowreference: row.allowreference,
+                    },
+                    row.syncableschemeadmin,
+                    opts.include_member_count.then_some(row.membercount),
+                )
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip(self, opts), fields(team_id = %team_id, found))]
+    async fn get_groups_by_team(
+        &self,
+        team_id: &str,
+        opts: &GroupSearchOpts,
+    ) -> Result<Vec<GroupWithSchemeAdmin>, StoreError> {
+        // The channel query with `GroupTeams`/`TeamId` substituted — the `st ==
+        // GroupSyncableTypeTeam` arm of `groupsBySyncableBaseQuery`. Everything the channel
+        // method documents holds here unchanged.
+        let ordered = opts.include_member_count || opts.page_opts.is_some();
+        let pattern = like_pattern(&opts.q);
+        let limit: Option<i64> = opts.page_opts.map(|p| p.per_page);
+        let offset: Option<i64> = opts.page_opts.map(|p| p.page.wrapping_mul(p.per_page));
+        let rows = sqlx::query!(
+            r#"
+            SELECT ug.id,
+                   ug.name,
+                   ug.displayname,
+                   ug.description,
+                   ug.source,
+                   ug.remoteid,
+                   ug.createat,
+                   ug.updateat,
+                   ug.deleteat,
+                   ug.allowreference,
+                   gs.schemeadmin AS syncableschemeadmin,
+                   COALESCE(members.membercount, 0) AS "membercount!"
+              FROM usergroups ug
+              JOIN groupteams gs ON gs.groupid = ug.id
+              LEFT JOIN (
+                    SELECT gm.groupid, COUNT(*) AS membercount
+                      FROM groupmembers gm
+                      LEFT JOIN users u ON u.id = gm.userid
+                     WHERE gm.deleteat = 0 AND u.deleteat = 0
+                     GROUP BY gm.groupid
+                   ) AS members ON members.groupid = ug.id
+             WHERE gs.teamid = $1::text
+               AND gs.deleteat = 0
+               AND ug.deleteat = 0
+               AND (NOT $2::boolean OR ug.allowreference = TRUE)
+               AND ($3::text = '' OR ug.name ILIKE $4::text OR ug.displayname ILIKE $4::text)
+             ORDER BY CASE WHEN $5::boolean THEN ug.displayname END
+             LIMIT $6::bigint OFFSET $7::bigint
+            "#,
+            team_id,
+            opts.filter_allow_reference,
+            opts.q,
+            pattern,
+            ordered,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Groups with teamId={team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                with_scheme_admin(
+                    GroupRow {
+                        id: row.id,
+                        name: row.name,
+                        displayname: row.displayname,
+                        description: row.description,
+                        source: row.source,
+                        remoteid: row.remoteid,
+                        createat: row.createat,
+                        updateat: row.updateat,
+                        deleteat: row.deleteat,
+                        allowreference: row.allowreference,
+                    },
+                    row.syncableschemeadmin,
+                    opts.include_member_count.then_some(row.membercount),
+                )
+            })
+            .collect())
+    }
 }
 
 impl SqlGroupStore {
@@ -1343,6 +1785,28 @@ impl GroupRow {
             member_ids: None,
         }
     }
+}
+
+/// `groupWithSchemeAdmin.ToModel()` (group_store.go:1189): a null `SyncableSchemeAdmin` becomes
+/// `false`, so the field is never absent on the wire for these two reads.
+fn with_scheme_admin(
+    row: GroupRow,
+    scheme_admin: Option<bool>,
+    member_count: Option<i64>,
+) -> GroupWithSchemeAdmin {
+    let mut group = row.into_group();
+    group.member_count = member_count;
+    GroupWithSchemeAdmin {
+        group,
+        scheme_admin: Some(scheme_admin.unwrap_or(false)),
+    }
+}
+
+/// The `%<term>%` every group search builds: `sanitizeSearchTerm(opts.Q, "\\")` strips the
+/// escape character and escapes `%` and `_`, then `fmt.Sprintf("%%%s%%", …)` wraps it. An empty
+/// `q` produces `%%`, which is never reached — every caller guards on `q != ""` first.
+fn like_pattern(q: &str) -> String {
+    format!("%{}%", sanitize_search_term(q, '\\'))
 }
 
 /// `IsUniqueConstraintError(err, []string{"Name", "groups_name_key"})` (group_store.go:172):

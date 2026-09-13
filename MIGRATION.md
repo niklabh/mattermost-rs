@@ -12450,3 +12450,42 @@ disagrees with the fixture.
 12. **Running the generator on this host changed three unrelated fixtures** — a random
     multipart boundary in `behaviour_filestore.json` and case-insensitive tzdata lookups in the
     two scheduled-post fixtures ([D-065]'s "deployment artifact") — reverted, not committed.
+## The three group list reads behind the mention engine (2026-09-13)
+
+`SqlGroupStore.GetGroups`, `GetGroupsByChannel`, `GetGroupsByTeam` and
+`App.getGroupsAllowedForReferenceInChannel` (app/notification.go:1498), ported for
+`PUT /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}`, whose
+`countThreadMentions` builds its keywords from them. Route count unchanged — the route itself is
+the main session's — but the three store reads are also what `GET /api/v4/groups`,
+`GET /channels/{id}/groups` and `GET /teams/{id}/groups` answer from, so every option branch of
+Go's builders is ported, not only the two combinations the mention engine passes.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/group_store.rs` — `get_groups`, `get_groups_by_channel`, `get_groups_by_team` | DONE | 10 licensed parity (store vs the licensed Go oracle) | Squirrel's optional clauses are one compile-checked statement each, switched by bound parameters; the three places the *shape* differs from Go's are argued equal on the method (see note 1). `per_page == 0` is no `LIMIT`. |
+| app | `crates/mm-app/src/group.rs` — `get_groups_allowed_for_reference_in_channel` | DONE | via parity | A constrained channel reads its own links even when the team is constrained too; a nameless group is dropped in every branch. The error is `app.select_error`; Go's callers each re-wrap it. |
+
+Mutation tally: 18 run, 18 caught, 2 controls survived (`api` suite filtered to `group_reads_licensed`: a dropped `DeleteAt = 0` on each of the joined tables, the inverted reference filter, the dropped source filter, both member-count predicates, the unescaped plugin prefix, `since` made inclusive and made to keep the live filter, the parent-team `ELSE`, the restriction predicate, the null scheme admin, the order column, and the three app-function decisions).
+
+### Notes
+
+1. **Three equivalences the static statement rests on.** The member-count and channel-count
+   subqueries are `GROUP BY GroupId`, so joining them unconditionally adds no rows and the column
+   is dropped from the model when its option is off; `filter_has_member`'s `LEFT JOIN … WHERE`
+   is an `EXISTS` because `(GroupId, UserId)` is the primary key; `applyViewRestrictionsFilter`'s
+   two inner joins are two `EXISTS` under a `COUNT(DISTINCT Users.Id)`. Each is asserted against
+   the oracle, not argued only.
+2. **`LIKE 'plugin_%'` is a wildcard in Go too.** `only_syncable_sources` matches a source of
+   `pluginzz`; reproduced, and the fixture plants one to prove it.
+3. **A custom group must be referenceable.** `createGroup` and `patchGroup` both refuse
+   `allow_reference: false` for `custom`, so the fixture flips the column on Go's own row —
+   the store reads the column.
+4. **The restrictions' team half has no Go producer here.** A guest on the licensed guest oracle
+   gives `Channels` a real value and `Teams` an empty one — nothing grants a guest `view_members`
+   on a team — so the team predicate is checked against the channel predicate's answer, not
+   against Go. Recorded as a parity risk, not a tech-debt entry: the two clauses differ by a
+   table name and a `DeleteAt`.
+5. **No `ORDER BY` without `include_member_count` or a page** in the two syncable reads; the
+   suite compares those as sets.
+6. **A pool in a static fixture dies with the first test's runtime** ("a Tokio 1.x context was
+   found, but it is being shutdown"); the suite opens one per test.

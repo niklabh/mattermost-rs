@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT gm.groupid AS \"group_id!\",\n                   COUNT(cm.userid) AS \"channel_member_count!\",\n                   COUNT(DISTINCT (\n                       CASE WHEN u.timezone->>'useAutomaticTimezone' = 'true'\n                                 AND length(u.timezone->>'automaticTimezone') > 0\n                            THEN u.timezone->>'automaticTimezone'\n                            WHEN u.timezone->>'useAutomaticTimezone' = 'false'\n                                 AND length(u.timezone->>'manualTimezone') > 0\n                            THEN u.timezone->>'manualTimezone'\n                       END\n                   )) AS \"channel_member_timezones_count!\"\n              FROM channelmembers cm\n              JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat = 0\n              JOIN users u ON u.id = gm.userid\n             WHERE cm.channelid = $1\n             GROUP BY gm.groupid\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "group_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_member_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_member_timezones_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "c2c66f9ebae2a0708d2335ef6a6d8e0f93900377032a10bc4799fb1ebe9d5cfe"
+}
