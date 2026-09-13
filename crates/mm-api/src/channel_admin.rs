@@ -320,7 +320,11 @@ pub async fn channel_members_minus_group_members(
 ///
 /// `None` is the single 400 the two gates share. Separate from the handler because the two
 /// strings they run against — stripped for the length, raw for the split — are the whole subtlety.
-fn parse_group_ids(raw: &str) -> Option<Vec<String>> {
+///
+/// **Shared with [`crate::team_admin::team_members_minus_group_members`]**, and that is not a
+/// convenience: `groupIDsQueryParamRegex` is declared once in `api4/team.go:24` and both handlers
+/// close over the same variable, so a second copy here would be a second thing to keep in step.
+pub(crate) fn parse_group_ids(raw: &str) -> Option<Vec<String>> {
     // `groupIDsParamPattern = "[^a-zA-Z0-9,]*"` (api4/team.go:24), replaced with "". A `*` regex
     // deletes every run of non-matching characters, so this is simply "keep the alphanumerics and
     // the commas".

@@ -8353,3 +8353,55 @@ orders, so no mutation over that reordering can be a true CAUGHT and none is in
 The property is enforced by reading `mm_api::user_deletes` and `mm_api::user_updates`, where the
 gate is the last thing before the write in both. Accepted, and stated as a parity risk rather
 than dressed up as tested.
+
+---
+
+## D-490 · `POST /teams/{team_id}/invite/email` sends no mail; the send forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (team administration)
+
+`inviteUsersToTeam` (api4/team.go:1751) is registered and answers its six refusals — the two
+permission 403s, the body 400, the empty-`emails` 400 and the `profiles`-without-`graceful` 400.
+**Every request that gets past them is forwarded**, because every success on this route is an
+email: `InviteNewUsersToTeam` and `InviteNewUsersToTeamGracefully` both build and send through the
+email service, and the graceful arm then creates a `resend_invitation_email` job.
+
+The hand-over is in front of that branch and behind all six gates, so nothing has been written when
+it happens — `mm_api::team_admin` documents why, and
+`parity::team_admin::every_answer_this_server_gives_on_the_two_write_routes_is_a_refusal` is the
+assertion: **no input produces a 2xx from Rust on this route at all.**
+
+**What it needs**, none of which exists yet:
+
+- an SMTP client and the invitation templates (`SendInviteEmails`, `SendGuestInviteEmails`);
+- `Token` writes for the invite tokens each address gets;
+- `Jobs.CreateJob` for `model.JobTypeResendInvitationEmail`, and the job runner behind it;
+- `ValidateUserPermissionsOnChannels`, which narrows `channelIds` to the channels the sender may
+  invite into — a read, and the only part of the handler past the gates that is not the send.
+
+On this stack SMTP is unconfigured, and it is worth knowing what Go then does, because it is not
+what a reader expects: the **non-graceful** arm answers `200 {"status":"OK"}` and the **graceful**
+arm answers `200` with a per-address `unable_to_send_email_with_defaults` error in the body. The
+failure is invisible on the non-graceful path.
+
+---
+
+## D-491 · `POST /teams/{team_id}/import` refuses; `importFrom=slack` forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (team administration)
+
+`importTeam` (api4/team.go:1660) is registered and answers its eight refusals: the id 400, the
+`import_team` 403, the not-multipart **500**, and the four field errors including
+`unknown_import_from` for any source but `slack`. The `slack` arm forwards.
+
+`App.SlackImport` is a Slack-export reader that creates users, channels, posts and emoji from a zip
+— several thousand lines across `channels/app/slackimport/`, none of it ported, and none of it
+usefully partial. Measured through the proxy: a body that is not a zip comes back as Go's own
+`api.slackimport.slack_import.zip.app_error` 400, which is the evidence the multipart body survives
+the hand-over.
+
+**Two branches are unreachable here and are deliberately not ported.** The handler's first
+statement is `License().IsCloud()` → 403 `api.restricted_system_admin`; a cloud installation is
+licensed by construction and a licensed server is forwarded whole before anything else runs.
+`len(fileInfoArray) <= 0` → `…array.app_error` is reproduced but cannot fire:
+`ParseMultipartForm` never builds an empty list under a present key.

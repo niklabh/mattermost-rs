@@ -1272,6 +1272,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_sidebar_category.json"))
 
+	if err := writeMemberInviteBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "member invite behaviour: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_member_invite.json"))
+
 	if err := writeTeamEmailBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: team email behaviour fixture: %v\n", err)
 		os.Exit(1)

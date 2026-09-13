@@ -130,6 +130,7 @@ mod parity {
     pub mod status_writes;
     pub mod system_posts;
     pub mod system_usage;
+    pub mod team_admin;
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;

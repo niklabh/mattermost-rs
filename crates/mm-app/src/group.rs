@@ -1,12 +1,13 @@
-//! Port of the one read from `channels/app/group.go` a route this server answers needs.
+//! Port of the two reads from `channels/app/group.go` the routes this server answers need.
 //!
 //! # Why this file exists at all
 //!
 //! Every one of the twenty routes in `api4/group.go` opens with `requireLicense` and is answered
 //! here as a 501 (see `mm_api::groups`), so nothing in that file reaches a group table. The
-//! exception is `channelMembersMinusGroupMembers` (api4/channel.go:2881), which lives in the
-//! *channel* file, has **no licence gate**, and answers a group question on an unlicensed server.
-//! It is the single caller of everything below.
+//! exceptions are `channelMembersMinusGroupMembers` (api4/channel.go:2881) and
+//! `teamMembersMinusGroupMembers` (api4/team.go:2222), which live in the *channel* and *team*
+//! files, have **no licence gate**, and answer a group question on an unlicensed server. They are
+//! the only callers of everything below.
 
 use mm_model::group::Group;
 use mm_model::user::UserWithGroups;
@@ -66,37 +67,7 @@ impl App {
                 )
             })?;
 
-        for user in &mut users {
-            self.sanitize_profile(&mut user.user, false);
-        }
-
-        // The distinct group ids across every user on this page, in Go's `map`-then-slice shape.
-        // Order does not reach the wire — the per-user loop below re-orders by each user's own
-        // `GetGroupIDs` — so a `BTreeSet` buys determinism for free.
-        let wanted: Vec<String> = users
-            .iter()
-            .filter_map(UserWithGroups::get_group_ids)
-            .flatten()
-            .map(str::to_owned)
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-
-        let groups = self.get_groups_by_ids(&wanted).await?;
-        let by_id: std::collections::HashMap<&str, &Group> =
-            groups.iter().map(|g| (g.id.as_str(), g)).collect();
-
-        for user in &mut users {
-            let hydrated = user
-                .get_group_ids()
-                .unwrap_or_default()
-                .into_iter()
-                // A clone per group is the answer's own storage, not a borrow-checker dodge:
-                // `groups` is local and each user's list is an independent copy, as it is in Go.
-                .filter_map(|id| by_id.get(id).map(|g| (*g).clone()))
-                .collect();
-            user.groups = Some(hydrated);
-        }
+        self.sanitize_and_hydrate_groups(&mut users).await?;
 
         let total = self
             .store
@@ -116,6 +87,104 @@ impl App {
         tracing::Span::current().record("users", users.len());
         tracing::Span::current().record("total", total);
         Ok((users, total))
+    }
+
+    /// Port of `App.TeamMembersMinusGroupMembers` (app/group.go:687).
+    ///
+    /// The members of `team_id` who are in **none** of `group_ids`, one page of them, plus the
+    /// total. Character-for-character the same function as
+    /// [`App::channel_members_minus_group_members`] with the store pair swapped — including the
+    /// `SanitizeProfile(..., false)`, the `Groups = []` assignment and the dropped-id `filter_map`,
+    /// all of which are documented there. Go duplicates the body too; the shared half lives in
+    /// [`App::sanitize_and_hydrate_groups`].
+    ///
+    /// **The `where` on a store failure is `TeamMembersMinusGroupMembers`**, not the channel
+    /// name — the only thing a client can tell apart when the database is down.
+    #[tracing::instrument(skip(self, group_ids), fields(team_id = %team_id, groups = group_ids.len(), users, total))]
+    pub async fn team_members_minus_group_members(
+        &self,
+        team_id: &str,
+        group_ids: &[String],
+        page: i64,
+        per_page: i64,
+    ) -> AppResult<(Vec<UserWithGroups>, i64)> {
+        let mut users = self
+            .store
+            .group()
+            .team_members_minus_group_members(team_id, group_ids, page, per_page)
+            .await
+            .map_err(|source| {
+                AppError::boxed(
+                    "TeamMembersMinusGroupMembers",
+                    "app.select_error",
+                    None,
+                    source.to_string(),
+                    500,
+                )
+            })?;
+
+        self.sanitize_and_hydrate_groups(&mut users).await?;
+
+        let total = self
+            .store
+            .group()
+            .count_team_members_minus_group_members(team_id, group_ids)
+            .await
+            .map_err(|source| {
+                AppError::boxed(
+                    "TeamMembersMinusGroupMembers",
+                    "app.select_error",
+                    None,
+                    source.to_string(),
+                    500,
+                )
+            })?;
+
+        tracing::Span::current().record("users", users.len());
+        tracing::Span::current().record("total", total);
+        Ok((users, total))
+    }
+
+    /// The half of `TeamMembersMinusGroupMembers` and `ChannelMembersMinusGroupMembers` that Go
+    /// writes out twice: sanitise every profile as a non-admin, then replace each user's
+    /// `string_agg`ed group ids with the group rows themselves.
+    ///
+    /// Every decision here is documented on [`App::channel_members_minus_group_members`]; this is
+    /// where they are actually taken.
+    async fn sanitize_and_hydrate_groups(&self, users: &mut [UserWithGroups]) -> AppResult {
+        for user in users.iter_mut() {
+            self.sanitize_profile(&mut user.user, false);
+        }
+
+        // The distinct group ids across every user on this page, in Go's `map`-then-slice shape.
+        // Order does not reach the wire — the per-user loop below re-orders by each user's own
+        // `GetGroupIDs` — so a `BTreeSet` buys determinism for free.
+        let wanted: Vec<String> = users
+            .iter()
+            .filter_map(UserWithGroups::get_group_ids)
+            .flatten()
+            .map(str::to_owned)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        let groups = self.get_groups_by_ids(&wanted).await?;
+        let by_id: std::collections::HashMap<&str, &Group> =
+            groups.iter().map(|g| (g.id.as_str(), g)).collect();
+
+        for user in users.iter_mut() {
+            let hydrated = user
+                .get_group_ids()
+                .unwrap_or_default()
+                .into_iter()
+                // A clone per group is the answer's own storage, not a borrow-checker dodge:
+                // `groups` is local and each user's list is an independent copy, as it is in Go.
+                .filter_map(|id| by_id.get(id).map(|g| (*g).clone()))
+                .collect();
+            user.groups = Some(hydrated);
+        }
+
+        Ok(())
     }
 
     /// Port of `App.GetGroupsByIDs` (app/group.go:740).

@@ -11930,3 +11930,70 @@ LDAP asymmetry between the two routes and the `manage_system` self-delete escape
 already the second-most-wanted unserved store method by `scripts/deps.py`. `PUT
 /users/{user_id}/mfa` is the other write left on the `{user_id}` subtree and needs the MFA
 secret path [D-462]'s sibling probe already exercises.
+
+
+## api4/team.go — the team administration routes (2026-09-13)
+
+| File | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| api4/team.go (`teamMembersMinusGroupMembers`), app/group.go, sqlstore/group_store.go | `mm-api/src/team_admin.rs`, `mm-app/src/group.rs`, `mm-store/src/group_store.rs` | PARTIAL | 10 parity | The channel route's twin, sharing its `group_ids` parser (Go shares the regex, and it is declared in *this* file). Three differences on the wire: the permission is `sysconsole_read_user_management_groups`, there is no space-channel guard, and the store adds **`TeamMembers.DeleteAt = 0`** — a predicate with no channel counterpart, and one no api4 route can write, so the parity fixture plants it by SQL. |
+| api4/team.go (`updateTeamScheme`) | `mm-api/src/team_admin.rs` | PARTIAL | 3 pass + 4 parity | **`{"scheme_id":""}` is a 501 here and a 400 on the channel twin**: Go's team condition carries `&& *p.SchemeID != ""`, which is how a client detaches a team from its scheme. The licence refusal is **501** `api.team.update_team_scheme.license.error` against the channel handler's 403. Gate order is id, body, licence; licensed forwards. |
+| api4/team.go (`inviteUsersToTeam`) | `mm-api/src/team_admin.rs`, `mm-model/src/member_invite.rs` | PARTIAL | 3 pass + 4 parity | Six refusals served, **every request that would send mail forwarded** — [D-490]. Both permission arms report `invite_user`, including the one testing `add_user_to_team`. `MemberInvite` gained null-tolerance and `profiles: Vec<Option<_>>`; see note 3. |
+| api4/team.go (`inviteGuestsToChannels`) | `mm-api/src/team_admin.rs` | PARTIAL | 2 parity | The licence check is the handler's **first statement**, ahead of `RequireTeamId`, so a bogus team id, a malformed body and a caller with no permission all get the same 501 — measured. Licensed forwards. |
+| api4/team.go (`importTeam`) | `mm-api/src/team_admin.rs` | PARTIAL | 2 parity | Seven refusals served, `importFrom=slack` forwarded — [D-491]. The not-multipart failure is a **500**, where `createEmoji` answers 400 for the identical failure. |
+
+### Notes
+
+1. **Measured, not read.** `updateTeamScheme` unlicensed is 501 and `{"scheme_id":""}` reaches it;
+   `inviteGuestsToChannels` answers 501 for `/teams/zzz/invite-guests/email` with `{}`;
+   `importTeam` with a JSON body is a 500 and with `importFrom=bogus` a 400. All four against the
+   pinned Go server on stack 4 before anything was registered.
+2. **The forward precedes every write, and the test says so by exhaustion.**
+   `parity::team_admin::every_answer_this_server_gives_on_the_two_write_routes_is_a_refusal` shows
+   that no input reaches a 2xx from Rust on `invite/email` or `import` — a handler with no success
+   of its own cannot have written anything — and that the two requests which *would* write come
+   back `x-mmrs-served-by: go`.
+3. **`null` is never a decode error in Go, and `MemberInvite` was refusing six bodies Go accepts.**
+   `{"emails":null}`, `{"emails":[null]}`, `{"message":null}`, `{"profiles":[null]}`,
+   `{"profiles":[{"email":null}]}` and a body that is exactly `null` all decode; `[null]` in a
+   `[]string` is `[""]`, and a `null` in `[]*MemberInviteProfile` is a nil pointer that still
+   counts toward `len(Profiles)` — which is the difference between a `profiles_graceful` 400 and
+   an `invalid_body` 400 on the wire. `profiles` is now `Vec<Option<_>>`, which also makes
+   `IsValid`'s `profile_nil` branch reachable for the first time. Pinned by
+   `fixtures/behaviour_member_invite.json`, 32 bodies through `json.Unmarshal`.
+4. **`sqlx::query_as!` was tried for the two near-identical store queries and reverted.** It binds
+   columns to fields by *position*, which turns "reorder two independent SELECT columns" — the
+   no-op control both mutation plans depend on — into a silent value swap. The shared mapping is a
+   `macro_rules!` over the anonymous, name-addressed `query!` row instead; the reasoning is in
+   `mm-store/src/group_store.rs` so the next reader does not repeat the experiment.
+5. **No stock role separates `sysconsole_read_user_management_groups` from `…_channels`.**
+   `system_admin`, `system_manager`, `system_read_only_admin` and `system_user_manager` all hold
+   both, so the mutation swapping the team route's gate for the channel route's survives against
+   every session the suite otherwise has.
+   `parity::team_admin::the_permission_is_the_groups_one_and_not_the_channels_one` plants two
+   roles of one permission each and drives both routes with both tokens.
+6. **Five anchors in `channel-admin.plan` went ambiguous** the moment a second
+   `…MinusGroupMembers` query landed in `group_store.rs`, and an ambiguous anchor mutates the
+   wrong copy silently. They now carry the `cm.`/`channelmembers` alias; `team-admin.plan` is the
+   twin and carries `tm.`/`teammembers`.
+
+7. **Mutations: 40 run over two passes, 34 caught, 2 controls survived, 0 harness faults.**
+   The first pass reported one of the two controls CAUGHT — by
+   `every_answer_this_server_gives_on_the_two_write_routes_is_a_refusal`, which the control cannot
+   affect. That test was missing `ACTIVE_LICENCE_ROW.read()`, and `import`'s first gate is the
+   licence: a sibling test planting a licence row turns three of its refusals into forwards. The
+   lock is there now, and both controls survive.
+
+   **One survivor is not a fixture gap and never can be**: `invite-reports-add-user-to-team`
+   changes which permission the 403 *names*, and the name reaches only `detailed_error`, which
+   `WipeDetailed` blanks on both servers when `EnableDeveloper` is false. The two bodies are
+   byte-identical. The plan line stays as the record that the question was asked; the observable
+   half — that `detailed_error` is empty on both — is asserted.
+
+### What is not here
+
+The cloud refusal at the top of `importTeam` (`License().IsCloud()` → 403
+`api.restricted_system_admin`) and its `len(fileInfoArray) <= 0` branch are both unreachable — the
+first because a cloud installation is licensed and a licensed server is forwarded whole, the second
+because `ParseMultipartForm` never builds an empty list under a present key. Both are recorded in
+[D-491] rather than asserted.
