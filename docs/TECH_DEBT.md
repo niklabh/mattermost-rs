@@ -8640,3 +8640,58 @@ unscoped websocket wait satisfied by another suite's event (fixed), and a bot-pr
 without `BOT_FIXTURES` deleting a sibling's fixture (fixed). Each was patched where it appeared.
 A deliberate pass on suite isolation — per-suite fixture accounts, or a schema per suite — would
 retire the category instead of the instance.
+
+---
+
+## D-571 · the enterprise interfaces are nil on every build from this tree, and eight routes now serve that fact
+
+**Status** OPEN · **Severity** deferred-feature · **Raised** 2026-09-13 (the licence sweep)
+
+`a.Ldap()`, `a.Saml()`, `a.Cluster()`, `a.DataRetention()`, `Platform().LicenseManager()` and
+the LDAP/SAML `CheckProviderAttributes` implementations are registered by the enterprise
+repository's `init`, which is not in `reference/mattermost`. A licence does not make them appear:
+the licensed Go oracle (`scripts/go-licensed.sh`, Enterprise SKU, every feature flag on) answers
+each of these exactly as the unlicensed server does, and since the sweep so does this port,
+without a forward. Measured in `parity::licensed_sweep`.
+
+| route / function | Go's answer with the interface nil | where it is pinned |
+|---|---|---|
+| `GET /cluster/status` | `[]` | `mm_app::system::get_cluster_status` |
+| `GET /trial-license/prev` | 403 `api.license.upgrade_needed.app_error` | `gated_reads::get_prev_trial_license` |
+| `GET /saml/metadata` | 501 `api.admin.saml.not_available.app_error` | `gated_reads::get_saml_metadata` |
+| `GET /ldap/groups` | 501 `ent.ldap.app_error`, past the `LDAPGroups` gate | `gated_reads::get_ldap_groups` |
+| every `data_retention` route | 501 `ent.data_retention.generic.license.error` | `data_retention::refuse_or_forward` |
+| `CheckProviderAttributes` for an LDAP/SAML account | no conflict | `mm_app::user_update::check_provider_attributes` |
+| `DoLogin`'s LDAP picture refresh | skipped | `login::login` |
+
+**What is owed:** the modules themselves — LDAP (sync, groups, provider attributes, the picture
+refresh), SAML (metadata, provider attributes), the cluster bus ([D-087]), data retention (the
+policy store and the jobs), and the licence manager (trial licences). Each is a family of routes
+in its own right and none has a Go implementation in this tree to compare against; when one is
+ported, its oracle has to be the enterprise repository or its documentation. Until then the
+refusals above **are** parity, and a future session must not "complete" one by guessing at the
+module behind it.
+
+Two forwards stay on their precise predicate rather than on "any licence", for the same reason:
+`generateSupportPacket` (`License() != nil`, then `GenerateSupportPacket` — a zip of logs and
+configuration that is not ported) and `listChannelBookmarksForChannel` (`License() != nil`, then
+the bookmark store, owed by the bookmark family).
+
+---
+
+## D-572 · the scheme writes are forwarded once the licence gate passes
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the licence sweep)
+
+`createScheme`, `patchScheme` and `deleteScheme` share one gate — `License() == nil ||
+(!*Features.CustomPermissionsSchemes && SkuShortName != professional)`, 501 — which
+`mm_api::schemes::licence_gate` now answers from the parsed licence on both sides. Past it the
+three writes are Go's: `App.CreateScheme` (app/scheme.go:74) mints the scheme's four to eight
+roles in one transaction with the scheme row, `PatchScheme`/`UpdateScheme` rewrite the display
+fields, and `DeleteScheme` resets every team or channel using the scheme to the defaults and
+deletes its roles. `parity::licensed_sweep::scheme_writes_pass_the_gate_and_are_forwarded_licensed`
+pins the hand-over and Go's own 400 for an invalid body.
+
+**What is owed:** `SchemeStore::save`/`update`/`delete` with the role cascade
+(sqlstore/scheme_store.go), the three app functions, and their audit records — behind these
+three routes, compared against the licensed pair.

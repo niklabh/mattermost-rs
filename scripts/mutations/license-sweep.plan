@@ -1,0 +1,24 @@
+# Mutation plan for the 2026-09-13 licence sweep — the sites that stopped forwarding on "any licence".
+#
+#   scripts/mutate-batch.sh scripts/mutations/license-sweep.plan
+#
+# Skipped deliberately, because the Enterprise oracle cannot tell them apart: the CPA group's rung
+# (enterprise and professional both pass), the two Advanced-tier conjunctions (both false on the
+# pair however the `&&` is bent), the load metric's arithmetic (rounds to the same number), and the
+# guest-login arm (both ids masked to one). The last two lines are the no-op controls and must SURVIVE.
+sweep-priority-urgent-inverted	crates/mm-api/src/post_writes.rs	        if priority.priority.as_deref() != Some(mm_model::post::POST_PRIORITY_URGENT) {	        if priority.priority.as_deref() == Some(mm_model::post::POST_PRIORITY_URGENT) {	api	licensed_sweep
+sweep-roles-gate-inverted	crates/mm-api/src/user_updates.rs	        if !custom_schemes {	        if custom_schemes {	api	licensed_sweep
+sweep-member-counts-timezones-always	crates/mm-store/src/channel_store.rs	                channel_member_timezones_count: if include_timezones {\n                    row.channel_member_timezones_count\n                } else {\n                    0\n                },	                channel_member_timezones_count: row.channel_member_timezones_count,	api	licensed_sweep
+sweep-member-counts-dead-rows	crates/mm-store/src/channel_store.rs	              JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat = 0	              JOIN groupmembers gm ON gm.userid = cm.userid AND gm.deleteat >= 0	api	licensed_sweep
+sweep-import-any-licence	crates/mm-api/src/team_admin.rs	        Ok(license) if license.as_deref().is_some_and(|l| l.is_cloud()) => {	        Ok(license) if license.is_some() => {	api	licensed_sweep
+sweep-transfer-flag-ignored	crates/mm-api/src/user_auth.rs	            .experimental_enable_authentication_transfer\n    {	            .experimental_enable_authentication_transfer\n        || licensed\n    {	api	licensed_sweep
+sweep-moderations-bookmarks-have-guests	crates/mm-app/src/channel_moderation.rs	            let guests = if *key == "manage_members" || *key == "manage_bookmarks" {	            let guests = if *key == "manage_members" {	unit	channel_moderation::
+sweep-moderations-value-enabled-swapped	crates/mm-app/src/channel_moderation.rs	                    members: Some(ChannelModeratedRole {\n                        value: granted(&member, key),\n                        enabled: granted(&higher_member, key),	                    members: Some(ChannelModeratedRole {\n                        value: granted(&higher_member, key),\n                        enabled: granted(&member, key),	unit	channel_moderation::
+sweep-limits-enforced-flag-ignored	crates/mm-app/src/limits.rs	            Some(l) if l.is_seat_count_enforced && licensed_users.is_some() => {	            Some(l) if licensed_users.is_some() => {	unit	limits::
+sweep-limits-extra-users-dropped	crates/mm-app/src/limits.rs	                limits.max_users_hard_limit = users + l.extra_users.unwrap_or(0);	                limits.max_users_hard_limit = users;	unit	limits::
+sweep-metrics-gated-on-metrics	crates/mm-app/src/config.rs	        if on(features.cluster) {\n            put("EnableMetrics", flag(c.metrics_settings.enable));	        if on(features.metrics) {\n            put("EnableMetrics", flag(c.metrics_settings.enable));	unit	licensed_client_config
+sweep-cloud-sso-override-dropped	crates/mm-app/src/config.rs	        if on(features.google_oauth) || cloud {	        if on(features.google_oauth) {	unit	licensed_client_config
+sweep-ping-indexing-ignored	crates/mm-api/src/system.rs	    if elasticsearch_enable_indexing {\n        return Some("elasticsearch_indexing");\n    }	    if elasticsearch_enable_indexing && false {\n        return Some("elasticsearch_indexing");\n    }	unit	system::tests
+sweep-audit-levels-any-id	crates/mm-app/src/config.rs	                    .is_some_and(|id| AUDIT_LEVEL_IDS.contains(&id))	                    .is_some_and(|id| AUDIT_LEVEL_IDS.contains(&id) || id >= 0)	unit	licensed_client_config
+control-rename-binding	crates/mm-app/src/channel_moderation.rs	    let member = permissions(member_role);\n    let guest = permissions(guest_role);	    let member_perms = permissions(member_role);\n    let member = member_perms;\n    let guest = permissions(guest_role);	unit	channel_moderation::
+control-reorder-columns	crates/mm-store/src/channel_store.rs	            SELECT gm.groupid AS "group_id!",\n                   COUNT(cm.userid) AS "channel_member_count!",	            SELECT COUNT(cm.userid) AS "channel_member_count!",\n                   gm.groupid AS "group_id!",	api	licensed_sweep

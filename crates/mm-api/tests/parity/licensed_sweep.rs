@@ -583,6 +583,27 @@ async fn member_counts_by_group_are_served_licensed() {
         .await
         .unwrap();
     }
+    // A **removed** membership for the outsider, who is not in the channel anyway but whose row
+    // would be counted by a query that forgot `GroupMembers.DeleteAt = 0` if they were — so
+    // they are added to the channel too. Two live members, one dead row: the count must stay 2.
+    let outsider = create_plain_user(&http, &admin, &team, "licmcbgo").await;
+    let response = http
+        .post(format!("{GO}/api/v4/channels/{channel}/members"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "user_id": outsider.id }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(response.status().is_success());
+    sqlx::query(
+        "INSERT INTO groupmembers (groupid, userid, createat, deleteat)
+         VALUES ($1, $2, 1700000000000, 1700000001000)",
+    )
+    .bind(GROUP)
+    .bind(&outsider.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     // One member on a manual timezone, so the distinct-timezone count is 1 and not 0.
     sqlx::query(
         r#"UPDATE users SET timezone = '{"useAutomaticTimezone":"false","manualTimezone":"Asia/Kolkata","automaticTimezone":""}'::jsonb WHERE id = $1"#,
@@ -615,9 +636,9 @@ async fn member_counts_by_group_are_served_licensed() {
     assert!(!go.ends_with(b"\n"));
 
     // A stranger: `read_channel` refuses with the permission error, after the licence gate.
-    let outsider = create_plain_user(&http, &admin, &team, "licmcbgo").await;
+    let stranger = create_plain_user(&http, &admin, &team, "licmcbgs").await;
     let ((go_status, go), (rs_status, rs)) =
-        fetch_licensed_pair(&http, &pair, Some(&outsider.token), &path).await;
+        fetch_licensed_pair(&http, &pair, Some(&stranger.token), &path).await;
     assert_eq!(go_status, 403, "{}", text(&go));
     assert_eq!(rs_status, 403);
     assert_error_bodies_match_except_known_gaps(&go, &rs, &path);
@@ -632,7 +653,7 @@ async fn member_counts_by_group_are_served_licensed() {
         .execute(&pool)
         .await
         .unwrap();
-    for user in [&a, &b, &outsider] {
+    for user in [&a, &b, &outsider, &stranger] {
         delete_plain_user(&http, &admin, &user.id).await;
     }
     delete_channel(&http, &admin, &channel).await;
@@ -641,6 +662,10 @@ async fn member_counts_by_group_are_served_licensed() {
 /// `createChannel` licensed: the only licence question is the anonymous-URL conjunction, which
 /// needs the Advanced tier and a setting that is off — so a licensed create is served, and its
 /// body matches the oracle's create modulo the per-channel fields.
+///
+/// The display names carry the per-run tag: `DELETE /channels/{id}` only archives, and two
+/// archived channels sharing one display name are a sort tie that `channel_search_all`'s
+/// `include_deleted` listings then order differently on the two servers (measured, once).
 #[tokio::test]
 async fn create_channel_is_served_licensed() {
     if !stack_enabled() {
@@ -655,7 +680,7 @@ async fn create_channel_is_served_licensed() {
     let mut bodies = Vec::new();
     for (base, suffix, ours) in [(&pair.go, "go", false), (&pair.rust, "rs", true)] {
         let body = format!(
-            r#"{{"team_id":"{team}","name":"{tag}-{suffix}","display_name":"Licensed create {suffix}","type":"O"}}"#
+            r#"{{"team_id":"{team}","name":"{tag}-{suffix}","display_name":"{tag} {suffix}","type":"O"}}"#
         );
         let (status, raw, by_rust) = send(
             &http,
