@@ -67,6 +67,7 @@ mod parity {
     /// insertion in the middle of it is a merge conflict for somebody else.
     pub mod config_reads;
     pub mod config_source;
+    pub mod cpa_licensed;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;
@@ -86,6 +87,7 @@ mod parity {
     pub mod gated_reads;
     pub mod group_syncables;
     pub mod group_writes;
+    pub mod group_writes_licensed;
     pub mod groups;
     pub mod image_writes;
     pub mod incoming_hooks;

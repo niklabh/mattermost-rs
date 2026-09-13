@@ -48,6 +48,16 @@ pub trait JobStore {
         status: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Job>, StoreError>> + Send;
 
+    /// Port of `SqlJobStore.GetNewestJobByStatusAndType` (job_store.go:423): the most recently
+    /// **created** (`ORDER BY CreateAt DESC`, not `StartAt`) job of one status and type, or
+    /// `ErrNotFound`. `SyncRolesAndMembership` (app/syncables.go:287) reads the last successful
+    /// LDAP sync from it and takes its `StartAt` as the `since` of a membership sync.
+    fn get_newest_job_by_status_and_type(
+        &self,
+        status: &str,
+        job_type: &str,
+    ) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
+
     /// Port of `SqlJobStore.UpdateStatus` (job_store.go) — the **only write** this store has.
     ///
     /// Sets `Status` and `LastActivityAt` and returns the updated row through `RETURNING`. Two
@@ -209,6 +219,46 @@ fn rows_into_jobs(rows: Vec<JobRow>) -> Result<Vec<Job>, StoreError> {
 }
 
 impl JobStore for SqlJobStore {
+    #[tracing::instrument(skip(self), fields(found))]
+    async fn get_newest_job_by_status_and_type(
+        &self,
+        status: &str,
+        job_type: &str,
+    ) -> Result<Job, StoreError> {
+        let row = sqlx::query_as!(
+            JobRow,
+            r#"
+            SELECT                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+              FROM jobs
+             WHERE status = $1 AND type = $2
+             ORDER BY createat DESC
+             LIMIT 1
+            "#,
+            status,
+            job_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Job with statuses={status} and type={job_type}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", row.is_some());
+        row.ok_or_else(|| StoreError::NotFound {
+            entity: "Job",
+            criteria: format!("<status, type>=<{status}, {job_type}>"),
+        })?
+        .into_job()
+    }
+
     #[tracing::instrument(skip(self), fields(job_type = %job_type, status = %status, found))]
     async fn get_all_by_type_and_status(
         &self,

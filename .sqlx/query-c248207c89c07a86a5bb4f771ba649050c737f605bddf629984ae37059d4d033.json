@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE propertyfields\n               SET name = $1,\n                   type = $2::text::property_field_type,\n                   attrs = $3::jsonb,\n                   targetid = $4,\n                   targettype = $5,\n                   protected = $6,\n                   permissionfield = $7::text::permission_level,\n                   permissionvalues = $8::text::permission_level,\n                   permissionoptions = $9::text::permission_level,\n                   linkedfieldid = $10,\n                   updateat = $11,\n                   deleteat = $12,\n                   updatedby = $13\n             WHERE id = $14\n               AND ($15::text = '' OR groupid = $15)\n               AND updateat = $16\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Jsonb",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c248207c89c07a86a5bb4f771ba649050c737f605bddf629984ae37059d4d033"
+}

@@ -117,6 +117,14 @@ pub struct Config {
     /// bots straight to the tables. Read by `mm_api::bots::create_bot`.
     pub enable_bot_account_creation: bool,
 
+    /// `ServiceSettings.EnableCustomGroups` (config.go:487), default **`true`** (config.go:990).
+    ///
+    /// The configuration half of `licensedAndConfiguredForGroupBySource` (api4/group.go:1566):
+    /// with it off, every custom-group route answers `api.custom_groups.feature_disabled` at 400
+    /// — after the licence tier has passed, so on an unlicensed server it is never consulted.
+    /// Read by `mm_app::App::licensed_and_configured_for_group_by_source`.
+    pub enable_custom_groups: bool,
+
     /// `ServiceSettings.PostPriority` (config.go:992). Go default **`true`**.
     ///
     /// Gates `metadata.priority` *and* `metadata.acknowledgements`. `IsPostPriorityEnabled`
@@ -779,6 +787,11 @@ pub struct Config {
     /// while it is set rather than answering from the local rows alone.
     pub ldap_enable: bool,
 
+    /// `LdapSettings.ReAddRemovedMembers` (config.go:2845, default **false**): whether a group
+    /// sync re-adds a member who left or was removed from a team or channel by hand. Read by
+    /// `App::sync_roles_and_membership` for an LDAP-source group only.
+    pub ldap_re_add_removed_members: bool,
+
     /// `SamlSettings.Enable` (config.go, defaulted **`false`** at :3033).
     ///
     /// One of the five flags `login`'s deferred error mask reads (api4/user.go:2163). Any of
@@ -891,6 +904,11 @@ pub struct Config {
     /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
     /// below alone.
     pub feature_flag_enable_ai_recaps: bool,
+
+    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
+    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
+    /// create a `rank` user field or to convert one. Environment-only, like every feature flag.
+    pub feature_flag_property_field_rank: bool,
 
     /// `AIRecapSettings.Enable` (ai_recap_settings.go:88).
     ///
@@ -1086,6 +1104,7 @@ impl Default for Config {
             enable_custom_emoji: true,
             // config.go:918 — `new(false)`.
             enable_bot_account_creation: false,
+            enable_custom_groups: true,
             // config.go:599 — `new(false)`.
             enable_dynamic_client_registration: false,
             enable_post_username_override: false,
@@ -1202,6 +1221,7 @@ impl Default for Config {
             enable_sign_in_with_email: true,
             enable_sign_in_with_username: true,
             ldap_enable: false,
+            ldap_re_add_removed_members: false,
             saml_enable: false,
             gitlab_enable: false,
             openid_enable: false,
@@ -1228,6 +1248,7 @@ impl Default for Config {
             scheduled_posts: true,
             // `f.EnableAIRecaps = false` (feature_flags.go:192).
             feature_flag_enable_ai_recaps: false,
+            feature_flag_property_field_rank: true,
             // Absent, and absent means **enabled** — see the field's note.
             ai_recap_settings_enable: None,
             // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
@@ -1321,6 +1342,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION",
                 default.enable_bot_account_creation,
+            ),
+            enable_custom_groups: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLECUSTOMGROUPS",
+                default.enable_custom_groups,
             ),
             allow_persistent_notifications: lookup_bool(
                 lookup,
@@ -1523,6 +1549,11 @@ impl Config {
                 "MM_FEATUREFLAGS_ENABLEAIRECAPS",
                 default.feature_flag_enable_ai_recaps,
             ),
+            feature_flag_property_field_rank: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_PROPERTYFIELDRANK",
+                default.feature_flag_property_field_rank,
+            ),
             // An overlay can only ever *set* this, never restore it to absent — which matches
             // Go, whose environment layer writes a pointer to the parsed value.
             ai_recap_settings_enable: lookup("MM_AIRECAPSETTINGS_ENABLE")
@@ -1694,6 +1725,11 @@ impl Config {
                 default.enable_sign_in_with_username,
             ),
             ldap_enable: lookup_bool(lookup, "MM_LDAPSETTINGS_ENABLE", default.ldap_enable),
+            ldap_re_add_removed_members: lookup_bool(
+                lookup,
+                "MM_LDAPSETTINGS_READDREMOVEDMEMBERS",
+                default.ldap_re_add_removed_members,
+            ),
             saml_enable: lookup_bool(lookup, "MM_SAMLSETTINGS_ENABLE", default.saml_enable),
             gitlab_enable: lookup_bool(lookup, "MM_GITLABSETTINGS_ENABLE", default.gitlab_enable),
             openid_enable: lookup_bool(lookup, "MM_OPENIDSETTINGS_ENABLE", default.openid_enable),
@@ -1889,6 +1925,9 @@ impl Config {
             enable_bot_account_creation: service
                 .enable_bot_account_creation
                 .unwrap_or(default.enable_bot_account_creation),
+            enable_custom_groups: service
+                .enable_custom_groups
+                .unwrap_or(default.enable_custom_groups),
             post_priority: service.post_priority.unwrap_or(default.post_priority),
             allow_persistent_notifications: service
                 .allow_persistent_notifications
@@ -1997,6 +2036,9 @@ impl Config {
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
             ldap_enable: ldap_settings.enable.unwrap_or(default.ldap_enable),
+            ldap_re_add_removed_members: ldap_settings
+                .re_add_removed_members
+                .unwrap_or(default.ldap_re_add_removed_members),
             saml_enable_sync_with_ldap: saml_settings
                 .enable_sync_with_ldap
                 .unwrap_or(default.saml_enable_sync_with_ldap),
@@ -2163,6 +2205,7 @@ impl Config {
             // the document is persisted, so reading it here would turn an absence into a value.
             feature_flag_test_feature: default.feature_flag_test_feature,
             feature_flag_enable_ai_recaps: default.feature_flag_enable_ai_recaps,
+            feature_flag_property_field_rank: default.feature_flag_property_field_rank,
             // **Not** `unwrap_or(default)`: the field is `Option` on purpose and an absent
             // `Enable` is a different input from `false`. Carried through as it arrived.
             ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,
@@ -2292,6 +2335,8 @@ struct LdapSettingsDocument {
     picture_attribute: Option<String>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
+    #[serde(rename = "ReAddRemovedMembers")]
+    re_add_removed_members: Option<bool>,
 }
 
 /// The two fields of `SamlSettings` a migrated route reads: `EnableSyncWithLdap` is only ever
@@ -2523,6 +2568,8 @@ struct ServiceSettingsDocument {
     enable_custom_emoji: Option<bool>,
     #[serde(rename = "EnableBotAccountCreation")]
     enable_bot_account_creation: Option<bool>,
+    #[serde(rename = "EnableCustomGroups")]
+    enable_custom_groups: Option<bool>,
     #[serde(rename = "PostPriority")]
     post_priority: Option<bool>,
     #[serde(rename = "AllowPersistentNotifications")]
@@ -3368,8 +3415,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 72,
-            "the fixture covers {keys} settings and Config reads 72 from the document. \
+            keys, 74,
+            "the fixture covers {keys} settings and Config reads 74 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

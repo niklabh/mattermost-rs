@@ -47,7 +47,8 @@
   },
   "LdapSettings": {
     "Enable": false,
-    "PictureAttribute": ""
+    "PictureAttribute": "",
+    "ReAddRemovedMembers": false
   },
   "LocalizationSettings": {
     "DefaultClientLocale": "en"
@@ -77,6 +78,7 @@
     "EnableBurnOnRead": true,
     "EnableCommands": true,
     "EnableCustomEmoji": true,
+    "EnableCustomGroups": true,
     "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
     "EnableMultifactorAuthentication": false,

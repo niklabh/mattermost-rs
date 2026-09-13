@@ -80,9 +80,7 @@ use mm_model::property_field::{
     PropertyFieldSearchCursor, PropertyFieldSearchOpts, is_valid_property_field_object_type,
     is_valid_psav2_property_field_target_type,
 };
-use mm_model::property_group::{
-    ACCESS_CONTROL_PROPERTY_GROUP_NAME, PropertyGroup, is_valid_property_group_name,
-};
+use mm_model::property_group::{PropertyGroup, is_valid_property_group_name};
 use mm_model::property_value::{
     PROPERTY_VALUE_SYSTEM_TARGET_ID, PropertyValueSearchCursor, PropertyValueSearchOpts,
 };
@@ -158,12 +156,12 @@ enum Group {
 /// group that does not exist is `app.property_group.get.app_error` and never
 /// `v2_group_not_found`, even when the name asked for is `session_attributes`.
 ///
-/// # The forward arm is narrower than it looks
+/// # Only `session_attributes` still forwards
 ///
-/// Only `access_control` carries hooks on the read path, so only `access_control` has to be
-/// forwarded when a licence is present — every other group reads the same on any edition. The
-/// licence is not consulted at all for the others, which is why this is not a
-/// [`crate::custom_profile_attributes`]-style gate that forwards the whole family.
+/// Only `access_control` carries hooks on the read path, and since 2026-09-13 those hooks are
+/// ported ([`mm_app::property_hooks`]), so a licensed read of that group is served like any
+/// other. The one forward left is `session_attributes` with its feature flag on, which turns on
+/// an Enterprise Advanced licence this server can only establish as false.
 async fn v2_group(state: &AppState, group_name: &str, where_: &'static str) -> Group {
     let group = match state.app.property_group(group_name).await {
         Ok(group) => group,
@@ -196,19 +194,6 @@ async fn v2_group(state: &AppState, group_name: &str, where_: &'static str) -> G
         // this server can only ever establish as false — and if it were true the group would be
         // readable and every write hook would be in play. Let Go decide.
         return Group::Forward;
-    }
-
-    if group.name == ACCESS_CONTROL_PROPERTY_GROUP_NAME {
-        match state.app.license_state().await {
-            Ok(mm_app::license::LicenseState::Unlicensed) => {
-                tracing::Span::current().record("licensed", false);
-            }
-            Ok(mm_app::license::LicenseState::Licensed) => {
-                tracing::Span::current().record("licensed", true);
-                return Group::Forward;
-            }
-            Err(err) => return Group::Failed(ApiError::from(err)),
-        }
     }
 
     Group::Serve(Box::new(group))
@@ -410,7 +395,12 @@ async fn search_fields_core(
             .into_response();
     }
 
-    match state.app.search_property_fields(group, &opts).await {
+    let caller = mm_app::property_hooks::PropertyCaller::from_session(&session.0);
+    match state
+        .app
+        .search_property_fields(group, &opts, &caller)
+        .await
+    {
         Ok(fields) => encoded(&fields, where_),
         Err(err) => ApiError::from(err).into_response(),
     }
@@ -596,7 +586,12 @@ pub async fn delete_property_field(
         Group::Failed(err) => return err.into_response(),
     };
 
-    let field = match state.app.get_property_field(&group.id, &field_id).await {
+    let caller = mm_app::property_hooks::PropertyCaller::from_session(&session.0);
+    let field = match state
+        .app
+        .get_property_field(&group, &field_id, &caller)
+        .await
+    {
         Ok(field) => field,
         Err(err) => return ApiError::from(err).into_response(),
     };
@@ -625,7 +620,7 @@ pub async fn delete_property_field(
 
     match state
         .app
-        .delete_property_field(&group, &field, &connection_id)
+        .delete_property_field_with_hooks(&group, &caller, &field.id, &connection_id)
         .await
     {
         Ok(()) => status_ok(),
@@ -800,7 +795,12 @@ async fn values_core(
         .into_response();
     }
 
-    match state.app.search_property_values(&group, &opts).await {
+    let caller = mm_app::property_hooks::PropertyCaller::from_session(&session.0);
+    match state
+        .app
+        .search_property_values(&group, &opts, &caller)
+        .await
+    {
         // **`null`, not `[]`, for the empty case** — the Go store leaves its slice nil. See the
         // module docs.
         Ok(values) if values.is_empty() => encoded(&serde_json::Value::Null, "getPropertyValues"),

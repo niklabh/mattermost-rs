@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(\n                     (SELECT 'system' FROM propertyfields\n                       WHERE objecttype = $1 AND groupid = $2 AND targettype = 'system'\n                         AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)\n                       LIMIT 1),\n                     (SELECT 'team' FROM propertyfields\n                       WHERE objecttype = $1 AND groupid = $2 AND targettype = 'team'\n                         AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)\n                       LIMIT 1),\n                     (SELECT 'channel' FROM propertyfields\n                       WHERE objecttype = $1 AND groupid = $2 AND targettype = 'channel'\n                         AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)\n                       LIMIT 1),\n                     '') AS \"level!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "level!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cb648dba5917700c96bb560d1a20454d13a7e0abe6e8062d5640c0897d366bfc"
+}

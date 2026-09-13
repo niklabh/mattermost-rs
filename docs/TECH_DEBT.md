@@ -7052,36 +7052,26 @@ database. Check that before assuming the hub.
 
 ---
 
-## D-300 · The licensed half of the seven CPA routes is forwarded, not served
+## D-300 · The licensed half of the seven CPA routes is forwarded, not served — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes) ·
+**Closed** 2026-09-13 by the licensed half of the same seven routes, measured against the licensed
+Go oracle
 
-`crate::custom_profile_attributes` serves the **unlicensed** contract of all seven routes and
-forwards to Go the moment `LicenseState::Licensed` comes back. That is not a stopgap for these
-routes' error paths — those are fully ported and compared — but it does mean the success path of
-`POST`/`PATCH`/`DELETE /fields`, `PATCH …/values` and the two non-empty reads has never run here.
+Nothing in `crate::custom_profile_attributes` forwards on the licence any more. The write half of
+`mm_store::property_store` (`create_field`, `update_field` with the optimistic-concurrency check
+and the linked-dependent propagation, `upsert_values`, the counts, the system-level name-conflict
+check) and the hook chain — licence, access control, attribute validation, field limit, the
+type-change value cleanup — are `mm_app::property_hooks` and `mm_app::custom_profile_attributes`,
+run in Go's registration order. The four CPA websocket events and the generic property events
+beside them are published. `parity::cpa_licensed` compares every write, every refusal the hooks
+mint, the read filtering of the three access modes and the events against the licensed pair; the
+unlicensed contract is unchanged and still `parity::custom_profile_attributes`.
 
-What a licensed server reaches that this side does not have, in the order it reaches them:
-
-| behind the gate | Go |
-|---|---|
-| `AccessControlHook` — read filtering, owners, sync lock, access modes | `app/properties/access_control.go` |
-| the attribute-validation hook — visibility, sort order, option and user-id checks, managed-flag authorisation | `app/properties/access_control_attribute_validation.go` |
-| `TypeChangeValueCleanupHook` — clears dependent values on a type change | `app/properties/type_change_value_cleanup.go` |
-| the group field limit | `app/properties/field_limit.go` |
-| four websocket events | `custom_profile_attributes_field_{created,updated,deleted}`, `custom_profile_attributes_values_updated` |
-| `App.UpsertPropertyValues`' value audit and broadcast | `app/property_value.go:169` |
-
-**What is owed:** the write half of `mm_store::property_store` and the three hooks, behind whichever
-route needs them first. Nothing here is blocked on the licence — a licence is not obtainable and is
-not a reason to skip the work, only a reason nothing on this stack can *compare* it. When it lands
-the comparison oracle has to be something other than the Go server beside it.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+Three things the comparison found that reading had not: a text field's `options` is `null` on
+the wire (a nil slice), not `[]`; `CPAField`'s keys are in struct order with `attrs` last; and an
+integral `float64` in a field's attrs prints as `3`, not `3.0`, on both the read and the write
+path (`go_normalize_json_numbers`). What is still owed is in [D-541], [D-542] and [D-543].
 
 ---
 
@@ -7298,54 +7288,30 @@ marker on that one file.
 
 ---
 
-## D-360 · the licensed half of the seven group writes is forwarded, not served
+## D-360 · the licensed half of the seven group writes is forwarded, not served — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group CRUD and membership)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-12 (group CRUD and membership) ·
+**Closed** 2026-09-13 by the licensed port of `createGroup`, `getGroupsByNames`, `patchGroup`,
+`deleteGroup`, `restoreGroup`, `addGroupMembers` and `deleteGroupMembers`
 
-`crate::groups` now serves the **unlicensed** contract of all seven writes in `api4/group.go` —
-`createGroup`, `getGroupsByNames`, `patchGroup`, `deleteGroup`, `restoreGroup`, `addGroupMembers`,
-`deleteGroupMembers` — alongside the ten reads it already answered. `requireLicense`
-(api4/handlers.go:237) is the first statement of every one of them, ahead of `RequireGroupId` *and
-ahead of reading the request body*, so an unlicensed server's whole contract is one 501 and that
-501 is fully compared. Everything past it forwards.
+All seven are served on a licensed server and compared against the licensed pair in
+`parity::group_writes_licensed` (seven tests, 70-odd cases). What landed: the `GroupStore` write
+surface (`mm_store::group_store` — create, update, delete, restore, member upsert and removal,
+plus the reads they need), `licensedAndConfiguredForGroupBySource`, `SessionHasPermissionToGroup`,
+`patchGroup`'s name derivation with Go's simple `ToLower` (corpus in `behaviour_group.json`),
+and the three websocket events. The three branch-level facts recorded above are now measured:
+`restoreGroup`'s 501, `deleteGroupMembers`' `where`, and the `[]`-versus-`null` of an empty
+membership answer (`addGroupMembers` writes `[]`, `deleteGroupMembers` writes `null`).
 
-Go loads its licence at startup and re-reads it only on a save, so `set_active_licence_id` moves
-our answer and not Go's: on this stack the licensed side of these routes has no oracle beside it,
-which is a fact to route around and not a reason the work is skipped.
+Two facts the comparison established that the source did not say: `system_user` holds every
+custom-group permission, so a plain user may write any custom group; and the implicit
+`custom_group_user` role is **empty** by default, so the membership branch of
+`SessionHasPermissionToGroup` grants nothing until an administrator edits the role — the suite
+edits it through Go's role API to reach that branch, and restores it.
 
-What a licensed server reaches that this side does not have:
-
-| behind the gate | Go |
-|---|---|
-| the `GroupStore` write surface — `Create`, `Update`, `Delete`, `Restore`, `UpsertMembers`, `DeleteMembers` | `channels/store/sqlstore/group_store.go` |
-| `licensedAndConfiguredForGroupBySource` — four refusals keyed on source, two statuses | `api4/group.go:1566` |
-| the custom-group permissions — `create_custom_group`, `edit_custom_group`, `delete_custom_group`, `restore_custom_group`, `manage_custom_group_members` — and `SessionHasPermissionToGroup` | `app/authorization.go` |
-| `patchGroup`'s name derivation: `strings.ReplaceAll(strings.ToLower(DisplayName), " ", "-")` when `allow_reference` is turned on without a name, plus the user-name and mentionable-group collision checks | `api4/group.go:265` |
-| six audit records and their `Auditable`/`LogClone` payloads | `model/group.go:45` |
-
-Three branch-level facts are recorded here because no test on this stack can reach them and they
-are the ones a later port will get wrong:
-
-1. **`restoreGroup`'s non-custom refusal is a 501, not a 400.** Every other handler in the family
-   answers `app.group.crud_permission` at `http.StatusBadRequest`; `restoreGroup` answers the same
-   id at `http.StatusNotImplemented` (group.go:1367), which on the wire is indistinguishable from
-   the licence error it sits behind.
-2. **`deleteGroupMembers`' marshal-failure branch names `Api4.addGroupMembers`** (group.go:1516),
-   copied from its neighbour. `Where` carries `json:"-"`, so it is a log-line difference only.
-3. **`getGroupsByNames` short-circuits an empty list before the permission question.** An empty
-   array writes a literal `[]` and returns (group.go:934), so a caller with no group permission at
-   all gets a 200 — the `FilterAllowReference` computation happens after.
-
-**What is owed:** `mm_store::group_store`'s write half and the custom-group permission checks,
-behind whichever route needs them first. `mm_model::Group`'s validators are already ported and are
-now pinned branch-by-branch against a generated oracle (`fixtures/behaviour_group.json`), so the
-model layer is not the blocker; the store and the permission model are.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+Not ported, deliberately: the six audit records (no audit record is ported anywhere yet), and
+`ldap`-source groups' `LDAPGroups` refusal remains measurable only as "not refused" — the oracle's
+licence has the feature on and no LDAP is configured, so an `ldap` group is a planted row.
 
 ---
 
@@ -7401,61 +7367,23 @@ licence it is false, and both are measured served and identical to the oracle.
 
 ---
 
-## D-390 · the licensed half of the three group syncable writes is forwarded, not served
+## D-390 · the licensed half of the three group syncable writes is forwarded, not served — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group syncables)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-12 (group syncables) ·
+**Closed** 2026-09-13 by the licensed pair (`scripts/go-licensed.sh`, `common::licensed`)
 
-`crate::groups` now serves the **unlicensed** contract of the last three handlers in
-`api4/group.go` — `linkGroupSyncable` (`POST .../link`), `unlinkGroupSyncable` (`DELETE .../link`)
-and `patchGroupSyncable` (`PUT .../patch`) — which completes the file: all twenty route+method
-pairs `InitGroup` registers are answered here, and `parity::group_syncables` re-measures every one
-of them. `requireLicense` is the first statement of all three, above `RequireGroupId`,
-`RequireSyncableId`, `RequireSyncableType` **and** `io.ReadAll(r.Body)`, so the unlicensed
-contract is one 501 and it is fully compared. Everything past it forwards, for the reason
-[D-360] gives: Go loads its licence at startup, so `set_active_licence_id` moves our answer and
-not Go's, and the licensed side has no oracle beside it on this stack.
-
-What a licensed server reaches that this side does not have:
-
-| behind the gate | Go |
-|---|---|
-| `verifyLinkUnlinkPermission` — `IsSyncable`, an `AllowReference` gate, then a per-type switch | `api4/group.go:679` |
-| its channel arm's **parent-team** question: a channel not yet synced via its team needs `invite_user` on the team, and the private/public channel type then picks `manage_private_channel_members` or `manage_public_channel_members` | `api4/group.go:705` |
-| `verifySchemeAdminAssignmentPermission` — `manage_team_roles` / `manage_channel_roles`, skipped entirely when `patch.SchemeAdmin` is nil | `api4/group.go:573` |
-| `GetGroupSyncable` / `UpsertGroupSyncable` / `UpdateGroupSyncable` / `DeleteGroupSyncable` | `channels/store/sqlstore/group_store.go` |
-| `SyncRolesAndMembership` and `RemoveMembershipsFromUnlinkedSyncable`, both dispatched through `Srv().Go` **after** the response is written | `app/syncables.go` |
-
-Four branch-level facts are recorded here because no test on this stack can reach them, and they
-are the ones a later port will get wrong:
-
-1. **`linkGroupSyncable`'s re-link deliberately discards the old row.** It upserts onto the
-   existing syncable only when `DeleteAt == 0`; a fresh link *or a re-link of a soft-deleted row*
-   starts from a zero-value `GroupSyncable`, so fields the caller did not set are not carried over
-   from the previous incarnation (group.go:385). A port that always patched the existing row would
-   resurrect `SchemeAdmin` from before the unlink.
-2. **The two handlers differ in exactly one place.** `GetGroupSyncable` returning 404 is tolerated
-   by `link` (it creates the row) and fatal to `patch`. Everything else — both verifiers, the
-   `Patch` call, the async sync — is identical.
-3. **Three routes, three response shapes.** `link` is a **201** with the marshalled syncable,
-   `patch` a 200 with the same, `unlink` a 200 with `ReturnStatusOK`'s `{"status":"OK"}`.
-4. **`RequireSyncableType` is unreachable through the mux.** The route pattern
-   `{syncable_type:teams|channels}` refuses a third value before any handler, and `params.go:269`
-   maps only those two strings onto `GroupSyncableType`. So its `SetInvalidURLParam("syncable_type")`
-   branch is dead code for every HTTP caller, which is why a third value is *forwarded* for
-   gorilla's own 404 rather than answered with a 400. Measured in
-   `parity::group_syncables::a_third_syncable_type_is_forwarded`.
-
-**What is owed:** `mm_store`'s `GroupSyncable` surface (the four CRUD methods plus
-`TeamMembersToAdd`/`ChannelMembersToAdd`), the two permission verifiers, and `app/syncables.go`'s
-membership reconciliation — behind whichever route needs them first. The team and channel member
-*writes* they would build on are already ported (`mm_app::team_member`, `mm_app::channel_member`),
-so the reconciliation loop is the blocker, not the membership primitives.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+`linkGroupSyncable`, `unlinkGroupSyncable` and `patchGroupSyncable` are served on a licensed
+server: both verifiers (`verify_link_unlink_permission`, `verify_scheme_admin_assignment_permission`
+in `mm-api/src/groups.rs`), the read-modify-write through `App::get_group_syncable` /
+`upsert_group_syncable` / `update_group_syncable` / `delete_group_syncable`
+(`mm-app/src/syncables.rs`), the syncable half of the group store
+(`mm-store/src/group_syncable_store.rs`), and `SyncRolesAndMembership` /
+`RemoveMembershipsFromUnlinkedSyncable` as a task spawned after the response. The four
+branch-level facts recorded above are measured now against the licensed Go oracle in
+`parity::group_syncables` — the re-link that discards the soft-deleted row, link's tolerated 404
+against patch's fatal one, the three response shapes (201 body / 200 body / `{"status":"OK"}`),
+and the mux's refusal of a third syncable type. One arm still hands over: a group with
+`AllowReference = false`, [D-531].
 
 ---
 
@@ -8614,3 +8542,65 @@ oracle is Enterprise (tier 20), so the served side is measured and the forward i
 
 **What is owed:** nothing this stack can compare. Recorded so the forward is known to be a
 forward on that exact predicate, not on "licensed".
+## D-531 · a syncable link on a group that hides its members is handed to Go
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (group syncables, licensed)
+
+`verifyLinkUnlinkPermission` (api4/group.go:690) asks `SessionHasPermissionToGroup(session,
+groupID, sysconsole_read_user_management_groups)` when `!group.AllowReference`, and that
+function belongs to the custom-group permission model ported with [D-360] — a group-membership
+read plus the `custom_group_user` implicit role (app/authorization.go:188). Rather than a second
+copy, `verify_link_unlink_permission` returns `Verdict::Forward` for such a group on all three
+routes, **before any write**, and `parity::group_syncables::licensed_refusals_match_go_and_a_hidden_group_is_handed_over`
+pins that the answer that comes back is Go's own. What is owed: replace the `Forward` arm with
+`App::session_has_permission_to_group` once it exists, and turn that test's expectation from
+"served by go" into a served 403 for the outsider and a served link for a group member.
+## D-541 · a struct placed into a websocket event's `data` as a `Value` loses Go's key order
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
+
+`custom_profile_attributes_field_created` and `_updated` carry the field under `data.field` as an
+**object** — Go's `message.Add("field", cpaField)` stores the struct and marshals it in
+declaration order, `attrs` last. Here `WebSocketEvent::add` takes a `serde_json::Value`, and a
+`serde_json::Map` is a `BTreeMap` without `preserve_order`, so the nested object goes out with
+sorted keys. Same bytes as a JSON value, different bytes on the wire; `parity::cpa_licensed`
+compares the events parsed and passes. [D-022] records the same hazard for `go_json_marshal` on a
+struct-in-map; this is the event-payload instance of it. Every event in this tree that adds a
+struct as a `Value` has it — the `property_field_created` twin does not, because Go adds that
+field as a JSON **string** and so do we.
+
+**What is owed:** a `WebSocketEvent::add_raw(key, String)` carrying pre-serialised JSON, and a
+`StringInterface` value type that can hold it — or `preserve_order` on `serde_json`, which
+changes every map in the tree and needs the full parity suite to say what else moves.
+
+---
+
+## D-542 · `checkFieldDeleteAccess` asks the plugin host whether a source plugin is installed
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
+
+A protected property field is deletable by anyone with the field permission **when its source
+plugin is not installed** (app/properties/access_control.go:859, `!h.pluginChecker(id)`). Go asks
+`GetPluginStatus`; there is no plugin host on this side, so every source plugin reads as
+absent and every protected field is deletable here. On the stack the two agree — the oracle has
+no plugins either, measured by `parity::cpa_licensed::access_modes_filter_reads_the_same_way_on_both`
+— and a protected field cannot be created over REST at all, so the divergence needs a plugin
+installed on Go and a row that plugin created. Recorded where `mm_app::property_hooks` says it.
+
+**What is owed:** the plugin host, or at least `GetPluginStatus` against the `PluginStatuses`
+the Go server keeps, which is cluster state and not a table.
+
+---
+
+## D-543 · the team- and channel-level property name-conflict checks are not ported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (CPA licensed half)
+
+`CheckPropertyNameConflict` (sqlstore/property_field_store.go:579) dispatches on the field's
+`TargetType`; `SqlPropertyStore::check_property_name_conflict` ports the **system** arm — the only
+one a CPA field can reach, since `createCPAField` pins `TargetType` to `system` and the patch
+clears it — and refuses a team or channel target with `StoreError::Argument`. Each of the other
+two is its own three-way `COALESCE`, and the team arm joins `Channels` to find the team's channel
+fields. Owed by whichever route first **writes** a team- or channel-scoped PSAv2 field — the
+generic `POST /properties/groups/{group}/{object_type}/fields`, when it is served.
+

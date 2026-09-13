@@ -233,8 +233,12 @@ pub struct CPAAttrs {
     #[serde(rename = "sort_order", with = "crate::serde_helpers::go_float")]
     pub sort_order: f64,
 
+    /// **`None` is Go's nil slice and marshals as `null`; `Some(empty)` is `[]`.** The attribute
+    /// hook deletes `options` from a non-select field's attrs, so a text field comes back from
+    /// `NewCPAFieldFromPropertyField` with a nil slice and the wire says `"options":null` —
+    /// measured against the licensed oracle, where a `[]` here was the first divergence found.
     #[serde(rename = "options")]
-    pub options: PropertyOptions<CustomProfileAttributesSelectOption>,
+    pub options: Option<PropertyOptions<CustomProfileAttributesSelectOption>>,
 
     #[serde(rename = "value_type")]
     pub value_type: String,
@@ -283,15 +287,51 @@ pub struct CPAField {
 }
 
 impl Serialize for CPAField {
+    /// Go's key order: the embedded `PropertyField`'s fields in declaration order — with its
+    /// `attrs` **shadowed out** by the outer, typed `attrs`, which therefore comes **last** — and
+    /// the four `omitempty` pointers skipped when nil. Written out field by field rather than
+    /// through a `serde_json::Map`, whose keys sort alphabetically and put `attrs` first: the
+    /// licensed oracle's byte comparison is what made the difference visible.
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut object = match serde_json::to_value(&self.property_field) {
-            Ok(serde_json::Value::Object(map)) => map,
-            _ => return Err(serde::ser::Error::custom("PropertyField is not an object")),
-        };
-        let typed = serde_json::to_value(&self.attrs).map_err(serde::ser::Error::custom)?;
-        // The shallower field wins, exactly as Go's shadowing does.
-        object.insert("attrs".to_string(), typed);
-        object.serialize(s)
+        use serde::ser::SerializeStruct;
+        let pf = &self.property_field;
+        let optional = [
+            pf.permission_field.is_some(),
+            pf.permission_values.is_some(),
+            pf.permission_options.is_some(),
+            pf.linked_field_id.is_some(),
+        ]
+        .iter()
+        .filter(|present| **present)
+        .count();
+        let mut st = s.serialize_struct("CPAField", 14 + optional)?;
+        st.serialize_field("id", &pf.id)?;
+        st.serialize_field("group_id", &pf.group_id)?;
+        st.serialize_field("name", &pf.name)?;
+        st.serialize_field("type", &pf.type_)?;
+        st.serialize_field("target_id", &pf.target_id)?;
+        st.serialize_field("target_type", &pf.target_type)?;
+        st.serialize_field("object_type", &pf.object_type)?;
+        st.serialize_field("protected", &pf.protected)?;
+        if let Some(level) = &pf.permission_field {
+            st.serialize_field("permission_field", level)?;
+        }
+        if let Some(level) = &pf.permission_values {
+            st.serialize_field("permission_values", level)?;
+        }
+        if let Some(level) = &pf.permission_options {
+            st.serialize_field("permission_options", level)?;
+        }
+        if let Some(linked) = &pf.linked_field_id {
+            st.serialize_field("linked_field_id", linked)?;
+        }
+        st.serialize_field("create_at", &pf.create_at)?;
+        st.serialize_field("update_at", &pf.update_at)?;
+        st.serialize_field("delete_at", &pf.delete_at)?;
+        st.serialize_field("created_by", &pf.created_by)?;
+        st.serialize_field("updated_by", &pf.updated_by)?;
+        st.serialize_field("attrs", &self.attrs)?;
+        st.end()
     }
 }
 

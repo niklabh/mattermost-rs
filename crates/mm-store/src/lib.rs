@@ -27,6 +27,7 @@ pub mod error;
 pub mod file_info_store;
 /// The one `GroupStore` read the channel-member add path needs.
 pub mod group_store;
+pub mod group_syncable_store;
 pub mod job_store;
 pub mod license_store;
 pub mod oauth_store;
@@ -69,6 +70,7 @@ pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
 pub use group_store::{GroupStore, SqlGroupStore};
+pub use group_syncable_store::GroupSyncableStore;
 pub use job_store::{JobStore, SqlJobStore};
 pub use license_store::{LicenseStore, SqlLicenseStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};

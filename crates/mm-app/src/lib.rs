@@ -50,6 +50,7 @@ pub mod post_unread;
 pub mod post_write;
 pub mod preference;
 pub mod properties;
+pub mod property_hooks;
 pub mod reaction;
 pub mod report;
 pub mod role;
@@ -58,6 +59,7 @@ pub mod session;
 /// The read side of `app/channel_category.go`.
 pub mod sidebar;
 pub mod status;
+pub mod syncables;
 pub mod system;
 pub mod team;
 pub mod team_member;

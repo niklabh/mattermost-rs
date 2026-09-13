@@ -12191,6 +12191,37 @@ is now ours, measured against the licensed pair and its guest variant.
    signs has the flag on; the 403 it guards is pinned by a mutation, not by a comparison.
 4. **The miss id is `app.user.missing_account.const`**, not `.app_error` — measured on both
    licensed servers after the port had guessed the neighbour's suffix.
+## The licensed half of the seven group writes — `api4/group.go` (2026-09-13)
+
+Base 80162e4. Route count unchanged at 460 of 764: the seven routes were already counted as
+served (the unlicensed 501); what changed is that a licensed server is served too, and compared.
+[D-360] closed.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/group_store.rs` — `get`, `get_by_name`, `get_by_names`, `create_with_user_ids`, `update`, `delete`, `restore`, `get_member`, `get_member_count`, `upsert_members`, `delete_members` | DONE | via parity | `Update` writes back the **input** with two timestamps reset, not a re-read; `Delete`/`Restore` select with `DeleteAt = 0` / `<> 0` so each is a 404 on the other's state; `DeleteMembers` compares lengths before it looks for the missing id, so a member named twice passes; the returned rows keep the `SELECT`'s order, which has no `ORDER BY`. |
+| app | `crates/mm-app/src/group.rs`, `authorization.rs` — `licensed_and_configured_for_group_by_source`, `session_has_permission_to_group`, the seven app functions | DONE | via parity | `CreateGroupWithUserIds`' switch has no `ErrNotFound` arm, so a member id naming nobody is a **500** `app.insert_error` there and a 400 `user_not_found` in `UpsertGroupMembers`. `UpdateGroup`'s duplicate-name arm says `where: CreateGroup`. `DeleteGroupMembers`' `where` is singular. |
+| api | `crates/mm-api/src/groups.rs` — the seven handlers | DONE | 3 unit + 7 parity | `restoreGroup` refuses a non-custom group at **501**, the others at 400. `addGroupMembers` checks the permission **before** it reads the body. An empty removal answers `null` (nil slice), an empty add `[]`. The derived name uses Go's simple `ToLower` — corpus line `derived_name` in `behaviour_group.json`. |
+| config | `crates/mm-app/src/config.rs` — `enable_custom_groups` | DONE | fixture | `ServiceSettings.EnableCustomGroups`, default true; the config half of the by-source gate. Projected into `config_active.json`. |
+| test | `crates/mm-api/tests/parity/group_writes_licensed.rs` — 7 tests | DONE | — | Serialised on one lock: every test sweeps the `mmrslicgrp` prefix and two running together deleted each other's fixture mid-request. |
+
+### Notes
+
+1. **`system_user` holds every custom-group permission**, measured: a plain user not in a group
+   patched it, added members, deleted and restored it — 200 each. So a plain user cannot show a
+   permission refusal; the suite makes one with `roles = ''` and a fresh login.
+2. **The implicit `custom_group_user` role is empty** (role.go:926). Being a member grants
+   nothing until an administrator gives the role a permission, which the suite does through the
+   licensed Go's `PUT /roles/{id}/patch` — `POST /caches/invalidate` was measured to leave that
+   server's role cache stale, so the write has to be Go's own.
+3. **Empty membership answers differ by handler.** `UpsertMembers` builds `make([]…, 0)` and
+   marshals `[]`; `buildDeleteMembersQuery` names a nil slice that `Select` leaves nil, and
+   marshals `null`. Measured, and the handler writes the literal.
+4. **A name that is not referenceable is still a name.** `patchGroup`'s collision check filters
+   to `allow_reference = true`, so a name held by an unreferenceable group passes it and fails on
+   the unique constraint instead — `app.custom_group.unique_name`, `where: CreateGroup`.
+5. **The audit records are not ported.** None are, anywhere; the six here are not an exception
+   and not a new entry.
 ## The licensed halves of the acknowledgement pair, `createTermsOfService`, and the archive cleanup (2026-09-13)
 
 Three ledger entries the licence surface unblocked, each now served and compared against the
@@ -12229,3 +12260,86 @@ half of each is answered too.
 5. **`cleanupTeamAccessControlPolicy` never needed the enterprise service.** It asks for it, gets
    nil, and takes the store fallback — on Team Edition, on the licensed oracle, on any build without
    the private tree. [D-371] forwarded on a premise the source did not support.
+## The licensed half of the three group syncable writes (2026-09-13)
+
+`POST`/`DELETE /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link` and `PUT …/patch`
+served on a licensed server — the first route family compared against the licensed pair
+(`common::licensed`) rather than forwarded past `requireLicense`. Route count unchanged at 460
+of 764 relative to base 80162e4: the three were already counted as served for their unlicensed
+501; what changed is that every branch behind the gate is answered here. D-390 closed; D-531
+opened.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/group_syncable_store.rs` — `GroupSyncableStore` on `SqlGroupStore`, `update_members_role` on the team and channel stores | DONE | 7 DB | Squirrel's optional clauses (the `reAddRemovedMembers` join, the scope) are one statement each, switched by bound parameters. `*MembersToRemove` return `(team, user)` pairs, not half-filled members — see the module note. |
+| store | `crates/mm-store/src/job_store.rs` — `get_newest_job_by_status_and_type` | DONE | 1 DB | `ORDER BY CreateAt DESC`, not `StartAt`. |
+| app | `crates/mm-app/src/syncables.rs` — `get/upsert/update/delete_group_syncable`, `sync_roles_and_membership`, `remove_memberships_from_unlinked_syncable` and the four membership loops; `group.rs` — `get_group` | DONE | via parity | A channel link is **two** rows and two events (the parent team is upserted first). `UpdateGroupSyncable`'s store miss is a 500, not a 404 — `errors.Wrap` hides `ErrNotFound` from `errors.As`. The sync's failures are warnings, as in Go. |
+| app | `crates/mm-app/src/config.rs` — `ldap_re_add_removed_members` | DONE | 2 unit | `LdapSettings.ReAddRemovedMembers`, read only for an LDAP-source group. Fixture projection extended (72 → 73 keys). |
+| api | `crates/mm-api/src/groups.rs` — the three handlers, `verify_link_unlink_permission`, `verify_scheme_admin_assignment_permission` | DONE | 5 licensed parity + the 7 unlicensed | See note 1. |
+
+### Notes
+
+1. **The channel arm asks a team question with the channel's id.** `SessionHasPermissionToTeam(
+   session, syncableID, invite_user)` in the channel arm of `verifyLinkUnlinkPermission`
+   (group.go:706) passes the *channel* id, so a session's team memberships never match and the
+   check falls to system roles: a team admin who is not a system admin is refused their first
+   channel link. Reproduced, and `licensed_refusals_match_go_and_a_hidden_group_is_handed_over`
+   holds a team admin to the 403; the mutation that passed the team's id instead was caught.
+2. **Two syncs write one database.** The Go oracle and the licensed mm-api both run
+   `SyncRolesAndMembership` after their response, on the same tables, so a comparison cannot send
+   one request to both. Each side gets its own group, team, channel and member, isomorphic to the
+   other's, and the outcomes are compared as shapes with ids and clocks taken out. The membership
+   sync is seen by polling `GET /teams/{team}/members/{user}` through the main Go server.
+3. **A group-constrained unlink removes the administrator too.** `TeamMembersToRemove` sheds
+   every member of a constrained team who is in none of its live groups, the team's creator
+   included — after which Go stops delivering team-scoped websocket frames to that admin's
+   session (`isMemberOfTeam`). The sync test therefore constrains a team of its own; done to the
+   shared one, the events test saw nothing.
+4. **Go's `GetTeamMember` returns a soft-deleted row**, so "removed by the sync" is a member
+   with `delete_at` set, not a 404.
+5. **`link` and `patch` read the body before the group.** A forward for a hidden group ([D-531])
+   is decided after `io.ReadAll` in Go's order, so the handler re-sends the bytes it consumed.
+## The licensed half of the seven CPA routes (2026-09-13)
+
+`api4/custom_profile_attributes.go`, past the licence: served and compared against the licensed
+Go oracle. Route count unchanged at 460 of 764 relative to base 80162e4 — the seven were already
+counted as served for their unlicensed contract; what changed is that nothing in them forwards.
+Closes [D-300]; opens [D-541], [D-542], [D-543].
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/property_store.rs` — `create_field`, `update_field`, `upsert_values`, `count_fields_for_group(_object_type)`, `check_property_name_conflict`, `get_field_in_any_group` | DONE (system-level conflict arm only, [D-543]) | via parity | `update_field` is one `UPDATE … WHERE updateat = expected` — zero rows is `StoreError::Stale`, Go's 409 — then the linked-dependent propagation in the same transaction. Integral floats in `attrs` are normalised to integers on both the read and the write path: Go decodes attrs into `map[string]any` and prints `3`, not `3.0`. |
+| app | `crates/mm-app/src/property_hooks.rs` | DONE | 9 unit | The `access_control` group's hook chain in registration order: licence, access control, attribute validation, field limit, type-change cleanup; `mapPropertyServiceError`. The caller is a user, never a plugin — see the module docs for which arms that decides, and [D-542] for the one arm that needs a plugin host. |
+| app | `crates/mm-app/src/custom_profile_attributes.rs` — `cpa_list_fields`, `cpa_get_field(s)`, `cpa_create_field`, `cpa_update_field`, `delete_property_field_with_hooks`, `cpa_upsert_values`, `cpa_list_values` | DONE | 6 unit | Each is the Go app function plus the service's own invariants; the `_unlicensed` functions are gone. `managed_post_get_*` is the licence's empty short-circuit followed by read access control, and the generic `api4/properties.go` reads on `access_control` now go through it instead of forwarding. |
+| app | `crates/mm-app/src/properties.rs` — `session_has_permission_to_manage_property_field_options`, `session_has_permission_to_set_property_field_values`, `publish_property_field_event` | DONE | — | The value permission is evaluated against the **value's target**, not the field's (authorization.go:642). |
+| api | `crates/mm-api/src/custom_profile_attributes.rs` | DONE | 9 unit + 12 + 10 parity | The handler logic proper: body, id, permission branching by patch shape, object-type check, CPA event. `createCPAField` is a **201**; `deleteCPAField` is `ReturnStatusOK` without a newline. |
+| model | `crates/mm-model/src/custom_profile_attributes.rs` — `CPAAttrs::options`, `CPAField`'s `Serialize` | DONE | 3 | `options` is `Option<…>`: `None` is Go's nil slice and marshals `null`. The struct serialises in Go's key order with `attrs` last; a `serde_json::Map` had been sorting it. |
+| test | `crates/mm-api/tests/parity/cpa_licensed.rs` — 10 tests | DONE | — | Every write through both licensed servers, compared scrubbed and then by state; the refusals of every hook arm a human caller can reach; the three access modes on planted fields; the eight websocket events one write per server. Holds `PROPERTY_ROWS` exclusively and purges by name prefix **and** by `createdby`. |
+| config | `crates/mm-app/src/config.rs` — `feature_flag_property_field_rank` | DONE | — | `true` by default (feature_flags.go:212); off, a `rank` user field is refused. |
+
+### Notes
+
+1. **`options: null`, not `[]`.** `NewCPAFieldFromPropertyField` round-trips the attrs map through
+   `CPAAttrs`, whose `Options` is a slice; the attribute hook deletes `options` from a non-select
+   field, so the slice is nil and the wire says `null`. The first divergence the licensed oracle
+   found, in the create response of the simplest possible field.
+2. **`CPAField` key order is Go's struct order.** The embedded `PropertyField`'s fields come
+   first, its own `attrs` shadowed out, and the typed `attrs` last. The unlicensed suite only
+   ever compared `[]`, so a sorted `serde_json::Map` had passed for three sessions.
+3. **A protected field's definition is refused by the hook, not the handler.** `protected` on a
+   planted field is an *attr*; the `Protected` column the handler's `SessionHasPermissionToEditPropertyField`
+   reads is false, so an administrator passes it and meets `checkLegacyFieldWriteAccess` — 403
+   `app.property.access_denied.app_error`, where a reader would expect `no_field_permission`.
+   And the same field is **deletable**, because its source plugin is not installed on either
+   server ([D-542]).
+4. **The type-change cleanup's exception.** Select ↔ rank keeps a field's values; every other
+   type change clears them, the CPA event says `delete_values: true`, and a generic
+   `property_values_updated` with `values: "[]"` goes out beside it.
+5. **`user` is not a reserved CPA name.** The CEL keyword list is `true false null in as break
+   const continue else for function if import let loop package namespace return var void while`;
+   the first draft of the suite assumed otherwise and Go corrected it. Both name refusals are
+   **422**.
+6. **Batch order is map order.** `cpaPatchValues` ranges over a decoded Go map, so with two
+   refusable fields in one batch the refusal Go reports is not fixed; this side iterates sorted
+   keys, which is one of Go's possible answers. The suite refuses one field per batch.
+

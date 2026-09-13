@@ -63,7 +63,7 @@ MODELLED = {
         "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
         "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
-        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands",
+        "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands", "EnableCustomGroups",
         "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
         # The mobile session length and the cookie-domain flag, read by
         # `PUT /api/v4/users/sessions/device`. Both `SessionLengthMobile*` keys are projected
@@ -103,7 +103,7 @@ MODELLED = {
         # `PUT /api/v4/users/{user_id}/active`.
         "EnableUserDeactivation",
     ],
-    "LdapSettings": ["PictureAttribute", "Enable"],
+    "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
     "EmailSettings": [
         "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",

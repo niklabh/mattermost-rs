@@ -1,0 +1,26 @@
+# Mutation plan for the licensed half of the CPA routes (D-300), 2026-09-13.
+#
+#   scripts/mutate-batch.sh scripts/mutations/cpa-licensed.plan
+#
+# The api lines run against the licensed pair (`cpa_licensed`) or the unlicensed one
+# (`custom_profile_attributes`); the unit lines against `property_hooks`. The decisions a reader
+# gets wrong: whether the licence hook fires on a create, the attr defaults and clearing, the
+# field-limit comparison, the human/owner rule, the sync-lock direction, the shared_only
+# intersection and the rank clamp direction, the type-change cleanup's exception, the default
+# permission level, the two patch-permission branches, the source_only option hiding and the
+# per-field value permission. The last two lines are the no-op controls and must SURVIVE.
+cpa-licence-hook-skipped-on-create	crates/mm-app/src/custom_profile_attributes.rs	            if !self.cpa_licensed().await? {\n                return Err(PropertyServiceError::LicenseRequired);	            if false {\n                return Err(PropertyServiceError::LicenseRequired);	api	custom_profile_attributes
+cpa-visibility-default-dropped	crates/mm-app/src/property_hooks.rs	    if visibility_unset {	    if false {	unit	property_hooks
+cpa-options-kept-on-text	crates/mm-app/src/property_hooks.rs	    if !is_select {\n        attrs.remove(PROPERTY_FIELD_ATTRIBUTE_OPTIONS);	    if false {\n        attrs.remove(PROPERTY_FIELD_ATTRIBUTE_OPTIONS);	unit	property_hooks
+cpa-field-limit-off-by-one	crates/mm-app/src/property_hooks.rs	            if count >= CPA_USER_FIELD_LIMIT {	            if count > CPA_USER_FIELD_LIMIT {	api	cpa_licensed
+cpa-owner-managed-human-allowed	crates/mm-app/src/property_hooks.rs	    if !caller.is_machine() {\n        return Err(PropertyServiceError::AccessDenied(format!(\n            "field {} is owner-managed and cannot be modified by human caller {}",	    if caller.is_machine() {\n        return Err(PropertyServiceError::AccessDenied(format!(\n            "field {} is owner-managed and cannot be modified by human caller {}",	unit	property_hooks
+cpa-sync-lock-inverted	crates/mm-app/src/property_hooks.rs	    if caller.id != expected {	    if caller.id == expected {	unit	property_hooks
+cpa-shared-only-union	crates/mm-app/src/property_hooks.rs	                    .filter(|id| caller_ids.contains(id))	                    .filter(|id| !caller_ids.contains(id))	api	cpa_licensed
+cpa-rank-clamp-direction	crates/mm-app/src/property_hooks.rs	            if *target_rank <= caller_rank {	            if *target_rank >= caller_rank {	api	cpa_licensed
+cpa-type-change-cleanup-exception-inverted	crates/mm-app/src/custom_profile_attributes.rs	            && !is_select_rank_transition(raw_existing.type_.as_str(), updated.type_.as_str())	            && is_select_rank_transition(raw_existing.type_.as_str(), updated.type_.as_str())	api	cpa_licensed
+cpa-default-permission-values-sysadmin	crates/mm-app/src/property_hooks.rs	        _ => PermissionLevel(PermissionLevel::MEMBER.to_owned()),	        _ => PermissionLevel(PermissionLevel::SYSADMIN.to_owned()),	api	cpa_licensed
+cpa-patch-permission-branch-collapsed	crates/mm-api/src/custom_profile_attributes.rs	    let options_only = is_options_only_patch(&patch) && existing.type_.supports_options();	    let options_only = false;	api	cpa_licensed
+cpa-source-only-options-shown	crates/mm-app/src/property_hooks.rs	        if supports_options {	        if false {	api	cpa_licensed
+cpa-value-permission-ignored	crates/mm-api/src/custom_profile_attributes.rs	            .session_has_permission_to_set_property_field_values(&session.0, field, user_id)\n            .await\n        {	            .session_has_permission_to_set_property_field_values(&session.0, field, user_id)\n            .await\n            && false\n        {	api	cpa_licensed
+control-rename-binding	crates/mm-app/src/property_hooks.rs	    let source = get_property_field_sync_source(field);	    let sync_source = get_property_field_sync_source(field);\n    let source = sync_source;	unit	property_hooks
+control-reorder-returning	crates/mm-store/src/property_store.rs	                RETURNING id                      AS "id!",\n                          targetid                AS "targetid!",	                RETURNING targetid                AS "targetid!",\n                          id                      AS "id!",	api	cpa_licensed
