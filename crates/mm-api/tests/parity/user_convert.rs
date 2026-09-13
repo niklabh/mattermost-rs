@@ -1380,6 +1380,7 @@ async fn on_the_guest_pair_the_gates_past_the_setting_fire_in_gos_order() {
     let admin = go_minted_token(&http).await;
     let me = common::logged_in_user_id();
     let team = create_team(&http, &admin, "demogst").await;
+    // `me` is the shared admin, used only as a bot owner below — never as a demotion target.
     let user = create_plain_user(&http, &admin, &team, "demogst").await;
 
     // A plain user holds no `demote_to_guest`: 403, the permission error, whoever the target.
@@ -1412,12 +1413,17 @@ async fn on_the_guest_pair_the_gates_past_the_setting_fire_in_gos_order() {
     .await;
 
     // The escalation guard: a caller with exactly `demote_to_guest` may not demote a system
-    // administrator, and the 403 names `manage_system`.
+    // administrator, and the 403 names `manage_system`. The administrator is a **throwaway**
+    // one — a plain user given `system_admin` — never the shared fixture admin: a mutation that
+    // drops the guard demotes the target for real, and demoting the account every suite logs in
+    // as turned the whole binary into 401s once (a guest cannot log in with guest accounts off).
     let Some(role) = common::plant_role("demogst", "demote_to_guest").await else {
         panic!("no DATABASE_URL");
     };
     let demoter = create_plain_user(&http, &admin, &team, "demogstd").await;
     common::set_user_roles(&demoter.id, &format!("system_user {role}")).await;
+    let target_admin = create_plain_user(&http, &admin, &team, "demogsta").await;
+    common::set_user_roles(&target_admin.id, "system_admin system_user").await;
     common::invalidate_go_caches(&http, &admin).await;
     invalidate_pair_caches(&http, &pair, &admin).await;
     let demoter_token = common::login_plain_user(&http, "demogstd").await;
@@ -1428,11 +1434,17 @@ async fn on_the_guest_pair_the_gates_past_the_setting_fire_in_gos_order() {
         &http,
         &pair,
         &demoter_token,
-        &format!("/api/v4/users/{me}/demote"),
+        &format!("/api/v4/users/{}/demote", target_admin.id),
         403,
         "api.context.permissions.app_error",
     )
     .await;
+    assert_eq!(
+        guest_shape(&target_admin.id).await.map(|shape| shape.0),
+        Some("system_admin system_user".to_owned()),
+        "the guard refused before any write"
+    );
+    delete_plain_user(&http, &admin, &target_admin.id).await;
     let demoted = http
         .post(format!("{}/api/v4/users/{}/demote", pair.rust, user.id))
         .header("Authorization", format!("Bearer {demoter_token}"))
