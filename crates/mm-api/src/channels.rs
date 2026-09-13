@@ -42,11 +42,16 @@ use axum::http::header::IF_NONE_MATCH;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::post::PrepareError;
-use mm_model::channel::{CHANNEL_TYPE_OPEN, ChannelSearchOpts, is_valid_channel_identifier};
+use mm_model::channel::{
+    CHANNEL_TYPE_OPEN, ChannelSearchOpts, ChannelsWithCount, is_valid_channel_identifier,
+};
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_TEAM_CHANNELS, PERMISSION_MANAGE_SYSTEM,
     PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL, PERMISSION_READ_CHANNEL_CONTENT,
-    PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
+    PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+    PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS, PERMISSION_VIEW_TEAM, Permission,
+    make_permission_error,
 };
 use mm_model::utils::{is_valid_id, parse_go_bool, sorted_array_from_json};
 
@@ -121,6 +126,545 @@ struct ChannelSearch {
     term: String,
 }
 
+/// Port of `getAllChannels` (api4/channel.go:1147), reached as `GET /api/v4/channels`.
+///
+/// The system console's channel list: every open and private channel on the server, on every
+/// team, whether or not the caller is a member of any of them.
+///
+/// # Four permission decisions, and only the first is a plain gate
+///
+/// 1. **Any of three sysconsole permissions** opens the route —
+///    `sysconsole_write_user_management_groups`, `sysconsole_read_user_management_channels`,
+///    `sysconsole_read_compliance_data_retention_policy`. The refusal names all three.
+/// 2. **`?exclude_policy_constrained=true` needs the data-retention read permission**, and is a
+///    403 naming only that one when it is missing. A caller holding, say, only the groups
+///    permission can list channels but cannot ask for that filter.
+/// 3. **`?exclude_access_control_policy_enforced=true` needs `manage_system`** — a different
+///    permission from every other check on this route.
+/// 4. **The data-retention permission is asked a *second* time, as a question rather than a
+///    gate**: its answer becomes `IncludePolicyID`, which adds the `policy_id` field to every
+///    channel in the response. So the same request from two admins with different sysconsole
+///    roles differs in a field, not in a status.
+///
+/// A fifth decision runs after the query: `sanitizeAllChannelsResponse` (api4/channel.go:1208)
+/// reduces every channel to **`id`, `team_id`, `type` and `display_name`** — plus the three team
+/// fields, which are outside the embedded `Channel` and survive — unless the caller holds the
+/// data-retention *or* the channel-management read permission. Which means the groups permission
+/// alone gets in, and gets four fields.
+///
+/// # `?include_total_count=true` changes the response from a list to an object
+///
+/// Without it the body is a bare JSON array. With it, it is
+/// `{"channels":[…],"total_count":N}` — a different top-level type on the same route and status.
+/// The count comes from a second query that is **not** the size of the first; see
+/// [`mm_app::App::get_all_channels_count`] for the two independent reasons it can disagree.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` either way, so a **trailing newline**, and `[]` rather than `null`
+/// for no rows because the store allocates the slice.
+#[tracing::instrument(skip_all, fields(count, total))]
+pub async fn get_all_channels(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    const GATE: [&Permission; 3] = [
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS,
+        &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+        &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+    ];
+    if !state
+        .app
+        .session_has_permission_to_any(&session.0, &GATE)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(&session.0, &GATE)));
+    }
+
+    let query = query.as_deref();
+    let exclude_policy_constrained = query_flag_is_true(query, "exclude_policy_constrained");
+    // Go's `&&` short-circuits, so the permission is not consulted at all unless the flag is set.
+    if exclude_policy_constrained
+        && !state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+            )
+            .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY],
+        )));
+    }
+
+    let exclude_access_control_policy_enforced =
+        query_flag_is_true(query, "exclude_access_control_policy_enforced");
+    if exclude_access_control_policy_enforced
+        && !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+            .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    // The same permission again, now as a field selector rather than a gate.
+    let include_policy_id = state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+        )
+        .await;
+
+    let opts = ChannelSearchOpts {
+        not_associated_to_group: query_first(query, "not_associated_to_group").unwrap_or_default(),
+        exclude_default_channels: query_flag_is_true(query, "exclude_default_channels"),
+        include_deleted: query_flag_is_true(query, "include_deleted"),
+        exclude_policy_constrained,
+        access_control_policy_enforced: query_flag_is_true(query, "access_control_policy_enforced"),
+        exclude_access_control_policy_enforced,
+        include_policy_id,
+        ..ChannelSearchOpts::default()
+    };
+
+    let per_page = parse_per_page(query);
+    let offset = page_offset(parse_page(query), per_page);
+
+    let mut channels = state.app.get_all_channels(offset, per_page, &opts).await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    sanitize_all_channels_response(&state, &session, &mut channels).await;
+
+    if !query_flag_is_true(query, "include_total_count") {
+        return Ok(channel_list_response(encoded_json(
+            "getAllChannels",
+            &channels,
+        )?));
+    }
+
+    let total_count = state.app.get_all_channels_count(&opts).await?;
+    tracing::Span::current().record("total", total_count);
+    let with_count = ChannelsWithCount {
+        channels: Some(channels),
+        total_count,
+    };
+    Ok(channel_list_response(encoded_json(
+        "getAllChannels",
+        &with_count,
+    )?))
+}
+
+/// Port of `sanitizeAllChannelsResponse` (api4/channel.go:1208), shared by `getAllChannels` and
+/// `searchAllChannels`.
+///
+/// **The gate is two of the route's three permissions, not all three.** A caller holding only
+/// `sysconsole_write_user_management_groups` passes the handler's gate and then has every channel
+/// reduced to `Channel.Sanitize()`'s four fields. Dropping this check entirely would leak
+/// `header`, `purpose`, `creator_id` and the counters to exactly that caller, and no test that
+/// runs as a system admin can see the difference.
+///
+/// The three `ChannelWithTeamData` fields are **not** sanitized: Go replaces the embedded
+/// `Channel` only, so `team_display_name`, `team_name` and `team_update_at` stay on the wire.
+async fn sanitize_all_channels_response(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    channels: &mut mm_model::channel_list::ChannelListWithTeamData,
+) {
+    const READERS: [&Permission; 2] = [
+        &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+        &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+    ];
+    if state
+        .app
+        .session_has_permission_to_any(&session.0, &READERS)
+        .await
+    {
+        return;
+    }
+    for channel in &mut channels.0 {
+        channel.channel = channel.channel.sanitize();
+    }
+}
+
+/// `json.NewEncoder(w).Encode(v)` — the value, then a newline ([D-086]).
+fn encoded_json<T: serde::Serialize>(where_: &'static str, value: &T) -> Result<Vec<u8>, ApiError> {
+    let mut body = serde_json::to_vec(value).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the response");
+        ApiError::from(mm_model::utils::AppError::new(
+            where_,
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+    Ok(body)
+}
+
+/// Port of `searchAllChannels` (api4/channel.go:1600), reached as
+/// `POST /api/v4/channels/search`.
+///
+/// # `?system_console` splits this into two routes that share a path
+///
+/// It **defaults to true**, and an empty value (`?system_console=`) is also true — Go only parses
+/// the parameter when `Get(...) != ""`. An unparseable value is the one 400 on this route's query
+/// string, and it names `system_console`.
+///
+/// - **`system_console=true`** is the admin search: three sysconsole permissions, the full
+///   `ChannelSearchOpts` from the body, and a result set that ignores membership entirely.
+/// - **`system_console=false`** is the webapp's channel pickers, and it does not touch the
+///   channel-search store at all. It runs the **autocomplete** queries instead, which are
+///   membership- and guest-aware, and it splits again: exactly one valid team id in `team_ids`
+///   is a team-scoped autocomplete gated on `view_team`; anything else — none, two, or one
+///   malformed — is the cross-team autocomplete with **no permission check whatsoever**, because
+///   that query is already scoped to the caller's own team memberships.
+///
+/// The three branches return three different bodies: a `ChannelList`, a
+/// `ChannelListWithTeamData`, and (sometimes) a `ChannelsWithCount`.
+///
+/// # The console branch's 403 names one permission where `getAllChannels` names three
+///
+/// The gate is the same `SessionHasPermissionToAny` over the same three permissions, but
+/// `SetPermissionError` is handed the literal `sysconsole_read_user_management_channels` rather
+/// than the slice. So the same denial on two routes produces two different error bodies, and
+/// copying [`get_all_channels`]'s refusal here would be wrong.
+///
+/// # `include_deleted` can arrive twice, and the two are OR-ed
+///
+/// `?include_deleted=true` **or** `"include_deleted":true` in the body. Neither overrides the
+/// other. The query-string half is `strconv.ParseBool` with the error discarded, so garbage there
+/// is silently false rather than a 400 — unlike `system_console` a few lines above it.
+///
+/// # `page`/`per_page` live in the **body**, and their presence changes the response type
+///
+/// Both are `*int` in `model.ChannelSearch`. When both are present the body is
+/// `{"channels":[…],"total_count":N}`; when either is missing it is a bare array *and* the store
+/// skips the count query entirely. `"page":0` is present, not missing — see
+/// [`mm_model::channel_search::ChannelSearch`].
+#[tracing::instrument(skip_all, fields(system_console, branch, count))]
+pub async fn search_all_channels(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let props = match decode_full_channel_search(request).await {
+        Ok(props) => props,
+        Err(err) => return err.into_response(),
+    };
+
+    let query = query.as_deref();
+    // `if val := query.Get("system_console"); val != ""` — absent *and* empty both leave the
+    // default of true, so only a non-empty unparseable value is the 400.
+    let from_sys_console = match query_first(query, "system_console") {
+        Some(raw) if !raw.is_empty() => match parse_go_bool(&raw) {
+            Some(value) => value,
+            None => return ApiError::invalid_param("system_console").into_response(),
+        },
+        _ => true,
+    };
+    tracing::Span::current().record("system_console", from_sys_console);
+
+    if !from_sys_console {
+        return search_all_channels_for_user(&state, &session, &props).await;
+    }
+
+    // Only system managers may use the `exclude_policy_constrained` field — checked before the
+    // route's own gate, so a caller who fails both is told about *this* one.
+    if props.exclude_policy_constrained
+        && !state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+            )
+            .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY],
+        ))
+        .into_response();
+    }
+
+    const GATE: [&Permission; 3] = [
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS,
+        &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS,
+        &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+    ];
+    if !state
+        .app
+        .session_has_permission_to_any(&session.0, &GATE)
+        .await
+    {
+        // One permission, not the three that were checked — see the doc comment.
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_CHANNELS],
+        ))
+        .into_response();
+    }
+    tracing::Span::current().record("branch", "console");
+
+    let include_deleted = query_flag_is_true(query, "include_deleted") || props.include_deleted;
+    let include_policy_id = state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+        )
+        .await;
+
+    let opts = ChannelSearchOpts {
+        not_associated_to_group: props.not_associated_to_group.clone(),
+        exclude_default_channels: props.exclude_default_channels,
+        team_ids: props.team_ids.clone().unwrap_or_default(),
+        group_constrained: props.group_constrained,
+        exclude_group_constrained: props.exclude_group_constrained,
+        exclude_policy_constrained: props.exclude_policy_constrained,
+        include_search_by_id: props.include_search_by_id,
+        exclude_remote: props.exclude_remote,
+        public: props.public,
+        private: props.private,
+        include_deleted,
+        deleted: props.deleted,
+        page: props.page,
+        per_page: props.per_page,
+        access_control_policy_enforced: props.access_control_policy_enforced,
+        exclude_access_control_policy_enforced: props.exclude_access_control_policy_enforced,
+        parent_access_control_policy_id: props.parent_access_control_policy_id.clone(),
+        include_policy_id,
+        ..ChannelSearchOpts::default()
+    };
+
+    let (mut channels, total_count) = match state.app.search_all_channels(&props.term, &opts).await
+    {
+        Ok(result) => result,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("count", channels.0.len());
+
+    sanitize_all_channels_response(&state, &session, &mut channels).await;
+
+    // Go's comment: channel props are deliberately not filled in here, since the client does not
+    // use them and doing so is potentially expensive.
+    let encoded = if props.page.is_some() && props.per_page.is_some() {
+        encoded_json(
+            "searchAllChannels",
+            &ChannelsWithCount {
+                channels: Some(channels),
+                total_count,
+            },
+        )
+    } else {
+        encoded_json("searchAllChannels", &channels)
+    };
+    match encoded {
+        Ok(body) => channel_list_response(body),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The `system_console=false` half of [`search_all_channels`] (api4/channel.go:1619-1648).
+///
+/// Two branches, and which one runs is decided **entirely by `team_ids`**: exactly one element
+/// that is a valid 26-character id takes the team-scoped path, and every other shape — empty,
+/// absent, two ids, or one that fails `IsValidId` — takes the cross-team path. So a malformed id
+/// does not 400; it silently widens the search and skips the `view_team` gate, because the
+/// cross-team query is scoped by the caller's team memberships rather than by a permission.
+///
+/// Within the team-scoped branch, `private` or `exclude_group_constrained` selects the *filtered*
+/// autocomplete; neither set uses the plain one. Note that `private` is passed on as the store's
+/// `privateOnly`, so setting it alone both chooses the branch and narrows it.
+async fn search_all_channels_for_user(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    props: &mm_model::channel_search::ChannelSearch,
+) -> Response {
+    let team_ids = props.team_ids.as_deref().unwrap_or_default();
+    if let [team_id] = team_ids
+        && is_valid_id(team_id)
+    {
+        if !state
+            .app
+            .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+            .await
+        {
+            return ApiError::from(make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))
+                .into_response();
+        }
+        tracing::Span::current().record("branch", "team");
+
+        let channels = if props.private || props.exclude_group_constrained {
+            state
+                .app
+                .autocomplete_channels_for_team_filtered(
+                    team_id,
+                    &session.0.user_id,
+                    &props.term,
+                    props.private,
+                    props.exclude_group_constrained,
+                )
+                .await
+        } else {
+            state
+                .app
+                .autocomplete_channels_for_team(team_id, &session.0.user_id, &props.term)
+                .await
+        };
+        let channels = match channels {
+            Ok(channels) => channels,
+            Err(err) => return ApiError::from(err).into_response(),
+        };
+        tracing::Span::current().record("count", channels.0.len());
+        return match encoded_json("searchAllChannels", &channels) {
+            Ok(body) => channel_list_response(body),
+            Err(err) => err.into_response(),
+        };
+    }
+
+    tracing::Span::current().record("branch", "all_teams");
+    let channels = match state
+        .app
+        .autocomplete_channels(&session.0.user_id, &props.term)
+        .await
+    {
+        Ok(channels) => channels,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("count", channels.0.len());
+    match encoded_json("searchAllChannels", &channels) {
+        Ok(body) => channel_list_response(body),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// [`decode_channel_search`] for the whole of `model.ChannelSearch` rather than its `term`.
+///
+/// `searchAllChannels` reads seventeen of the eighteen fields, so this one cannot use the
+/// term-only struct its two neighbours share. The `null`- and array-refusing behaviour is the
+/// same and is documented there.
+async fn decode_full_channel_search(
+    request: Request,
+) -> Result<mm_model::channel_search::ChannelSearch, ApiError> {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return Err(ApiError::invalid_param("channel_search"));
+        }
+    };
+    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel search body did not decode");
+            return Err(ApiError::invalid_param("channel_search"));
+        }
+    };
+    match decoded {
+        Some(value @ serde_json::Value::Object(_)) => serde_json::from_value::<
+            mm_model::channel_search::ChannelSearch,
+        >(value)
+        .map_err(|err| {
+            tracing::debug!(error = %err, "channel search body has the wrong field types");
+            ApiError::invalid_param("channel_search")
+        }),
+        _ => Err(ApiError::invalid_param("channel_search")),
+    }
+}
+
+/// Port of `searchGroupChannels` (api4/channel.go:739), reached as
+/// `POST /api/v4/channels/group/search`.
+///
+/// # There is no permission check at all
+///
+/// Unlike every other channel search, this one has no gate beyond a valid session: it searches
+/// the caller's **own** group-message channels by the session's user id, which the request body
+/// cannot influence. `term` is the only field of `model.ChannelSearch` it reads.
+///
+/// # The term matches member usernames, not channel names
+///
+/// A group message has no useful display name, so the store matches every whitespace-separated
+/// word of the term against the aggregated usernames of the channel's members — see
+/// [`mm_store::channel_store::search_group_channels`], which also explains why a term of a single
+/// space returns *everything* while the empty term returns nothing.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(groupChannels)` — a trailing newline, and `[]` rather than `null`:
+/// both the empty-term short circuit and the store allocate the slice.
+#[tracing::instrument(skip_all, fields(found))]
+pub async fn search_group_channels(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let props = match decode_channel_search(request).await {
+        Ok(props) => props,
+        Err(err) => return err.into_response(),
+    };
+
+    let channels = match state
+        .app
+        .search_group_channels(&session.0.user_id, &props.term)
+        .await
+    {
+        Ok(channels) => channels,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("found", channels.0.len());
+
+    match encoded_json("searchGroupChannels", &channels) {
+        Ok(body) => channel_list_response(body),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `json.NewDecoder(r.Body).Decode(&props)` into a `*model.ChannelSearch`, with
+/// `SetInvalidParamWithErr("channel_search", err)` for every failure — shared by
+/// [`search_group_channels`] and [`search_channels_for_team`], which write it identically.
+///
+/// Two things it has to do that the obvious `Json<ChannelSearch>` extractor would not:
+///
+/// - **A body of `null` is a 400.** Go decodes into a pointer, so `null` succeeds and leaves it
+///   nil, and the handler's `props == nil` is what rejects it. `Option` reproduces both halves.
+/// - **A JSON array is a 400.** serde builds a struct from an array *positionally*, so `[]`
+///   would deserialize to `ChannelSearch { term: "" }` and answer 200 where Go's decoder returns
+///   an `UnmarshalTypeError`. Measured — the parity test failed before this check existed.
+async fn decode_channel_search(request: Request) -> Result<ChannelSearch, ApiError> {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return Err(ApiError::invalid_param("channel_search"));
+        }
+    };
+    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel search body did not decode");
+            return Err(ApiError::invalid_param("channel_search"));
+        }
+    };
+    match decoded {
+        Some(value @ serde_json::Value::Object(_)) => {
+            serde_json::from_value::<ChannelSearch>(value).map_err(|err| {
+                tracing::debug!(error = %err, "channel search body has the wrong field types");
+                ApiError::invalid_param("channel_search")
+            })
+        }
+        _ => Err(ApiError::invalid_param("channel_search")),
+    }
+}
+
 /// Port of `searchChannelsForTeam` (api4/channel.go:1035) —
 /// `POST /api/v4/teams/{team_id}/channels/search`.
 ///
@@ -159,39 +703,9 @@ pub async fn search_channels_for_team(
         return err.into_response();
     }
 
-    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            tracing::warn!(error = %err, "could not read the request body");
-            return ApiError::invalid_param("channel_search").into_response();
-        }
-    };
-    // `json.NewDecoder(r.Body).Decode(&props)` into a **pointer**, so a body of `null` decodes
-    // without error and leaves it nil — which `props == nil` then rejects. `Option` reproduces
-    // both halves.
-    //
-    // The value is decoded to a `Value` first, and anything but an object is refused, because
-    // **serde builds a struct from a JSON array positionally** where Go's decoder refuses one:
-    // `[]` would otherwise deserialize to `ChannelSearch { term: "" }` and answer 200 where Go
-    // answers 400. Measured — this test failed before the check existed.
-    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
-        Err(err) => {
-            tracing::debug!(error = %err, "channel search body did not decode");
-            return ApiError::invalid_param("channel_search").into_response();
-        }
-    };
-    let props = match decoded {
-        Some(serde_json::Value::Object(map)) => {
-            match serde_json::from_value::<ChannelSearch>(serde_json::Value::Object(map)) {
-                Ok(props) => props,
-                Err(err) => {
-                    tracing::debug!(error = %err, "channel search body has the wrong field types");
-                    return ApiError::invalid_param("channel_search").into_response();
-                }
-            }
-        }
-        _ => return ApiError::invalid_param("channel_search").into_response(),
+    let props = match decode_channel_search(request).await {
+        Ok(props) => props,
+        Err(err) => return err.into_response(),
     };
 
     let may_list = state

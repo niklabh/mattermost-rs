@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(c.id) AS \"count!\"\n          FROM channels c\n         WHERE c.type IN ('P', 'O')\n           AND ($1 OR c.deleteat = 0)\n           AND ($2 = '' OR c.id NOT IN (\n                   SELECT gc.channelid FROM groupchannels gc\n                    WHERE gc.groupid = $2 AND gc.deleteat = 0))\n           AND (NOT $3 OR c.groupconstrained = true)\n           AND ($3 OR NOT $4 OR c.groupconstrained IS DISTINCT FROM true)\n           AND (cardinality($5::text[]) = 0 OR c.name <> ALL($5::text[]))\n           AND (NOT $6 OR NOT EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc\n                    WHERE rpc.channelid = c.id))\n           AND (NOT $7 OR c.id NOT IN (\n                   SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel'))\n           AND ($7 OR NOT $8 OR EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "81513893fcd88b582afd4b32e96316d2685b1e7c01a89041eddb10304ccd568c"
+}

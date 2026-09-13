@@ -880,13 +880,34 @@ pub fn router(state: AppState) -> Router {
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
-        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41) — the only method on the bare
-        // `/channels` collection that this server answers. `getAllChannels` is a `GET` on the
-        // same path and is not migrated, so there is no method to combine with here yet; a `GET`
-        // falls to `partially_migrated`'s method fallback and is forwarded.
+        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41, :42) — both methods on the bare
+        // `/channels` collection. Two `Handle("")` calls in Go, split by gorilla's method
+        // matcher; `MethodRouter::post(...).get(...)` is the same split, and a third method still
+        // falls to `partially_migrated`'s fallback and is forwarded.
         .route(
             "/api/v4/channels",
-            partially_migrated(post(channel_creates::create_channel)),
+            partially_migrated(
+                post(channel_creates::create_channel).get(channels::get_all_channels),
+            ),
+        )
+        // `BaseRoutes.Channels.Handle("/search")` and `("/group/search")` (api4/channel.go:44,
+        // :45), both **POST-only**. `search` and `group` are literals in the `{channel_id}` slot
+        // of `/channels/{channel_id}` below — the same shape as `/channels/direct` beside them,
+        // and matchit and gorilla agree on it. A `GET` to either path now falls to the method
+        // fallback and is forwarded, where it previously reached `get_channel` and got that
+        // handler's 400 for a non-id segment; Go's `{channel_id}` route answers the same 400, so
+        // the body is unchanged and only who computed it moved.
+        //
+        // `/channels/group/search` is one segment deeper than the already-registered
+        // `/channels/group`, so it shadows nothing: axum matches the longer literal path first
+        // and `/channels/group` keeps its own `POST`.
+        .route(
+            "/api/v4/channels/search",
+            partially_migrated(post(channels::search_all_channels)),
+        )
+        .route(
+            "/api/v4/channels/group/search",
+            partially_migrated(post(channels::search_group_channels)),
         )
         // `BaseRoutes.Channels.Handle("/direct")` and `("/group")` (api4/channel.go:42, :43).
         // Two literal segments in the `{channel_id}` slot of `/channels/{channel_id}` below,
@@ -2773,6 +2794,211 @@ mod tests {
                     Request::builder()
                         .method(method.clone())
                         .uri(*path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// Nothing the channel-listing session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// This session added three routes, and **all three are literal segments sitting in a
+    /// `{param}` slot that is already served**: `/channels/search` and `/channels/group/search`
+    /// sit where `/channels/{channel_id}` matches, and the bare `/channels` gained a second
+    /// method on a path that already had one. axum prefers a static segment to a `{param}` and
+    /// does not backtrack across method routers, so a path registered one segment too shallow —
+    /// `/channels/group` instead of `/channels/group/search`, say — would take
+    /// `POST /channels/group` out of service rather than adding anything, and only a suite that
+    /// exercised the *old* route would notice.
+    ///
+    /// The list is therefore every `/api/v4/channels` route+method pair this server registers,
+    /// generated from the router rather than from the three that changed.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `(Method::POST, "/api/v4/channels/{CHANNEL}/patch")` — a
+    /// path Go has but this server does not migrate as a POST — and confirming the assertion
+    /// fails on a missing `x-mmrs-served-by`. It does.
+    #[tokio::test]
+    async fn the_channel_routes_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const BOOKMARK: &str = "dbcdefghijklmnopqrstuvwxyz";
+        const REQUEST: &str = "ebcdefghijklmnopqrstuvwxyz";
+        const VIEW: &str = "fbcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            (Method::GET, "/api/v4/channels".to_owned()),
+            (Method::POST, "/api/v4/channels".to_owned()),
+            (Method::POST, "/api/v4/channels/search".to_owned()),
+            (Method::POST, "/api/v4/channels/group/search".to_owned()),
+            (Method::POST, "/api/v4/channels/direct".to_owned()),
+            (Method::POST, "/api/v4/channels/group".to_owned()),
+            (
+                Method::POST,
+                "/api/v4/channels/stats/member_count".to_owned(),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/view"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/members/{USER}/mark_read"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/members/{USER}/direct/read"),
+            ),
+            (Method::DELETE, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/patch")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/privacy")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/restore")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/stats")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/members")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/members")),
+            (Method::PUT, format!("/api/v4/channels/{CHANNEL}/members")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/members/ids"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/roles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/schemeRoles"),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/channels/{CHANNEL}/members/{USER}/notify_props"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/posts")),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/common_teams"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/moderations"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/bookmarks")),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/member_counts_by_group"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/pinned")),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/timezones")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/bookmarks/{BOOKMARK}/sort_order"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/groups")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/join_request"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_requests"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/join_requests/count"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/join_requests/{REQUEST}"),
+            ),
+            (Method::GET, format!("/api/v4/channels/{CHANNEL}/views")),
+            (Method::POST, format!("/api/v4/channels/{CHANNEL}/views")),
+            (
+                Method::DELETE,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}/posts"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/channels/{CHANNEL}/views/{VIEW}/sort_order"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
                         .body(axum::body::Body::empty())
                         .expect("a request"),
                 )
