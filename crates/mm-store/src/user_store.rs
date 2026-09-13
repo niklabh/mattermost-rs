@@ -407,6 +407,51 @@ pub trait UserStore {
         last_login: i64,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateAuthData` (user_store.go:467), as `updateUserAuth` calls it.
+    ///
+    /// # This is how an account's credentials are replaced, and it blanks the password
+    ///
+    /// One statement sets six columns: `Password = ''`, `LastPasswordUpdate` and `UpdateAt` to
+    /// **one** `GetMillis()` read, `FailedAttempts = 0`, and the two auth columns. The blanked
+    /// password is the point — an account moved to SSO must not keep a password that still works
+    /// — and it is irreversible through this route, so a caller that means to *read* the auth
+    /// method must not come here.
+    ///
+    /// # Go has two more parameters and this does not
+    ///
+    /// The Go signature is `(userID, service string, authData *string, email string, resetMfa
+    /// bool)`. `email != ""` adds `Email = lower(?)`, and `resetMfa` adds `MfaActive = false`,
+    /// `MfaSecret = ''` and `MfaUsedTimestamps = []`. Both are dead for the one call site this
+    /// server has: `App.UpdateUserAuth` passes `""` and `false` (app/user.go:1489). The other
+    /// three callers — `CreateOAuthUser` (app/user.go:490), `completeOAuth`'s SSO merge
+    /// (app/oauth.go:913, the only `resetMfa: true`) and the bulk importer
+    /// (import_functions.go:606) — are not ported, so the parameters are left off rather than
+    /// shipped untested. Adding either means adding the `SET` clause and a test for it.
+    ///
+    /// # A miss is a success
+    ///
+    /// There is no existence check and Go discards the row count, so an id that matches nothing
+    /// returns `Ok` and the handler answers **200** with the submitted `UserAuth` echoed back.
+    /// Measured against the running server, not inferred: `PUT /users/aaaa…aa/auth` with a valid
+    /// body is a 200.
+    ///
+    /// # Its unique violations are `InvalidInput`
+    ///
+    /// `Users.AuthData` carries a unique constraint, so moving two accounts onto one
+    /// `auth_data` fails the second. Go names five strings —
+    /// `Email`, `users_email_key`, `idx_users_email_unique`, `AuthData`, `users_authdata_key` —
+    /// and substring-matches them against the driver's message; the two that exist in this
+    /// schema are `users_email_key` and `users_authdata_key`. Either raises
+    /// `ErrInvalidInput("User", "id", userId)`, which the app layer renders as
+    /// `app.user.update_auth_data.email_exists.app_error` at **400** — a message about e-mail for
+    /// what is nearly always an `AuthData` collision.
+    fn update_auth_data(
+        &self,
+        user_id: &str,
+        service: &str,
+        auth_data: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<String, StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdateFailedPasswordAttempts` (user_store.go:420).
     ///
     /// An unconditional `SET FailedAttempts = ?`. Every caller passes `0`, so in practice this is
@@ -2974,6 +3019,55 @@ impl UserStore for SqlUserStore {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, service = %service, updated))]
+    async fn update_auth_data(
+        &self,
+        user_id: &str,
+        service: &str,
+        auth_data: Option<&str>,
+    ) -> Result<String, StoreError> {
+        // `updateAt := model.GetMillis()` — read **once** and used for both `LastPasswordUpdate`
+        // and `UpdateAt`, so the two columns are exactly equal afterwards. Reading the clock twice
+        // would leave them a millisecond apart on a slow machine and nowhere else.
+        let update_at = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users
+                SET password = '',
+                    lastpasswordupdate = $1,
+                    updateat = $1,
+                    failedattempts = 0,
+                    authservice = $2,
+                    authdata = $3
+              WHERE id = $4",
+            update_at,
+            service,
+            auth_data,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| {
+            if auth_data_unique_constraint(&source) {
+                StoreError::InvalidInput {
+                    entity: "User",
+                    field: "id",
+                    value: user_id.to_owned(),
+                }
+            } else {
+                StoreError::Db {
+                    context: format!("failed to update User with userId={user_id}"),
+                    source,
+                }
+            }
+        })?;
+
+        // Go returns the id it was handed, not the id of a row it found — the row count is never
+        // consulted. Recorded on the span so a miss is visible in a trace even though it is not
+        // visible in the answer.
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(user_id.to_owned())
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %user_id, attempts, updated))]
     async fn update_failed_password_attempts(
         &self,
@@ -3503,6 +3597,28 @@ fn unique_constraint(err: &sqlx::Error) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// Port of `IsUniqueConstraintError(err, []string{"Email", "users_email_key",
+/// "idx_users_email_unique", "AuthData", "users_authdata_key"})` — the list
+/// `SqlUserStore.UpdateAuthData` names, and a **different list** from the one
+/// [`unique_constraint`] carries for `Update`: `Username` is not on it and `AuthData` is.
+///
+/// Go substring-matches those five strings against the driver's whole message, so the bare
+/// column names `Email` and `AuthData` match a Postgres error that mentions the column at all.
+/// Matching the constraint name is the narrower, precise version of the same test: the two
+/// constraints that exist in this schema are `users_email_key` and `users_authdata_key`, and this
+/// statement can violate only the second — it does not write `Email` at all, because the `email`
+/// parameter is not ported. The e-mail names are kept because Go's error id says "email_exists"
+/// and a reader who drops them would have to rediscover why.
+fn auth_data_unique_constraint(err: &sqlx::Error) -> bool {
+    let Some(constraint) = err.as_database_error().and_then(|db| db.constraint()) else {
+        return false;
+    };
+    matches!(
+        constraint,
+        "users_email_key" | "idx_users_email_unique" | "users_authdata_key"
+    )
 }
 
 #[cfg(test)]

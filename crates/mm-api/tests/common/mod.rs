@@ -1030,6 +1030,16 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
         "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsupduser%')",
         "DELETE FROM users WHERE username LIKE 'mmrsupduser%'",
+        // `parity/user_auth.rs`. Its own prefix, and it needs no extra tables — but a leftover
+        // row there is worse than most: the route under test writes `Users.AuthData`, which
+        // carries a **unique constraint**, so an abandoned run keeps `mmrsauth-…` reserved and
+        // the next run's switch is a 400 that reads as a port bug rather than as debris.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsauthuser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsauthuser%'",
         // `parity/user_deletes.rs`. Its own prefix again, and it needs three tables the two
         // sweeps above do not: it plants `Bots` rows over its own users and `OAuth*` grants for
         // them, and both are what the route under test is asked to clear. A leftover `Bots` row

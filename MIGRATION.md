@@ -11997,3 +11997,80 @@ The cloud refusal at the top of `importTeam` (`License().IsCloud()` → 403
 first because a cloud installation is licensed and a licensed server is forwarded whole, the second
 because `ParseMultipartForm` never builds an empty list under a present key. Both are recorded in
 [D-491] rather than asserted.
+
+---
+
+## The authentication-data routes (2026-09-13, branch `wt/userauth`)
+
+**`PUT /users/{id}/auth` serves whole; the MFA pair serves its eight refusals and forwards
+anything that would touch a secret; `POST /users/login/switch` serves its branch table and one of
+four branches entire.** 14 parity tests in `parity/user_auth.rs`, 4 unit tests, two router
+neighbourhood guards extended.
+
+`452 → 456 of 764 route+method pairs`, measured with `scripts/routes.py` in this worktree against
+base `65db093`. `api4/user.go` goes 61/78 → 65/78. Mutations: **25 run over three passes, 22
+caught, 2 controls survived, 0 outstanding harness faults** — one line faulted because
+`updateat = $1 + 1` makes Postgres deduce `$1` as both `integer` and `bigint`, so the mutated
+store does not compile; re-expressed as a different constant on `lastpasswordupdate`, which is the
+same claim without arithmetic on the parameter, and re-run as CAUGHT.
+
+| File | What |
+|---|---|
+| `crates/mm-store/src/user_store.rs` | `UpdateAuthData` and its own unique-constraint list |
+| `crates/mm-app/src/user_auth.rs` | `UpdateUserAuth`, `GenerateMfaSecret`, `ActivateMfa`, the `email` → `""` normalisation |
+| `crates/mm-api/src/user_auth.rs` | the four handlers and `switchAccountType`'s branch table |
+| `crates/mm-api/src/lib.rs` | four registrations, plus both `/users/` neighbourhood guards |
+| `reference/dump/main.go`, `fixtures/user_auth.json` | `model.UserAuth` had `json:` tags and no fixture; it has one now |
+
+The one thing a reader would otherwise get wrong: **`updateUserAuth` runs `!c.IsSystemAdmin()`
+before `RequireUserId`**, which is the opposite of every other route in the family. A caller
+without `manage_system` naming a malformed id gets a **403**; the same caller on
+`POST /users/{id}/mfa/generate` gets a **400**, because that handler checks the id first. Both
+halves are in one test so that swapping the order in either handler fails.
+
+Three more measured facts, none of them guessable from the source:
+
+- **An id that matches no row is a 200.** `UpdateAuthData` has no existence check and Go discards
+  the row count, so `PUT /users/aaaa…aa/auth` answers with the submitted `UserAuth` echoed back,
+  having written nothing. Adding the obvious `GetUser` would turn a 200 into a 404.
+- **The route blanks `Password` and zeroes `FailedAttempts`**, neither of which its name mentions,
+  and then revokes every session. An account moved to `gitlab` cannot log in with the password it
+  had a moment earlier — which is the point, and is what a port that wrote only the two auth
+  columns would silently lose.
+- **A duplicate `AuthData` is `app.user.update_auth_data.email_exists.app_error`** — a 400 whose
+  message is about an e-mail address for a collision on the identity column. `Users.AuthData`
+  carries a unique constraint; `Email` is not written by this statement at all.
+
+`{"auth_service":"email"}` answers `{}`: `IsValid` forces `auth_data` absent on that branch, the
+handler then blanks `auth_service`, and both fields carry `omitempty`.
+
+### What forwards, and that every forward precedes every write
+
+| route | forwarded | why |
+|---|---|---|
+| `PUT /mfa` | `{"activate": false}`, after `GetUser` | `DeactivateMfa` writes, then sends an MFA-change e-mail ([D-238]) |
+| `PUT /mfa`, `POST /mfa/generate` | `EnableMultifactorAuthentication` on | `crypto/rand`, a QR PNG and `dgoogauth` — unverifiable against Go by construction ([D-500]) |
+| `POST /login/switch` | `email → oauth`, `email → ldap`, past the 404 | `CheckPasswordAndAllCriteria` claims a `FailedAttempts` slot before it compares ([D-501]) |
+| `POST /login/switch` | `oauth → email`, past `not_oauth_user` | `UpdatePassword` hashes, writes, mails and revokes |
+| `POST /login/switch` | every branch, licensed | `ExperimentalEnableAuthenticationTransfer` is not in this port's configuration |
+
+The ordering property is asserted rather than argued: `the_email_switch_branches_serve_the_404_and_forward_the_password_check`
+sends a wrong password to a real account and reads `FailedAttempts` back — it moves by exactly
+one, which is the evidence the slot was claimed once, by Go, rather than once here and once there.
+
+### `ldap → email` is served whole, and the reason is the build rather than the configuration
+
+`SwitchLdapToEmail` reaches `ldapInterface == nil || user.AuthData == nil` before it validates or
+writes anything, and `a.Ldap()` is nil in the pinned tree: `RegisterLdapInterface` is called only
+from the enterprise import package, which is not in it. So every account that clears the earlier
+refusals gets a **501**, measured against a real `ldap` row created through the `/auth` route this
+session also ships. That is correct for this Go binary and would stop being correct against an
+enterprise build; the licensed case forwards anyway, and [D-501] records the unlicensed-enterprise
+gap plainly rather than hiding it behind the measurement.
+
+### What the MFA routes cannot be tested against
+
+`EnableMultifactorAuthentication` is off stack-wide, `PUT /api/v4/config` is not served here, and
+`Users.MfaActive` cannot be set through any api4 route with the flag off. So no test in this tree
+has ever seen a row with MFA active, and the flag forward is covered by a mutation rather than by
+a request. That is the same gap the login vertical recorded; it is [D-500], not a claim of parity.

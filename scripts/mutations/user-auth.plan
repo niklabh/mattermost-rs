@@ -1,0 +1,47 @@
+# Mutation plan for the authentication-data routes (updateUserAuth, updateUserMfa,
+# generateMfaSecret, switchAccountType).
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-auth.plan
+#
+# What is worth mutating here is almost entirely *what a wrong answer lets through*. These four
+# routes decide how an account authenticates, so the dangerous failures are the permissive ones:
+# a gate that runs in the wrong order, a refusal that stops refusing, a forward taken on the arm
+# that writes. Three groups:
+#
+#   * the six columns `UpdateAuthData` writes, of which only two are named in the function. The
+#     blanked `Password` and the zeroed `FailedAttempts` are the security half of the route, and
+#     a port that wrote the auth columns alone would pass every test about the auth columns.
+#   * the MFA refusal *order* — `GetUser` before the flag, the auth-service check before the flag,
+#     and the two body-parameter checks before `GetUser`. Each pair has a wrong order whose
+#     answers are individually plausible.
+#   * `switchAccountType`'s branch table, where the mutation that matters is routing a request to
+#     a neighbouring branch rather than refusing it.
+#
+# Every line runs the `user_auth` parity suite, which is the only suite that exercises any of
+# this; `MUTATE_FILTER` is set per line so an unrelated suite cannot decide a verdict.
+#
+# Two controls at the end, both behaviour-preserving: a reorder of two independent SET columns
+# and a flipped-around equality. Both must SURVIVE, or the harness is noisy and the tally means
+# nothing.
+store-auth-keeps-the-password	crates/mm-store/src/user_store.rs	SET password = '',\n                    lastpasswordupdate	SET lastpasswordupdate	api	user_auth
+store-auth-keeps-the-failed-attempts	crates/mm-store/src/user_store.rs	                    failedattempts = 0,\n                    authservice = $2,	                    authservice = $2,	api	user_auth
+store-auth-splits-the-two-timestamp-columns	crates/mm-store/src/user_store.rs	                    lastpasswordupdate = $1,\n                    updateat = $1,	                    lastpasswordupdate = 1,\n                    updateat = $1,	api	user_auth
+store-auth-data-collision-is-not-recognised	crates/mm-store/src/user_store.rs	"users_email_key" | "idx_users_email_unique" | "users_authdata_key"	"users_email_key" | "idx_users_email_unique"	api	user_auth
+app-auth-collision-becomes-a-five-hundred	crates/mm-app/src/user_auth.rs	if matches!(err, StoreError::InvalidInput { .. }) {	if !matches!(err, StoreError::InvalidInput { .. }) {	api	user_auth
+app-auth-keeps-the-sessions	crates/mm-app/src/user_auth.rs	        self.revoke_all_sessions(user_id).await?;	        let _ = user_id;	api	user_auth
+app-email-service-is-not-blanked	crates/mm-app/src/user_auth.rs	    if normalised.auth_service == USER_AUTH_SERVICE_EMAIL {\n        normalised.auth_service.clear();\n    }	    if false {\n        normalised.auth_service.clear();\n    }	api	user_auth
+app-activate-mfa-refuses-ldap-too	crates/mm-app/src/user_auth.rs	if !user.auth_service.is_empty() && user.auth_service != USER_AUTH_SERVICE_LDAP {	if !user.auth_service.is_empty() {	api	user_auth
+app-activate-mfa-refuses-a-password-account	crates/mm-app/src/user_auth.rs	if !user.auth_service.is_empty() && user.auth_service != USER_AUTH_SERVICE_LDAP {	if user.auth_service.is_empty() || user.auth_service != USER_AUTH_SERVICE_LDAP {	api	user_auth
+app-generate-mfa-skips-the-user-lookup	crates/mm-app/src/user_auth.rs	        let _user = self.get_user(user_id).await?;\n\n        if !self.config().enable_multifactor_authentication {\n            return Err(mfa_disabled("GenerateMfaSecret"));	        let _user = self.get_user(user_id).await;\n\n        if !self.config().enable_multifactor_authentication {\n            return Err(mfa_disabled("GenerateMfaSecret"));	api	user_auth
+app-mfa-disabled-is-a-four-hundred	crates/mm-app/src/user_auth.rs	        501,\n    )\n}	        400,\n    )\n}	api	user_auth
+api-mfa-prologue-checks-the-permission-first	crates/mm-api/src/user_auth.rs	    if let Err(err) = require_id(&user_id, "user_id") {\n        return Err(err.into_response());\n    }\n    tracing::Span::current().record("user_id", &user_id);	    tracing::Span::current().record("user_id", &user_id);	api	user_auth
+api-mfa-accepts-an-empty-code	crates/mm-api/src/user_auth.rs	            Some(code) if !code.is_empty() => code,	            Some(code) => code,	api	user_auth
+api-mfa-forwards-the-wrong-arm	crates/mm-api/src/user_auth.rs	    if activate {\n        return match state.app.activate_mfa(&user_id, code).await {	    if !activate {\n        return match state.app.activate_mfa(&user_id, code).await {	api	user_auth
+api-auth-gate-runs-after-the-id-check	crates/mm-api/src/user_auth.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {	    if false {	api	user_auth
+api-auth-accepts-an-invalid-user-auth	crates/mm-api/src/user_auth.rs	    if !user_auth.is_valid() {	    if false {	api	user_auth
+api-ldap-to-email-inverts-the-account-check	crates/mm-api/src/user_auth.rs	    if user.auth_service != USER_AUTH_SERVICE_LDAP {	    if user.auth_service == USER_AUTH_SERVICE_LDAP {	api	user_auth
+api-oauth-to-email-drops-the-owner-check	crates/mm-api/src/user_auth.rs	    if user.id != session.user_id {	    if user.id == session.user_id {	api	user_auth
+api-oauth-to-email-session-refusal-is-a-403	crates/mm-api/src/user_auth.rs	            "UserRequired".to_owned(),\n            401,	            "UserRequired".to_owned(),\n            403,	api	user_auth
+api-switch-routes-ldap-to-email-as-email-to-ldap	crates/mm-api/src/user_auth.rs	    if switch.ldap_to_email() {\n        tracing::Span::current().record("branch", "ldap_to_email");	    if switch.email_to_ldap() {\n        tracing::Span::current().record("branch", "ldap_to_email");	api	user_auth
+control-store-reorders-two-independent-set-columns	crates/mm-store/src/user_store.rs	                    failedattempts = 0,\n                    authservice = $2,\n                    authdata = $3	                    authservice = $2,\n                    authdata = $3,\n                    failedattempts = 0	api	user_auth
+control-api-flips-a-comparison-around	crates/mm-api/src/user_auth.rs	    let user_id = if user_id == ME {\n        session.0.user_id.clone()\n    } else {\n        user_id\n    };\n    if let Err(err) = require_id(&user_id, "user_id") {\n        return Err(err.into_response());\n    }	    let user_id = if ME == user_id {\n        session.0.user_id.clone()\n    } else {\n        user_id\n    };\n    if let Err(err) = require_id(&user_id, "user_id") {\n        return Err(err.into_response());\n    }	api	user_auth

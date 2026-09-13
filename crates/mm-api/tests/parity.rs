@@ -152,6 +152,7 @@ mod parity {
     pub mod token_writes;
     pub mod user_access_tokens;
     pub mod user_audits;
+    pub mod user_auth;
     pub mod user_by_email;
     pub mod user_by_username;
     pub mod user_creates;

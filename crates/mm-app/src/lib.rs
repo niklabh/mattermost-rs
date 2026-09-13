@@ -68,6 +68,7 @@ pub mod usage;
 pub mod user;
 pub mod user_access_token;
 pub mod user_agent;
+pub mod user_auth;
 pub mod user_create;
 pub mod user_delete;
 pub mod user_terms_of_service;

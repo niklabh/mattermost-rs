@@ -49,6 +49,12 @@ var registry = map[string]any{
 	"app_error":      &model.AppError{},
 	"user":           &model.User{},
 
+	// `model.UserAuth` (user.go:225), the body and the response of
+	// `PUT /users/{user_id}/auth`. Both fields carry `omitempty`, so a
+	// zero-valued instance would marshal to `{}` and prove nothing — which is
+	// exactly why it goes through the reflective filler like everything else.
+	"user_auth": &model.UserAuth{},
+
 	// The `members_minus_group_members` pair (user.go:1118, :1139), landed with
 	// `GET /channels/{channel_id}/members_minus_group_members`.
 	"user_with_groups":             &model.UserWithGroups{},

@@ -1481,6 +1481,75 @@ mod tests {
         assert_eq!(round_tripped, expected);
     }
 
+    /// `UserAuth` is the body **and** the response of `PUT /users/{user_id}/auth`, so its wire
+    /// shape is asserted in both directions by one round trip. The fixture carries a distinctive
+    /// value in each of the two fields — a zero-valued Go struct would marshal to `{}` here,
+    /// because both tags carry `omitempty`, and would prove nothing about either.
+    #[test]
+    fn user_auth_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/user_auth.json");
+        let parsed: UserAuth = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+    }
+
+    /// The two `omitempty` tags, which are what make `{"auth_service":"email"}` answer `{}`.
+    ///
+    /// Go emits `auth_data` only when the pointer is non-nil and `auth_service` only when the
+    /// string is non-empty, so the four combinations are four different bodies. A port that
+    /// modelled `auth_service` as `Option<String>` would agree on three of them and write
+    /// `"auth_service":null` on the fourth.
+    #[test]
+    fn user_auth_omits_each_empty_field_independently() {
+        let both = UserAuth {
+            auth_data: Some("ad".to_owned()),
+            auth_service: "ldap".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_string(&both).unwrap(),
+            r#"{"auth_data":"ad","auth_service":"ldap"}"#
+        );
+
+        let no_service = UserAuth {
+            auth_data: Some("ad".to_owned()),
+            auth_service: String::new(),
+        };
+        assert_eq!(
+            serde_json::to_string(&no_service).unwrap(),
+            r#"{"auth_data":"ad"}"#
+        );
+
+        let no_data = UserAuth {
+            auth_data: None,
+            auth_service: "ldap".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_string(&no_data).unwrap(),
+            r#"{"auth_service":"ldap"}"#
+        );
+
+        // The shape `updateUserAuth` answers for `{"auth_service":"email"}`.
+        assert_eq!(serde_json::to_string(&UserAuth::default()).unwrap(), "{}");
+    }
+
+    /// An **empty string** in `auth_data` is not the same as its absence: Go's pointer is
+    /// non-nil, the key is emitted, and `IsValid` refuses it for every service. A port using
+    /// `skip_serializing_if = "String::is_empty"` on this field would drop the key and turn a
+    /// refusal into a different refusal.
+    #[test]
+    fn an_empty_auth_data_string_is_still_on_the_wire() {
+        let empty = UserAuth {
+            auth_data: Some(String::new()),
+            auth_service: "ldap".to_owned(),
+        };
+        assert_eq!(
+            serde_json::to_string(&empty).unwrap(),
+            r#"{"auth_data":"","auth_service":"ldap"}"#
+        );
+        assert!(!empty.is_valid(), "empty auth data is refused");
+    }
+
     #[test]
     fn user_with_groups_matches_go_serialization() {
         let go = include_str!("../../../fixtures/user_with_groups.json");

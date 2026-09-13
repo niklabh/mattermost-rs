@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users\n                SET password = '',\n                    lastpasswordupdate = $1,\n                    updateat = $1,\n                    failedattempts = 0,\n                    authservice = $2,\n                    authdata = $3\n              WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "abd6462dc8c2eadbd1170e941965677e4739b0e1e252a87b19ae66c15138cd0a"
+}

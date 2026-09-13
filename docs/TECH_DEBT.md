@@ -241,14 +241,16 @@ adding a drift test.
 
 ---
 
-## D-006 · `is_valid_user_auth_service` was inferred, not read
+## D-006 · `is_valid_user_auth_service` was inferred, not read — RESOLVED 2026-09-13
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Status** RESOLVED · **Severity** unverified · **Raised** 2026-08-13 (phase 1, `user.go`)
 
 The accepted set was derived from the auth-service constants without opening the Go body
-(user.go:942). It is the only function in `user.rs` not backed by either a fixture or the
-behavioural oracle. Confirm when `ldap.go` / `saml.go` are translated — or sooner, by adding it
-to `reference/dump/behaviour.go`, which is a five-line change.
+(user.go:942). Read in the authentication-data session and confirmed identical: seven services,
+`email`, `gitlab`, `ldap`, `saml`, `google`, `office365`, `openid`, and `magic_link` is **not**
+among them. It is now exercised through a route as well — `UserAuth::is_valid` calls it, and
+`parity::user_auth::the_auth_body_refusals_agree` sends `{"auth_service":"bogus"}` to both servers
+and compares the refusal.
 
 ---
 
@@ -8405,3 +8407,81 @@ statement is `License().IsCloud()` → 403 `api.restricted_system_admin`; a clou
 licensed by construction and a licensed server is forwarded whole before anything else runs.
 `len(fileInfoArray) <= 0` → `…array.app_error` is reproduced but cannot fire:
 `ParseMultipartForm` never builds an empty list under a present key.
+
+---
+
+## D-500 · The MFA pair serves only refusals; anything that touches a secret forwards
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+
+`PUT /users/{user_id}/mfa` and `POST /users/{user_id}/mfa/generate` are registered and answer
+every refusal: the id 400, the OAuth-app 403, the `edit_other_users` 403, the `activate` and
+`code` body 400s, `GetUser`'s 404, `api.user.activate_mfa.email_and_ldap_only.app_error` and
+`mfa.mfa_disabled.app_error`. **No input produces a 2xx from Rust on either route.** Two forwards
+carry the rest, and both are taken from reads and the configuration, before any write:
+
+- `{"activate": false}` — `DeactivateMfa` has no configuration gate. It writes `MfaActive = false`
+  and `MfaSecret = ''` (two `UPDATE`s, `UpdateAt` bumped twice, `MfaUsedTimestamps` zeroed) and
+  then sends an MFA-change e-mail from a goroutine. The e-mail is [D-238]: there is no e-mail
+  service here and the side effect follows the write, so the whole request goes to Go after the
+  `GetUser` whose 404 is served.
+- `ServiceSettings.EnableMultifactorAuthentication` on — past that flag Go mints 160 bits from
+  `crypto/rand`, renders a QR PNG with `github.com/mattermost/rsc/qr`, and validates tokens with
+  `dgryski/dgoogauth` at a window size of 3 against a replay list in `Users.MfaUsedTimestamps`.
+
+**The second forward is not a matter of effort.** A TOTP secret generated here could not be
+compared against one Go generated — they are different random numbers — so a Rust implementation
+of `mfa.GenerateSecret` would be unverifiable by construction, which is the failure this project
+exists to prevent. What would make it portable is a seam that lets a test fix the randomness on
+both sides; nothing like that exists in the Go code, which calls `crypto/rand.Read` inline.
+
+**What is untested rather than unported:** the flag forward itself. The flag is off stack-wide and
+`PUT /api/v4/config` is not served here, so no parity test flips it; the forward is asserted by
+reading the configuration in the handler, and the branch is covered by a mutation
+(`api-mfa-forwards-the-wrong-arm`) rather than by a request. `Users.MfaActive` likewise cannot be
+set through any api4 route with the flag off, so no test in the tree has ever seen a row with MFA
+active — the same gap the login vertical recorded and probed with SQL (`db_login_mfa_probe.rs`).
+
+---
+
+## D-501 · `POST /users/login/switch` serves its refusals; three of four branches forward
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (authentication data)
+
+`switchAccountType` (api4/user.go:2919) is registered. What it answers and what it hands on:
+
+| branch | served | forwarded |
+|---|---|---|
+| no matching from/to pair, or a body that will not decode | the 400 naming `switch_request` | — |
+| `email` → `saml`/`gitlab`/`google`/`office365`/`openid` | the unknown-address 404 | everything past it |
+| `email` → `ldap` | the unknown-address 404 | everything past it |
+| one of the five → `email` | the 401, the OAuth-app 403, both sign-in 403s, the 404, the magic-link 400, the owner 403, `not_oauth_user` | the password change |
+| `ldap` → `email` | **the whole branch**, unlicensed | the whole branch, licensed |
+
+Three things are owed:
+
+1. **`ServiceSettings.ExperimentalEnableAuthenticationTransfer` is not in this port's
+   configuration.** It gates all four branches, but only behind `License() != nil`, so on an
+   unlicensed server the whole gate is skipped by its first conjunct and nothing observable is
+   missing. A licence makes the gate live and this server cannot read it, which is why every
+   branch forwards when licensed. Adding the field is a four-line change (struct, default,
+   `lookup_bool`, the document parse) and would close this half.
+2. **`CheckPasswordAndAllCriteria` writes before it compares.** It claims a `FailedAttempts` slot,
+   which is why `email → oauth` and `email → ldap` forward one gate after they start: the only
+   thing ahead of the claim is `GetUserByEmail`. The function itself *is* ported
+   (`mm_app::login`), so these two branches could be served as far as Go's next step — a SAML
+   relay token for `email → saml`, `GetAuthorizationCode`'s 501 for the other four, and
+   `RevokeAllSessions` then the LDAP 501 for `email → ldap`. That is real work with real writes
+   and it was not done here.
+3. **`SwitchOAuthToEmail`'s tail.** `UpdatePassword` hashes, writes, sends a sign-in-change e-mail
+   ([D-238]) and revokes every session. Every gate ahead of it is served; the write is not.
+
+**One thing served here is a property of the build, not of the configuration, and it should be
+said plainly.** `ldap → email` terminates at `ldapInterface == nil` → 501
+`api.user.ldap_to_email.not_available.app_error`, and `a.Ldap()` is nil because
+`RegisterLdapInterface` is called only from the enterprise import package, which is not in the
+pinned reference tree. So the 501 is correct for *this* Go binary and would stop being correct
+against an enterprise build, licensed or not. The licensed case forwards for reason 1 above, which
+covers the likely half of that; an unlicensed enterprise build with LDAP registered would
+diverge. `parity::user_auth::ldap_to_email_refuses_a_non_ldap_account_and_then_has_no_ldap`
+measures it against the binary the strangler actually pairs with.

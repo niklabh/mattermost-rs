@@ -66,7 +66,7 @@ use crate::proxy;
 use crate::user_creates::{decode_go_struct, decode_user};
 
 /// Read the whole body, keeping the parts so the request can still be forwarded.
-async fn split_body(
+pub(crate) async fn split_body(
     request: Request,
     parameter: &'static str,
 ) -> Result<(Request, Vec<u8>), ApiError> {
@@ -120,7 +120,9 @@ fn map_from_json(bytes: &[u8]) -> StringMap {
 /// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same call into a
 /// `map[string]any`, where every JSON value is assignable, so only a non-object top level
 /// produces the empty map. Trailing bytes are ignored for the same reason as above.
-fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn string_interface_from_json(
+    bytes: &[u8],
+) -> serde_json::Map<String, serde_json::Value> {
     use serde::Deserialize;
 
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);

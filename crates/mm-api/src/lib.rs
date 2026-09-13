@@ -76,6 +76,7 @@ pub mod tokens;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
+pub mod user_auth;
 pub mod user_creates;
 pub mod user_deletes;
 pub mod user_updates;
@@ -393,6 +394,32 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/roles",
             partially_migrated_with_ids(&state, put(user_updates::update_user_roles)),
         )
+        // The authentication-data trio (api4/user.go:64, :66, :67). `/auth` and `/mfa` are
+        // siblings of `patch`, `active` and `roles` above — one segment under `{user_id}`, so
+        // none of them shadows the parameterised route or each other. `/mfa/generate` is a static
+        // **child** of `/mfa`, which is the shape that has bitten this router before: matchit
+        // prefers a static child and does not fall back across method routers, so registering
+        // `/mfa` without also registering `/mfa/generate` would turn a forwarded route into a
+        // local 404. Both are registered, and
+        // `the_user_update_routes_and_their_neighbours_are_all_still_answered_here` in
+        // `tests/parity.rs` covers the whole `/users/{id}/…` neighbourhood.
+        //
+        // `PUT /mfa` and `POST /mfa/generate` are `APISessionRequiredMfa` in Go, which differs
+        // from `APISessionRequired` in exactly one field — `RequireMfa: false` — and that field
+        // gates a check this server does not make at all. So the two wrappers are the same thing
+        // here, and will stop being the same thing the day `MfaRequired` is ported.
+        .route(
+            "/api/v4/users/{user_id}/auth",
+            partially_migrated_with_ids(&state, put(user_auth::update_user_auth)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/mfa",
+            partially_migrated_with_ids(&state, put(user_auth::update_user_mfa)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/mfa/generate",
+            partially_migrated_with_ids(&state, post(user_auth::generate_mfa_secret)),
+        )
         // The literal `ids` beside `{user_id}`: axum prefers the literal, so `POST /users/ids`
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
         // answers as before. The GET route's exact-26-char rule never saw `ids` anyway (three
@@ -570,6 +597,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/login/type",
             partially_migrated(post(login::get_login_type)),
+        )
+        // `BaseRoutes.Users.Handle("/login/switch", APIHandler(switchAccountType))`
+        // (api4/user.go:72) — the third static child of `/users/login`, beside `type`. It was
+        // deliberately left unregistered while it was forwarded; registering it now serves the
+        // branch table in `user_auth::switch_account_type` and leaves every other method on the
+        // path forwarded through `partially_migrated`.
+        //
+        // Its three unregistered neighbours — `/login/sso/code-exchange`, `/login/desktop_token`
+        // and `/login/cws` — are untouched: each needs SSO, a licence or CWS, and each is a
+        // sibling rather than a child of this path, so nothing about this registration reaches
+        // them.
+        .route(
+            "/api/v4/users/login/switch",
+            partially_migrated(post(user_auth::switch_account_type)),
         )
         // `BaseRoutes.Users.Handle("/password/reset", APIHandler(resetPassword))`
         // (api4/user.go:55). Two segments under `/users/`, so it is a sibling of
@@ -3336,6 +3377,10 @@ mod tests {
         let anonymous: Vec<(Method, String)> = vec![
             (Method::POST, "/api/v4/users/login".to_owned()),
             (Method::POST, "/api/v4/users/login/type".to_owned()),
+            // `login/switch` is the third literal child of `login`, added with the
+            // authentication-data family. It is anonymous for the same reason: `switchAccountType`
+            // is an `APIHandler`, and one of its four branches asks for a session itself.
+            (Method::POST, "/api/v4/users/login/switch".to_owned()),
             // Already anonymous before this session, and a literal under `/users/` like the two
             // above — so a botched registration could shadow it.
             (Method::POST, "/api/v4/users/logout".to_owned()),
@@ -3644,8 +3689,11 @@ mod tests {
     ///
     /// # Non-vacuity
     ///
-    /// Checked by temporarily adding `PUT /api/v4/users/{id}/mfa` — a route this server
-    /// deliberately forwards — to the `served` list and confirming the assertion fails. It does.
+    /// Checked by temporarily adding `POST /api/v4/users/{id}/convert_to_bot` — a route this
+    /// server deliberately forwards — to the `served` list and confirming the assertion fails. It
+    /// does. `PUT /users/{id}/mfa` used to be that example and is now served, which is exactly the
+    /// drift a non-vacuity note has to survive: the check is the *pair* of lists, and a route
+    /// moving from one to the other is a migration rather than a regression.
     #[tokio::test]
     async fn the_user_update_routes_and_their_neighbours_are_all_still_answered_here() {
         use axum::http::{Method, Request, StatusCode};
@@ -3666,6 +3714,12 @@ mod tests {
             (Method::PUT, format!("/api/v4/users/{USER}/patch")),
             (Method::PUT, format!("/api/v4/users/{USER}/active")),
             (Method::PUT, format!("/api/v4/users/{USER}/roles")),
+            // The authentication-data trio, which moved out of the `forwarded` list below when
+            // it was added. `mfa/generate` is a static **child** of `mfa`, the one shape in this
+            // neighbourhood that can un-serve a sibling, so it is listed as well as its parent.
+            (Method::PUT, format!("/api/v4/users/{USER}/auth")),
+            (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
+            (Method::POST, format!("/api/v4/users/{USER}/mfa/generate")),
             // The parameterised parent keeps its GET.
             (Method::GET, format!("/api/v4/users/{USER}")),
             // Every other `/users/{id}/…` literal this server answered before them. Each is a
@@ -3726,9 +3780,13 @@ mod tests {
         // without the header — and if a registration above had swallowed them, they would come
         // back as ours.
         let forwarded: Vec<(Method, String)> = vec![
-            (Method::PUT, format!("/api/v4/users/{USER}/mfa")),
-            (Method::PUT, format!("/api/v4/users/{USER}/auth")),
             (Method::POST, format!("/api/v4/users/{USER}/convert_to_bot")),
+            // A sibling of `mfa/generate` that nothing registers, so the static-child
+            // registration above must not have taken `/mfa/…` whole.
+            (Method::POST, format!("/api/v4/users/{USER}/mfa/nonesuch")),
+            // A literal under `{user_id}` that Go owns and nothing here registers — the plain
+            // version of the same claim, beside the constructed one.
+            (Method::POST, format!("/api/v4/users/{USER}/demote")),
         ];
         for (method, path) in &forwarded {
             let response = router(state.clone())
