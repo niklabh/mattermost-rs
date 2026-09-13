@@ -1356,24 +1356,30 @@ pub(crate) fn all_teams_opts(
 ///
 /// Go follows the store read with `FilterNonQualifyingTeamsForUser` and
 /// `AnnotateRecommendedTeamsForUser`, gated behind `for_directory` / `manage_system`. Both
-/// functions return immediately unless `TeamMembershipAccessControlEnabled()` — which is
-/// **false** on this deployment for the reasons set out on
-/// [`mm_app::App::team_membership_access_control_enabled`] — so the whole block is a no-op and is
-/// omitted rather than written blind. `for_directory=true` is therefore accepted and ignored,
-/// exactly as Go does with ABAC off; that equivalence is measured over HTTP, the ABAC-on
-/// behaviour is not, and nothing here should be taken as a claim about it.
+/// functions return immediately unless `TeamMembershipAccessControlEnabled()` — an Enterprise
+/// Advanced licence *and* `AccessControlSettings.EnableAttributeBasedAccessControl`, see
+/// [`mm_app::App::team_membership_access_control_enabled`]. The block is not ported: when the
+/// gate is open the whole request is **forwarded**, and when it is closed the block is a no-op
+/// and is omitted. `for_directory=true` is therefore accepted and ignored, exactly as Go does
+/// with ABAC off; that equivalence is measured over HTTP against both the unlicensed and the
+/// Enterprise-licensed pair, the ABAC-on behaviour is Go's.
 ///
 /// # Wire format
 ///
 /// `json.Marshal` + `w.Write` (team.go:1530), so **no trailing newline** — measured byte for
 /// byte, same call-site rule as [`get_teams_for_user`] and unlike the channel lists ([D-086]).
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count, forwarded = false))]
 pub async fn get_all_teams(
     State(state): State<AppState>,
     session: AuthenticatedSession,
-    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    request: Request,
 ) -> Result<Response, ApiError> {
-    let query = query.as_deref();
+    if state.app.team_membership_access_control_enabled().await? {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing an attribute-based team listing to Go");
+        return Ok(crate::proxy::forward_to_go(State(state), request).await);
+    }
+    let query = request.uri().query();
 
     let can_read_retention_policy = state
         .app
@@ -1396,7 +1402,8 @@ pub async fn get_all_teams(
         can_read_retention_policy,
         list_private,
         list_public,
-        state.app.team_membership_access_control_enabled(),
+        // Closed, or the request would have been forwarded above.
+        false,
     )
     .map_err(|denial| match denial {
         AllTeamsDenial::RetentionPolicyRead => ApiError::from(make_permission_error(
@@ -1828,9 +1835,11 @@ fn team_deletion_not_enabled_id(is_system_admin: bool) -> &'static str {
 ///   members and webhooks, the memberships, the slash commands and the row — ten store methods
 ///   across five stores, none of them reachable on this deployment because the flag is off. See
 ///   [D-370].
-/// - **A licensed installation**, on either arm: `cleanupTeamAccessControlPolicy` runs between
-///   the write and the event and needs the enterprise access-control service. Same rule as
-///   `mm_api::channel_writes::delete_channel`.
+/// `cleanupTeamAccessControlPolicy` runs between the write and the event on the archive arm.
+/// The access-control *service* it asks first is nil on every build without the enterprise
+/// tree, so its store fallback is the whole function, and that is ported
+/// (`App::soft_delete_team`); a licensed installation was forwarded here until 2026-09-13 on the
+/// belief that the service was needed — [D-371].
 ///
 /// # Wire format
 ///
@@ -1849,15 +1858,6 @@ pub async fn delete_team(
     // `params.Permanent, _ = strconv.ParseBool(query.Get("permanent"))` (web/params.go:232).
     let permanent = crate::channels::query_flag_is_true(request.uri().query(), "permanent");
     tracing::Span::current().record("permanent", permanent);
-
-    match state.app.license_state().await {
-        Ok(mm_app::license::LicenseState::Licensed) => {
-            tracing::Span::current().record("forwarded", true);
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
-        Ok(_) => {}
-        Err(err) => return ApiError::from(err).into_response(),
-    }
 
     if !state
         .app
@@ -2255,19 +2255,29 @@ pub(crate) fn team_search_plan(
 /// # What is deliberately not here
 ///
 /// `FilterNonQualifyingTeamsForUser` and `AnnotateRecommendedTeamsForUser`, both of which return
-/// immediately unless `TeamMembershipAccessControlEnabled()` — false on this deployment, same
-/// reasoning as [`get_all_teams`]. The `manage_system` permission that gates them is therefore
-/// not read at all; with ABAC on it would have to be.
+/// immediately unless `TeamMembershipAccessControlEnabled()` — the same gate as
+/// [`get_all_teams`], and the same rule: open, the request is forwarded whole; closed, the search
+/// is served and the `manage_system` permission that gates the two is not read at all. Closed is
+/// what the stack's Enterprise-licensed pair measures ([D-371]); open needs Enterprise Advanced.
 ///
 /// # Wire format
 ///
 /// `w.Write(payload)` (team.go:1619) — **no trailing newline**, on either shape.
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plan, count))]
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plan, count, forwarded = false))]
 pub async fn search_teams(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    match state.app.team_membership_access_control_enabled().await {
+        Ok(true) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!("handing an attribute-based team search to Go");
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        Ok(false) => {}
+        Err(err) => return ApiError::from(err).into_response(),
+    }
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -2310,7 +2320,8 @@ pub async fn search_teams(
         can_read_retention_policy,
         list_private,
         list_public,
-        state.app.team_membership_access_control_enabled(),
+        // Closed, or the request would have been forwarded above.
+        false,
     ) {
         Ok(plan) => plan,
         Err(TeamSearchDenial::RetentionPolicyRead) => {

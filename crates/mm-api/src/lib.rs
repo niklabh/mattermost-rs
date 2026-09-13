@@ -49,6 +49,7 @@ pub mod login;
 pub mod multipart;
 pub mod oauth;
 pub mod permissions;
+pub mod post_acks;
 pub mod post_writes;
 pub mod posts;
 pub mod preferences;
@@ -1641,8 +1642,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/posts/{post_id}/ack",
             partially_migrated_with_ids(
                 &state,
-                post(licensed_features::acknowledge_post)
-                    .delete(licensed_features::unacknowledge_post),
+                post(post_acks::acknowledge_post).delete(post_acks::unacknowledge_post),
             ),
         )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of

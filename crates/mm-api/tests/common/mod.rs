@@ -2615,6 +2615,67 @@ pub async fn licensed() -> LicensedPair {
     }
 }
 
+/// One request to one base: `(status, body, x-mmrs-served-by)`. The general-purpose sibling of
+/// [`fetch_licensed_pair`] for the writes — a caller names the base, so the same helper drives
+/// `GO`, `RUST` and both halves of the licensed pair.
+pub async fn request_raw(
+    client: &reqwest::Client,
+    base: &str,
+    method: reqwest::Method,
+    token: Option<&str>,
+    path: &str,
+    body: Option<&[u8]>,
+) -> (u16, Vec<u8>, Option<String>) {
+    let mut request = client.request(method, format!("{base}{path}"));
+    if let Some(token) = token {
+        request = request.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(body) = body {
+        request = request
+            .header("Content-Type", "application/json")
+            .body(body.to_vec());
+    }
+    let response = request
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served_by = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    (
+        status,
+        response.bytes().await.expect("body reads").to_vec(),
+        served_by,
+    )
+}
+
+/// `POST /caches/invalidate` against the licensed Go oracle, which keeps its own caches — a row
+/// written through the unlicensed pair or straight into the table is invisible to it until then.
+pub async fn invalidate_licensed_go_caches(
+    client: &reqwest::Client,
+    pair: &LicensedPair,
+    admin_token: &str,
+) {
+    let (status, body, _) = request_raw(
+        client,
+        &pair.go,
+        reqwest::Method::POST,
+        Some(admin_token),
+        "/api/v4/caches/invalidate",
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "the licensed oracle's caches invalidate: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
 /// Fetch `path` from both servers of the licensed pair, with an optional bearer token, and
 /// assert the Rust side served it itself.
 pub async fn fetch_licensed_pair(

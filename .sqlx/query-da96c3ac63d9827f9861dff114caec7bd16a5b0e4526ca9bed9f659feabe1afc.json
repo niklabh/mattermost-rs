@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO postacknowledgements (postid, userid, channelid, acknowledgedat, remoteid)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (postid, userid) DO UPDATE SET acknowledgedat = $4\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da96c3ac63d9827f9861dff114caec7bd16a5b0e4526ca9bed9f659feabe1afc"
+}

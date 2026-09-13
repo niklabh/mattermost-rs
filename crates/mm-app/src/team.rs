@@ -10,13 +10,13 @@ use mm_model::team_member::{TeamMember, TeamUnread};
 use mm_model::team_search::TeamSearch;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult};
-use mm_store::TeamStore;
 use mm_store::channel_store::ChannelStore;
 use mm_store::job_store::JobStore;
 use mm_store::post_store::PostStore;
 use mm_store::system_store::SystemStore;
 use mm_store::team_store::TeamMembersGetOptions;
 use mm_store::token_store::TokenStore;
+use mm_store::{AccessControlPolicyStore, TeamStore};
 
 use crate::App;
 
@@ -396,26 +396,43 @@ impl App {
 
     /// Port of `app.App.TeamMembershipAccessControlEnabled` (team.go:932).
     ///
-    /// Go's gate is a conjunction of three things, and **only the licence decides it here**:
+    /// Go's gate is a conjunction of three things:
     ///
-    /// | term | value on this deployment | why |
-    /// |---|---|---|
-    /// | `FeatureFlags.TeamMembershipAccessControl` | `true` | `SetDefaults` sets it (feature_flags.go:173) — note it is *not* dark by default |
-    /// | `MinimumEnterpriseAdvancedLicense(License())` | `false` | the image is `mattermost-team-edition` and `Licenses` holds zero rows |
-    /// | `AccessControlSettings.EnableAttributeBasedAccessControl` | irrelevant | short-circuited by the licence |
+    /// | term | here |
+    /// |---|---|
+    /// | `FeatureFlags.TeamMembershipAccessControl` | `true` — `SetDefaults` sets it (feature_flags.go:173) and, like every flag, it lives only in the environment; not modelled, so the default is the value |
+    /// | `MinimumEnterpriseAdvancedLicense(License())` | read from [`App::license`] since 2026-09-13; `false` for the Enterprise licence the stack's oracle carries, `true` only for `advanced` or `entry` |
+    /// | `AccessControlSettings.EnableAttributeBasedAccessControl` | [`crate::config::Config::enable_attribute_based_access_control`], default `false` |
     ///
-    /// So this returns a constant `false`, and it is a **measurement, not an assumption**: a
-    /// Team Edition binary has no enterprise code to load a licence into, and `docker-compose.yml`
-    /// pins that image. The three callers this constant switches off — `IncludePolicyEnforced` in
-    /// `getAllTeams`, `FilterNonQualifyingTeamsForUser` and `AnnotateRecommendedTeamsForUser` —
-    /// all short-circuit on it before doing anything, so the whole ABAC directory surface is a
-    /// no-op and the ported handler reproduces Go by omitting it.
+    /// The three callers this switches — `IncludePolicyEnforced` in `getAllTeams`,
+    /// `FilterNonQualifyingTeamsForUser` and `AnnotateRecommendedTeamsForUser` in `searchTeams`,
+    /// and `TeamAccessControlled` — all short-circuit on it before doing anything, and what they do
+    /// past it is the attribute-based directory filter, which is not ported. So every caller
+    /// **forwards** when this is true and serves the plain listing when it is false; the licence
+    /// term is the one this process could not read until now.
+    pub async fn team_membership_access_control_enabled(&self) -> AppResult<bool> {
+        let license = self.license().await?;
+        if !mm_model::license::minimum_enterprise_advanced_license(license.as_deref()) {
+            return Ok(false);
+        }
+        Ok(self.config().enable_attribute_based_access_control)
+    }
+
+    /// Port of `app.App.cleanupTeamAccessControlPolicy` (team.go:2160) — the store fallback.
     ///
-    /// Point this at a real licence read before running against an Enterprise Advanced server;
-    /// until then the honest statement is that those branches are read from the Go source and
-    /// never exercised.
-    pub fn team_membership_access_control_enabled(&self) -> bool {
-        false
+    /// The access-control *service* is nil on every build without the enterprise tree, so
+    /// `useStoreFallback` is always taken and `AccessControlPolicyStore().Delete(team.Id)` runs
+    /// unconditionally — a no-op when no policy row carries the team's id, which on any server
+    /// below Enterprise Advanced is every team. Its failure is a warning, never the request's
+    /// error. The audit record Go writes only for a `PolicyEnforced` team is not written: audit
+    /// records are not ported ([D-028]).
+    async fn cleanup_team_access_control_policy(&self, team: &mm_model::team::Team, trigger: &str) {
+        if team.id.is_empty() {
+            return;
+        }
+        if let Err(err) = self.store().access_control_policy().delete(&team.id).await {
+            tracing::warn!(team_id = %team.id, trigger, error = %err, "Failed to delete team ABAC policy during team delete/archive");
+        }
     }
 
     /// Port of `app.App.SanitizeTeam` (team.go:2303).
@@ -625,13 +642,17 @@ mod tests {
     use mm_store::SqlStore;
     use sqlx::postgres::PgPoolOptions;
 
-    fn unreachable_app() -> App {
+    fn unreachable_store() -> SqlStore {
         // Same 250ms cap as `channel.rs`'s tests: sqlx's default acquire timeout is 30 seconds.
         let pool = PgPoolOptions::new()
             .acquire_timeout(std::time::Duration::from_millis(250))
             .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
             .expect("a lazy pool is built without connecting");
-        App::new(SqlStore::from_pool(pool))
+        SqlStore::from_pool(pool)
+    }
+
+    fn unreachable_app() -> App {
+        App::new(unreachable_store())
     }
 
     /// Pins the deployment fact three of `getAllTeams`' branches rest on. Not a tautology: it is
@@ -639,11 +660,50 @@ mod tests {
     /// mutation that turns the ABAC directory surface on with nothing else to notice.
     // `connect_lazy` needs a reactor to exist even though nothing here opens a connection.
     #[tokio::test]
-    async fn team_membership_access_control_is_off_on_this_deployment() {
+    async fn team_membership_access_control_needs_the_advanced_tier_and_the_setting() {
+        let app = |sku: &str, abac: bool| {
+            crate::App::with_config(
+                unreachable_store(),
+                crate::config::Config {
+                    enable_attribute_based_access_control: abac,
+                    ..crate::license::test_signing::licensed_config(sku)
+                },
+            )
+        };
+        // The stack's oracle is `enterprise`: below the rung whatever the setting says.
         assert!(
-            !unreachable_app().team_membership_access_control_enabled(),
-            "the image is mattermost-team-edition and Licenses holds no rows, so \
-             MinimumEnterpriseAdvancedLicense is false and the whole ABAC gate is dark"
+            !app("enterprise", true)
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
+        );
+        assert!(
+            !app("advanced", false)
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
+        );
+        assert!(
+            app("advanced", true)
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
+        );
+        // `entry` is tier 30 too — see the module docs of `mm_model::license`.
+        assert!(
+            app("entry", true)
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap()
+        );
+        // No MM_LICENSE: the store is asked, and its failure is a 500, never a silent `false`.
+        assert_eq!(
+            unreachable_app()
+                .team_membership_access_control_enabled()
+                .await
+                .unwrap_err()
+                .status_code,
+            500
         );
     }
 
@@ -1730,6 +1790,10 @@ impl App {
 
         team.delete_at = mm_model::utils::get_millis();
         let deleted = self.write_team("SoftDeleteTeam", team).await?;
+
+        self.cleanup_team_access_control_policy(&deleted, "archive")
+            .await;
+
         self.send_team_event(
             &deleted,
             mm_model::websocket_message::WEBSOCKET_EVENT_DELETE_TEAM,

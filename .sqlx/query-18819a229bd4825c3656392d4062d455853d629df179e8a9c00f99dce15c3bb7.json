@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO accesscontrolpolicyhistory (id, name, type, createat, revision, version, data, props)\n            SELECT id, name, type, createat, revision, version, data, props\n              FROM accesscontrolpolicies\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "18819a229bd4825c3656392d4062d455853d629df179e8a9c00f99dce15c3bb7"
+}

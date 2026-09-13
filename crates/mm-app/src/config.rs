@@ -293,6 +293,15 @@ pub struct Config {
     /// `api.user.delete_team.not_enabled.app_error`. Read by `mm_api::teams::delete_team`.
     pub enable_api_team_deletion: bool,
 
+    /// `AccessControlSettings.EnableAttributeBasedAccessControl` (config.go). Go default
+    /// **`false`**.
+    ///
+    /// One of the three terms of `TeamMembershipAccessControlEnabled` (app/team.go:932) — the
+    /// other two are a feature flag that defaults on and `MinimumEnterpriseAdvancedLicense`. Read
+    /// by [`crate::App::team_membership_access_control_enabled`], which forwards a request to Go
+    /// when all three hold, because the attribute-based filtering behind them is not ported.
+    pub enable_attribute_based_access_control: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -1119,6 +1128,7 @@ impl Default for Config {
             enable_api_channel_deletion: false,
             // config.go:885 — `new(false)`.
             enable_api_team_deletion: false,
+            enable_attribute_based_access_control: false,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -1410,6 +1420,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEAPITEAMDELETION",
                 default.enable_api_team_deletion,
+            ),
+            enable_attribute_based_access_control: lookup_bool(
+                lookup,
+                "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
+                default.enable_attribute_based_access_control,
             ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
@@ -1952,6 +1967,11 @@ impl Config {
             enable_api_team_deletion: service
                 .enable_api_team_deletion
                 .unwrap_or(default.enable_api_team_deletion),
+            enable_attribute_based_access_control: parsed
+                .access_control_settings
+                .unwrap_or_default()
+                .enable_attribute_based_access_control
+                .unwrap_or(default.enable_attribute_based_access_control),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -2261,6 +2281,8 @@ struct Document {
     localization_settings: Option<LocalizationSettingsDocument>,
     #[serde(rename = "GuestAccountsSettings")]
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
+    #[serde(rename = "AccessControlSettings")]
+    access_control_settings: Option<AccessControlSettingsDocument>,
     #[serde(rename = "MessageExportSettings")]
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
@@ -2405,6 +2427,13 @@ struct GuestAccountsSettingsDocument {
     enable: Option<bool>,
     #[serde(rename = "EnableGuestMagicLink")]
     enable_guest_magic_link: Option<bool>,
+}
+
+/// The one field of `AccessControlSettings` a migrated route reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AccessControlSettingsDocument {
+    #[serde(rename = "EnableAttributeBasedAccessControl")]
+    enable_attribute_based_access_control: Option<bool>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:

@@ -760,7 +760,7 @@ impl App {
     /// `omit_connection_id`. So the client that made the edit **is** told about it, unlike a draft
     /// save; a port that helpfully threaded the `Connection-Id` header through here would silently
     /// stop the editing tab from seeing its own edit.
-    async fn publish_websocket_event_for_post(&self, event: &str, post: &Post) {
+    pub(crate) async fn publish_websocket_event_for_post(&self, event: &str, post: &Post) {
         let mut message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");
         match post.to_json() {
             Ok(json) => message.add("post", serde_json::Value::String(json)),

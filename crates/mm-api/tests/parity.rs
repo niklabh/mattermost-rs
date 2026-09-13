@@ -101,6 +101,7 @@ mod parity {
     pub mod oauth_apps;
     pub mod outgoing_hooks;
     pub mod post_acks;
+    pub mod post_acks_licensed;
     pub mod post_bulk_reactions;
     pub mod post_creates;
     pub mod post_edit_history;
@@ -132,6 +133,7 @@ mod parity {
     pub mod system_posts;
     pub mod system_usage;
     pub mod team_admin;
+    pub mod team_channel_delete_licensed;
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
@@ -146,6 +148,7 @@ mod parity {
     pub mod teams_for_user;
     pub mod teams_unread;
     pub mod terms_of_service;
+    pub mod terms_of_service_licensed;
     pub mod terms_of_service_writes;
     pub mod thread_for_user;
     pub mod thread_writes;
