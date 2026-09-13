@@ -7396,61 +7396,23 @@ licence it is false, and both are measured served and identical to the oracle.
 
 ---
 
-## D-390 · the licensed half of the three group syncable writes is forwarded, not served
+## D-390 · the licensed half of the three group syncable writes is forwarded, not served — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group syncables)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-12 (group syncables) ·
+**Closed** 2026-09-13 by the licensed pair (`scripts/go-licensed.sh`, `common::licensed`)
 
-`crate::groups` now serves the **unlicensed** contract of the last three handlers in
-`api4/group.go` — `linkGroupSyncable` (`POST .../link`), `unlinkGroupSyncable` (`DELETE .../link`)
-and `patchGroupSyncable` (`PUT .../patch`) — which completes the file: all twenty route+method
-pairs `InitGroup` registers are answered here, and `parity::group_syncables` re-measures every one
-of them. `requireLicense` is the first statement of all three, above `RequireGroupId`,
-`RequireSyncableId`, `RequireSyncableType` **and** `io.ReadAll(r.Body)`, so the unlicensed
-contract is one 501 and it is fully compared. Everything past it forwards, for the reason
-[D-360] gives: Go loads its licence at startup, so `set_active_licence_id` moves our answer and
-not Go's, and the licensed side has no oracle beside it on this stack.
-
-What a licensed server reaches that this side does not have:
-
-| behind the gate | Go |
-|---|---|
-| `verifyLinkUnlinkPermission` — `IsSyncable`, an `AllowReference` gate, then a per-type switch | `api4/group.go:679` |
-| its channel arm's **parent-team** question: a channel not yet synced via its team needs `invite_user` on the team, and the private/public channel type then picks `manage_private_channel_members` or `manage_public_channel_members` | `api4/group.go:705` |
-| `verifySchemeAdminAssignmentPermission` — `manage_team_roles` / `manage_channel_roles`, skipped entirely when `patch.SchemeAdmin` is nil | `api4/group.go:573` |
-| `GetGroupSyncable` / `UpsertGroupSyncable` / `UpdateGroupSyncable` / `DeleteGroupSyncable` | `channels/store/sqlstore/group_store.go` |
-| `SyncRolesAndMembership` and `RemoveMembershipsFromUnlinkedSyncable`, both dispatched through `Srv().Go` **after** the response is written | `app/syncables.go` |
-
-Four branch-level facts are recorded here because no test on this stack can reach them, and they
-are the ones a later port will get wrong:
-
-1. **`linkGroupSyncable`'s re-link deliberately discards the old row.** It upserts onto the
-   existing syncable only when `DeleteAt == 0`; a fresh link *or a re-link of a soft-deleted row*
-   starts from a zero-value `GroupSyncable`, so fields the caller did not set are not carried over
-   from the previous incarnation (group.go:385). A port that always patched the existing row would
-   resurrect `SchemeAdmin` from before the unlink.
-2. **The two handlers differ in exactly one place.** `GetGroupSyncable` returning 404 is tolerated
-   by `link` (it creates the row) and fatal to `patch`. Everything else — both verifiers, the
-   `Patch` call, the async sync — is identical.
-3. **Three routes, three response shapes.** `link` is a **201** with the marshalled syncable,
-   `patch` a 200 with the same, `unlink` a 200 with `ReturnStatusOK`'s `{"status":"OK"}`.
-4. **`RequireSyncableType` is unreachable through the mux.** The route pattern
-   `{syncable_type:teams|channels}` refuses a third value before any handler, and `params.go:269`
-   maps only those two strings onto `GroupSyncableType`. So its `SetInvalidURLParam("syncable_type")`
-   branch is dead code for every HTTP caller, which is why a third value is *forwarded* for
-   gorilla's own 404 rather than answered with a 400. Measured in
-   `parity::group_syncables::a_third_syncable_type_is_forwarded`.
-
-**What is owed:** `mm_store`'s `GroupSyncable` surface (the four CRUD methods plus
-`TeamMembersToAdd`/`ChannelMembersToAdd`), the two permission verifiers, and `app/syncables.go`'s
-membership reconciliation — behind whichever route needs them first. The team and channel member
-*writes* they would build on are already ported (`mm_app::team_member`, `mm_app::channel_member`),
-so the reconciliation loop is the blocker, not the membership primitives.
-
-**2026-09-13 — unblocked.** Both halves of what this entry waited on exist now: `App::license`
-reads and verifies the licence body (SKU tier, feature flags), and `scripts/go-licensed.sh` runs an
-enterprise-ready Go server with a stack-local signed Enterprise licence — the oracle "beside it"
-that every paragraph above says was missing. `common::licensed` in the parity harness starts the
-matching mm-api. What remains is the route work itself, compared against that pair.
+`linkGroupSyncable`, `unlinkGroupSyncable` and `patchGroupSyncable` are served on a licensed
+server: both verifiers (`verify_link_unlink_permission`, `verify_scheme_admin_assignment_permission`
+in `mm-api/src/groups.rs`), the read-modify-write through `App::get_group_syncable` /
+`upsert_group_syncable` / `update_group_syncable` / `delete_group_syncable`
+(`mm-app/src/syncables.rs`), the syncable half of the group store
+(`mm-store/src/group_syncable_store.rs`), and `SyncRolesAndMembership` /
+`RemoveMembershipsFromUnlinkedSyncable` as a task spawned after the response. The four
+branch-level facts recorded above are measured now against the licensed Go oracle in
+`parity::group_syncables` — the re-link that discards the soft-deleted row, link's tolerated 404
+against patch's fatal one, the three response shapes (201 body / 200 body / `{"status":"OK"}`),
+and the mux's refusal of a third syncable type. One arm still hands over: a group with
+`AllowReference = false`, [D-531].
 
 ---
 
@@ -8617,3 +8579,16 @@ oracle is Enterprise (tier 20), so the served side is measured and the forward i
 
 **What is owed:** nothing this stack can compare. Recorded so the forward is known to be a
 forward on that exact predicate, not on "licensed".
+## D-531 · a syncable link on a group that hides its members is handed to Go
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (group syncables, licensed)
+
+`verifyLinkUnlinkPermission` (api4/group.go:690) asks `SessionHasPermissionToGroup(session,
+groupID, sysconsole_read_user_management_groups)` when `!group.AllowReference`, and that
+function belongs to the custom-group permission model ported with [D-360] — a group-membership
+read plus the `custom_group_user` implicit role (app/authorization.go:188). Rather than a second
+copy, `verify_link_unlink_permission` returns `Verdict::Forward` for such a group on all three
+routes, **before any write**, and `parity::group_syncables::licensed_refusals_match_go_and_a_hidden_group_is_handed_over`
+pins that the answer that comes back is Go's own. What is owed: replace the `Forward` arm with
+`App::session_has_permission_to_group` once it exists, and turn that test's expectation from
+"served by go" into a served 403 for the outsider and a served link for a group member.

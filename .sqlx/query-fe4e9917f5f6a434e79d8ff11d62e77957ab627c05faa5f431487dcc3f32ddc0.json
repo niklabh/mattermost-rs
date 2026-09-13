@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT tm.teamid AS \"teamid!\", tm.userid AS \"userid!\"\n              FROM teammembers tm\n              JOIN teams t ON t.id = tm.teamid\n              LEFT JOIN bots b ON b.userid = tm.userid\n             WHERE tm.deleteat = 0\n               AND t.deleteat = 0\n               AND t.groupconstrained = true\n               AND b.userid IS NULL\n               AND (tm.teamid, tm.userid) NOT IN (\n                       SELECT t2.id AS teamid, gm.userid\n                         FROM teams t2\n                         JOIN groupteams gt ON gt.teamid = t2.id\n                         JOIN usergroups ug ON ug.id = gt.groupid\n                         JOIN groupmembers gm ON gm.groupid = ug.id\n                        WHERE t2.groupconstrained = true\n                          AND gt.deleteat = 0\n                          AND ug.deleteat = 0\n                          AND t2.deleteat = 0\n                          AND gm.deleteat = 0\n                        GROUP BY t2.id, gm.userid)\n               AND ($1::text IS NULL OR tm.teamid = $1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "fe4e9917f5f6a434e79d8ff11d62e77957ab627c05faa5f431487dcc3f32ddc0"
+}

@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT                    id                          AS \"id!\",\n                   COALESCE(type, '')          AS \"job_type!\",\n                   COALESCE(priority, 0)       AS \"priority!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(startat, 0)        AS \"startat!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(progress, 0)       AS \"progress!\",\n                   data                        AS \"data?\"\n              FROM jobs\n             WHERE status = $1 AND type = $2\n             ORDER BY createat DESC\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "priority!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "startat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "lastactivityat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "progress!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "data?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "f0d768d915f7848c5785f8219febdccf1b33b71adffd11b188d110c0298f46db"
+}

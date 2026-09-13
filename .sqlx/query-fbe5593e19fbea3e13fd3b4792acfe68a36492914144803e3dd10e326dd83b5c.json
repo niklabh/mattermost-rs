@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE groupchannels\n                   SET autoadd = $3, schemeadmin = $4, createat = $5, deleteat = $6, updateat = $7\n                 WHERE groupid = $1 AND channelid = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fbe5593e19fbea3e13fd3b4792acfe68a36492914144803e3dd10e326dd83b5c"
+}

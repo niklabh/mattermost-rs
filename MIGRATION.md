@@ -12226,3 +12226,42 @@ half of each is answered too.
 5. **`cleanupTeamAccessControlPolicy` never needed the enterprise service.** It asks for it, gets
    nil, and takes the store fallback — on Team Edition, on the licensed oracle, on any build without
    the private tree. [D-371] forwarded on a premise the source did not support.
+## The licensed half of the three group syncable writes (2026-09-13)
+
+`POST`/`DELETE /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link` and `PUT …/patch`
+served on a licensed server — the first route family compared against the licensed pair
+(`common::licensed`) rather than forwarded past `requireLicense`. Route count unchanged at 460
+of 764 relative to base 80162e4: the three were already counted as served for their unlicensed
+501; what changed is that every branch behind the gate is answered here. D-390 closed; D-531
+opened.
+
+| layer | file | status | tests | note |
+|---|---|---|---|---|
+| store | `crates/mm-store/src/group_syncable_store.rs` — `GroupSyncableStore` on `SqlGroupStore`, `update_members_role` on the team and channel stores | DONE | 7 DB | Squirrel's optional clauses (the `reAddRemovedMembers` join, the scope) are one statement each, switched by bound parameters. `*MembersToRemove` return `(team, user)` pairs, not half-filled members — see the module note. |
+| store | `crates/mm-store/src/job_store.rs` — `get_newest_job_by_status_and_type` | DONE | 1 DB | `ORDER BY CreateAt DESC`, not `StartAt`. |
+| app | `crates/mm-app/src/syncables.rs` — `get/upsert/update/delete_group_syncable`, `sync_roles_and_membership`, `remove_memberships_from_unlinked_syncable` and the four membership loops; `group.rs` — `get_group` | DONE | via parity | A channel link is **two** rows and two events (the parent team is upserted first). `UpdateGroupSyncable`'s store miss is a 500, not a 404 — `errors.Wrap` hides `ErrNotFound` from `errors.As`. The sync's failures are warnings, as in Go. |
+| app | `crates/mm-app/src/config.rs` — `ldap_re_add_removed_members` | DONE | 2 unit | `LdapSettings.ReAddRemovedMembers`, read only for an LDAP-source group. Fixture projection extended (72 → 73 keys). |
+| api | `crates/mm-api/src/groups.rs` — the three handlers, `verify_link_unlink_permission`, `verify_scheme_admin_assignment_permission` | DONE | 5 licensed parity + the 7 unlicensed | See note 1. |
+
+### Notes
+
+1. **The channel arm asks a team question with the channel's id.** `SessionHasPermissionToTeam(
+   session, syncableID, invite_user)` in the channel arm of `verifyLinkUnlinkPermission`
+   (group.go:706) passes the *channel* id, so a session's team memberships never match and the
+   check falls to system roles: a team admin who is not a system admin is refused their first
+   channel link. Reproduced, and `licensed_refusals_match_go_and_a_hidden_group_is_handed_over`
+   holds a team admin to the 403; the mutation that passed the team's id instead was caught.
+2. **Two syncs write one database.** The Go oracle and the licensed mm-api both run
+   `SyncRolesAndMembership` after their response, on the same tables, so a comparison cannot send
+   one request to both. Each side gets its own group, team, channel and member, isomorphic to the
+   other's, and the outcomes are compared as shapes with ids and clocks taken out. The membership
+   sync is seen by polling `GET /teams/{team}/members/{user}` through the main Go server.
+3. **A group-constrained unlink removes the administrator too.** `TeamMembersToRemove` sheds
+   every member of a constrained team who is in none of its live groups, the team's creator
+   included — after which Go stops delivering team-scoped websocket frames to that admin's
+   session (`isMemberOfTeam`). The sync test therefore constrains a team of its own; done to the
+   shared one, the events test saw nothing.
+4. **Go's `GetTeamMember` returns a soft-deleted row**, so "removed by the sync" is a member
+   with `delete_at` set, not a 404.
+5. **`link` and `patch` read the body before the group.** A forward for a hidden group ([D-531])
+   is decided after `io.ReadAll` in Go's order, so the handler re-sends the bytes it consumed.

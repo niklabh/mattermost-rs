@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT gm.userid AS \"userid!\"\n                  FROM groupteams gt\n                  JOIN groupmembers gm ON gm.groupid = gt.groupid\n                       AND gt.schemeadmin = true AND gt.deleteat = 0 AND gm.deleteat = 0\n                 WHERE gt.teamid = $1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7f303b888e652a5c2ac3f75f274f030f3b031da27a6abf93714d82a57aac2694"
+}

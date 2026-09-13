@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO groupteams\n                        (groupid, autoadd, schemeadmin, createat, deleteat, updateat, teamid)\n                    VALUES ($1, $2, $3, $4, $5, $6, $7)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62e064bd606e3feb913a74c725bd880e9a920c4feb01b1b478040f587294dcf8"
+}

@@ -63,11 +63,16 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::channel::CHANNEL_TYPE_PRIVATE;
 use mm_model::group::{Group, GroupModifyMembers, GroupPatch, GroupSource, GroupWithUserIds};
+use mm_model::group_syncable::{GroupSyncable, GroupSyncablePatch, GroupSyncableType};
+use mm_model::license::License;
 use mm_model::permission::{
     PERMISSION_CREATE_CUSTOM_GROUP, PERMISSION_DELETE_CUSTOM_GROUP, PERMISSION_EDIT_CUSTOM_GROUP,
-    PERMISSION_MANAGE_CUSTOM_GROUP_MEMBERS, PERMISSION_RESTORE_CUSTOM_GROUP,
-    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_GROUPS,
+    PERMISSION_INVITE_USER, PERMISSION_MANAGE_CHANNEL_ROLES,
+    PERMISSION_MANAGE_CUSTOM_GROUP_MEMBERS, PERMISSION_MANAGE_PRIVATE_CHANNEL_MEMBERS,
+    PERMISSION_MANAGE_PUBLIC_CHANNEL_MEMBERS, PERMISSION_MANAGE_TEAM_ROLES,
+    PERMISSION_RESTORE_CUSTOM_GROUP, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_GROUPS,
     PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS, Permission, make_permission_error,
 };
 use mm_model::session::Session;
@@ -79,6 +84,7 @@ use mm_model::utils::{
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{LicenceGate, licence_gate, read_body, require_id};
+use crate::error::ApiError;
 
 /// Port of `getGroups` (group.go:1123).
 ///
@@ -906,6 +912,307 @@ pub async fn delete_group_members(
     }
 }
 
+/// The two literal segments gorilla routes, as the `GroupSyncableType` `params.go:269` maps
+/// them to. Only called after [`syncable_type_matches_go_mux`] has admitted the segment.
+fn syncable_type_of(segment: &str) -> GroupSyncableType {
+    if segment == "teams" {
+        GroupSyncableType::from(GroupSyncableType::TEAM)
+    } else {
+        GroupSyncableType::from(GroupSyncableType::CHANNEL)
+    }
+}
+
+/// The licence, or the answer the request gets without one.
+///
+/// `requireLicense` is the first statement of all three handlers, above `RequireGroupId`,
+/// `RequireSyncableId`, `RequireSyncableType` **and** `io.ReadAll(r.Body)` — so an unlicensed
+/// server answers one 501 to every input, and nothing else on the request is consulted.
+/// Measured in `parity::group_syncables`.
+async fn require_license(state: &AppState) -> Result<std::sync::Arc<License>, ApiError> {
+    match state.app.license().await {
+        Ok(Some(license)) => {
+            tracing::Span::current().record("licensed", true);
+            Ok(license)
+        }
+        Ok(None) => {
+            tracing::Span::current().record("licensed", false);
+            Err(ApiError::from(AppError::new(
+                "",
+                "api.license_error",
+                None,
+                String::new(),
+                501,
+            )))
+        }
+        Err(err) => Err(ApiError::from(err)),
+    }
+}
+
+/// `!*c.App.Channels().License().Features.LDAPGroups` → 403 `api.ldap_groups.license_error`.
+///
+/// The one licence-*feature* gate in the family, checked after the body is parsed and before
+/// any permission. `Features.SetDefaults` has run on a loaded licence, so the flag is never
+/// absent; an absent one would be a nil dereference in Go and reads as `false` here.
+fn require_ldap_groups(license: &License, where_: &'static str) -> Result<(), ApiError> {
+    let enabled = license
+        .features
+        .as_ref()
+        .and_then(|f| f.ldap_groups)
+        .unwrap_or(false);
+    if enabled {
+        Ok(())
+    } else {
+        Err(ApiError::from(AppError::new(
+            where_,
+            "api.ldap_groups.license_error",
+            None,
+            String::new(),
+            403,
+        )))
+    }
+}
+
+/// `RequireGroupId().RequireSyncableId()`, in that order — two `SetInvalidURLParam`s whose only
+/// wire difference is which of them fires first when both ids are malformed.
+fn require_group_and_syncable_ids(group_id: &str, syncable_id: &str) -> Result<(), ApiError> {
+    require_id(group_id, "group_id")?;
+    require_id(syncable_id, "syncable_id")?;
+    Ok(())
+}
+
+/// What a verifier decided: proceed, refuse with Go's error, or hand the request to Go.
+enum Verdict {
+    Proceed,
+    Refuse(Box<AppError>),
+    /// The `!group.AllowReference` arm asks `SessionHasPermissionToGroup`, which is not ported
+    /// here (it belongs to the custom-group permission model, [D-360]); a group that hides its
+    /// members is forwarded whole, before any write. See [D-531].
+    Forward(&'static str),
+}
+
+/// Port of `verifyLinkUnlinkPermission` (api4/group.go:680).
+///
+/// # The channel arm asks a team question with the channel's id
+///
+/// `SessionHasPermissionToTeam(session, syncableID, PermissionInviteUser)` is called with
+/// **`syncableID`** — the channel id — in the channel arm, where the team's id is one field away
+/// on the channel just fetched. That is Go's line, reproduced: the session's team memberships
+/// never match a channel id, so the check falls through to the caller's system roles, and a team
+/// admin who is not a system admin is refused their first channel link where the source reads as
+/// if they should be allowed. `parity::group_syncables` measures it.
+///
+/// # The parent-team question
+///
+/// A channel whose team is not yet synced to the group asks for `invite_user` on the team (or
+/// the sysconsole write permission); a channel whose team already is asks only the channel's own
+/// `manage_{private,public}_channel_members`. "Already synced" means a `GroupTeams` row exists —
+/// **deleted or not**, since `GetGroupSyncable` has no `DeleteAt` filter — so an unlinked team
+/// still exempts its channels from the team question.
+async fn verify_link_unlink_permission(
+    state: &AppState,
+    session: &Session,
+    group_id: &str,
+    syncable_type: &GroupSyncableType,
+    syncable_id: &str,
+) -> Result<Verdict, Box<AppError>> {
+    let group = state.app.get_group(group_id).await?;
+
+    if !group.is_syncable() {
+        return Ok(Verdict::Refuse(AppError::boxed(
+            "Api4.linkGroupSyncable",
+            "app.group.crud_permission",
+            None,
+            String::new(),
+            400,
+        )));
+    }
+
+    // If AllowReference is disabled, limit who can link the group.
+    if !group.allow_reference {
+        return Ok(Verdict::Forward(
+            "the group hides its members and SessionHasPermissionToGroup is not ported",
+        ));
+    }
+
+    match syncable_type.as_str() {
+        GroupSyncableType::TEAM => {
+            if !state
+                .app
+                .session_has_permission_to_team(session, syncable_id, &PERMISSION_INVITE_USER)
+                .await
+                && !state
+                    .app
+                    .session_has_permission_to(
+                        session,
+                        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS,
+                    )
+                    .await
+            {
+                return Ok(Verdict::Refuse(make_permission_error(
+                    session,
+                    &[&PERMISSION_INVITE_USER],
+                )));
+            }
+        }
+        GroupSyncableType::CHANNEL => {
+            let channel = state.app.get_channel(syncable_id).await?;
+
+            let team_type = GroupSyncableType::from(GroupSyncableType::TEAM);
+            match state
+                .app
+                .get_group_syncable(group_id, &channel.team_id, &team_type)
+                .await
+            {
+                Ok(_) => {}
+                Err(err) if err.status_code == 404 => {
+                    // Go's line passes `syncableID` — the channel's id — as the team id.
+                    if !state
+                        .app
+                        .session_has_permission_to_team(
+                            session,
+                            syncable_id,
+                            &PERMISSION_INVITE_USER,
+                        )
+                        .await
+                        && !state
+                            .app
+                            .session_has_permission_to(
+                                session,
+                                &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS,
+                            )
+                            .await
+                    {
+                        return Ok(Verdict::Refuse(make_permission_error(
+                            session,
+                            &[&PERMISSION_INVITE_USER],
+                        )));
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+
+            let permission = if channel.channel_type == CHANNEL_TYPE_PRIVATE {
+                &PERMISSION_MANAGE_PRIVATE_CHANNEL_MEMBERS
+            } else {
+                &PERMISSION_MANAGE_PUBLIC_CHANNEL_MEMBERS
+            };
+            let (ok, _) = state
+                .app
+                .session_has_permission_to_channel(session, syncable_id, permission)
+                .await;
+            if !ok {
+                return Ok(Verdict::Refuse(make_permission_error(
+                    session,
+                    &[permission],
+                )));
+            }
+        }
+        _ => {}
+    }
+    Ok(Verdict::Proceed)
+}
+
+/// Port of `verifySchemeAdminAssignmentPermission` (api4/group.go:747): a no-op unless the
+/// patch names `scheme_admin`; then the sysconsole write permission, or the syncable's own
+/// role-management permission.
+async fn verify_scheme_admin_assignment_permission(
+    state: &AppState,
+    session: &Session,
+    syncable_type: &GroupSyncableType,
+    syncable_id: &str,
+    patch: &GroupSyncablePatch,
+) -> Option<Box<AppError>> {
+    patch.scheme_admin?;
+    if state
+        .app
+        .session_has_permission_to(session, &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_GROUPS)
+        .await
+    {
+        return None;
+    }
+    match syncable_type.as_str() {
+        GroupSyncableType::TEAM => {
+            if !state
+                .app
+                .session_has_permission_to_team(session, syncable_id, &PERMISSION_MANAGE_TEAM_ROLES)
+                .await
+            {
+                return Some(make_permission_error(
+                    session,
+                    &[&PERMISSION_MANAGE_TEAM_ROLES],
+                ));
+            }
+        }
+        GroupSyncableType::CHANNEL => {
+            let (ok, _) = state
+                .app
+                .session_has_permission_to_channel(
+                    session,
+                    syncable_id,
+                    &PERMISSION_MANAGE_CHANNEL_ROLES,
+                )
+                .await;
+            if !ok {
+                return Some(make_permission_error(
+                    session,
+                    &[&PERMISSION_MANAGE_CHANNEL_ROLES],
+                ));
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// `appErr.Where = "Api4.linkGroupSyncable"` and its siblings — Go relabels the verifiers'
+/// errors with the handler's name. `Where` is not on the wire; it is kept for the trace.
+fn relabelled(mut err: Box<AppError>, where_: &str) -> Response {
+    err.where_ = where_.to_owned();
+    ApiError::from(err).into_response()
+}
+
+/// `json.Marshal` + `w.Write` — **no trailing newline** — at the status the handler chose.
+fn marshalled(status: StatusCode, where_: &'static str, syncable: &GroupSyncable) -> Response {
+    match serde_json::to_vec(syncable) {
+        Ok(body) => (
+            status,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the group syncable");
+            ApiError::from(AppError::new(
+                where_,
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response()
+        }
+    }
+}
+
+/// `c.App.Srv().Go(func() { SyncRolesAndMembership(...) })` — after the response, on a task of
+/// its own. Its failures are logged by the task, never surfaced.
+fn spawn_sync(
+    state: &AppState,
+    syncable_id: String,
+    syncable_type: GroupSyncableType,
+    group_id: String,
+    sync_roles: bool,
+) {
+    let app = state.app.clone();
+    tokio::spawn(async move {
+        app.sync_roles_and_membership(&syncable_id, &syncable_type, &group_id, sync_roles)
+            .await;
+    });
+}
+
 /// Port of `linkGroupSyncable` (group.go:319) —
 /// `POST /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link`.
 ///
@@ -925,28 +1232,134 @@ pub async fn delete_group_members(
 /// `SetInvalidURLParam` is dead code reachable only from a non-mux caller — which is why a third
 /// value is forwarded for gorilla's 404 here rather than answered with a 400.
 ///
-/// # What is behind the gate
+/// # A re-link starts from nothing
 ///
-/// This is the deepest unported handler in the family: `verifyLinkUnlinkPermission` (five
-/// permission questions whose shape depends on the syncable type and, for a channel, on whether
-/// the parent *team* is already synced), `verifySchemeAdminAssignmentPermission`, the
-/// read-modify-write over `GetGroupSyncable`/`UpsertGroupSyncable` whose re-link of a
-/// soft-deleted row deliberately starts from a zero value, and the asynchronous
-/// `SyncRolesAndMembership`. None of it is reachable without a licence; see [D-390].
+/// The upsert is onto the existing row only when it is live. A fresh link *or a re-link of a
+/// soft-deleted row* starts from a zero-value syncable, so `scheme_admin` from before an unlink
+/// is not carried over unless the caller sets it again (group.go:385). The store's update then
+/// restores the row by writing `DeleteAt = 0`.
+///
+/// # 201, and two events for a channel
+///
+/// The only one of the three that answers **201**. Linking a channel also links its team
+/// (`App::upsert_group_syncable`), so the socket sees `received_group_associated_to_team` and
+/// then `..._to_channel`. The membership sync runs after the response — see
+/// [`mm_app::App::sync_roles_and_membership`].
 #[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
 pub async fn link_group_syncable(
     State(state): State<AppState>,
     Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    let _ = (&group_id, &syncable_id);
+    const WHERE: &str = "Api4.linkGroupSyncable";
     if !syncable_type_matches_go_mux(&syncable_type) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     tracing::Span::current().record("forwarded", false);
-    answer(&state, request).await
+
+    let license = match require_license(&state).await {
+        Ok(license) => license,
+        Err(err) => return err.into_response(),
+    };
+    if let Err(err) = require_group_and_syncable_ids(&group_id, &syncable_id) {
+        return err.into_response();
+    }
+    let syncable_type = syncable_type_of(&syncable_type);
+
+    // The forward, if there is one, needs the request back — so the body is read from a clone
+    // of it only once the decision to answer here is made... except that the decision depends
+    // on the group, which is read after the body in Go. Go's order is kept: the body is parsed
+    // first, and a forward re-sends the bytes it read.
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::from(AppError::new(
+                "Api4.createGroupSyncable",
+                "api.io_error",
+                None,
+                String::new(),
+                400,
+            ))
+            .into_response();
+        }
+    };
+    let patch = match serde_json::from_slice::<Option<GroupSyncablePatch>>(&bytes) {
+        Ok(Some(patch)) => patch,
+        Ok(None) | Err(_) => {
+            return ApiError::invalid_param(&format!("Group{syncable_type}")).into_response();
+        }
+    };
+
+    if let Err(err) = require_ldap_groups(&license, "Api4.createGroupSyncable") {
+        return err.into_response();
+    }
+
+    match verify_link_unlink_permission(&state, &session.0, &group_id, &syncable_type, &syncable_id)
+        .await
+    {
+        Ok(Verdict::Proceed) => {}
+        Ok(Verdict::Refuse(err)) | Err(err) => return relabelled(err, WHERE),
+        Ok(Verdict::Forward(reason)) => {
+            tracing::debug!(reason, "forwarding to Go");
+            return crate::proxy::forward_to_go(
+                State(state),
+                Request::from_parts(parts, axum::body::Body::from(bytes)),
+            )
+            .await;
+        }
+    }
+    if let Some(err) = verify_scheme_admin_assignment_permission(
+        &state,
+        &session.0,
+        &syncable_type,
+        &syncable_id,
+        &patch,
+    )
+    .await
+    {
+        return relabelled(err, WHERE);
+    }
+
+    let existing = match state
+        .app
+        .get_group_syncable(&group_id, &syncable_id, &syncable_type)
+        .await
+    {
+        Ok(existing) => Some(existing),
+        Err(err) if err.status_code == 404 => None,
+        Err(err) => return relabelled(err, WHERE),
+    };
+    let mut group_syncable = match existing {
+        Some(existing) if existing.delete_at == 0 => existing,
+        _ => GroupSyncable {
+            group_id: group_id.clone(),
+            syncable_id: syncable_id.clone(),
+            type_: syncable_type.clone(),
+            ..GroupSyncable::default()
+        },
+    };
+    group_syncable.patch(&patch);
+    let group_syncable = match state.app.upsert_group_syncable(group_syncable).await {
+        Ok(gs) => gs,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    spawn_sync(
+        &state,
+        syncable_id,
+        syncable_type,
+        group_id,
+        patch.scheme_admin.is_some(),
+    );
+    marshalled(
+        StatusCode::CREATED,
+        "Api4.createGroupSyncable",
+        &group_syncable,
+    )
 }
 
 /// Port of `unlinkGroupSyncable` (group.go:624) —
@@ -957,20 +1370,71 @@ pub async fn link_group_syncable(
 /// even behind the gate, and the only one whose success is `ReturnStatusOK` rather than a
 /// marshalled syncable — so the three routes have three response shapes: a 201 with a body, a 200
 /// with a body, and a 200 with `{"status":"OK"}`.
+///
+/// Only [`verify_link_unlink_permission`] guards it — there is no patch, so no scheme-admin
+/// question. Unlinking a team also soft-deletes the group's channel links
+/// (`App::delete_group_syncable`), and the membership removal runs after the response.
 #[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
 pub async fn unlink_group_syncable(
     State(state): State<AppState>,
     Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    let _ = (&group_id, &syncable_id);
+    const WHERE: &str = "Api4.unlinkGroupSyncable";
     if !syncable_type_matches_go_mux(&syncable_type) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     tracing::Span::current().record("forwarded", false);
-    answer(&state, request).await
+
+    let license = match require_license(&state).await {
+        Ok(license) => license,
+        Err(err) => return err.into_response(),
+    };
+    if let Err(err) = require_group_and_syncable_ids(&group_id, &syncable_id) {
+        return err.into_response();
+    }
+    let syncable_type = syncable_type_of(&syncable_type);
+
+    if let Err(err) = require_ldap_groups(&license, WHERE) {
+        return err.into_response();
+    }
+    match verify_link_unlink_permission(&state, &session.0, &group_id, &syncable_type, &syncable_id)
+        .await
+    {
+        Ok(Verdict::Proceed) => {}
+        Ok(Verdict::Refuse(err)) | Err(err) => return relabelled(err, WHERE),
+        Ok(Verdict::Forward(reason)) => {
+            tracing::debug!(reason, "forwarding to Go");
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+    }
+
+    if let Err(err) = state
+        .app
+        .delete_group_syncable(&group_id, &syncable_id, &syncable_type)
+        .await
+    {
+        return ApiError::from(err).into_response();
+    }
+
+    let app = state.app.clone();
+    tokio::spawn(async move {
+        app.remove_memberships_from_unlinked_syncable(&syncable_id, &syncable_type)
+            .await;
+    });
+
+    // `ReturnStatusOK` — `w.Write(MapToJSON(...))`, no trailing newline.
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
 }
 
 /// Port of `patchGroupSyncable` (group.go:527) —
@@ -980,24 +1444,108 @@ pub async fn unlink_group_syncable(
 /// different position from `/groups/{group_id}/patch` ([`patch_group`]); the two never compete,
 /// and a request reaches this one only with a `syncable_type` and a `syncable_id` between them.
 ///
-/// Behind the gate it differs from [`link_group_syncable`] in exactly one way that matters:
-/// `GetGroupSyncable` failing is fatal here (there is nothing to patch), where the link handler
-/// tolerates a 404 and creates the row. Both then run the same two permission verifiers and the
-/// same asynchronous `SyncRolesAndMembership`. See [D-390].
+/// It differs from [`link_group_syncable`] in exactly one way that matters: `GetGroupSyncable`
+/// failing is fatal here (there is nothing to patch, **404** `app.group.no_rows`), where the
+/// link handler tolerates the miss and creates the row. Both run the same two verifiers and the
+/// same sync afterwards; this one answers **200**. Its invalid-body parameter is
+/// `Group[Team]Patch` / `Group[Channel]Patch`, with the brackets, where link's is `GroupTeam`.
 #[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
 pub async fn patch_group_syncable(
     State(state): State<AppState>,
     Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
-    _session: AuthenticatedSession,
+    session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    let _ = (&group_id, &syncable_id);
+    const WHERE: &str = "Api4.patchGroupSyncable";
     if !syncable_type_matches_go_mux(&syncable_type) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     tracing::Span::current().record("forwarded", false);
-    answer(&state, request).await
+
+    let license = match require_license(&state).await {
+        Ok(license) => license,
+        Err(err) => return err.into_response(),
+    };
+    if let Err(err) = require_group_and_syncable_ids(&group_id, &syncable_id) {
+        return err.into_response();
+    }
+    let syncable_type = syncable_type_of(&syncable_type);
+
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::from(AppError::new(
+                WHERE,
+                "api.io_error",
+                None,
+                String::new(),
+                400,
+            ))
+            .into_response();
+        }
+    };
+    let patch = match serde_json::from_slice::<Option<GroupSyncablePatch>>(&bytes) {
+        Ok(Some(patch)) => patch,
+        Ok(None) | Err(_) => {
+            return ApiError::invalid_param(&format!("Group[{syncable_type}]Patch"))
+                .into_response();
+        }
+    };
+
+    if let Err(err) = require_ldap_groups(&license, WHERE) {
+        return err.into_response();
+    }
+    match verify_link_unlink_permission(&state, &session.0, &group_id, &syncable_type, &syncable_id)
+        .await
+    {
+        Ok(Verdict::Proceed) => {}
+        Ok(Verdict::Refuse(err)) | Err(err) => return relabelled(err, WHERE),
+        Ok(Verdict::Forward(reason)) => {
+            tracing::debug!(reason, "forwarding to Go");
+            return crate::proxy::forward_to_go(
+                State(state),
+                Request::from_parts(parts, axum::body::Body::from(bytes)),
+            )
+            .await;
+        }
+    }
+    if let Some(err) = verify_scheme_admin_assignment_permission(
+        &state,
+        &session.0,
+        &syncable_type,
+        &syncable_id,
+        &patch,
+    )
+    .await
+    {
+        return relabelled(err, WHERE);
+    }
+
+    let mut group_syncable = match state
+        .app
+        .get_group_syncable(&group_id, &syncable_id, &syncable_type)
+        .await
+    {
+        Ok(gs) => gs,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    group_syncable.patch(&patch);
+    let group_syncable = match state.app.update_group_syncable(group_syncable).await {
+        Ok(gs) => gs,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    spawn_sync(
+        &state,
+        syncable_id,
+        syncable_type,
+        group_id,
+        patch.scheme_admin.is_some(),
+    );
+    marshalled(StatusCode::OK, WHERE, &group_syncable)
 }
 
 #[cfg(test)]

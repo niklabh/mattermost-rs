@@ -103,7 +103,7 @@ MODELLED = {
         # `PUT /api/v4/users/{user_id}/active`.
         "EnableUserDeactivation",
     ],
-    "LdapSettings": ["PictureAttribute", "Enable"],
+    "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
     "EmailSettings": [
         "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",
