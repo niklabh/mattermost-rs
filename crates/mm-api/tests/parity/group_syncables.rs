@@ -1242,7 +1242,7 @@ async fn licensed_refusals_match_go_and_a_hidden_group_is_handed_over() {
     let fx = licensed_fixture(&client).await;
     let admin = &fx.admin;
     let team = &fx.rs.team;
-    let channel = &fx.rs.channel;
+    let _channel = &fx.rs.channel;
     let cases: Vec<(&str, reqwest::Method, String, &str, &str, u16, &str)> = vec![
         // (label, method, path, body, token, status, id)
         (

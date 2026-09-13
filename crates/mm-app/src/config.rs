@@ -3400,8 +3400,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 73,
-            "the fixture covers {keys} settings and Config reads 73 from the document. \
+            keys, 74,
+            "the fixture covers {keys} settings and Config reads 74 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
