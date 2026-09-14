@@ -538,6 +538,23 @@ pub fn is_go_number(c: char) -> bool {
     in_ranges(crate::go_unicode_generated::IS_NUMBER_RANGES, c)
 }
 
+/// Port of `unicode.IsDigit` — Unicode general category `Nd` only.
+///
+/// Not [`is_go_number`]: `IsNumber` also accepts `Nl` (Roman numerals) and `No` (`²`, `½`), and
+/// the post-search term filter `containsAlphaNumericChar` (sqlstore/utils.go:118) reads
+/// `IsDigit`, so a term of `½` alone is dropped there and would survive under the wider class.
+pub fn is_go_digit(c: char) -> bool {
+    in_ranges(crate::go_unicode_generated::IS_DIGIT_RANGES, c)
+}
+
+/// Port of `unicode.IsMark` — Unicode general category `M`.
+///
+/// Read by `isWordRune` (sqlstore/utils.go:227): a combining mark beside a hyphen keeps the
+/// hyphen, because the mark attaches to the letter before it rather than ending the word.
+pub fn is_go_mark(c: char) -> bool {
+    in_ranges(crate::go_unicode_generated::IS_MARK_RANGES, c)
+}
+
 /// Binary search over one of the category tables emitted from the Go toolchain.
 ///
 /// The three predicates above used to evaluate their category through the
@@ -1233,6 +1250,33 @@ pub fn go_json_marshal<T: Serialize>(value: &T) -> Result<String, serde_json::Er
 pub fn go_to_lower(s: &str) -> String {
     s.chars()
         .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect()
+}
+
+/// Port of Go's `strings.ToUpper`.
+///
+/// The uppercase half of [`go_to_lower`]'s contract, and **the first-character trick does not
+/// transfer**. Lowercasing, the full mapping's first character *is* the simple mapping; uppercasing,
+/// a character with a multi-character full mapping usually has no simple mapping at all — `ß`
+/// stays `ß` in Go where `str::to_uppercase` writes `SS`, and `ŉ` stays `ŉ` where Rust writes
+/// `ʼN`. So a full mapping of one character is taken and anything longer is left as it was.
+///
+/// The residue is the four ypogegrammeni forms (`ᾀ` and its kin), whose full mapping is two
+/// characters and whose simple mapping is a *different* single character — the corpus records
+/// Go's answer for them, and the assertion is relaxed there rather than the divergence hidden.
+/// See `go_parity::go_to_upper_matches_go` for the measured list.
+///
+/// Read by the hashtag branch of `SqlPostStore.search`, which uppercases both the search term
+/// and every stored tag before comparing them.
+pub fn go_to_upper(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
         .collect()
 }
 
@@ -2893,6 +2937,41 @@ mod go_to_lower_parity {
         }
     }
 
+    /// Every corpus input except the ypogegrammeni forms, whose simple mapping is a single
+    /// character Rust's full mapping does not start with — listed here so that a corpus edit
+    /// which adds a fifth such character fails loudly rather than joining the exemption.
+    #[test]
+    fn go_to_upper_matches_go() {
+        let oracle: Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_utils.json")).unwrap();
+        let cases = oracle["go_to_upper"].as_object().unwrap();
+        assert!(cases.len() > 25);
+        const SIMPLE_AND_FULL_DIFFER: [&str; 4] = ["ᾀ", "ᾳ", "ῃ", "ῳ"];
+        for (input, want) in cases {
+            let want = want.as_str().unwrap();
+            if SIMPLE_AND_FULL_DIFFER.contains(&input.as_str()) {
+                assert_ne!(
+                    go_to_upper(input),
+                    want,
+                    "input {input:?} is no longer an exemption"
+                );
+                continue;
+            }
+            assert_eq!(go_to_upper(input), want, "input {input:?}");
+        }
+    }
+
+    /// The inputs that made the uppercase helper its own function rather than a mirror of the
+    /// lowercase one.
+    #[test]
+    fn str_to_uppercase_would_disagree() {
+        assert_eq!(go_to_upper("ß"), "ß");
+        assert_ne!("ß".to_uppercase(), "ß");
+        assert_eq!(go_to_upper("ŉ"), "ŉ");
+        assert_ne!("ŉ".to_uppercase(), "ŉ");
+        assert_eq!(go_to_upper("#Straße"), "#STRAßE");
+    }
+
     /// The two inputs that made this function necessary. Asserted directly as well as through
     /// the corpus, so the reason the helper exists survives a corpus edit.
     #[test]
@@ -3089,6 +3168,14 @@ mod go_quote_go_parity {
             oracle["number_range_count"].as_u64(),
             Some(crate::go_unicode_generated::IS_NUMBER_RANGES.len() as u64)
         );
+        assert_eq!(
+            oracle["digit_range_count"].as_u64(),
+            Some(crate::go_unicode_generated::IS_DIGIT_RANGES.len() as u64)
+        );
+        assert_eq!(
+            oracle["mark_range_count"].as_u64(),
+            Some(crate::go_unicode_generated::IS_MARK_RANGES.len() as u64)
+        );
 
         let runes = oracle["runes"].as_array().expect("an array");
         assert!(
@@ -3113,6 +3200,16 @@ mod go_quote_go_parity {
                 is_go_number(c),
                 case["is_number"].as_bool().expect("a bool"),
                 "IsNumber(U+{code:04X})"
+            );
+            assert_eq!(
+                is_go_digit(c),
+                case["is_digit"].as_bool().expect("a bool"),
+                "IsDigit(U+{code:04X})"
+            );
+            assert_eq!(
+                is_go_mark(c),
+                case["is_mark"].as_bool().expect("a bool"),
+                "IsMark(U+{code:04X})"
             );
             assert_eq!(
                 go_quote(&c.to_string()),

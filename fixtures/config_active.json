@@ -103,6 +103,7 @@
     "EnableOutgoingOAuthConnections": false,
     "EnableOutgoingWebhooks": true,
     "EnablePostIconOverride": false,
+    "EnablePostSearch": true,
     "EnablePostUsernameOverride": false,
     "EnableTesting": false,
     "EnableUserStatuses": true,

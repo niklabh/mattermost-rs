@@ -88,6 +88,8 @@ MODELLED = {
         # The two settings of the outbound-connection guard and the link-preview gate on
         # GET /api/v4/redirect_location.
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
+        # The 501 gate on the two post-search routes.
+        "EnablePostSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is

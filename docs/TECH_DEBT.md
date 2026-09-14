@@ -8753,3 +8753,21 @@ The out-of-channel arm is the one a client reaches on Team Edition, and it needs
 `GetProfilesByUsernames`, `FilterUsersByVisible` and `makeOutOfChannelMentionPost`'s three
 message forms besides the i18n bundle. **What is owed:** the i18n bundle first, then the three.
 
+
+---
+
+## D-640 · `go_to_upper` diverges from `strings.ToUpper` on four ypogegrammeni forms
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-14 (post search)
+
+`mm_model::utils::go_to_upper` takes Rust's full uppercase mapping when it is one character and
+leaves the character alone otherwise, which reproduces Go's simple mapping for `ß`, `ŉ`, `ǰ`,
+`ﬁ` and `և`. It does not for `ᾀ`, `ᾳ`, `ῃ` and `ῳ`, whose full mapping is two characters and
+whose simple mapping is a *different* single character (`ᾈ`, `ᾼ`, `ῌ`, `ῼ`) — measured in
+`fixtures/behaviour_utils.json` (`go_to_upper`) and exempted by name in
+`go_to_upper_matches_go`. The only reader is the hashtag comparison in `SqlPostStore::search`,
+so a Greek hashtag ending in one of those letters would compare differently here.
+
+**What is owed:** a `TO_UPPER_SIMPLE` table from `reference/dump/go_unicode_gen.go` — every
+rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
+lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
