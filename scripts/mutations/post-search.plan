@@ -1,0 +1,25 @@
+# Mutation plan for `POST /api/v4/teams/{team_id}/posts/search` and `POST /api/v4/posts/search`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-search.plan
+#
+# Every line is a decision in `SqlPostStore::search` or the term pipeline that a reader could get
+# wrong and that `parity::post_search` has a row to catch: the planted `card` and `system_generic`
+# posts for the two type exclusions, the three day-boundary posts for the date comparisons, the
+# public channel the plain user is not in for the membership sub-query, the direct channel for
+# the `TeamId = ''` half of the team filter, `#mmrspsRunning` against `#mmrspsRun` for the
+# exact-tag pass, and 105 planted posts for the window. Two no-op controls close the plan.
+
+search-system-posts-not-excluded	crates/mm-store/src/post_store.rs	           AND q2.type NOT LIKE 'system_%'	           AND TRUE	api	post_search
+search-card-posts-not-excluded	crates/mm-store/src/post_store.rs	           AND q2.type <> 'card'	           AND q2.type <> 'cardx'	api	post_search
+search-after-is-strict	crates/mm-store/src/post_store.rs	OR q2.createat >= $8)	OR q2.createat > $8)	api	post_search
+search-and-join-is-or	crates/mm-store/src/post_store.rs	joined.replace(' ', if use_or { "|" } else { "&" })	joined.replace(' ', if use_or { "|" } else { "|" })	api	post_search
+search-excluded-terms-not-negated	crates/mm-store/src/post_store.rs	clause.push_str(" &!(");	clause.push_str(" &(");	api	post_search
+search-window-is-fifty	crates/mm-store/src/post_store.rs	ORDER BY q2.createat DESC\n         LIMIT 100	ORDER BY q2.createat DESC\n         LIMIT 50	api	post_search
+search-teamless-channels-dropped	crates/mm-store/src/post_store.rs	AND ($1 = '' OR c.teamid = $1 OR c.teamid = '')	AND ($1 = '' OR c.teamid = $1)	api	post_search
+search-deleted-channels-flag-inverted	crates/mm-store/src/post_store.rs	AND ($18::bool OR c.deleteat = 0)	AND (NOT $18::bool OR c.deleteat = 0)	api	post_search
+search-membership-not-required	crates/mm-store/src/post_store.rs	AND cm.userid = $19	AND (cm.userid = $19 OR TRUE)	api	post_search
+search-hashtag-exact-pass-dropped	crates/mm-store/src/post_store.rs	.any(|tag| term_map.contains(&go_to_upper(tag)))	.any(|tag| term_map.contains(&go_to_upper(tag)) || true)	api	post_search
+search-column-choice-swapped	crates/mm-store/src/post_store.rs	CASE WHEN $14::bool THEN q2.hashtags ELSE q2.message END)	CASE WHEN $14::bool THEN q2.message ELSE q2.hashtags END)	api	post_search
+search-page-one-is-served	crates/mm-store/src/post_store.rs	        if page > 0 {	        if page > 1 {	api	post_search
+control-rename-found	crates/mm-store/src/post_store.rs	let found = search(&self.pool, team_id, user_id, params).await?;\n            posts.extend(&found);	let list_found = search(&self.pool, team_id, user_id, params).await?;\n            posts.extend(&list_found);	api	post_search
+control-reorder-two-columns	crates/mm-store/src/post_store.rs	               q2.editat       AS "edit_at!",\n               q2.deleteat     AS "delete_at!",	               q2.deleteat     AS "delete_at!",\n               q2.editat       AS "edit_at!",	api	post_search

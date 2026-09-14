@@ -2783,7 +2783,7 @@ const SPACE_FULLTEXT_SEARCH_CHARS: &str = "<>+-()~:*\"!@&";
 /// same dictionary, and it keeps the query a single compile-checked literal. The value is read
 /// from the same database at connect time, so a deployment that changes the setting changes both
 /// servers together.
-async fn default_text_search_config(pool: &PgPool) -> Result<String, StoreError> {
+pub(crate) async fn default_text_search_config(pool: &PgPool) -> Result<String, StoreError> {
     let row: (String,) = sqlx::query_as("SHOW default_text_search_config")
         .fetch_one(pool)
         .await

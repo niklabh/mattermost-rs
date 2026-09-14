@@ -64,6 +64,7 @@ pub mod notify_admin;
 pub mod oauth;
 pub mod permissions;
 pub mod post_acks;
+pub mod post_search;
 pub mod post_writes;
 pub mod posts;
 pub mod preferences;
@@ -1690,6 +1691,24 @@ pub fn router(state: AppState) -> Router {
                     .put(invalid_post_id_param)
                     .delete(invalid_post_id_param),
             ),
+        )
+        // `BaseRoutes.Posts.Handle("/search")` (api4/post.go:40) — the other literal sibling of
+        // `{post_id}`, with the same three pins as `/ephemeral` above: `search` is not an id, so
+        // `GET`, `PUT` and `DELETE` were already the 400 those three handlers give it.
+        .route(
+            "/api/v4/posts/search",
+            partially_migrated(
+                post(post_search::search_posts_in_all_teams)
+                    .get(invalid_post_id_param)
+                    .put(invalid_post_id_param)
+                    .delete(invalid_post_id_param),
+            ),
+        )
+        // `BaseRoutes.Team.Handle("/posts/search")` (api4/post.go:39) — two literal segments
+        // under `{team_id}`, with no `{param}` sibling at either depth.
+        .route(
+            "/api/v4/teams/{team_id}/posts/search",
+            partially_migrated_with_ids(&state, post(post_search::search_posts_in_team)),
         )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
@@ -3595,6 +3614,8 @@ mod tests {
             (Method::POST, format!("/api/v4/posts/{POST}/unpin")),
             (Method::POST, "/api/v4/posts".to_owned()),
             (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
+            (Method::POST, "/api/v4/posts/search".to_owned()),
+            (Method::POST, format!("/api/v4/teams/{USER}/posts/search")),
         ];
 
         for (method, path) in served {

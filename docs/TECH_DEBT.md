@@ -8756,6 +8756,22 @@ message forms besides the i18n bundle. **What is owed:** the i18n bundle first, 
 
 ---
 
+## D-640 · `go_to_upper` diverges from `strings.ToUpper` on four ypogegrammeni forms
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-14 (post search)
+
+`mm_model::utils::go_to_upper` takes Rust's full uppercase mapping when it is one character and
+leaves the character alone otherwise, which reproduces Go's simple mapping for `ß`, `ŉ`, `ǰ`,
+`ﬁ` and `և`. It does not for `ᾀ`, `ᾳ`, `ῃ` and `ῳ`, whose full mapping is two characters and
+whose simple mapping is a *different* single character (`ᾈ`, `ᾼ`, `ῌ`, `ῼ`) — measured in
+`fixtures/behaviour_utils.json` (`go_to_upper`) and exempted by name in
+`go_to_upper_matches_go`. The only reader is the hashtag comparison in `SqlPostStore::search`,
+so a Greek hashtag ending in one of those letters would compare differently here.
+
+**What is owed:** a `TO_UPPER_SIMPLE` table from `reference/dump/go_unicode_gen.go` — every
+rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
+lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
+
 ## D-650 · The image write-through for the upload routes is Go's
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
@@ -8819,3 +8835,4 @@ other than `files` in an order Go's single stream would fix but the parsed `Hash
 **What is owed:** a streaming multipart reader that yields parts in body order with their form
 names, if a client is ever found that depends on one of these edges. Until then the simplification
 stands, pinned by `parity::file_upload::a_multipart_text_upload_matches_go`.
+

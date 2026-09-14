@@ -1,4 +1,4 @@
-//! The `DisableWhenBusy` gate on the five served search routes — `APISessionRequiredDisableWhenBusy`
+//! The `DisableWhenBusy` gate on the seven served search routes — `APISessionRequiredDisableWhenBusy`
 //! (api4/handlers.go:179), refused by `web.Handler.ServeHTTP` with
 //! `api.context.server_busy.app_error` / 503 while the server is busy (web/handlers.go:349).
 //!
@@ -87,9 +87,9 @@ fn assert_busy(status: u16, served: bool, body: &serde_json::Value, path: &str) 
     assert_eq!(body["status_code"], 503, "{path}");
 }
 
-/// The five routes, each a 503 while busy and a success once the flag is cleared.
+/// The seven routes, each a 503 while busy and a success once the flag is cleared.
 #[tokio::test]
-async fn the_five_searches_are_refused_while_busy_and_answer_after() {
+async fn the_seven_searches_are_refused_while_busy_and_answer_after() {
     if !stack_enabled() {
         return;
     }
@@ -98,7 +98,7 @@ async fn the_five_searches_are_refused_while_busy_and_answer_after() {
     let token = go_minted_token(&client).await;
     let team_id = create_team(&client, &token, "busyg").await;
 
-    let routes: [(String, &str); 5] = [
+    let routes: [(String, &str); 7] = [
         ("/api/v4/channels/search".to_owned(), r#"{"term":"busyg"}"#),
         (
             "/api/v4/channels/group/search".to_owned(),
@@ -110,6 +110,11 @@ async fn the_five_searches_are_refused_while_busy_and_answer_after() {
             r#"{"term":"busyg"}"#,
         ),
         ("/api/v4/users/search".to_owned(), r#"{"term":"busyg"}"#),
+        ("/api/v4/posts/search".to_owned(), r#"{"terms":"busyg"}"#),
+        (
+            format!("/api/v4/teams/{team_id}/posts/search"),
+            r#"{"terms":"busyg"}"#,
+        ),
     ];
 
     for (path, body) in &routes {

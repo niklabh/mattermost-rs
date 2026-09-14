@@ -90,6 +90,7 @@ func writeBehaviourFixture(outDir string) error {
 		"valid_simple_alpha_num_hyphen_underscore_plus": matchAll(validSimpleAlphaNumHyphenUnderscorePlus),
 		"is_valid_id":                                   isValidIDAll(),
 		"go_to_lower":                                   goToLowerAll(),
+		"go_to_upper":                                   goToUpperAll(),
 		"pad_date_string_zeros":                         padAll(),
 		"clear_mention_tags":                            clearMentionAll(),
 		"sanitize_unicode":                              sanitizeAll(),
@@ -713,6 +714,29 @@ func goToLowerAll() map[string]string {
 	res := make(map[string]string, len(inputs))
 	for _, in := range inputs {
 		res[in] = strings.ToLower(in)
+	}
+	return res
+}
+
+// The `strings.ToUpper` side of the same contract, for the hashtag comparison in
+// `SqlPostStore.search` (post_store.go:2270, :2376), where both the term and the stored tag go
+// through it before the equality test.
+func goToUpperAll() map[string]string {
+	inputs := []string{
+		"", "a", "A", "abc", "AbC123", "ALREADY_UPPER", "a+b", "MiXeD-_+",
+		// Multi-character uppercase mappings: Rust's full mapping expands these, Go's simple
+		// mapping leaves them alone.
+		"ß", "straße", "ŉ", "ǰ", "ﬁ", "ﬀ", "և",
+		// Full and simple mappings that BOTH exist and differ — the ypogegrammeni forms.
+		"ᾀ", "ᾳ", "ῃ", "ῳ",
+		// Ordinary titlecase and digraph cases.
+		"ǆ", "ǅ", "ǳ", "i", "ı", "éclair", "İ",
+		// Non-letters pass through.
+		"123", "\U0001F600", "☃", "#hashtag", "#Straße",
+	}
+	res := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		res[in] = strings.ToUpper(in)
 	}
 	return res
 }

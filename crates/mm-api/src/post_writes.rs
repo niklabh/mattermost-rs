@@ -1648,7 +1648,6 @@ mod tests {
             ("POST", format!("/api/v4/posts/{AN_ID}/move")),
             ("POST", format!("/api/v4/posts/{AN_ID}/restore/{AN_ID}")),
             ("POST", "/api/v4/posts/rewrite".to_owned()),
-            ("POST", "/api/v4/posts/search".to_owned()),
         ] {
             assert_eq!(
                 status_of(method, &path).await,

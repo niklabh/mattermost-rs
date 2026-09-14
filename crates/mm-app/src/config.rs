@@ -227,6 +227,11 @@ pub struct Config {
     /// `getRedirectLocation` answers an empty location before reading its parameter.
     pub enable_link_previews: bool,
 
+    /// `ServiceSettings.EnablePostSearch` (config.go:440, defaulted **`true`** at :692). Off,
+    /// `SearchPostsForUser` answers 501 `store.sql_post.search.disabled` before touching the
+    /// store — read by [`crate::App::search_posts_for_user`].
+    pub enable_post_search: bool,
+
     /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
@@ -1248,6 +1253,7 @@ impl Default for Config {
             enable_api_trigger_admin_notifications: false,
             enable_developer: false,
             enable_link_previews: true,
+            enable_post_search: true,
             allowed_untrusted_internal_connections: String::new(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
@@ -1543,6 +1549,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLELINKPREVIEWS",
                 default.enable_link_previews,
+            ),
+            enable_post_search: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEPOSTSEARCH",
+                default.enable_post_search,
             ),
             allowed_untrusted_internal_connections: lookup(
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
@@ -2197,6 +2208,9 @@ impl Config {
             enable_link_previews: service
                 .enable_link_previews
                 .unwrap_or(default.enable_link_previews),
+            enable_post_search: service
+                .enable_post_search
+                .unwrap_or(default.enable_post_search),
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
@@ -2855,6 +2869,8 @@ struct ServiceSettingsDocument {
     enable_developer: Option<bool>,
     #[serde(rename = "EnableLinkPreviews")]
     enable_link_previews: Option<bool>,
+    #[serde(rename = "EnablePostSearch")]
+    enable_post_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -3128,6 +3144,7 @@ mod tests {
         let config = Config::default();
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
+        assert!(config.enable_post_search, "config.go:692 — new(true)");
         assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
         // `getUsersWithInvalidEmails` answers 400 when this is **on**, so a wrong default turns
         // a working route into an unconditional refusal on any server that has not set it. The
@@ -3780,8 +3797,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 94,
-            "the fixture covers {keys} settings and Config reads 94 from the document. \
+            keys, 95,
+            "the fixture covers {keys} settings and Config reads 95 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3809,6 +3826,7 @@ mod go_parity {
                 "EnableAPITriggerAdminNotifications": true,
                 "EnableDeveloper": true,
                 "EnableLinkPreviews": false,
+                "EnablePostSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true
@@ -3840,6 +3858,7 @@ mod go_parity {
         assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_developer);
         assert!(!config.enable_link_previews);
+        assert!(!config.enable_post_search);
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"

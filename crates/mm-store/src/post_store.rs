@@ -50,9 +50,15 @@ use mm_model::post::Post;
 use mm_model::post_acknowledgement::PostAcknowledgement;
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostPriority;
+use mm_model::post_search_results::PostSearchResults;
 use mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST;
+use mm_model::search_params::{SearchParams, is_search_params_list_valid};
+use mm_model::unicode::contains_cjk;
 use mm_model::user::User;
-use mm_model::utils::{StringArray, StringInterface, array_to_json, get_millis, new_id};
+use mm_model::utils::{
+    StringArray, StringInterface, array_to_json, get_millis, go_to_upper, is_go_digit,
+    is_go_letter, is_go_mark, new_id,
+};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
@@ -520,6 +526,19 @@ pub trait PostStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<PostReminderMetadata, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.SearchPostsForUser` (post_store.go:2909) — the database branch
+    /// only. The query and its reshaping are on [`search`].
+    ///
+    /// `params_list` is taken by value because Go rewrites `params.Terms` in place before the
+    /// searches run and the caller never reads it again.
+    fn search_posts_for_user(
+        &self,
+        params_list: Vec<SearchParams>,
+        user_id: &str,
+        team_id: &str,
+        page: i64,
+    ) -> impl std::future::Future<Output = Result<PostSearchResults, StoreError>> + Send;
 }
 
 /// Port of `store.PostReminderMetadata` (channels/store/store.go:1389).
@@ -3490,6 +3509,61 @@ impl PostStore for SqlPostStore {
         tracing::Span::current().record("post_id", post.id.as_str());
         Ok(post)
     }
+
+    /// # Paging is a lie, and `perPage` is not read
+    ///
+    /// "Since we don't support paging for DB search, we just return nothing for later pages":
+    /// `page > 0` is an empty result before the params are even validated, and `perPage` is not
+    /// a parameter of this method at all — the window is the `LIMIT 100` per element of
+    /// `params_list`. A client asking for `per_page: 5` gets up to 100 posts, which is Go's
+    /// answer too.
+    ///
+    /// # Go runs the elements concurrently; this runs them in order
+    ///
+    /// Each `SearchParams` is one query, fanned out over goroutines and merged through a
+    /// channel. The merge is `PostList.Extend` then `SortByCreateAt`: the post map is
+    /// order-insensitive, and `Order` after an unstable `sort.Slice` promises nothing for ids
+    /// tied on `CreateAt`. Sequential is one of the orders the goroutines can produce.
+    ///
+    /// # The validation error is Go's `*model.AppError`, passed through
+    ///
+    /// `IsSearchParamsListValid` returns an `AppError` and the app layer's `errors.As` hands it to
+    /// the client unchanged — a 500 carrying
+    /// `model.search_params_list.is_valid.include_deleted_channels.app_error`. It is carried as
+    /// [`StoreError::Invalid`] for the same reason `Save` carries its `IsValid` failures. It is
+    /// unreachable from the API, which sets the flag identically on every element.
+    #[tracing::instrument(
+        skip(self, params_list),
+        fields(user_id = %user_id, team_id = %team_id, page, elements = params_list.len())
+    )]
+    async fn search_posts_for_user(
+        &self,
+        mut params_list: Vec<SearchParams>,
+        user_id: &str,
+        team_id: &str,
+        page: i64,
+    ) -> Result<PostSearchResults, StoreError> {
+        if page > 0 {
+            return Ok(PostSearchResults::new(Some(PostList::new()), None));
+        }
+
+        is_search_params_list_valid(&params_list).map_err(|app_error| StoreError::Invalid {
+            entity: "SearchParams",
+            app_error,
+        })?;
+
+        let mut posts = PostList::new();
+        for params in &mut params_list {
+            // "remove any unquoted term that contains only non-alphanumeric chars" — applied to
+            // `Terms` only; `ExcludedTerms` is not filtered here or anywhere.
+            params.terms = remove_non_alpha_numeric_unquoted_terms(&params.terms, " ");
+            let found = search(&self.pool, team_id, user_id, params).await?;
+            posts.extend(&found);
+        }
+        posts.sort_by_create_at();
+
+        Ok(PostSearchResults::new(Some(posts), None))
+    }
 }
 
 /// Port of `updateThreadAfterReplyDeletion` (post_store.go:3063), inside the delete's
@@ -3757,6 +3831,448 @@ fn shave_extra_row(posts: &mut Vec<Post>, per_page: i64) -> bool {
     has_next
 }
 
+/// `specialSearchChars` (sqlstore/store.go:394) — "have special meaning and can be treated as
+/// spaces". Replaced in `Terms` unless the search is a hashtag one, and in `ExcludedTerms` always.
+const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~', ':'];
+
+/// Port of `SqlPostStore.search` (post_store.go:2235) with `channelsByName` and `userByUsername`
+/// both false — the only shape `SearchPostsForUser` calls it in. The by-name shape is `Search`,
+/// the plugin API's entry point, and is not ported.
+///
+/// # One statement where Go composes many
+///
+/// Squirrel appends a `WHERE` per filter that is present; sqlx's compile-time checking wants one
+/// fixed statement. So every optional predicate is `($n IS NULL OR <predicate>)` with the argument
+/// `None` where Go would have appended nothing — the planner folds the constant arm and the row
+/// set is the same. Three places reshape more than that: the `from:` sub-query tests
+/// `TeamMembers` through `EXISTS` rather than Go's comma join (the same membership test, minus
+/// duplicate ids in the `IN` list); `sq.Eq{"Id": ids}` is `= ANY($n)` and `sq.NotEq` is
+/// `<> ALL($n)`; and the `Message`/`Hashtags` column choice is a `CASE` on a boolean rather than
+/// a second statement. Everything else — the `system_` prefix with its LIKE-wildcard underscore,
+/// the `card` exclusion, `TeamId = ? OR TeamId = ''` so direct and group channels count in a team
+/// search, the `ReplyCount` sub-query, the order and the 100-row cap — is Go's text.
+///
+/// # The text-search config is a parameter
+///
+/// Go reads `default_text_search_config` once at start-up and pastes it into the SQL;
+/// [`default_text_search_config`] reads the same setting and binds it as `regconfig`, the way
+/// `channel_store` already does. Same dictionary either way.
+///
+/// # A query error is an empty result, not an error
+///
+/// "Don't return the error to the caller as it is of no use to the user" — Go logs the failure
+/// and answers with whatever the list holds, which is nothing. This is reachable: a search of
+/// only excluded terms (`-foo`) builds the tsquery ` &!(foo)`, which Postgres rejects, and Go's
+/// answer is a 200 with an empty `order`. So the error is logged and swallowed here — against
+/// the crate's usual rule, deliberately — because the alternative is a 500 where Go shows an
+/// empty page. A row that will not decode takes the same path, since Go's `SelectBuilder` fails
+/// as one call.
+///
+/// # The CJK branch is live
+///
+/// `FeatureFlags.CJKSearch` defaults to `true` (feature_flags.go:198), so a term containing Han,
+/// Hiragana, Katakana or Hangul takes the `LIKE` path instead of `to_tsquery` on a stock server
+/// as much as here. `SearchWithoutUserId` is never set by this route's caller and is not
+/// modelled: every search is scoped to the caller's channel memberships.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, hashtag = params.is_hashtag, or_terms = params.or_terms))]
+async fn search(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    params: &SearchParams,
+) -> Result<PostList, StoreError> {
+    let mut list = PostList::new();
+    // Note what the list omits: `ExcludedDate`, `ExcludedAfterDate` and `ExcludedBeforeDate`.
+    // `-on:2024-01-01` alone is an empty result, not "everything else".
+    if params.terms.is_empty()
+        && params.excluded_terms.is_empty()
+        && params.in_channels.is_empty()
+        && params.excluded_channels.is_empty()
+        && params.from_users.is_empty()
+        && params.excluded_users.is_empty()
+        && params.on_date.is_empty()
+        && params.after_date.is_empty()
+        && params.before_date.is_empty()
+    {
+        return Ok(list);
+    }
+
+    // `buildCreateDateFilterClause` (post_store.go:2050): `on:` returns early, so none of the
+    // other five bounds is applied beside it.
+    let mut on_date = None;
+    let mut excluded_date = None;
+    let mut after_date = None;
+    let mut before_date = None;
+    let mut excluded_after_date = None;
+    let mut excluded_before_date = None;
+    if !params.on_date.is_empty() {
+        on_date = Some(params.get_on_date_millis());
+    } else {
+        if !params.excluded_date.is_empty() {
+            excluded_date = Some(params.get_excluded_date_millis());
+        }
+        if !params.after_date.is_empty() {
+            after_date = Some(params.get_after_date_millis());
+        }
+        if !params.before_date.is_empty() {
+            before_date = Some(params.get_before_date_millis());
+        }
+        if !params.excluded_after_date.is_empty() {
+            excluded_after_date = Some(params.get_excluded_after_date_millis());
+        }
+        if !params.excluded_before_date.is_empty() {
+            excluded_before_date = Some(params.get_excluded_before_date_millis());
+        }
+    }
+
+    // The hashtag map is built from the terms **before** the special characters are blanked,
+    // and uppercased with Go's `strings.ToUpper` on both sides of the comparison.
+    let mut term_map = std::collections::HashSet::new();
+    if params.is_hashtag {
+        for term in params.terms.split(' ') {
+            term_map.insert(go_to_upper(term));
+        }
+    }
+
+    let mut terms = params.terms.as_str().to_owned();
+    let mut excluded_terms = params.excluded_terms.as_str().to_owned();
+    for c in SPECIAL_SEARCH_CHARS {
+        if !params.is_hashtag {
+            terms = terms.replace(c, " ");
+        }
+        excluded_terms = excluded_terms.replace(c, " ");
+    }
+
+    let mut ts_query: Option<String> = None;
+    let mut like_terms: Option<Vec<String>> = None;
+    let mut like_excluded: Option<Vec<String>> = None;
+    if terms.is_empty() && excluded_terms.is_empty() {
+        // "we've already confirmed that we have a channel or user to search for"
+    } else if contains_cjk(&terms) || contains_cjk(&excluded_terms) {
+        // `buildCJKSearchClause` (post_store.go:2202): one `LIKE` per term, ANDed or ORed, and
+        // one `NOT LIKE` per excluded term. An empty list adds no clause, so it binds as NULL.
+        let parsed: Vec<String> = split_cjk_search_terms(&terms)
+            .iter()
+            .map(|term| like_pattern(term))
+            .collect();
+        if !parsed.is_empty() {
+            like_terms = Some(parsed);
+        }
+        let parsed: Vec<String> = split_cjk_search_terms(&excluded_terms)
+            .iter()
+            .map(|term| like_pattern(term))
+            .collect();
+        if !parsed.is_empty() {
+            like_excluded = Some(parsed);
+        }
+    } else {
+        ts_query = Some(build_ts_query(&terms, &excluded_terms, params.or_terms));
+    }
+
+    let text_config = crate::channel_store::default_text_search_config(pool).await?;
+
+    fn non_empty(list: &StringArray) -> Option<&[String]> {
+        (!list.is_empty()).then_some(list.as_slice())
+    }
+    let from_users = non_empty(&params.from_users);
+    let excluded_users = non_empty(&params.excluded_users);
+    let in_channels = non_empty(&params.in_channels);
+    let excluded_channels = non_empty(&params.excluded_channels);
+
+    let rows = sqlx::query_as!(
+        PostRow,
+        r#"
+        SELECT q2.id           AS "id!",
+               q2.createat     AS "create_at!",
+               q2.updateat     AS "update_at!",
+               q2.editat       AS "edit_at!",
+               q2.deleteat     AS "delete_at!",
+               q2.ispinned     AS "is_pinned!",
+               q2.userid       AS "user_id!",
+               q2.channelid    AS "channel_id!",
+               q2.rootid       AS "root_id!",
+               q2.originalid   AS "original_id!",
+               q2.message      AS "message!",
+               q2.type         AS "post_type!",
+               q2.props        AS "props?",
+               q2.hashtags     AS "hashtags!",
+               q2.filenames    AS "filenames?",
+               q2.fileids      AS "file_ids?",
+               q2.hasreactions AS "has_reactions!",
+               q2.remoteid     AS "remote_id?",
+               (SELECT count(*)
+                  FROM posts
+                 WHERE posts.rootid = (CASE WHEN q2.rootid = '' THEN q2.id ELSE q2.rootid END)
+                   AND posts.deleteat = 0) AS "reply_count!"
+          FROM posts q2
+         WHERE q2.deleteat = 0
+           AND q2.type NOT LIKE 'system_%'
+           AND q2.type <> 'card'
+           AND (($2::text[] IS NULL AND $3::text[] IS NULL)
+                OR q2.userid IN (SELECT u.id
+                                   FROM users u
+                                  WHERE ($1::text = ''
+                                         OR EXISTS (SELECT 1
+                                                      FROM teammembers tm
+                                                     WHERE tm.teamid = $1
+                                                       AND tm.userid = u.id))
+                                    AND ($2::text[] IS NULL OR u.id = ANY($2))
+                                    AND ($3::text[] IS NULL OR u.id <> ALL($3))))
+           AND ($4::bigint IS NULL OR q2.createat BETWEEN $4 AND $5::bigint)
+           AND ($6::bigint IS NULL OR q2.createat NOT BETWEEN $6 AND $7::bigint)
+           AND ($8::bigint IS NULL OR q2.createat >= $8)
+           AND ($9::bigint IS NULL OR q2.createat <= $9)
+           AND ($10::bigint IS NULL OR q2.createat < $10)
+           AND ($11::bigint IS NULL OR q2.createat > $11)
+           AND ($12::text IS NULL
+                OR to_tsvector($13::text::regconfig,
+                               CASE WHEN $14::bool THEN q2.hashtags ELSE q2.message END)
+                   @@ to_tsquery($13::text::regconfig, $12))
+           AND ($15::text[] IS NULL
+                OR ($16::bool
+                    AND (CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ANY($15))
+                OR (NOT $16
+                    AND (CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ALL($15)))
+           AND ($17::text[] IS NULL
+                OR NOT ((CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ANY($17)))
+           AND q2.channelid IN (SELECT c.id
+                                  FROM channels c, channelmembers cm
+                                 WHERE c.id = cm.channelid
+                                   AND ($18::bool OR c.deleteat = 0)
+                                   AND cm.userid = $19
+                                   AND ($1 = '' OR c.teamid = $1 OR c.teamid = '')
+                                   AND ($20::text[] IS NULL OR c.id = ANY($20))
+                                   AND ($21::text[] IS NULL OR c.id <> ALL($21)))
+         ORDER BY q2.createat DESC
+         LIMIT 100
+        "#,
+        team_id,
+        from_users,
+        excluded_users,
+        on_date.map(|(start, _)| start),
+        on_date.map(|(_, end)| end),
+        excluded_date.map(|(start, _)| start),
+        excluded_date.map(|(_, end)| end),
+        after_date,
+        before_date,
+        excluded_after_date,
+        excluded_before_date,
+        ts_query,
+        text_config,
+        params.is_hashtag,
+        like_terms.as_deref(),
+        params.or_terms,
+        like_excluded.as_deref(),
+        params.include_deleted_channels,
+        user_id,
+        in_channels,
+        excluded_channels,
+    )
+    .fetch_all(pool)
+    .await;
+
+    let decoded: Result<Vec<Post>, StoreError> = match rows {
+        Ok(rows) => rows.into_iter().map(post_from_row).collect(),
+        Err(source) => Err(StoreError::Db {
+            context: "failed to search posts".to_owned(),
+            source,
+        }),
+    };
+    match decoded {
+        Err(err) => {
+            // Go: `mlog.Warn("Query error searching posts.", ...)` and an empty list.
+            tracing::warn!(error = %err, "query error searching posts");
+        }
+        Ok(posts) => {
+            for post in posts {
+                // "exclude burn on read posts from search results"
+                if post.post_type == mm_model::post::POST_TYPE_BURN_ON_READ {
+                    continue;
+                }
+                if params.is_hashtag
+                    && !post
+                        .hashtags
+                        .split(' ')
+                        .any(|tag| term_map.contains(&go_to_upper(tag)))
+                {
+                    continue;
+                }
+                list.add_order(post.id.as_str());
+                list.add_post(post);
+            }
+        }
+    }
+    list.make_non_nil();
+    Ok(list)
+}
+
+/// The tsquery text Go builds for the non-CJK branch (post_store.go:2294-2333): hyphens
+/// neutralised, `*` at a word end rewritten as `:*`, runs of whitespace joined with `&` (or `|`
+/// for an OR search), spaces inside a quoted phrase joined with `<->`, and the excluded terms —
+/// always `|`-joined — appended as ` &!(...)`.
+///
+/// Whatever this produces is bound as a parameter and parsed by Postgres, so its exact bytes are
+/// the parity surface: an input Go turns into an unparseable query must become the same
+/// unparseable query here, or one server answers an empty page and the other a match.
+fn build_ts_query(terms: &str, excluded_terms: &str, or_terms: bool) -> String {
+    let terms = mark_wildcards(&neutralize_non_word_hyphens(terms));
+    let excluded_terms = mark_wildcards(&neutralize_non_word_hyphens(excluded_terms));
+
+    let mut clause = replace_spaces(&terms, or_terms);
+    let excluded_clause = replace_spaces(&excluded_terms, true);
+    if !excluded_clause.is_empty() {
+        clause.push_str(" &!(");
+        clause.push_str(&excluded_clause);
+        clause.push(')');
+    }
+    clause
+}
+
+/// The `replaceSpaces` closure (post_store.go:2306): collapse whitespace, join quoted phrases,
+/// then turn every remaining space into the operator. `use_or` is `excludedInput || OrTerms`.
+fn replace_spaces(input: &str, use_or: bool) -> String {
+    if input.is_empty() {
+        return String::new();
+    }
+    // `strings.Join(strings.Fields(input), " ")`.
+    let collapsed = input.split_whitespace().collect::<Vec<_>>().join(" ");
+    let joined = join_quoted_phrases(&collapsed);
+    joined.replace(' ', if use_or { "|" } else { "&" })
+}
+
+/// `quotedStringsRegex.ReplaceAllStringFunc` (post_store.go:2314) — `("[^"]*")`, each match
+/// with its spaces replaced by `<->`. Pairs are taken left to right, so an odd trailing quote
+/// matches nothing and the text after it keeps its spaces.
+fn join_quoted_phrases(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(open) = rest.find('"') {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('"') else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        out.push('"');
+        out.push_str(&after_open[..close].replace(' ', "<->"));
+        out.push('"');
+        rest = &after_open[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `wildCardRegex.ReplaceAllLiteralString(terms, ":* ")` (post_store.go:2301) — the pattern is
+/// `\*($| )`, so a `*` is a prefix marker only at the end of a word, and the space it consumes
+/// is put back by the replacement. `a**` is `a*:* `: the first star is not followed by a
+/// boundary and survives as a character.
+fn mark_wildcards(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 4);
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '*' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            None => out.push_str(":* "),
+            Some(' ') => {
+                chars.next();
+                out.push_str(":* ");
+            }
+            Some(_) => out.push('*'),
+        }
+    }
+    out
+}
+
+/// Port of `neutralizeNonWordHyphens` (sqlstore/utils.go:207): a `-` not flanked by a word rune
+/// on both sides becomes a space, so `t-shirt` reaches `to_tsquery` intact and `-`, `--` and
+/// `foo-` do not. Go mutates the rune slice as it goes, and a hyphen only ever becomes a space,
+/// which is as much a non-word as the hyphen was — so reading the original runes answers the same.
+fn neutralize_non_word_hyphens(s: &str) -> String {
+    if !s.contains('-') {
+        return s.to_owned();
+    }
+    let runes: Vec<char> = s.chars().collect();
+    runes
+        .iter()
+        .enumerate()
+        .map(|(i, &r)| {
+            if r != '-' {
+                return r;
+            }
+            let has_left = i > 0 && is_word_rune(runes[i - 1]);
+            let has_right = i + 1 < runes.len() && is_word_rune(runes[i + 1]);
+            if has_left && has_right { '-' } else { ' ' }
+        })
+        .collect()
+}
+
+/// Port of `isWordRune` (sqlstore/utils.go:227): `unicode.IsLetter || IsDigit || IsMark`. Not
+/// `char::is_alphanumeric`, which is a different (and Rust-versioned) set on both counts.
+fn is_word_rune(r: char) -> bool {
+    is_go_letter(r) || is_go_digit(r) || is_go_mark(r)
+}
+
+/// Port of `removeNonAlphaNumericUnquotedTerms` (sqlstore/utils.go:105): split on the
+/// separator, keep a word if it is quoted or holds at least one letter or digit, trim each
+/// survivor, join again. `abcd "**" && abc` becomes `abcd "**" abc`.
+fn remove_non_alpha_numeric_unquoted_terms(line: &str, separator: &str) -> String {
+    line.split(separator)
+        .filter(|word| is_quoted_word(word) || contains_alpha_numeric_char(word))
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(separator)
+}
+
+/// Port of `isQuotedWord` (sqlstore/utils.go:131): at least two bytes, a `"` at each end.
+fn is_quoted_word(s: &str) -> bool {
+    s.len() >= 2 && s.starts_with('"') && s.ends_with('"')
+}
+
+/// Port of `containsAlphaNumericChar` (sqlstore/utils.go:118): `unicode.IsLetter || IsDigit`.
+fn contains_alpha_numeric_char(s: &str) -> bool {
+    s.chars().any(|c| is_go_letter(c) || is_go_digit(c))
+}
+
+/// Port of `splitCJKSearchTerms` (post_store.go:2176): every quoted phrase first, in order and
+/// without its quotes, then the unquoted words; trailing `*` stripped from each, since
+/// `LIKE '%term%'` is already open at both ends. A quoted phrase is kept if it was non-empty
+/// **before** the strip — `"**"` yields an empty term, and `LIKE '%%'` matches every row — while
+/// an unquoted word is dropped if it is empty **after** it. Both are Go's.
+fn split_cjk_search_terms(input: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut remaining = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(open) = rest.find('"') {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('"') else {
+            break;
+        };
+        let phrase = &after_open[..close];
+        if !phrase.is_empty() {
+            terms.push(phrase.trim_end_matches('*').to_owned());
+        }
+        remaining.push_str(&rest[..open]);
+        remaining.push(' ');
+        rest = &after_open[close + 1..];
+    }
+    remaining.push_str(rest);
+    for word in remaining.split_whitespace() {
+        let word = word.trim_end_matches('*');
+        if !word.is_empty() {
+            terms.push(word.to_owned());
+        }
+    }
+    terms
+}
+
+/// `"%" + sanitizeSearchTerm(term, "\\") + "%"` — the CJK branch's `LIKE` argument. No `ESCAPE`
+/// clause in Go, so Postgres's default backslash is the escape the sanitiser writes.
+fn like_pattern(term: &str) -> String {
+    format!("%{}%", crate::user_store::sanitize_search_term(term, '\\'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3884,5 +4400,110 @@ mod tests {
                 ..
             }
         ));
+    }
+}
+
+/// The term pipeline, transcribed from the Go source rather than an oracle: every function here
+/// is unexported in `sqlstore` and cannot be reached from `reference/dump`. The parity suite
+/// (`tests/parity/post_search.rs`) is where the composed result meets Go's own answer; these pin
+/// the branches a reader could plausibly get wrong on the way there.
+#[cfg(test)]
+mod search_term_tests {
+    use super::*;
+
+    #[test]
+    fn non_alphanumeric_unquoted_terms_are_dropped_and_quoted_ones_kept() {
+        assert_eq!(
+            remove_non_alpha_numeric_unquoted_terms(r#"abcd "**" && abc"#, " "),
+            r#"abcd "**" abc"#
+        );
+        assert_eq!(remove_non_alpha_numeric_unquoted_terms("", " "), "");
+        assert_eq!(remove_non_alpha_numeric_unquoted_terms("&& --", " "), "");
+        // A single `"` is not a quoted word: two bytes minimum, one at each end.
+        assert_eq!(remove_non_alpha_numeric_unquoted_terms(r#"" a"#, " "), "a");
+        assert_eq!(
+            remove_non_alpha_numeric_unquoted_terms(r#""" a"#, " "),
+            r#""" a"#
+        );
+        // `IsDigit`, not `IsNumber`: a vulgar fraction is not alphanumeric.
+        assert_eq!(remove_non_alpha_numeric_unquoted_terms("½ 3", " "), "3");
+        assert_eq!(remove_non_alpha_numeric_unquoted_terms("٣ é", " "), "٣ é");
+    }
+
+    #[test]
+    fn hyphens_survive_only_between_word_runes() {
+        assert_eq!(neutralize_non_word_hyphens("t-shirt"), "t-shirt");
+        assert_eq!(neutralize_non_word_hyphens("-shirt"), " shirt");
+        assert_eq!(neutralize_non_word_hyphens("shirt-"), "shirt ");
+        assert_eq!(neutralize_non_word_hyphens("a--b"), "a  b");
+        assert_eq!(neutralize_non_word_hyphens("a - b"), "a   b");
+        assert_eq!(neutralize_non_word_hyphens("no hyphen"), "no hyphen");
+        assert_eq!(neutralize_non_word_hyphens("1-2"), "1-2");
+        // A combining mark counts as part of the word on the left.
+        assert_eq!(neutralize_non_word_hyphens("e\u{301}-x"), "e\u{301}-x");
+        assert_eq!(neutralize_non_word_hyphens("a-\u{301}"), "a-\u{301}");
+        assert_eq!(neutralize_non_word_hyphens("a-*"), "a *");
+    }
+
+    #[test]
+    fn a_star_is_a_prefix_marker_only_at_a_word_end() {
+        assert_eq!(mark_wildcards("foo*"), "foo:* ");
+        assert_eq!(mark_wildcards("foo* bar"), "foo:* bar");
+        assert_eq!(mark_wildcards("a**"), "a*:* ");
+        assert_eq!(mark_wildcards("* *"), ":* :* ");
+        assert_eq!(mark_wildcards("f*o"), "f*o");
+        assert_eq!(mark_wildcards(""), "");
+    }
+
+    #[test]
+    fn spaces_become_operators_except_inside_quotes() {
+        assert_eq!(replace_spaces("", false), "");
+        assert_eq!(replace_spaces("  a   b  ", false), "a&b");
+        assert_eq!(replace_spaces("a b", true), "a|b");
+        assert_eq!(replace_spaces(r#"a "b c" d"#, false), r#"a&"b<->c"&d"#);
+        assert_eq!(replace_spaces(r#"a "b c" d"#, true), r#"a|"b<->c"|d"#);
+        // An odd quote opens nothing.
+        assert_eq!(replace_spaces(r#"a "b c"#, false), r#"a&"b&c"#);
+        assert_eq!(
+            replace_spaces(r#""a b" "c d""#, false),
+            r#""a<->b"&"c<->d""#
+        );
+    }
+
+    #[test]
+    fn excluded_terms_are_or_joined_and_negated_as_a_group() {
+        assert_eq!(build_ts_query("a b", "", false), "a&b");
+        assert_eq!(build_ts_query("a b", "", true), "a|b");
+        assert_eq!(build_ts_query("a b", "c d", false), "a&b &!(c|d)");
+        // The excluded side is `|`-joined even in an AND search.
+        assert_eq!(build_ts_query("a", "c d", false), "a &!(c|d)");
+        // No terms at all: the clause Postgres will reject, which is Go's empty page.
+        assert_eq!(build_ts_query("", "c", false), " &!(c)");
+        assert_eq!(
+            build_ts_query("t-shirt foo*", "-bar", false),
+            "t-shirt&foo:* &!(bar)"
+        );
+        // The star before a closing quote is followed by `"`, not a boundary, so it stays.
+        assert_eq!(build_ts_query(r#""a b*" c"#, "", false), r#""a<->b*"&c"#);
+        assert_eq!(build_ts_query(r#""a b" c*"#, "", false), r#""a<->b"&c:*"#);
+    }
+
+    #[test]
+    fn cjk_terms_split_quoted_phrases_first_then_words() {
+        assert_eq!(
+            split_cjk_search_terms(r#"日本 "東京 タワー" 韓国*"#),
+            vec!["東京 タワー", "日本", "韓国"]
+        );
+        assert_eq!(split_cjk_search_terms(r#""**" x"#), vec!["", "x"]);
+        assert_eq!(split_cjk_search_terms("** x"), vec!["x"]);
+        assert_eq!(split_cjk_search_terms(r#"a "b"#), vec!["a", "\"b"]);
+        assert!(split_cjk_search_terms("").is_empty());
+    }
+
+    #[test]
+    fn like_patterns_escape_with_a_backslash() {
+        assert_eq!(like_pattern("50%"), "%50\\%%");
+        assert_eq!(like_pattern("a_b"), "%a\\_b%");
+        assert_eq!(like_pattern("a\\b"), "%ab%");
     }
 }

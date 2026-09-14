@@ -36,7 +36,13 @@ func writeQuoteGenerated(outDir, rustOutDir string) error {
 	ranges := scanRuneRanges(unicode.IsPrint)
 	letterRanges := scanRuneRanges(unicode.IsLetter)
 	numberRanges := scanRuneRanges(unicode.IsNumber)
-	if len(ranges) == 0 || len(letterRanges) == 0 || len(numberRanges) == 0 {
+	// `IsDigit` (Nd) and `IsMark` (M) are the two classes `sqlstore/utils.go` reads that the
+	// three above do not cover: `containsAlphaNumericChar` is `IsLetter || IsDigit` and
+	// `isWordRune` adds `IsMark`. Neither is `IsNumber` — `IsDigit` excludes Nl and No — so
+	// each gets its own table rather than an approximation from the one already here.
+	digitRanges := scanRuneRanges(unicode.IsDigit)
+	markRanges := scanRuneRanges(unicode.IsMark)
+	if len(ranges) == 0 || len(letterRanges) == 0 || len(numberRanges) == 0 || len(digitRanges) == 0 || len(markRanges) == 0 {
 		return fmt.Errorf("a category scan came back empty")
 	}
 
@@ -60,12 +66,14 @@ func writeQuoteGenerated(outDir, rustOutDir string) error {
 	emitRanges(&b, "IS_PRINT_RANGES", "unicode.IsPrint", ranges)
 	emitRanges(&b, "IS_LETTER_RANGES", "unicode.IsLetter (general category `L`)", letterRanges)
 	emitRanges(&b, "IS_NUMBER_RANGES", "unicode.IsNumber (general category `N`)", numberRanges)
+	emitRanges(&b, "IS_DIGIT_RANGES", "unicode.IsDigit (general category `Nd`)", digitRanges)
+	emitRanges(&b, "IS_MARK_RANGES", "unicode.IsMark (general category `M`)", markRanges)
 
 	rustPath := filepath.Join(rustOutDir, "go_unicode_generated.rs")
 	if err := os.WriteFile(rustPath, []byte(b.String()), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s (%d print, %d letter, %d number ranges)\n", rustPath, len(ranges), len(letterRanges), len(numberRanges))
+	fmt.Printf("wrote %s (%d print, %d letter, %d number, %d digit, %d mark ranges)\n", rustPath, len(ranges), len(letterRanges), len(numberRanges), len(digitRanges), len(markRanges))
 
 	// The corpus: every ASCII byte, both sides of every range boundary, and a handful of strings
 	// that exercise quoting of more than one character at a time.
@@ -86,7 +94,7 @@ func writeQuoteGenerated(outDir, rustOutDir string) error {
 	for r := rune(0); r < utf8.RuneSelf; r++ {
 		addRune(r)
 	}
-	for _, table := range [][]runeRange{ranges, letterRanges, numberRanges} {
+	for _, table := range [][]runeRange{ranges, letterRanges, numberRanges, digitRanges, markRanges} {
 		for _, rg := range table {
 			addRune(rg.lo - 1)
 			addRune(rg.lo)
@@ -102,6 +110,8 @@ func writeQuoteGenerated(outDir, rustOutDir string) error {
 			"is_print":   unicode.IsPrint(r),
 			"is_letter":  unicode.IsLetter(r),
 			"is_number":  unicode.IsNumber(r),
+			"is_digit":   unicode.IsDigit(r),
+			"is_mark":    unicode.IsMark(r),
 			"quoted":     strconv.Quote(string(r)),
 		})
 	}
@@ -125,6 +135,8 @@ func writeQuoteGenerated(outDir, rustOutDir string) error {
 		"range_count":        len(ranges),
 		"letter_range_count": len(letterRanges),
 		"number_range_count": len(numberRanges),
+		"digit_range_count":  len(digitRanges),
+		"mark_range_count":   len(markRanges),
 		"runes":              runeCases,
 		"strings":            stringCases,
 	}
