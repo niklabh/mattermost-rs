@@ -13260,3 +13260,30 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+
+## Local mode: `team_local.go`, `webhook_local.go` and `command_local.go` (2026-09-14)
+
+**+30 local-mode pairs** relative to `fc7c7ec` (493 of 764). Twenty-four are the HTTP handlers
+under the local session; the six `local*` Go handlers are their own functions in
+`crates/mm-api/src/local_teams.rs` — `localCreateTeam` (no creator, `App.CreateTeam`, the
+invite id never blanked), `localDeleteTeam` (no permission, no `EnableAPITeamDeletion`: the
+permanent arm is forwarded over the socket before anything is written, [D-370]),
+`localInviteUsersToTeam` (its six gates served, the send forwarded, as on the HTTP route),
+`localCreateIncomingHook` / `localCreateOutgoingHook` (`user_id` / `creator_id` required from
+the body, no lock forcing, no permission) and `localCreateCommand` (the body's creator, no
+lookup — a made-up creator is a 201 on both). Every shared-handler condition that would forward
+over the **port** (ABAC, content reviewer, group-constraint, built-in commands, a `team_name`
+outside the mux class) is pre-empted and forwarded over the socket. Two things a reader would
+otherwise get wrong: `POST /teams/{id}/members/ids` answers **`[]`** for any ids, because the
+empty local user id's view restrictions are the empty pair (measured); and `GET /teams/name/
+{stats,image,members}` is **not** shadowed on this router — `InitTeamLocal` registers no `GET`
+literal under `BaseRoutes.Team` — so `getTeamByName` was split (`teams::serve_team_by_name`).
+Found on the way: the two hook lists marshalled through `serde_json`, so a callback URL with
+`&` differed from Go's `&` — `webhooks::encode` now goes through `go_json_marshal`.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_email_invitations`, default `isUpdate`; fixture reprojected (92 keys) | DONE |
+| api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
+| test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
+| mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
