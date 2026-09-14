@@ -72,6 +72,7 @@ mod parity {
     /// insertion in the middle of it is a merge conflict for somebody else.
     pub mod config_reads;
     pub mod config_source;
+    pub mod constant_refusals;
     pub mod cpa_licensed;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;
@@ -91,6 +92,7 @@ mod parity {
     pub mod flagged_posts;
     pub mod gated_families;
     pub mod gated_reads;
+    pub mod gm_conversion;
     pub mod group_reads_licensed;
     pub mod group_syncables;
     pub mod group_writes;
@@ -130,6 +132,7 @@ mod parity {
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
+    pub mod product_notices_view;
     /// Appended out of alphabetical order; see `config_reads`.
     pub mod properties;
     pub mod push_ack;
@@ -215,5 +218,6 @@ mod parity {
     // Appended 2026-09-13, same reason: the user-update family.
     pub mod notification_store;
     pub mod notify_admin;
+    pub mod notify_admin_trigger;
     pub mod user_updates;
 }

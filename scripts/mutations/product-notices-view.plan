@@ -1,0 +1,15 @@
+# Mutation plan for PUT /system/notices/view — the body decode, the count-up, the insert, the
+# existing-row match, and the parse error.
+#
+#   scripts/mutate-batch.sh scripts/mutations/product-notices-view.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+count-up-by-two	crates/mm-store/src/product_notices_store.rs	                   SET viewed = viewed + 1, "timestamp" = $3	                   SET viewed = viewed + 2, "timestamp" = $3	api	product_notices_view
+insert-starts-at-zero	crates/mm-store/src/product_notices_store.rs	                VALUES ($1, $2, 1, $3)	                VALUES ($1, $2, 0, $3)	api	product_notices_view
+existing-match-inverted	crates/mm-store/src/product_notices_store.rs	             WHERE userid = $1 AND noticeid = ANY($2)	             WHERE userid = $1 AND noticeid <> ALL($2)	api	product_notices_view
+null-writes-a-row	crates/mm-api/src/product_notices.rs	        None => return Ok(Vec::new()),	        None => return Ok(vec![String::new()]),	api	product_notices_view
+duplicates-kept	crates/mm-api/src/product_notices.rs	    ids.sort();\n    ids.dedup();	    ids.sort();	api	product_notices_view
+parse-error-is-500	crates/mm-api/src/product_notices.rs	                "api.payload.parse.error",\n                None,\n                err.to_string(),\n                400,	                "api.payload.parse.error",\n                None,\n                err.to_string(),\n                500,	api	product_notices_view
+control-reorder-headers	crates/mm-api/src/product_notices.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	product_notices_view
+control-sql-whitespace	crates/mm-store/src/product_notices_store.rs	                   SET viewed = viewed + 1, "timestamp" = $3	                   SET viewed = viewed + 1, "timestamp"=$3	api	product_notices_view

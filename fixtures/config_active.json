@@ -86,6 +86,7 @@
     "AllowPersistentNotifications": true,
     "AllowPersistentNotificationsForGuests": false,
     "AllowSyncedDrafts": true,
+    "EnableAPITriggerAdminNotifications": false,
     "EnableAPIUserDeletion": false,
     "EnableBurnOnRead": true,
     "EnableCommands": true,

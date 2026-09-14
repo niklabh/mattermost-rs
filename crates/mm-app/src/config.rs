@@ -211,6 +211,13 @@ pub struct Config {
     /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
     pub enable_api_user_deletion: bool,
 
+    /// `ServiceSettings.EnableAPITriggerAdminNotifications` (config.go:889). Go default
+    /// **`false`**. The first check of `POST /users/trigger-notify-admin-posts`: off, the route
+    /// is the 403 `api.cloud.app_error` before the body or the caller is looked at; on, an admin
+    /// can make the server send the "upgrade" posts the notify-admin rows are waiting for,
+    /// which is forwarded.
+    pub enable_api_trigger_admin_notifications: bool,
+
     /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
     ///
     /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
@@ -408,6 +415,11 @@ pub struct Config {
     /// that disables only the setting — the same value, reached two ways, is exactly the sort of
     /// coincidence that hides a wrong read.
     pub feature_flag_burn_on_read: bool,
+
+    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default and
+    /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
+    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
+    pub feature_flag_mobile_sso_code_exchange: bool,
 
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
@@ -1195,6 +1207,7 @@ impl Default for Config {
             enable_user_deactivation: false,
             // config.go:894 — `new(false)`.
             enable_api_user_deletion: false,
+            enable_api_trigger_admin_notifications: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
             // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
@@ -1228,6 +1241,7 @@ impl Default for Config {
             // config.go:906 — `new(false)`.
             experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
+            feature_flag_mobile_sso_code_exchange: false,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1468,6 +1482,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEAPIUSERDELETION",
                 default.enable_api_user_deletion,
             ),
+            enable_api_trigger_admin_notifications: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPITRIGGERADMINNOTIFICATIONS",
+                default.enable_api_trigger_admin_notifications,
+            ),
             enable_sign_up_with_email: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL",
@@ -1583,6 +1602,11 @@ impl Config {
                 lookup,
                 "MM_FEATUREFLAGS_BURNONREAD",
                 default.feature_flag_burn_on_read,
+            ),
+            feature_flag_mobile_sso_code_exchange: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
+                default.feature_flag_mobile_sso_code_exchange,
             ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
@@ -2088,6 +2112,9 @@ impl Config {
             enable_api_user_deletion: service
                 .enable_api_user_deletion
                 .unwrap_or(default.enable_api_user_deletion),
+            enable_api_trigger_admin_notifications: service
+                .enable_api_trigger_admin_notifications
+                .unwrap_or(default.enable_api_trigger_admin_notifications),
             enable_sign_up_with_email: email_settings
                 .enable_sign_up_with_email
                 .unwrap_or(default.enable_sign_up_with_email),
@@ -2177,6 +2204,7 @@ impl Config {
             // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
             feature_flag_burn_on_read: default.feature_flag_burn_on_read,
+            feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2721,6 +2749,8 @@ struct ServiceSettingsDocument {
     enable_multifactor_authentication: Option<bool>,
     #[serde(rename = "EnableAPIUserDeletion")]
     enable_api_user_deletion: Option<bool>,
+    #[serde(rename = "EnableAPITriggerAdminNotifications")]
+    enable_api_trigger_admin_notifications: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -3631,8 +3661,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 86,
-            "the fixture covers {keys} settings and Config reads 86 from the document. \
+            keys, 87,
+            "the fixture covers {keys} settings and Config reads 87 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3657,6 +3687,7 @@ mod go_parity {
                 "ExtendSessionLengthWithActivity": true,
                 "SessionLengthWebInHours": 19,
                 "SessionLengthSSOInHours": 23,
+                "EnableAPITriggerAdminNotifications": true,
                 "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
@@ -3683,6 +3714,7 @@ mod go_parity {
         let config = Config::from_document(inverted).expect("valid document");
 
         assert!(config.enable_post_icon_override);
+        assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
         assert!(!config.post_priority);

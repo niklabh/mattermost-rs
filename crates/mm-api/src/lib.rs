@@ -12,6 +12,7 @@ pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
 pub mod channel_admin;
+pub mod channel_convert;
 pub mod channel_creates;
 pub mod channel_member_writes;
 pub mod channel_move;
@@ -57,6 +58,7 @@ pub mod post_acks;
 pub mod post_writes;
 pub mod posts;
 pub mod preferences;
+pub mod product_notices;
 pub mod properties;
 pub mod proxy;
 pub mod push_ack;
@@ -477,6 +479,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/notify-admin",
             partially_migrated(post(notify_admin::handle_notify_admin)),
         )
+        // `BaseRoutes.Users.Handle("/trigger-notify-admin-posts")` (api4/user.go:121), served
+        // up to its setting.
+        .route(
+            "/api/v4/users/trigger-notify-admin-posts",
+            partially_migrated(post(notify_admin::handle_trigger_notify_admin_posts)),
+        )
         // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
         // usernames it found in a page of posts.
         .route(
@@ -645,11 +653,10 @@ pub fn router(state: AppState) -> Router {
         //
         // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
         // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
-        // [D-430]. `/login/sso/code-exchange` is deliberately **not** registered: leaving it off
-        // this router is what keeps it forwarded, and it needs SSO. `/login/cws` is served since
-        // 2026-09-14 — its first statement is the Cloud-licence refusal, which is all this
-        // deployment reaches — and `/login/desktop_token` since the same day, on the
-        // desktop-token store.
+        // [D-430]. `/login/cws` is served since 2026-09-14 — its first statement is the
+        // Cloud-licence refusal, which is all this deployment reaches — `/login/desktop_token`
+        // since the same day, on the desktop-token store, and `/login/sso/code-exchange` too,
+        // up to its feature flag.
         .route(
             "/api/v4/users/login",
             partially_migrated(post(login::login)),
@@ -662,6 +669,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/login/desktop_token",
             partially_migrated(post(login::login_with_desktop_token)),
         )
+        // `BaseRoutes.Users.Handle("/login/sso/code-exchange")`: the 410 its feature flag gives
+        // while off, served; on, forwarded whole.
+        .route(
+            "/api/v4/users/login/sso/code-exchange",
+            partially_migrated(post(login::login_sso_code_exchange)),
+        )
         .route(
             "/api/v4/users/login/type",
             partially_migrated(post(login::get_login_type)),
@@ -672,9 +685,8 @@ pub fn router(state: AppState) -> Router {
         // branch table in `user_auth::switch_account_type` and leaves every other method on the
         // path forwarded through `partially_migrated`.
         //
-        // Its unregistered neighbour — `/login/sso/code-exchange` — is untouched: it needs SSO,
-        // and it is a sibling rather than a child of this path, so nothing about this
-        // registration reaches it.
+        // Its neighbours under `/login/` are siblings rather than children of this path, so
+        // nothing about this registration reaches them.
         .route(
             "/api/v4/users/login/switch",
             partially_migrated(post(user_auth::switch_account_type)),
@@ -1152,6 +1164,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/move",
             partially_migrated_with_ids(&state, post(channel_move::move_channel)),
+        )
+        // `BaseRoutes.Channel.Handle("/convert_to_channel")` (api4/channel.go) — a group message
+        // becoming a private channel.
+        .route(
+            "/api/v4/channels/{channel_id}/convert_to_channel",
+            partially_migrated_with_ids(
+                &state,
+                post(channel_convert::convert_group_message_to_channel),
+            ),
         )
         // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
         // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
@@ -2107,6 +2128,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/cloud/validate-workspace-business-email",
             partially_migrated(post(cloud::validate_workspace_business_email)),
         )
+        // `BaseRoutes.Cloud.Handle("/webhook")` (cloud.go:42), `CloudAPIKeyRequired`: the 401 its
+        // wrapper gives without a Cloud licence, served here.
+        .route(
+            "/api/v4/cloud/webhook",
+            partially_migrated(post(cloud::handle_cws_webhook)),
+        )
         .route(
             "/api/v4/remotecluster",
             partially_migrated(
@@ -2462,6 +2489,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
+        // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
+        .route(
+            "/api/v4/system/notices/view",
+            partially_migrated(put(product_notices::update_viewed_product_notices)),
         )
         // `api4/user.go`'s two remaining literal-path reads. Both sit under `/api/v4/users`
         // beside `{user_id}`, and gorilla matches literals before parameters — so `auth_data`
@@ -3530,9 +3563,10 @@ mod tests {
     ///
     /// # Non-vacuity
     ///
-    /// Checked by temporarily adding `POST /api/v4/users/login/sso/code-exchange`, which this
-    /// server deliberately forwards, and confirming the assertion fails. It does. (The check was
-    /// first made with `/login/desktop_token`, before that route was served.)
+    /// Checked by temporarily adding `POST /api/v4/users/{user_id}/posts/{post_id}/reminder`,
+    /// which this server deliberately forwards ([D-420]), and confirming the assertion fails. It
+    /// does. (The check was first made with `/login/desktop_token` and then with
+    /// `/login/sso/code-exchange`, before each was served.)
     #[tokio::test]
     async fn the_login_routes_and_their_neighbours_are_all_still_answered_here() {
         use axum::http::{Method, Request, StatusCode};
@@ -3669,10 +3703,10 @@ mod tests {
     ///
     /// # Non-vacuity
     ///
-    /// Checked by temporarily adding `POST /api/v4/users/login/sso/code-exchange` — a route this
-    /// server deliberately forwards — to the `anonymous` list and confirming the `x-mmrs-served-by`
-    /// assertion fails on it. It does. (First made with `/login/desktop_token`, before it was
-    /// served.)
+    /// Checked by temporarily adding `POST /api/v4/users/{user_id}/posts/{post_id}/reminder` — a
+    /// route this server deliberately forwards ([D-420]) — to the `anonymous` list and confirming
+    /// the `x-mmrs-served-by` assertion fails on it. It does. (First made with
+    /// `/login/desktop_token` and then `/login/sso/code-exchange`, before each was served.)
     #[tokio::test]
     async fn the_user_creation_routes_and_their_neighbours_are_all_still_answered_here() {
         use axum::http::{Method, Request, StatusCode};
@@ -4112,10 +4146,7 @@ mod tests {
         // port 1, so a forwarded request answers without the header.
         let forwarded: Vec<(Method, String)> = vec![
             // `/move` left this list on 2026-09-14, when it was served.
-            (
-                Method::POST,
-                format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
-            ),
+            // `/convert_to_channel` left this list on 2026-09-14 too, when it was served.
             // `moderations/patch` is a `PUT` only; a `GET` there is gorilla's 405 path, forwarded.
             (
                 Method::GET,

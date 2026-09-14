@@ -19,7 +19,8 @@
 //! `getPreviewModalData` has no cloud gate at all — it answers
 //! `app.cloud.preview_modal_bucket_url_not_configured` at 404, measured — and
 //! `handleCWSWebhook` is `api.CloudAPIKeyRequired`, a different authentication wrapper from the
-//! session one every route here uses. Both are left to the proxy rather than guessed at.
+//! session one every route here uses — served since 2026-09-14 as the 401 that wrapper gives
+//! without a Cloud licence (see [`handle_cws_webhook`]). The first is left to the proxy.
 
 use axum::extract::{Request, State};
 use axum::response::{IntoResponse, Response};
@@ -107,6 +108,36 @@ pub async fn get_subscription(
     request: Request,
 ) -> Response {
     refuse_or_forward(state, "Api4.getSubscription", request).await
+}
+
+/// Port of `handleCWSWebhook` (cloud.go:42), reached as `POST /api/v4/cloud/webhook` — the
+/// one route of the file behind `CloudAPIKeyRequired` rather than a session.
+///
+/// `web.Handler.ServeHTTP` runs `CloudKeyRequired` before the handler: no licence, a licence
+/// that is not Cloud, or a session that is not a cloud-key session is the 401
+/// `api.context.session_expired.app_error` with `TokenRequired` as its detail — and the first
+/// two arms hold for every licence this deployment can carry, so the route is that 401 here for
+/// any caller, token or not. A Cloud licence would reach the key check, `ensureCloudInterface`
+/// and the webhook's event switch, and is forwarded.
+#[tracing::instrument(skip_all, fields(cloud))]
+pub async fn handle_cws_webhook(State(state): State<AppState>, request: Request) -> Response {
+    let cloud = match state.app.license().await {
+        Ok(license) => license.is_some_and(|l| l.is_cloud()),
+        Err(err) => return ApiError::from(*err).into_response(),
+    };
+    tracing::Span::current().record("cloud", cloud);
+    if cloud {
+        tracing::debug!("handing a CWS webhook to Go");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    ApiError::from(AppError::new(
+        "",
+        "api.context.session_expired.app_error",
+        None,
+        "TokenRequired",
+        401,
+    ))
+    .into_response()
 }
 
 #[cfg(test)]

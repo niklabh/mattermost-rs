@@ -100,7 +100,10 @@ fn status_ok() -> Response {
 ///
 /// The `AppError`'s `where` is the empty string in both — `NewAppError("", …)` — and
 /// `handleContextError` overwrites it with the request path, so it is invisible to a client.
-async fn reject_board_or_space_channel(state: &AppState, channel_id: &str) -> Option<ApiError> {
+pub(crate) async fn reject_board_or_space_channel(
+    state: &AppState,
+    channel_id: &str,
+) -> Option<ApiError> {
     if state.app.get_board_channel(channel_id).await.is_ok() {
         return Some(ApiError::from(AppError::new(
             "",

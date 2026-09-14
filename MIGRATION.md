@@ -13097,3 +13097,78 @@ and the ping follows redirects, as Go's default client does; no timeout, as Go h
 | api | `crates/mm-api/src/site_url_test.rs`; registered in `lib.rs`; the shared `reqwest` client | DONE |
 | test | `crates/mm-api/tests/parity/site_url_test.rs` — 1, pinging the stack's own bases | DONE |
 | mutation | `scripts/mutations/site-url-test.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+## `PUT /api/v4/system/notices/view` (2026-09-14)
+
+Route count **481 of 764**. `updateViewedProductNotices` decodes a list of notice
+ids (`null` is an empty list, anything else that is not a list of strings the 400
+`api.payload.parse.error`), sorts and de-duplicates it, and `View`s it: existing rows count up
+and re-stamp, new ids get a row with `Viewed = 1`, `Timestamp` in Unix **seconds**. Then
+`{"status":"OK"}`. `GET /system/notices/{team_id}` stays forwarded: it filters the notice cache
+the fetch job fills, which Go on the stack has and this server does not.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/product_notices_store.rs` — `view`, one transaction | DONE |
+| api | `crates/mm-api/src/product_notices.rs`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/product_notices_view.rs` — 2, rows read back per server | DONE |
+| mutation | `scripts/mutations/product-notices-view.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **A new account already has rows**: Go marks every cached notice viewed on creation
+  (`UpdateViewedProductNoticesForNewUser`), so the suite reads back only the ids it wrote.
+
+## `POST /api/v4/channels/{channel_id}/convert_to_channel` (2026-09-14)
+
+Route count **482 of 764**. `convertGroupMessageToChannel` turns a group message
+into a private channel: the body (an object, or the 400 `body`), the caller's guest flag (403)
+before the `create_private_channel` permission on the body's team, the id match, then the app —
+the team must be common to the members (400 `incorrect_team`, and a non-DM/GM is the
+common-teams read's own 400 first), the channel a GM (the 404 is reachable only for a DM), the
+converter a member, the private shape valid — then `UpdateChannel`, the sidebar re-filing and
+the `system_gm_to_channel` post both only logged, and the converter made channel admin.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/channel_convert.rs` — the conversion, its validation, the sidebar and the post; `join_list` | DONE |
+| api | `crates/mm-api/src/channel_convert.rs`; registered in `lib.rs`; `reject_board_or_space_channel` shared | DONE |
+| test | `crates/mm-api/tests/parity/gm_conversion.rs` — 2, each conversion on its own GM | DONE |
+| mutation | `scripts/mutations/gm-conversion.plan` — 11 run, 9 caught, 2 controls survived | DONE |
+
+- **The post is English** — `{converter} created this channel from a group message with a, b
+  and c.` — the same exception every system post makes; `humanize.list_join` has no Oxford comma.
+- **Go files nothing into the members' sidebars here**, measured: the categories exist and the
+  `channels` category is re-saved, yet no `SidebarChannels` row appears. The suite compares the
+  two servers rather than asserting a row.
+
+## `POST /api/v4/users/trigger-notify-admin-posts` (2026-09-14)
+
+Route count **483 of 764**. `handleTriggerNotifyAdminPosts` checks
+`ServiceSettings.EnableAPITriggerAdminNotifications` **first** — off (the default and the stack)
+is the 403 `api.cloud.app_error` for every caller and every body — then decodes the request (a
+`null` or non-object the 400 `notifyAdminRequest`), requires `manage_system`, and runs
+`SendNotifyAdminPosts`, which is forwarded: the admins, the system bot, the pending rows and a
+DM post to each admin. `Config` gains the setting.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_api_trigger_admin_notifications`; fixture reprojected | DONE |
+| api | `crates/mm-api/src/notify_admin.rs` — `handle_trigger_notify_admin_posts`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/notify_admin_trigger.rs` — 1 | DONE |
+| mutation | `scripts/mutations/notify-admin-trigger.plan` — 6 run, 4 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/cloud/webhook` and `POST /api/v4/users/login/sso/code-exchange` (2026-09-14)
+
+Route count **485 of 764**. Two constant refusals on this deployment, served up to
+their gate and forwarded past it. The CWS webhook is `CloudAPIKeyRequired`: without a Cloud
+licence its wrapper answers the 401 `api.context.session_expired.app_error` (`TokenRequired`)
+for every caller, token or not — the Enterprise licence included. The deprecated mobile SSO code
+exchange sets `Deprecation: true` on every answer and, with the environment-only
+`MobileSSOCodeExchange` flag off, is the 410 `login_sso_code_exchange.deprecated.app_error`;
+on, the one-time token consumption, the PKCE check and the SAML login are forwarded. `Config`
+gains the flag.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `feature_flag_mobile_sso_code_exchange`, environment-only | DONE |
+| api | `crates/mm-api/src/cloud.rs` — `handle_cws_webhook`; `crates/mm-api/src/login.rs` — `login_sso_code_exchange`; both registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/constant_refusals.rs` — 2, unlicensed and licensed pairs | DONE |
+| mutation | `scripts/mutations/constant-refusals.plan` — 8 run, 6 caught, 2 controls survived | DONE |
