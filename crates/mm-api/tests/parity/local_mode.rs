@@ -690,41 +690,6 @@ async fn a_segment_outside_the_mux_charset_is_forwarded_over_the_socket() {
     }
 }
 
-/// **The two pairs in these three files that are *not* ported still reach Go.** `patchRole` and
-/// `convertBotToUser` are unregistered here, so one falls to the method fallback on a registered
-/// path and the other to the router fallback — two different mechanisms, one answer.
-#[tokio::test]
-async fn the_unported_pairs_of_these_families_still_forward() {
-    if !sockets_enabled() {
-        return;
-    }
-    // `mmrsbot%` is one fixture and `unplant_bots` sweeps all of it, so these share
-    // `parity/bots`' lock rather than racing it and each other.
-    let _bots = common::BOT_FIXTURES.lock().await;
-    let client = common::client();
-    let _token = common::go_minted_token(&client).await;
-    let Some(bot) = common::plant_bot(LOCAL_BOT_TAG, common::logged_in_user_id(), 0).await else {
-        return;
-    };
-
-    // `PUT /roles/{id}/patch` — a path this router does not register at all.
-    let ((go_status, go_body), (rs_status, rs_body), served_here) =
-        both_maybe_forwarded("PUT", "/api/v4/roles/zzzzzzzzzzzzzzzzzzzzzzzzzz/patch").await;
-    assert!(!served_here, "the role patch must be forwarded");
-    assert_eq!(rs_status, go_status, "the role patch");
-    assert_forwarded_body_is_gos(&go_body, &rs_body, "PUT /roles/{id}/patch");
-
-    // `POST /bots/{id}/convert_to_user` — likewise unregistered.
-    let path = format!("/api/v4/bots/{bot}/convert_to_user");
-    let ((go_status, go_body), (rs_status, rs_body), served_here) =
-        both_maybe_forwarded("POST", &path).await;
-    assert!(!served_here, "convert_to_user must be forwarded");
-    assert_eq!(rs_status, go_status, "{path}");
-    assert_forwarded_body_is_gos(&go_body, &rs_body, &path);
-
-    common::unplant_bots().await;
-}
-
 /// **The bot writes round-trip over the socket.** `disable` then `enable` moves `DeleteAt` on a
 /// planted bot and back, and each answer is compared byte for byte — so the pair proves the write
 /// reached the table and that both servers report the same row afterwards.

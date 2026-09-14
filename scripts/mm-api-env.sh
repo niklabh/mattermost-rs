@@ -31,10 +31,12 @@
 # route reports the configuration the pair shares, and mm-api's own port comes from
 # `MM_API_LISTEN`, which no Mattermost setting is named after.
 #
-# `MM_SQLSETTINGS_DATASOURCE` is set for its **presence**, not its value: `GET /config` masks it
-# to `FakeSetting` on both servers, but `GET /config/environment` reports which settings an
-# operator overrode, and an unset variable there is a visible difference. The value is this
-# process's own `DATABASE_URL`, which is the same database with slightly different parameters.
+# `MM_SQLSETTINGS_DATASOURCE` is **Go's DSN string, verbatim** — `DATABASE_URL` plus the
+# `?sslmode=disable&connect_timeout=10` that `go-server.sh` appends — and not merely present.
+# `GET /config` masks it to `FakeSetting` on both servers, and `GET /config/environment` only
+# reports that it is set; but `localGetConfig` over the unix socket is **unsanitized** (see
+# `mm_api::local_misc`), so the socket parity suite compares the value itself. This process
+# still connects with `DATABASE_URL`; the variable is only what the config routes project.
 #
 # One override still differs and cannot be reconciled by this file: `MM_FILESETTINGS_DIRECTORY` is
 # rooted at whichever checkout launched each server, so `FileSettings.Directory` is exempted by
@@ -63,7 +65,7 @@ mmrs_launch_mm_api() {
     MM_SERVICESETTINGS_SITEURL="$MMRS_GO_BASE" \
     MM_SERVICESETTINGS_LISTENADDRESS=":$MMRS_GO_PORT" \
     MM_SQLSETTINGS_DRIVERNAME=postgres \
-    MM_SQLSETTINGS_DATASOURCE="$DATABASE_URL" \
+    MM_SQLSETTINGS_DATASOURCE="$DATABASE_URL?sslmode=disable&connect_timeout=10" \
     MM_SERVICESETTINGS_ENABLELOCALMODE=true \
     MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
     MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \

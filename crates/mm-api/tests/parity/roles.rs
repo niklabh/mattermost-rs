@@ -968,39 +968,6 @@ async fn a_get_to_the_names_path_is_still_gos_invalid_role_id() {
     assert_eq!(rs["id"], go["id"]);
 }
 
-/// `GET /api/v4/roles` (`getAllRoles`) and `PUT /roles/{id}/patch` are not migrated, so they must
-/// still be Go's — a route added carelessly beside them would 405 or 404 instead.
-#[tokio::test]
-async fn the_unmigrated_role_routes_are_still_forwarded() {
-    if !stack_enabled() {
-        return;
-    }
-    let client = client();
-    let token = go_minted_token(&client).await;
-
-    // Aimed at an id that is **no role**, so Go 404s before `PatchRole` can touch anything. A
-    // patch at a real role — even with an empty body — calls `Store().Save()` and rewrites the
-    // row's `UpdateAt` and `Permissions`; doing that to a fixture here cost a debugging session.
-    let response = client
-        .put(format!(
-            "{RUST}/api/v4/roles/zzzzzzzzzzzzzzzzzzzzzzzzzz/patch"
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(response.status(), 404, "no such role");
-    assert_eq!(
-        response
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "patchRole is not migrated"
-    );
-}
-
 /// `GET /api/v4/roles` — `getAllRoles`, every row of the `Roles` table in one answer.
 ///
 /// # Why this is not a plain byte comparison

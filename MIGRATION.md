@@ -13313,3 +13313,33 @@ channel-scheme re-merge fires only under a licence and is exercised by the unit 
 | api | `crates/mm-api/src/roles.rs` — `patch_role`; `PUT` in `lib.rs`, `local_patch_role` in `local.rs` | DONE |
 | test | `crates/mm-api/tests/parity/role_patch.rs` — 3 (write+socket+refusals, licensed manager two-gate) | DONE |
 | mutation | `scripts/mutations/role-patch.plan` — 6 run, 4 caught, 2 controls survived | DONE |
+
+## The miscellaneous local-mode families: jobs, preferences, CPA, exports, imports, and five singletons (2026-09-14)
+
+**+31 local-mode pairs** over base `fc7c7ec` (493 of 764). `job_local.go` (7), `preference_local.go`
+(5), `custom_profile_attributes_local.go` (7), `export_local.go` (4), `import_local.go` (2),
+`convertBotToUser`, `getUpload`, `generateSupportPacket`, `getLdapGroups`, and the two `local*`
+config reads — on the unix socket, in `crates/mm-api/src/local_misc.rs`, merged into
+`local::router` by one line. Twenty-nine handlers are the HTTP ones handed `Session{local: true}`;
+the two config reads are **different functions**: `localGetConfig` is `c.App.Config()` with no
+permission check and no sanitizing — the socket sees the database password where `GET /config`
+over TCP writes asterisks, measured — and `localGetClientConfig` is the full map without the
+session test, written without a newline. Every in-handler forward (an access-control job, a
+`flagged_post` batch, `?remove_masked=`, a non-local file backend, a segment outside gorilla's
+class) goes over the **socket** through a transport-free core (`create_job_from_body`,
+`update_preferences_for`, `*_inner`, `*_answer`) split out of the HTTP handler; a port forward
+would come back 401 where Go's socket answers. `PUT /users/{user_id}/preferences` is served here
+and still only as `me` on the HTTP router. `me` is nobody on five pairs and both servers say so.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/local_misc.rs` — 32 wrappers, `routes()`; `local.rs` gains the `.merge` | DONE |
+| api | `jobs.rs`, `preferences.rs`, `exports.rs`, `gated_reads.rs`, `config.rs` — the shared cores made `pub(crate)`, no behaviour change on TCP | DONE |
+| harness | `scripts/mm-api-env.sh` — `MM_SQLSETTINGS_DATASOURCE` is now Go's DSN verbatim; the unsanitized socket body compares it | DONE |
+| test | `crates/mm-api/tests/parity/local_misc.rs` — 8, one write per server for preferences, jobs and the bot conversion; `local_mode.rs` drops its "convert_to_user is forwarded" half | DONE |
+| mutation | `scripts/mutations/local-misc.plan` — 12 run, 10 caught, 2 controls survived, 0 harness faults | DONE |
+
+- **`ServiceSettings.LocalModeSocketLocation` is a per-checkout path** like `FileSettings.Directory`
+  (a worktree's mm-api names the socket through its own symlink); the socket suite exempts both,
+  and `config_reads` over TCP, which exempts only the first, fails on a worktree stack for that
+  reason alone — not this family's doing, but found by it.

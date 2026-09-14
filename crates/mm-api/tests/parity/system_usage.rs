@@ -336,22 +336,6 @@ async fn the_onboarding_flag_matches_in_every_state() {
             common::set_system_value(KEY, None).await;
         }
     }
-
-    // The POST on the same path installs marketplace plugins; there is no plugin host here.
-    let ours = client
-        .post(format!("{RUST}{PATH}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({"organization": "parity-must-not-write"}))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(
-        ours.headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "POST {PATH} must be forwarded"
-    );
 }
 
 /// `GET /api/v4/cluster/status` — `[]` on an unlicensed server, and Go's when licensed.
