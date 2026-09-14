@@ -1,0 +1,14 @@
+# Mutation plan for POST /system/onboarding/complete — the permission and its id, the body, the
+# organisation requirement, the plugin hand-over, and the completion flag.
+#
+#   scripts/mutate-batch.sh scripts/mutations/onboarding-complete.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+refusal-is-generic-permission	crates/mm-api/src/system.rs	            "app.system.complete_onboarding_request.no_first_user",\n            None,\n            String::new(),\n            403,	            "api.context.permissions.app_error",\n            None,\n            String::new(),\n            403,	api	onboarding_complete
+null-body-is-400	crates/mm-api/src/system.rs	        Ok(Value::Null) => return forward(state, "a nil request Go dereferences").await,	        Ok(Value::Null) => return forward(state, "a nil request Go dereferences").await,\n        Ok(Value::Array(_)) => return forward(state, "a list").await,	api	onboarding_complete
+organisation-optional	crates/mm-app/src/onboarding.rs	        if !is_cloud && organization.is_empty() {	        if is_cloud && organization.is_empty() {	api	onboarding_complete
+plugins-not-forwarded	crates/mm-api/src/system.rs	    if !onboarding.install_plugins.is_empty() {	    if onboarding.install_plugins.is_empty() {	api	onboarding_complete
+flag-written-false	crates/mm-app/src/onboarding.rs	            .save_or_update(SYSTEM_FIRST_ADMIN_SETUP_COMPLETE, "true")	            .save_or_update(SYSTEM_FIRST_ADMIN_SETUP_COMPLETE, "false")	api	onboarding_complete
+control-log-text	crates/mm-api/src/system.rs	        tracing::debug!(reason = why, "handing the onboarding completion to Go");	        tracing::debug!(reason = why, "handing onboarding completion to Go");	api	onboarding_complete
+control-detail-spacing	crates/mm-app/src/onboarding.rs	            tracing::error!("No organization name provided for self hosted onboarding");	            tracing::error!("No organization name provided for self-hosted onboarding");	api	onboarding_complete

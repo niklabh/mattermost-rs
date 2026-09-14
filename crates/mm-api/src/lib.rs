@@ -2493,7 +2493,7 @@ pub fn router(state: AppState) -> Router {
         // goroutines, and there is no plugin host here.
         .route(
             "/api/v4/system/onboarding/complete",
-            partially_migrated(get(system::get_onboarding)),
+            partially_migrated(get(system::get_onboarding).post(system::complete_onboarding)),
         )
         .route(
             "/api/v4/cluster/status",

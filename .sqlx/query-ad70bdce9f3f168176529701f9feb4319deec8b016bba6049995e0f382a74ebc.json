@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO systems (name, value) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET value = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ad70bdce9f3f168176529701f9feb4319deec8b016bba6049995e0f382a74ebc"
+}

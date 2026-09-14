@@ -13219,3 +13219,21 @@ and the map echoed back, keys sorted, with the encoder's newline. `Config` gains
 | api | `crates/mm-api/src/client_log.rs`; the `POST` on `/logs` in `lib.rs`, the `GET` (the server's log file) still forwarded | DONE |
 | test | `crates/mm-api/tests/parity/client_log.rs` — 1, the echoes byte for byte | DONE |
 | mutation | `scripts/mutations/client-log.plan` — 9 run, 7 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/system/onboarding/complete` (2026-09-14)
+
+Route count **490 of 764**. `completeOnboarding`: `manage_system` refused with its own id
+(`complete_onboarding_request.no_first_user`, 403), the body (a non-object the 400
+`complete_onboarding_request.app_error`; a `null` Go dereferences, forwarded), the organisation
+name required outside Cloud (400 `no_organization_name_provided_for_self_hosted_onboarding`) and
+saved as the `OrganizationName` system row, then — when the request names no plugins — the
+`FirstAdminSetupComplete` row written `true` and `{"status":"OK"}`. A request naming plugins is
+forwarded whole: the marketplace installs need the plugin host.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/system_store.rs` — `save_or_update`, the upsert on `Name` | DONE |
+| app | `crates/mm-app/src/onboarding.rs` — `save_onboarding_organization`, `mark_admin_onboarding_complete` | DONE |
+| api | `crates/mm-api/src/system.rs` — `complete_onboarding`; the `POST` joined the onboarding route in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/onboarding_complete.rs` — 1, both rows read back per server | DONE |
+| mutation | `scripts/mutations/onboarding-complete.plan` — 7 run, 5 caught, 2 controls survived | DONE |

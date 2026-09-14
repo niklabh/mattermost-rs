@@ -28,6 +28,13 @@ pub trait SystemStore {
         name: &str,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
 
+    /// Port of `SqlSystemStore.SaveOrUpdate` (system_store.go:39): one upsert on `Name`.
+    fn save_or_update(
+        &self,
+        name: &str,
+        value: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlSystemStore.PermanentDeleteByName` (system_store.go:105) — one `DELETE`.
     ///
     /// Go's signature returns `*model.System`, and the struct it returns is the **zero value**:
@@ -84,5 +91,21 @@ impl SystemStore for SqlSystemStore {
 
         tracing::Span::current().record("found", value.is_some());
         Ok(value)
+    }
+
+    #[tracing::instrument(skip(self, value), fields(name = %name))]
+    async fn save_or_update(&self, name: &str, value: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "INSERT INTO systems (name, value) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET value = $2",
+            name,
+            value,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to upsert system property".to_owned(),
+            source,
+        })?;
+        Ok(())
     }
 }

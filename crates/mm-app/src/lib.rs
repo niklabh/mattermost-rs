@@ -52,6 +52,7 @@ pub mod mention;
 pub mod notification;
 pub mod notify_admin;
 pub mod oauth;
+pub mod onboarding;
 pub mod password;
 pub mod post;
 pub mod post_acknowledgement;

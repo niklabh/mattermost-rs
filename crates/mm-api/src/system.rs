@@ -357,6 +357,86 @@ pub async fn get_applied_schema_migrations(
         .into_response())
 }
 
+/// Port of `completeOnboarding` (api4/system.go) — `POST /api/v4/system/onboarding/complete`.
+///
+/// `manage_system` — refused with its **own** id, `app.system.complete_onboarding_request.no_first_user`
+/// at 403, not the generic permission error — then `CompleteOnboardingRequestFromReader`, a
+/// `json.Decode` into a pointer whose failure is the 400 `complete_onboarding_request.app_error`
+/// (a `null` leaves the pointer nil and Go dereferences it; forwarded rather than reproduced).
+/// Then [`mm_app::App::save_onboarding_organization`] and, when the request names no plugins,
+/// [`mm_app::App::mark_admin_onboarding_complete`] and `{"status":"OK"}`; a request that names
+/// plugins is forwarded whole, since the marketplace installs need the plugin host.
+#[tracing::instrument(skip_all, fields(forwarded = false, plugins))]
+pub async fn complete_onboarding(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return ApiError::from(AppError::new(
+            "completeOnboarding",
+            "app.system.complete_onboarding_request.no_first_user",
+            None,
+            String::new(),
+            403,
+        ))
+        .into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    let parsed = serde_json::from_slice::<Value>(&bytes);
+    let forward = |state: AppState, why: &'static str| async move {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!(reason = why, "handing the onboarding completion to Go");
+        let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+        proxy::forward_to_go(State(state), request).await
+    };
+    let onboarding = match parsed {
+        Ok(Value::Null) => return forward(state, "a nil request Go dereferences").await,
+        Ok(value @ Value::Object(_)) => {
+            match serde_json::from_value::<mm_model::onboarding::CompleteOnboardingRequest>(value) {
+                Ok(onboarding) => onboarding,
+                Err(_) => return forward(state, "a body Go decodes partially").await,
+            }
+        }
+        _ => {
+            return ApiError::from(AppError::new(
+                "completeOnboarding",
+                "app.system.complete_onboarding_request.app_error",
+                None,
+                String::new(),
+                400,
+            ))
+            .into_response();
+        }
+    };
+    tracing::Span::current().record("plugins", onboarding.install_plugins.len());
+
+    if let Err(err) = state
+        .app
+        .save_onboarding_organization(&onboarding.organization)
+        .await
+    {
+        return ApiError::from(*err).into_response();
+    }
+
+    if !onboarding.install_plugins.is_empty() {
+        return forward(state, "the marketplace installs need the plugin host").await;
+    }
+
+    if let Err(err) = state.app.mark_admin_onboarding_complete().await {
+        return ApiError::from(*err).into_response();
+    }
+    status_ok()
+}
+
 /// Port of `getOnboarding` (api4/system.go:1010).
 ///
 /// `manage_system`, and a `model.System` row — synthesised as `"false"` when the row is absent.
