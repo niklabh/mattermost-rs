@@ -30,6 +30,7 @@ pub mod group_store;
 pub mod group_syncable_store;
 pub mod job_store;
 pub mod license_store;
+pub mod notify_admin_store;
 pub mod oauth_store;
 pub mod post_acknowledgement_store;
 pub mod post_store;
@@ -73,6 +74,7 @@ pub use group_store::{GroupStore, SqlGroupStore};
 pub use group_syncable_store::GroupSyncableStore;
 pub use job_store::{JobStore, SqlJobStore};
 pub use license_store::{LicenseStore, SqlLicenseStore};
+pub use notify_admin_store::{NotifyAdminStore, SqlNotifyAdminStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
 pub use post_store::{PostStore, SqlPostStore};
@@ -118,6 +120,7 @@ pub struct SqlStore {
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
+    notify_admin: SqlNotifyAdminStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -183,6 +186,7 @@ impl SqlStore {
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
+            notify_admin: SqlNotifyAdminStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -296,6 +300,11 @@ impl SqlStore {
     /// Port of `store.Store.FileInfo()`.
     pub fn draft(&self) -> &SqlDraftStore {
         &self.draft
+    }
+
+    /// Port of `store.Store.NotifyAdmin()`.
+    pub fn notify_admin(&self) -> &SqlNotifyAdminStore {
+        &self.notify_admin
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {

@@ -1,0 +1,17 @@
+# Mutation plan for `POST /api/v4/users/notify-admin` — SaveAdminNotification and its store.
+#
+#   scripts/mutate-batch.sh scripts/mutations/notify-admin.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+
+already-notified-ignored	crates/mm-app/src/notify_admin.rs	            Ok(data) => !data.is_empty(),	            Ok(data) => data.is_empty() && false,	api	notify_admin
+already-notified-status-400	crates/mm-app/src/notify_admin.rs	                "api.cloud.notify_admin_to_upgrade_error.already_notified",\n                None,\n                String::new(),\n                403,	                "api.cloud.notify_admin_to_upgrade_error.already_notified",\n                None,\n                String::new(),\n                400,	api	notify_admin
+invalid-is-a-400	crates/mm-app/src/notify_admin.rs	            let status = if err.is_not_found() { 404 } else { 500 };	            let status = if err.is_not_found() { 404 } else { 400 };	api	notify_admin
+trial-dropped	crates/mm-app/src/notify_admin.rs	            trial: request.trial_notification,	            trial: false,	api	notify_admin
+store-validator-skipped	crates/mm-store/src/notify_admin_store.rs	        data.is_valid().map_err(|app_error| StoreError::Invalid {\n            entity: "NotifyAdmin",\n            app_error,\n        })?;	        let _ = data.is_valid();	api	notify_admin
+store-lookup-ignores-feature	crates/mm-store/src/notify_admin_store.rs	             WHERE userid = $1 AND requiredfeature = $2	             WHERE userid = $1 AND ($2::text = '' OR requiredfeature <> '')	api	notify_admin
+plugin-prefix-not-exempt	crates/mm-model/src/notify_admin.rs	        if self.required_feature.as_str().starts_with(PLUGIN_FEATURE) {\n            return Ok(());\n        }	        if self.required_feature.as_str() == PLUGIN_FEATURE {\n            return Ok(());\n        }	api	notify_admin
+null-body-accepted	crates/mm-api/src/notify_admin.rs	            serde_json::Value::Null => None,	            serde_json::Value::Null => Some(NotifyAdminToUpgradeRequest::default()),	api	notify_admin
+control-annotate-rows	crates/mm-store/src/notify_admin_store.rs	        tracing::Span::current().record("found", rows.len());	        tracing::Span::current().record("found", rows.len() as usize);	api	notify_admin
+control-reorder-insert	crates/mm-store/src/notify_admin_store.rs	            INSERT INTO notifyadmin (userid, createat, requiredplan, requiredfeature, trial)\n            VALUES ($1, $2, $3, $4, $5)	            INSERT INTO notifyadmin (userid, requiredplan, createat, requiredfeature, trial)\n            VALUES ($1, $3, $2, $4, $5)	api	notify_admin

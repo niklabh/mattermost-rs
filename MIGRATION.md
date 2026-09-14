@@ -12858,3 +12858,24 @@ still forwards.
 - **Both errors are 400s**, the unknown team included: `RemoveTeamIcon` wraps `GetTeam`'s 404.
 - **The event's `update_at` is the old one** while the row holds `0`: Go zeroes only the icon
   timestamp on the struct it publishes.
+
+## `POST /api/v4/users/notify-admin` (2026-09-14)
+
+Route count **466 of 764**. A user asks the admins to upgrade for a feature: one `NotifyAdmin`
+row per user and feature, a second request for the feature the 403 `already_notified`, and the
+validator's refusals — a plan outside `professional`/`enterprise`, a feature outside the paid
+list — reaching the wire as the **500** `app.notify_admin.save.app_error`, because
+`SaveAdminNotifyData` folds every save error but a not-found into it. The job that mails the
+admins from these rows is not here.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/notify_admin_store.rs` — `save`, `get_data_by_user_id_and_feature` | DONE |
+| app | `crates/mm-app/src/notify_admin.rs` — `save_admin_notification` | DONE |
+| api | `crates/mm-api/src/notify_admin.rs` — `handle_notify_admin`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/notify_admin.rs` — 3 | DONE |
+| mutation | `scripts/mutations/notify-admin.plan` — 10 run, 8 caught, 2 controls survived | DONE |
+
+- **The validator's message never reaches a client**: the 400 it builds is a 500 with the
+  generic id on the wire. Measured on both.
+- **`mattermost.feature.plugin…` skips the validator** — any plan is stored.

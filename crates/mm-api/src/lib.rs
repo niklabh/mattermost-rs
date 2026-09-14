@@ -47,6 +47,7 @@ pub mod limits;
 pub mod local;
 pub mod login;
 pub mod multipart;
+pub mod notify_admin;
 pub mod oauth;
 pub mod permissions;
 pub mod post_acks;
@@ -454,6 +455,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/search",
             partially_migrated(post(users::search_users)),
+        )
+        // `BaseRoutes.Users.Handle("/notify-admin")` (api4/user.go:120) — a static segment
+        // under `/users/`, like `/search`.
+        .route(
+            "/api/v4/users/notify-admin",
+            partially_migrated(post(notify_admin::handle_notify_admin)),
         )
         // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
         // usernames it found in a page of posts.
