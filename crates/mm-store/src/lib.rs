@@ -36,6 +36,7 @@ pub mod oauth_store;
 pub mod post_acknowledgement_store;
 pub mod post_store;
 pub mod preference_store;
+pub mod product_notices_store;
 /// The five CPA reads across `PropertyGroups`, `PropertyFields` and `PropertyValues`.
 pub mod property_store;
 pub mod reaction_store;
@@ -81,6 +82,7 @@ pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
+pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
@@ -128,6 +130,7 @@ pub struct SqlStore {
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
     post_acknowledgement: SqlPostAcknowledgementStore,
+    product_notices: SqlProductNoticesStore,
     license: SqlLicenseStore,
     oauth: SqlOAuthStore,
     post: SqlPostStore,
@@ -195,6 +198,7 @@ impl SqlStore {
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
             post_acknowledgement: SqlPostAcknowledgementStore::new(pool.clone()),
+            product_notices: SqlProductNoticesStore::new(pool.clone()),
             license: SqlLicenseStore::new(pool.clone()),
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
@@ -338,6 +342,11 @@ impl SqlStore {
     /// Port of `store.Store.PostAcknowledgement()`.
     pub fn post_acknowledgement(&self) -> &SqlPostAcknowledgementStore {
         &self.post_acknowledgement
+    }
+
+    /// Port of `store.Store.ProductNotices()`.
+    pub fn product_notices(&self) -> &SqlProductNoticesStore {
+        &self.product_notices
     }
 
     /// Port of `store.Store.Bot()`.

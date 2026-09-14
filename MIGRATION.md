@@ -13028,3 +13028,22 @@ gains `enable_shared_channels`, whose default on an update comes from the legacy
 | api | `crates/mm-api/src/connected_workspaces.rs` — `can_user_direct_message`; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/can_dm.rs` — 2, unlicensed and licensed pairs | DONE |
 | mutation | `scripts/mutations/can-dm.plan` — 7 run, 5 caught, 2 controls survived (two wire-equivalent mutants dropped, see the plan header) | DONE |
+
+## `PUT /api/v4/system/notices/view` (2026-09-14)
+
+Route count **477 of 764** on this branch. `updateViewedProductNotices` decodes a list of notice
+ids (`null` is an empty list, anything else that is not a list of strings the 400
+`api.payload.parse.error`), sorts and de-duplicates it, and `View`s it: existing rows count up
+and re-stamp, new ids get a row with `Viewed = 1`, `Timestamp` in Unix **seconds**. Then
+`{"status":"OK"}`. `GET /system/notices/{team_id}` stays forwarded: it filters the notice cache
+the fetch job fills, which Go on the stack has and this server does not.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/product_notices_store.rs` — `view`, one transaction | DONE |
+| api | `crates/mm-api/src/product_notices.rs`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/product_notices_view.rs` — 2, rows read back per server | DONE |
+| mutation | `scripts/mutations/product-notices-view.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **A new account already has rows**: Go marks every cached notice viewed on creation
+  (`UpdateViewedProductNoticesForNewUser`), so the suite reads back only the ids it wrote.

@@ -56,6 +56,7 @@ pub mod post_acks;
 pub mod post_writes;
 pub mod posts;
 pub mod preferences;
+pub mod product_notices;
 pub mod properties;
 pub mod proxy;
 pub mod reactions;
@@ -2440,6 +2441,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
+        // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
+        .route(
+            "/api/v4/system/notices/view",
+            partially_migrated(put(product_notices::update_viewed_product_notices)),
         )
         // `api4/user.go`'s two remaining literal-path reads. Both sit under `/api/v4/users`
         // beside `{user_id}`, and gorilla matches literals before parameters — so `auth_data`

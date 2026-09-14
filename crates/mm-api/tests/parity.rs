@@ -129,6 +129,7 @@ mod parity {
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
+    pub mod product_notices_view;
     /// Appended out of alphabetical order; see `config_reads`.
     pub mod properties;
     pub mod reaction_writes;

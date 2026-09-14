@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE productnoticeviewstate\n                   SET viewed = viewed + 1, \"timestamp\" = $3\n                 WHERE userid = $1 AND noticeid = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47435fa9918f6a2c0f4f5cf4ab6893b2ee5a9076fcf085cfe82087bac3c7ea29"
+}

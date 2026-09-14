@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT noticeid AS \"notice_id!\"\n              FROM productnoticeviewstate\n             WHERE userid = $1 AND noticeid = ANY($2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "notice_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "08ce21be39431211503317993d8c69145f513fc3d057b01cdef4148543938ae0"
+}
