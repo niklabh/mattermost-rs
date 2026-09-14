@@ -12768,3 +12768,22 @@ The `~channel` mention on create — `FillInPostProps` resolving channel names i
 notification itself, which needs `forEachPersistentNotificationPost`, the `PersistentNotifications`
 row and the job that sends from it, and [D-551] for the reply that resolves it.
 
+## `?silent=true` on `POST /api/v4/posts` (2026-09-14)
+
+Route count unchanged at 463 of 764. The last arm of the create's query string is served: an
+integration author (a bot, or an OAuth session) gets the `silent_notification: true` prop, and
+`SendNotifications` — whose suppression gates were already in place — skips the mention pass,
+the counters, the thread fan-out and the out-of-channel notice on it. Nothing new was ported;
+the forward after the prop was written (`post_create.rs`) is removed.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/post_create.rs` — the silent arm no longer forwards | DONE |
+| test | `crates/mm-api/tests/parity/post_create_silent.rs` — 4, posting as the stack's seeded bot | DONE |
+| mutation | `scripts/mutations/post-create-silent.plan` — 7 run, 5 caught, 2 controls survived | DONE |
+
+- **A silent mention of a non-member is served**, where the loud one still forwards for the
+  translated notice ([D-591]): suppression returns before `sendOutOfChannelMentions`.
+
+[D-401] narrowed: the `?silent=true` row is closed.
+

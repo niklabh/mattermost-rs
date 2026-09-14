@@ -1,0 +1,15 @@
+# Mutation plan for `POST /api/v4/posts?silent=true` — the silent_notification prop and the
+# suppression it switches on in SendNotifications.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-silent.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+
+suppress-flag-ignored	crates/mm-app/src/notification.rs	        let suppress_notifications = post.is_notification_suppressed();	        let suppress_notifications = false;	api	post_create_silent
+forward-reason-ignores-suppression	crates/mm-app/src/notification.rs	        if channel.delete_at > 0 || post.is_notification_suppressed() {	        if channel.delete_at > 0 {	api	post_create_silent
+integration-gate-needs-both	crates/mm-app/src/post_create.rs	            if !(user.is_bot || session.is_oauth) {	            if !(user.is_bot && session.is_oauth) {	api	post_create_silent
+prop-written-false	crates/mm-app/src/post_create.rs	                POST_PROPS_SILENT_NOTIFICATION,\n                serde_json::Value::Bool(true),	                POST_PROPS_SILENT_NOTIFICATION,\n                serde_json::Value::Bool(false),	api	post_create_silent
+model-never-suppressed	crates/mm-model/src/post.rs	        self.has_silent_notification()\n    }	        self.has_silent_notification() && self.has_force_notification()\n    }	api	post_create_silent
+control-annotate-flag	crates/mm-app/src/notification.rs	        let suppress_notifications = post.is_notification_suppressed();	        let suppress_notifications: bool = post.is_notification_suppressed();	api	post_create_silent
+control-reorder-log-fields	crates/mm-app/src/post_create.rs	                    user_id = %user.id,\n                    channel_id = %channel.id,\n                    "Rejected silent notification post from non-integration author",	                    channel_id = %channel.id,\n                    user_id = %user.id,\n                    "Rejected silent notification post from non-integration author",	api	post_create_silent

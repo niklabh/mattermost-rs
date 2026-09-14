@@ -110,6 +110,7 @@ mod parity {
     pub mod post_create_files;
     pub mod post_create_priority;
     pub mod post_create_replies;
+    pub mod post_create_silent;
     pub mod post_creates;
     pub mod post_delete_replies;
     pub mod post_edit_history;

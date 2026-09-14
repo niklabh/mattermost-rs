@@ -7630,7 +7630,6 @@ it:
 | a message with `~` | `FillInPostProps` resolving the channel names into the `channel_mentions` prop, and the `channel_mentions` broadcast hook |
 | a message that mentions a non-member, a group, or the whole channel past `MaxNotificationsPerChannel` | the translated ephemeral notices — [D-591] |
 | a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
-| `?silent=true` | the notification suppression the prop names |
 | the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
 
 ## D-402 · email, push and plugin hooks do not fire for a post this server writes

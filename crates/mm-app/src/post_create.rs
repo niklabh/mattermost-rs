@@ -621,15 +621,13 @@ impl App {
                     403,
                 )));
             }
+            // The prop is what `IsNotificationSuppressed` reads: `SendNotifications` then skips
+            // the mention pass, the counters, the thread fan-out and the out-of-channel notice,
+            // and `notification_forward_reason` has nothing to forward for.
             post.add_prop(
                 POST_PROPS_SILENT_NOTIFICATION,
                 serde_json::Value::Bool(true),
             );
-            // The prop is on the saved row, but suppressing the notification it names is the
-            // fan-out's job and the fan-out is not here.
-            return Err(PrepareError::Unreproducible(
-                "a silent notification post suppresses a fan-out this port does not run",
-            ));
         }
 
         if session.is_oauth {
