@@ -91,6 +91,7 @@ mod parity {
     pub mod flagged_posts;
     pub mod gated_families;
     pub mod gated_reads;
+    pub mod gm_conversion;
     pub mod group_reads_licensed;
     pub mod group_syncables;
     pub mod group_writes;

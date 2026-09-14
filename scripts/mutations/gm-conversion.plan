@@ -1,0 +1,21 @@
+# Mutation plan for POST /channels/{channel_id}/convert_to_channel — the validation order, the
+# update, the admin grant, the post, the guest gate, the id check, and the body decode.
+#
+#   scripts/mutate-batch.sh scripts/mutations/gm-conversion.plan
+#
+# Not planned, equivalent: skipping `clone.is_valid()` in the validation — the store update
+# validates again and answers the same `model.channel.is_valid.*` id.
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+team-check-inverted	crates/mm-app/src/channel_convert.rs	        if !common_teams.iter().any(|team| team.id == request.team_id) {	        if common_teams.iter().any(|team| team.id == request.team_id) {	api	gm_conversion
+gm-check-inverted	crates/mm-app/src/channel_convert.rs	        if original.channel_type != CHANNEL_TYPE_GROUP {	        if original.channel_type == CHANNEL_TYPE_GROUP {	api	gm_conversion
+type-stays-group	crates/mm-app/src/channel_convert.rs	        updated.channel_type = CHANNEL_TYPE_PRIVATE.to_owned();	        updated.channel_type = CHANNEL_TYPE_GROUP.to_owned();	api	gm_conversion
+admin-not-granted	crates/mm-app/src/channel_convert.rs	            false,\n            true,\n            true,\n        )\n        .await?;	            false,\n            true,\n            false,\n        )\n        .await?;	api	gm_conversion
+members-not-humanised	crates/mm-app/src/channel_convert.rs	                join_list(&usernames)	                usernames.join(", ")	api	gm_conversion
+join-list-oxford-comma	crates/mm-app/src/channel_convert.rs	        [others @ .., last] => format!("{} and {last}", others.join(", ")),	        [others @ .., last] => format!("{}, and {last}", others.join(", ")),	unit	join_list
+guest-gate-inverted	crates/mm-api/src/channel_convert.rs	    if user.is_guest() {	    if !user.is_guest() {	api	gm_conversion
+id-mismatch-ignored	crates/mm-api/src/channel_convert.rs	    if conversion.channel_id != channel_id {	    if conversion.channel_id == channel_id {	api	gm_conversion
+any-json-decodes	crates/mm-api/src/channel_convert.rs	        Ok(value @ serde_json::Value::Object(_)) => {	        Ok(value) => {	api	gm_conversion
+control-reorder-headers	crates/mm-api/src/channel_convert.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	gm_conversion
+control-rename-last	crates/mm-app/src/channel_convert.rs	        [others @ .., last] => format!("{} and {last}", others.join(", ")),	        [others @ .., last_item] => format!("{} and {last_item}", others.join(", ")),	api	gm_conversion

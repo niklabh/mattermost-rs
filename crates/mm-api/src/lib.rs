@@ -12,6 +12,7 @@ pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
 pub mod channel_admin;
+pub mod channel_convert;
 pub mod channel_creates;
 pub mod channel_member_writes;
 pub mod channel_move;
@@ -1151,6 +1152,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/move",
             partially_migrated_with_ids(&state, post(channel_move::move_channel)),
+        )
+        // `BaseRoutes.Channel.Handle("/convert_to_channel")` (api4/channel.go) — a group message
+        // becoming a private channel.
+        .route(
+            "/api/v4/channels/{channel_id}/convert_to_channel",
+            partially_migrated_with_ids(
+                &state,
+                post(channel_convert::convert_group_message_to_channel),
+            ),
         )
         // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
         // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
@@ -4103,10 +4113,7 @@ mod tests {
         // port 1, so a forwarded request answers without the header.
         let forwarded: Vec<(Method, String)> = vec![
             // `/move` left this list on 2026-09-14, when it was served.
-            (
-                Method::POST,
-                format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
-            ),
+            // `/convert_to_channel` left this list on 2026-09-14 too, when it was served.
             // `moderations/patch` is a `PUT` only; a `GET` there is gorilla's 405 path, forwarded.
             (
                 Method::GET,

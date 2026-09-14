@@ -13069,3 +13069,26 @@ the fetch job fills, which Go on the stack has and this server does not.
 
 - **A new account already has rows**: Go marks every cached notice viewed on creation
   (`UpdateViewedProductNoticesForNewUser`), so the suite reads back only the ids it wrote.
+
+## `POST /api/v4/channels/{channel_id}/convert_to_channel` (2026-09-14)
+
+Route count **478 of 764** on this branch. `convertGroupMessageToChannel` turns a group message
+into a private channel: the body (an object, or the 400 `body`), the caller's guest flag (403)
+before the `create_private_channel` permission on the body's team, the id match, then the app —
+the team must be common to the members (400 `incorrect_team`, and a non-DM/GM is the
+common-teams read's own 400 first), the channel a GM (the 404 is reachable only for a DM), the
+converter a member, the private shape valid — then `UpdateChannel`, the sidebar re-filing and
+the `system_gm_to_channel` post both only logged, and the converter made channel admin.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/channel_convert.rs` — the conversion, its validation, the sidebar and the post; `join_list` | DONE |
+| api | `crates/mm-api/src/channel_convert.rs`; registered in `lib.rs`; `reject_board_or_space_channel` shared | DONE |
+| test | `crates/mm-api/tests/parity/gm_conversion.rs` — 2, each conversion on its own GM | DONE |
+| mutation | `scripts/mutations/gm-conversion.plan` — 11 run, 9 caught, 2 controls survived | DONE |
+
+- **The post is English** — `{converter} created this channel from a group message with a, b
+  and c.` — the same exception every system post makes; `humanize.list_join` has no Oxford comma.
+- **Go files nothing into the members' sidebars here**, measured: the categories exist and the
+  `channels` category is re-saved, yet no `SidebarChannels` row appears. The suite compares the
+  two servers rather than asserting a row.
