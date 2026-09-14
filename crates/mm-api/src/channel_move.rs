@@ -32,7 +32,9 @@ use crate::error::ApiError;
 use crate::proxy;
 
 /// `model.StringInterfaceFromJSON(r.Body)`: an object, or an empty map for anything else.
-fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn string_interface_from_json(
+    bytes: &[u8],
+) -> serde_json::Map<String, serde_json::Value> {
     match serde_json::from_slice::<serde_json::Value>(bytes) {
         Ok(serde_json::Value::Object(map)) => map,
         _ => serde_json::Map::new(),
@@ -119,7 +121,7 @@ pub async fn move_channel(
     if force {
         match state
             .app
-            .remove_users_from_channel_not_member_of_team(&user, &channel, &team)
+            .remove_users_from_channel_not_member_of_team(Some(&user), &channel, &team)
             .await
         {
             Ok(MemberWrite::Done(())) => {}
@@ -128,7 +130,11 @@ pub async fn move_channel(
         }
     }
 
-    match state.app.move_channel(&team, &mut channel, &user).await {
+    match state
+        .app
+        .move_channel(&team, &mut channel, Some(&user))
+        .await
+    {
         Ok(MemberWrite::Done(())) => {}
         Ok(MemberWrite::Forward(why)) => return forward(state, why).await,
         Err(err) => return ApiError::from(*err).into_response(),

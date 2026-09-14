@@ -186,6 +186,21 @@ pub trait UserStore {
         deleted: Option<bool>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// `SqlUserStore.GetAllProfiles` (user_store.go:682) with **only** `Role` set — the shape
+    /// `GetOrCreateSystemOwnedBot` (app/bot.go) asks for, to find the system bot's owner.
+    ///
+    /// `Inactive` is false and `Active` is unset there, so **no `DeleteAt` predicate**: a
+    /// deactivated administrator whose username sorts first still owns the bot. The pattern is
+    /// `applyRoleFilter`'s — `Users.Roles LIKE LOWER('%<role>%')` with `%` and `_` escaped —
+    /// built by the caller, because the escaping is Go's `sanitizeSearchTerm` and lives in the
+    /// app layer beside the other search-term helpers. Username order, offset paging.
+    fn get_all_profiles_in_role(
+        &self,
+        role_pattern: &str,
+        page: i64,
+        per_page: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetProfiles` (user_store.go:835) — the `in_team` filter.
     fn get_profiles_in_team(
         &self,
@@ -1678,6 +1693,68 @@ impl UserStore for SqlUserStore {
     }
 
     #[tracing::instrument(skip_all, fields(page, per_page, found))]
+    #[tracing::instrument(skip(self), fields(found))]
+    async fn get_all_profiles_in_role(
+        &self,
+        role_pattern: &str,
+        page: i64,
+        per_page: i64,
+    ) -> Result<Vec<User>, StoreError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.roles LIKE LOWER($3)
+             ORDER BY u.username ASC
+             OFFSET $1 LIMIT $2
+            "#,
+            offset_of(page, per_page),
+            per_page,
+            role_pattern,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get User profiles".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
+    }
+
     async fn get_all_profiles(
         &self,
         page: i64,

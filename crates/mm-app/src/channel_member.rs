@@ -1498,16 +1498,27 @@ impl App {
         removed_user: &User,
         channel: &Channel,
     ) {
-        if remover_user_id.is_empty() {
-            tracing::warn!(
-                channel_id = %channel.id,
-                "Failed to post user removal message: GetSystemBot is not ported",
-            );
-            return;
-        }
+        // `postRemoveFromChannelMessage`: an empty remover (the local-mode handler) makes the
+        // system bot the post's author, created on first use; a bot that cannot be fetched is
+        // the same logged failure as a post that cannot be saved.
+        let message_user_id = if remover_user_id.is_empty() {
+            match self.get_system_bot().await {
+                Ok(bot) => bot.user_id,
+                Err(err) => {
+                    tracing::error!(
+                        error = %err,
+                        channel_id = %channel.id,
+                        "Failed to post user removal message",
+                    );
+                    return;
+                }
+            }
+        } else {
+            remover_user_id.to_owned()
+        };
 
         self.post_system_message(
-            remove_from_channel_post(remover_user_id, removed_user, &channel.id),
+            remove_from_channel_post(&message_user_id, removed_user, &channel.id),
             channel,
         )
         .await;

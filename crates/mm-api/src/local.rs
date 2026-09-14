@@ -271,6 +271,7 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .merge(crate::local_misc::routes(&state))
         // `user_local.go` — 25 of its 26 pairs, in their own module.
         .merge(crate::local_users::routes(&state))
+        .merge(crate::local_channels::routes(&state))
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
         // process rather than 404'd by this one.

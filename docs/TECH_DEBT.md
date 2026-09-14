@@ -8864,3 +8864,19 @@ because each server only reads its own rows. **What is owed:** `updateUser` (and
 `Update`) must preserve the target's `props`/`timezone` when the body omits them, as Go does,
 rather than writing NULL. `parity::local_users` sends both fields explicitly to route around it.
 
+## D-610 · `DELETE /channels/{id}?permanent=true` over the socket is forwarded: `PermanentDeleteChannel` is unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (channel_local.go)
+
+`localDeleteChannel` (channel_local.go:404) reaches `App.PermanentDeleteChannel`
+(app/channel.go) with **no** `EnableAPIChannelDeletion` gate — the socket is the only caller that
+does; the HTTP handler forwards the same branch when the setting is on. The app function is six
+store deletes in order — `Post().PermanentDeleteByChannel`, `Channel().PermanentDeleteMembersByChannel`,
+`Webhook().PermanentDeleteIncomingByChannel`, `Webhook().PermanentDeleteOutgoingByChannel`,
+`PostPersistentNotification().DeleteByChannel`, `Channel().PermanentDelete` — then the access-control
+cleanup, the cache invalidation and the `channel_deleted` event that `DeleteChannel` already
+publishes. None of the six store methods exists. **What is owed:** the six methods and the app
+function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` branch, which then
+serves the HTTP twin's branch as well. The parity test that will cover it already sends the
+request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
+forward today and would assert the served answer then.

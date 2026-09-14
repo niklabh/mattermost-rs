@@ -552,6 +552,85 @@ impl App {
     /// `GetSingle`'s not-found means "either already deleted or never a notification post" and
     /// returns nil. Only a real store failure becomes the 500, and both the read and the write
     /// report it with the **same** id.
+    /// Port of `App.PermanentDeletePost` (app/post.go:2400) — `DELETE /posts/{id}?permanent=true`
+    /// over the local socket, which is the one caller that reaches it without the
+    /// `EnableAPIPostDeletion` gate.
+    ///
+    /// # Read with `includeDeleted`, then a hard delete
+    ///
+    /// `GetSingle(id, true)`, so an already-archived post can still be removed for good; the
+    /// store then drops the post, its replies and every row keyed on it — see
+    /// [`mm_store::PostStore::permanent_delete`]. `DeletePersistentNotification` and
+    /// `CleanUpAfterPostDeletion` follow, exactly as after a soft delete. Nothing is stamped, so
+    /// `delete_by_id` reaches only the `post_deleted` event's `delete_by` field.
+    ///
+    /// # Two branches are handed to Go
+    ///
+    /// A post **with files** — `PermanentDeleteFilesByPost` removes them through the file
+    /// backend — and a **burn-on-read** post, whose files are on the revealed copy. Both are
+    /// [`PrepareError::Unreproducible`], so the caller forwards the whole request.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, forwarded))]
+    pub async fn permanent_delete_post(
+        &self,
+        post_id: &str,
+        delete_by_id: &str,
+    ) -> Result<(), PrepareError> {
+        let post = self
+            .store()
+            .post()
+            .get_single(post_id, true)
+            .await
+            .map_err(|err| {
+                tracing::debug!(error = %err, "post lookup failed");
+                PrepareError::App(AppError::boxed(
+                    "DeletePost",
+                    "app.post.get.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ))
+            })?;
+
+        if post.post_type == mm_model::post::POST_TYPE_BURN_ON_READ {
+            return Err(PrepareError::Unreproducible(
+                "a burn-on-read post's files hang off its revealed copy",
+            ));
+        }
+        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
+            return Err(PrepareError::Unreproducible(
+                "PermanentDeleteFilesByPost removes the files through the file backend",
+            ));
+        }
+
+        self.store()
+            .post()
+            .permanent_delete(post_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "post permanent delete failed");
+                PrepareError::App(AppError::boxed(
+                    "PermanentDeletePost",
+                    "app.post.permanent_delete_post.error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            })?;
+
+        if post.root_id.is_empty() {
+            self.delete_persistent_notification(&post).await?;
+        }
+
+        // `CleanUpAfterPostDeletion` broadcasts to the post's channel, which the row still
+        // names; the channel row outlives its posts.
+        let channel = self.get_channel(&post.channel_id).await?;
+        self.clean_up_after_post_deletion(&post, &channel, delete_by_id)
+            .await?;
+
+        tracing::Span::current().record("forwarded", false);
+        Ok(())
+    }
+
     async fn delete_persistent_notification(&self, post: &Post) -> Result<(), PrepareError> {
         if !(self.config().post_priority && self.config().allow_persistent_notifications) {
             return Ok(());

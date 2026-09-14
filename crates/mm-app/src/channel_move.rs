@@ -74,7 +74,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, team_id = %team.id))]
     pub async fn remove_users_from_channel_not_member_of_team(
         &self,
-        remover: &User,
+        remover: Option<&User>,
         channel: &Channel,
         team: &Team,
     ) -> Result<MemberWrite<()>, Box<AppError>> {
@@ -103,7 +103,13 @@ impl App {
             .filter(|user_id| !in_team.contains(user_id.as_str()))
         {
             match self
-                .remove_user_from_channel_inner(user_id, &remover.id, channel)
+                // `removerId` is the empty string when there is no remover — the local-mode
+                // move — and that is what the removal's websocket events then carry.
+                .remove_user_from_channel_inner(
+                    user_id,
+                    remover.map_or("", |remover| remover.id.as_str()),
+                    channel,
+                )
                 .await?
             {
                 MemberWrite::Done(_) => {}
@@ -120,7 +126,7 @@ impl App {
         &self,
         team: &Team,
         channel: &mut Channel,
-        user: &User,
+        user: Option<&User>,
     ) -> Result<MemberWrite<()>, Box<AppError>> {
         if channel.is_space() {
             return Err(AppError::boxed(
@@ -271,8 +277,11 @@ impl App {
             }
         }
 
-        self.post_channel_move_message(user, channel, &previous_team)
-            .await;
+        // `if user != nil`: the local-mode move posts no notice at all.
+        if let Some(user) = user {
+            self.post_channel_move_message(user, channel, &previous_team)
+                .await;
+        }
         Ok(MemberWrite::Done(()))
     }
 

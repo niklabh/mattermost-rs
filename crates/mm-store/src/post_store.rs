@@ -366,6 +366,18 @@ pub trait PostStore {
         delete_by_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlPostStore.PermanentDelete` (post_store.go:1023) for one id.
+    ///
+    /// One transaction: `permanentDeleteAssociatedData` first — the `Threads` and
+    /// `ThreadMemberships` rows keyed on the post, its `Reactions`, `TemporaryPosts` and
+    /// `ReadReceipts`, then every reply (`Posts.RootId = id`) — and the post itself last. A hard
+    /// delete, so nothing is stamped and nothing can be restored; the app layer has already
+    /// dealt with the files, which Go removes through the file backend before calling this.
+    fn permanent_delete(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostPersistentNotificationStore.Delete`
     /// (post_persistent_notification_store.go:88) for the one id its reachable caller passes.
     ///
@@ -3086,6 +3098,59 @@ impl PostStore for SqlPostStore {
     }
 
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn permanent_delete(&self, post_id: &str) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // `permanentDeleteAssociatedData`, in Go's order.
+        for (statement, context) in [
+            (
+                "DELETE FROM threads WHERE postid = $1",
+                "failed to delete Threads",
+            ),
+            (
+                "DELETE FROM threadmemberships WHERE postid = $1",
+                "failed to delete ThreadMemberships",
+            ),
+            (
+                "DELETE FROM reactions WHERE postid = $1",
+                "failed to delete Reactions",
+            ),
+            // Go's own wrap text for this table says "Threads"; kept, so a log line here reads
+            // the same as Go's for the same failure.
+            (
+                "DELETE FROM temporaryposts WHERE postid = $1",
+                "failed to delete Threads",
+            ),
+            (
+                "DELETE FROM readreceipts WHERE postid = $1",
+                "failed to delete ReadReceipts",
+            ),
+            (
+                "DELETE FROM posts WHERE rootid = $1",
+                "failed to delete Posts",
+            ),
+            ("DELETE FROM posts WHERE id = $1", "failed to delete Posts"),
+        ] {
+            sqlx::query(statement)
+                .bind(post_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: context.to_owned(),
+                    source,
+                })?;
+        }
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
+    }
+
     async fn delete(&self, post_id: &str, time: i64, delete_by_id: &str) -> Result<(), StoreError> {
         // Unlike `update`, this one **is** a transaction in Go.
         let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {

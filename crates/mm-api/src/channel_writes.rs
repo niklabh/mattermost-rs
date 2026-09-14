@@ -84,7 +84,7 @@ const AUTO_TRANSLATION_AVAILABLE: bool = false;
 
 /// `web.ReturnStatusOK` (web/web.go:127) — `w.Write(MapToJSON(...))`, so **no trailing newline**.
 /// The one route of the five that answers this rather than a channel.
-fn status_ok() -> Response {
+pub(crate) fn status_ok() -> Response {
     (
         StatusCode::OK,
         [
@@ -97,7 +97,10 @@ fn status_ok() -> Response {
 }
 
 /// `json.NewEncoder(w).Encode(channel)` — a 200 and a **trailing newline** ([D-086]).
-fn channel_response(handler: &'static str, channel: &Channel) -> Result<Response, ApiError> {
+pub(crate) fn channel_response(
+    handler: &'static str,
+    channel: &Channel,
+) -> Result<Response, ApiError> {
     let mut body = serde_json::to_vec(channel).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise Channel");
         ApiError::from(AppError::new(
@@ -171,7 +174,7 @@ fn patch_update_forbidden(handler: &'static str) -> Box<AppError> {
 /// Not [`crate::channels::licence_gate`], which forwards for you and therefore consumes the
 /// request — three of these five handlers have a *second* forwarding branch further down and need
 /// to still own it.
-async fn licensed(state: &AppState) -> Result<bool, ApiError> {
+pub(crate) async fn licensed(state: &AppState) -> Result<bool, ApiError> {
     let state_of_licence = state.app.license_state().await?;
     let licensed = state_of_licence == mm_app::license::LicenseState::Licensed;
     tracing::Span::current().record("licensed", licensed);
@@ -845,7 +848,7 @@ pub async fn update_channel_privacy(
 
     match state
         .app
-        .update_channel_privacy(&mut channel, &author)
+        .update_channel_privacy(&mut channel, Some(&author))
         .await
     {
         Ok(ChannelWrite::Done) => match channel_response("updateChannelPrivacy", &channel) {
@@ -867,7 +870,7 @@ pub async fn update_channel_privacy(
 /// Every failure collapses to `None`, because Go's decode error is discarded and a missing key, a
 /// non-string value and an out-of-set string all fail the same `if`. Returns a `&'static str`
 /// rather than the parsed value so a caller cannot accidentally widen the accepted set.
-fn requested_privacy(body: &[u8]) -> Option<&'static str> {
+pub(crate) fn requested_privacy(body: &[u8]) -> Option<&'static str> {
     // `json.NewDecoder(data).Decode(&objmap)` — one value, trailing bytes unread, and the error
     // discarded. `serde_json::from_slice` differs on the first of those, which is why this goes
     // through the shared helper rather than the obvious call.

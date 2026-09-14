@@ -35,7 +35,7 @@ const HEADER_ETAG_SERVER: &str = "ETag";
 const INCLUDE_DELETED_PARAM: &str = "include_deleted";
 
 /// What the handler decided to do, before any of it is written.
-enum Outcome {
+pub(crate) enum Outcome {
     Served(Response),
     Failed(ApiError),
     /// The Go server has to answer this one — see [`mm_app::post`] for the shapes and why.
@@ -77,20 +77,38 @@ pub async fn get_post(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    // Copied out before the request is consumed, so the forward path can still hand Go the
-    // untouched original.
-    let query = request.uri().query().map(str::to_owned);
-    let if_none_match = request
-        .headers()
-        .get(IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-
-    match serve(&state, &post_id, &session, query.as_deref(), if_none_match).await {
+    match get_post_outcome(
+        &state,
+        &post_id,
+        &session,
+        request.uri().query(),
+        request.headers(),
+    )
+    .await
+    {
         Outcome::Served(response) => response,
         Outcome::Failed(err) => err.into_response(),
         Outcome::Forward => proxy::forward_to_go(State(state), request).await,
     }
+}
+
+/// [`get_post`]'s decision, with the request's query and headers borrowed rather than the
+/// request consumed — so the caller still owns it for whichever forward leg is right for its
+/// router. The local socket calls this and forwards over the unix socket; the handler above
+/// forwards over the port. (Not `&Request`: its body is not `Sync`, which would make the
+/// handler's future not `Send`.)
+pub(crate) async fn get_post_outcome(
+    state: &AppState,
+    post_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+    headers: &axum::http::HeaderMap,
+) -> Outcome {
+    let if_none_match = headers
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    serve(state, post_id, session, query, if_none_match).await
 }
 
 async fn serve(
@@ -410,19 +428,12 @@ pub async fn get_posts_for_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    let query = request.uri().query().map(str::to_owned);
-    let if_none_match = request
-        .headers()
-        .get(IF_NONE_MATCH)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-
-    match serve_channel_posts(
+    match get_posts_for_channel_outcome(
         &state,
         &channel_id,
         &session,
-        query.as_deref(),
-        if_none_match,
+        request.uri().query(),
+        request.headers(),
     )
     .await
     {
@@ -430,6 +441,21 @@ pub async fn get_posts_for_channel(
         Outcome::Failed(err) => err.into_response(),
         Outcome::Forward => proxy::forward_to_go(State(state), request).await,
     }
+}
+
+/// [`get_posts_for_channel`]'s decision with the request borrowed — see [`get_post_outcome`].
+pub(crate) async fn get_posts_for_channel_outcome(
+    state: &AppState,
+    channel_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+    headers: &axum::http::HeaderMap,
+) -> Outcome {
+    let if_none_match = headers
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    serve_channel_posts(state, channel_id, session, query, if_none_match).await
 }
 
 async fn serve_channel_posts(
