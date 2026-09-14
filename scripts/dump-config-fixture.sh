@@ -85,6 +85,10 @@ MODELLED = {
         "EnableAPITriggerAdminNotifications",
         # Whether POST /api/v4/logs needs a session and forces a non-admin to debug.
         "EnableDeveloper",
+        # The two settings of the outbound-connection guard and the link-preview gate on
+        # GET /api/v4/redirect_location.
+        "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
+        "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so

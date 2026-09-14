@@ -67,6 +67,7 @@ pub mod proxy;
 pub mod push_ack;
 pub mod reactions;
 pub mod recaps;
+pub mod redirect_location;
 pub mod reports;
 pub mod roles;
 pub mod schemes;
@@ -2508,6 +2509,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/email/test",
             partially_migrated(post(email_test::test_email)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/redirect_location")` (api4/system.go:64) — the webapp's
+        // link probe, through the outbound-connection guard.
+        .route(
+            "/api/v4/redirect_location",
+            partially_migrated(get(redirect_location::get_redirect_location)),
         )
         // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
         // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.

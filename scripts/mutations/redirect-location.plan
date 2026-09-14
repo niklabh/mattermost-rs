@@ -1,0 +1,20 @@
+# Mutation plan for GET /redirect_location — the preview gate, the parameter, and the guard that
+# decides whether an address is probed at all.
+#
+#   scripts/mutate-batch.sh scripts/mutations/redirect-location.plan
+#
+# Not planned, unobservable on the stack (no probe ever succeeds behind an empty allow-list):
+# following redirects, the 2100-byte cut, and the cache expiry — the answer is "" either way.
+# The guard is unit-tested against the Go oracle for those paths. `guard-accepts-reserved` runs under the
+# unit suite: every reserved address this host can reach is also one of its own, so on the stack the
+# own-IP check masks a dropped reserved check (it survived the api suite once for that reason).
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+previews-gate-inverted	crates/mm-api/src/redirect_location.rs	    if !config.enable_link_previews {	    if config.enable_link_previews {	api	redirect_location
+empty-url-allowed	crates/mm-api/src/redirect_location.rs	    if query.url.is_empty() {	    if !query.url.is_empty() {	api	redirect_location
+guard-accepts-reserved	crates/mm-app/src/http_guard.rs	    if !reserved && !own {	    if !own {	unit	http_guard
+host-allow-inverted	crates/mm-app/src/http_guard.rs	        if is_allowed_internal_host(host, &self.allowed_untrusted_internal_connections) {	        if !is_allowed_internal_host(host, &self.allowed_untrusted_internal_connections) {	api	redirect_location
+reserved-table-loopback-dropped	crates/mm-app/src/http_guard.rs	    (Ipv4Addr::new(127, 0, 0, 0), 8),	    (Ipv4Addr::new(127, 0, 0, 0), 32),	unit	http_guard
+control-cache-size-spelling	crates/mm-api/src/redirect_location.rs	const CACHE_SIZE: usize = 10_000;	const CACHE_SIZE: usize = 10000;	api	redirect_location
+control-reorder-headers	crates/mm-api/src/redirect_location.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	redirect_location

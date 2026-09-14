@@ -223,6 +223,19 @@ pub struct Config {
     /// on, anyone may log at any level.
     pub enable_developer: bool,
 
+    /// `ServiceSettings.EnableLinkPreviews` (config.go:531). Go default **`true`**. Off,
+    /// `getRedirectLocation` answers an empty location before reading its parameter.
+    pub enable_link_previews: bool,
+
+    /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
+    /// space-or-comma list of hosts and CIDRs the outbound-connection guard
+    /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
+    pub allowed_untrusted_internal_connections: String,
+
+    /// `ServiceSettings.EnableInsecureOutgoingConnections` (config.go). Go default **`false`**.
+    /// On, the guard's client accepts any TLS certificate.
+    pub enable_insecure_outgoing_connections: bool,
+
     /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
     ///
     /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
@@ -1214,6 +1227,9 @@ impl Default for Config {
             enable_api_user_deletion: false,
             enable_api_trigger_admin_notifications: false,
             enable_developer: false,
+            enable_link_previews: true,
+            allowed_untrusted_internal_connections: String::new(),
+            enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
             // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
@@ -1497,6 +1513,20 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEDEVELOPER",
                 default.enable_developer,
+            ),
+            enable_link_previews: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLELINKPREVIEWS",
+                default.enable_link_previews,
+            ),
+            allowed_untrusted_internal_connections: lookup(
+                "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
+            )
+            .unwrap_or(default.allowed_untrusted_internal_connections),
+            enable_insecure_outgoing_connections: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEINSECUREOUTGOINGCONNECTIONS",
+                default.enable_insecure_outgoing_connections,
             ),
             enable_sign_up_with_email: lookup_bool(
                 lookup,
@@ -2127,6 +2157,15 @@ impl Config {
                 .enable_api_trigger_admin_notifications
                 .unwrap_or(default.enable_api_trigger_admin_notifications),
             enable_developer: service.enable_developer.unwrap_or(default.enable_developer),
+            enable_link_previews: service
+                .enable_link_previews
+                .unwrap_or(default.enable_link_previews),
+            allowed_untrusted_internal_connections: service
+                .allowed_untrusted_internal_connections
+                .unwrap_or(default.allowed_untrusted_internal_connections),
+            enable_insecure_outgoing_connections: service
+                .enable_insecure_outgoing_connections
+                .unwrap_or(default.enable_insecure_outgoing_connections),
             enable_sign_up_with_email: email_settings
                 .enable_sign_up_with_email
                 .unwrap_or(default.enable_sign_up_with_email),
@@ -2765,6 +2804,12 @@ struct ServiceSettingsDocument {
     enable_api_trigger_admin_notifications: Option<bool>,
     #[serde(rename = "EnableDeveloper")]
     enable_developer: Option<bool>,
+    #[serde(rename = "EnableLinkPreviews")]
+    enable_link_previews: Option<bool>,
+    #[serde(rename = "AllowedUntrustedInternalConnections")]
+    allowed_untrusted_internal_connections: Option<String>,
+    #[serde(rename = "EnableInsecureOutgoingConnections")]
+    enable_insecure_outgoing_connections: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -3675,8 +3720,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 88,
-            "the fixture covers {keys} settings and Config reads 88 from the document. \
+            keys, 91,
+            "the fixture covers {keys} settings and Config reads 91 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3703,6 +3748,9 @@ mod go_parity {
                 "SessionLengthSSOInHours": 23,
                 "EnableAPITriggerAdminNotifications": true,
                 "EnableDeveloper": true,
+                "EnableLinkPreviews": false,
+                "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
+                "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
@@ -3731,6 +3779,12 @@ mod go_parity {
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_developer);
+        assert!(!config.enable_link_previews);
+        assert_eq!(
+            config.allowed_untrusted_internal_connections,
+            "10.0.0.0/8 localhost"
+        );
+        assert!(config.enable_insecure_outgoing_connections);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
         assert!(!config.post_priority);

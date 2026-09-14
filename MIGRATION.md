@@ -13237,3 +13237,26 @@ forwarded whole: the marketplace installs need the plugin host.
 | api | `crates/mm-api/src/system.rs` — `complete_onboarding`; the `POST` joined the onboarding route in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/onboarding_complete.rs` — 1, both rows read back per server | DONE |
 | mutation | `scripts/mutations/onboarding-complete.plan` — 7 run, 5 caught, 2 controls survived | DONE |
+## `GET /api/v4/redirect_location`, and the outbound-connection guard (2026-09-14)
+
+Route count **491 of 764**. `getRedirectLocation`: `EnableLinkPreviews` off is
+`{"location":""}` before the parameter; a missing `url` the 400; otherwise the hour-long cache,
+else one `HEAD` with redirects not followed — a transport error or a `Location` over 2100
+bytes cached as `""`, anything else cached and returned; `MapToJSON`, no newline. The `HEAD`
+goes through the new `mm_app::http_guard`, the port of `shared/httpservice`: thirty reserved
+ranges (Go's `IsReservedIP`, oracle in `fixtures/behaviour_httpservice.json`), the machine's
+own addresses (`if-addrs`, a new dependency), and `AllowedUntrustedInternalConnections` as
+verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the three settings.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/behaviour_httpservice.go` → `fixtures/behaviour_httpservice.json` — 92 addresses over every range edge and the IPv4-mapped forms | DONE |
+| app | `crates/mm-app/src/http_guard.rs` — `is_reserved_ip`, `is_own_ip`, `check_internal_ip`, `GuardedClient::head_without_redirects` (3 s connect, 30 s request) | DONE |
+| config | `enable_link_previews`, `allowed_untrusted_internal_connections`, `enable_insecure_outgoing_connections`; fixture reprojected (90 keys) | DONE |
+| api | `crates/mm-api/src/redirect_location.rs` — the route and its 10,000-entry cache; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/redirect_location.rs` — 1; every reachable address is a refusal on the stack, so the accept path rests on the guard's unit tests | DONE |
+| mutation | `scripts/mutations/redirect-location.plan` — 7 run, 5 caught, 2 controls survived (the guard mutant under the unit suite, see the plan header) | DONE |
+
+- **Regenerating the fixtures drifts three unrelated files on this machine** — a random
+  multipart boundary in `behaviour_filestore.json` and a missing tz database for
+  `america/new_york` in the two scheduled-post files. Reverted, not committed.

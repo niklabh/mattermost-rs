@@ -19,6 +19,8 @@ chrono.workspace = true
 # The hub holds one bounded `mpsc` queue per live websocket connection; the queue *is* the port
 # of Go's `wc.send`, including that a full one is a disconnect rather than backpressure.
 tokio = { workspace = true }
+if-addrs.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 
 # Password hashing — see the workspace manifest for why each is here.
 pbkdf2.workspace = true

@@ -1,0 +1,372 @@
+{
+  "is_reserved_ip": [
+    {
+      "ip": "10.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "10.255.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "11.0.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "172.16.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "172.31.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "172.32.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "172.15.255.255",
+      "reserved": false
+    },
+    {
+      "ip": "192.168.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "192.168.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "192.169.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "127.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "127.255.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "128.0.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "127.0.0.1",
+      "reserved": true
+    },
+    {
+      "ip": "0.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "0.255.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "1.0.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "169.254.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "169.254.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "169.255.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "192.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "192.0.0.255",
+      "reserved": true
+    },
+    {
+      "ip": "192.0.1.0",
+      "reserved": false
+    },
+    {
+      "ip": "192.0.2.0",
+      "reserved": true
+    },
+    {
+      "ip": "192.0.2.255",
+      "reserved": true
+    },
+    {
+      "ip": "192.0.3.0",
+      "reserved": false
+    },
+    {
+      "ip": "198.51.100.0",
+      "reserved": true
+    },
+    {
+      "ip": "198.51.100.255",
+      "reserved": true
+    },
+    {
+      "ip": "198.51.101.0",
+      "reserved": false
+    },
+    {
+      "ip": "203.0.113.0",
+      "reserved": true
+    },
+    {
+      "ip": "203.0.113.255",
+      "reserved": true
+    },
+    {
+      "ip": "203.0.114.0",
+      "reserved": false
+    },
+    {
+      "ip": "192.88.99.0",
+      "reserved": true
+    },
+    {
+      "ip": "192.88.99.255",
+      "reserved": true
+    },
+    {
+      "ip": "192.88.100.0",
+      "reserved": false
+    },
+    {
+      "ip": "198.18.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "198.19.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "198.20.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "198.17.255.255",
+      "reserved": false
+    },
+    {
+      "ip": "224.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "239.255.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "240.0.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "255.255.255.254",
+      "reserved": true
+    },
+    {
+      "ip": "255.255.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "100.64.0.0",
+      "reserved": true
+    },
+    {
+      "ip": "100.127.255.255",
+      "reserved": true
+    },
+    {
+      "ip": "100.128.0.0",
+      "reserved": false
+    },
+    {
+      "ip": "100.63.255.255",
+      "reserved": false
+    },
+    {
+      "ip": "8.8.8.8",
+      "reserved": false
+    },
+    {
+      "ip": "1.1.1.1",
+      "reserved": false
+    },
+    {
+      "ip": "93.184.216.34",
+      "reserved": false
+    },
+    {
+      "ip": "151.101.1.69",
+      "reserved": false
+    },
+    {
+      "ip": "::",
+      "reserved": true
+    },
+    {
+      "ip": "::1",
+      "reserved": true
+    },
+    {
+      "ip": "::2",
+      "reserved": false
+    },
+    {
+      "ip": "100::",
+      "reserved": true
+    },
+    {
+      "ip": "100::ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "100:0:0:1::",
+      "reserved": false
+    },
+    {
+      "ip": "2001::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2001:200::",
+      "reserved": false
+    },
+    {
+      "ip": "2001:2::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:2:0:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2001:2:1::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:db8::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2001:db9::",
+      "reserved": false
+    },
+    {
+      "ip": "2001:10::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:1f:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2001:20::",
+      "reserved": true
+    },
+    {
+      "ip": "2001:2f:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2001:30::",
+      "reserved": true
+    },
+    {
+      "ip": "fc00::",
+      "reserved": true
+    },
+    {
+      "ip": "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "fe00::",
+      "reserved": false
+    },
+    {
+      "ip": "fe80::",
+      "reserved": true
+    },
+    {
+      "ip": "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "fec0::",
+      "reserved": false
+    },
+    {
+      "ip": "ff00::",
+      "reserved": true
+    },
+    {
+      "ip": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2002::",
+      "reserved": true
+    },
+    {
+      "ip": "2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "2003::",
+      "reserved": false
+    },
+    {
+      "ip": "64:ff9b::",
+      "reserved": true
+    },
+    {
+      "ip": "64:ff9b::ffff:ffff",
+      "reserved": true
+    },
+    {
+      "ip": "64:ff9b::1:0:0",
+      "reserved": false
+    },
+    {
+      "ip": "2606:4700:4700::1111",
+      "reserved": false
+    },
+    {
+      "ip": "2a00:1450:4001:80e::200e",
+      "reserved": false
+    },
+    {
+      "ip": "::ffff:10.0.0.1",
+      "reserved": true
+    },
+    {
+      "ip": "::ffff:8.8.8.8",
+      "reserved": false
+    },
+    {
+      "ip": "::ffff:127.0.0.1",
+      "reserved": true
+    },
+    {
+      "ip": "::ffff:192.168.1.1",
+      "reserved": true
+    }
+  ]
+}
