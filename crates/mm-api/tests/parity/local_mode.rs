@@ -290,17 +290,20 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
     let go = go_socket().expect("present");
     let rust = rust_socket().expect("present");
 
-    let (go_status, _, go_body) = over_socket(&go, "GET", "/api/v4/users/me").await;
-    let (rust_status, rust_headers, rust_body) =
-        over_socket(&rust, "GET", "/api/v4/users/me").await;
+    // `GET /api/v4/plugins` (plugin_local.go) is not registered on this router — the plugin
+    // families are unported — so it falls to the socket fallback. `/users/me` used to be the
+    // example here and no longer is: `user_local.go`'s `{user_id}` catches `me` (a 400 about
+    // `user_id`), so it is now served rather than forwarded.
+    let (go_status, _, go_body) = over_socket(&go, "GET", "/api/v4/plugins").await;
+    let (rust_status, rust_headers, rust_body) = over_socket(&rust, "GET", "/api/v4/plugins").await;
 
-    assert_eq!(go_status, 400);
-    assert_eq!(rust_status, 400);
+    assert_eq!(go_status, 200);
+    assert_eq!(rust_status, 200);
     assert!(
         rust_headers.get("x-mmrs-served-by").is_none(),
         "a forwarded response carries Go's headers, not our cutover marker"
     );
-    assert_forwarded_body_is_gos(&go_body, &rust_body, "/api/v4/users/me");
+    assert_forwarded_body_is_gos(&go_body, &rust_body, "/api/v4/plugins");
 }
 
 /// A forwarded **POST with a body** reaches Go intact.
