@@ -26,6 +26,7 @@ pub mod connected_workspaces;
 pub mod custom_profile_attributes;
 pub mod data_retention;
 pub mod drafts;
+pub mod email_test;
 pub mod emoji;
 pub mod error;
 /// The four export routes and the two import ones.
@@ -2473,6 +2474,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/email/test")` (api4/system.go) — the console's test
+        // email, served up to the send.
+        .route(
+            "/api/v4/email/test",
+            partially_migrated(post(email_test::test_email)),
         )
         // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
         // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
