@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE teams SET lastteamiconupdate = $2, updateat = $2 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c47f06dfb93aa7718b87e3afc1399c0d6f4ff37d81d6706fdc2a663e6c03a30"
+}

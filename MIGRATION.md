@@ -12839,3 +12839,22 @@ asks for permissions; the three pure hooks wrap a ready future.
 The persistent notification on create (`forEachPersistentNotificationPost`, the row, the job), or
 the outgoing-webhook arm (`handleWebhookEvents`). Both are create shapes that still forward.
 
+## `DELETE /api/v4/teams/{team_id}/image` (2026-09-14)
+
+Route count **465 of 764**. `removeTeamIcon` zeroes `LastTeamIconUpdate` — and `UpdateAt`, in the
+same `UPDATE` — publishes `update_team` with the sanitised team as fetched, and answers
+`{"status":"OK"}`; the file stays on disk and the read, which consults the file and not the
+timestamp, still serves it. The `POST` that sets an icon (a multipart upload re-encoded as PNG)
+still forwards.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/team_store.rs` — `update_last_team_icon_update` | DONE |
+| app | `crates/mm-app/src/team.rs` — `remove_team_icon` | DONE |
+| api | `crates/mm-api/src/teams.rs` — `remove_team_icon`, the `DELETE` beside the icon `GET` | DONE |
+| test | `crates/mm-api/tests/parity/team_icon_writes.rs` — 2 | DONE |
+| mutation | `scripts/mutations/team-icon-remove.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **Both errors are 400s**, the unknown team included: `RemoveTeamIcon` wraps `GetTeam`'s 404.
+- **The event's `update_at` is the old one** while the row holds `0`: Go zeroes only the icon
+  timestamp on the struct it publishes.

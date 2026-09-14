@@ -1819,9 +1819,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/image/default",
             partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
         )
+        // `BaseRoutes.Team.Handle("/image")`: the GET reads the icon, the DELETE removes it, and
+        // the POST (a multipart upload re-encoded as PNG) still goes to Go.
         .route(
             "/api/v4/teams/{team_id}/image",
-            partially_migrated_with_ids(&state, get(images::get_team_icon)),
+            partially_migrated_with_ids(
+                &state,
+                get(images::get_team_icon).delete(teams::remove_team_icon),
+            ),
         )
         // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
         // `APIHandlerTrustRequester` — **unauthenticated** — and the DELETE is session-required

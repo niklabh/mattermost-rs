@@ -1,0 +1,15 @@
+# Mutation plan for `DELETE /api/v4/teams/{team_id}/image` — removeTeamIcon.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-icon-remove.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-updateat-untouched	crates/mm-store/src/team_store.rs	            "UPDATE teams SET lastteamiconupdate = $2, updateat = $2 WHERE id = $1",	            "UPDATE teams SET lastteamiconupdate = $2, updateat = updateat + ($2::bigint - $2::bigint) WHERE id = $1",	api	team_icon_writes
+store-icon-untouched	crates/mm-store/src/team_store.rs	            "UPDATE teams SET lastteamiconupdate = $2, updateat = $2 WHERE id = $1",	            "UPDATE teams SET updateat = $2 WHERE id = $1 AND $2::bigint >= 0",	api	team_icon_writes
+app-lookup-error-is-404	crates/mm-app/src/team.rs	                "api.team.remove_team_icon.get_team.app_error",\n                None,\n                String::new(),\n                400,	                "api.team.remove_team_icon.get_team.app_error",\n                None,\n                String::new(),\n                404,	api	team_icon_writes
+app-event-carries-old-icon-time	crates/mm-app/src/team.rs	        team.last_team_icon_update = 0;\n\n        self.send_team_event(	        let _ = &mut team.last_team_icon_update;\n\n        self.send_team_event(	api	team_icon_writes
+app-no-event	crates/mm-app/src/team.rs	        self.send_team_event(\n            &team,\n            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,\n        )\n        .await\n    }\n\n    /// Port of `app.App.sendTeamEvent` (app/team.go).	        let _ = (&team, mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM);\n        Ok(())\n    }\n\n    /// Port of `app.App.sendTeamEvent` (app/team.go).	api	team_icon_writes
+api-permission-skipped	crates/mm-api/src/teams.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_TEAM],\n        ))\n        .into_response();\n    }\n\n    match state.app.remove_team_icon(&team_id).await {	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)\n        .await\n        && false\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_TEAM],\n        ))\n        .into_response();\n    }\n\n    match state.app.remove_team_icon(&team_id).await {	api	team_icon_writes
+control-annotate-team	crates/mm-app/src/team.rs	        team.last_team_icon_update = 0;\n\n        self.send_team_event(	        team.last_team_icon_update = 0_i64;\n\n        self.send_team_event(	api	team_icon_writes
+control-reorder-set	crates/mm-store/src/team_store.rs	            "UPDATE teams SET lastteamiconupdate = $2, updateat = $2 WHERE id = $1",	            "UPDATE teams SET updateat = $2, lastteamiconupdate = $2 WHERE id = $1",	api	team_icon_writes

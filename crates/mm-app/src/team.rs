@@ -1924,6 +1924,51 @@ impl App {
         Ok(())
     }
 
+    /// Port of `app.App.RemoveTeamIcon` (app/team.go:2421) — `DELETE /api/v4/teams/{id}/image`.
+    ///
+    /// Nothing is deleted from the file store, and `GetTeamIcon` reads the file rather than the
+    /// timestamp — so the icon is still served after this; the client learns it is gone from the
+    /// team's `LastTeamIconUpdate`, now `0`. Both errors are **400s**, the team lookup's
+    /// included (`api.team.remove_team_icon.get_team.app_error` wraps `GetTeam`'s 404). The
+    /// `update_team` event carries the team **as fetched** with only `LastTeamIconUpdate`
+    /// zeroed — so its `update_at` is the pre-removal value while the row now holds `0`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    pub async fn remove_team_icon(&self, team_id: &str) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await.map_err(|err| {
+            tracing::debug!(error = %err, "RemoveTeamIcon: team lookup failed");
+            AppError::boxed(
+                "RemoveTeamIcon",
+                "api.team.remove_team_icon.get_team.app_error",
+                None,
+                String::new(),
+                400,
+            )
+        })?;
+
+        self.store()
+            .team()
+            .update_last_team_icon_update(team_id, 0)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "RemoveTeamIcon: the timestamp update failed");
+                AppError::boxed(
+                    "RemoveTeamIcon",
+                    "api.team.team_icon.update.app_error",
+                    None,
+                    String::new(),
+                    400,
+                )
+            })?;
+
+        team.last_team_icon_update = 0;
+
+        self.send_team_event(
+            &team,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await
+    }
+
     /// Port of `app.App.sendTeamEvent` (app/team.go).
     ///
     /// **The team is sanitised before it goes on the wire** — `Team.Sanitize` clears `Email` and

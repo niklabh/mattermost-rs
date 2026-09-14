@@ -148,6 +148,7 @@ mod parity {
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
+    pub mod team_icon_writes;
     pub mod team_member_writes;
     pub mod team_members_route;
     pub mod team_name_members;
