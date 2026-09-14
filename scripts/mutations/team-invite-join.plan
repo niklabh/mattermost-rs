@@ -1,0 +1,15 @@
+# Mutation plan for `POST /api/v4/teams/members/invite` — addUserToTeamFromInvite.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-invite-join.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# Not mutated: the guest 403 (a guest session needs a licence this stack's Go never loads).
+# The last two lines are the no-op controls and must SURVIVE.
+
+token-not-forwarded	crates/mm-api/src/team_member_writes.rs	    if !token.is_empty() {\n        tracing::Span::current().record("forwarded", true);	    if !token.is_empty() && invite_id.is_empty() {\n        tracing::Span::current().record("forwarded", true);	api	team_invite_join
+missing-parameter-tolerated	crates/mm-api/src/team_member_writes.rs	    if invite_id.is_empty() {\n        return ApiError::from(AppError::new(\n            "addTeamMember",	    if invite_id.is_empty() && !token.is_empty() {\n        return ApiError::from(AppError::new(\n            "addTeamMember",	api	team_invite_join
+group-constraint-ignored	crates/mm-app/src/team_member.rs	        if team.is_group_constrained() {\n            return Err(AppError::boxed(\n                "AddUserToTeamByInviteId",	        if team.is_group_constrained() && invite_id.is_empty() {\n            return Err(AppError::boxed(\n                "AddUserToTeamByInviteId",	api	team_invite_join
+constraint-status-404	crates/mm-app/src/team_member.rs	                "app.team.invite_id.group_constrained.error",\n                None,\n                String::new(),\n                403,	                "app.team.invite_id.group_constrained.error",\n                None,\n                String::new(),\n                404,	api	team_invite_join
+created-is-200	crates/mm-api/src/team_member_writes.rs	        Ok((_team, member)) => encoded(StatusCode::CREATED, &member, "addUserToTeamFromInvite"),	        Ok((_team, member)) => encoded(StatusCode::OK, &member, "addUserToTeamFromInvite"),	api	team_invite_join
+control-annotate-query	crates/mm-api/src/team_member_writes.rs	    let token = crate::channels::query_first(query.as_deref(), "token").unwrap_or_default();	    let token: String = crate::channels::query_first(query.as_deref(), "token").unwrap_or_default();	api	team_invite_join
+control-annotate-team	crates/mm-app/src/team_member.rs	        let team = self.get_team_by_invite_id(invite_id).await?;\n\n        if team.is_group_constrained() {	        let team: Team = self.get_team_by_invite_id(invite_id).await?;\n\n        if team.is_group_constrained() {	api	team_invite_join

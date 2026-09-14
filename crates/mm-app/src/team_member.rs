@@ -473,6 +473,41 @@ impl App {
         Ok((team, member))
     }
 
+    /// Port of `app.App.AddUserToTeamByInviteId` (app/team.go:703), behind
+    /// `AddTeamMemberByInviteId` (:1205) — `POST /api/v4/teams/members/invite?invite_id=`.
+    ///
+    /// The team is found by its invite id (both misses and failures carry
+    /// `app.team.get_by_invite_id.finding.app_error`, 404 and 500), a group-constrained team is a
+    /// 403 before the user is even read, the user's misses are `MissingAccountError`, and the
+    /// join is `JoinUserToTeam` with an **empty requestor** — the user brought themself. Go
+    /// reads the team and the user concurrently; the observable order is the same.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    pub async fn add_user_to_team_by_invite_id(
+        &self,
+        invite_id: &str,
+        user_id: &str,
+    ) -> AppResult<(Team, TeamMember)> {
+        let team = self.get_team_by_invite_id(invite_id).await?;
+
+        if team.is_group_constrained() {
+            return Err(AppError::boxed(
+                "AddUserToTeamByInviteId",
+                "app.team.invite_id.group_constrained.error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        let user = self.get_user(user_id).await.map_err(|mut err| {
+            err.where_ = "AddUserToTeamByInviteId".to_owned();
+            err
+        })?;
+
+        let member = self.join_user_to_team(&team, &user, "").await?;
+        Ok((team, member))
+    }
+
     /// Port of `app.App.JoinUserToTeam` (team.go:754) wrapped around
     /// `TeamService.JoinUserToTeam` (app/teams/teams.go:171).
     ///

@@ -1345,6 +1345,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/search",
             partially_migrated(post(teams::search_teams)),
         )
+        // `BaseRoutes.Teams.Handle("/members/invite")` (api4/team.go:75). Two static segments
+        // under `/teams/`, like `/invites/email` below.
+        .route(
+            "/api/v4/teams/members/invite",
+            partially_migrated(post(team_member_writes::add_user_to_team_from_invite)),
+        )
         // `BaseRoutes.Teams.Handle("/invites/email")` (api4/team.go:74). Two static segments
         // under `/teams/`, so no overlap with `{team_id}` — `invites` would have matched the
         // id class, but the path is one segment longer than `{team_id}` and matches nothing

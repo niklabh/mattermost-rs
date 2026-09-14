@@ -467,6 +467,64 @@ pub async fn add_team_member(
     encoded(StatusCode::CREATED, &created, "addTeamMember")
 }
 
+/// Port of `addUserToTeamFromInvite` (api4/team.go:1091) — `POST /api/v4/teams/members/invite`.
+///
+/// Two ways in, decided by the query string in this order: `?token=` (an email or guest
+/// invitation token — `AddTeamMemberByToken`, which reads the `Tokens` table and may also add
+/// the guest to channels; **forwarded**) and `?invite_id=` (the team's invite id, served). With
+/// both, the token wins. With neither, the 400 `api.team.add_user_to_team.missing_parameter.app_error`
+/// — whose `where` is `addTeamMember`, copied from the sibling route.
+///
+/// A guest session may not use an invite id: 403 `api.team.add_user_to_team_from_invite.guest.app_error`,
+/// before any lookup. The success is a **201** with the member, `json.NewEncoder`-written.
+#[tracing::instrument(skip_all)]
+pub async fn add_user_to_team_from_invite(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+    let token = crate::channels::query_first(query.as_deref(), "token").unwrap_or_default();
+    let invite_id = crate::channels::query_first(query.as_deref(), "invite_id").unwrap_or_default();
+
+    if !token.is_empty() {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing an invitation-token join to Go");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+
+    if invite_id.is_empty() {
+        return ApiError::from(AppError::new(
+            "addTeamMember",
+            "api.team.add_user_to_team.missing_parameter.app_error",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    }
+
+    if session.0.is_guest() {
+        return ApiError::from(AppError::new(
+            "addUserToTeamFromInvite",
+            "api.team.add_user_to_team_from_invite.guest.app_error",
+            None,
+            String::new(),
+            403,
+        ))
+        .into_response();
+    }
+
+    match state
+        .app
+        .add_user_to_team_by_invite_id(&invite_id, &session.0.user_id)
+        .await
+    {
+        Ok((_team, member)) => encoded(StatusCode::CREATED, &member, "addUserToTeamFromInvite"),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
 /// Port of `addTeamMembers` (api4/team.go:1131) —
 /// `POST /api/v4/teams/{team_id}/members/batch`.
 ///

@@ -12859,3 +12859,22 @@ it may `join_public_teams`) — and every refusal is the one 404 `app.post.get.a
   layers (the permission check and `has_joined_team`), and removal from a team also leaves its
   channels, so both flags read `false` once the team is open enough to describe the post.
 - **The body is `json.Marshal` written directly**: no trailing newline, unlike the post reads.
+
+## `POST /api/v4/teams/members/invite` by invite id (2026-09-14)
+
+Route count **465 of 764**. `addUserToTeamFromInvite` with `?invite_id=` is served: the team by
+its invite id, a group-constrained team refused, the caller looked up, and `JoinUserToTeam` with
+an empty requestor — the join the served `POST /teams/{id}/members` already makes, with its
+recorded gaps ([D-243]: no "joined the team" post). `?token=` — `AddTeamMemberByToken`, the
+`Tokens` table and the guest channel adds — is forwarded and wins over an invite id beside it.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/team_member.rs` — `add_user_to_team_by_invite_id` | DONE |
+| api | `crates/mm-api/src/team_member_writes.rs` — `add_user_to_team_from_invite`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/team_invite_join.rs` — 4 | DONE |
+| mutation | `scripts/mutations/team-invite-join.plan` — 7 run, 5 caught, 2 controls survived | DONE |
+
+- **The missing-parameter 400 says `where: addTeamMember`** — copied from the sibling route in
+  Go, not on the wire.
+- **The guest 403 is unmeasured**: a guest session needs a licence this stack's Go never loads.
