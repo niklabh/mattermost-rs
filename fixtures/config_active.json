@@ -92,6 +92,7 @@
     "EnableCommands": true,
     "EnableCustomEmoji": true,
     "EnableCustomGroups": true,
+    "EnableDeveloper": false,
     "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
     "EnableMultifactorAuthentication": false,

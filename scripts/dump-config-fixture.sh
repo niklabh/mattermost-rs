@@ -83,6 +83,8 @@ MODELLED = {
         "EnableAPIUserDeletion",
         # The first gate on POST /api/v4/users/trigger-notify-admin-posts.
         "EnableAPITriggerAdminNotifications",
+        # Whether POST /api/v4/logs needs a session and forces a non-admin to debug.
+        "EnableDeveloper",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so

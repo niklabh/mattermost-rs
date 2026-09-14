@@ -218,6 +218,11 @@ pub struct Config {
     /// which is forwarded.
     pub enable_api_trigger_admin_notifications: bool,
 
+    /// `ServiceSettings.EnableDeveloper` (config.go:547). Go default **`false`**. Read by
+    /// `postLog`: off, a client log line needs a session and a non-admin's is forced to debug;
+    /// on, anyone may log at any level.
+    pub enable_developer: bool,
+
     /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
     ///
     /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
@@ -1208,6 +1213,7 @@ impl Default for Config {
             // config.go:894 — `new(false)`.
             enable_api_user_deletion: false,
             enable_api_trigger_admin_notifications: false,
+            enable_developer: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
             // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
@@ -1486,6 +1492,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEAPITRIGGERADMINNOTIFICATIONS",
                 default.enable_api_trigger_admin_notifications,
+            ),
+            enable_developer: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEDEVELOPER",
+                default.enable_developer,
             ),
             enable_sign_up_with_email: lookup_bool(
                 lookup,
@@ -2115,6 +2126,7 @@ impl Config {
             enable_api_trigger_admin_notifications: service
                 .enable_api_trigger_admin_notifications
                 .unwrap_or(default.enable_api_trigger_admin_notifications),
+            enable_developer: service.enable_developer.unwrap_or(default.enable_developer),
             enable_sign_up_with_email: email_settings
                 .enable_sign_up_with_email
                 .unwrap_or(default.enable_sign_up_with_email),
@@ -2751,6 +2763,8 @@ struct ServiceSettingsDocument {
     enable_api_user_deletion: Option<bool>,
     #[serde(rename = "EnableAPITriggerAdminNotifications")]
     enable_api_trigger_admin_notifications: Option<bool>,
+    #[serde(rename = "EnableDeveloper")]
+    enable_developer: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -3661,8 +3675,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 87,
-            "the fixture covers {keys} settings and Config reads 87 from the document. \
+            keys, 88,
+            "the fixture covers {keys} settings and Config reads 88 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3688,6 +3702,7 @@ mod go_parity {
                 "SessionLengthWebInHours": 19,
                 "SessionLengthSSOInHours": 23,
                 "EnableAPITriggerAdminNotifications": true,
+                "EnableDeveloper": true,
                 "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
@@ -3715,6 +3730,7 @@ mod go_parity {
 
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);
+        assert!(config.enable_developer);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
         assert!(!config.post_priority);

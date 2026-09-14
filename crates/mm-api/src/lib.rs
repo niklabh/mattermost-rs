@@ -18,6 +18,7 @@ pub mod channel_member_writes;
 pub mod channel_move;
 pub mod channel_writes;
 pub mod channels;
+pub mod client_log;
 pub mod cloud;
 pub mod commands;
 pub mod common_teams;
@@ -2507,6 +2508,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/email/test",
             partially_migrated(post(email_test::test_email)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
+        // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.
+        .route(
+            "/api/v4/logs",
+            partially_migrated(post(client_log::post_log)),
         )
         // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
         // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
