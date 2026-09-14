@@ -109,7 +109,7 @@ pub fn local_session() -> AuthenticatedSession {
 /// The local twin of [`crate::partially_migrated`], and it is just as non-optional: axum matches
 /// the path before the method, so registering `POST /api/v4/server_busy` without this would turn
 /// the `GET` beside it into a 405 from our router instead of Go's answer.
-fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
+pub(crate) fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
     methods.fallback(forward_to_go_local)
 }
 
@@ -157,7 +157,7 @@ async fn local_mux_segments_or_forward(
 
 /// [`partially_migrated`], plus the segment charset check, for a local route with path
 /// parameters.
-fn partially_migrated_with_ids(
+pub(crate) fn partially_migrated_with_ids(
     state: &AppState,
     methods: MethodRouter<AppState>,
 ) -> MethodRouter<AppState> {
@@ -172,6 +172,11 @@ fn partially_migrated_with_ids(
 /// `go_socket` is the Go server's `ServiceSettings.LocalModeSocketLocation` — the forward target,
 /// not our own listening socket. The two must be different paths; [`crate::main`] refuses to
 /// start if they are not.
+///
+/// **Families live in their own modules.** A `*_local.go` file ports as `crate::local_<family>`,
+/// exposing `pub(crate) fn routes(state: &AppState) -> Router<AppState>` built from the same
+/// [`partially_migrated`] / [`partially_migrated_with_ids`] helpers, and is `.merge`d below —
+/// so four families landing at once touch four lines of this function rather than one region.
 pub fn router(state: AppState, go_socket: PathBuf) -> Router {
     Router::new()
         // `api.BaseRoutes.System.Handle("/ping", api.APILocal(getSystemPing))`

@@ -6,6 +6,8 @@
 //! `dead_code` allowance.
 #![allow(dead_code)]
 
+pub mod local_socket;
+
 use std::time::Duration;
 
 /// The two servers under comparison, **baked in at compile time** from the stack this checkout
