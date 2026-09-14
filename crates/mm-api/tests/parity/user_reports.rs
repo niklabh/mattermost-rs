@@ -371,6 +371,8 @@ const FIXTURE_USERS: i64 = 8;
 
 #[tokio::test]
 async fn the_scoped_page_is_this_fixture_and_matches_go() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -416,6 +418,8 @@ async fn the_scoped_page_is_this_fixture_and_matches_go() {
 /// An empty page is `[]`, not `null` — `make([]*model.UserReport, 0)` is non-nil.
 #[tokio::test]
 async fn an_empty_report_is_an_empty_array() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -440,6 +444,8 @@ async fn an_empty_report_is_an_empty_array() {
 /// All seven sort columns, both directions.
 #[tokio::test]
 async fn every_sort_column_and_direction_matches() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -488,6 +494,8 @@ async fn every_sort_column_and_direction_matches() {
 /// The keyset cursor, walked forwards and backwards on every sort column.
 #[tokio::test]
 async fn the_cursor_walks_the_same_pages_in_both_directions() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -548,6 +556,8 @@ async fn the_cursor_walks_the_same_pages_in_both_directions() {
 /// applied it to the wrong direction would return the wrong rows.
 #[tokio::test]
 async fn a_prev_page_with_no_cursor_is_the_tail_in_forward_order() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -574,6 +584,8 @@ async fn a_prev_page_with_no_cursor_is_the_tail_in_forward_order() {
 /// The six filters, each one narrowing to the users the fixture built for it.
 #[tokio::test]
 async fn each_filter_selects_the_users_it_names() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -704,6 +716,8 @@ async fn each_filter_selects_the_users_it_names() {
 /// The three guest filters, which replace the role filter and add a channel-count predicate.
 #[tokio::test]
 async fn the_guest_filters_split_on_the_channel_count() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -756,6 +770,8 @@ async fn the_guest_filters_split_on_the_channel_count() {
 /// `date_range` moves the aggregates and never the rows.
 #[tokio::test]
 async fn the_date_range_narrows_the_post_stats_only() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -870,6 +886,8 @@ async fn the_date_range_narrows_the_post_stats_only() {
 /// The count route reads six of the thirteen query parameters and ignores the rest.
 #[tokio::test]
 async fn the_count_ignores_pagination_sorting_and_the_date_range() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -926,6 +944,8 @@ async fn the_count_ignores_pagination_sorting_and_the_date_range() {
 /// Both routes' 400s, and the order Go checks them in.
 #[tokio::test]
 async fn the_parameter_errors_match_and_keep_their_order() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1017,6 +1037,8 @@ async fn the_parameter_errors_match_and_keep_their_order() {
 /// Unparseable pagination is silently defaulted, never a 400.
 #[tokio::test]
 async fn garbage_pagination_falls_back_to_the_defaults() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1085,6 +1107,8 @@ async fn garbage_pagination_falls_back_to_the_defaults() {
 /// page, which is the plausible wrong answer this test exists to refuse.
 #[tokio::test]
 async fn a_non_numeric_cursor_on_create_at_fails_the_query() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1113,6 +1137,8 @@ async fn a_non_numeric_cursor_on_create_at_fails_the_query() {
 /// `sysconsole_read_user_management_users`, which an ordinary user does not hold.
 #[tokio::test]
 async fn a_plain_caller_is_refused_by_both_routes() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1139,6 +1165,8 @@ async fn a_plain_caller_is_refused_by_both_routes() {
 /// An unauthenticated request is a 401 from the session middleware, on both routes.
 #[tokio::test]
 async fn an_anonymous_caller_is_unauthenticated() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1171,6 +1199,8 @@ async fn an_anonymous_caller_is_unauthenticated() {
 /// other assertion in this suite, whose users are all human.
 #[tokio::test]
 async fn a_bot_is_in_neither_the_report_nor_the_count() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1212,6 +1242,8 @@ async fn a_bot_is_in_neither_the_report_nor_the_count() {
 /// `ReportingMaxPageSize` is **inclusive** — 100 is served and 101 is refused.
 #[tokio::test]
 async fn the_page_size_bound_is_inclusive() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

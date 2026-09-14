@@ -113,6 +113,8 @@ async fn both(
 /// Every route, as an admin: fifteen 501s with the same error id.
 #[tokio::test]
 async fn every_route_is_the_same_licence_refusal() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -214,6 +216,8 @@ async fn every_route_is_the_same_licence_refusal() {
 /// take one — because Go calls `RequirePolicyId` and never looks at `c.Err`.
 #[tokio::test]
 async fn a_malformed_policy_id_is_a_licence_refusal_and_not_a_400() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -259,6 +263,8 @@ async fn a_malformed_policy_id_is_a_licence_refusal_and_not_a_400() {
 /// two shapes produce two different error ids.
 #[tokio::test]
 async fn a_malformed_body_is_a_400_before_the_licence_is_read() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -311,6 +317,8 @@ async fn a_malformed_body_is_a_400_before_the_licence_is_read() {
 /// and the read and write halves are two different permissions.
 #[tokio::test]
 async fn each_half_needs_its_own_permission() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -419,6 +427,8 @@ async fn each_half_needs_its_own_permission() {
 /// id check is the only live one in the file.
 #[tokio::test]
 async fn the_per_user_routes_are_self_or_manage_system() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -475,6 +485,8 @@ async fn the_per_user_routes_are_self_or_manage_system() {
 /// server does not answer them.
 #[tokio::test]
 async fn the_searches_and_other_methods_are_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

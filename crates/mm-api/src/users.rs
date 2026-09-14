@@ -24,6 +24,7 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true, resolve_me};
 use crate::error::ApiError;
+use crate::system::refuse_when_busy;
 
 /// `model.HeaderEtagServer`.
 const HEADER_ETAG_SERVER: &str = "ETag";
@@ -520,6 +521,10 @@ pub async fn search_users(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `APISessionRequiredDisableWhenBusy`: the busy check precedes the handler.
+    if let Err(err) = refuse_when_busy() {
+        return err.into_response();
+    }
     let (parts, body) = request.into_parts();
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,

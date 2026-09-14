@@ -89,6 +89,8 @@ fn error_id(raw: &str) -> String {
 /// before and after values, not the ids themselves, which cannot match across two teams.
 #[tokio::test]
 async fn closing_a_team_regenerates_the_invite_id_and_reopening_does_not() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -182,6 +184,8 @@ async fn closing_a_team_regenerates_the_invite_id_and_reopening_does_not() {
 /// malformed-body answer, because `StringInterfaceFromJSON` swallows the decode error.
 #[tokio::test]
 async fn every_unusable_privacy_body_is_one_400() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -231,6 +235,8 @@ async fn every_unusable_privacy_body_is_one_400() {
 /// bodies are compared byte for byte after the two teams' own ids are normalised away.
 #[tokio::test]
 async fn the_search_answers_the_same_teams_on_both_servers() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -270,6 +276,8 @@ async fn the_search_answers_the_same_teams_on_both_servers() {
 /// alone leaves a bare array. `total_count` counts the whole match, not the page.
 #[tokio::test]
 async fn the_response_shape_needs_both_pagination_fields() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -344,6 +352,8 @@ async fn the_response_shape_needs_both_pagination_fields() {
 /// - The search itself is narrowed to open teams, so a team this test closes disappears from it.
 #[tokio::test]
 async fn the_public_only_arm_refuses_pagination_and_hides_closed_teams() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -472,6 +482,8 @@ async fn the_public_only_arm_refuses_pagination_and_hides_closed_teams() {
 /// returns the same teams as a body that does not.
 #[tokio::test]
 async fn a_policy_id_in_the_body_is_ignored() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -509,6 +521,8 @@ async fn a_policy_id_in_the_body_is_ignored() {
 /// — Go's decoder leaves the struct zero-valued and the search runs with an empty term.
 #[tokio::test]
 async fn a_malformed_search_body_is_a_400_and_null_is_not() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -556,6 +570,8 @@ async fn a_malformed_search_body_is_a_400_and_null_is_not() {
 /// is an ordinary member of the team they just made.
 #[tokio::test]
 async fn creating_a_team_matches_go_down_to_the_default_channels() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -696,6 +712,8 @@ async fn creating_a_team_matches_go_down_to_the_default_channels() {
 /// switch keys on that.
 #[tokio::test]
 async fn a_duplicate_team_name_is_the_existing_team_400() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -734,6 +752,8 @@ async fn a_duplicate_team_name_is_the_existing_team_400() {
 /// bytes and the status and error id compared.
 #[tokio::test]
 async fn the_create_refusals_agree() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -800,6 +820,8 @@ async fn the_create_refusals_agree() {
 /// normal state of a fresh fixture.
 #[tokio::test]
 async fn a_removal_cascades_the_same_way_on_both_servers() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1078,6 +1100,8 @@ async fn a_removal_cascades_the_same_way_on_both_servers() {
 /// *someone else* is a 403. The leave also posts the other message: "left", not "removed".
 #[tokio::test]
 async fn a_self_removal_needs_no_permission_and_posts_the_other_message() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1282,6 +1306,8 @@ async fn preference_exists(
 /// needs a working SMTP server. The row is all this route looks at.
 #[tokio::test]
 async fn invalidating_email_invites_removes_both_token_types() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1327,6 +1353,8 @@ async fn invalidating_email_invites_removes_both_token_types() {
 /// same id on both servers.
 #[tokio::test]
 async fn invalidating_email_invites_needs_the_permission() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1413,6 +1441,8 @@ async fn invite_token_count(tag: &str) -> Option<i64> {
 /// the fixture teams are shared state and a suite that leaves one archived breaks the next.
 #[tokio::test]
 async fn archiving_a_team_stamps_delete_at_and_nothing_else() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1533,6 +1563,8 @@ async fn archiving_a_team_stamps_delete_at_and_nothing_else() {
 /// `strconv.ParseBool` discards its error, so `?permanent=yes` is *false* and archives the team.
 #[tokio::test]
 async fn permanent_deletion_is_a_401_whose_id_depends_on_the_caller() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -1624,6 +1656,8 @@ async fn permanent_deletion_is_a_401_whose_id_depends_on_the_caller() {
 /// `manage_team` gets a 403 even for `?permanent=true`.
 #[tokio::test]
 async fn archiving_needs_manage_team_before_anything_else() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

@@ -15,7 +15,7 @@
 //! Each server's hub only knows its own connections, so a probe on Go sees Go's publish and a
 //! probe on us sees ours; the request is sent to the server whose probe is being asserted.
 //!
-//! # Every test holds `BUSY_STATE`
+//! # Every test holds `BUSY_STATE` — read guards, and a write guard for the busy test
 //!
 //! One test marks this server busy, and this is the only `DisableWhenBusy` route this server
 //! serves — so every other test in the file would see its 503. The lock is the one
@@ -208,7 +208,7 @@ async fn typing_publishes_one_channel_frame_to_members_and_none_to_the_typist() 
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let _broadcast = BROADCAST_STREAM.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
@@ -244,7 +244,7 @@ async fn an_empty_parent_id_and_the_me_alias() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let _broadcast = BROADCAST_STREAM.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
@@ -272,7 +272,7 @@ async fn typing_as_another_user_needs_manage_system() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let _broadcast = BROADCAST_STREAM.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
@@ -306,7 +306,7 @@ async fn typing_needs_create_post_in_the_channel() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -354,7 +354,7 @@ async fn a_body_that_does_not_decode_is_a_400_before_permissions() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -405,7 +405,7 @@ async fn an_invalid_user_id_is_a_400_and_a_non_mux_segment_is_forwarded() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -467,7 +467,7 @@ async fn a_busy_server_refuses_typing_with_a_503() {
     if !stack_enabled() {
         return;
     }
-    let _busy = BUSY_STATE.lock().await;
+    let _busy = BUSY_STATE.write().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;

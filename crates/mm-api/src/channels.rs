@@ -59,6 +59,7 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
 use crate::proxy;
+use crate::system::refuse_when_busy;
 
 /// `model.Me` (user.go:26) — the literal a client may send instead of its own id.
 pub(crate) const ME: &str = "me";
@@ -356,6 +357,10 @@ pub async fn search_all_channels(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredDisableWhenBusy`: the busy check precedes the handler.
+    if let Err(err) = refuse_when_busy() {
+        return err.into_response();
+    }
     let props = match decode_full_channel_search(request).await {
         Ok(props) => props,
         Err(err) => return err.into_response(),
@@ -607,6 +612,10 @@ pub async fn search_group_channels(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredDisableWhenBusy`: the busy check precedes the handler.
+    if let Err(err) = refuse_when_busy() {
+        return err.into_response();
+    }
     let props = match decode_channel_search(request).await {
         Ok(props) => props,
         Err(err) => return err.into_response(),
@@ -699,6 +708,10 @@ pub async fn search_channels_for_team(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredDisableWhenBusy`: the busy check precedes the handler.
+    if let Err(err) = refuse_when_busy() {
+        return err.into_response();
+    }
     if let Err(err) = require_id(&team_id, "team_id") {
         return err.into_response();
     }

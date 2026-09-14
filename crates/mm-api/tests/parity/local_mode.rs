@@ -262,7 +262,7 @@ async fn the_socket_carries_gos_security_headers() {
         return;
     }
     // It issues a DELETE on both sockets, which is a write to the busy flag.
-    let _guard = BUSY_STATE.lock().await;
+    let _guard = BUSY_STATE.write().await;
     let go = go_socket().expect("present");
     let rust = rust_socket().expect("present");
 
@@ -310,7 +310,7 @@ async fn the_clear_body_is_status_ok_on_both_sockets() {
     if !sockets_enabled() {
         return;
     }
-    let _guard = BUSY_STATE.lock().await;
+    let _guard = BUSY_STATE.write().await;
     let ((go_status, go_body), (rust_status, rust_body)) =
         both("DELETE", "/api/v4/server_busy").await;
 
@@ -391,7 +391,7 @@ async fn the_idle_busy_state_matches_byte_for_byte() {
     if !sockets_enabled() {
         return;
     }
-    let _guard = BUSY_STATE.lock().await;
+    let _guard = BUSY_STATE.write().await;
     let ((go_status, go_body), (rust_status, rust_body)) = both("GET", "/api/v4/server_busy").await;
 
     assert_eq!((go_status, rust_status), (200, 200));
@@ -440,7 +440,7 @@ async fn the_rust_busy_state_is_this_processs_own() {
     if !sockets_enabled() {
         return;
     }
-    let _guard = BUSY_STATE.lock().await;
+    let _guard = BUSY_STATE.write().await;
     let go = go_socket().expect("present");
     let rust = rust_socket().expect("present");
 

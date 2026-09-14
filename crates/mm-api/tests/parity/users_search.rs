@@ -117,6 +117,8 @@ fn names(raw: &[u8]) -> Vec<String> {
 /// The default shape, byte for byte, and username-ordered.
 #[tokio::test]
 async fn a_plain_search_is_byte_identical() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -155,6 +157,8 @@ async fn a_plain_search_is_byte_identical() {
 /// `allow_inactive` is the only thing that admits a deactivated account.
 #[tokio::test]
 async fn allow_inactive_admits_the_deactivated_user() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -185,6 +189,8 @@ async fn allow_inactive_admits_the_deactivated_user() {
 /// `Email` is a searchable column, and a planted address is the only way to prove it.
 #[tokio::test]
 async fn an_email_only_term_matches_for_an_admin() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -216,6 +222,8 @@ async fn an_email_only_term_matches_for_an_admin() {
 /// `team_id` scopes the search to that team's members.
 #[tokio::test]
 async fn the_team_id_scopes_the_search() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -245,6 +253,8 @@ async fn the_team_id_scopes_the_search() {
 /// `limit` caps the result, and its range check runs **after** the permission checks.
 #[tokio::test]
 async fn the_validation_order_is_go_s() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -298,6 +308,8 @@ async fn the_validation_order_is_go_s() {
 /// A body that is not an object, and the `null` that decodes to the zero value.
 #[tokio::test]
 async fn a_non_object_body_is_a_400_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -329,6 +341,8 @@ async fn a_non_object_body_is_a_400_on_both() {
 /// Every field that picks a different store query is handed to Go.
 #[tokio::test]
 async fn the_query_shaping_fields_are_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -375,6 +389,8 @@ async fn the_query_shaping_fields_are_forwarded() {
 /// No session is a 401 on both.
 #[tokio::test]
 async fn no_session_is_a_401_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -393,6 +409,8 @@ async fn no_session_is_a_401_on_both() {
 /// Every other method on this path is Go's.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

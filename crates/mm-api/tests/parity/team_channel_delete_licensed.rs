@@ -84,6 +84,8 @@ async fn clear_policy(pool: &sqlx::PgPool, id: &str) {
 /// read back archived from the oracle.
 #[tokio::test]
 async fn a_team_archive_is_served_on_the_licensed_pair() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -153,6 +155,8 @@ async fn a_team_archive_is_served_on_the_licensed_pair() {
 /// Archive one channel through each licensed server, the same way.
 #[tokio::test]
 async fn a_channel_archive_is_served_on_the_licensed_pair() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -222,6 +226,8 @@ async fn a_channel_archive_is_served_on_the_licensed_pair() {
 /// gate needs Advanced — and match the oracle byte for byte.
 #[tokio::test]
 async fn the_two_team_listings_are_served_and_identical_on_the_licensed_pair() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

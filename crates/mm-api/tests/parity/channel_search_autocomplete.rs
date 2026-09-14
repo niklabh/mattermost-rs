@@ -239,6 +239,8 @@ fn names(body: &[u8]) -> Vec<String> {
 /// The whole route in one assertion, from the caller whose memberships it is about.
 #[tokio::test]
 async fn the_search_list_is_byte_identical() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -274,6 +276,8 @@ async fn the_search_list_is_byte_identical() {
 /// `ChannelMembers` row; the switcher next door needs none for a public channel.
 #[tokio::test]
 async fn a_public_channel_the_caller_never_joined_is_absent() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -306,6 +310,8 @@ async fn a_public_channel_the_caller_never_joined_is_absent() {
 /// name — which is empty — and not under its channel name, which is a pair of ids.
 #[tokio::test]
 async fn a_direct_message_is_listed_under_the_other_users_username() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -352,6 +358,8 @@ async fn a_direct_message_is_listed_under_the_other_users_username() {
 /// A group message belongs to no team, and the team predicate lets it through under any team.
 #[tokio::test]
 async fn a_group_message_answers_under_every_team() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -378,6 +386,8 @@ async fn a_group_message_answers_under_every_team() {
 /// both, which is why they belong in one test.
 #[tokio::test]
 async fn a_joined_channel_in_another_team_is_not_listed_here() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -410,6 +420,8 @@ async fn a_joined_channel_in_another_team_is_not_listed_here() {
 /// answers **200 with an empty list**, where the sibling switcher answers 403.
 #[tokio::test]
 async fn a_team_the_caller_is_not_in_is_an_empty_list_not_a_403() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -447,6 +459,8 @@ async fn a_team_the_caller_is_not_in_is_an_empty_list_not_a_403() {
 /// caller's channels.
 #[tokio::test]
 async fn an_empty_term_lists_the_callers_channels() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -475,6 +489,8 @@ async fn an_empty_term_lists_the_callers_channels() {
 /// The merged list is sorted by lower-cased display name, across both passes.
 #[tokio::test]
 async fn the_two_passes_are_merged_and_sorted_together() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -509,6 +525,8 @@ async fn the_two_passes_are_merged_and_sorted_together() {
 /// `RequireTeamId`: alphanumeric, so the router's charset lets it through, but the wrong length.
 #[tokio::test]
 async fn a_team_id_of_the_wrong_length_is_a_400_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -529,6 +547,8 @@ async fn a_team_id_of_the_wrong_length_is_a_400_on_both() {
 /// Everything but `GET` on this path stays Go's.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -558,6 +578,8 @@ async fn other_methods_are_forwarded() {
 /// An unauthenticated request never reaches the handler.
 #[tokio::test]
 async fn no_session_is_a_401_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -589,6 +611,8 @@ async fn no_session_is_a_401_on_both() {
 /// file, because every other fixture's name and display name say the same words.
 #[tokio::test]
 async fn a_mid_word_display_name_fragment_matches_only_through_the_like_clause() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -611,6 +635,8 @@ async fn a_mid_word_display_name_fragment_matches_only_through_the_like_clause()
 /// prefixes and does not care about adjacency, while no single column holds that string at all.
 #[tokio::test]
 async fn a_reversed_two_word_term_matches_only_through_the_fulltext_clause() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -635,6 +661,8 @@ async fn a_reversed_two_word_term_matches_only_through_the_fulltext_clause() {
 /// built by splitting on whitespace and the padding simply disappears.
 #[tokio::test]
 async fn the_term_is_trimmed_before_it_reaches_the_store() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

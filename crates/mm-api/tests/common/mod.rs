@@ -277,13 +277,19 @@ pub static ROLE_ROWS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new((
 /// there; the emulator was hiding them.
 pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Serialises the tests that touch the busy flag.
+/// Serialises the tests that touch the busy flag against the tests a busy flag would refuse.
 ///
 /// `ServerBusy` is one global per process — that is what it is in Go too — so a test that marks
 /// this server busy and a test that asserts it is idle cannot both run at once. The alternative
 /// was a test that passes alone and fails in the suite, which this project already has enough of.
-/// Held by `local_mode`'s busy tests and by `typing`'s `DisableWhenBusy` test.
-pub static BUSY_STATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+///
+/// A **write** guard is for the tests that set the flag (`local_mode`'s busy tests, `typing`'s and
+/// `busy_gates`'s `DisableWhenBusy` tests). A **read** guard is for every test that calls a
+/// `DisableWhenBusy` route and expects it to answer — six are served: `POST /users/{id}/typing`
+/// and the five searches (`channels/search`, `channels/group/search`, `teams/search`,
+/// `teams/{id}/channels/search`, `users/search`). Readers do not block each other; a writer
+/// waits for them all, so its 503 window never lands in a neighbour.
+pub static BUSY_STATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 /// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
 ///

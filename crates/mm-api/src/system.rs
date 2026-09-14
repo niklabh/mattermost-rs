@@ -590,6 +590,15 @@ static SERVER_BUSY: ServerBusy = ServerBusy::new();
 ///
 /// The flag it reads is this process's own ([D-320]): a busy state set on the Go server is not
 /// visible here and vice versa, which is a property of running two servers and ends when Go does.
+///
+/// # Every handler Go registers this way
+///
+/// Ten, all `POST` (`grep DisableWhenBusy( channels/api4`): `searchPostsInTeam`,
+/// `searchPostsInAllTeams`, `searchAllChannels`, `searchGroupChannels`, `searchChannelsForTeam`,
+/// `searchFilesInTeam`, `searchFilesInAllTeams`, `searchTeams`, `searchUsers` and
+/// `publishUserTyping`. The six served here call this first thing; the four post and file
+/// searches must too when they land — the suite that checks the served ones is
+/// `parity::busy_gates`.
 pub(crate) fn refuse_when_busy() -> Result<(), ApiError> {
     if SERVER_BUSY.state(Utc::now()).busy {
         return Err(ApiError::from(AppError::new(

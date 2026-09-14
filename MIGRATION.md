@@ -12787,3 +12787,20 @@ the forward after the prop was written (`post_create.rs`) is removed.
 
 [D-401] narrowed: the `?silent=true` row is closed.
 
+## The busy gate on the five served searches (2026-09-14)
+
+Route count unchanged at 463 of 764. `POST /channels/search`, `/channels/group/search`,
+`/teams/search`, `/teams/{id}/channels/search` and `/users/search` now refuse with
+`api.context.server_busy.app_error` / 503 while this server is busy, first thing after
+authentication, as `publishUserTyping` already did. `common::BUSY_STATE` became a read-write
+lock: the busy-setting tests take the write side, and the nine suites that call these routes take
+a read guard per test so the 503 window never lands in a neighbour.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/{channels,teams,users}.rs` — `refuse_when_busy()` on five handlers | DONE |
+| test | `crates/mm-api/tests/parity/busy_gates.rs` — 2 | DONE |
+| mutation | `scripts/mutations/busy-gates.plan` — 7 run, 5 caught, 2 controls survived | DONE |
+
+[D-585] closed. The four post and file searches are unserved routes; the gate's doc names them.
+

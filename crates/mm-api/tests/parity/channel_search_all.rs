@@ -286,6 +286,8 @@ fn search(term: &str) -> Vec<u8> {
 /// divergence.
 #[tokio::test]
 async fn the_unfiltered_list_and_its_pages_match_go() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -312,6 +314,8 @@ async fn the_unfiltered_list_and_its_pages_match_go() {
 /// not the length of the list it carries.
 #[tokio::test]
 async fn include_total_count_wraps_the_list_in_an_object() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -355,6 +359,8 @@ async fn include_total_count_wraps_the_list_in_an_object() {
 /// to reach the count query as well as the list query, and the count has to move when they do.
 #[tokio::test]
 async fn the_total_count_follows_the_same_filters_as_the_list() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -398,6 +404,8 @@ async fn the_total_count_follows_the_same_filters_as_the_list() {
 /// none of them.
 #[tokio::test]
 async fn a_plain_user_is_refused_identically() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -420,6 +428,8 @@ async fn a_plain_user_is_refused_identically() {
 /// **both** keys are load-bearing.
 #[tokio::test]
 async fn the_console_search_orders_by_display_name_then_team() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -474,6 +484,8 @@ async fn the_console_search_orders_by_display_name_then_team() {
 /// Every boolean in the body that narrows the result set, one request each.
 #[tokio::test]
 async fn the_console_search_flags_narrow_the_same_way() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -603,6 +615,8 @@ async fn the_console_search_flags_narrow_the_same_way() {
 /// count is the whole match rather than the page.
 #[tokio::test]
 async fn body_pagination_switches_the_response_type() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -670,6 +684,8 @@ async fn body_pagination_switches_the_response_type() {
 /// there is **not** read at all — the body's is.
 #[tokio::test]
 async fn the_query_string_include_deleted_is_ored_with_the_body() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -719,6 +735,8 @@ async fn the_query_string_include_deleted_is_ored_with_the_body() {
 /// The console branch's 403 names **one** permission where `getAllChannels`' names three.
 #[tokio::test]
 async fn the_console_search_refuses_a_plain_user_identically() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -767,6 +785,8 @@ async fn the_console_search_refuses_a_plain_user_identically() {
 /// The three branches of `system_console=false`, which share no code with the console one.
 #[tokio::test]
 async fn the_non_console_branches_match_go() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -865,6 +885,8 @@ async fn the_non_console_branches_match_go() {
 /// The team-scoped branch is gated on `view_team`, and the cross-team one on nothing.
 #[tokio::test]
 async fn the_team_branch_is_gated_and_the_cross_team_branch_is_not() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -905,6 +927,8 @@ async fn the_team_branch_is_gated_and_the_cross_team_branch_is_not() {
 /// `?system_console` defaults to true, is true when empty, and 400s on anything unparseable.
 #[tokio::test]
 async fn the_system_console_flag_has_three_answers() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -953,6 +977,8 @@ async fn the_system_console_flag_has_three_answers() {
 /// Every way the body can fail to decode, on both search routes.
 #[tokio::test]
 async fn a_malformed_body_is_the_same_400_on_both_search_routes() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -1076,6 +1102,8 @@ fn ids_of(body: &[u8]) -> std::collections::BTreeSet<String> {
 /// short circuit.
 #[tokio::test]
 async fn the_group_search_matches_usernames_word_by_word() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -1155,6 +1183,8 @@ async fn the_group_search_matches_usernames_word_by_word() {
 /// the caller's group messages unfiltered.
 #[tokio::test]
 async fn the_empty_term_and_a_space_are_different_requests() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -1195,6 +1225,8 @@ async fn the_empty_term_and_a_space_are_different_requests() {
 /// A caller sees only their **own** group messages: the plain user is not in either fixture GM.
 #[tokio::test]
 async fn the_group_search_is_scoped_to_the_caller() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -1232,6 +1264,8 @@ async fn the_group_search_is_scoped_to_the_caller() {
 /// ever turned on and the route starts existing.
 #[tokio::test]
 async fn the_managed_categories_route_is_a_404_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }
@@ -1306,6 +1340,8 @@ async fn the_managed_categories_route_is_a_404_on_both() {
 ///   is the kind of thing a port "fixes" by accident.
 #[tokio::test]
 async fn the_retention_and_access_control_filters_need_planted_rows() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !common::stack_enabled() {
         return;
     }

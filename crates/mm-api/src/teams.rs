@@ -37,6 +37,7 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
+use crate::system::refuse_when_busy;
 use mm_model::utils::decode_one_from_json;
 use mm_store::team_store::TeamMembersGetOptions;
 
@@ -2269,6 +2270,10 @@ pub async fn search_teams(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredDisableWhenBusy`: the busy check precedes the handler.
+    if let Err(err) = refuse_when_busy() {
+        return err.into_response();
+    }
     match state.app.team_membership_access_control_enabled().await {
         Ok(true) => {
             tracing::Span::current().record("forwarded", true);

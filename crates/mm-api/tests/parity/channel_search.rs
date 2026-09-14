@@ -155,6 +155,8 @@ fn ids(raw: &[u8]) -> Vec<String> {
 /// An admin holds `list_team_channels`, so they search every public channel in the team.
 #[tokio::test]
 async fn a_lister_searches_every_public_channel_and_the_body_matches() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -197,6 +199,8 @@ async fn a_lister_searches_every_public_channel_and_the_body_matches() {
 /// The display-name arm of the search clause, which the name arm cannot answer for.
 #[tokio::test]
 async fn a_term_only_the_display_name_carries_still_matches() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -225,6 +229,8 @@ async fn a_term_only_the_display_name_carries_still_matches() {
 /// `list_team_channels`, so an ordinary member takes the *first* branch.
 #[tokio::test]
 async fn a_private_channel_is_never_a_result() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -258,6 +264,8 @@ async fn a_private_channel_is_never_a_result() {
 /// An empty term returns the whole (ordered, limited) list rather than nothing.
 #[tokio::test]
 async fn an_empty_term_omits_the_search_clause() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -286,6 +294,8 @@ async fn an_empty_term_omits_the_search_clause() {
 /// A term matching nothing is `[]`, not `null`.
 #[tokio::test]
 async fn no_matches_is_an_empty_array() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -305,6 +315,8 @@ async fn no_matches_is_an_empty_array() {
 /// A caller who is not a team member gets `GetTeamMember`'s **404**, not a 403.
 #[tokio::test]
 async fn a_non_member_without_the_list_permission_gets_a_404() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -326,6 +338,8 @@ async fn a_non_member_without_the_list_permission_gets_a_404() {
 /// The body must decode to an object; `null` is rejected by the nil check after it.
 #[tokio::test]
 async fn a_bad_body_is_a_400_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -356,6 +370,8 @@ async fn a_bad_body_is_a_400_on_both() {
 /// A malformed team id is a 400 before the body is read.
 #[tokio::test]
 async fn a_bad_team_id_is_a_400_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -375,6 +391,8 @@ async fn a_bad_team_id_is_a_400_on_both() {
 /// No session is a 401 on both.
 #[tokio::test]
 async fn no_session_is_a_401_on_both() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }
@@ -394,6 +412,8 @@ async fn no_session_is_a_401_on_both() {
 /// Every other method on this path is Go's.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         return;
     }

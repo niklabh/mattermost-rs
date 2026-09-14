@@ -8692,7 +8692,7 @@ generic `POST /properties/groups/{group}/{object_type}/fields`, when it is serve
 
 ## D-585 · Five served routes carry Go's `DisableWhenBusy` and ignore the busy flag
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (typing)
+**Status** CLOSED 2026-09-14 — all six served `DisableWhenBusy` handlers call `refuse_when_busy` first; `parity::busy_gates`; the four unserved searches are listed on that function for the port that lands them. · **Severity** divergence · **Raised** 2026-09-13 (typing)
 
 `web.Handler.ServeHTTP` refuses a `DisableWhenBusy` handler with
 `api.context.server_busy.app_error` / 503 while `platform.Busy` is set (web/handlers.go:349).

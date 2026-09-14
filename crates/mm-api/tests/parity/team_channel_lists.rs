@@ -153,6 +153,8 @@ fn display_names_of(body: &[u8]) -> Vec<String> {
 /// `FillInChannelsProps` having resolved the `~mention` in a header.
 #[tokio::test]
 async fn the_public_list_matches_go_and_lists_unjoined_channels() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -238,6 +240,8 @@ async fn the_public_list_matches_go_and_lists_unjoined_channels() {
 /// `getChannelMembers`, where the store's `Limit > 0` guard turns the same zero into "no limit".
 #[tokio::test]
 async fn public_paging_walks_by_offset_and_runs_out_on_an_empty_list() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -322,6 +326,8 @@ async fn public_paging_walks_by_offset_and_runs_out_on_an_empty_list() {
 /// id — not `200 []`, which is what clamping the page would have produced.
 #[tokio::test]
 async fn an_overflowing_page_is_the_same_500_on_both_servers() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -351,6 +357,8 @@ async fn an_overflowing_page_is_the_same_500_on_both_servers() {
 /// channels only — the archived one is the `deleted` route's business.
 #[tokio::test]
 async fn the_private_list_is_system_gated_and_excludes_archived() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -408,6 +416,8 @@ async fn the_private_list_is_system_gated_and_excludes_archived() {
 /// joined.
 #[tokio::test]
 async fn the_deleted_list_widens_for_manage_system_and_narrows_otherwise() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -484,6 +494,8 @@ async fn the_deleted_list_widens_for_manage_system_and_narrows_otherwise() {
 /// ([D-150]). Asserted on all three routes, because each registers the parameter separately.
 #[tokio::test]
 async fn a_bad_team_id_400s_and_a_non_id_segment_is_forwarded() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -520,6 +532,8 @@ async fn a_bad_team_id_400s_and_a_non_id_segment_is_forwarded() {
 /// `x-mmrs-served-by: go`, which only the proxy sets.
 #[tokio::test]
 async fn the_sibling_literals_are_still_forwarded_to_go() {
+    // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
+    let _not_busy = common::BUSY_STATE.read().await;
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
