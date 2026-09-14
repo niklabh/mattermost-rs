@@ -12839,3 +12839,23 @@ asks for permissions; the three pure hooks wrap a ready future.
 The persistent notification on create (`forEachPersistentNotificationPost`, the row, the job), or
 the outgoing-webhook arm (`handleWebhookEvents`). Both are create shapes that still forward.
 
+## `GET /api/v4/posts/{post_id}/info` (2026-09-14)
+
+Route count **464 of 764**. `getPostInfo` is the permalink preflight: it describes a post's
+channel and team to a caller who may not read the post, so the client can offer the join. Two
+layers decide — the team (a live membership, else `join_public_teams`/`join_private_teams` by
+`AllowOpenInvite`), then the channel (the read check, else an open channel on a
+non-compliance deployment when the session may `join_public_channels` or the team is open and
+it may `join_public_teams`) — and every refusal is the one 404 `app.post.get.app_error`.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/post.rs` — `get_post_info` | DONE |
+| api | `crates/mm-api/src/posts.rs` — `get_post_info`, registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/post_info.rs` — 5 | DONE |
+| mutation | `scripts/mutations/post-info.plan` — 10 run, 8 caught, 2 controls survived | DONE |
+
+- **A removed teammate is not a member** — the `TeamMembers` row's `DeleteAt` is read at both
+  layers (the permission check and `has_joined_team`), and removal from a team also leaves its
+  channels, so both flags read `false` once the team is open enough to describe the post.
+- **The body is `json.Marshal` written directly**: no trailing newline, unlike the post reads.

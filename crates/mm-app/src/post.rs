@@ -37,6 +37,7 @@
 //! | `sanitizeFileAttachmentsForUser` | returns immediately when `AccessControl` is nil or `EnableAttributeBasedAccessControl` is false (post_metadata.go:432) — both hold on Team Edition | an enterprise licence with ABAC on |
 //! | `removeInaccessibleContentFromFilesSlice` | Cloud file limits, same licence gate as above | a Cloud licence |
 
+use mm_model::channel::Channel;
 use mm_model::emoji::{Emoji, find_emoji_references, get_system_emoji_id};
 use mm_model::file_info::FileInfo;
 use mm_model::permission::{
@@ -48,10 +49,12 @@ use mm_model::post::{
     POST_PROPS_OVERRIDE_ICON_EMOJI, POST_PROPS_PREVIEWED_POST, POST_PROPS_UNSAFE_LINKS,
     POST_TYPE_BURN_ON_READ, Post,
 };
+use mm_model::post_info::PostInfo;
 use mm_model::post_list::{PostList, PostMap};
 use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
+use mm_model::team::{TEAM_INVITE, TEAM_OPEN, Team};
 use mm_model::utils::{
     AppError, AppResult, StringInterface, etag, get_millis, remove_duplicate_strings,
 };
@@ -140,6 +143,42 @@ pub fn message_may_contain_a_link(message: &str) -> bool {
 }
 
 impl App {
+    /// Port of `app.App.GetPostInfo` (app/post.go:2977) — the body of
+    /// `GET /api/v4/posts/{post_id}/info`, assembled from what the handler already fetched.
+    ///
+    /// `has_joined_team` is a **fresh** `GetTeamMember` read here, not the one the handler made
+    /// for its permission check: Go reads twice, and the second read's error is folded into
+    /// `false` rather than answered (`teamMemberErr == nil && teamMember.DeleteAt == 0`). The
+    /// team type is the two-letter `O`/`I` from `AllowOpenInvite`, not the team's `Type` column.
+    /// Never fails — the `*model.AppError` return is always nil.
+    pub async fn get_post_info(
+        &self,
+        channel: &Channel,
+        team: Option<&Team>,
+        user_id: &str,
+        has_joined_channel: bool,
+    ) -> PostInfo {
+        let mut info = PostInfo {
+            channel_id: channel.id.clone(),
+            channel_type: channel.channel_type.clone(),
+            channel_display_name: channel.display_name.clone(),
+            has_joined_channel,
+            ..PostInfo::default()
+        };
+        if let Some(team) = team {
+            let member = self.get_team_member(&team.id, user_id).await;
+            info.team_id.clone_from(&team.id);
+            info.team_type = if team.allow_open_invite {
+                TEAM_OPEN.to_owned()
+            } else {
+                TEAM_INVITE.to_owned()
+            };
+            info.team_display_name.clone_from(&team.display_name);
+            info.has_joined_team = member.is_ok_and(|member| member.delete_at == 0);
+        }
+        info
+    }
+
     /// Port of `app.App.GetSinglePost` (post.go:1525).
     ///
     /// Both store branches carry the **same** error id, `app.post.get.app_error`, and differ

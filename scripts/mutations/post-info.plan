@@ -1,0 +1,21 @@
+# Mutation plan for `GET /api/v4/posts/{post_id}/info` — the two permission layers and the body.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-info.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# Not mutated: the team layer's `DeleteAt == 0` test on a found membership. A removed teammate
+# is refused by the channel layer whatever the team layer says (no channel row, no team role for
+# `join_public_channels`), and on an open team both layers pass by `join_public_teams` — so the
+# condition decides nothing this route can answer. The last two lines are the no-op controls and
+# must SURVIVE.
+
+team-permission-swapped	crates/mm-api/src/posts.rs	            let permission = if the_team.allow_open_invite {\n                &PERMISSION_JOIN_PUBLIC_TEAMS\n            } else {\n                &PERMISSION_JOIN_PRIVATE_TEAMS\n            };	            let permission = if the_team.allow_open_invite {\n                &PERMISSION_JOIN_PRIVATE_TEAMS\n            } else {\n                &PERMISSION_JOIN_PUBLIC_TEAMS\n            };	api	post_info
+open-channel-fallback-dropped	crates/mm-api/src/posts.rs	        && channel.channel_type == CHANNEL_TYPE_OPEN	        && channel.channel_type == "never"	api	post_info
+compliance-gate-inverted	crates/mm-api/src/posts.rs	        && !state.app.config().compliance_enable	        && state.app.config().compliance_enable	api	post_info
+join-open-team-arm-inverted	crates/mm-api/src/posts.rs	            Some(team) if team.allow_open_invite => {	            Some(team) if !team.allow_open_invite => {	api	post_info
+dm-team-layer-refuses	crates/mm-api/src/posts.rs	        // This happens in case of DMs and GMs.\n        has_permission_to_access_team = true;	        // This happens in case of DMs and GMs.\n        has_permission_to_access_team = false;	api	post_info
+has-joined-channel-forced	crates/mm-app/src/post.rs	            has_joined_channel,\n            ..PostInfo::default()	            has_joined_channel: true,\n            ..PostInfo::default()	api	post_info
+team-type-swapped	crates/mm-app/src/post.rs	            info.team_type = if team.allow_open_invite {\n                TEAM_OPEN.to_owned()\n            } else {\n                TEAM_INVITE.to_owned()\n            };	            info.team_type = if team.allow_open_invite {\n                TEAM_INVITE.to_owned()\n            } else {\n                TEAM_OPEN.to_owned()\n            };	api	post_info
+has-joined-team-ignores-delete	crates/mm-app/src/post.rs	            info.has_joined_team = member.is_ok_and(|member| member.delete_at == 0);	            info.has_joined_team = member.is_ok();	api	post_info
+control-annotate-user-id	crates/mm-api/src/posts.rs	    let user_id = session.0.user_id.as_str();\n\n    let post = state.app.get_single_post(post_id, false).await?;	    let user_id: &str = session.0.user_id.as_str();\n\n    let post = state.app.get_single_post(post_id, false).await?;	api	post_info
+control-annotate-team-option	crates/mm-api/src/posts.rs	    let mut team = None;\n    let mut has_permission_to_access_team = false;	    let mut team: Option<mm_model::team::Team> = None;\n    let mut has_permission_to_access_team = false;	api	post_info

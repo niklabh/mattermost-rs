@@ -1697,6 +1697,11 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}/files/info",
             partially_migrated_with_ids(&state, get(posts::get_file_infos_for_post)),
         )
+        // `BaseRoutes.Post.Handle("/info")` (api4/post.go:37) — the permalink preflight.
+        .route(
+            "/api/v4/posts/{post_id}/info",
+            partially_migrated_with_ids(&state, get(posts::get_post_info)),
+        )
         // `BaseRoutes.File.Handle("/info")` (api4/file.go:39). `{file_id}` is id-shaped —
         // gorilla's class is `[A-Za-z0-9]+` (api.go:245) — so the id-charset middleware applies.
         .route(

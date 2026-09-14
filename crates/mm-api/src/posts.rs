@@ -12,9 +12,11 @@ use axum::http::StatusCode;
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::response::{IntoResponse, Response};
 use mm_app::post::{PrepareError, PreparePostForClientOpts};
+use mm_model::channel::CHANNEL_TYPE_OPEN;
 use mm_model::file_info::get_etag_for_file_infos;
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_EDIT_POST, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_EDIT_POST, PERMISSION_JOIN_PRIVATE_TEAMS,
+    PERMISSION_JOIN_PUBLIC_CHANNELS, PERMISSION_JOIN_PUBLIC_TEAMS, PERMISSION_MANAGE_SYSTEM,
     PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_READ_DELETED_POSTS, make_permission_error,
 };
 use mm_model::utils::{PAYLOAD_PARSE_ERROR, go_json_marshal, is_valid_id, sorted_array_from_json};
@@ -204,6 +206,161 @@ async fn serve(
         )
             .into_response(),
     )
+}
+
+/// Port of `getPostInfo` (api4/post.go:1646) — `GET /api/v4/posts/{post_id}/info`.
+///
+/// # A route that answers for posts the caller cannot read
+///
+/// It exists for a permalink into a channel the user has not joined: the client asks what the
+/// link points at before deciding whether to join. So the checks are looser than `getPost`'s,
+/// in two layers, and **every refusal is the same 404** (`app.post.get.app_error`, where
+/// `GetPostInfo`) so a probe cannot tell "no such post" from "not yours to see":
+///
+/// 1. **The team.** A live membership passes. Otherwise `AllowOpenInvite` decides which
+///    *user* permission is consulted — `join_public_teams` for an open team,
+///    `join_private_teams` for an invite-only one — through `HasPermissionToTeam`, which is a
+///    role check on the user, not the session. A DM or GM has no team and passes outright.
+/// 2. **The channel.** `SessionHasPermissionToReadChannel` as for a read; failing that, an
+///    **open** channel on a deployment without compliance passes when the session may
+///    `join_public_channels` on the team, or the team is open and the session may
+///    `join_public_teams`.
+///
+/// The `hasJoinedChannel` the read check reports is what the body's `has_joined_channel`
+/// carries, so a caller who may read the channel without being in it gets `false` there.
+///
+/// The body is `json.Marshal` written directly — no trailing newline.
+#[tracing::instrument(skip_all, fields(post_id = %post_id))]
+pub async fn get_post_info(
+    State(state): State<AppState>,
+    Path(post_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    match serve_post_info(&state, &post_id, &session).await {
+        Ok(info) => match serde_json::to_vec(&info) {
+            Ok(body) => (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "application/json"),
+                    ("x-mmrs-served-by", "rust"),
+                ],
+                body,
+            )
+                .into_response(),
+            Err(err) => {
+                tracing::error!(error = %err, "PostInfo does not serialise");
+                ApiError::from(mm_model::utils::AppError::new(
+                    "getPostInfo",
+                    "api.marshal_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+                .into_response()
+            }
+        },
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_post_info(
+    state: &AppState,
+    post_id: &str,
+    session: &AuthenticatedSession,
+) -> Result<mm_model::post_info::PostInfo, ApiError> {
+    // `c.RequirePostId()`.
+    if !is_valid_id(post_id) {
+        return Err(ApiError::invalid_url_param("post_id"));
+    }
+    let user_id = session.0.user_id.as_str();
+
+    let post = state.app.get_single_post(post_id, false).await?;
+    let channel = state.app.get_channel(&post.channel_id).await?;
+
+    let not_found = || {
+        ApiError::from(mm_model::utils::AppError::new(
+            "GetPostInfo",
+            "app.post.get.app_error",
+            None,
+            String::new(),
+            404,
+        ))
+    };
+
+    let mut team = None;
+    let mut has_permission_to_access_team = false;
+    if !channel.team_id.is_empty() {
+        let the_team = state.app.get_team(&channel.team_id).await?;
+
+        // `GetTeamMember` — a 404 is tolerated, any other error is answered.
+        match state.app.get_team_member(&channel.team_id, user_id).await {
+            Ok(member) => {
+                if member.delete_at == 0 {
+                    has_permission_to_access_team = true;
+                }
+            }
+            Err(err) if err.status_code == 404 => {}
+            Err(err) => return Err(ApiError::from(err)),
+        }
+
+        if !has_permission_to_access_team {
+            let permission = if the_team.allow_open_invite {
+                &PERMISSION_JOIN_PUBLIC_TEAMS
+            } else {
+                &PERMISSION_JOIN_PRIVATE_TEAMS
+            };
+            has_permission_to_access_team = state
+                .app
+                .has_permission_to_team(user_id, &the_team.id, permission)
+                .await;
+        }
+        team = Some(the_team);
+    } else {
+        // This happens in case of DMs and GMs.
+        has_permission_to_access_team = true;
+    }
+
+    if !has_permission_to_access_team {
+        return Err(not_found());
+    }
+
+    let (mut has_permission_to_access_channel, has_joined_channel) = state
+        .app
+        .session_has_permission_to_read_channel(&session.0, &channel)
+        .await;
+
+    if !has_permission_to_access_channel
+        && channel.channel_type == CHANNEL_TYPE_OPEN
+        && !state.app.config().compliance_enable
+    {
+        let can_join_open_channel = state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &channel.team_id,
+                &PERMISSION_JOIN_PUBLIC_CHANNELS,
+            )
+            .await;
+        let can_join_open_team = match team.as_ref() {
+            Some(team) if team.allow_open_invite => {
+                state
+                    .app
+                    .session_has_permission_to(&session.0, &PERMISSION_JOIN_PUBLIC_TEAMS)
+                    .await
+            }
+            _ => false,
+        };
+        has_permission_to_access_channel = can_join_open_channel || can_join_open_team;
+    }
+
+    if !has_permission_to_access_channel {
+        return Err(not_found());
+    }
+
+    Ok(state
+        .app
+        .get_post_info(&channel, team.as_ref(), user_id, has_joined_channel)
+        .await)
 }
 
 /// The three query parameters that choose a branch of `getPostsForChannel`, and one that
