@@ -3,7 +3,8 @@
     "Enable": true
   },
   "AccessControlSettings": {
-    "EnableAttributeBasedAccessControl": false
+    "EnableAttributeBasedAccessControl": false,
+    "EnableChannelPolicyIndicators": true
   },
   "ClientRequirements": {
     "AndroidLatestVersion": "",

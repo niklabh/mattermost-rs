@@ -336,6 +336,17 @@ pub trait TeamStore {
         member: &TeamMember,
     ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.UpdateLastTeamIconUpdate` (team_store.go:1329): one `UPDATE`
+    /// writing `cur_time` to **both** `LastTeamIconUpdate` and `UpdateAt`. `RemoveTeamIcon`
+    /// passes `0`, so a removal sets the team's `UpdateAt` to zero as well — reproduced, since it
+    /// is what a later `GET /teams/{id}` reads back. A missing team is not an error here: the
+    /// `UPDATE` matches no row and Go does not check the count.
+    fn update_last_team_icon_update(
+        &self,
+        team_id: &str,
+        cur_time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlTeamStore.SaveMember` (team_store.go:942) — see [`save_member`].
     fn save_member(
         &self,
@@ -566,6 +577,26 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(team_id = %member.team_id, user_id = %member.user_id))]
     async fn update_member(&self, member: &TeamMember) -> Result<TeamMember, StoreError> {
         update_member(&self.pool, member).await
+    }
+
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, cur_time))]
+    async fn update_last_team_icon_update(
+        &self,
+        team_id: &str,
+        cur_time: i64,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE teams SET lastteamiconupdate = $2, updateat = $2 WHERE id = $1",
+            team_id,
+            cur_time,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update LastTeamIconUpdate for team_id={team_id}"),
+            source,
+        })
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %member.team_id, user_id = %member.user_id))]

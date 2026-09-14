@@ -27,6 +27,7 @@
 mod common;
 
 mod parity {
+    pub mod access_control_reads;
     pub mod auth_migrations;
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
@@ -151,6 +152,7 @@ mod parity {
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
+    pub mod team_icon_writes;
     pub mod team_invite_join;
     pub mod team_member_writes;
     pub mod team_members_route;
@@ -206,5 +208,6 @@ mod parity {
 
     // Appended 2026-09-13, same reason: the user-update family.
     pub mod notification_store;
+    pub mod notify_admin;
     pub mod user_updates;
 }

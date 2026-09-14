@@ -1693,6 +1693,40 @@ pub async fn update_team(
 /// `updateTeam` — so a patch naming a nonexistent team answers 403 rather than 404 for a caller
 /// without the permission.
 #[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+/// Port of `removeTeamIcon` (api4/team.go:2129) — `DELETE /api/v4/teams/{team_id}/image`.
+///
+/// `manage_team` on the team, then [`mm_app::App::remove_team_icon`], then `ReturnStatusOK`.
+/// The permission check comes **before** the team lookup, so a caller without the permission
+/// on an unknown team gets the 403, not the 400 — except a system admin, whose session passes
+/// every team check and so reaches the 400.
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
+pub async fn remove_team_icon(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    match state.app.remove_team_icon(&team_id).await {
+        Ok(()) => crate::thread_writes::status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
 pub async fn patch_team(
     State(state): State<AppState>,
     session: AuthenticatedSession,

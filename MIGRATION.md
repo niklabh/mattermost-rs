@@ -12924,3 +12924,66 @@ this deployment can hold; a Cloud one forwards.
 - **The migrations' `from` list differs by one provider**: `saml` is accepted by the LDAP
   migration and `ldap` by the SAML one; `""` fails both.
 - **The cloud login is served without a session**, as `APIHandlerTrustRequester` registers it.
+## `DELETE /api/v4/teams/{team_id}/image` (2026-09-14)
+
+Route count **472 of 764**. `removeTeamIcon` zeroes `LastTeamIconUpdate` — and `UpdateAt`, in the
+same `UPDATE` — publishes `update_team` with the sanitised team as fetched, and answers
+`{"status":"OK"}`; the file stays on disk and the read, which consults the file and not the
+timestamp, still serves it. The `POST` that sets an icon (a multipart upload re-encoded as PNG)
+still forwards.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/team_store.rs` — `update_last_team_icon_update` | DONE |
+| app | `crates/mm-app/src/team.rs` — `remove_team_icon` | DONE |
+| api | `crates/mm-api/src/teams.rs` — `remove_team_icon`, the `DELETE` beside the icon `GET` | DONE |
+| test | `crates/mm-api/tests/parity/team_icon_writes.rs` — 2 | DONE |
+| mutation | `scripts/mutations/team-icon-remove.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **Both errors are 400s**, the unknown team included: `RemoveTeamIcon` wraps `GetTeam`'s 404.
+- **The event's `update_at` is the old one** while the row holds `0`: Go zeroes only the icon
+  timestamp on the struct it publishes.
+
+## `POST /api/v4/users/notify-admin` (2026-09-14)
+
+Route count **473 of 764**. A user asks the admins to upgrade for a feature: one `NotifyAdmin`
+row per user and feature, a second request for the feature the 403 `already_notified`, and the
+validator's refusals — a plan outside `professional`/`enterprise`, a feature outside the paid
+list — reaching the wire as the **500** `app.notify_admin.save.app_error`, because
+`SaveAdminNotifyData` folds every save error but a not-found into it. The job that mails the
+admins from these rows is not here.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/notify_admin_store.rs` — `save`, `get_data_by_user_id_and_feature` | DONE |
+| app | `crates/mm-app/src/notify_admin.rs` — `save_admin_notification` | DONE |
+| api | `crates/mm-api/src/notify_admin.rs` — `handle_notify_admin`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/notify_admin.rs` — 3 | DONE |
+| mutation | `scripts/mutations/notify-admin.plan` — 10 run, 8 caught, 2 controls survived | DONE |
+
+- **The validator's message never reaches a client**: the 400 it builds is a 500 with the
+  generic id on the wire. Measured on both.
+- **`mattermost.feature.plugin…` skips the validator** — any plan is stored.
+
+## The three access-control reads (2026-09-14)
+
+Route count **474 of 764**. `GET /channels/{id}/access_control/attributes`,
+`GET /teams/{id}/access_control/attributes` and `GET /teams/{id}/access_control/policy` are
+served for what this build can answer: the access-control service is registered by the
+enterprise package and nil here ([D-571]), so the two attribute reads are a permission check
+(`read_channel`; `view_team`) and then the 501 `app.pap.get_channel_access_control_attributes.app_error`
+— the channel one first answering `{}` when `EnableChannelPolicyIndicators` is off — and the
+policy read is `manage_system` or `manage_team_access_rules` and then
+`{"policy":null,"enforced":false}` while `TeamMembershipAccessControlEnabled` is false, which
+it is without an Enterprise Advanced licence and the ABAC setting; with both it forwards.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/config.rs` — `enable_channel_policy_indicators` (fixture 81 keys) | DONE |
+| api | `crates/mm-api/src/access_control.rs` — three handlers; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/access_control_reads.rs` — 4 | DONE |
+| mutation | `scripts/mutations/access-control-reads.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **The `{}` arm is unmeasured**: the indicator setting is on for the stack and is not flipped.
+- **The policy body is `json.Marshal`**: no trailing newline; the attribute reads' `{}` would be
+  encoder-written, with one.

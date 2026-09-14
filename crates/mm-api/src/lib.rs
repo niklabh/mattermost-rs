@@ -5,6 +5,7 @@
 //! forwarded. Nothing has to be removed from a list of exclusions, because there is no list —
 //! the proxy is the fallback.
 
+pub mod access_control;
 pub mod audits;
 pub mod auth;
 pub mod auth_writes;
@@ -48,6 +49,7 @@ pub mod local;
 pub mod login;
 pub mod migrate_auth;
 pub mod multipart;
+pub mod notify_admin;
 pub mod oauth;
 pub mod permissions;
 pub mod post_acks;
@@ -466,6 +468,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/migrate_auth/saml",
             partially_migrated(post(migrate_auth::migrate_auth_to_saml)),
         )
+        // `BaseRoutes.Users.Handle("/notify-admin")` (api4/user.go:120) — a static segment
+        // under `/users/`, like `/search`.
+        .route(
+            "/api/v4/users/notify-admin",
+            partially_migrated(post(notify_admin::handle_notify_admin)),
+        )
         // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
         // usernames it found in a page of posts.
         .route(
@@ -878,6 +886,22 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/stats",
             partially_migrated_with_ids(&state, get(teams::get_team_stats)),
         )
+        // `BaseRoutes.Team.Handle("/access_control/attributes")` and `("/access_control/policy")`
+        // (api4/team.go:52-53).
+        .route(
+            "/api/v4/teams/{team_id}/access_control/attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_team_access_control_attributes),
+            ),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/access_control/policy",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_team_access_control_policy),
+            ),
+        )
         // `team_name` is not id-shaped — Go's class is `[A-Za-z0-9_-]+` — so the id-charset
         // middleware must not apply; the handler carries its own mux forward, like `username`.
         // axum gives the static `name` precedence over `{team_id}` above, which is the *reverse*
@@ -1123,6 +1147,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/stats",
             partially_migrated_with_ids(&state, get(channels::get_channel_stats)),
+        )
+        // `BaseRoutes.Channel.Handle("/access_control/attributes")` (api4/channel.go:100).
+        .route(
+            "/api/v4/channels/{channel_id}/access_control/attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_channel_access_control_attributes),
+            ),
         )
         // Three methods on one path. **axum panics on a duplicate route path**, so the POST and
         // PUT are chained onto the GET's `MethodRouter` rather than added as a second `.route`.
@@ -1846,9 +1878,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/image/default",
             partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
         )
+        // `BaseRoutes.Team.Handle("/image")`: the GET reads the icon, the DELETE removes it, and
+        // the POST (a multipart upload re-encoded as PNG) still goes to Go.
         .route(
             "/api/v4/teams/{team_id}/image",
-            partially_migrated_with_ids(&state, get(images::get_team_icon)),
+            partially_migrated_with_ids(
+                &state,
+                get(images::get_team_icon).delete(teams::remove_team_icon),
+            ),
         )
         // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
         // `APIHandlerTrustRequester` — **unauthenticated** — and the DELETE is session-required
