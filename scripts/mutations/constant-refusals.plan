@@ -1,0 +1,15 @@
+# Mutation plan for POST /cloud/webhook and POST /users/login/sso/code-exchange — the two gates,
+# their answers, and the deprecation header.
+#
+#   scripts/mutate-batch.sh scripts/mutations/constant-refusals.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+webhook-gate-inverted	crates/mm-api/src/cloud.rs	    if cloud {\n        tracing::debug!("handing a CWS webhook to Go");	    if !cloud {\n        tracing::debug!("handing a CWS webhook to Go");	api	constant_refusals
+webhook-is-403	crates/mm-api/src/cloud.rs	        "TokenRequired",\n        401,	        "TokenRequired",\n        403,	api	constant_refusals
+exchange-gate-inverted	crates/mm-api/src/login.rs	    if enabled {\n        tracing::debug!("handing an SSO code exchange to Go");	    if !enabled {\n        tracing::debug!("handing an SSO code exchange to Go");	api	constant_refusals
+exchange-is-400	crates/mm-api/src/login.rs	        "api.user.login_sso_code_exchange.deprecated.app_error",\n        None,\n        String::new(),\n        410,	        "api.user.login_sso_code_exchange.deprecated.app_error",\n        None,\n        String::new(),\n        400,	api	constant_refusals
+deprecation-header-misnamed	crates/mm-api/src/login.rs	        .insert("Deprecation", axum::http::HeaderValue::from_static("true"));	        .insert("Deprecated", axum::http::HeaderValue::from_static("true"));	api	constant_refusals
+flag-defaults-on	crates/mm-app/src/config.rs	            feature_flag_mobile_sso_code_exchange: false,	            feature_flag_mobile_sso_code_exchange: true,	api	constant_refusals
+control-detail-text	crates/mm-api/src/cloud.rs	        "TokenRequired",\n        401,	        "Token required",\n        401,	api	constant_refusals
+control-log-text	crates/mm-api/src/login.rs	        tracing::debug!("handing an SSO code exchange to Go");	        tracing::debug!("handing a mobile SSO code exchange to Go");	api	constant_refusals

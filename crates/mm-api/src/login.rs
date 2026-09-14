@@ -721,6 +721,36 @@ async fn desktop_token_login(state: AppState, request: Request) -> Result<Respon
     Ok(response)
 }
 
+/// Port of `loginSSOCodeExchange` (api4/user.go) — `POST /api/v4/users/login/sso/code-exchange`,
+/// the deprecated mobile SSO hand-off, an `APIHandler` (no session).
+///
+/// `Deprecation: true` is set on every answer, before anything is checked. Then the
+/// `MobileSSOCodeExchange` feature flag — environment-only, off by default and off here — is
+/// the **410** `api.user.login_sso_code_exchange.deprecated.app_error`. On, Go reads
+/// `login_code`, `code_verifier` and `state`, consumes the one-time token, checks its expiry,
+/// state and PKCE challenge, and logs the user in with the SAML flag — forwarded.
+#[tracing::instrument(skip_all, fields(enabled))]
+pub async fn login_sso_code_exchange(State(state): State<AppState>, request: Request) -> Response {
+    let enabled = state.app.config().feature_flag_mobile_sso_code_exchange;
+    tracing::Span::current().record("enabled", enabled);
+    if enabled {
+        tracing::debug!("handing an SSO code exchange to Go");
+        return proxy::forward_to_go(State(state), request).await;
+    }
+    let mut response = ApiError::from(AppError::new(
+        "loginSSOCodeExchange",
+        "api.user.login_sso_code_exchange.deprecated.app_error",
+        None,
+        String::new(),
+        410,
+    ))
+    .into_response();
+    response
+        .headers_mut()
+        .insert("Deprecation", axum::http::HeaderValue::from_static("true"));
+    response
+}
+
 /// `User.Sanitize(map[string]bool{})` never leaves a password behind, and this route is the one
 /// where a leak would hand over a live credential rather than a profile field.
 #[cfg(test)]

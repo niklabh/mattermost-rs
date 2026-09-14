@@ -13108,3 +13108,21 @@ DM post to each admin. `Config` gains the setting.
 | api | `crates/mm-api/src/notify_admin.rs` — `handle_trigger_notify_admin_posts`; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/notify_admin_trigger.rs` — 1 | DONE |
 | mutation | `scripts/mutations/notify-admin-trigger.plan` — 6 run, 4 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/cloud/webhook` and `POST /api/v4/users/login/sso/code-exchange` (2026-09-14)
+
+Route count **481 of 764** on this branch. Two constant refusals on this deployment, served up to
+their gate and forwarded past it. The CWS webhook is `CloudAPIKeyRequired`: without a Cloud
+licence its wrapper answers the 401 `api.context.session_expired.app_error` (`TokenRequired`)
+for every caller, token or not — the Enterprise licence included. The deprecated mobile SSO code
+exchange sets `Deprecation: true` on every answer and, with the environment-only
+`MobileSSOCodeExchange` flag off, is the 410 `login_sso_code_exchange.deprecated.app_error`;
+on, the one-time token consumption, the PKCE check and the SAML login are forwarded. `Config`
+gains the flag.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `feature_flag_mobile_sso_code_exchange`, environment-only | DONE |
+| api | `crates/mm-api/src/cloud.rs` — `handle_cws_webhook`; `crates/mm-api/src/login.rs` — `login_sso_code_exchange`; both registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/constant_refusals.rs` — 2, unlicensed and licensed pairs | DONE |
+| mutation | `scripts/mutations/constant-refusals.plan` — 8 run, 6 caught, 2 controls survived | DONE |

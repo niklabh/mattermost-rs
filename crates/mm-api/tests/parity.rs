@@ -72,6 +72,7 @@ mod parity {
     /// insertion in the middle of it is a merge conflict for somebody else.
     pub mod config_reads;
     pub mod config_source;
+    pub mod constant_refusals;
     pub mod cpa_licensed;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;

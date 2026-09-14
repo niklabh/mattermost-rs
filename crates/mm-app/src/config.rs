@@ -416,6 +416,11 @@ pub struct Config {
     /// coincidence that hides a wrong read.
     pub feature_flag_burn_on_read: bool,
 
+    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default and
+    /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
+    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
+    pub feature_flag_mobile_sso_code_exchange: bool,
+
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
     ///
@@ -1229,6 +1234,7 @@ impl Default for Config {
             // config.go:906 — `new(false)`.
             experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
+            feature_flag_mobile_sso_code_exchange: false,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1587,6 +1593,11 @@ impl Config {
                 lookup,
                 "MM_FEATUREFLAGS_BURNONREAD",
                 default.feature_flag_burn_on_read,
+            ),
+            feature_flag_mobile_sso_code_exchange: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
+                default.feature_flag_mobile_sso_code_exchange,
             ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
@@ -2179,6 +2190,7 @@ impl Config {
             // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
             feature_flag_burn_on_read: default.feature_flag_burn_on_read,
+            feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
