@@ -214,5 +214,6 @@ mod parity {
     // Appended 2026-09-13, same reason: the user-update family.
     pub mod notification_store;
     pub mod notify_admin;
+    pub mod notify_admin_trigger;
     pub mod user_updates;
 }

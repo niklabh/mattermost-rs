@@ -211,6 +211,13 @@ pub struct Config {
     /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
     pub enable_api_user_deletion: bool,
 
+    /// `ServiceSettings.EnableAPITriggerAdminNotifications` (config.go:889). Go default
+    /// **`false`**. The first check of `POST /users/trigger-notify-admin-posts`: off, the route
+    /// is the 403 `api.cloud.app_error` before the body or the caller is looked at; on, an admin
+    /// can make the server send the "upgrade" posts the notify-admin rows are waiting for,
+    /// which is forwarded.
+    pub enable_api_trigger_admin_notifications: bool,
+
     /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
     ///
     /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
@@ -1188,6 +1195,7 @@ impl Default for Config {
             enable_user_deactivation: false,
             // config.go:894 — `new(false)`.
             enable_api_user_deletion: false,
+            enable_api_trigger_admin_notifications: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
             // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
@@ -1458,6 +1466,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEAPIUSERDELETION",
                 default.enable_api_user_deletion,
+            ),
+            enable_api_trigger_admin_notifications: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPITRIGGERADMINNOTIFICATIONS",
+                default.enable_api_trigger_admin_notifications,
             ),
             enable_sign_up_with_email: lookup_bool(
                 lookup,
@@ -2074,6 +2087,9 @@ impl Config {
             enable_api_user_deletion: service
                 .enable_api_user_deletion
                 .unwrap_or(default.enable_api_user_deletion),
+            enable_api_trigger_admin_notifications: service
+                .enable_api_trigger_admin_notifications
+                .unwrap_or(default.enable_api_trigger_admin_notifications),
             enable_sign_up_with_email: email_settings
                 .enable_sign_up_with_email
                 .unwrap_or(default.enable_sign_up_with_email),
@@ -2703,6 +2719,8 @@ struct ServiceSettingsDocument {
     enable_multifactor_authentication: Option<bool>,
     #[serde(rename = "EnableAPIUserDeletion")]
     enable_api_user_deletion: Option<bool>,
+    #[serde(rename = "EnableAPITriggerAdminNotifications")]
+    enable_api_trigger_admin_notifications: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -3611,8 +3629,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 85,
-            "the fixture covers {keys} settings and Config reads 85 from the document. \
+            keys, 86,
+            "the fixture covers {keys} settings and Config reads 86 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3637,6 +3655,7 @@ mod go_parity {
                 "ExtendSessionLengthWithActivity": true,
                 "SessionLengthWebInHours": 19,
                 "SessionLengthSSOInHours": 23,
+                "EnableAPITriggerAdminNotifications": true,
                 "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
@@ -3662,6 +3681,7 @@ mod go_parity {
         let config = Config::from_document(inverted).expect("valid document");
 
         assert!(config.enable_post_icon_override);
+        assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
         assert!(!config.post_priority);

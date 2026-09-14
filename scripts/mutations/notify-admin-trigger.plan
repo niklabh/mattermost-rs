@@ -1,0 +1,13 @@
+# Mutation plan for POST /users/trigger-notify-admin-posts — the setting gate, its answer, the
+# body decode, and the permission that follows.
+#
+#   scripts/mutate-batch.sh scripts/mutations/notify-admin-trigger.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+gate-inverted	crates/mm-api/src/notify_admin.rs	    if !state.app.config().enable_api_trigger_admin_notifications {	    if state.app.config().enable_api_trigger_admin_notifications {	api	notify_admin_trigger
+refusal-is-401	crates/mm-api/src/notify_admin.rs	            "Manual triggering of notifications not allowed",\n            403,	            "Manual triggering of notifications not allowed",\n            401,	api	notify_admin_trigger
+refusal-id-is-permissions	crates/mm-api/src/notify_admin.rs	            "api.cloud.app_error",\n            None,\n            "Manual triggering of notifications not allowed",	            "api.context.permissions.app_error",\n            None,\n            "Manual triggering of notifications not allowed",	api	notify_admin_trigger
+default-on	crates/mm-app/src/config.rs	            enable_api_trigger_admin_notifications: false,	            enable_api_trigger_admin_notifications: true,	unit	config
+control-detail-text	crates/mm-api/src/notify_admin.rs	            "Manual triggering of notifications not allowed",\n            403,	            "Manual triggering of notifications is not allowed",\n            403,	api	notify_admin_trigger
+control-env-spelling	crates/mm-app/src/config.rs	                "MM_SERVICESETTINGS_ENABLEAPITRIGGERADMINNOTIFICATIONS",	                "MM_SERVICESETTINGS_ENABLEAPITRIGGERADMINNOTIFICATIONS", // `EnableAPITriggerAdminNotifications`	unit	config

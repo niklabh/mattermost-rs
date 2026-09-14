@@ -51,3 +51,64 @@ pub async fn handle_notify_admin(
         Err(err) => ApiError::from(*err).into_response(),
     }
 }
+
+/// Port of `handleTriggerNotifyAdminPosts` (api4/notify_admin.go:31) —
+/// `POST /api/v4/users/trigger-notify-admin-posts`, an admin making the server send the
+/// "please upgrade" posts the notify-admin rows are waiting for.
+///
+/// # The setting is the first check, before the body and before the caller
+///
+/// `ServiceSettings.EnableAPITriggerAdminNotifications` off — the default, and the stack — is
+/// the 403 `api.cloud.app_error` for every request, session or not aside. On, the body is
+/// `Decode(&ptr)` (a `null` or a non-object the 400 `notifyAdminRequest`), then `manage_system`,
+/// then `SendNotifyAdminPosts`: the admins, the system bot, the pending rows, a DM post to each
+/// admin and the rows stamped — forwarded.
+#[tracing::instrument(skip_all, fields(forwarded = false))]
+pub async fn handle_trigger_notify_admin_posts(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !state.app.config().enable_api_trigger_admin_notifications {
+        return ApiError::from(mm_model::utils::AppError::new(
+            "Api4.handleTriggerNotifyAdminPosts",
+            "api.cloud.app_error",
+            None,
+            "Manual triggering of notifications not allowed",
+            403,
+        ))
+        .into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    let decoded = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(value @ serde_json::Value::Object(_)) => {
+            serde_json::from_value::<NotifyAdminToUpgradeRequest>(value).ok()
+        }
+        _ => None,
+    };
+    if decoded.is_none() {
+        return ApiError::invalid_param("notifyAdminRequest").into_response();
+    }
+
+    // only system admins can manually trigger these notifications
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return ApiError::from(*mm_model::permission::make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_MANAGE_SYSTEM],
+        ))
+        .into_response();
+    }
+
+    tracing::Span::current().record("forwarded", true);
+    tracing::debug!("handing the notify-admin post batch to Go");
+    let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+    crate::proxy::forward_to_go(State(state), request).await
+}

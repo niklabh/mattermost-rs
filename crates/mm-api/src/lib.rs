@@ -477,6 +477,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/notify-admin",
             partially_migrated(post(notify_admin::handle_notify_admin)),
         )
+        // `BaseRoutes.Users.Handle("/trigger-notify-admin-posts")` (api4/user.go:121), served
+        // up to its setting.
+        .route(
+            "/api/v4/users/trigger-notify-admin-posts",
+            partially_migrated(post(notify_admin::handle_trigger_notify_admin_posts)),
+        )
         // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
         // usernames it found in a page of posts.
         .route(

@@ -13092,3 +13092,19 @@ the `system_gm_to_channel` post both only logged, and the converter made channel
 - **Go files nothing into the members' sidebars here**, measured: the categories exist and the
   `channels` category is re-saved, yet no `SidebarChannels` row appears. The suite compares the
   two servers rather than asserting a row.
+
+## `POST /api/v4/users/trigger-notify-admin-posts` (2026-09-14)
+
+Route count **479 of 764** on this branch. `handleTriggerNotifyAdminPosts` checks
+`ServiceSettings.EnableAPITriggerAdminNotifications` **first** — off (the default and the stack)
+is the 403 `api.cloud.app_error` for every caller and every body — then decodes the request (a
+`null` or non-object the 400 `notifyAdminRequest`), requires `manage_system`, and runs
+`SendNotifyAdminPosts`, which is forwarded: the admins, the system bot, the pending rows and a
+DM post to each admin. `Config` gains the setting.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_api_trigger_admin_notifications`; fixture reprojected | DONE |
+| api | `crates/mm-api/src/notify_admin.rs` — `handle_trigger_notify_admin_posts`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/notify_admin_trigger.rs` — 1 | DONE |
+| mutation | `scripts/mutations/notify-admin-trigger.plan` — 6 run, 4 caught, 2 controls survived | DONE |

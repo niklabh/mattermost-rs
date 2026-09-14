@@ -81,6 +81,8 @@ MODELLED = {
         "MaximumLoginAttempts", "EnableMultifactorAuthentication",
         # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
         "EnableAPIUserDeletion",
+        # The first gate on POST /api/v4/users/trigger-notify-admin-posts.
+        "EnableAPITriggerAdminNotifications",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
