@@ -23,6 +23,8 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/niklabh/mattermost-rs"
 
 [workspace.dependencies]
+# The machine's own interface addresses, for the outbound-connection guard's `IsOwnIP`.
+if-addrs = "0.13"
 # Internal crates. Dependency direction is strict and enforced by review:
 #   mm-model <- mm-store <- mm-app <- {mm-api, mm-ws}
 mm-model = { path = "crates/mm-model" }

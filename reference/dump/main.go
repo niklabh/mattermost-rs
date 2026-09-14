@@ -1094,6 +1094,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_analytics_row.json"))
 
+	if err := writeHTTPServiceBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: httpservice behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_httpservice.json"))
+
 	if err := writeStatsBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: stats behaviour fixture: %v\n", err)
 		os.Exit(1)
