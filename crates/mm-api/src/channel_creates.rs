@@ -62,7 +62,7 @@ const PAYLOAD_PARSE_ERROR: &str = "api.payload.parse.error";
 
 /// `w.WriteHeader(http.StatusCreated)` then `json.NewEncoder(w).Encode(channel)` — a 201 and a
 /// **trailing newline** ([D-086]).
-fn created(handler: &'static str, channel: &Channel) -> Result<Response, ApiError> {
+pub(crate) fn created(handler: &'static str, channel: &Channel) -> Result<Response, ApiError> {
     let mut body = serde_json::to_vec(channel).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise Channel");
         ApiError::from(AppError::new(

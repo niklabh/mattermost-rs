@@ -218,6 +218,8 @@ mod parity {
     // purpose — four agents were editing this file in parallel and an append conflicts with
     // nothing.
     pub mod local_mode;
+    // Appended 2026-09-14: `channel_local.go`, `post_local.go`, `group_local.go` on the socket.
+    pub mod local_channels;
 
     // Appended 2026-09-13, same reason: the user-update family.
     pub mod notification_store;

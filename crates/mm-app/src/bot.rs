@@ -576,6 +576,142 @@ fn bot_update_error(
     }
 }
 
+/// The system bot: the actor Go substitutes when a channel write has no user behind it.
+///
+/// Every `*_local.go` handler that archives, restores or converts a channel, or removes a
+/// member, passes an empty user id — and the app layer then posts the system message **as the
+/// system bot**, creating it on first use. Before this port that branch was a log line, which
+/// left the socket's answer right and the channel's history wrong.
+impl App {
+    /// Port of `App.GetSystemBot` (bot.go:640).
+    ///
+    /// `i18n.T("app.system.system_bot.bot_displayname")` is `"System"` in the server's only
+    /// bundled locale; the username is `model.BotSystemBotUsername`.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_system_bot(&self) -> AppResult<Bot> {
+        self.get_or_create_system_owned_bot(mm_model::bot::BOT_SYSTEM_BOT_USERNAME, "System")
+            .await
+    }
+
+    /// Port of `App.GetOrCreateSystemOwnedBot` (bot.go:644).
+    ///
+    /// The owner is the **first system administrator by username** — `GetUsersFromProfiles`
+    /// with `Role: system_admin`, page 0 of size 1, and neither `Inactive` nor `Active` set, so a
+    /// deactivated administrator qualifies. No administrator at all is the 500
+    /// `app.bot.get_system_bot.empty_admin_list.app_error`, which a real installation cannot
+    /// produce (the first user is one) and this port does not special-case.
+    #[tracing::instrument(skip(self), fields(username = %username))]
+    pub async fn get_or_create_system_owned_bot(
+        &self,
+        username: &str,
+        display_name: &str,
+    ) -> AppResult<Bot> {
+        // `applyRoleFilter`: `%` + sanitizeSearchTerm(role, "\\") + `%`, compared with `LIKE
+        // LOWER(?)`. The role id carries an underscore, which the sanitiser escapes.
+        let pattern = format!(
+            "%{}%",
+            mm_store::user_store::sanitize_search_term(mm_model::role::SYSTEM_ADMIN_ROLE_ID, '\\')
+        );
+        let admins = self
+            .store()
+            .user()
+            .get_all_profiles_in_role(&pattern, 0, 1)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "the administrator lookup failed");
+                AppError::boxed(
+                    "GetUsersFromProfiles",
+                    "app.user.get_profiles.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        let Some(owner) = admins.first() else {
+            return Err(AppError::boxed(
+                "GetSystemBot",
+                "app.bot.get_system_bot.empty_admin_list.app_error",
+                None,
+                String::new(),
+                500,
+            ));
+        };
+
+        let definition = Bot {
+            username: username.to_owned(),
+            display_name: display_name.to_owned(),
+            description: String::new(),
+            owner_id: owner.id.clone(),
+            ..Bot::default()
+        };
+        self.get_or_create_bot(definition).await
+    }
+
+    /// Port of `App.getOrCreateBot` (bot.go:669).
+    ///
+    /// Looked up **by username**, not by the `Bots` table: an existing user of that name that
+    /// is not a bot makes the trailing `GetBot` fail with the bot-not-found error, exactly as in
+    /// Go. The create path is `CreateBot`'s first half — the user row, then the bot row, the
+    /// user removed again if the bot save fails — without the owner DM and its welcome post.
+    #[tracing::instrument(skip_all, fields(username = %definition.username, created))]
+    async fn get_or_create_bot(&self, mut definition: Bot) -> AppResult<Bot> {
+        match self.get_user_by_username(&definition.username).await {
+            Ok(bot_user) => {
+                tracing::Span::current().record("created", false);
+                self.get_bot(&bot_user.id, false).await
+            }
+            Err(err) if err.status_code == 404 => {
+                tracing::Span::current().record("created", true);
+                let user = self
+                    .store()
+                    .user()
+                    .save(
+                        &user_from_bot(&definition),
+                        &crate::password::latest_hasher(),
+                    )
+                    .await
+                    .map_err(|err| {
+                        let mut err = create_bot_user_save_error(err);
+                        err.where_ = "getOrCreateBot".to_owned();
+                        err
+                    })?;
+                definition.user_id = user.id;
+
+                match self.store().bot().save(&definition).await {
+                    Ok(saved) => Ok(saved),
+                    Err(err) => {
+                        if let Err(cleanup) = self
+                            .store()
+                            .user()
+                            .permanent_delete(&definition.user_id)
+                            .await
+                        {
+                            tracing::error!(
+                                error = %cleanup,
+                                "Failed to permanently delete the user after bot save failure",
+                            );
+                        }
+                        Err(match err {
+                            StoreError::Invalid { app_error, .. } => app_error,
+                            other => {
+                                tracing::error!(error = %other, "system bot save failed");
+                                AppError::boxed(
+                                    "getOrCreateBot",
+                                    "app.bot.createbot.internal_error",
+                                    None,
+                                    String::new(),
+                                    500,
+                                )
+                            }
+                        })
+                    }
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

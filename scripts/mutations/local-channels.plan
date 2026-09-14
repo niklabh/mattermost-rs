@@ -1,0 +1,37 @@
+# Mutation plan for the 23 local-mode pairs of `channel_local.go`, `post_local.go` and
+# `group_local.go`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-channels.plan
+#
+# The eleven shared read handlers are mutated by their own plans; what is new here is the twelve
+# handlers that *differ* from their HTTP twins by having no user, and the app-layer branches that
+# difference reaches: the system bot as the author of the archive, restore, privacy and removal
+# notices, the added user as the author of the join notice, no notice at all on a move, no
+# creator on a create, no requestor on an add, `DeleteBy == ""` on a post delete. Each line
+# below puts a user, a gate, or a notice back where Go has none — or takes one away where Go
+# has one — and `the_local_channel_writes_match_over_the_socket` compares the notice each twin
+# is left with.
+#
+# Not planned, because they are equivalent here: a requestor equal to the added user (Go posts
+# the join notice for that case too); a `force` sweep with a member who is on both teams;
+# `FillInChannelProps` on a header with no `~mention`; and every parameter-name change, whose
+# only wire effect is Go's translated `message` (D-092).
+#
+# The controls: a contiguous rename of a binding and its two uses in `local_move_channel`, and a
+# true swap of the `/privacy` and `/restore` registrations, which are different paths.
+#
+# The valid run: **14 run, 12 caught, 2 controls survived, 0 harness faults** (2026-09-14).
+local-create-adds-the-empty-creator-as-member	crates/mm-api/src/local_channels.rs	    if let Err(err) = state.app.create_channel(&mut channel, false).await {	    if let Err(err) = state.app.create_channel(&mut channel, true).await {	api	local_channels
+local-archive-notice-lands-in-the-wrong-channel	crates/mm-app/src/channel_write.rs	                            channel_deleted_post(&bot.user_id, &bot.username, &channel.id),	                            channel_deleted_post(&bot.user_id, &bot.username, &channel.team_id),	api	local_channels
+local-restore-notice-has-the-archive-type	crates/mm-app/src/channel_write.rs	                        channel_restored_post(&bot.user_id, &bot.username, &channel.id),	                        channel_deleted_post(&bot.user_id, &bot.username, &channel.id),	api	local_channels
+local-privacy-author-is-nobody	crates/mm-app/src/channel_write.rs	                Ok((Cow::Owned(bot.user_id), Cow::Owned(bot.username)))	                Ok((Cow::Owned(String::new()), Cow::Owned(bot.username)))	api	local_channels
+local-add-member-root-check-inverted	crates/mm-api/src/local_channels.rs	        if root.channel_id != channel_id {	        if root.channel_id == channel_id {	api	local_channels
+local-remove-member-is-a-self-leave	crates/mm-api/src/local_channels.rs	        .remove_user_from_channel(&user_id, "", &channel)	        .remove_user_from_channel(&user_id, &user_id, &channel)	api	local_channels
+local-removal-notice-author-is-the-owner	crates/mm-app/src/channel_member.rs	                Ok(bot) => bot.user_id,	                Ok(bot) => bot.owner_id,	api	local_channels
+local-move-accepts-a-string-force	crates/mm-api/src/local_channels.rs	    let Some(force) = props.get("force").and_then(|v| v.as_bool()) else {	    let Some(force) = props.get("force").map(|v| v.as_bool().unwrap_or(true)) else {	api	local_channels
+local-delete-post-inverts-permanent	crates/mm-api/src/local_channels.rs	    let outcome = if permanent {	    let outcome = if !permanent {	api	local_channels
+local-groups-licence-refusal-is-the-http-status	crates/mm-api/src/local_channels.rs	            "api.ldap_groups.license_error",\n            None,\n            String::new(),\n            403,	            "api.ldap_groups.license_error",\n            None,\n            String::new(),\n            501,	api	local_channels
+local-reviewer-branch-reaches-the-handler	crates/mm-api/src/local_channels.rs	    if channels::is_content_reviewer_request(request.uri().query()) {	    if false && channels::is_content_reviewer_request(request.uri().query()) {	api	local_channels
+local-permanent-channel-delete-is-an-archive	crates/mm-api/src/local_channels.rs	    if permanent {\n        tracing::debug!("handing a permanent channel deletion to Go over the socket");	    if permanent && false {\n        tracing::debug!("handing a permanent channel deletion to Go over the socket");	api	local_channels
+control-rename-a-binding-and-its-uses	crates/mm-api/src/local_channels.rs	    let props = channel_move::string_interface_from_json(&bytes);\n    let Some(team_id) = props.get("team_id").and_then(|v| v.as_str()) else {\n        return ApiError::invalid_param("team_id").into_response();\n    };\n    let Some(force) = props.get("force").and_then(|v| v.as_bool()) else {	    let fields = channel_move::string_interface_from_json(&bytes);\n    let Some(team_id) = fields.get("team_id").and_then(|v| v.as_str()) else {\n        return ApiError::invalid_param("team_id").into_response();\n    };\n    let Some(force) = fields.get("force").and_then(|v| v.as_bool()) else {	api	local_channels
+control-swap-two-independent-registrations	crates/mm-api/src/local_channels.rs	            "/api/v4/channels/{channel_id}/privacy",\n            partially_migrated_with_ids(state, put(local_update_channel_privacy)),\n        )\n        .route(\n            "/api/v4/channels/{channel_id}/restore",\n            partially_migrated_with_ids(state, post(local_restore_channel)),\n        )	            "/api/v4/channels/{channel_id}/restore",\n            partially_migrated_with_ids(state, post(local_restore_channel)),\n        )\n        .route(\n            "/api/v4/channels/{channel_id}/privacy",\n            partially_migrated_with_ids(state, put(local_update_channel_privacy)),\n        )	api	local_channels

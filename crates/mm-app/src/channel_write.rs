@@ -308,7 +308,7 @@ impl App {
     pub async fn update_channel_privacy(
         &self,
         channel: &mut Channel,
-        user: &User,
+        user: Option<&User>,
     ) -> AppResult<ChannelWrite> {
         if channel.discoverable && channel.channel_type == CHANNEL_TYPE_OPEN {
             // `CancelPendingChannelJoinRequestsOnConvert` fans out over the pending join requests
@@ -329,10 +329,20 @@ impl App {
 
         self.update_channel(channel).await?;
 
-        if let Err(post_err) = self
-            .create_system_post(channel_privacy_post(user, channel), channel)
-            .await
-        {
+        // `postChannelPrivacyMessage`: the author is the user, or the system bot when there is
+        // none (the local-mode handler) — and a bot that cannot be fetched fails the post the
+        // same way a failed save does, so the privacy change is reverted below either way.
+        let posted = match self.privacy_message_author(user).await {
+            Ok((author_id, author_username)) => self
+                .create_system_post(
+                    channel_privacy_post(&author_id, &author_username, channel),
+                    channel,
+                )
+                .await
+                .map(|_| ()),
+            Err(err) => Err(err),
+        };
+        if let Err(post_err) = posted {
             if channel.channel_type == CHANNEL_TYPE_OPEN {
                 channel.channel_type = mm_model::channel::CHANNEL_TYPE_PRIVATE.to_owned();
                 channel.discoverable = was_discoverable;
@@ -492,15 +502,29 @@ impl App {
         if !channel.is_space() {
             match &user {
                 Some(user) => {
-                    self.post_system_message(channel_deleted_post(user, &channel.id), channel)
-                        .await;
+                    self.post_system_message(
+                        channel_deleted_post(&user.id, &user.username, &channel.id),
+                        channel,
+                    )
+                    .await;
                 }
-                // Go's `else` posts as the system bot, which `GetSystemBot` would create. Not
-                // reachable from `DELETE /channels/{id}` — the handler always has a session.
-                None => tracing::warn!(
-                    channel_id = %channel.id,
-                    "Failed to post archive message: GetSystemBot is not ported",
-                ),
+                // Go's `else`: no user id (the local-mode handler passes `""`), so the notice is
+                // posted as the system bot, created on first use. Its failure is logged, and the
+                // archive stands — Go's `Warn`, not a return.
+                None => match self.get_system_bot().await {
+                    Ok(bot) => {
+                        self.post_system_message(
+                            channel_deleted_post(&bot.user_id, &bot.username, &channel.id),
+                            channel,
+                        )
+                        .await;
+                    }
+                    Err(err) => tracing::warn!(
+                        error = %err,
+                        channel_id = %channel.id,
+                        "Failed to post archive message",
+                    ),
+                },
             }
         }
 
@@ -671,11 +695,53 @@ impl App {
                 }
             })?;
 
-            self.post_system_message(channel_restored_post(&user, &channel.id), channel)
-                .await;
+            self.post_system_message(
+                channel_restored_post(&user.id, &user.username, &channel.id),
+                channel,
+            )
+            .await;
+        } else {
+            // Go's `else` runs in a goroutine (`a.Srv().Go`), so its post lands *after* the
+            // response; here it lands before. The order is not on the wire — the response is
+            // the channel, and the post reaches clients over the websocket either way.
+            match self.get_system_bot().await {
+                Ok(bot) => {
+                    self.post_system_message(
+                        channel_restored_post(&bot.user_id, &bot.username, &channel.id),
+                        channel,
+                    )
+                    .await;
+                }
+                Err(err) => tracing::error!(
+                    error = %err,
+                    channel_id = %channel.id,
+                    "Failed to post unarchive message",
+                ),
+            }
         }
 
         Ok(())
+    }
+
+    /// `postChannelPrivacyMessage`'s author: the user, or the system bot when there is none.
+    ///
+    /// The bot's failure is wrapped into the privacy post's own id, because that is the error
+    /// Go returns from the function that would have posted.
+    async fn privacy_message_author<'a>(
+        &self,
+        user: Option<&'a User>,
+    ) -> Result<(std::borrow::Cow<'a, str>, std::borrow::Cow<'a, str>), Box<AppError>> {
+        use std::borrow::Cow;
+        match user {
+            Some(user) => Ok((Cow::Borrowed(&user.id), Cow::Borrowed(&user.username))),
+            None => {
+                let bot = self
+                    .get_system_bot()
+                    .await
+                    .map_err(|err| privacy_message_error(&err))?;
+                Ok((Cow::Owned(bot.user_id), Cow::Owned(bot.username)))
+            }
+        }
     }
 
     /// Port of `app.App.PostUpdateChannelDisplayNameMessage` (app/channel.go:2198).
@@ -866,7 +932,7 @@ impl App {
 ///
 /// A map literal indexed by `channel.Type`, so the public sentence is the one a channel that is
 /// now open gets. Neither string interpolates the username, which only reaches `props`.
-fn channel_privacy_post(user: &User, channel: &Channel) -> Post {
+fn channel_privacy_post(actor_id: &str, actor_username: &str, channel: &Channel) -> Post {
     let message = if channel.channel_type == CHANNEL_TYPE_OPEN {
         "This channel has been converted to a Public Channel and can be joined by any team member."
     } else {
@@ -877,20 +943,20 @@ fn channel_privacy_post(user: &User, channel: &Channel) -> Post {
         channel_id: channel.id.clone(),
         message: message.to_owned(),
         post_type: POST_TYPE_CHANGE_CHANNEL_PRIVACY.to_owned(),
-        user_id: user.id.clone(),
-        props: Some(system_props([("username", user.username.as_str())])),
+        user_id: actor_id.to_owned(),
+        props: Some(system_props([("username", actor_username)])),
         ..Post::default()
     }
 }
 
 /// The `model.Post` literal of `App.DeleteChannel`'s archive notice (app/channel.go:1768).
-fn channel_deleted_post(user: &User, channel_id: &str) -> Post {
+fn channel_deleted_post(actor_id: &str, actor_username: &str, channel_id: &str) -> Post {
     Post {
         channel_id: channel_id.to_owned(),
-        message: format!("{} archived the channel.", user.username),
+        message: format!("{actor_username} archived the channel."),
         post_type: POST_TYPE_CHANNEL_DELETED.to_owned(),
-        user_id: user.id.clone(),
-        props: Some(system_props([("username", user.username.as_str())])),
+        user_id: actor_id.to_owned(),
+        props: Some(system_props([("username", actor_username)])),
         ..Post::default()
     }
 }
@@ -900,13 +966,13 @@ fn channel_deleted_post(user: &User, channel_id: &str) -> Post {
 /// Its i18n string is the one **named-parameter** template among the twelve
 /// (`{{.Username}} unarchived the channel.`) where the others are `%v`. The rendered sentence is
 /// the same shape; the difference is only visible in `en.json`.
-fn channel_restored_post(user: &User, channel_id: &str) -> Post {
+fn channel_restored_post(actor_id: &str, actor_username: &str, channel_id: &str) -> Post {
     Post {
         channel_id: channel_id.to_owned(),
-        message: format!("{} unarchived the channel.", user.username),
+        message: format!("{actor_username} unarchived the channel."),
         post_type: POST_TYPE_CHANNEL_RESTORED.to_owned(),
-        user_id: user.id.clone(),
-        props: Some(system_props([("username", user.username.as_str())])),
+        user_id: actor_id.to_owned(),
+        props: Some(system_props([("username", actor_username)])),
         ..Post::default()
     }
 }
@@ -1003,7 +1069,7 @@ mod tests {
     fn the_privacy_post_sentence_follows_the_new_type() {
         let user = acting_user();
 
-        let to_public = channel_privacy_post(&user, &typed(CHANNEL_TYPE_OPEN));
+        let to_public = channel_privacy_post(&user.id, &user.username, &typed(CHANNEL_TYPE_OPEN));
         assert_eq!(to_public.post_type, "system_change_chan_privacy");
         assert_eq!(
             to_public.message,
@@ -1015,8 +1081,11 @@ mod tests {
             vec![("username".to_owned(), "alice".to_owned())]
         );
 
-        let to_private =
-            channel_privacy_post(&user, &typed(mm_model::channel::CHANNEL_TYPE_PRIVATE));
+        let to_private = channel_privacy_post(
+            &user.id,
+            &user.username,
+            &typed(mm_model::channel::CHANNEL_TYPE_PRIVATE),
+        );
         assert_eq!(
             to_private.message,
             "This channel has been converted to a Private Channel."
@@ -1030,12 +1099,12 @@ mod tests {
     fn the_archive_and_restore_posts_are_counted_messages() {
         let user = acting_user();
 
-        let archived = channel_deleted_post(&user, "c1");
+        let archived = channel_deleted_post(&user.id, &user.username, "c1");
         assert_eq!(archived.post_type, "system_channel_deleted");
         assert_eq!(archived.message, "alice archived the channel.");
         assert!(!archived.excludes_from_channel_message_count());
 
-        let restored = channel_restored_post(&user, "c1");
+        let restored = channel_restored_post(&user.id, &user.username, "c1");
         assert_eq!(restored.post_type, "system_channel_restored");
         assert_eq!(restored.message, "alice unarchived the channel.");
         assert!(!restored.excludes_from_channel_message_count());

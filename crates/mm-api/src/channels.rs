@@ -1546,7 +1546,7 @@ pub async fn get_channel_members(
 /// plus `_` and `-`, **without** the `.` the username class allows. A segment outside it never
 /// matches Go's route and falls to the mux 404, so it is forwarded rather than answered
 /// ([D-150] under a third alphabet).
-fn segment_matches_channel_name_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_channel_name_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()

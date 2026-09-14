@@ -134,7 +134,7 @@ pub(crate) async fn reject_board_or_space_channel(
 /// Go's `c.RequireChannelId().RequireUserId()`, in that order — the channel id's error wins when
 /// both segments are malformed.
 #[allow(clippy::result_large_err)]
-fn require_channel_and_user(channel_id: &str, user_id: &str) -> Result<(), ApiError> {
+pub(crate) fn require_channel_and_user(channel_id: &str, user_id: &str) -> Result<(), ApiError> {
     if !is_valid_id(channel_id) {
         return Err(ApiError::invalid_url_param("channel_id"));
     }

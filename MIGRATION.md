@@ -13260,3 +13260,34 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+
+## `channel_local.go`, `post_local.go` and `group_local.go` on the socket (2026-09-14)
+
+**+23 local-mode pairs** over base `fc7c7ec` (493 of 764). Eleven of the handlers are the HTTP ones
+under `local_session()`; the other twelve are Go's own `local*` functions, which drop the permission
+checks *and the user*, and what Go does with no user is the port: the archive, restore, privacy
+and removal notices are posted by the **system bot** — `App::get_system_bot`, the port of
+`GetSystemBot`/`getOrCreateBot`, created on first use and owned by the first administrator by
+username, which the archive branches had been logging as "not ported" — the join notice is posted
+by the added user (no requestor), a move posts nothing (`user == nil`), a create has no creator
+and no member, and a post delete stamps `DeleteBy == ""` with `?permanent` ungated (the new
+`App::permanent_delete_post` and `PostStore::permanent_delete`). The two group lists skip
+`requireLicense`, so unlicensed they are the 403 `api.ldap_groups.license_error` where the HTTP
+twins are a 501. Every forward is over the socket: the shared read handlers' port forwards are
+decided before the call (`?as_content_reviewer`, the two name-segment mux classes) or taken as a
+value (`posts::get_post_outcome`). `PermanentDeleteChannel` is unported and that branch forwards
+([D-610]).
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/post_store.rs` — `permanent_delete`; `user_store.rs` — `get_all_profiles_in_role` (the system bot's owner: no `DeleteAt` predicate) | DONE |
+| app | `crates/mm-app/src/bot.rs` — `get_system_bot`, `get_or_create_system_owned_bot`; `channel_write.rs` — the bot as author, `update_channel_privacy(…, Option<&User>)`; `channel_move.rs` — `Option<&User>` through the move; `channel_member.rs` — the bot as removal author; `post_write.rs` — `permanent_delete_post` | DONE |
+| api | `crates/mm-api/src/local_channels.rs` — the 23 registrations, merged by one line in `local.rs`; `posts.rs` — `get_post_outcome`, `get_posts_for_channel_outcome` | DONE |
+| test | `crates/mm-api/tests/parity/local_channels.rs` — 5: the reads byte for byte, the writes on a twin per server with every notice compared, 34 refusals, the neighbours and the mux forwards, and the bot created here when absent | DONE |
+| mutation | `scripts/mutations/local-channels.plan` — 14 run, 12 caught, 2 controls survived | DONE |
+
+Two facts measured against Go that the HTTP handlers hide: `localCreateChannel` accepts an empty
+`team_id` (201, `team_id: ""`; the model does not require one) and `localPatchChannel` accepts a
+blank `display_name` (200) — neither is a refusal on either server. Go's channel cache does not
+see a row this server changed, so the suite drops it before reading a twin back
+(`invalidate_go_caches`); the stale read is the stack's, not the route's.
