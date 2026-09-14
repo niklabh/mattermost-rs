@@ -8753,3 +8753,35 @@ The out-of-channel arm is the one a client reaches on Team Edition, and it needs
 `GetProfilesByUsernames`, `FilterUsersByVisible` and `makeOutOfChannelMentionPost`'s three
 message forms besides the i18n bundle. **What is owed:** the i18n bundle first, then the three.
 
+
+---
+
+## D-600 · `DELETE /api/v4/users` (localPermanentDeleteAllUsers) needs an isolated database to test
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (user_local.go)
+
+`localPermanentDeleteAllUsers` (api4/user_local.go) wipes **every** user in the database. The
+parity stacks share one Postgres between the two servers and every other suite, so exercising it
+would destroy the fixture users the whole suite depends on. It is left forwarded to Go — the
+`GET`/`POST` method router on `/api/v4/users` falls through `local::partially_migrated` to the
+socket, so Go answers the `DELETE` — and unregistered in `crate::local_users`. **What is owed:**
+port `App::permanent_delete_all_users` and register the route, tested against a throwaway
+database (a fresh compose volume, or a transaction rolled back), not the shared stack.
+
+---
+
+## D-601 · `updateUser` writes an omitted `props`/`timezone` as SQL NULL, which Go's scanner cannot read
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
+
+Found by the local-socket user suite, which is the first test to have **Go read a row this
+server's `updateUser` wrote** (the forwarded `DELETE ?permanent=true` does a `GetUser` in Go).
+`PUT /api/v4/users/{id}` with a body that omits `props` or `timezone` decodes them as `None`, and
+`mm_store` (`user_store.rs`, `json_or_null`) writes `None` as **SQL NULL** — discarding the `{}` /
+default-timezone the create stored. Go's `User` scanner then fails on that row with
+`failed to unmarshal user props: unexpected end of JSON input` and the read 500s; Go's own
+`updateUser` keeps the existing `{}` and never writes NULL. The HTTP parity suite misses it
+because each server only reads its own rows. **What is owed:** `updateUser` (and the store's
+`Update`) must preserve the target's `props`/`timezone` when the body omits them, as Go does,
+rather than writing NULL. `parity::local_users` sends both fields explicitly to route around it.
+

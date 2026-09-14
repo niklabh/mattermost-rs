@@ -13260,3 +13260,41 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+
+## The user family on the socket — `api4/user_local.go` (2026-09-14)
+
+**+25 local-mode pairs.** All 26 of `InitUserLocal` except `DELETE /api/v4/users`
+(`localPermanentDeleteAllUsers`, [D-600] — wiping every user cannot be tested on a shared stack),
+against base `fc7c7ec`'s 493 of 764. Seventeen pairs are the HTTP handler through `APILocal` with
+`local_session()`; nine are the `local*` functions, each the HTTP handler *minus* a check —
+`localGetUsers` drops the per-arm permission gate (so `?in_channel=<none>` is `[]`, not a 403),
+the restrictions and the `sort=admin`/`in_group` arms; `localGetUser`/`ByUsername`/`ByEmail`/
+`ByAuthData` drop `UserCanSeeOtherUser` and reuse the HTTP tails; `localGetUploadsForUser` drops
+`RequireUserId`, so `me` is a three-byte id. `me` is nobody on every route through
+`RequireUserId`.
+
+The one structural change outside the module: `proxy::forward_to_go` now redirects a request that
+carries the `local::GoLocalSocket` extension to `forward_over_unix`, so a shared HTTP handler's
+forward branch (the MFA deactivation, the permanent delete) reaches Go's `APILocal` over the
+socket rather than `APISessionRequired` over the port — a 401 vs Go's answer.
+
+- `crates/mm-api/src/local_users.rs` — the 25 registrations, the nine `local*` handlers, the
+  seventeen wrappers; merged into `local::router` by one `.merge`.
+- `crates/mm-api/src/users.rs`, `uploads.rs` — the read tails split out `pub(crate)`
+  (`respond_user_by_email`, `respond_user_by_auth_data`, `email_lookup_prologue`,
+  `auth_data_value`, `serve_users` gains a `GetUsersVariant`, `uploads_for_user_response`).
+- `crates/mm-api/src/user_creates.rs` — `verifyUserEmailWithoutToken` gained the encoder's
+  trailing newline ([D-086]), missed until the socket suite compared it byte for byte.
+- `scripts/routes.py` — the local inventory now unions `local_*.rs` with `local.rs`.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/local_users.rs`; the `.merge` in `local.rs`; the socket-forward intercept in `proxy.rs` | DONE |
+| test | `crates/mm-api/tests/parity/local_users.rs` — 6, over both sockets; plus 4 unit tests in the module | DONE |
+| mutation | `scripts/mutations/local-users.plan` — see below | DONE |
+
+**Parity risk / found:** `updateUser` writes an omitted `props`/`timezone` as SQL NULL, which
+Go's row scanner cannot read (500) — [D-601], surfaced because the socket lets Go read a row this
+server wrote. The two write tests send both fields explicitly to route around it. A converted
+account is a bot owned by itself, and Go's `userDeactivated` recurses on it without end; the
+suite scrubs those by SQL rather than deactivating them.

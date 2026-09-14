@@ -220,6 +220,7 @@ mod parity {
     pub mod local_mode;
 
     // Appended 2026-09-13, same reason: the user-update family.
+    pub mod local_users;
     pub mod notification_store;
     pub mod notify_admin;
     pub mod notify_admin_trigger;

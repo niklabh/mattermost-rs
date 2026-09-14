@@ -233,7 +233,14 @@ def main():
     args = set(sys.argv[1:])
     routes = collect()
     have = served()
-    have_local = served(LOCALRS) if LOCALRS.exists() else set()
+    # The local router is `local.rs` plus the `local_<family>.rs` modules it `.merge`s — a family
+    # ports as its own module (see `local::router`), so a parse of `local.rs` alone would miss
+    # every merged family. Union them all.
+    have_local = set()
+    if LOCALRS.exists():
+        have_local |= served(LOCALRS)
+        for module in sorted(LOCALRS.parent.glob("local_*.rs")):
+            have_local |= served(module)
     want_local = "--local" in args
 
     for r in routes:
