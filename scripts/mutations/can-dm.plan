@@ -1,0 +1,21 @@
+# Mutation plan for GET /sharedchannels/users/{user_id}/can_dm/{other_user_id} — the two id
+# checks, the session, the no-service answer, the service gate, and the legacy config fallback.
+#
+#   scripts/mutate-batch.sh scripts/mutations/can-dm.plan
+#
+# Not planned, equivalent on the wire: which of the two ids a 400 names — this server answers the
+# untranslated id as its message ([D-092]) and the parameter name lives only in Go's translated
+# text, so `second-id-misnamed` and `ids-checked-in-reverse` survived a batch and were dropped.
+# Equivalent on the stack:
+# view restrictions, so the visibility check never answers false) and the licence half of the
+# service gate (the config half is off on both pairs, so the licence side never decides).
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+no-service-is-false	crates/mm-api/src/connected_workspaces.rs	    answer(true)\n}	    answer(false)\n}	api	can_dm
+service-gate-or	crates/mm-api/src/connected_workspaces.rs	    let service_would_exist = licence.is_some_and(|l| l.has_shared_channels())\n        && state.app.config().enable_shared_channels;	    let service_would_exist = licence.is_some_and(|l| l.has_shared_channels())\n        || state.app.config().enable_shared_channels;	api	can_dm
+status-201	crates/mm-api/src/connected_workspaces.rs	    fn answer(can_dm: bool) -> Response {\n        (\n            axum::http::StatusCode::OK,	    fn answer(can_dm: bool) -> Response {\n        (\n            axum::http::StatusCode::CREATED,	api	can_dm
+session-not-required	crates/mm-api/src/connected_workspaces.rs	    _session: AuthenticatedSession,\n    request: Request,\n) -> Response {\n    fn answer(can_dm: bool) -> Response {	    request: Request,\n) -> Response {\n    fn answer(can_dm: bool) -> Response {	api	can_dm
+legacy-fallback-on-fresh	crates/mm-app/src/config.rs	                .or_else(|| {\n                    if is_update {\n                        parsed\n                            .experimental_settings	                .or_else(|| {\n                    if !is_update {\n                        parsed\n                            .experimental_settings	unit	config
+control-rename-gate	crates/mm-api/src/connected_workspaces.rs	    let service_would_exist = licence.is_some_and(|l| l.has_shared_channels())\n        && state.app.config().enable_shared_channels;\n    if service_would_exist {	    let service_exists = licence.is_some_and(|l| l.has_shared_channels())\n        && state.app.config().enable_shared_channels;\n    if service_exists {	api	can_dm
+control-reorder-headers	crates/mm-api/src/connected_workspaces.rs	                ("Content-Type", "application/json"),\n                ("x-mmrs-served-by", "rust"),	                ("x-mmrs-served-by", "rust"),\n                ("Content-Type", "application/json"),	api	can_dm

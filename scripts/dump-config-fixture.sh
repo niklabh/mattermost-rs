@@ -86,7 +86,10 @@ MODELLED = {
         "SiteURL",
     ],
     "ComplianceSettings": ["Enable"],
-    "ExperimentalSettings": ["RestrictSystemAdmin"],
+    # `EnableSharedChannels` here is the legacy key `ConnectedWorkspacesSettings` falls back to
+    # on an update; both are projected so the fixture can show which one a live document has.
+    "ExperimentalSettings": ["RestrictSystemAdmin", "EnableSharedChannels"],
+    "ConnectedWorkspacesSettings": ["EnableSharedChannels"],
     "ImageProxySettings": ["Enable"],
     "FileSettings": ["DriverName", "EnablePublicLink", "MaxFileSize"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],

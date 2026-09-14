@@ -314,6 +314,16 @@ pub struct Config {
     /// on this build — for the channel's membership rule.
     pub enable_channel_policy_indicators: bool,
 
+    /// `ConnectedWorkspacesSettings.EnableSharedChannels` (config.go:3773, defaulted at :3803).
+    /// Go default **`false`** — unless the document is an update carrying the legacy
+    /// `ExperimentalSettings.EnableSharedChannels`, which then supplies the value.
+    ///
+    /// Half of the gate on the shared-channel sync service (app/server.go:713-732): the service
+    /// starts only with a licence that `HasSharedChannels` **and** this on. Read by
+    /// `canUserDirectMessage`, whose answer past the visibility check is the service's when it
+    /// exists and `true` when it does not.
+    pub enable_shared_channels: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -1184,6 +1194,7 @@ impl Default for Config {
             enable_attribute_based_access_control: false,
             // config.go:4100 — `new(true)`.
             enable_channel_policy_indicators: true,
+            enable_shared_channels: false,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -1496,6 +1507,11 @@ impl Config {
                 lookup,
                 "MM_ACCESSCONTROLSETTINGS_ENABLECHANNELPOLICYINDICATORS",
                 default.enable_channel_policy_indicators,
+            ),
+            enable_shared_channels: lookup_bool(
+                lookup,
+                "MM_CONNECTEDWORKSPACESSETTINGS_ENABLESHAREDCHANNELS",
+                default.enable_shared_channels,
             ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
@@ -1931,8 +1947,8 @@ impl Config {
             site_url: service.site_url,
             restrict_system_admin: parsed
                 .experimental_settings
-                .unwrap_or_default()
-                .restrict_system_admin
+                .as_ref()
+                .and_then(|s| s.restrict_system_admin)
                 .unwrap_or(default.restrict_system_admin),
             compliance_enable: parsed
                 .compliance_settings
@@ -2081,6 +2097,24 @@ impl Config {
                 .as_ref()
                 .and_then(|s| s.enable_channel_policy_indicators)
                 .unwrap_or(default.enable_channel_policy_indicators),
+            // `ConnectedWorkspacesSettings.SetDefaults(isUpdate, e)` (config.go:3803): the
+            // section's own key, else — on an update only — the legacy
+            // `ExperimentalSettings.EnableSharedChannels`, else `false`.
+            enable_shared_channels: parsed
+                .connected_workspaces_settings
+                .as_ref()
+                .and_then(|s| s.enable_shared_channels)
+                .or_else(|| {
+                    if is_update {
+                        parsed
+                            .experimental_settings
+                            .as_ref()
+                            .and_then(|s| s.enable_shared_channels)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(default.enable_shared_channels),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -2388,6 +2422,8 @@ struct Document {
     compliance_settings: Option<EnableOnlyDocument>,
     #[serde(rename = "AccessControlSettings")]
     access_control_settings: Option<AccessControlSettingsDocument>,
+    #[serde(rename = "ConnectedWorkspacesSettings")]
+    connected_workspaces_settings: Option<ConnectedWorkspacesSettingsDocument>,
     #[serde(rename = "ExperimentalSettings")]
     experimental_settings: Option<ExperimentalSettingsDocument>,
     #[serde(rename = "ImageProxySettings")]
@@ -2729,6 +2765,16 @@ struct EnableOnlyDocument {
 struct ExperimentalSettingsDocument {
     #[serde(rename = "RestrictSystemAdmin")]
     restrict_system_admin: Option<bool>,
+    /// The legacy home of the shared-channels flag, read only as the update-time fallback for
+    /// `ConnectedWorkspacesSettings.EnableSharedChannels`.
+    #[serde(rename = "EnableSharedChannels")]
+    enable_shared_channels: Option<bool>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct ConnectedWorkspacesSettingsDocument {
+    #[serde(rename = "EnableSharedChannels")]
+    enable_shared_channels: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3536,8 +3582,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 81,
-            "the fixture covers {keys} settings and Config reads 81 from the document. \
+            keys, 83,
+            "the fixture covers {keys} settings and Config reads 83 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3576,6 +3622,7 @@ mod go_parity {
             "Office365Settings": { "Enable": true },
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
             "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
+            "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false
@@ -3585,6 +3632,7 @@ mod go_parity {
         let config = Config::from_document(inverted).expect("valid document");
 
         assert!(config.enable_post_icon_override);
+        assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
         assert!(!config.post_priority);
         assert!(!config.allow_synced_drafts);
@@ -3702,6 +3750,28 @@ mod go_parity {
         let update =
             Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
         assert_eq!(update.session_length_web_in_hours, 4320);
+    }
+
+    /// `ConnectedWorkspacesSettings.EnableSharedChannels` falls back to the legacy
+    /// `ExperimentalSettings` key — but only on an update, which is what `SiteURL` marks.
+    #[test]
+    fn the_shared_channels_flag_takes_its_legacy_key_only_on_an_update() {
+        let legacy_update = Config::from_document(
+            r#"{"ServiceSettings":{"SiteURL":""},"ExperimentalSettings":{"EnableSharedChannels":true}}"#,
+        )
+        .expect("valid document");
+        assert!(legacy_update.enable_shared_channels);
+
+        let legacy_fresh =
+            Config::from_document(r#"{"ExperimentalSettings":{"EnableSharedChannels":true}}"#)
+                .expect("valid document");
+        assert!(!legacy_fresh.enable_shared_channels);
+
+        let own_key_wins = Config::from_document(
+            r#"{"ServiceSettings":{"SiteURL":""},"ExperimentalSettings":{"EnableSharedChannels":true},"ConnectedWorkspacesSettings":{"EnableSharedChannels":false}}"#,
+        )
+        .expect("valid document");
+        assert!(!own_key_wins.enable_shared_channels);
     }
 
     /// The two privacy settings are read from **different** keys.

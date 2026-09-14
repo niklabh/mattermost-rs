@@ -12987,3 +12987,20 @@ it is without an Enterprise Advanced licence and the ABAC setting; with both it 
 - **The `{}` arm is unmeasured**: the indicator setting is on for the stack and is not flipped.
 - **The policy body is `json.Marshal`**: no trailing newline; the attribute reads' `{}` would be
   encoder-written, with one.
+
+## `GET /api/v4/sharedchannels/users/{user_id}/can_dm/{other_user_id}` (2026-09-14)
+
+Route count **475 of 764** on this branch. `canUserDirectMessage` checks **no permission**: two
+`RequireXId`s, then `UserCanSeeOtherUser` on the *path's* user, and with no shared-channel sync
+service — which needs a licence with the feature **and** `EnableSharedChannels`, off on the
+stack — the answer is `{"can_dm":true}` for every visible pair, an id that names nobody
+included. The service's own answer (the other user's remote cluster) is forwarded. `Config`
+gains `enable_shared_channels`, whose default on an update comes from the legacy
+`ExperimentalSettings` key.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_shared_channels` and its legacy fallback; fixture reprojected | DONE |
+| api | `crates/mm-api/src/connected_workspaces.rs` — `can_user_direct_message`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/can_dm.rs` — 2, unlicensed and licensed pairs | DONE |
+| mutation | `scripts/mutations/can-dm.plan` — 7 run, 5 caught, 2 controls survived (two wire-equivalent mutants dropped, see the plan header) | DONE |
