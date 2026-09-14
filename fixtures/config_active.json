@@ -29,7 +29,8 @@
     "EnableSignInWithEmail": true,
     "EnableSignInWithUsername": true,
     "EnableSignUpWithEmail": true,
-    "RequireEmailVerification": false
+    "RequireEmailVerification": false,
+    "SendPushNotifications": false
   },
   "ExperimentalSettings": {
     "EnableSharedChannels": false,

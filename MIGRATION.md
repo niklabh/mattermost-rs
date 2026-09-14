@@ -13051,3 +13051,19 @@ remove (a guest, a shared channel) forwards the whole request.
 
 - **The move post is English** (`api.team.move_channel.success` with the *previous* team's
   name), the same exception every system post makes — see `App::create_system_post`.
+
+## `POST /api/v4/notifications/ack` (2026-09-14)
+
+Route count **478 of 764**. `pushNotificationAck` is served up to its setting: the body decodes
+into a struct **value** (`null` is a no-op, a non-object or a mistyped field the 400
+`push_notifications_ack.message.parse.app_error`), then `EmailSettings.SendPushNotifications` —
+off, the 501 `push_notification.disabled.app_error`, which is the whole route on the stack; on,
+the ack counting, the session prop reset, the push-proxy HTTP call and the id-loaded message
+read, all forwarded. `Config` gains the setting, `new(!isUpdate)` like the session-activity flag.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `send_push_notifications`; fixture reprojected (86 keys) | DONE |
+| api | `crates/mm-api/src/push_ack.rs`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/push_ack.rs` — 1 | DONE |
+| mutation | `scripts/mutations/push-ack.plan` — 8 run, 6 caught, 2 controls survived | DONE |

@@ -122,6 +122,9 @@ MODELLED = {
         # The other half of `IsUserSignUpAllowed`. Distinct from `EnableSignInWithEmail`
         # above, which Go merely *seeds* from it.
         "EnableSignUpWithEmail",
+        # The gate on POST /api/v4/notifications/ack. Defaulted from isUpdate, so the value in
+        # the live document is what decides between the 501 and the push proxy.
+        "SendPushNotifications",
     ],
     # `users.CreateUser` replaces an unsupported submitted locale with this.
     "LocalizationSettings": ["DefaultClientLocale"],

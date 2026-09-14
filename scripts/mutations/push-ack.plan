@@ -1,0 +1,15 @@
+# Mutation plan for POST /notifications/ack — the body decode, the setting gate, its status,
+# and the config default.
+#
+#   scripts/mutate-batch.sh scripts/mutations/push-ack.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+null-is-an-error	crates/mm-api/src/push_ack.rs	        Ok(serde_json::Value::Null) => Ok(PushNotificationAck::default()),	        Ok(serde_json::Value::Null) => Err("null".to_owned()),	api	push_ack
+any-json-decodes	crates/mm-api/src/push_ack.rs	        Ok(_) => Err("not an object".to_owned()),	        Ok(_) => Ok(PushNotificationAck::default()),	api	push_ack
+gate-inverted	crates/mm-api/src/push_ack.rs	    if !state.app.config().send_push_notifications {	    if state.app.config().send_push_notifications {	api	push_ack
+disabled-is-400	crates/mm-api/src/push_ack.rs	            "api.push_notification.disabled.app_error",\n            None,\n            String::new(),\n            501,	            "api.push_notification.disabled.app_error",\n            None,\n            String::new(),\n            400,	api	push_ack
+parse-is-501	crates/mm-api/src/push_ack.rs	            "api.push_notifications_ack.message.parse.app_error",\n            None,\n            details,\n            400,	            "api.push_notifications_ack.message.parse.app_error",\n            None,\n            details,\n            501,	api	push_ack
+default-not-inverted	crates/mm-app/src/config.rs	            send_push_notifications: email_settings.send_push_notifications.unwrap_or(!is_update),	            send_push_notifications: email_settings.send_push_notifications.unwrap_or(is_update),	unit	config
+control-detail-text	crates/mm-api/src/push_ack.rs	        Ok(_) => Err("not an object".to_owned()),	        Ok(_) => Err("not a JSON object".to_owned()),	api	push_ack
+control-default-spelling	crates/mm-app/src/config.rs	            send_push_notifications: true,	            send_push_notifications: !false,	unit	config

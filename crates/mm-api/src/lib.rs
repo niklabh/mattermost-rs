@@ -59,6 +59,7 @@ pub mod posts;
 pub mod preferences;
 pub mod properties;
 pub mod proxy;
+pub mod push_ack;
 pub mod reactions;
 pub mod recaps;
 pub mod reports;
@@ -2422,6 +2423,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/system/ping",
             partially_migrated(get(system::get_system_ping)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/notifications/ack")` (api4/system.go) — a device's push
+        // confirmation, served up to the `SendPushNotifications` gate.
+        .route(
+            "/api/v4/notifications/ack",
+            partially_migrated(post(push_ack::push_notification_ack)),
         )
         .route(
             "/api/v4/system/timezones",

@@ -812,6 +812,13 @@ pub struct Config {
     /// `…_username`; with both on, `…_email_username`. Clients branch on those ids.
     pub enable_sign_in_with_email: bool,
 
+    /// `EmailSettings.SendPushNotifications` (config.go:2245): **`new(!isUpdate)`** — on for a
+    /// fresh install, off for a document that already had a `SiteURL`, like
+    /// [`Config::extend_session_length_with_activity`]. The gate on `pushNotificationAck`: off,
+    /// the route is the 501 `api.push_notification.disabled.app_error`; on, it reaches the push
+    /// proxy and is forwarded.
+    pub send_push_notifications: bool,
+
     /// `EmailSettings.EnableSignInWithUsername` (config.go:2142, defaulted **`true`** at :2181).
     ///
     /// See [`Config::enable_sign_in_with_email`]. Note the store predicate is
@@ -1289,6 +1296,8 @@ impl Default for Config {
             // (config.go:2173), so an empty config resolves to `true` in two steps.
             enable_sign_in_with_email: true,
             enable_sign_in_with_username: true,
+            // `new(!isUpdate)` over an empty config: on.
+            send_push_notifications: true,
             ldap_enable: false,
             ldap_re_add_removed_members: false,
             saml_enable: false,
@@ -1826,6 +1835,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION",
                 default.enable_multifactor_authentication,
             ),
+            send_push_notifications: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS",
+                default.send_push_notifications,
+            ),
             enable_sign_in_with_email: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL",
@@ -2276,6 +2290,8 @@ impl Config {
             enable_sign_in_with_email: email_settings
                 .enable_sign_in_with_email
                 .unwrap_or(default.enable_sign_in_with_email),
+            // `new(!isUpdate)` (config.go:2246), computed like `ExtendSessionLengthWithActivity`.
+            send_push_notifications: email_settings.send_push_notifications.unwrap_or(!is_update),
             enable_sign_in_with_username: email_settings
                 .enable_sign_in_with_username
                 .unwrap_or(default.enable_sign_in_with_username),
@@ -2602,6 +2618,8 @@ struct EmailSettingsDocument {
     enable_sign_in_with_email: Option<bool>,
     #[serde(rename = "EnableSignInWithUsername")]
     enable_sign_in_with_username: Option<bool>,
+    #[serde(rename = "SendPushNotifications")]
+    send_push_notifications: Option<bool>,
 }
 
 /// The one field of `LocalizationSettings` a migrated route reads.
@@ -3306,6 +3324,8 @@ mod go_parity {
         let transcribed = Config {
             site_url: Some(String::new()),
             extend_session_length_with_activity: false,
+            // The same `!isUpdate` rule: off on a document that has a `SiteURL`.
+            send_push_notifications: false,
             terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
             // The fifth adjustment, and the same reason as the two `!isUpdate` booleans above:
@@ -3611,8 +3631,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 85,
-            "the fixture covers {keys} settings and Config reads 85 from the document. \
+            keys, 86,
+            "the fixture covers {keys} settings and Config reads 86 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3655,7 +3675,8 @@ mod go_parity {
             "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
-                "EnableSignInWithUsername": false
+                "EnableSignInWithUsername": false,
+                "SendPushNotifications": false
             },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
         }"#;
@@ -3700,6 +3721,7 @@ mod go_parity {
         assert_eq!(config.session_length_web_in_hours, 19);
         assert!(config.enable_multifactor_authentication);
         assert!(!config.enable_sign_in_with_email);
+        assert!(!config.send_push_notifications);
         assert!(!config.enable_sign_in_with_username);
         assert!(config.ldap_enable);
         assert!(config.saml_enable);
@@ -3797,6 +3819,22 @@ mod go_parity {
         let update =
             Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
         assert_eq!(update.session_length_web_in_hours, 4320);
+    }
+
+    /// `SendPushNotifications` is `!isUpdate`: on for a document with no `SiteURL`, off for one
+    /// with it — the stack's, which is why the parity suite sees the 501.
+    #[test]
+    fn the_push_flag_is_on_for_a_fresh_document_and_off_for_an_update() {
+        let fresh = Config::from_document("{}").expect("valid document");
+        assert!(fresh.send_push_notifications);
+        let update =
+            Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
+        assert!(!update.send_push_notifications);
+        let explicit = Config::from_document(
+            r#"{"ServiceSettings":{"SiteURL":""},"EmailSettings":{"SendPushNotifications":true}}"#,
+        )
+        .expect("valid document");
+        assert!(explicit.send_push_notifications);
     }
 
     /// `ConnectedWorkspacesSettings.EnableSharedChannels` falls back to the legacy
@@ -3955,6 +3993,8 @@ mod go_parity {
             Config {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
+                // The same `!isUpdate` rule: off on a document that has a `SiteURL`.
+                send_push_notifications: false,
                 terminate_sessions_on_password_change: false,
                 // Also `!isUpdate`-shaped: a document with a `SiteURL` is an update, so the
                 // mobile session length defaults to 180 days rather than 30.

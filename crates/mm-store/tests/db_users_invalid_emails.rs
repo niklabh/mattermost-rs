@@ -236,7 +236,7 @@ async fn store_invalid_emails_four_exclusions_each_keep_a_row_out() {
     // No restricted domains — the stock configuration — so there is no email predicate at all
     // and "invalid" means every account the other four clauses admit.
     let users = store
-        .get_users_with_invalid_emails(0, 200, "")
+        .get_users_with_invalid_emails(0, 100_000, "")
         .await
         .expect("the query runs");
 
@@ -266,7 +266,7 @@ async fn store_invalid_emails_a_guest_with_a_second_role_is_kept() {
     let store = SqlUserStore::new(pool.clone());
 
     let users = store
-        .get_users_with_invalid_emails(0, 200, "")
+        .get_users_with_invalid_emails(0, 100_000, "")
         .await
         .expect("the query runs");
     let ids = ours(&users);
@@ -289,7 +289,7 @@ async fn store_invalid_emails_every_domain_removes_its_own_addresses() {
     let store = SqlUserStore::new(pool.clone());
 
     let only_outsiders = store
-        .get_users_with_invalid_emails(0, 200, "mmrs.invalid")
+        .get_users_with_invalid_emails(0, 100_000, "mmrs.invalid")
         .await
         .expect("the query runs");
     assert_eq!(
@@ -300,7 +300,7 @@ async fn store_invalid_emails_every_domain_removes_its_own_addresses() {
 
     // Two domains, and the second one takes the last row away.
     let nobody = store
-        .get_users_with_invalid_emails(0, 200, "mmrs.invalid,elsewhere.test")
+        .get_users_with_invalid_emails(0, 100_000, "mmrs.invalid,elsewhere.test")
         .await
         .expect("the query runs");
     assert_eq!(ours(&nobody), Vec::<&str>::new(), "both domains allowed");
@@ -309,7 +309,7 @@ async fn store_invalid_emails_every_domain_removes_its_own_addresses() {
     // becomes `LIKE '% elsewhere.test%'`, which no address matches, so the domain silently
     // allows nobody and the account is reported as invalid anyway.
     let untrimmed = store
-        .get_users_with_invalid_emails(0, 200, "mmrs.invalid, elsewhere.test")
+        .get_users_with_invalid_emails(0, 100_000, "mmrs.invalid, elsewhere.test")
         .await
         .expect("the query runs");
     assert_eq!(
@@ -321,7 +321,7 @@ async fn store_invalid_emails_every_domain_removes_its_own_addresses() {
     // Empty pieces are dropped by the loop's own guard rather than becoming `LIKE '%%'`, which
     // would match every address and report nobody.
     let empties = store
-        .get_users_with_invalid_emails(0, 200, ",,mmrs.invalid,,")
+        .get_users_with_invalid_emails(0, 100_000, ",,mmrs.invalid,,")
         .await
         .expect("the query runs");
     assert_eq!(
@@ -333,7 +333,7 @@ async fn store_invalid_emails_every_domain_removes_its_own_addresses() {
     // The match is a substring with no `@` anchor, so a *sub*domain of an allowed domain is
     // allowed too — and so is an address that merely contains the text.
     let substring = store
-        .get_users_with_invalid_emails(0, 200, "invalid")
+        .get_users_with_invalid_emails(0, 100_000, "invalid")
         .await
         .expect("the query runs");
     assert_eq!(
@@ -360,7 +360,7 @@ async fn store_invalid_emails_pages_partition_the_result() {
     let store = SqlUserStore::new(pool.clone());
 
     let all = store
-        .get_users_with_invalid_emails(0, 200, "")
+        .get_users_with_invalid_emails(0, 100_000, "")
         .await
         .expect("the query runs");
     let total = all.len();
@@ -410,7 +410,7 @@ async fn store_invalid_emails_rows_keep_their_emails() {
     let store = SqlUserStore::new(pool.clone());
 
     let users = store
-        .get_users_with_invalid_emails(0, 200, "")
+        .get_users_with_invalid_emails(0, 100_000, "")
         .await
         .expect("the query runs");
     let plain = users
