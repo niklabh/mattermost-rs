@@ -932,7 +932,7 @@ fn privacy_message_error(cause: &AppError) -> Box<AppError> {
 ///
 /// The arms are tried in Go's order and the order is observable: a `Conflict` is *also* a store
 /// error, so putting the default first would turn every duplicate channel name into a 500.
-fn update_channel_error(err: StoreError) -> Box<AppError> {
+pub(crate) fn update_channel_error(err: StoreError) -> Box<AppError> {
     if err.conflict_resource() == Some("Name") {
         return AppError::boxed(
             "UpdateChannel",

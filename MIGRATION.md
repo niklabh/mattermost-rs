@@ -13028,3 +13028,26 @@ gains `enable_shared_channels`, whose default on an update comes from the legacy
 | api | `crates/mm-api/src/connected_workspaces.rs` — `can_user_direct_message`; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/can_dm.rs` — 2, unlicensed and licensed pairs | DONE |
 | mutation | `scripts/mutations/can-dm.plan` — 7 run, 5 caught, 2 controls survived (two wire-equivalent mutants dropped, see the plan header) | DONE |
+
+## `POST /api/v4/channels/{channel_id}/move` (2026-09-14)
+
+Route count **477 of 764**. `moveChannel` re-homes a channel on another team: the channel is
+loaded before the body (`team_id` a string, `force` a bool, each its own 400), the team next, a
+DM/GM is the 403 `move_channel.type.invalid` **before** the `manage_system` check, then two
+sweeps — deactivated members always, members not on the new team when `force` — and the move:
+sidebar rows deleted, `TeamId` updated, both kinds of webhook re-homed, threads re-homed, the
+sweep again, and a `system_move_channel` post by the mover. A member not on the new team without
+`force` is a **500** `members_do_not_match`. The sweep removes through the inner
+`removeUserFromChannel`, so a swept member gets no "removed" post; a member this port cannot
+remove (a guest, a shared channel) forwards the whole request.
+
+| layer | file | status |
+|---|---|---|
+| store | `channel_store.rs` `remove_all_deactivated_members`; `sidebar_category_store.rs` `update_sidebar_channel_category_on_move`; `thread_store.rs` `update_team_id_for_channel_threads` | DONE |
+| app | `crates/mm-app/src/channel_move.rs` — the move and both sweeps; `remove_user_from_channel` split into its inner half | DONE |
+| api | `crates/mm-api/src/channel_move.rs`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/channel_move.rs` — 3, each move on its own channel, the five writes read back from the database | DONE |
+| mutation | `scripts/mutations/channel-move.plan` — 12 run, 10 caught, 2 controls survived | DONE |
+
+- **The move post is English** (`api.team.move_channel.success` with the *previous* team's
+  name), the same exception every system post makes — see `App::create_system_post`.

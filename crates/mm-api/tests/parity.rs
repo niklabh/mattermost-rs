@@ -48,6 +48,7 @@ mod parity {
     pub mod channel_members_for_team_for_user;
     pub mod channel_members_for_user;
     pub mod channel_members_list;
+    pub mod channel_move;
     pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_posts_unread;

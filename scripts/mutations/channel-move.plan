@@ -1,0 +1,19 @@
+# Mutation plan for POST /channels/{channel_id}/move — the two membership sweeps, the members
+# check, the five writes of the move, the type refusal, and the post.
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-move.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+sweep-equal-inverted	crates/mm-app/src/channel_move.rs	        if team_members.len() == channel_members.len() {\n            return Ok(MemberWrite::Done(()));	        if team_members.len() != channel_members.len() {\n            return Ok(MemberWrite::Done(()));	api	channel_move
+mismatch-not-refused	crates/mm-app/src/channel_move.rs	            if team_members.len() != channel_members.len() {	            if team_members.len() == channel_members.len() {	api	channel_move
+team-not-updated	crates/mm-app/src/channel_move.rs	        channel.team_id = team.id.clone();	        channel.team_id = channel.team_id.clone();	api	channel_move
+threads-not-moved	crates/mm-app/src/channel_move.rs	            .update_team_id_for_channel_threads(&channel.id, &team.id)	            .update_team_id_for_channel_threads(&team.id, &team.id)	api	channel_move
+incoming-hooks-not-filtered	crates/mm-app/src/channel_move.rs	            .get_incoming_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)\n            .await\n        {\n            Ok(hooks) => {\n                for mut hook in hooks {\n                    if hook.channel_id == channel.id {	            .get_incoming_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)\n            .await\n        {\n            Ok(hooks) => {\n                for mut hook in hooks {\n                    if hook.channel_id != channel.id {	api	channel_move
+move-message-names-channel	crates/mm-app/src/channel_move.rs	                previous_team.name\n            ),	                channel.name\n            ),	api	channel_move
+dm-allowed	crates/mm-api/src/channel_move.rs	    if channel.channel_type == CHANNEL_TYPE_DIRECT || channel.channel_type == CHANNEL_TYPE_GROUP {	    if channel.channel_type == CHANNEL_TYPE_DIRECT && channel.channel_type == CHANNEL_TYPE_GROUP {	api	channel_move
+force-inverted	crates/mm-api/src/channel_move.rs	    if force {\n        match state	    if !force {\n        match state	api	channel_move
+deactivated-sweep-takes-active	crates/mm-store/src/channel_store.rs	             WHERE userid IN (SELECT id FROM users WHERE users.deleteat != 0)	             WHERE userid IN (SELECT id FROM users WHERE users.deleteat = 0)	api	channel_move
+sidebar-not-cleared	crates/mm-store/src/sidebar_category_store.rs	            "DELETE FROM sidebarchannels WHERE channelid = $1",	            "DELETE FROM sidebarchannels WHERE channelid = $1 AND userid = $1",	api	channel_move
+control-reorder-headers	crates/mm-api/src/channel_move.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	channel_move
+control-literal-spelling	crates/mm-app/src/channel_move.rs	const ALL_MEMBERS: i64 = 10_000_000;	const ALL_MEMBERS: i64 = 10000000;	api	channel_move

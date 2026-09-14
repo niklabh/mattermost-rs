@@ -25,6 +25,15 @@ use crate::post_store::{PostRow, post_from_row};
 
 /// Port of `store.ThreadStore`, narrowed to the threads-list route.
 pub trait ThreadStore {
+    /// Port of `SqlThreadStore.UpdateTeamIdForChannelThreads` (thread_store.go:1148): every
+    /// thread of the channel takes the new `ThreadTeamId` — provided the team exists, which the
+    /// `EXISTS` guards so a bad id updates nothing rather than orphaning the threads.
+    fn update_team_id_for_channel_threads(
+        &self,
+        channel_id: &str,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlThreadStore.GetThreadsForUser` (thread_store.go:283), for the option set the
     /// api4 handler serves: a team, no cursor, not deleted, not unread-only.
     fn get_threads_for_user(
@@ -290,6 +299,31 @@ impl JoinedThreadRow {
 }
 
 impl ThreadStore for SqlThreadStore {
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, team_id = %team_id))]
+    async fn update_team_id_for_channel_threads(
+        &self,
+        channel_id: &str,
+        team_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            UPDATE threads
+               SET threadteamid = $2
+             WHERE channelid = $1
+               AND EXISTS (SELECT 1 FROM teams WHERE id = $2)
+            "#,
+            channel_id,
+            team_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update threads team id for channel id={channel_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
     #[tracing::instrument(
         skip(self),
         fields(user_id = %user_id, team_id = %team_id, page_size, found)

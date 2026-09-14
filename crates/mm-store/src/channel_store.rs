@@ -145,6 +145,14 @@ pub fn get_channel_roles(
 
 /// The subset of Go's `store.ChannelStore` (store/store.go:200-386) that is ported.
 pub trait ChannelStore {
+    /// Port of `SqlChannelStore.RemoveAllDeactivatedMembers` (channel_store.go:2806): every
+    /// `ChannelMembers` row of the channel whose user has a non-zero `DeleteAt`. One statement,
+    /// no history row and no event — the sweep `moveChannel` runs before a move.
+    fn remove_all_deactivated_members(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlChannelStore.DeleteSidebarChannelsByPreferences`
     /// (channel_store_categories.go:953).
     ///
@@ -875,6 +883,25 @@ impl SqlChannelStore {
 }
 
 impl ChannelStore for SqlChannelStore {
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    async fn remove_all_deactivated_members(&self, channel_id: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            DELETE FROM channelmembers
+             WHERE userid IN (SELECT id FROM users WHERE users.deleteat != 0)
+               AND channelmembers.channelid = $1
+            "#,
+            channel_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete ChannelMembers with channelId={channel_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
     /// `preferences` is the `(user_id, channel_id)` pairs of the favourite-channel preferences in
     /// the batch — the caller has already applied Go's category filter, since it is the only
     /// thing the category is used for here.

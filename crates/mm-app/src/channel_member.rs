@@ -838,13 +838,19 @@ impl App {
     ///   (`teamService.RemoveTeamMember`, a `TeamMembers` write plus its own posts and events),
     /// - a **group-constrained** channel when somebody else is doing the removing,
     /// - a **shared** channel.
+    /// Port of the inner `app.App.removeUserFromChannel` (app/channel.go:2999): everything
+    /// [`App::remove_user_from_channel`] does **except** the leave or removal post — the
+    /// membership, the history row, the two `user_removed` events. Called on its own by the
+    /// team-membership sweep a channel move runs (`RemoveUsersFromChannelNotMemberOfTeam`),
+    /// which is why a member swept off a moved channel gets no "removed" post. Returns the user
+    /// it loaded so the wrapper can write that post without a second read.
     #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
-    pub async fn remove_user_from_channel(
+    pub(crate) async fn remove_user_from_channel_inner(
         &self,
         user_id_to_remove: &str,
         remover_user_id: &str,
         channel: &Channel,
-    ) -> Result<MemberWrite<()>, Box<AppError>> {
+    ) -> Result<MemberWrite<User>, Box<AppError>> {
         let user = self.get_user(user_id_to_remove).await.map_err(|mut err| {
             // Go's ids here are `MissingAccountError`/`app.user.get.app_error`, which is what
             // `App::get_user` already produces — but the `where` is this function's.
@@ -936,6 +942,24 @@ impl App {
             serde_json::Value::String(remover_user_id.to_owned()),
         );
         self.publish(user_event).await;
+
+        Ok(MemberWrite::Done(user))
+    }
+
+    #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, user_id = %user_id_to_remove))]
+    pub async fn remove_user_from_channel(
+        &self,
+        user_id_to_remove: &str,
+        remover_user_id: &str,
+        channel: &Channel,
+    ) -> Result<MemberWrite<()>, Box<AppError>> {
+        let user = match self
+            .remove_user_from_channel_inner(user_id_to_remove, remover_user_id, channel)
+            .await?
+        {
+            MemberWrite::Done(user) => user,
+            MemberWrite::Forward(why) => return Ok(MemberWrite::Forward(why)),
+        };
 
         // `if channel.IsSpace() { return nil }` guards both posts in Go.
         if channel.is_space() {
