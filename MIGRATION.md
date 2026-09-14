@@ -13172,3 +13172,18 @@ gains the flag.
 | api | `crates/mm-api/src/cloud.rs` — `handle_cws_webhook`; `crates/mm-api/src/login.rs` — `login_sso_code_exchange`; both registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/constant_refusals.rs` — 2, unlicensed and licensed pairs | DONE |
 | mutation | `scripts/mutations/constant-refusals.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/email/test` (2026-09-14)
+
+Route count **486 of 764**. `testEmail` decodes a whole `model.Config` and
+refuses with the 400 `test_connection_email_settings_nil` if any of `EmailSettings`' thirty
+pointer fields is absent — **before** the `test_email` permission, so a plain member sending a
+partial section learns that first — then, for the admin, an empty `SMTPServer` is the 400
+`test_email.missing_server`. A body that does not decode (Go tests its live configuration) and
+everything past those refusals (the fake-password swap, the SMTP send) is forwarded.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/email_test.rs` — the nil-field check read off the serialised section; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/email_test.rs` — 1, the fixture's full section with `SMTPServer` swapped | DONE |
+| mutation | `scripts/mutations/email-test.plan` — 8 run, 6 caught, 2 controls survived | DONE |

@@ -80,6 +80,7 @@ mod parity {
     pub mod desktop_login;
     pub mod draft_and_preference_writes;
     pub mod drafts;
+    pub mod email_test;
     pub mod emoji_autocomplete;
     pub mod emoji_by_names;
     pub mod emoji_get;

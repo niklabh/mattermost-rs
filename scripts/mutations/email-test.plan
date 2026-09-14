@@ -1,0 +1,15 @@
+# Mutation plan for POST /email/test — the nil-field check, its place before the permission, the
+# permission, and the empty-server refusal.
+#
+#   scripts/mutate-batch.sh scripts/mutations/email-test.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+nil-check-all-instead-of-any	crates/mm-api/src/email_test.rs	        Ok(serde_json::Value::Object(fields)) => fields.values().any(serde_json::Value::is_null),	        Ok(serde_json::Value::Object(fields)) => fields.values().all(serde_json::Value::is_null),	api	email_test
+nil-check-inverted	crates/mm-api/src/email_test.rs	    if email_settings_have_nil_fields(&cfg.email_settings) {	    if !email_settings_have_nil_fields(&cfg.email_settings) {	api	email_test
+nil-check-is-500	crates/mm-api/src/email_test.rs	            "api.file.test_connection_email_settings_nil.app_error",\n            None,\n            String::new(),\n            400,	            "api.file.test_connection_email_settings_nil.app_error",\n            None,\n            String::new(),\n            500,	api	email_test
+permission-inverted	crates/mm-api/src/email_test.rs	    if !state\n        .app\n        .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_TEST_EMAIL)	    if state\n        .app\n        .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_TEST_EMAIL)	api	email_test
+empty-server-allowed	crates/mm-api/src/email_test.rs	        .smtp_server\n        .as_deref()\n        .unwrap_or("")\n        .is_empty()\n    {	        .smtp_server\n        .as_deref()\n        .unwrap_or("")\n        .is_empty()\n        == false\n    {	api	email_test
+missing-server-is-501	crates/mm-api/src/email_test.rs	            "api.admin.test_email.missing_server",\n            None,\n            "Invalid or missing SMTPServer parameter in request body.",\n            400,	            "api.admin.test_email.missing_server",\n            None,\n            "Invalid or missing SMTPServer parameter in request body.",\n            501,	api	email_test
+control-detail-text	crates/mm-api/src/email_test.rs	            "Invalid or missing SMTPServer parameter in request body.",\n            400,	            "Invalid or missing SMTPServer parameter in the request body.",\n            400,	api	email_test
+control-log-text	crates/mm-api/src/email_test.rs	        tracing::debug!(reason = why, "handing an email test to Go");	        tracing::debug!(reason = why, "handing a test email to Go");	api	email_test
