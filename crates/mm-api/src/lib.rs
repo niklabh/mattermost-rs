@@ -105,6 +105,10 @@ pub mod websocket;
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
 pub mod config;
 
+/// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
+/// (thirty pairs on the socket). Appended for the same reason as `config`.
+pub mod local_teams;
+
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;

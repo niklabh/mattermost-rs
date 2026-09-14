@@ -225,4 +225,7 @@ mod parity {
     pub mod notify_admin_trigger;
     pub mod onboarding_complete;
     pub mod user_updates;
+
+    // Appended 2026-09-14: the team, webhook and command families on the socket.
+    pub mod local_teams;
 }
