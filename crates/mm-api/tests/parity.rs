@@ -102,6 +102,7 @@ mod parity {
     pub mod group_writes;
     pub mod group_writes_licensed;
     pub mod groups;
+    pub mod image_proxy;
     pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;

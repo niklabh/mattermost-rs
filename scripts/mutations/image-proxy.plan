@@ -1,0 +1,12 @@
+# Mutation plan for `GET /api/v4/image` with the proxy off.
+#
+#   scripts/mutate-batch.sh scripts/mutations/image-proxy.plan
+#
+# One gate and one answer. Inverting the gate forwards every request, which the served-by
+# assertion sees; the status and the session are the other two decisions.
+
+ip-gate-inverted	crates/mm-api/src/image_proxy.rs	    if state.app.config().image_proxy_enable {	    if !state.app.config().image_proxy_enable {	api	image_proxy
+ip-status-forbidden	crates/mm-api/src/image_proxy.rs	        400,	        403,	api	image_proxy
+ip-session-optional	crates/mm-api/src/image_proxy.rs	    _session: AuthenticatedSession,	    _session: crate::auth_writes::OptionalSession,	api	image_proxy
+control-rename-request	crates/mm-api/src/image_proxy.rs	    request: Request,\n) -> Response {\n    if state.app.config().image_proxy_enable {\n        tracing::Span::current().record("forwarded", true);\n        return proxy::forward_to_go(State(state), request).await;	    incoming: Request,\n) -> Response {\n    if state.app.config().image_proxy_enable {\n        tracing::Span::current().record("forwarded", true);\n        return proxy::forward_to_go(State(state), incoming).await;	api	image_proxy
+control-spell-none-and-empty	crates/mm-api/src/image_proxy.rs	        None,\n        String::new(),\n        400,	        Option::None,\n        String::from(""),\n        400,	api	image_proxy

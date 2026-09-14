@@ -13278,3 +13278,17 @@ three. The report model and its `IsValid` are not ported; no route reaches them.
 | api | `crates/mm-api/src/latest_version.rs`, `crates/mm-api/src/client_perf.rs`; both registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/latest_version.rs` — 2 (needs the network); `client_perf.rs` — 2 | DONE |
 | mutation | `scripts/mutations/latest-version.plan` — 6 run, 4 caught, 2 controls survived | DONE |
+
+## `GET /api/v4/image` (2026-09-14)
+
+Route count **496 of 764**. `getImage` with `ImageProxySettings.Enable` off — the default and
+this deployment — is the one 400 `api.image.get.app_error` for every `url`, parseable or not
+(measured: the parse failure and the disabled branch carry the same id and an empty
+`detailed_error`), so Go's `net/url` parser is not ported. With the proxy on, the same-host
+302 and the proxied fetch are forwarded, parser included.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/image_proxy.rs`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/image_proxy.rs` — 2 | DONE |
+| mutation | `scripts/mutations/image-proxy.plan` — 5 run, 3 caught, 2 controls survived | DONE |

@@ -44,6 +44,7 @@ pub mod channel_join_requests;
 pub mod files;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
+pub mod image_proxy;
 pub mod images;
 /// The three job reads. `getJobs`, `getJob` and `getJobsByType`.
 pub mod jobs;
@@ -2529,6 +2530,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/client_perf",
             partially_migrated(post(client_perf::submit_performance_report)),
+        )
+        // `BaseRoutes.Image.Handle("")` (api4/image.go:14) — the image proxy entry point, the
+        // one 400 while the proxy is off; forwarded with it on.
+        .route(
+            "/api/v4/image",
+            partially_migrated(get(image_proxy::get_image)),
         )
         // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
         // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.
