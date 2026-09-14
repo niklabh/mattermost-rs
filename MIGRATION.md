@@ -13187,3 +13187,20 @@ everything past those refusals (the fake-password swap, the SMTP send) is forwar
 | api | `crates/mm-api/src/email_test.rs` — the nil-field check read off the serialised section; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/email_test.rs` — 1, the fixture's full section with `SMTPServer` swapped | DONE |
 | mutation | `scripts/mutations/email-test.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/file/test` and `POST /api/v4/file/s3_test` (2026-09-14)
+
+Route count **488 of 764**. One handler, `testFileStore`, on both paths: `test_s3` first (kept
+for every backend), then the nil-field 400 over `FileSettings`' sixty-three pointer fields, then
+the driver — `local` needs nothing, `amazons3` a bucket, `azureblob` (not `azure`, measured) an
+account, a container and a key in shared-key mode, anything else the 400 `unsupported_driver`.
+`local` is tested here — a backend over the body's `Directory`, `testfile` written and removed,
+the failure the 500 `api.file.test_connection` — while S3 and Azure (the fake-secret swap and
+the SDK) and a body that does not decode are forwarded. A relative directory resolves against
+each process's own working directory.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/file_store_test.rs`; both routes in `lib.rs`; `FileBackend::test_connection` reused | DONE |
+| test | `crates/mm-api/tests/parity/file_store_test.rs` — 1, on both paths, `/tmp` and an unwritable directory | DONE |
+| mutation | `scripts/mutations/file-store-test.plan` — 9 run, 7 caught, 2 controls survived | DONE |

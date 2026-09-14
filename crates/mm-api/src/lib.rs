@@ -32,6 +32,7 @@ pub mod error;
 /// The four export routes and the two import ones.
 pub mod exports;
 pub mod feature_gates;
+pub mod file_store_test;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
@@ -2466,6 +2467,16 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/site_url/test",
             partially_migrated(post(site_url_test::test_site_url)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/file/test")` and its older alias `("/file/s3_test")`
+        // (api4/system.go:50-52), one handler — the console's storage check.
+        .route(
+            "/api/v4/file/test",
+            partially_migrated(post(file_store_test::test_file_store)),
+        )
+        .route(
+            "/api/v4/file/s3_test",
+            partially_migrated(post(file_store_test::test_file_store)),
         )
         .route(
             "/api/v4/system/timezones",

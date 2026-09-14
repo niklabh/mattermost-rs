@@ -90,6 +90,7 @@ mod parity {
     pub mod exports_and_uploads;
     pub mod file_bytes;
     pub mod file_info;
+    pub mod file_store_test;
     pub mod flagged_posts;
     pub mod gated_families;
     pub mod gated_reads;

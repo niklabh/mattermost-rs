@@ -1,0 +1,16 @@
+# Mutation plan for POST /file/test and /file/s3_test — the permission, the nil-field check, the
+# driver switch and its refusals, and the local connection test.
+#
+#   scripts/mutate-batch.sh scripts/mutations/file-store-test.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+permission-inverted	crates/mm-api/src/file_store_test.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_TEST_S3)	    if state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_TEST_S3)	api	file_store_test
+nil-check-inverted	crates/mm-api/src/file_store_test.rs	    if file_settings_have_nil_fields(&cfg.file_settings) {	    if !file_settings_have_nil_fields(&cfg.file_settings) {	api	file_store_test
+local-unsupported	crates/mm-api/src/file_store_test.rs	        "local" => {}	        "localstore" => {}	api	file_store_test
+azure-misnamed	crates/mm-api/src/file_store_test.rs	        "azureblob" => {	        "azure" => {	api	file_store_test
+unsupported-is-500	crates/mm-api/src/file_store_test.rs	                "api.file.test_connection_unsupported_driver.app_error",\n                Some(params),\n                String::new(),\n                400,	                "api.file.test_connection_unsupported_driver.app_error",\n                Some(params),\n                String::new(),\n                500,	api	file_store_test
+directory-ignored	crates/mm-api/src/file_store_test.rs	    let backend = FileBackend::new(&FileBackendSettings::from_file_settings("local", directory));	    let backend = FileBackend::new(&FileBackendSettings::from_file_settings("local", "/tmp"));	api	file_store_test
+test-failure-is-400	crates/mm-api/src/file_store_test.rs	            "api.file.test_connection.app_error",\n            &err.to_string(),\n            500,	            "api.file.test_connection.app_error",\n            &err.to_string(),\n            400,	api	file_store_test
+control-reorder-headers	crates/mm-api/src/file_store_test.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	file_store_test
+control-detail-spacing	crates/mm-api/src/file_store_test.rs	                    "missing azure container setting",	                    "missing azure container setting", // CheckMandatoryAzureFields	api	file_store_test
