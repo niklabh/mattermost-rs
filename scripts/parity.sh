@@ -126,9 +126,15 @@ else
     echo "  re-running each alone to separate a real regression from a test-level race…"
     still=0
     for t in "${failing[@]}"; do
-      cargo test -p mm-api --test parity "$t" -- --exact --test-threads=1 \
-        > "$LOG.solo" 2>&1
-      solo_rc=$?
+      # `set -e` would end the script on a failing rerun before "FAILS ALONE" could be printed —
+      # which is what happened, three times on 2026-09-14: a real failure looked like a script
+      # that stopped writing. The `if` keeps a non-zero exit from being fatal.
+      if cargo test -p mm-api --test parity "$t" -- --exact --test-threads=1 \
+        > "$LOG.solo" 2>&1; then
+        solo_rc=0
+      else
+        solo_rc=$?
+      fi
       # A run of zero tests exits 0. Treat it as inconclusive, never as a pass.
       ran=$(grep -oE 'test result: (ok|FAILED)\. [0-9]+ passed; [0-9]+ failed' "$LOG.solo" \
             | grep -oE '[0-9]+' | paste -sd+ | bc)
