@@ -1,0 +1,23 @@
+# Mutation plan for the three job writes — POST /jobs, POST /jobs/{id}/cancel,
+# PATCH /jobs/{id}/status.
+#
+#   scripts/mutate-batch.sh scripts/mutations/job-writes.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# Not mutated: the status override on the announced job — every publisher here passes the row
+# the status write returned, which already carries that status, so the override is a no-op.
+# The last two lines are the no-op controls and must SURVIVE.
+
+registered-set-ignored	crates/mm-app/src/job.rs	        if !REGISTERED_JOB_TYPES.contains(&job.job_type.as_str()) {	        if !job::is_valid_job_type(&job.job_type) {	api	job_writes
+create-status-not-pending	crates/mm-app/src/job.rs	            status: job::JOB_STATUS_PENDING.to_owned(),\n            data,	            status: job::JOB_STATUS_IN_PROGRESS.to_owned(),\n            data,	api	job_writes
+cancel-pending-goes-cancel-requested	crates/mm-app/src/job.rs	            .update_status_optimistically(job_id, job::JOB_STATUS_PENDING, job::JOB_STATUS_CANCELED)	            .update_status_optimistically(job_id, job::JOB_STATUS_PENDING, job::JOB_STATUS_CANCEL_REQUESTED)	api	job_writes
+cancel-in-progress-arm-dropped	crates/mm-app/src/job.rs	                job::JOB_STATUS_IN_PROGRESS,\n                job::JOB_STATUS_CANCEL_REQUESTED,	                job::JOB_STATUS_SUCCESS,\n                job::JOB_STATUS_CANCEL_REQUESTED,	api	job_writes
+status-other-is-200	crates/mm-app/src/job.rs	                "app.job.update_status.app_error",\n                None,\n                String::new(),\n                500,	                "app.job.update_status.app_error",\n                None,\n                String::new(),\n                200,	api	job_writes
+event-not-sensitive	crates/mm-app/src/job.rs	            broadcast.contains_sensitive_data = true;	            broadcast.contains_sensitive_data = false;	api	job_writes
+manage-list-includes-notify-expiring	crates/mm-app/src/job.rs	            | job::JOB_TYPE_CLEANUP_EXPIRED_ACCESS_TOKENS => &PERMISSION_MANAGE_JOBS,	            | job::JOB_TYPE_CLEANUP_EXPIRED_ACCESS_TOKENS\n            | job::JOB_TYPE_NOTIFY_EXPIRING_ACCESS_TOKENS => &PERMISSION_MANAGE_JOBS,	api	job_writes
+force-ignored	crates/mm-api/src/jobs.rs	    if !force && !job.is_valid_status_change(&status) {	    if !job.is_valid_status_change(&status) {	api	job_writes
+status-change-unchecked	crates/mm-api/src/jobs.rs	    if !force && !job.is_valid_status_change(&status) {	    if !force && !job.is_valid_status_change(&status) && false {	api	job_writes
+cancel-uses-manage-matrix	crates/mm-api/src/jobs.rs	        .session_has_permission_to_create_job(&session.0, &job)\n        .await;\n    let Some(required) = permission.required() else {\n        return ApiError::from(AppError::new(\n            "unableToCancelJob",	        .session_has_permission_to_manage_job(&session.0, &job)\n        .await;\n    let Some(required) = permission.required() else {\n        return ApiError::from(AppError::new(\n            "unableToCancelJob",	api	job_writes
+store-optimistic-ignores-current	crates/mm-store/src/job_store.rs	             WHERE id = $1 AND status = $2	             WHERE id = $1 AND ($2::text = '' OR status <> '')	api	job_writes
+control-annotate-force	crates/mm-api/src/jobs.rs	    let force = props\n        .get("force")\n        .and_then(|v| v.as_bool())\n        .unwrap_or(false);	    let force: bool = props\n        .get("force")\n        .and_then(|v| v.as_bool())\n        .unwrap_or(false);	api	job_writes
+control-annotate-now	crates/mm-store/src/job_store.rs	        let now = mm_model::utils::get_millis();\n        // `StartAt` moves with the status only on the way into `in_progress`	        let now: i64 = mm_model::utils::get_millis();\n        // `StartAt` moves with the status only on the way into `in_progress`	api	job_writes

@@ -12878,3 +12878,29 @@ recorded gaps ([D-243]: no "joined the team" post). `?token=` — `AddTeamMember
 - **The missing-parameter 400 says `where: addTeamMember`** — copied from the sibling route in
   Go, not on the wire.
 - **The guest 403 is unmeasured**: a guest session needs a licence this stack's Go never loads.
+
+## The three job writes: `POST /jobs`, `POST /jobs/{id}/cancel`, `PATCH /jobs/{id}/status` (2026-09-14)
+
+Route count **468 of 764**. `createJob` mints a `pending` job of the requested type — for the
+types this build registers a worker for (`REGISTERED_JOB_TYPES`, `job.rs`; the eight enterprise
+types are nil here, [D-571]) — behind the type's own create permission, which most registered
+types have none of (`incorrect_job_type`, 400). The two access-control syncs forward
+(`CreateAccessControlSyncJob` is enterprise ABAC). `cancelJob` is `RequestCancellation`:
+`pending` → `canceled`, `in_progress` → `cancel_requested`, else the 500. `updateJobStatus`
+sets `pending`/`canceled`/`cancel_requested` behind the manage permission and
+`IsValidStatusChange` unless forced; any other status is the 500 even when forced. Every move
+publishes `job_updated` with `ContainsSensitiveData`, so only `manage_system` sessions get it.
+A job created here is run by Go's worker off the shared table.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/job_store.rs` — `save`, `update_status_optimistically` | DONE |
+| app | `crates/mm-app/src/job.rs` — `create_job`, `cancel_job`, `update_job_status`, the two permission matrices, `publish_job_status` | DONE |
+| api | `crates/mm-api/src/jobs.rs` — three handlers; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/job_writes.rs` — 6 | DONE |
+| mutation | `scripts/mutations/job-writes.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+
+- **The type refusal names a fresh id** in `detailed_error` (`id=…`), so the two servers'
+  bodies differ there and the suite compares around it.
+- **The team-admin policy-ownership arm** of the sync matrices is enterprise ABAC and answers
+  `false` here, as an unlicensed Go does.

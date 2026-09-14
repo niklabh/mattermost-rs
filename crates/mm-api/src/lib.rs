@@ -2738,7 +2738,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/bots/{bot_user_id}/assign/{user_id}",
             partially_migrated_with_ids(&state, post(bots::assign_bot)),
         )
-        .route("/api/v4/jobs", partially_migrated(get(jobs::get_jobs)))
+        .route(
+            "/api/v4/jobs",
+            partially_migrated(get(jobs::get_jobs).post(jobs::create_job)),
+        )
         // `BaseRoutes.Jobs.Handle("/type/{job_type:[A-Za-z0-9_-]+}")` (api4/job.go:28). Two
         // segments deeper than `{job_id}` below, so there is no precedence question; the handler
         // carries its own mux charset, because `job_type` is not id-shaped and the id middleware
@@ -2750,6 +2753,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/jobs/{job_id}",
             partially_migrated_with_ids(&state, get(jobs::get_job)),
+        )
+        // `BaseRoutes.Job.Handle("/cancel")` and `("/status")` (api4/job.go:29-30).
+        .route(
+            "/api/v4/jobs/{job_id}/cancel",
+            partially_migrated_with_ids(&state, post(jobs::cancel_job)),
+        )
+        .route(
+            "/api/v4/jobs/{job_id}/status",
+            partially_migrated_with_ids(&state, axum::routing::patch(jobs::update_job_status)),
         )
         .route(
             "/api/v4/usage/posts",

@@ -250,6 +250,223 @@ pub async fn get_job(
     Ok(json_ok(body))
 }
 
+/// Port of `createJob` (api4/job.go:145) — `POST /api/v4/jobs`.
+///
+/// The body is a `Job` of which only `type` and `data` are read; everything else is minted by
+/// `CreateJob`. The permission is the type's own (`SessionHasPermissionToCreateJob`), and a
+/// type with no entry there is the 400 `api.job.unable_to_create_job.incorrect_job_type` — so
+/// most of the thirty registered types, which no permission names, cannot be created over the
+/// API by anyone. The two access-control syncs are **forwarded**: `CreateAccessControlSyncJob`
+/// de-duplicates against running syncs and, for a team admin, resolves channels by attribute —
+/// enterprise ABAC. Success is a **201** with the job, `json.NewEncoder`-written.
+#[tracing::instrument(skip_all, fields(job_type))]
+pub async fn create_job(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("job").into_response();
+        }
+    };
+    // `json.NewDecoder(r.Body).Decode(&job)` into a struct: `null` is accepted (a zero job),
+    // an array is not — the `Value` round-trip gives serde the same answer.
+    let job: Job = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(serde_json::Value::Null) => Job::default(),
+        Ok(value @ serde_json::Value::Object(_)) => match serde_json::from_value(value) {
+            Ok(job) => job,
+            Err(err) => {
+                tracing::debug!(error = %err, "job body did not decode");
+                return ApiError::invalid_param("job").into_response();
+            }
+        },
+        _ => return ApiError::invalid_param("job").into_response(),
+    };
+    tracing::Span::current().record("job_type", job.job_type.as_str());
+
+    let permission = state
+        .app
+        .session_has_permission_to_create_job(&session.0, &job)
+        .await;
+    let Some(required) = permission.required() else {
+        return ApiError::from(AppError::new(
+            "unableToCreateJob",
+            "api.job.unable_to_create_job.incorrect_job_type",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    };
+    if !permission.granted() {
+        return ApiError::from(*make_permission_error(&session.0, &[required])).into_response();
+    }
+
+    if job.job_type == job::JOB_TYPE_ACCESS_CONTROL_SYNC
+        || job.job_type == job::JOB_TYPE_ACCESS_CONTROL_TEAM_SYNC
+    {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing an access-control sync job to Go");
+        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+
+    match state.app.create_job(&job.job_type, job.data).await {
+        Ok(created) => match serde_json::to_vec(&created) {
+            Ok(mut body) => {
+                body.push(b'\n');
+                (
+                    StatusCode::CREATED,
+                    [
+                        ("Content-Type", "application/json"),
+                        ("x-mmrs-served-by", "rust"),
+                    ],
+                    body,
+                )
+                    .into_response()
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to serialise job");
+                ApiError::from(AppError::new(
+                    "createJob",
+                    "api.marshal_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+                .into_response()
+            }
+        },
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
+/// Port of `cancelJob` (api4/job.go:375) — `POST /api/v4/jobs/{job_id}/cancel`.
+///
+/// The job is fetched first (its type decides the permission, which is the **create**
+/// permission: "if permission to create, permission to cancel"), a type with no entry is the
+/// 400 `incorrect_job_type` under `unableToCancelJob`, and the cancellation itself is
+/// [`mm_app::App::cancel_job`]. `ReturnStatusOK`.
+#[tracing::instrument(skip_all, fields(job_id = %job_id))]
+pub async fn cancel_job(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    if !is_valid_id(&job_id) {
+        return ApiError::invalid_url_param("job_id").into_response();
+    }
+    let job = match state.app.get_job(&job_id).await {
+        Ok(job) => job,
+        Err(err) => return ApiError::from(*err).into_response(),
+    };
+    let permission = state
+        .app
+        .session_has_permission_to_create_job(&session.0, &job)
+        .await;
+    let Some(required) = permission.required() else {
+        return ApiError::from(AppError::new(
+            "unableToCancelJob",
+            "api.job.unable_to_create_job.incorrect_job_type",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    };
+    if !permission.granted() {
+        return ApiError::from(*make_permission_error(&session.0, &[required])).into_response();
+    }
+    match state.app.cancel_job(&job_id).await {
+        Ok(()) => crate::thread_writes::status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
+/// Port of `updateJobStatus` (api4/job.go:416) — `PATCH /api/v4/jobs/{job_id}/status`.
+///
+/// The body is a free map: `status` must be a string (else the 400 `status`), `force` a bool
+/// that defaults to `false` when absent **or not a bool**. Then the job, the **manage**
+/// permission for its type, and — unless forced — `IsValidStatusChange`, whose refusal is the
+/// 400 `api.job.status.invalid`. [`mm_app::App::update_job_status`] does the write.
+#[tracing::instrument(skip_all, fields(job_id = %job_id, status, force))]
+pub async fn update_job_status(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if !is_valid_id(&job_id) {
+        return ApiError::invalid_url_param("job_id").into_response();
+    }
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("status").into_response();
+        }
+    };
+    // `model.StringInterfaceFromJSON`: anything that is not an object decodes to an empty map.
+    let props: serde_json::Map<String, serde_json::Value> =
+        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        };
+    let Some(status) = props
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+    else {
+        return ApiError::invalid_param("status").into_response();
+    };
+    let force = props
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    tracing::Span::current().record("status", status.as_str());
+    tracing::Span::current().record("force", force);
+
+    let job = match state.app.get_job(&job_id).await {
+        Ok(job) => job,
+        Err(err) => return ApiError::from(*err).into_response(),
+    };
+    let permission = state
+        .app
+        .session_has_permission_to_manage_job(&session.0, &job)
+        .await;
+    let Some(required) = permission.required() else {
+        return ApiError::from(AppError::new(
+            "updateJobStatus",
+            "api.job.unable_to_manage_job.incorrect_job_type",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    };
+    if !permission.granted() {
+        return ApiError::from(*make_permission_error(&session.0, &[required])).into_response();
+    }
+    if !force && !job.is_valid_status_change(&status) {
+        return ApiError::from(AppError::new(
+            "updateJobStatus",
+            "api.job.status.invalid",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    }
+    match state.app.update_job_status(&job, &status).await {
+        Ok(()) => crate::thread_writes::status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
 /// Port of `getJobsByType` (api4/job.go:269) — `GET /api/v4/jobs/type/{job_type}`.
 ///
 /// # Two grants that are not the type's own permission

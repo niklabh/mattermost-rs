@@ -58,7 +58,7 @@ pub trait JobStore {
         job_type: &str,
     ) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
 
-    /// Port of `SqlJobStore.UpdateStatus` (job_store.go) — the **only write** this store has.
+    /// Port of `SqlJobStore.UpdateStatus` (job_store.go:249).
     ///
     /// Sets `Status` and `LastActivityAt` and returns the updated row through `RETURNING`. Two
     /// things a reader gets wrong:
@@ -78,6 +78,23 @@ pub trait JobStore {
         id: &str,
         status: &str,
     ) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.Save` (job_store.go:56): one `INSERT` of the nine columns, `Data`
+    /// as JSON — a nil map is the JSON `null`, which is what a job created with no data reads
+    /// back as. Returns the job it was given.
+    fn save(&self, job: &Job) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.UpdateStatusOptimistically` (job_store.go:275): the status moves
+    /// only if the row still holds `current_status`, with `LastActivityAt` stamped — and
+    /// `StartAt` too when the new status is `in_progress`. **No row matched is `Ok(None)`**,
+    /// not an error: the caller tries the next transition, and `RequestCancellation` is built
+    /// on exactly that.
+    fn update_status_optimistically(
+        &self,
+        id: &str,
+        current_status: &str,
+        new_status: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Job>, StoreError>> + Send;
 
     /// Port of `SqlJobStore.GetAllByTypesPage` (job_store.go:319).
     ///
@@ -334,6 +351,82 @@ impl JobStore for SqlJobStore {
                 criteria: id.to_owned(),
             }),
         }
+    }
+
+    #[tracing::instrument(skip_all, fields(job_id = %job.id, job_type = %job.job_type))]
+    async fn save(&self, job: &Job) -> Result<Job, StoreError> {
+        let data = serde_json::to_value(&job.data).map_err(|source| StoreError::Decode {
+            entity: "Job",
+            column: "data",
+            source,
+        })?;
+        sqlx::query!(
+            r#"
+            INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, progress, data)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+            job.id,
+            job.job_type,
+            job.priority,
+            job.create_at,
+            job.start_at,
+            job.last_activity_at,
+            job.status,
+            job.progress,
+            data,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to save Job".to_owned(),
+            source,
+        })?;
+        Ok(job.clone())
+    }
+
+    #[tracing::instrument(skip_all, fields(job_id = %id, current_status, new_status, moved))]
+    async fn update_status_optimistically(
+        &self,
+        id: &str,
+        current_status: &str,
+        new_status: &str,
+    ) -> Result<Option<Job>, StoreError> {
+        let now = mm_model::utils::get_millis();
+        // `StartAt` moves with the status only on the way into `in_progress`; the parameter
+        // carries the same clock read so the two columns agree, as Go's do.
+        let start_at_too = new_status == mm_model::job::JOB_STATUS_IN_PROGRESS;
+        let row = sqlx::query_as!(
+            JobRow,
+            r#"
+            UPDATE jobs
+               SET status = $3,
+                   lastactivityat = $4,
+                   startat = CASE WHEN $5 THEN $4 ELSE startat END
+             WHERE id = $1 AND status = $2
+         RETURNING                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+            "#,
+            id,
+            current_status,
+            new_status,
+            now,
+            start_at_too,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Job with id={id}"),
+            source,
+        })?;
+        tracing::Span::current().record("moved", row.is_some());
+        row.map(JobRow::into_job).transpose()
     }
 
     #[tracing::instrument(skip_all, fields(job_id = %id))]
