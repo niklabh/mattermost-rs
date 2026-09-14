@@ -13260,3 +13260,38 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+## `POST /api/v4/teams/{team_id}/posts/search` and `POST /api/v4/posts/search` (2026-09-14)
+
+**+2 HTTP pairs** on base `fc7c7ec` (493 of 764). `searchPostsInTeam` / `searchPostsInAllTeams`:
+the `view_team` 403 before the body; the body read as Go's decoder reads it (one value, `null` a
+zero struct, `terms` missing or empty the 400); `ParseSearchParams` — already ported with its
+oracle — then `SearchPostsForUser` down to the store's database branch, which is the only
+branch on a deployment with no search engine. One compile-checked statement stands in for
+Go's per-filter `WHERE`s (`($n IS NULL OR …)`, `= ANY` / `<> ALL`, a `CASE` for the
+`Message`/`Hashtags` column); the `from:` sub-query, the day-bound comparisons, the
+`TeamId = ? OR TeamId = ''` team filter, the `card` and `system_` exclusions, the burn-on-read
+skip, the exact-tag pass after the stemmer, the CJK `LIKE` branch and the 100-row window are
+each pinned by a parity row. Two things a reader would otherwise get wrong: a query Postgres
+rejects (`-word` alone builds ` &!(word)`) is a **200 with an empty page** on both servers, since
+Go swallows the store error; and `per_page` is parsed and never read — the database search has
+no paging, so `page > 0` is empty and page 0 is up to 100 rows per params element. `in:@user`
+opens the direct channel when none exists, as Go does. `EnablePostSearch` joins `Config`
+(fixture reprojected, 92 keys); `ExperimentalViewArchivedChannels` is **not** read anywhere on
+the server side of this route — `include_deleted_channels` passes straight through.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/go_unicode_gen.go` — `IsDigit` (Nd) and `IsMark` (M) tables and probes, for `isWordRune` and `containsAlphaNumericChar`; `reference/dump/behaviour.go` — a `strings.ToUpper` corpus for the hashtag comparison | DONE |
+| model | `crates/mm-model/src/utils.rs` — `is_go_digit`, `is_go_mark`, `go_to_upper` (four ypogegrammeni forms exempted, [D-640]); 2 + the extended quote oracle | DONE |
+| config | `enable_post_search` (`ServiceSettings.EnablePostSearch`, default `true`); `scripts/dump-config-fixture.sh` and `fixtures/config_active.json` reprojected | DONE |
+| store | `crates/mm-store/src/post_store.rs` — `search_posts_for_user`, `search`, and the term pipeline (`build_ts_query`, `mark_wildcards`, `neutralize_non_word_hyphens`, `remove_non_alpha_numeric_unquoted_terms`, `split_cjk_search_terms`); 7 unit tests transcribed from the Go source, since the helpers are unexported and the parity suite is their oracle | DONE |
+| app | `crates/mm-app/src/post_search.rs` — `search_posts_for_user`, `filter_posts_by_channel_permissions`, `get_group_channel`, the two name-to-id conversions and the `in:` resolver | DONE |
+| api | `crates/mm-api/src/post_search.rs` — both handlers behind the busy gate; registered in `lib.rs` beside `/posts/ephemeral` with the same three `invalid_post_id_param` pins; 1 unit test | DONE |
+| test | `crates/mm-api/tests/parity/post_search.rs` — 16, bodies byte-identical on every 200 (the 100-row page included); `busy_gates` extended to seven routes | DONE |
+| mutation | `scripts/mutations/post-search.plan` — 14 run, 12 caught, 2 controls survived | DONE |
+
+- **Not verified by parity:** the 501 `store.sql_post.search.disabled` for `EnablePostSearch =
+  false` — the setting cannot be changed on the shared Go server from the suite. The branch
+  is the first thing `search_posts_for_user` does after parsing.
+- **Left forwarded:** nothing on these two routes. `FileInfo.Search` (the two file-search
+  routes) is the follow-up the brief names.

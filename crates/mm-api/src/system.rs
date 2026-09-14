@@ -676,9 +676,8 @@ static SERVER_BUSY: ServerBusy = ServerBusy::new();
 /// Ten, all `POST` (`grep DisableWhenBusy( channels/api4`): `searchPostsInTeam`,
 /// `searchPostsInAllTeams`, `searchAllChannels`, `searchGroupChannels`, `searchChannelsForTeam`,
 /// `searchFilesInTeam`, `searchFilesInAllTeams`, `searchTeams`, `searchUsers` and
-/// `publishUserTyping`. The six served here call this first thing; the four post and file
-/// searches must too when they land — the suite that checks the served ones is
-/// `parity::busy_gates`.
+/// `publishUserTyping`. The eight served here call this first thing; the two file searches must
+/// too when they land — the suite that checks the served ones is `parity::busy_gates`.
 pub(crate) fn refuse_when_busy() -> Result<(), ApiError> {
     if SERVER_BUSY.state(Utc::now()).busy {
         return Err(ApiError::from(AppError::new(

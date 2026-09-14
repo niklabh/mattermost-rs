@@ -224,5 +224,6 @@ mod parity {
     pub mod notify_admin;
     pub mod notify_admin_trigger;
     pub mod onboarding_complete;
+    pub mod post_search;
     pub mod user_updates;
 }
