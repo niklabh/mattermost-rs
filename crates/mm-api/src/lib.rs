@@ -2166,6 +2166,14 @@ pub fn router(state: AppState) -> Router {
                 get(connected_workspaces::get_shared_channel_remotes),
             ),
         )
+        // `BaseRoutes.SharedChannels.Handle("/users/{user_id}/can_dm/{other_user_id}")`
+        // (api4/shared_channel.go:19). `users` is a literal under `/sharedchannels/`, where Go's
+        // `{team_id:[A-Za-z0-9]+}` would also match it — but the literal is longer and axum, like
+        // mux, prefers it.
+        .route(
+            "/api/v4/sharedchannels/users/{user_id}/can_dm/{other_user_id}",
+            partially_migrated_with_ids(&state, get(connected_workspaces::can_user_direct_message)),
+        )
         // ---- recaps (2026-09-07) ----
         //
         // Fifteen routes behind one **configuration** gate, not a licence — see `recaps.rs`. An

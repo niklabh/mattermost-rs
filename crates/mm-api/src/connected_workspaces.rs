@@ -37,8 +37,9 @@
 //! cluster's own token, not a session. So are the two file-streaming routes. Answering them from
 //! a session-authenticated handler would change who can reach them.
 //!
-//! `canUserDirectMessage` is not here either: it is an ordinary read that answers **200** on this
-//! server, measured — it consults the shared-channel *store*, not the service.
+//! `canUserDirectMessage` **is** here, since 2026-09-14, and is the one route of the file whose
+//! gate is not a refusal: with no service it answers `true` (see the function), and the service's
+//! own answer — which reads the other user's remote cluster — is what is forwarded.
 
 use axum::extract::{Path, Request, State};
 use axum::response::{IntoResponse, Response};
@@ -438,6 +439,74 @@ pub async fn get_shared_channel_remotes(
         .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
         .await;
     response
+}
+
+/// Port of `canUserDirectMessage` (api4/shared_channel.go:307) —
+/// `GET /api/v4/sharedchannels/users/{user_id}/can_dm/{other_user_id}`.
+///
+/// **No permission check**: any session may ask about any pair. Two `RequireXId`s, then
+/// `UserCanSeeOtherUser(user_id, other_user_id)` — the *path's* user, not the caller's — and a
+/// `false` there is `{"can_dm":false}` at 200. Past that the shared-channel sync service
+/// decides, and the service exists only when the licence has shared channels **and**
+/// `ConnectedWorkspacesSettings.EnableSharedChannels` is on (app/server.go:713-732). With no
+/// service the answer is `true` — for an `other_user_id` that names nobody too, since nothing
+/// else reads the row. With the service Go loads the other user (a miss is `false`) and refuses
+/// a remote user whose original cluster is not directly connected; that branch is forwarded.
+///
+/// `json.NewEncoder` writes the map, so the body ends in a newline.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, other_user_id = %other_user_id, forwarded = false))]
+pub async fn can_user_direct_message(
+    State(state): State<AppState>,
+    Path((user_id, other_user_id)): Path<(String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    fn answer(can_dm: bool) -> Response {
+        (
+            axum::http::StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            format!("{{\"can_dm\":{can_dm}}}\n"),
+        )
+            .into_response()
+    }
+
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+    if let Err(err) = require_id(&other_user_id, "other_user_id") {
+        return err.into_response();
+    }
+
+    match state
+        .app
+        .user_can_see_other_user(&user_id, &other_user_id)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return answer(false),
+        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason, "forwarding a restricted view to Go");
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        Err(mm_app::post::PrepareError::App(err)) => return ApiError::from(err).into_response(),
+    }
+
+    let licence = match state.app.license().await {
+        Ok(licence) => licence,
+        Err(err) => return ApiError::from(*err).into_response(),
+    };
+    let service_would_exist = licence.is_some_and(|l| l.has_shared_channels())
+        && state.app.config().enable_shared_channels;
+    if service_would_exist {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing a shared-channel DM check to Go's sync service");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    answer(true)
 }
 
 #[cfg(test)]

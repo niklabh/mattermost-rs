@@ -18,6 +18,9 @@
   "ComplianceSettings": {
     "Enable": false
   },
+  "ConnectedWorkspacesSettings": {
+    "EnableSharedChannels": false
+  },
   "ElasticsearchSettings": {
     "EnableIndexing": false,
     "EnableSearching": false
@@ -29,6 +32,7 @@
     "RequireEmailVerification": false
   },
   "ExperimentalSettings": {
+    "EnableSharedChannels": false,
     "RestrictSystemAdmin": false
   },
   "FileSettings": {

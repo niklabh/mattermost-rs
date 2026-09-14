@@ -62,6 +62,20 @@ for PLAN in "${PLANS[@]}"; do
       BAD=$((BAD + 1))
       continue
     fi
+    # The same escape check `mutate-batch.sh` makes before it runs anything: an escape `printf %b`
+    # does not know (`\"`, `\'`) passes through as backslash-plus-character and never matches.
+    # This script accepted a `\"` anchor the batch then refused, which cost a launch.
+    for FIELD in "$FROM" "$TO"; do
+      BADESC=$(FIELD="$FIELD" python3 -c '
+import os, re
+bad = sorted(set(re.findall(r"\\(.)", os.environ["FIELD"])) - set("abefnrtv\\0x"))
+print(" ".join("\\" + c for c in bad))
+')
+      if [ -n "$BADESC" ]; then
+        echo "$PLAN: $NAME: has escapes printf %b will not expand: $BADESC"
+        BAD=$((BAD + 1))
+      fi
+    done
     PATTERN=$(printf '%b' "$FROM")
     COUNT=$(FILE="$FILE" PATTERN="$PATTERN" python3 -c '
 import os

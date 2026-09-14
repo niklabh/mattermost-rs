@@ -13012,3 +13012,19 @@ the three cookies are unconditional. Go's 2/s rate limit on the route is not por
   for the plain account. The suite converts accounts through Go's own route for that reason.
 - **The SSO length is 720 on the stack where the web length is 4320**, which is what lets the
   suite tell the two arms apart.
+## `GET /api/v4/sharedchannels/users/{user_id}/can_dm/{other_user_id}` (2026-09-14)
+
+Route count **476 of 764**. `canUserDirectMessage` checks **no permission**: two
+`RequireXId`s, then `UserCanSeeOtherUser` on the *path's* user, and with no shared-channel sync
+service — which needs a licence with the feature **and** `EnableSharedChannels`, off on the
+stack — the answer is `{"can_dm":true}` for every visible pair, an id that names nobody
+included. The service's own answer (the other user's remote cluster) is forwarded. `Config`
+gains `enable_shared_channels`, whose default on an update comes from the legacy
+`ExperimentalSettings` key.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_shared_channels` and its legacy fallback; fixture reprojected | DONE |
+| api | `crates/mm-api/src/connected_workspaces.rs` — `can_user_direct_message`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/can_dm.rs` — 2, unlicensed and licensed pairs | DONE |
+| mutation | `scripts/mutations/can-dm.plan` — 7 run, 5 caught, 2 controls survived (two wire-equivalent mutants dropped, see the plan header) | DONE |
