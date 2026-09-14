@@ -852,13 +852,12 @@ async fn the_edit_routes_refuse_the_same_way() {
     common::delete_channel(&http, &token, &channel).await;
 }
 
-/// An edit whose message carries a `~channel` mention is **forwarded**: `FillInPostProps` resolves
-/// the mention into a prop through channel and team lookups this port does not do.
-///
-/// The point of the test is that the forward is *invisible* to a client — same status, same body —
-/// and that it happens for the mention rather than for the route.
+/// An edit whose message carries a `~channel` mention is **served** (since 2026-09-14):
+/// `FillInPostProps` resolves the mention into the `channel_mentions` prop, which the response
+/// carries in the viewer's rewrite. The full shape is pinned in `post_create_channel_mentions`;
+/// this one keeps the edit route's own claim.
 #[tokio::test]
-async fn an_edit_that_mentions_a_channel_is_forwarded_to_go() {
+async fn an_edit_that_mentions_a_channel_is_served_with_the_prop() {
     if !stack_enabled() {
         return;
     }
@@ -876,15 +875,16 @@ async fn an_edit_that_mentions_a_channel_is_forwarded_to_go() {
         &serde_json::json!({"id": post, "message": "see ~town-square for details"}),
     )
     .await;
-    assert_eq!(status, 200, "the forwarded edit still succeeds: {raw}");
-    assert!(
-        !served_by_rust,
-        "a ~channel mention must be forwarded, not answered here: {raw}"
-    );
+    assert_eq!(status, 200, "{raw}");
+    assert!(served_by_rust, "a ~channel mention is resolved here: {raw}");
     let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
     assert_eq!(body["message"], "see ~town-square for details");
+    assert_eq!(
+        body["props"]["channel_mentions"]["town-square"]["display_name"], "Town Square",
+        "{raw}"
+    );
 
-    // And a message with no mention is answered here, so the forward is about the mention.
+    // And a message with no mention is answered here too, with the prop gone.
     let (status, raw, served_by_rust) = put_post(
         &http,
         RUST,

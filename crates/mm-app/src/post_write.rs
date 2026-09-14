@@ -22,7 +22,6 @@
 //! |---|---|
 //! | `PostWithProxyRemovedFromImageURLs` (post.go:2466) | `ImageProxySettings.Enable` is on |
 //! | `processPostFileChanges` (post_file_change.go:12) | the edit changes the file id set |
-//! | `FillInPostProps`' channel mentions (post.go:568) | the post carries a `~channel` mention |
 //! | `FillInPostProps`' group-mention prop (:632) | the message holds an `@` mention **and** the installation is licensed |
 //! | `FillInPostProps`' AI-generated lookup (:637) | `ai_generated_by` is set |
 //! | `RefreshInteractiveActionsOnPost` (post_interactive_blocks.go:733) | the post carries interactive content |
@@ -42,17 +41,18 @@ use mm_model::channel::Channel;
 use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
     AllStringsOptions, POST_PROPS_ADAPTIVE_CARDS, POST_PROPS_AI_GENERATED_BY_USER_ID,
-    POST_PROPS_BLOCK_KIT_BLOCKS, POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_MM_BLOCKS,
-    POST_PROPS_MM_BLOCKS_ACTIONS, POST_TYPE_BURN_ON_READ, POST_TYPE_CARD, Post, PostPatch,
+    POST_PROPS_BLOCK_KIT_BLOCKS, POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_CURRENT_TEAM_ID,
+    POST_PROPS_MM_BLOCKS, POST_PROPS_MM_BLOCKS_ACTIONS, POST_TYPE_BURN_ON_READ, POST_TYPE_CARD,
+    Post, PostPatch,
 };
 use mm_model::session::Session;
 use mm_model::user::User;
-use mm_model::utils::{AppError, get_millis, parse_hashtags};
+use mm_model::utils::{AppError, StringInterface, get_millis, parse_hashtags};
 use mm_model::websocket_message::{
     WEBSOCKET_EVENT_POST_DELETED, WEBSOCKET_EVENT_POST_EDITED, WEBSOCKET_EVENT_POSTED,
     WebSocketEvent,
 };
-use mm_store::{DraftStore, FileInfoStore, PostStore, PreferenceStore};
+use mm_store::{ChannelStore, DraftStore, FileInfoStore, PostStore, PreferenceStore};
 
 use crate::App;
 use crate::channel::RestrictedDm;
@@ -323,7 +323,7 @@ impl App {
             new_post.edit_at = get_millis();
         }
 
-        self.fill_in_post_props(&mut new_post).await?;
+        self.fill_in_post_props(&mut new_post, None).await?;
 
         // `oldPost.RemoteId = new(*receivedUpdatedPost.RemoteId)` — it mutates the **old** post,
         // which is about to become the edit-history row, so a federated edit stamps the history
@@ -698,32 +698,125 @@ impl App {
         })
     }
 
-    /// Port of `app.App.FillInPostProps` (app/post.go:566) for the shapes an edit can reach.
+    /// Port of `app.App.FillInPostProps` (app/post.go:566): the `channel_mentions` prop, the
+    /// licensed group-highlight prop, and the `ai_generated_by` resolution.
     ///
-    /// Called with a nil `channel` on this path, which is what makes the `Channel().GetForPost`
-    /// lookup inside the channel-mentions branch reachable at all — and that branch is refused
-    /// here, so the lookup is not needed.
+    /// # The channel-mention branch
     ///
-    /// # What survives
+    /// Every `~name` in the message, the attachments and the interactive payloads is looked up by
+    /// name in **one team**: the post's channel's, or — for a DM or GM, whose channel has none —
+    /// the `current_team_id` prop the client may send, and failing that every team at once
+    /// (`GetByNames` drops its team predicate for `""`). `current_team_id` is then deleted from
+    /// the props, inside this branch only: a post with no `~` keeps it. Each channel found is
+    /// kept when the **poster** may resolve it ([`App::has_permission_to_resolve_channel_mention`])
+    /// and its team row is readable, as `{display_name, team_name, id}` under its name; a team
+    /// lookup that fails is logged and that mention skipped.
     ///
-    /// The `channel_mentions` **deletion**. Go's `else if post.GetProps() != nil` arm removes a
-    /// stale prop whenever the post no longer mentions a channel, and a post read out of the
-    /// store always has a materialised props map — so the arm is taken on every edit. It is a
-    /// no-op on a post that never had the prop, and the prop itself is refused, so the only way to
-    /// observe it is a mutation that removes it.
-    pub(crate) async fn fill_in_post_props(&self, post: &mut Post) -> Result<(), PrepareError> {
+    /// `channel` is `None` on the edit path, where Go looks the channel up by the post's id and
+    /// answers `api.context.invalid_param.app_error` (400, `Name: post.channel_id`) if that
+    /// fails. On the create path the caller has it already.
+    ///
+    /// # What the empty case does
+    ///
+    /// Go's `else if post.GetProps() != nil` arm **removes** a stale `channel_mentions` prop
+    /// whenever the post no longer mentions a channel, and a post read out of the store always
+    /// has a materialised props map — so the arm is taken on every edit that drops the last `~`.
+    pub(crate) async fn fill_in_post_props(
+        &self,
+        post: &mut Post,
+        channel: Option<&Channel>,
+    ) -> Result<(), PrepareError> {
         // `ChannelMentionsAllWithOptions` reads the message *and* the attachments and interactive
         // payloads. `omit_interactive_blocks` is `!FeatureFlags.MmBlocksEnabled`, and that flag
         // defaults to true, so the blocks are walked.
         let channel_mentions = post.channel_mentions_all_with_options(AllStringsOptions {
             omit_interactive_blocks: false,
         });
+        let mut channel_mentions_prop = StringInterface::new();
+
         if !channel_mentions.is_empty() {
-            return Err(PrepareError::Unreproducible(
-                "a ~channel mention resolves channels and teams into a prop",
-            ));
+            let post_channel;
+            let channel = match channel {
+                Some(channel) => channel,
+                None => {
+                    post_channel = self
+                        .store()
+                        .channel()
+                        .get_for_post(&post.id)
+                        .await
+                        .map_err(|err| {
+                            tracing::debug!(error = %err, post_id = %post.id, "FillInPostProps: channel for post not found");
+                            let mut params = std::collections::HashMap::new();
+                            params.insert(
+                                "Name".to_owned(),
+                                serde_json::Value::String("post.channel_id".to_owned()),
+                            );
+                            PrepareError::App(AppError::boxed(
+                                "FillInPostProps",
+                                "api.context.invalid_param.app_error",
+                                Some(params),
+                                String::new(),
+                                400,
+                            ))
+                        })?;
+                    &post_channel
+                }
+            };
+
+            // Determine which team to search for channel mentions. For DMs/GMs (no team_id),
+            // use current_team_id from client if provided; else search globally.
+            let mut team_id = channel.team_id.clone();
+            if team_id.is_empty() {
+                if let Some(current) = post
+                    .get_prop(POST_PROPS_CURRENT_TEAM_ID)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|current| !current.is_empty())
+                {
+                    team_id = current.to_owned();
+                }
+            }
+
+            let mentioned = self
+                .get_channels_by_names(&channel_mentions, &team_id)
+                .await?;
+
+            // Remove current_team_id from props after using it: a transient hint from the
+            // client, not persisted data.
+            post.del_prop(POST_PROPS_CURRENT_TEAM_ID);
+
+            // Populate channel_mentions for channels the POST CREATOR may resolve.
+            for channel in mentioned {
+                if !self
+                    .has_permission_to_resolve_channel_mention(&post.user_id, &channel)
+                    .await
+                {
+                    continue;
+                }
+                let team = match self.get_team(&channel.team_id).await {
+                    Ok(team) => team,
+                    Err(err) => {
+                        tracing::warn!(error = %err, team_id = %channel.team_id, channel_id = %channel.id, "Failed to get team of the channel mention");
+                        continue;
+                    }
+                };
+                channel_mentions_prop.insert(
+                    channel.name,
+                    serde_json::json!({
+                        "display_name": channel.display_name,
+                        "team_name": team.name,
+                        // Used by the WebSocket broadcast hook for permission checks
+                        "id": channel.id,
+                    }),
+                );
+            }
         }
-        if post.get_props().is_some() {
+
+        if !channel_mentions_prop.is_empty() {
+            post.add_prop(
+                POST_PROPS_CHANNEL_MENTIONS,
+                serde_json::Value::Object(channel_mentions_prop),
+            );
+        } else if post.get_props().is_some() {
             post.del_prop(POST_PROPS_CHANNEL_MENTIONS);
         }
 
@@ -753,11 +846,11 @@ impl App {
     /// # Four of its five stages are inert here
     ///
     /// The burn-on-read content blanking needs that post type (refused). The permalink hook needs
-    /// `previewed_post` and the channel-mentions hook needs `channel_mentions` — both refused
-    /// props, so `removePermalinkMetadataFromPost` and the `DelProp` have nothing to remove. The
-    /// ABAC files hook needs `AccessControlSettings.EnableAttributeBasedAccessControl`, an
-    /// enterprise setting, and `FeatureFlags.PermissionPolicies`. What is left is the serialisation
-    /// and the publish.
+    /// `previewed_post`, a refused prop, so `removePermalinkMetadataFromPost` has nothing to
+    /// remove. The ABAC files hook needs `AccessControlSettings.EnableAttributeBasedAccessControl`,
+    /// an enterprise setting, and `FeatureFlags.PermissionPolicies`. What is left is the
+    /// serialisation, the `channel_mentions` hook and the publish — all in
+    /// [`App::publish_websocket_event_for_post_with_hooks`], shared with the `posted` event.
     ///
     /// # The event names no user and omits no connection
     ///
@@ -766,18 +859,16 @@ impl App {
     /// save; a port that helpfully threaded the `Connection-Id` header through here would silently
     /// stop the editing tab from seeing its own edit.
     pub(crate) async fn publish_websocket_event_for_post(&self, event: &str, post: &Post) {
-        let mut message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");
-        match post.to_json() {
-            Ok(json) => message.add("post", serde_json::Value::String(json)),
-            Err(err) => {
-                // Go answers 500 `app.post.marshal.app_error` here. A `Post` cannot fail to
-                // serialise — every field is a JSON-representable owned value — so the branch is
-                // logged rather than propagated, and the caller keeps one error type fewer.
-                tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
-                return;
-            }
+        let message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");
+        if let Err(err) = self
+            .publish_websocket_event_for_post_with_hooks(post, message)
+            .await
+        {
+            // Go answers 500 `app.post.marshal.app_error` here. A `Post` cannot fail to
+            // serialise — every field is a JSON-representable owned value — so the branch is
+            // logged rather than propagated, and the caller keeps one error type fewer.
+            tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
         }
-        self.publish(message).await;
     }
 
     /// The slice of `app.App.CreatePost` (app/post.go:173) that a **system post** reaches, plus
@@ -793,7 +884,7 @@ impl App {
     /// `SanitizeProps`; the author lookup (whose 404 is `MissingAccountError`); the `from_bot`
     /// prop for a bot author; `ParseHashtags` over the message; `CreateAt`; `Post().Save`. The
     /// `post.Type == ""` guard means the mention-highlight ephemeral post is skipped outright,
-    /// and `FillInPostProps` reduces to the channel-mention branch — see the refusal below.
+    /// and `FillInPostProps` reduces to the channel-mention branch, which runs.
     ///
     /// # The message text is English, and that is a deliberate exception to [D-092]
     ///
@@ -829,12 +920,18 @@ impl App {
             );
         }
 
-        // `FillInPostProps` would resolve a `~channel` mention in the message into a
-        // `channel_mentions` prop. None of the twelve system messages names a channel except the
-        // header, purpose and display-name notices, which quote text a user wrote — so a header
-        // containing `~town-square` gets a post here with the prop missing, and the client
-        // renders the raw text instead of a link. Recorded as D-235; the post's absence would be
-        // the worse divergence.
+        // `FillInPostProps`: the header, purpose and display-name notices quote text a user
+        // wrote, so a header containing `~town-square` gets the `channel_mentions` prop here as
+        // it does in Go. The two forwarding arms cannot fire on a system message — none carries
+        // an `@` or an `ai_generated_by` prop — so an `Unreproducible` here is logged rather
+        // than turned into a failure Go does not have.
+        match self.fill_in_post_props(&mut post, Some(channel)).await {
+            Ok(()) => {}
+            Err(PrepareError::App(err)) => return Err(err),
+            Err(PrepareError::Unreproducible(why)) => {
+                tracing::warn!(reason = why, post_type = %post.post_type, "FillInPostProps took a branch this server does not reproduce; the system post is written without it");
+            }
+        }
         let (hashtags, _) = parse_hashtags(&post.message);
         post.hashtags = hashtags;
 
@@ -945,15 +1042,14 @@ impl App {
         );
         message.add("set_online", serde_json::Value::Bool(true));
 
-        match post.to_json() {
-            Ok(json) => message.add("post", serde_json::Value::String(json)),
-            Err(err) => {
-                tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
-                return;
-            }
+        // `publishWebsocketEventForPost`: the serialisation, the `channel_mentions` hook for a
+        // notice that quotes a `~name`, and the publish.
+        if let Err(err) = self
+            .publish_websocket_event_for_post_with_hooks(post, message)
+            .await
+        {
+            tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
         }
-
-        self.publish(message).await;
     }
 }
 

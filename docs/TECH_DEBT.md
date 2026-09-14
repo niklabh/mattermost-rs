@@ -5921,29 +5921,31 @@ Two ways to close it, and the choice is not obvious:
 Recorded rather than solved because (2) is the plan and (1) would be scaffolding on scaffolding.
 It stops being a hole when the last publishing route is migrated.
 
-## D-183 · Broadcast hooks: the runner and three of nine hooks run; six are still skipped
+## D-183 · Broadcast hooks: the runner and four of nine hooks run; five are still skipped
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
-**Narrowed** 2026-09-14 — the runner, `add_mentions`, `add_followers` and `posted_ack` are ported.
+**Narrowed** 2026-09-14 — the runner, `add_mentions`, `add_followers`, `posted_ack` and
+`channel_mentions` are ported; the hook trait is async with a `BroadcastHookSuite` for lookups.
 
 `web_broadcast_hooks.go` rewrites an event *per connection* on the way out. That now happens:
 `mm_app::hub::Hub::run_broadcast_hooks` runs inside the fan-out where Go's does (web_hub.go:731),
 a hook that writes gets the per-connection copy (`HookedWebSocketEvent`), and the copy leaves
 non-precomputed — the encoding difference a client can see (`hub::broadcast_frame`). The three
-hooks `SendNotifications` attaches to `posted` are in `mm_app::broadcast_hooks`; `posted_ack`
-reads `WebConn::posted_ack`, set from `?posted_ack=true` on connect.
+hooks `SendNotifications` attaches to `posted` are in `mm_app::broadcast_hooks`, and so is
+`channel_mentions`, which `publishWebsocketEventForPost` attaches and which reads the database
+per recipient through `hub::BroadcastHookSuite`; `posted_ack` reads `WebConn::posted_ack`, set
+from `?posted_ack=true` on connect.
 
-**Still owed — the six hooks `makeBroadcastHooks` registers that this server does not:**
-`permalink`, `channel_mentions`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`,
-`only_channel_admins`; plus the `Reject` path (`msg.Event().Reject()`, skipped by the write pump
-at web_conn.go:577) that `burn_on_read_reaction`, `abac_files` and `only_channel_admins` use. An
-event carrying one of their ids is logged (`Unable to find broadcast hook`) and leaves unmodified,
-precomputed. Their ids are declared in `broadcast_hooks` so a raiser can attach them now —
-`channel_join_request` attaches `only_channel_admins` already, and that one *widens an audience*
-when skipped ([D-340]). Each of the six lands with the first served route that needs it:
-`permalink` and `channel_mentions` with the permalink-preview and channel-mention passes of
-`SendNotifications`, `abac_files` with attribute-based access control, the `burn_on_read` pair
-with burn-on-read posts.
+**Still owed — the five hooks `makeBroadcastHooks` registers that this server does not:**
+`permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`, `only_channel_admins`; plus
+the `Reject` path (`msg.Event().Reject()`, skipped by the write pump at web_conn.go:577) that
+`burn_on_read_reaction`, `abac_files` and `only_channel_admins` use. An event carrying one of
+their ids is logged (`Unable to find broadcast hook`) and leaves unmodified, precomputed. Their
+ids are declared in `broadcast_hooks` so a raiser can attach them now — `channel_join_request`
+attaches `only_channel_admins` already, and that one *widens an audience* when skipped
+([D-340]). Each of the five lands with the first served route that needs it: `permalink` with
+the permalink-preview pass of `SendNotifications`, `abac_files` with attribute-based access
+control, the `burn_on_read` pair with burn-on-read posts.
 
 **Not a hub gap, but the reason `should_ack` is not on the wire yet:** `posted_ack` is attached
 by `SendNotifications`, whose port (`post_create::publish_user_posted_event`) does not attach it.
@@ -6582,9 +6584,8 @@ back off the timeline. Four things `App.CreatePost` does that [`App::create_syst
   exclusion cannot widen. `getExplicitMentions` over the message text is absent with it — with
   default keywords it finds nothing in these twelve sentences, but a user whose custom mention key
   matches one would be mentioned by Go and not by us.
-- **`channel_mentions`.** `FillInPostProps` resolves a `~channel` mention into a prop. The header,
-  purpose and display-name notices quote text a user wrote, so a header naming a channel gets a
-  post with the prop missing and the client renders the raw `~name`.
+- ~~**`channel_mentions`.**~~ Paid off 2026-09-14: `create_system_post` runs `FillInPostProps`,
+  so a header naming a channel gets the prop, and its `posted` frame the `channel_mentions` hook.
 - **A group channel's `channel_display_name`** in the `posted` event is Go's sorted member list
   (`PostNotification.GetChannelName`) and the stored display name here. Reachable only through a
   header or purpose patch on a GM, which is the one lifecycle route a GM allows.
@@ -7627,7 +7628,6 @@ it:
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
 | a shared channel | the shared-channel sync service |
 | a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
-| a message with `~` | `FillInPostProps` resolving the channel names into the `channel_mentions` prop, and the `channel_mentions` broadcast hook |
 | a message that mentions a non-member, a group, or the whole channel past `MaxNotificationsPerChannel` | the translated ephemeral notices — [D-591] |
 | a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
 | `?silent=true` | the notification suppression the prop names |

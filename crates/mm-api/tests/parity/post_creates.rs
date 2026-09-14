@@ -942,10 +942,6 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
             serde_json::json!({ "message": "mmrs fwd at @nobody" }),
         ),
         (
-            "a ~channel mention resolves into a prop",
-            serde_json::json!({ "message": "mmrs fwd tilde ~town-square" }),
-        ),
-        (
             "a link needs the embed pipeline",
             serde_json::json!({ "message": "mmrs fwd link https://example.com" }),
         ),
