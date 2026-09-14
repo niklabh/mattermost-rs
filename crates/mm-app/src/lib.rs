@@ -32,6 +32,8 @@ pub mod emoji;
 pub mod export;
 /// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.
 pub mod file;
+/// Port of `UploadFileX` — the single-file upload behind `POST /api/v4/files`.
+pub mod file_upload;
 /// Port of `platform/shared/filestore` — the local driver, and a refusal for the other two.
 pub mod filestore;
 /// The one unlicensed read of `app/group.go`, for `members_minus_group_members`.
@@ -50,6 +52,8 @@ pub mod license;
 pub mod limits;
 pub mod login;
 pub mod mention;
+/// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
+pub mod mime;
 pub mod notification;
 pub mod notify_admin;
 pub mod oauth;
@@ -134,6 +138,10 @@ pub struct App {
     pending_post_ids: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<String, crate::post_create::PendingPostEntry>>,
     >,
+    /// Go's `uploadLockMap` (app/channels.go) — the upload-session ids with a chunk in flight,
+    /// shared across every clone so a second chunk for one session is refused whichever request
+    /// holds it. See `crate::upload`.
+    upload_locks: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Go's `platform.filestore` — the backend every file, image, emoji and brand read goes
     /// through. Built once from the configuration, like Go's, so a route never re-reads
     /// `FileSettings` to decide where to look.
@@ -203,6 +211,9 @@ impl App {
             )),
             pending_post_ids: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
+            )),
+            upload_locks: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
             )),
         }
     }

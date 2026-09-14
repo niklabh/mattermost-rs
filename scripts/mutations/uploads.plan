@@ -1,0 +1,30 @@
+# Mutation plan for the file-writing routes: createUpload, uploadData and uploadFileStream.
+#
+#   scripts/mutate-batch.sh scripts/mutations/uploads.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The two parity suites upload a text file and a PNG to both servers, read the bytes back, and
+# cover the 204 chunk, the completion, an oversize chunk, the forwarded image and the refusals.
+# Each mutation below is chosen so the right and wrong answers diverge on a case one suite runs;
+# the discriminating test is named beside it. The last two lines are the no-op controls and must
+# SURVIVE.
+#
+# - completion-condition: the `!=` deciding 204-vs-FileInfo, inverted -> a completing chunk 204s.
+#   Caught by a_text_upload_completes (expects 200) and the 204 test (expects the tail to finish).
+# - content-length-past-remaining: `>` -> `>=`, so a chunk of exactly the remaining size is
+#   wrongly the 400. a_text_upload sends exactly file_size on the first chunk.
+# - permission-target-createupload: the attachment upload's channel check moved to manage_system,
+#   which a plain channel member lacks. a_channel_member_can_create_an_upload is the positive case.
+# - image-resolution-comparison: `>` -> `<`, so a 1x1 PNG is "too large". The image test expects
+#   the upload to forward to Go, not to 400 here.
+# - image-branch-inverted: `is_image()` negated, so the PNG is written here instead of forwarded.
+#   The image test asserts the request forwards (served_by != rust).
+
+completion-condition	crates/mm-app/src/upload.rs	        if us.file_offset != us.file_size {	        if us.file_offset == us.file_size {	api	upload_write
+content-length-past-remaining	crates/mm-api/src/upload_write.rs	                if length > us.file_size - us.file_offset {	                if length >= us.file_size - us.file_offset {	api	upload_write
+permission-target-createupload	crates/mm-api/src/upload_write.rs	            .session_has_permission_to_channel(&session.0, &us.channel_id, &PERMISSION_UPLOAD_FILE)\n            .await;\n        if !ok {\n            return Err(make_permission_error(&session.0, &[&PERMISSION_UPLOAD_FILE]).into());\n        }\n        us.type_ = UploadType(UploadType::ATTACHMENT.to_owned());	            .session_has_permission_to_channel(&session.0, &us.channel_id, &PERMISSION_MANAGE_SYSTEM)\n            .await;\n        if !ok {\n            return Err(make_permission_error(&session.0, &[&PERMISSION_UPLOAD_FILE]).into());\n        }\n        us.type_ = UploadType(UploadType::ATTACHMENT.to_owned());	api	upload_write
+image-resolution-comparison	crates/mm-app/src/imaging.rs	    if resolution > max_res {	    if resolution < max_res {	api	file_upload
+image-branch-inverted	crates/mm-app/src/file_upload.rs	        if info.is_image() {	        if !info.is_image() {	api	file_upload
+control-reorder-clear-fields	crates/mm-api/src/upload_write.rs	    us.remote_id = String::new();\n    us.req_file_id = String::new();	    us.req_file_id = String::new();\n    us.remote_id = String::new();	api	upload_write
+control-reorder-info-assigns	crates/mm-app/src/upload.rs	        info.creator_id.clone_from(&us.user_id);\n        info.channel_id.clone_from(&us.channel_id);	        info.channel_id.clone_from(&us.channel_id);\n        info.creator_id.clone_from(&us.user_id);	api	upload_write

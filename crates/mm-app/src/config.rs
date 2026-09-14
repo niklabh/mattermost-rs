@@ -472,6 +472,26 @@ pub struct Config {
     /// the read.
     pub file_max_file_size: i64,
 
+    /// `FileSettings.EnableFileAttachments` (config.go:1875, defaulted **`true`**).
+    ///
+    /// Off, every file-writing route refuses before reading a byte — and with **two different
+    /// statuses**: `createUpload` and `uploadData` answer 501 and `uploadFileStream` answers 403,
+    /// all three under the one id `api.file.attachments.disabled.app_error`.
+    pub file_enable_file_attachments: bool,
+
+    /// `FileSettings.MaxImageResolution` (config.go:1891, defaulted **`7680 * 4320`** — 8K, about
+    /// 33 megapixels). Compared against `width * height` as an `int64` product by
+    /// `checkImageResolutionLimit` (app/image.go:13); the refusal is `>`, so an image of exactly
+    /// the limit is accepted.
+    pub file_max_image_resolution: i64,
+
+    /// `PluginSettings.Directory` (config.go:3637, defaulted **`"./plugins"`**, and — like
+    /// `FileSettings.Directory` — an *empty* document value takes the default too).
+    ///
+    /// Read by `createUpload` for an `import` upload only: the import directory may not sit
+    /// inside the plugin directory or vice versa (`fileutils.CheckDirectoryConflict`).
+    pub plugin_directory: String,
+
     /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
     ///
     /// One of the two halves of `setProfileImage`'s 409: an LDAP user — or a SAML user on a
@@ -1269,6 +1289,11 @@ impl Default for Config {
             file_directory: "./data/".to_owned(),
             // config.go:1888 — 100 MiB.
             file_max_file_size: 100 * 1024 * 1024,
+            file_enable_file_attachments: true,
+            // config.go:1892 — 8K.
+            file_max_image_resolution: 7680 * 4320,
+            // config.go:268 — `PluginSettingsDefaultDirectory`.
+            plugin_directory: "./plugins".to_owned(),
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
             saml_enable_sync_with_ldap: false,
@@ -1659,6 +1684,18 @@ impl Config {
                 "MM_FILESETTINGS_MAXFILESIZE",
                 default.file_max_file_size,
             ),
+            file_enable_file_attachments: lookup_bool(
+                lookup,
+                "MM_FILESETTINGS_ENABLEFILEATTACHMENTS",
+                default.file_enable_file_attachments,
+            ),
+            file_max_image_resolution: lookup_int(
+                lookup,
+                "MM_FILESETTINGS_MAXIMAGERESOLUTION",
+                default.file_max_image_resolution,
+            ),
+            plugin_directory: lookup("MM_PLUGINSETTINGS_DIRECTORY")
+                .unwrap_or(default.plugin_directory),
             ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
                 .unwrap_or(default.ldap_picture_attribute),
             saml_enable_sync_with_ldap: lookup_bool(
@@ -2266,6 +2303,16 @@ impl Config {
             file_max_file_size: file_settings
                 .max_file_size
                 .unwrap_or(default.file_max_file_size),
+            file_enable_file_attachments: file_settings
+                .enable_file_attachments
+                .unwrap_or(default.file_enable_file_attachments),
+            file_max_image_resolution: file_settings
+                .max_image_resolution
+                .unwrap_or(default.file_max_image_resolution),
+            plugin_directory: non_empty_or(
+                parsed.plugin_settings.unwrap_or_default().directory,
+                default.plugin_directory,
+            ),
             ldap_picture_attribute: ldap_settings
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
@@ -2554,6 +2601,8 @@ struct Document {
     export_settings: Option<ExportSettingsDocument>,
     #[serde(rename = "ImportSettings")]
     import_settings: Option<ImportSettingsDocument>,
+    #[serde(rename = "PluginSettings")]
+    plugin_settings: Option<PluginSettingsDocument>,
     #[serde(rename = "PrivacySettings")]
     privacy_settings: Option<PrivacySettingsDocument>,
     #[serde(rename = "ClientRequirements")]
@@ -2919,6 +2968,10 @@ struct FileSettingsDocument {
     driver_name: Option<String>,
     #[serde(rename = "MaxFileSize")]
     max_file_size: Option<i64>,
+    #[serde(rename = "EnableFileAttachments")]
+    enable_file_attachments: Option<bool>,
+    #[serde(rename = "MaxImageResolution")]
+    max_image_resolution: Option<i64>,
     #[serde(rename = "Directory")]
     directory: Option<String>,
     #[serde(rename = "EnablePublicLink")]
@@ -2943,6 +2996,13 @@ struct ExportSettingsDocument {
 /// `ImportSettings`.
 #[derive(Debug, Default, serde::Deserialize)]
 struct ImportSettingsDocument {
+    #[serde(rename = "Directory")]
+    directory: Option<String>,
+}
+
+/// `PluginSettings` — the one key `createUpload`'s import branch reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct PluginSettingsDocument {
     #[serde(rename = "Directory")]
     directory: Option<String>,
 }
@@ -3720,8 +3780,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 91,
-            "the fixture covers {keys} settings and Config reads 91 from the document. \
+            keys, 94,
+            "the fixture covers {keys} settings and Config reads 94 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

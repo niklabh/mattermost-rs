@@ -13260,3 +13260,32 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+## `POST /api/v4/uploads`, `POST /api/v4/uploads/{upload_id}`, `POST /api/v4/files` (2026-09-14)
+
+**+3 HTTP pairs** relative to base `fc7c7ec` (493 of 764). The file-writing routes a client hits
+for every attachment: `createUpload`/`uploadData` (the resumable session and its data leg) and
+`uploadFileStream` (the classic simple-body and multipart upload). The write path is served —
+offset/size checks, the 5 MiB first-part floor, the local-backend write, the `FileInfo` the
+completing chunk mints — but a **raster image** is handed to Go before the write, because its
+`_preview`/`_thumb`/`mini_preview` are the pixel work [D-380]/[D-411] defer; `uploadData` decides
+that from the file's head *before* writing the chunk, so the forward replays the request Go would
+have handled. Two new oracles underpin the wire format: `mime.TypeByExtension` with its host
+table loader (`behaviour_mime.json`) for `FileInfo.mime_type`, and `imaging.ParseSVG` with a Go
+`fmt.Sscan` port (`behaviour_svg.json`) for an SVG's dimensions.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `EnableFileAttachments`, `MaxImageResolution`, `PluginSettings.Directory`; fixture reprojected (+6 keys, 94 total) | DONE |
+| model | `mime.TypeByExtension` port `crates/mm-app/src/mime.rs`; `imaging::parse_svg`/`check_image_resolution_limit`/`file_ext_from_mime_type` in `crates/mm-app/src/imaging.rs` | DONE |
+| store | `crates/mm-store/src/upload_session_store.rs` — `save`/`update`/`delete`; `crates/mm-store/src/file_info_store.rs` — `save` (the 20-column INSERT that drops `Archived`) | DONE |
+| app | `crates/mm-app/src/upload.rs` — `create_upload_session`, `upload_data`, `check_directory_conflict`; `crates/mm-app/src/file_upload.rs` — `upload_file_x`; `append_file` in `filestore.rs`/`file.rs` | DONE |
+| api | `crates/mm-api/src/upload_write.rs` (createUpload, uploadData); `crates/mm-api/src/file_upload.rs` (uploadFileStream); `multipart::first_part`/`boundary_of`; three routes in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/upload_write.rs` — 6; `crates/mm-api/tests/parity/file_upload.rs` — 6 | DONE |
+| mutation | `scripts/mutations/uploads.plan` — see report tally | DONE |
+
+- **The completed `FileInfo` from `uploadData` sets neither `has_preview_image` nor
+  `mini_preview`**, unlike `UploadFileX` — a resumable upload's image answer is Go's (forwarded);
+  a resumable text file's row is this server's. See the doc comment on `App::upload_data`.
+- Content extraction (`ExtractContentFromFileInfo`) is skipped on both new write paths — [D-651].
+- The multipart `uploadFileStream` parses the whole body rather than reproducing Go's
+  streaming-vs-legacy split — observably identical for a well-formed request — [D-652].

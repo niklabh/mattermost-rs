@@ -40,6 +40,8 @@ pub mod gated_reads;
 
 /// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod channel_join_requests;
+/// `uploadFileStream` — the classic `POST /api/v4/files` upload.
+pub mod file_upload;
 pub mod files;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
@@ -87,6 +89,8 @@ pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
 pub mod typing;
+/// The two upload-session writes: `createUpload` and `uploadData`.
+pub mod upload_write;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
@@ -1812,6 +1816,13 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/files/{file_id}",
             partially_migrated_with_ids(&state, get(files::get_file)),
         )
+        // `BaseRoutes.Files.Handle("")` (api4/file.go:32) — `POST /files`, `uploadFileStream`.
+        // One segment shorter than `/files/{file_id}` above, so a distinct path; the multipart
+        // and simple uploads are served and an image among the files forwards the whole request.
+        .route(
+            "/api/v4/files",
+            partially_migrated(axum::routing::post(file_upload::upload_file_stream)),
+        )
         .route(
             "/api/v4/files/{file_id}/thumbnail",
             partially_migrated_with_ids(&state, get(files::get_file_thumbnail)),
@@ -1969,9 +1980,22 @@ pub fn router(state: AppState) -> Router {
         // (api4/user.go:118). Both are reads of `UploadSessions` rows and neither touches the
         // file backend. The `POST` on each path — `uploadData` and nothing, respectively — falls
         // to `partially_migrated`'s method fallback.
+        // `BaseRoutes.Upload` (api.go:249): `GET` is `getUpload`, `POST` is `uploadData` — the
+        // data leg of the resumable upload, which writes through the file backend and forwards a
+        // completing image chunk to Go ([D-380]/[D-411]).
         .route(
             "/api/v4/uploads/{upload_id}",
-            partially_migrated_with_ids(&state, get(uploads::get_upload)),
+            partially_migrated_with_ids(
+                &state,
+                get(uploads::get_upload).post(upload_write::upload_data),
+            ),
+        )
+        // `BaseRoutes.Uploads.Handle("")` (api4/upload.go:20) — the bare collection, `POST`
+        // only: `createUpload`, the resumable session. A distinct path from `{upload_id}`, so no
+        // shadowing question.
+        .route(
+            "/api/v4/uploads",
+            partially_migrated(axum::routing::post(upload_write::create_upload)),
         )
         .route(
             "/api/v4/users/{user_id}/uploads",

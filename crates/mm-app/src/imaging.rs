@@ -202,6 +202,43 @@ pub enum ImageConfig {
     Undecidable(&'static str),
 }
 
+/// Port of `checkImageResolutionLimit` (app/image.go:13): `width * height` as an `int64`
+/// against `FileSettings.MaxImageResolution`, refused when **strictly** greater.
+pub fn check_image_resolution_limit(
+    width: i64,
+    height: i64,
+    max_res: i64,
+) -> Result<(), ImageResolutionError> {
+    let resolution = width.saturating_mul(height);
+    if resolution > max_res {
+        return Err(ImageResolutionError {
+            resolution,
+            max: max_res,
+        });
+    }
+    Ok(())
+}
+
+/// The error `checkImageResolutionLimit` returns, with Go's text — it is `Wrap`ped into
+/// `api.file.upload_file.large_image_detailed.app_error`, so the text is the wire detail when
+/// `EnableDeveloper` is on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("image resolution is too high: {resolution}, max allowed is {max}")]
+pub struct ImageResolutionError {
+    pub resolution: i64,
+    pub max: i64,
+}
+
+/// Port of `getFileExtFromMimeType` (app/file.go:1849): `png` for `image/png`, `jpg` for
+/// everything else — so a GIF's or a WebP's preview is named `_preview.jpg`.
+pub fn file_ext_from_mime_type(mime_type: &str) -> &'static str {
+    if mime_type == "image/png" {
+        "png"
+    } else {
+        "jpg"
+    }
+}
+
 /// The header half of `image.DecodeConfig`, for the formats this port measures exactly.
 ///
 /// # Only PNG, and only the unambiguous part of PNG
@@ -577,5 +614,606 @@ mod decode_config_parity {
                 );
             }
         }
+    }
+}
+
+/// What `imaging.ParseSVG` (channels/app/imaging/svg.go:22) returns: the pair, and Go's error
+/// beside it rather than instead of it, because Go returns **both** and the caller reads the
+/// pair whatever the error says.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SvgDimensions {
+    pub width: i64,
+    pub height: i64,
+}
+
+/// The failures `ParseSVG` reports. The text is not Go's — it only reaches a log line — but
+/// the *presence* of an error is pinned by the oracle alongside the dimensions.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SvgParseError {
+    #[error("xml: {0}")]
+    Xml(&'static str),
+    #[error("scan: {0}")]
+    Scan(&'static str),
+    #[error("unable to extract SVG dimensions")]
+    NoDimensions,
+}
+
+/// Port of `imaging.ParseSVG`: the `width`/`height` — or `viewBox` — attributes of the **first**
+/// element in the document, whatever it is called.
+///
+/// Pinned by `fixtures/behaviour_svg.json`, which is where every rule below comes from:
+///
+/// - `viewBox` with exactly four whitespace-separated fields wins outright, at whatever position
+///   it sits, and returns at once; with any other count it is ignored. Four fields that do not
+///   scan **return early with no error** and whatever `width`/`height` came before it.
+/// - `width`/`height` are `fmt.Sscan` integers ([`go_sscan_int`]): `100px` is 100, `0x10` is
+///   16, `0100` is octal 64, `1e2` is 1, `-100` is -100, and a value that does not start with an
+///   integer ends the parse with an error and the pair so far.
+/// - Attribute names are matched on their local part (`svg:width` counts) and case-sensitively
+///   (`WIDTH` does not); a repeated attribute is applied twice, so the last wins.
+/// - Either dimension still zero after the first element is `unable to extract SVG dimensions`.
+/// - Anything Go's XML decoder refuses before that element — an undefined entity, an encoding
+///   declaration that is not UTF-8, an unquoted attribute, invalid UTF-8, a NUL — is that error
+///   with `(0, 0)`; a document with no element at all is `EOF`.
+pub fn parse_svg(data: &[u8]) -> (SvgDimensions, Option<SvgParseError>) {
+    let mut dims = SvgDimensions::default();
+    let attrs = match svg_xml::first_start_element(data) {
+        Ok(attrs) => attrs,
+        Err(err) => return (dims, Some(SvgParseError::Xml(err))),
+    };
+
+    for (local, value) in &attrs {
+        if local == "viewBox" {
+            let values: Vec<&str> = value.split_whitespace().collect();
+            if values.len() == 4 {
+                let (Ok(width), Ok(height)) = (go_sscan_int(values[2]), go_sscan_int(values[3]))
+                else {
+                    // `return svgInfo, err` — and `err` is the decoder's, which is nil.
+                    return (dims, None);
+                };
+                dims.width = width;
+                dims.height = height;
+                return (dims, None);
+            }
+        }
+        if local == "width" {
+            match go_sscan_int(value) {
+                Ok(width) => dims.width = width,
+                Err(err) => return (dims, Some(SvgParseError::Scan(err))),
+            }
+        }
+        if local == "height" {
+            match go_sscan_int(value) {
+                Ok(height) => dims.height = height,
+                Err(err) => return (dims, Some(SvgParseError::Scan(err))),
+            }
+        }
+    }
+
+    if dims.width == 0 || dims.height == 0 {
+        return (dims, Some(SvgParseError::NoDimensions));
+    }
+    (dims, None)
+}
+
+/// `fmt.Sscan(s, &i)` for an `int` (fmt/scan.go `scanInt` with verb `v`): skip leading space,
+/// an optional sign, a base prefix (`0b`, `0o`, `0x`, or a bare `0` for octal), then the longest
+/// run of that base's digits **and underscores**, which `strconv.ParseInt(tok, 0, 64)` then
+/// parses — so the token stops at the first foreign character rather than requiring the value
+/// to end there, and `_` placement is validated only afterwards.
+pub fn go_sscan_int(s: &str) -> Result<i64, &'static str> {
+    let rest = s.trim_start_matches(go_is_space);
+    let mut chars = rest.chars().peekable();
+    let mut tok = String::new();
+
+    if chars.peek().is_none() {
+        return Err("EOF");
+    }
+    if let Some(sign) = chars.next_if(|c| *c == '+' || *c == '-') {
+        tok.push(sign);
+    }
+
+    // `scanBasePrefix`.
+    let (digits, mut have_digits): (&str, bool) = if chars.next_if_eq(&'0').is_some() {
+        tok.push('0');
+        if let Some(b) = chars.next_if(|c| *c == 'b' || *c == 'B') {
+            tok.push(b);
+            ("01_", true)
+        } else if let Some(o) = chars.next_if(|c| *c == 'o' || *c == 'O') {
+            tok.push(o);
+            ("01234567_", true)
+        } else if let Some(x) = chars.next_if(|c| *c == 'x' || *c == 'X') {
+            tok.push(x);
+            ("0123456789aAbBcCdDeEfF_", true)
+        } else {
+            ("01234567_", true)
+        }
+    } else {
+        ("0123456789_", false)
+    };
+
+    // `scanNumber`.
+    if !have_digits {
+        match chars.peek() {
+            None => return Err("EOF"),
+            Some(c) if digits.contains(*c) => {}
+            Some(_) => return Err("expected integer"),
+        }
+        have_digits = true;
+    }
+    let _ = have_digits;
+    while let Some(c) = chars.next_if(|c| digits.contains(*c)) {
+        tok.push(c);
+    }
+
+    go_parse_int_base0(&tok)
+}
+
+/// `strconv.ParseInt(s, 0, 64)`: the sign, the prefix, underscores between digits only, and
+/// the `int64` range — a value past it is `value out of range`, not saturation.
+fn go_parse_int_base0(s: &str) -> Result<i64, &'static str> {
+    let (neg, body) = match s.as_bytes().first() {
+        Some(b'+') => (false, &s[1..]),
+        Some(b'-') => (true, &s[1..]),
+        _ => (false, s),
+    };
+    if body.is_empty() {
+        return Err("invalid syntax");
+    }
+    let bytes = body.as_bytes();
+    let (base, digits): (u64, &[u8]) = if bytes[0] == b'0' && bytes.len() >= 3 {
+        match bytes[1].to_ascii_lowercase() {
+            b'b' => (2, &bytes[2..]),
+            b'o' => (8, &bytes[2..]),
+            b'x' => (16, &bytes[2..]),
+            _ => (8, &bytes[1..]),
+        }
+    } else if bytes[0] == b'0' {
+        (8, &bytes[1..])
+    } else {
+        (10, bytes)
+    };
+    // `ParseUint` on `"0"` alone: the prefix loop above leaves nothing, and Go's `s = s[1:]`
+    // for a bare leading zero leaves nothing too; the loop then produces 0.
+    let mut value: u64 = 0;
+    let mut underscores = false;
+    for &b in digits {
+        if b == b'_' {
+            underscores = true;
+            continue;
+        }
+        let d = match b {
+            b'0'..=b'9' => u64::from(b - b'0'),
+            b'a'..=b'z' => u64::from(b - b'a') + 10,
+            b'A'..=b'Z' => u64::from(b - b'A') + 10,
+            _ => return Err("invalid syntax"),
+        };
+        if d >= base {
+            return Err("invalid syntax");
+        }
+        value = value
+            .checked_mul(base)
+            .and_then(|v| v.checked_add(d))
+            .ok_or("value out of range")?;
+    }
+    if underscores && !go_underscore_ok(s) {
+        return Err("invalid syntax");
+    }
+    let cutoff: u64 = 1 << 63;
+    if !neg && value >= cutoff {
+        return Err("value out of range");
+    }
+    if neg && value > cutoff {
+        return Err("value out of range");
+    }
+    // Both branches are in range by the checks above: `value` is at most 2^63 when negative.
+    Ok(if neg {
+        (value as i64).wrapping_neg()
+    } else {
+        value as i64
+    })
+}
+
+/// `strconv.underscoreOK`: an underscore may only sit between two digits, or between a base
+/// prefix and a digit.
+fn go_underscore_ok(s: &str) -> bool {
+    let mut bytes = s.as_bytes();
+    if let Some(b'-' | b'+') = bytes.first() {
+        bytes = &bytes[1..];
+    }
+    let mut saw = b'^';
+    let mut i = 0;
+    let mut hex = false;
+    if bytes.len() >= 2
+        && bytes[0] == b'0'
+        && matches!(bytes[1].to_ascii_lowercase(), b'b' | b'o' | b'x')
+    {
+        i = 2;
+        saw = b'0';
+        hex = bytes[1].eq_ignore_ascii_case(&b'x');
+    }
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_digit() || (hex && matches!(b.to_ascii_lowercase(), b'a'..=b'f')) {
+            saw = b'0';
+        } else if b == b'_' {
+            if saw != b'0' {
+                return false;
+            }
+            saw = b'_';
+        } else {
+            if saw == b'_' {
+                return false;
+            }
+            saw = b'!';
+        }
+        i += 1;
+    }
+    saw != b'_'
+}
+
+/// `fmt`'s `isSpace` (fmt/scan.go), the table `SkipSpace` consults.
+fn go_is_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{85}' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+/// The slice of `encoding/xml`'s decoder that `ParseSVG` exercises: everything up to the first
+/// start element, and that element's attributes.
+///
+/// Transcribed from `Decoder.rawToken` (encoding/xml/xml.go) for the branches a document can
+/// take before its root — BOM, character data (with entity checking), comments, CDATA,
+/// processing instructions (with the `encoding` refusal), `<!DOCTYPE>` with an internal subset —
+/// and for the attribute grammar of the element itself, in `Strict` mode. Error strings are
+/// summaries, not Go's.
+mod svg_xml {
+    /// `(Name.Local, decoded value)` for each attribute, in document order.
+    pub(super) fn first_start_element(data: &[u8]) -> Result<Vec<(String, String)>, &'static str> {
+        let mut p = Parser {
+            data,
+            pos: 0,
+            depth: 0,
+        };
+        // Go's decoder drops a leading byte-order mark.
+        if data.starts_with(b"\xef\xbb\xbf") {
+            p.pos = 3;
+        }
+        loop {
+            match p.peek() {
+                None => return Err("EOF"),
+                Some(b'<') => {
+                    p.pos += 1;
+                    match p.peek() {
+                        None => return Err("unexpected EOF"),
+                        Some(b'/') => return Err("unexpected end element"),
+                        Some(b'?') => {
+                            p.pos += 1;
+                            p.proc_inst()?;
+                        }
+                        Some(b'!') => {
+                            p.pos += 1;
+                            p.markup_declaration()?;
+                        }
+                        Some(_) => return p.start_element(),
+                    }
+                }
+                Some(_) => {
+                    // Character data before the root, entities checked.
+                    p.text(None)?;
+                }
+            }
+        }
+    }
+
+    struct Parser<'a> {
+        data: &'a [u8],
+        pos: usize,
+        depth: usize,
+    }
+
+    impl Parser<'_> {
+        fn peek(&self) -> Option<u8> {
+            self.data.get(self.pos).copied()
+        }
+
+        fn getc(&mut self) -> Option<u8> {
+            let b = self.peek()?;
+            self.pos += 1;
+            Some(b)
+        }
+
+        fn space(&mut self) {
+            while matches!(self.peek(), Some(b' ' | b'\r' | b'\n' | b'\t')) {
+                self.pos += 1;
+            }
+        }
+
+        /// `<?target data?>`; the `xml` declaration's `encoding` must be UTF-8 or absent.
+        fn proc_inst(&mut self) -> Result<(), &'static str> {
+            let start = self.pos;
+            let end = find(self.data, self.pos, b"?>").ok_or("unexpected EOF")?;
+            let body = &self.data[start..end];
+            self.pos = end + 2;
+            let text = String::from_utf8_lossy(body);
+            let (target, content) = text
+                .split_once(|c: char| c.is_ascii_whitespace())
+                .unwrap_or((&text, ""));
+            if target.is_empty() {
+                return Err("expected target name after <?");
+            }
+            if target == "xml" {
+                if let Some(enc) = proc_inst_param("encoding", content) {
+                    if !enc.is_empty() && !enc.eq_ignore_ascii_case("utf-8") {
+                        return Err("encoding declared but Decoder.CharsetReader is nil");
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        /// `<!-- -->`, `<![CDATA[ ]]>` or a `<!DOCTYPE …>` directive with its internal subset.
+        fn markup_declaration(&mut self) -> Result<(), &'static str> {
+            if self.data[self.pos..].starts_with(b"--") {
+                let end = find(self.data, self.pos + 2, b"-->").ok_or("unexpected EOF")?;
+                self.pos = end + 3;
+                return Ok(());
+            }
+            if self.data[self.pos..].starts_with(b"[CDATA[") {
+                let end = find(self.data, self.pos + 7, b"]]>").ok_or("unexpected EOF")?;
+                self.pos = end + 3;
+                return Ok(());
+            }
+            // A directive: read to the matching `>`, skipping quoted strings, nested `<! >`
+            // and comments, and the `[ ]` internal subset.
+            self.depth = 0;
+            loop {
+                let b = self.getc().ok_or("unexpected EOF")?;
+                match b {
+                    b'"' | b'\'' => while self.getc().ok_or("unexpected EOF")? != b {},
+                    b'[' => self.depth += 1,
+                    b']' => self.depth = self.depth.saturating_sub(1),
+                    b'<' => {
+                        if self.data[self.pos..].starts_with(b"!--") {
+                            let end =
+                                find(self.data, self.pos + 3, b"-->").ok_or("unexpected EOF")?;
+                            self.pos = end + 3;
+                        } else if self.peek() == Some(b'!') {
+                            self.depth += 1;
+                        }
+                    }
+                    b'>' if self.depth == 0 => return Ok(()),
+                    b'>' => self.depth -= 1,
+                    _ => {}
+                }
+            }
+        }
+
+        /// The element after `<`: its name, then attributes until `>` or `/>`.
+        fn start_element(&mut self) -> Result<Vec<(String, String)>, &'static str> {
+            let _name = self.name()?;
+            let mut attrs = Vec::new();
+            loop {
+                self.space();
+                let b = self.getc().ok_or("unexpected EOF")?;
+                match b {
+                    b'/' => {
+                        if self.getc() != Some(b'>') {
+                            return Err("expected /> in element");
+                        }
+                        return Ok(attrs);
+                    }
+                    b'>' => return Ok(attrs),
+                    _ => self.pos -= 1,
+                }
+                let name = self.name()?;
+                let local = name
+                    .rsplit_once(':')
+                    .map_or(name.as_str(), |(_, l)| l)
+                    .to_owned();
+                self.space();
+                if self.getc() != Some(b'=') {
+                    return Err("attribute name without = in element");
+                }
+                self.space();
+                let quote = self.getc().ok_or("unexpected EOF")?;
+                if quote != b'"' && quote != b'\'' {
+                    return Err("unquoted or missing attribute value in element");
+                }
+                let value = self.text(Some(quote))?;
+                attrs.push((local, value));
+            }
+        }
+
+        /// `Decoder.name` — the longest run of name bytes, then `isName`.
+        fn name(&mut self) -> Result<String, &'static str> {
+            let start = self.pos;
+            while let Some(b) = self.peek() {
+                if is_name_byte(b) || b >= 0x80 {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
+            }
+            let raw = &self.data[start..self.pos];
+            let name = std::str::from_utf8(raw).map_err(|_| "invalid UTF-8")?;
+            if !is_name(name) {
+                return Err("invalid XML name");
+            }
+            Ok(name.to_owned())
+        }
+
+        /// `Decoder.text(quote, cdata=false)`: up to the closing quote (or the next `<` for
+        /// character data), with entity references resolved and Go's character checks.
+        fn text(&mut self, quote: Option<u8>) -> Result<String, &'static str> {
+            let mut out: Vec<u8> = Vec::new();
+            loop {
+                let Some(b) = self.getc() else {
+                    if quote.is_some() {
+                        return Err("unexpected EOF");
+                    }
+                    break;
+                };
+                if Some(b) == quote {
+                    break;
+                }
+                if b == b'<' {
+                    if quote.is_some() {
+                        return Err("unescaped < inside quoted string");
+                    }
+                    self.pos -= 1;
+                    break;
+                }
+                if b == b'&' {
+                    let end = find(self.data, self.pos, b";").ok_or("invalid character entity")?;
+                    let raw = std::str::from_utf8(&self.data[self.pos..end])
+                        .map_err(|_| "invalid UTF-8")?;
+                    if end - self.pos > 64 || raw.is_empty() {
+                        return Err("invalid character entity");
+                    }
+                    self.pos = end + 1;
+                    let decoded: char = if let Some(num) = raw.strip_prefix('#') {
+                        let code = if let Some(hex) = num.strip_prefix('x') {
+                            u32::from_str_radix(hex, 16)
+                        } else {
+                            num.parse::<u32>()
+                        }
+                        .map_err(|_| "invalid character entity")?;
+                        char::from_u32(code)
+                            .filter(|c| is_in_character_range(*c))
+                            .ok_or("invalid character entity")?
+                    } else {
+                        match raw {
+                            "lt" => '<',
+                            "gt" => '>',
+                            "amp" => '&',
+                            "apos" => '\'',
+                            "quot" => '"',
+                            _ => return Err("invalid character entity"),
+                        }
+                    };
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(decoded.encode_utf8(&mut buf).as_bytes());
+                    continue;
+                }
+                // `\r` and `\r\n` become `\n`.
+                if b == b'\r' {
+                    if self.peek() == Some(b'\n') {
+                        self.pos += 1;
+                    }
+                    out.push(b'\n');
+                    continue;
+                }
+                out.push(b);
+            }
+            let text = String::from_utf8(out).map_err(|_| "invalid UTF-8")?;
+            if let Some(bad) = text.chars().find(|c| !is_in_character_range(*c)) {
+                let _ = bad;
+                return Err("illegal character code");
+            }
+            Ok(text)
+        }
+    }
+
+    /// `procInst(param, s)`: the quoted value of `param="…"` in a processing instruction's
+    /// data, or `None`.
+    fn proc_inst_param(param: &str, s: &str) -> Option<String> {
+        let idx = s.find(&format!("{param}="))?;
+        let v = &s[idx + param.len() + 1..];
+        let quote = v.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return None;
+        }
+        let rest = &v[1..];
+        let end = rest.find(quote)?;
+        Some(rest[..end].to_owned())
+    }
+
+    fn find(data: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+        if from > data.len() {
+            return None;
+        }
+        data[from..]
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|i| i + from)
+    }
+
+    /// `isNameByte` (encoding/xml/xml.go).
+    fn is_name_byte(b: u8) -> bool {
+        b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'.' | b'-')
+    }
+
+    /// `isName`: a letter, `_` or `:` first, then those plus digits, `.` and `-`. Non-ASCII is
+    /// admitted by Unicode class — letters anywhere, marks and digits after the first.
+    fn is_name(s: &str) -> bool {
+        let mut chars = s.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first.is_alphabetic() || first == '_' || first == ':') {
+            return false;
+        }
+        chars.all(|c| {
+            c.is_alphanumeric() || matches!(c, '_' | ':' | '.' | '-' | '\u{b7}') || is_mark(c)
+        })
+    }
+
+    fn is_mark(c: char) -> bool {
+        matches!(c, '\u{300}'..='\u{36f}' | '\u{203f}' | '\u{2040}')
+    }
+
+    /// `isInCharacterRange`: the XML 1.0 `Char` production.
+    fn is_in_character_range(c: char) -> bool {
+        matches!(c, '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')
+    }
+}
+
+#[cfg(test)]
+mod svg_parity {
+    use super::{SvgDimensions, go_sscan_int, parse_svg};
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_svg.json"))
+            .expect("behaviour_svg.json is generated by reference/dump")
+    }
+
+    #[test]
+    fn parse_svg_matches_go_over_the_corpus() {
+        let oracle = oracle();
+        let cases = oracle["parse_svg"].as_array().expect("an array");
+        assert!(cases.len() > 50);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let svg = case["svg"].as_str().unwrap();
+            let want = SvgDimensions {
+                width: case["width"].as_i64().unwrap(),
+                height: case["height"].as_i64().unwrap(),
+            };
+            let want_err = !case["err"].as_str().unwrap().is_empty();
+            let (got, err) = parse_svg(svg.as_bytes());
+            assert_eq!(got, want, "{name}: dimensions (err {err:?})");
+            assert_eq!(err.is_some(), want_err, "{name}: error presence ({err:?})");
+        }
+    }
+
+    #[test]
+    fn sscan_int_stops_at_the_first_foreign_character() {
+        assert_eq!(go_sscan_int("100px"), Ok(100));
+        assert_eq!(go_sscan_int("1e2"), Ok(1));
+        assert_eq!(go_sscan_int("0x10"), Ok(16));
+        assert_eq!(go_sscan_int("0100"), Ok(64));
+        assert_eq!(go_sscan_int("09"), Ok(0));
+        assert_eq!(go_sscan_int("1_000"), Ok(1000));
+        assert_eq!(go_sscan_int("-0b11"), Ok(-3));
+        assert!(go_sscan_int("0x").is_err());
+        assert!(go_sscan_int("_1").is_err());
+        assert!(go_sscan_int("").is_err());
+        assert!(go_sscan_int("  ").is_err());
+        assert!(go_sscan_int("abc").is_err());
+        assert!(go_sscan_int("9223372036854775808").is_err());
+        assert_eq!(go_sscan_int("-9223372036854775808"), Ok(i64::MIN));
     }
 }

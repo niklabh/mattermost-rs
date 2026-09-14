@@ -8753,3 +8753,69 @@ The out-of-channel arm is the one a client reaches on Team Edition, and it needs
 `GetProfilesByUsernames`, `FilterUsersByVisible` and `makeOutOfChannelMentionPost`'s three
 message forms besides the i18n bundle. **What is owed:** the i18n bundle first, then the three.
 
+
+---
+
+## D-650 · The image write-through for the upload routes is Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
+
+`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve every
+refusal and the write for a **non-image** file, and forward a raster image to Go before writing —
+`mm_app::App::upload_file_x` and `mm_app::App::upload_data` return
+`PrepareError::Unreproducible` the moment `decode_config` measures an image inside the resolution
+limit. The reason is exactly [D-380]/[D-411]'s: `postprocessImage`/`HandleImages` resize the
+original to a `_thumb` and a `_preview` and encode a 16×16 `mini_preview`, and `imaging.Fit` plus
+Go's PNG/JPEG encoders do not reproduce byte-for-byte from a second implementation.
+
+The forward is taken from the file's head **before** the write, so a forwarded `uploadData` chunk
+reaches Go with the session's `FileOffset` still behind and is written there, not double-written.
+An SVG is not forwarded (it has no raster preview); a raster image Go cannot decode is served here
+(Go's own `preprocessImage` returns "as is").
+
+**What is owed:** the same decision [D-380] deferred — pixel-exact `imaging.Fit` and the two
+encoders — after which the completing image chunk and the multipart image upload are served rather
+than forwarded. Until then these two routes are write-through only for non-images.
+
+---
+
+## D-651 · Content extraction is skipped on both upload write paths
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
+
+`UploadFileX` and `UploadData` end with `ExtractContentFromFileInfo` under
+`FileSettings.ExtractContent` (default on): a background goroutine that runs `docextractor` over a
+non-image file and writes the text into `FileInfo.Content`, making the file body searchable. Both
+ported paths skip it — `mm_app::App::upload_file_x` and `App::upload_data` note the omission where
+Go schedules it.
+
+The result is invisible on the upload response (extraction is asynchronous and never touches the
+returned `FileInfo`) and reachable only through `POST /files/search`, which is itself unported. So
+a file uploaded through the Rust server has an empty `Content` where one through Go would, after
+the queue drains, have the extracted text.
+
+**What is owed:** a `docextractor` equivalent (PDF, Office, archive walkers) and the
+`FileInfo.SetContent` write behind it — a large dependency, deferred until a search route needs it.
+
+---
+
+## D-652 · `uploadFileStream` multipart does not reproduce Go's streaming/legacy split
+
+**Status** OPEN · **Severity** fidelity · **Raised** 2026-09-14 (the file-writing routes)
+
+`uploadFileMultipart` (api4/file.go:196) buffers until the first part, then either re-processes
+the body in a streaming mode (channel_id seen first) or falls back to a legacy buffered path
+(a file part seen before channel_id), and pairs `client_ids[nFiles]` with each file as it is read.
+`mm_api::file_upload::upload_multipart` instead parses the whole body once, reads files from the
+`files` field in document order and `client_ids` from its field, and applies the legacy count
+check. For a well-formed request — every request a real client sends — the two are observably
+identical.
+
+The differences are all on malformed input: the 10 KiB `maxMultipartFormDataBytes` cap on a field
+*value*, the `multiple_channel_ids` 400 when two `channel_id` fields disagree, the exact
+`SetInvalidParam("client_ids")` ordering when files and ids interleave, and file parts under a name
+other than `files` in an order Go's single stream would fix but the parsed `HashMap` may not.
+
+**What is owed:** a streaming multipart reader that yields parts in body order with their form
+names, if a client is ever found that depends on one of these edges. Until then the simplification
+stands, pinned by `parity::file_upload::a_multipart_text_upload_matches_go`.

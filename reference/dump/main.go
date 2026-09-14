@@ -1100,6 +1100,18 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_httpservice.json"))
 
+	if err := writeMimeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: mime behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_mime.json"))
+
+	if err := writeSVGBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: svg behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_svg.json"))
+
 	if err := writeStatsBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: stats behaviour fixture: %v\n", err)
 		os.Exit(1)
