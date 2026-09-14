@@ -1,0 +1,14 @@
+# Mutation plan for POST /site_url/test — the permission, the parameter, the ping and its verdict.
+#
+#   scripts/mutate-batch.sh scripts/mutations/site-url-test.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+permission-inverted	crates/mm-api/src/site_url_test.rs	    if !state\n        .app\n        .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_TEST_SITE_URL)	    if state\n        .app\n        .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_TEST_SITE_URL)	api	site_url_test
+empty-url-allowed	crates/mm-api/src/site_url_test.rs	    if site_url.is_empty() {	    if !site_url.is_empty() {	api	site_url_test
+ping-path-wrong	crates/mm-api/src/site_url_test.rs	        .get(format!("{site_url}/api/v4/system/ping"))	        .get(format!("{site_url}/api/v4/system/pong"))	api	site_url_test
+any-status-reachable	crates/mm-api/src/site_url_test.rs	        Ok(response) => response.status() == reqwest::StatusCode::OK,	        Ok(response) => response.status() != reqwest::StatusCode::NOT_FOUND,	api	site_url_test
+verdict-inverted	crates/mm-api/src/site_url_test.rs	    if !reachable {	    if reachable {	api	site_url_test
+failure-is-500	crates/mm-api/src/site_url_test.rs	            "app.admin.test_site_url.failure",\n            None,\n            String::new(),\n            400,	            "app.admin.test_site_url.failure",\n            None,\n            String::new(),\n            500,	api	site_url_test
+control-explicit-turbofish	crates/mm-api/src/site_url_test.rs	    let props: StringMap = serde_json::from_slice(&bytes).unwrap_or_default();	    let props: StringMap = serde_json::from_slice::<StringMap>(&bytes).unwrap_or_default();	api	site_url_test
+control-reorder-headers	crates/mm-api/src/site_url_test.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	site_url_test

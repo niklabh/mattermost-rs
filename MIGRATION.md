@@ -13083,3 +13083,17 @@ publishes `update_team`, all forwarded since the bytes are Go's encoder's.
 | api | `crates/mm-api/src/images.rs` — `set_team_icon`; the `POST` joined the team-image route in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/team_icon_set.rs` — 1, the seven refusals in order and the forwarded write | DONE |
 | mutation | `scripts/mutations/team-icon-set.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/site_url/test` (2026-09-14)
+
+Route count **480 of 764**. `testSiteURL`: `test_site_url` behind the not-restricted-admin
+check, a `MapFromJSON` body whose `site_url` must be non-empty (the 400 `site_url`), and one
+plain GET of `{site_url}/api/v4/system/ping` — any transport error or any status but 200 is the
+400 `app.admin.test_site_url.failure`; a 200 is `{"status":"OK"}`. The URL is joined by string
+and the ping follows redirects, as Go's default client does; no timeout, as Go has none.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/site_url_test.rs`; registered in `lib.rs`; the shared `reqwest` client | DONE |
+| test | `crates/mm-api/tests/parity/site_url_test.rs` — 1, pinging the stack's own bases | DONE |
+| mutation | `scripts/mutations/site-url-test.plan` — 8 run, 6 caught, 2 controls survived | DONE |

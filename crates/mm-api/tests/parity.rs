@@ -147,6 +147,7 @@ mod parity {
     pub mod sidebar_category_writes;
     pub mod sidebar_router;
     pub mod single_hooks;
+    pub mod site_url_test;
     pub mod status;
     pub mod status_writes;
     pub mod system_posts;

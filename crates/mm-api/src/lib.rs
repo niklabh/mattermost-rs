@@ -69,6 +69,7 @@ pub mod schemes;
 pub mod serve_content;
 pub mod sessions;
 pub mod sidebar;
+pub mod site_url_test;
 pub mod status;
 pub mod system;
 pub mod team_admin;
@@ -2431,6 +2432,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/notifications/ack",
             partially_migrated(post(push_ack::push_notification_ack)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/site_url/test")` (api4/system.go) — the console's live
+        // URL check, one outbound ping.
+        .route(
+            "/api/v4/site_url/test",
+            partially_migrated(post(site_url_test::test_site_url)),
         )
         .route(
             "/api/v4/system/timezones",
