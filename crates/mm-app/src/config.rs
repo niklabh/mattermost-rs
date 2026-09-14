@@ -223,6 +223,12 @@ pub struct Config {
     /// on, anyone may log at any level.
     pub enable_developer: bool,
 
+    /// `ServiceSettings.EnableEmailInvitations` (config.go:460). Go default **`isUpdate`**: `false`
+    /// on a document with no `SiteURL`, `true` on every persisted one (config.go:502). Off, the
+    /// two invite-by-email routes (`inviteUsersToTeam` and its local twin) are the 501
+    /// `api.team.invite_members.disabled.app_error` before the body is read.
+    pub enable_email_invitations: bool,
+
     /// `ServiceSettings.EnableLinkPreviews` (config.go:531). Go default **`true`**. Off,
     /// `getRedirectLocation` answers an empty location before reading its parameter.
     pub enable_link_previews: bool,
@@ -1252,6 +1258,7 @@ impl Default for Config {
             enable_api_user_deletion: false,
             enable_api_trigger_admin_notifications: false,
             enable_developer: false,
+            enable_email_invitations: false,
             enable_link_previews: true,
             enable_post_search: true,
             allowed_untrusted_internal_connections: String::new(),
@@ -1544,6 +1551,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEDEVELOPER",
                 default.enable_developer,
+            ),
+            enable_email_invitations: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEEMAILINVITATIONS",
+                default.enable_email_invitations,
             ),
             enable_link_previews: lookup_bool(
                 lookup,
@@ -2205,6 +2217,9 @@ impl Config {
                 .enable_api_trigger_admin_notifications
                 .unwrap_or(default.enable_api_trigger_admin_notifications),
             enable_developer: service.enable_developer.unwrap_or(default.enable_developer),
+            // `new(isUpdate)` in effect (config.go:502): nil, and the document has a `SiteURL`,
+            // is `true`. Resolved here for the same reason as `extend_session_length_with_activity`.
+            enable_email_invitations: service.enable_email_invitations.unwrap_or(is_update),
             enable_link_previews: service
                 .enable_link_previews
                 .unwrap_or(default.enable_link_previews),
@@ -2867,6 +2882,8 @@ struct ServiceSettingsDocument {
     enable_api_trigger_admin_notifications: Option<bool>,
     #[serde(rename = "EnableDeveloper")]
     enable_developer: Option<bool>,
+    #[serde(rename = "EnableEmailInvitations")]
+    enable_email_invitations: Option<bool>,
     #[serde(rename = "EnableLinkPreviews")]
     enable_link_previews: Option<bool>,
     #[serde(rename = "EnablePostSearch")]
@@ -3493,6 +3510,8 @@ mod go_parity {
             // The same `!isUpdate` rule: off on a document that has a `SiteURL`.
             send_push_notifications: false,
             terminate_sessions_on_password_change: false,
+            // `isUpdate` rather than `!isUpdate`, and the fixture carries the key explicitly.
+            enable_email_invitations: true,
             ai_recap_settings_enable: Some(true),
             // The fifth adjustment, and the same reason as the two `!isUpdate` booleans above:
             // `Config::default` models a *fresh* config, where the mobile length is 30 days.
@@ -3797,8 +3816,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 95,
-            "the fixture covers {keys} settings and Config reads 95 from the document. \
+            keys, 96,
+            "the fixture covers {keys} settings and Config reads 96 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3825,6 +3844,7 @@ mod go_parity {
                 "SessionLengthSSOInHours": 23,
                 "EnableAPITriggerAdminNotifications": true,
                 "EnableDeveloper": true,
+                "EnableEmailInvitations": true,
                 "EnableLinkPreviews": false,
                 "EnablePostSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
@@ -3857,6 +3877,7 @@ mod go_parity {
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_developer);
+        assert!(config.enable_email_invitations);
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);
         assert_eq!(
@@ -4177,6 +4198,9 @@ mod go_parity {
                 // The same `!isUpdate` rule: off on a document that has a `SiteURL`.
                 send_push_notifications: false,
                 terminate_sessions_on_password_change: false,
+                // And the one `isUpdate` (not `!isUpdate`) default: on for a document with a
+                // `SiteURL`.
+                enable_email_invitations: true,
                 // Also `!isUpdate`-shaped: a document with a `SiteURL` is an update, so the
                 // mobile session length defaults to 180 days rather than 30.
                 session_length_mobile_in_hours: 4320,

@@ -238,4 +238,6 @@ mod parity {
 
     // Appended 2026-09-14, same reason: the miscellaneous local-mode families.
     pub mod local_misc;
+    // Appended 2026-09-14: the team, webhook and command families on the socket.
+    pub mod local_teams;
 }

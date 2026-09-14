@@ -71,7 +71,7 @@ fn command_not_found() -> ApiError {
 /// `<`, `>` and `&` to `\u003c`, `\u003e` and `\u0026` in every string it writes, and serde does
 /// not. A command's `url` is the field that makes that reachable — `?a=1&b=2` is an ordinary
 /// callback URL and would otherwise differ from Go byte for byte.
-fn encoded<T: serde::Serialize>(
+pub(crate) fn encoded<T: serde::Serialize>(
     status: StatusCode,
     value: &T,
     where_: &'static str,

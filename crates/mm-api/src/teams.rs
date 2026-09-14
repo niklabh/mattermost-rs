@@ -666,6 +666,22 @@ pub async fn get_team_by_name(
     }
     tracing::Span::current().record("forwarded", false);
 
+    serve_team_by_name(&state, team_name, &session).await
+}
+
+/// [`get_team_by_name`] past its two mux forwards — the handler proper.
+///
+/// Lifted so the local router can call it after **its own** charset check. On the socket there
+/// is no `{team_id}` shadowing to forward for: `InitTeamLocal` registers no `GET` literal under
+/// `BaseRoutes.Team`, so `GET /teams/name/stats` really is `getTeamByName("stats")` there
+/// (measured, a 404 `app.team.get_by_name.missing`), and a forward over the port would reach
+/// `APISessionRequired` instead of `APILocal`. `team_name` must already satisfy
+/// [`segment_matches_team_name_mux`].
+pub(crate) async fn serve_team_by_name(
+    state: &AppState,
+    team_name: String,
+    session: &AuthenticatedSession,
+) -> Response {
     // `params.TeamName = strings.ToLower(props["team_name"])` (web/params.go:178) — **every**
     // route with a `{team_name}` segment gets it lowercased before any handler sees it, so
     // `/teams/name/MMRS-PARITY-X` is the same request as the lowercase one. Rust's

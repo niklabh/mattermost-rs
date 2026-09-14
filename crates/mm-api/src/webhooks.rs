@@ -176,17 +176,24 @@ pub async fn get_incoming_hooks(
 
 /// `json.Marshal` — no encoder, so no trailing newline, and its failure is Go's own
 /// `api.marshal_error` **500 raised in the handler**, not the app layer.
+///
+/// Through [`mm_model::utils::go_json_marshal`], not `serde_json::to_vec`: `encoding/json`
+/// escapes `&` to `\u0026`, and an outgoing hook's `callback_urls` is where a client puts a
+/// query string. Found by the local-mode suite listing a hook whose URL carried `?a=1&b=2` —
+/// every HTTP fixture before it had been a bare URL.
 fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
-    serde_json::to_vec(value).map_err(|err| {
-        tracing::error!(error = %err, "failed to serialise the incoming webhooks");
-        ApiError::from(AppError::new(
-            "getIncomingHooks",
-            "api.marshal_error",
-            None,
-            String::new(),
-            500,
-        ))
-    })
+    mm_model::utils::go_json_marshal(value)
+        .map(String::into_bytes)
+        .map_err(|err| {
+            tracing::error!(error = %err, "failed to serialise the incoming webhooks");
+            ApiError::from(AppError::new(
+                "getIncomingHooks",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+        })
 }
 
 /// Port of `getOutgoingHooks` (webhook.go:512).
@@ -1044,7 +1051,7 @@ fn permission_error(
 }
 
 /// `w.WriteHeader(http.StatusCreated)` then `json.NewEncoder(w).Encode` — a trailing newline.
-fn created_json<T: serde::Serialize>(value: &T) -> Response {
+pub(crate) fn created_json<T: serde::Serialize>(value: &T) -> Response {
     encoded_json(StatusCode::CREATED, value)
 }
 

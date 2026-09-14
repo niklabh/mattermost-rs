@@ -1,0 +1,27 @@
+# Mutation plan for the thirty local-mode pairs of `team_local.go`, `webhook_local.go` and
+# `command_local.go` — `crates/mm-api/src/local_teams.rs`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-teams.plan
+#
+# The twenty-four shared handlers are mutated by their own plans; what this file tests is the six
+# `local*` ports and the socket-side pre-checks that keep a shared handler's port forward from
+# running on this router. Every line was checked against the suite before launch: each mutant
+# changes an answer the suite asserts, and the two controls are a contiguous rename and a swap of
+# two registrations with different paths.
+#
+# `local-list-commands-forwards-the-custom-list` inverts the pre-check, so the `custom_only`
+# request is forwarded (the suite's `both` asserts we served it) and the built-in list reaches the
+# shared handler, which forwards it over the **port** — a 401 where the suite expects Go's 200.
+local-create-team-blanks-the-invite-id	crates/mm-api/src/local_teams.rs	            created_json(&created, "localCreateTeam")	            let mut created = created;\n            created.invite_id = String::new();\n            created_json(&created, "localCreateTeam")	api	local_teams
+local-create-team-keeps-the-email-case	crates/mm-api/src/local_teams.rs	    team.email = go_to_lower(&team.email);	    team.email = team.email.trim().to_owned();	api	local_teams
+local-delete-team-archives-the-permanent-arm	crates/mm-api/src/local_teams.rs	    if permanent {	    if permanent && false {	api	local_teams
+local-members-by-ids-swallows-a-bad-body	crates/mm-api/src/local_teams.rs	    let user_ids = ids_from_body(&bytes, "user_ids", "getTeamMembersByIds")?;	    let user_ids = ids_from_body(&bytes, "user_ids", "getTeamMembersByIds").unwrap_or_default();	api	local_teams
+local-invite-skips-the-email-validation	crates/mm-api/src/local_teams.rs	        if !is_valid_email(&email) {	        if !is_valid_email(&email) && false {	api	local_teams
+local-invite-profiles-check-inverted	crates/mm-api/src/local_teams.rs	    if !graceful && invite.profiles.iter().flatten().next().is_some() {	    if graceful && invite.profiles.iter().flatten().next().is_some() {	api	local_teams
+local-incoming-hook-does-not-require-user-id	crates/mm-api/src/local_teams.rs	    if hook.user_id.is_empty() {	    if hook.user_id.is_empty() && false {	api	local_teams
+local-outgoing-hook-does-not-require-creator-id	crates/mm-api/src/local_teams.rs	    if hook.creator_id.is_empty() {	    if hook.creator_id.is_empty() && false {	api	local_teams
+local-list-commands-forwards-the-custom-list	crates/mm-api/src/local_teams.rs	    if !team_id.is_empty() && !query_flag_is_true(query.as_deref(), "custom_only") {	    if !team_id.is_empty() && query_flag_is_true(query.as_deref(), "custom_only") {	api	local_teams
+local-get-team-uses-an-ordinary-session	crates/mm-api/src/local_teams.rs	    teams::get_team(State(state), path, local_session(), request).await	    teams::get_team(\n        State(state),\n        path,\n        crate::auth::AuthenticatedSession(mm_model::session::Session::default()),\n        request,\n    )\n    .await	api	local_teams
+local-team-by-name-skips-the-mux-class	crates/mm-api/src/local_teams.rs	    if !teams::segment_matches_team_name_mux(&team_name) {	    if teams::segment_matches_team_name_mux(&team_name) && false {	api	local_teams
+control-rename-a-binding-and-its-use	crates/mm-api/src/local_teams.rs	    let user_ids = ids_from_body(&bytes, "user_ids", "getTeamMembersByIds")?;\n    tracing::debug!(\n        asked = user_ids.len(),	    let asked_ids = ids_from_body(&bytes, "user_ids", "getTeamMembersByIds")?;\n    tracing::debug!(\n        asked = asked_ids.len(),	api	local_teams
+control-swap-two-independent-registrations	crates/mm-api/src/local_teams.rs	            "/api/v4/teams/{team_id}/privacy",\n            partially_migrated_with_ids(state, put(local_update_team_privacy)),\n        )\n        .route(\n            "/api/v4/teams/{team_id}/restore",\n            partially_migrated_with_ids(state, post(local_restore_team)),	            "/api/v4/teams/{team_id}/restore",\n            partially_migrated_with_ids(state, post(local_restore_team)),\n        )\n        .route(\n            "/api/v4/teams/{team_id}/privacy",\n            partially_migrated_with_ids(state, put(local_update_team_privacy)),	api	local_teams

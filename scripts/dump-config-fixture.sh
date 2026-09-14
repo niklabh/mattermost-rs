@@ -85,6 +85,8 @@ MODELLED = {
         "EnableAPITriggerAdminNotifications",
         # Whether POST /api/v4/logs needs a session and forces a non-admin to debug.
         "EnableDeveloper",
+        # The 501 gate on both invite-by-email routes (team.go and team_local.go).
+        "EnableEmailInvitations",
         # The two settings of the outbound-connection guard and the link-preview gate on
         # GET /api/v4/redirect_location.
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
