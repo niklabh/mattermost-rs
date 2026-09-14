@@ -23,8 +23,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::post::PrepareError;
 use mm_model::permission::{
-    PERMISSION_EDIT_BRAND, PERMISSION_EDIT_OTHER_USERS, PERMISSION_VIEW_MEMBERS,
-    PERMISSION_VIEW_TEAM, make_permission_error,
+    PERMISSION_EDIT_BRAND, PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_TEAM,
+    PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
 
 use crate::AppState;
@@ -967,4 +967,128 @@ async fn refuse_brand_image(
             Ok(())
         }
     }
+}
+
+/// Port of `setTeamIcon` (api4/team.go), reached as `POST /api/v4/teams/{team_id}/image` —
+/// the refusals, and the hand-over before the write, like its three siblings ([D-411]).
+///
+/// # Seven refusals in Go's order, and two of them are not where the profile route has them
+///
+/// | # | check | answer |
+/// |---|---|---|
+/// | 1 | `team_id` is not an id | 400 `api.context.invalid_url_param.app_error` |
+/// | 2 | no `manage_team` on the team | 403 — for a team that does not exist too |
+/// | 3 | declared `Content-Length` over `MaxFileSize` | **400** `api.team.set_team_icon.too_large.app_error`, not the profile route's 413 |
+/// | 4 | the body will not parse as multipart | 400 `…parse.app_error`; the read cap, wrapped, is the global 413 |
+/// | 5 | no `image` part | 400 `…no_file.app_error` |
+/// | 6 | `GetTeam` fails | **400** `…get_team.app_error`, the 404 discarded |
+/// | 7 | `FileSettings.DriverName == ""` | 501 `…storage.app_error` |
+///
+/// The storage check comes **after** the body and the team here, where `setProfileImage` makes
+/// it before reading anything. Past 7 Go checks the image's resolution, decodes it, `FillCenter`s
+/// it to 128×128, re-encodes it as PNG and writes `teams/<id>/teamIcon.png`, then stamps
+/// `LastTeamIconUpdate` and publishes `update_team` — all forwarded, since the bytes are Go's
+/// encoder's.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+pub async fn set_team_icon(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    tracing::Span::current().record("forwarded", false);
+    let (parts, body) = request.into_parts();
+    let mut forwarded_body = axum::body::Bytes::new();
+
+    match refuse_team_icon(
+        &state,
+        &team_id,
+        &session,
+        &parts,
+        body,
+        &mut forwarded_body,
+    )
+    .await
+    {
+        Ok(Some(response)) => response,
+        Ok(None) => {
+            tracing::Span::current().record("forwarded", true);
+            let request = Request::from_parts(parts, axum::body::Body::from(forwarded_body));
+            proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+/// Everything `setTeamIcon` answers, as `Err`; `Ok(None)` is the hand-over.
+async fn refuse_team_icon(
+    state: &AppState,
+    team_id: &str,
+    session: &AuthenticatedSession,
+    parts: &axum::http::request::Parts,
+    body: axum::body::Body,
+    forwarded_body: &mut axum::body::Bytes,
+) -> Result<Option<Response>, ApiError> {
+    const WHERE: &str = "setTeamIcon";
+
+    require_id(team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        )));
+    }
+
+    let (bytes, form) = match read_multipart_body(state, parts, body).await {
+        Ok(parsed) => parsed,
+        Err(BodyRefusal::DeclaredTooLarge) => {
+            return Err(profile_image_error(
+                WHERE,
+                "api.team.set_team_icon.too_large.app_error",
+                400,
+            ));
+        }
+        // `.Wrap(err)` on the parse error, so the cap is the global 413 here as on the profile.
+        Err(BodyRefusal::ReadCapExceeded) => return Err(request_body_too_large(WHERE)),
+        Err(BodyRefusal::Unparseable) => {
+            return Err(profile_image_error(
+                WHERE,
+                "api.team.set_team_icon.parse.app_error",
+                400,
+            ));
+        }
+    };
+    *forwarded_body = bytes;
+
+    if form.first_file("image").is_none() {
+        return Err(profile_image_error(
+            WHERE,
+            "api.team.set_team_icon.no_file.app_error",
+            400,
+        ));
+    }
+
+    // `SetTeamIconFromMultiPartFile`: `GetTeam`'s error is wrapped into a **400**.
+    if state.app.get_team(team_id).await.is_err() {
+        return Err(profile_image_error(
+            "SetTeamIcon",
+            "api.team.set_team_icon.get_team.app_error",
+            400,
+        ));
+    }
+
+    if state.app.config().file_driver_name.is_empty() {
+        return Err(profile_image_error(
+            WHERE,
+            "api.team.set_team_icon.storage.app_error",
+            501,
+        ));
+    }
+
+    Ok(None)
 }

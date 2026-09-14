@@ -13067,3 +13067,19 @@ read, all forwarded. `Config` gains the setting, `new(!isUpdate)` like the sessi
 | api | `crates/mm-api/src/push_ack.rs`; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/push_ack.rs` — 1 | DONE |
 | mutation | `scripts/mutations/push-ack.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/teams/{team_id}/image` (2026-09-14)
+
+Route count **479 of 764**. `setTeamIcon` joins the refusal-only image family ([D-411]): the
+id, `manage_team` on the team (an unknown team is the 403 too), a declared `Content-Length` over
+`MaxFileSize` as a **400** (the profile route's is a 413), the multipart parse (its read cap the
+global 413), the missing `image` part, `GetTeam`'s error as a **400**, and the storage check —
+after the body and the team, where the profile route makes it first. Past those Go decodes,
+`FillCenter`s to 128×128 and re-encodes the icon, writes it, stamps `LastTeamIconUpdate` and
+publishes `update_team`, all forwarded since the bytes are Go's encoder's.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/images.rs` — `set_team_icon`; the `POST` joined the team-image route in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/team_icon_set.rs` — 1, the seven refusals in order and the forwarded write | DONE |
+| mutation | `scripts/mutations/team-icon-set.plan` — 8 run, 6 caught, 2 controls survived | DONE |

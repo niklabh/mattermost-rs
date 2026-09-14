@@ -1890,12 +1890,14 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
         )
         // `BaseRoutes.Team.Handle("/image")`: the GET reads the icon, the DELETE removes it, and
-        // the POST (a multipart upload re-encoded as PNG) still goes to Go.
+        // the POST answers its refusals and hands the upload (re-encoded as PNG) to Go — [D-411].
         .route(
             "/api/v4/teams/{team_id}/image",
             partially_migrated_with_ids(
                 &state,
-                get(images::get_team_icon).delete(teams::remove_team_icon),
+                get(images::get_team_icon)
+                    .delete(teams::remove_team_icon)
+                    .post(images::set_team_icon),
             ),
         )
         // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
