@@ -5,6 +5,7 @@
 //! forwarded. Nothing has to be removed from a list of exclusions, because there is no list —
 //! the proxy is the fallback.
 
+pub mod access_control;
 pub mod audits;
 pub mod auth;
 pub mod auth_writes;
@@ -869,6 +870,22 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/stats",
             partially_migrated_with_ids(&state, get(teams::get_team_stats)),
         )
+        // `BaseRoutes.Team.Handle("/access_control/attributes")` and `("/access_control/policy")`
+        // (api4/team.go:52-53).
+        .route(
+            "/api/v4/teams/{team_id}/access_control/attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_team_access_control_attributes),
+            ),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/access_control/policy",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_team_access_control_policy),
+            ),
+        )
         // `team_name` is not id-shaped — Go's class is `[A-Za-z0-9_-]+` — so the id-charset
         // middleware must not apply; the handler carries its own mux forward, like `username`.
         // axum gives the static `name` precedence over `{team_id}` above, which is the *reverse*
@@ -1114,6 +1131,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/stats",
             partially_migrated_with_ids(&state, get(channels::get_channel_stats)),
+        )
+        // `BaseRoutes.Channel.Handle("/access_control/attributes")` (api4/channel.go:100).
+        .route(
+            "/api/v4/channels/{channel_id}/access_control/attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control::get_channel_access_control_attributes),
+            ),
         )
         // Three methods on one path. **axum panics on a duplicate route path**, so the POST and
         // PUT are chained onto the GET's `MethodRouter` rather than added as a second `.route`.

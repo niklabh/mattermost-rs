@@ -12879,3 +12879,26 @@ admins from these rows is not here.
 - **The validator's message never reaches a client**: the 400 it builds is a 500 with the
   generic id on the wire. Measured on both.
 - **`mattermost.feature.plugin…` skips the validator** — any plan is stored.
+
+## The three access-control reads (2026-09-14)
+
+Route count **469 of 764** on this branch. `GET /channels/{id}/access_control/attributes`,
+`GET /teams/{id}/access_control/attributes` and `GET /teams/{id}/access_control/policy` are
+served for what this build can answer: the access-control service is registered by the
+enterprise package and nil here ([D-571]), so the two attribute reads are a permission check
+(`read_channel`; `view_team`) and then the 501 `app.pap.get_channel_access_control_attributes.app_error`
+— the channel one first answering `{}` when `EnableChannelPolicyIndicators` is off — and the
+policy read is `manage_system` or `manage_team_access_rules` and then
+`{"policy":null,"enforced":false}` while `TeamMembershipAccessControlEnabled` is false, which
+it is without an Enterprise Advanced licence and the ABAC setting; with both it forwards.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/config.rs` — `enable_channel_policy_indicators` (fixture 81 keys) | DONE |
+| api | `crates/mm-api/src/access_control.rs` — three handlers; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/access_control_reads.rs` — 4 | DONE |
+| mutation | `scripts/mutations/access-control-reads.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+- **The `{}` arm is unmeasured**: the indicator setting is on for the stack and is not flipped.
+- **The policy body is `json.Marshal`**: no trailing newline; the attribute reads' `{}` would be
+  encoder-written, with one.

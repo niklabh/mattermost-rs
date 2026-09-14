@@ -1,0 +1,18 @@
+# Mutation plan for the three access-control reads — channel attributes, team attributes,
+# team policy — on a build whose access-control service is nil.
+#
+#   scripts/mutate-batch.sh scripts/mutations/access-control-reads.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# Not mutated: the `{}` arm behind `EnableChannelPolicyIndicators` (on, on this deployment,
+# and the setting is a config the stack does not flip). The last two lines are the no-op controls
+# and must SURVIVE.
+
+channel-permission-skipped	crates/mm-api/src/access_control.rs	    if !has_permission {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_CHANNEL],\n        ))	    if !has_permission && channel_id.is_empty() {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_CHANNEL],\n        ))	api	access_control_reads
+channel-indicators-gate-inverted	crates/mm-api/src/access_control.rs	    if !state.app.config().enable_channel_policy_indicators {	    if state.app.config().enable_channel_policy_indicators {	api	access_control_reads
+team-attributes-permission-skipped	crates/mm-api/src/access_control.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)\n        .await\n    {\n        return ApiError::from(*make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)\n        .await\n        && false\n    {\n        return ApiError::from(*make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))	api	access_control_reads
+pap-status-500	crates/mm-api/src/access_control.rs	        NOT_INITIALIZED_DETAIL,\n        501,	        NOT_INITIALIZED_DETAIL,\n        500,	api	access_control_reads
+policy-permission-needs-both	crates/mm-api/src/access_control.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n        && !state	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n        || !state	api	access_control_reads
+policy-enforced-true	crates/mm-api/src/access_control.rs	    const OFF: &[u8] = br#"{"policy":null,"enforced":false}"#;	    const OFF: &[u8] = br#"{"policy":null,"enforced":true}"#;	api	access_control_reads
+control-annotate-detail	crates/mm-api/src/access_control.rs	    const NOT_INITIALIZED_DETAIL: &str = "Policy Administration Point is not initialized";	    const NOT_INITIALIZED_DETAIL: &'static str = "Policy Administration Point is not initialized";	api	access_control_reads
+control-annotate-off	crates/mm-api/src/access_control.rs	    const OFF: &[u8] = br#"{"policy":null,"enforced":false}"#;	    const OFF: &'static [u8] = br#"{"policy":null,"enforced":false}"#;	api	access_control_reads

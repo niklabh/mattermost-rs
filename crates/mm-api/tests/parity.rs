@@ -27,6 +27,7 @@
 mod common;
 
 mod parity {
+    pub mod access_control_reads;
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
     pub mod bot_writes;

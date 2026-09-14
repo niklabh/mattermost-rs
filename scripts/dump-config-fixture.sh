@@ -95,7 +95,7 @@ MODELLED = {
     ],
     "SqlSettings": ["DisableDatabaseSearch"],
     "ElasticsearchSettings": ["EnableSearching", "EnableIndexing"],
-    "AccessControlSettings": ["EnableAttributeBasedAccessControl"],
+    "AccessControlSettings": ["EnableAttributeBasedAccessControl", "EnableChannelPolicyIndicators"],
     "AIRecapSettings": ["Enable"],
     "TeamSettings": [
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",

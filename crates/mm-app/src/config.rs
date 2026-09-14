@@ -306,6 +306,14 @@ pub struct Config {
     /// when all three hold, because the attribute-based filtering behind them is not ported.
     pub enable_attribute_based_access_control: bool,
 
+    /// `AccessControlSettings.EnableChannelPolicyIndicators` (config.go:4078). Go default
+    /// **`true`**.
+    ///
+    /// Read by `getChannelAccessControlAttributes` (api4/channel.go:3266): off, the route answers
+    /// `{}` so no attribute value reaches a member; on, it asks the access-control service — nil
+    /// on this build — for the channel's membership rule.
+    pub enable_channel_policy_indicators: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -1174,6 +1182,8 @@ impl Default for Config {
             // config.go:885 — `new(false)`.
             enable_api_team_deletion: false,
             enable_attribute_based_access_control: false,
+            // config.go:4100 — `new(true)`.
+            enable_channel_policy_indicators: true,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -1481,6 +1491,11 @@ impl Config {
                 lookup,
                 "MM_ACCESSCONTROLSETTINGS_ENABLEATTRIBUTEBASEDACCESSCONTROL",
                 default.enable_attribute_based_access_control,
+            ),
+            enable_channel_policy_indicators: lookup_bool(
+                lookup,
+                "MM_ACCESSCONTROLSETTINGS_ENABLECHANNELPOLICYINDICATORS",
+                default.enable_channel_policy_indicators,
             ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
@@ -2058,9 +2073,14 @@ impl Config {
                 .unwrap_or(default.enable_api_team_deletion),
             enable_attribute_based_access_control: parsed
                 .access_control_settings
-                .unwrap_or_default()
-                .enable_attribute_based_access_control
+                .as_ref()
+                .and_then(|s| s.enable_attribute_based_access_control)
                 .unwrap_or(default.enable_attribute_based_access_control),
+            enable_channel_policy_indicators: parsed
+                .access_control_settings
+                .as_ref()
+                .and_then(|s| s.enable_channel_policy_indicators)
+                .unwrap_or(default.enable_channel_policy_indicators),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -2542,6 +2562,8 @@ struct LocalizationSettingsDocument {
 struct AccessControlSettingsDocument {
     #[serde(rename = "EnableAttributeBasedAccessControl")]
     enable_attribute_based_access_control: Option<bool>,
+    #[serde(rename = "EnableChannelPolicyIndicators")]
+    enable_channel_policy_indicators: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3514,8 +3536,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 80,
-            "the fixture covers {keys} settings and Config reads 80 from the document. \
+            keys, 81,
+            "the fixture covers {keys} settings and Config reads 81 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
