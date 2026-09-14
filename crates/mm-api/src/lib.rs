@@ -51,6 +51,7 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod local_misc;
 pub mod login;
 pub mod migrate_auth;
 pub mod multipart;

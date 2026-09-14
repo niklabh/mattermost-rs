@@ -20,7 +20,7 @@ use mm_model::utils::is_valid_alpha_num_hyphen_underscore;
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{ME, require_id};
+use crate::channels::{ME, require_id, resolve_me};
 use crate::error::ApiError;
 
 /// Go's mux class for `{category}` and `{preference_name}`: `[A-Za-z0-9_]+`
@@ -28,7 +28,7 @@ use crate::error::ApiError;
 /// accepts a hyphen, the route does not, so `display-settings` is a mux 404 before any handler
 /// runs. A segment outside this class is forwarded so that 404 is Go's own ([D-150]); the
 /// `{user_id}` segment is handled by `partially_migrated_with_ids`, which knows only the id class.
-fn segment_matches_preference_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_preference_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
@@ -301,53 +301,94 @@ pub async fn update_preferences_me(
         }
     };
 
-    let preferences: Vec<Preference> = match serde_json::from_slice(&bytes) {
+    match update_preferences_for(&state, &session, ME, &bytes).await {
+        Some(response) => response,
+        // The part we do not implement goes to the server that does.
+        None => {
+            let request = Request::from_parts(parts, Body::from(bytes));
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+/// Port of `updatePreferences` (api4/preference.go:90) past the body read, for any `{user_id}`
+/// — shared by [`update_preferences_me`] and the local router, which registers the explicit-id
+/// path.
+///
+/// Go's order, which the `me` handler used to skip because both steps are tautologies for a
+/// caller naming itself: `me` resolves to the session's user **before** `RequireUserId`
+/// (web/context.go:301) — so on the local socket, where the session has no user, `me` is a 400
+/// naming `user_id` — then `SessionHasPermissionToUser`, the 403 naming `edit_other_users`, and
+/// only then the body. `None` is "hand this to Go" (a [`FORWARDED_CATEGORIES`] entry); the
+/// caller picks the transport, because a local request forwarded over the port would be refused
+/// by `APISessionRequired` where Go's socket answers it.
+pub(crate) async fn update_preferences_for(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    user_id: &str,
+    bytes: &[u8],
+) -> Option<Response> {
+    let user_id = resolve_me(user_id, session);
+    if let Err(err) = require_id(user_id, "user_id") {
+        return Some(err.into_response());
+    }
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Some(
+            ApiError::from(*make_permission_error(
+                &session.0,
+                &[&PERMISSION_EDIT_OTHER_USERS],
+            ))
+            .into_response(),
+        );
+    }
+
+    let preferences: Vec<Preference> = match serde_json::from_slice(bytes) {
         Ok(preferences) => preferences,
         // Go answers `SetInvalidParamWithErr("preferences", ...)` for a body that will not decode.
         Err(err) => {
             tracing::debug!(error = %err, "preferences body did not decode");
-            return ApiError::invalid_param("preferences").into_response();
+            return Some(ApiError::invalid_param("preferences").into_response());
         }
     };
 
     // `len(preferences) == 0 || len(preferences) > maxUpdatePreferences` (preference.go:109).
     // Both bounds are Go's, and the empty case is an error rather than a no-op.
     if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {
-        return ApiError::invalid_param("preferences").into_response();
+        return Some(ApiError::invalid_param("preferences").into_response());
     }
 
-    // The part we do not implement goes to the server that does.
     if preferences
         .iter()
         .any(|p| FORWARDED_CATEGORIES.contains(&p.category.as_str()))
     {
         tracing::Span::current().record("forwarded", true);
-        let request = Request::from_parts(parts, Body::from(bytes));
-        return crate::proxy::forward_to_go(State(state), request).await;
+        return None;
     }
     tracing::Span::current().record("forwarded", false);
     tracing::Span::current().record("count", preferences.len());
 
     let preferences = Preferences(preferences);
-    if let Err(app_error) = state
-        .app
-        .update_preferences(&session.0.user_id, &preferences)
-        .await
-    {
-        return ApiError::from(app_error).into_response();
+    if let Err(app_error) = state.app.update_preferences(user_id, &preferences).await {
+        return Some(ApiError::from(app_error).into_response());
     }
 
     // `ReturnStatusOK` — `{"status":"OK"}` written with `w.Write`, so no trailing newline
     // (web.go:127). Not an encoder call site; see [D-086].
-    (
-        StatusCode::OK,
-        [
-            ("Content-Type", "application/json"),
-            ("x-mmrs-served-by", "rust"),
-        ],
-        r#"{"status":"OK"}"#,
+    Some(
+        (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            r#"{"status":"OK"}"#,
+        )
+            .into_response(),
     )
-        .into_response()
 }
 
 /// `GET /api/v4/users/{user_id}/preferences/delete`, which is **not a route Go registers**.

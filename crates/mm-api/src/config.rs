@@ -84,12 +84,7 @@ pub async fn get_config(
         .into_response();
     }
 
-    // `strconv.ParseBool(r.URL.Query().Get(…))` discards its error, so an unparseable value is
-    // false and is *not* a reason to forward — only a value Go would read as true is.
-    let filtered = ["remove_masked", "remove_defaults"].iter().any(|param| {
-        query_first(request.uri().query(), param)
-            .is_some_and(|raw| matches!(raw.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"))
-    });
+    let filtered = filtered_config_requested(request.uri().query());
     if filtered || !reads_every_field(&state, &session.0).await || cloud_licensed(&state).await {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
@@ -115,6 +110,18 @@ pub async fn get_config(
             .into_response()
         }
     }
+}
+
+/// Whether `?remove_masked=` or `?remove_defaults=` asks for a `FilterConfig` this server does
+/// not do ([D-313]) — shared with `localGetConfig`, which reads the same two parameters.
+///
+/// `strconv.ParseBool(r.URL.Query().Get(…))` discards its error, so an unparseable value is
+/// false and is *not* a reason to forward — only a value Go would read as true is.
+pub(crate) fn filtered_config_requested(query: Option<&str>) -> bool {
+    ["remove_masked", "remove_defaults"].iter().any(|param| {
+        query_first(query, param)
+            .is_some_and(|raw| matches!(raw.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"))
+    })
 }
 
 /// Port of `getClientConfig` (api4/config.go:245).
@@ -229,7 +236,7 @@ async fn cloud_licensed(state: &AppState) -> bool {
 ///
 /// `no_store` is the `Cache-Control` header, which two of these three routes set and
 /// `getClientConfig` does not — see [`NO_STORE`].
-fn json_response(body: &serde_json::Value, newline: bool, no_store: bool) -> Response {
+pub(crate) fn json_response(body: &serde_json::Value, newline: bool, no_store: bool) -> Response {
     let mut bytes = match serde_json::to_vec(body) {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -261,7 +268,7 @@ fn json_response(body: &serde_json::Value, newline: bool, no_store: bool) -> Res
 /// Go cannot produce this — it is answering from a copy it loaded at boot — so there is no id to
 /// port. `api.config.get_config.restricted_merge.app_error` is the nearest thing `getConfig` has
 /// and is reused, with the failure in the detail where a log reader will find it.
-fn config_error(where_: &str, err: &mm_app::config::ConfigError) -> ApiError {
+pub(crate) fn config_error(where_: &str, err: &mm_app::config::ConfigError) -> ApiError {
     tracing::error!(error = %err, "could not read the configuration document");
     ApiError::from(AppError::new(
         where_,

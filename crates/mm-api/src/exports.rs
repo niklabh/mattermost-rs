@@ -61,7 +61,7 @@ async fn require_system_admin(
 }
 
 /// `{export_name:.+\.zip}` — a name gorilla would not have routed forwards instead of answering.
-fn archive_name_is_routable(name: &str) -> bool {
+pub(crate) fn archive_name_is_routable(name: &str) -> bool {
     // `.+\.zip` needs at least one character before the suffix, so `.zip` alone does not match.
     name.len() > ARCHIVE_SUFFIX.len() && name.ends_with(ARCHIVE_SUFFIX)
 }
@@ -96,7 +96,7 @@ pub async fn list_exports(
     }
 }
 
-async fn list_exports_inner(
+pub(crate) async fn list_exports_inner(
     state: &AppState,
     session: &AuthenticatedSession,
 ) -> Result<Option<Response>, ApiError> {
@@ -131,7 +131,7 @@ pub async fn list_imports(
     }
 }
 
-async fn list_imports_inner(
+pub(crate) async fn list_imports_inner(
     state: &AppState,
     session: &AuthenticatedSession,
 ) -> Result<Option<Response>, ApiError> {
@@ -228,12 +228,12 @@ pub async fn delete_import(
 }
 
 #[derive(Clone, Copy)]
-enum Archive {
+pub(crate) enum Archive {
     Export,
     Import,
 }
 
-async fn delete_archive(
+pub(crate) async fn delete_archive(
     state: &AppState,
     session: &AuthenticatedSession,
     name: &str,
@@ -295,7 +295,7 @@ pub async fn download_export(
     }
 }
 
-async fn download_export_inner(
+pub(crate) async fn download_export_inner(
     state: &AppState,
     export_name: &str,
     session: &AuthenticatedSession,
@@ -388,40 +388,50 @@ pub async fn generate_presign_url_export(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !archive_name_is_routable(&export_name) {
+    match generate_presign_url_export_inner(&state, &session, &export_name).await {
+        Ok(Some(response)) => response,
+        Ok(None) => proxy::forward_to_go(State(state), request).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// [`generate_presign_url_export`] minus the transport, shared with the local router. `None` is
+/// "forward" — a name outside gorilla's pattern, or a backend this server cannot reproduce.
+pub(crate) async fn generate_presign_url_export_inner(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    export_name: &str,
+) -> Result<Option<Response>, ApiError> {
+    if !archive_name_is_routable(export_name) {
         tracing::debug!(
             export_name,
             "outside the router's `.+\\.zip` pattern; forwarding"
         );
-        return proxy::forward_to_go(State(state), request).await;
+        return Ok(None);
     }
 
-    if let Err(err) = require_system_admin(&state, &session).await {
-        return err.into_response();
-    }
+    require_system_admin(state, session).await?;
 
-    match state
-        .app
-        .generate_presign_url_for_export(&export_name)
-        .await
-    {
+    match state.app.generate_presign_url_for_export(export_name).await {
         Ok(value) => match serde_json::to_vec(&value) {
-            Ok(body) => (
-                StatusCode::OK,
-                [
-                    ("Content-Type", "application/json"),
-                    ("x-mmrs-served-by", "rust"),
-                ],
-                body,
-            )
-                .into_response(),
-            Err(err) => marshal_error(&err, "generatePresignURLExport").into_response(),
+            Ok(body) => Ok(Some(
+                (
+                    StatusCode::OK,
+                    [
+                        ("Content-Type", "application/json"),
+                        ("x-mmrs-served-by", "rust"),
+                    ],
+                    body,
+                )
+                    .into_response(),
+            )),
+            Err(err) => Err(marshal_error(&err, "generatePresignURLExport")),
         },
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, export_name, "forwarding to Go");
-            proxy::forward_to_go(State(state), request).await
+            Ok(None)
         }
-        Err(PrepareError::App(err)) => ApiError::from(*err).into_response(),
+        Err(PrepareError::App(err)) => Err(ApiError::from(*err)),
     }
 }
 

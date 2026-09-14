@@ -1,0 +1,32 @@
+# Mutation plan for the thirty-one miscellaneous local-mode pairs of `mm_api::local_misc`
+# (job, preference, CPA, export, import, `convert_to_user`, `getUpload`, `support_packet`,
+# `ldap/groups`, and the two `local*` config handlers).
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-misc.plan
+#
+# The shared handlers are mutated by their own plans. What this file tests is the **wiring** and
+# the two handlers that are not shared: which session the socket hands each handler, which
+# transport an in-handler forward takes (the port would reach `APISessionRequired` and come back
+# 401 where Go's socket answers), which segments reach a handler at all, and — the two lines a
+# reader would most plausibly get wrong — that `localGetConfig` is *not* sanitized and that
+# `localGetClientConfig` is the *full* map.
+#
+# `misc-local-cpa-values-list-uses-an-ordinary-session` is the one line whose catch depends on
+# the target check rather than a permission shortcut: an ordinary empty session asks
+# `UserCanSeeOtherUser("", admin)`, which is not `Allowed`, where the local one passes before the
+# lookup.
+#
+# The controls: a contiguous rename of a binding *and its use* in `local_download_export`, and a
+# true swap of two adjacent registrations on different paths (`support_packet` / `ldap/groups`).
+misc-local-config-is-sanitized	crates/mm-api/src/local_misc.rs	    let config = match mm_app::config::load_model_config(state.app.store().config()).await {\n        Ok(config) => config,\n        Err(err) => return config::config_error("getConfig", &err).into_response(),\n    };\n\n    match serde_json::to_value(&config) {	    let mut config = match mm_app::config::load_model_config(state.app.store().config()).await {\n        Ok(config) => config,\n        Err(err) => return config::config_error("getConfig", &err).into_response(),\n    };\n    mm_app::config::sanitize(&mut config);\n\n    match serde_json::to_value(&config) {	api	local_misc
+misc-local-config-filter-forwards-over-the-port	crates/mm-api/src/local_misc.rs	    if config::filtered_config_requested(request.uri().query()) {\n        tracing::Span::current().record("forwarded", true);\n        return forward_over_unix(&go.0, request).await;	    if config::filtered_config_requested(request.uri().query()) {\n        tracing::Span::current().record("forwarded", true);\n        return crate::proxy::forward_to_go(State(state), request).await;	api	local_misc
+misc-local-client-config-is-the-limited-map	crates/mm-api/src/local_misc.rs	    let props = match state.app.client_config_with_computed().await {	    let props = match state.app.limited_client_config_with_computed().await {	api	local_misc
+misc-local-preference-write-uses-an-ordinary-session	crates/mm-api/src/local_misc.rs	    match preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await {	    match preferences::update_preferences_for(&state, &crate::auth::AuthenticatedSession(mm_model::session::Session::default()), &user_id, &bytes).await {	api	local_misc
+misc-local-flagged-preference-forwards-over-the-port	crates/mm-api/src/local_misc.rs	    match preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await {\n        Some(response) => response,\n        None => forward_over_unix(&go.0, Request::from_parts(parts, Body::from(bytes))).await,	    match preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await {\n        Some(response) => response,\n        None => crate::proxy::forward_to_go(State(state), Request::from_parts(parts, Body::from(bytes))).await,	api	local_misc
+misc-local-jobs-by-type-skips-the-mux-check	crates/mm-api/src/local_misc.rs	    if !jobs::segment_matches_job_type_mux(&job_type) {	    if false && !jobs::segment_matches_job_type_mux(&job_type) {	api	local_misc
+misc-local-preference-category-check-inverted	crates/mm-api/src/local_misc.rs	    if !preferences::segment_matches_preference_mux(&category) {	    if preferences::segment_matches_preference_mux(&category) {	api	local_misc
+misc-local-job-create-uses-an-ordinary-session	crates/mm-api/src/local_misc.rs	    match jobs::create_job_from_body(&state, &local_session(), &bytes).await {	    match jobs::create_job_from_body(&state, &crate::auth::AuthenticatedSession(mm_model::session::Session::default()), &bytes).await {	api	local_misc
+misc-local-cpa-values-list-uses-an-ordinary-session	crates/mm-api/src/local_misc.rs	    cpa::list_cpa_values(state, path, local_session(), request).await	    cpa::list_cpa_values(state, path, crate::auth::AuthenticatedSession(mm_model::session::Session::default()), request).await	api	local_misc
+misc-local-support-packet-unlicensed-forwards	crates/mm-api/src/gated_reads.rs	        Ok(mm_app::license::LicenseState::Unlicensed) => {\n            tracing::Span::current().record("licensed", false);\n            Ok(Some(refusal(\n                "Api4.generateSupportPacket",\n                "api.no_license",\n                403,\n            )))\n        }	        Ok(mm_app::license::LicenseState::Unlicensed) => {\n            tracing::Span::current().record("licensed", false);\n            Ok(None)\n        }	api	local_misc
+control-rename-a-binding-and-its-use	crates/mm-api/src/local_misc.rs	    let method = request.method().clone();\n    let headers = request.headers().clone();\n    match exports::download_export_inner(&state, &export_name, &local_session(), &method, &headers)	    let verb = request.method().clone();\n    let headers = request.headers().clone();\n    match exports::download_export_inner(&state, &export_name, &local_session(), &verb, &headers)	api	local_misc
+control-swap-two-independent-registrations	crates/mm-api/src/local_misc.rs	        .route(\n            "/api/v4/system/support_packet",\n            partially_migrated(get(local_generate_support_packet)),\n        )\n        .route(\n            "/api/v4/ldap/groups",\n            partially_migrated(get(local_get_ldap_groups)),\n        )	        .route(\n            "/api/v4/ldap/groups",\n            partially_migrated(get(local_get_ldap_groups)),\n        )\n        .route(\n            "/api/v4/system/support_packet",\n            partially_migrated(get(local_generate_support_packet)),\n        )	api	local_misc

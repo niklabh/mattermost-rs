@@ -43,7 +43,7 @@ const JOB_TYPE_MAX_LEN: usize = 32;
 /// Go's `{job_type:[A-Za-z0-9_-]+}` (api4/job.go:28) — the id class plus `_` and `-`, and
 /// *without* the `.` the username class allows. A segment outside it never matches Go's route, so
 /// it is forwarded and Go answers its own mux 404. [D-150]'s rule under a third alphabet.
-fn segment_matches_job_type_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_job_type_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
@@ -273,18 +273,38 @@ pub async fn create_job(
             return ApiError::invalid_param("job").into_response();
         }
     };
+    match create_job_from_body(&state, &session, &bytes).await {
+        Some(response) => response,
+        None => {
+            let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+/// [`create_job`] past the body read, shared with the local router.
+///
+/// `None` is "hand this to Go" — the two access-control sync types — and the caller decides the
+/// transport: the port on the HTTP router, the socket on the local one. The split exists for
+/// that decision alone; a local request forwarded over the port would reach
+/// `APISessionRequired` and be refused where Go's socket answers it.
+pub(crate) async fn create_job_from_body(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    bytes: &[u8],
+) -> Option<Response> {
     // `json.NewDecoder(r.Body).Decode(&job)` into a struct: `null` is accepted (a zero job),
     // an array is not — the `Value` round-trip gives serde the same answer.
-    let job: Job = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+    let job: Job = match serde_json::from_slice::<serde_json::Value>(bytes) {
         Ok(serde_json::Value::Null) => Job::default(),
         Ok(value @ serde_json::Value::Object(_)) => match serde_json::from_value(value) {
             Ok(job) => job,
             Err(err) => {
                 tracing::debug!(error = %err, "job body did not decode");
-                return ApiError::invalid_param("job").into_response();
+                return Some(ApiError::invalid_param("job").into_response());
             }
         },
-        _ => return ApiError::invalid_param("job").into_response(),
+        _ => return Some(ApiError::invalid_param("job").into_response()),
     };
     tracing::Span::current().record("job_type", job.job_type.as_str());
 
@@ -293,17 +313,21 @@ pub async fn create_job(
         .session_has_permission_to_create_job(&session.0, &job)
         .await;
     let Some(required) = permission.required() else {
-        return ApiError::from(AppError::new(
-            "unableToCreateJob",
-            "api.job.unable_to_create_job.incorrect_job_type",
-            None,
-            String::new(),
-            400,
-        ))
-        .into_response();
+        return Some(
+            ApiError::from(AppError::new(
+                "unableToCreateJob",
+                "api.job.unable_to_create_job.incorrect_job_type",
+                None,
+                String::new(),
+                400,
+            ))
+            .into_response(),
+        );
     };
     if !permission.granted() {
-        return ApiError::from(*make_permission_error(&session.0, &[required])).into_response();
+        return Some(
+            ApiError::from(*make_permission_error(&session.0, &[required])).into_response(),
+        );
     }
 
     if job.job_type == job::JOB_TYPE_ACCESS_CONTROL_SYNC
@@ -311,11 +335,10 @@ pub async fn create_job(
     {
         tracing::Span::current().record("forwarded", true);
         tracing::debug!("handing an access-control sync job to Go");
-        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
-        return crate::proxy::forward_to_go(State(state), request).await;
+        return None;
     }
 
-    match state.app.create_job(&job.job_type, job.data).await {
+    Some(match state.app.create_job(&job.job_type, job.data).await {
         Ok(created) => match serde_json::to_vec(&created) {
             Ok(mut body) => {
                 body.push(b'\n');
@@ -342,7 +365,7 @@ pub async fn create_job(
             }
         },
         Err(err) => ApiError::from(*err).into_response(),
-    }
+    })
 }
 
 /// Port of `cancelJob` (api4/job.go:375) — `POST /api/v4/jobs/{job_id}/cancel`.
@@ -515,7 +538,7 @@ pub async fn get_jobs_by_type(
     }
 }
 
-async fn get_jobs_by_type_inner(
+pub(crate) async fn get_jobs_by_type_inner(
     state: AppState,
     job_type: String,
     query: Option<String>,

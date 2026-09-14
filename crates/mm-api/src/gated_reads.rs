@@ -210,26 +210,46 @@ pub async fn generate_support_packet(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    match support_packet_answer(&state, &session).await {
+        Ok(Some(response)) => response,
+        Ok(None) => crate::proxy::forward_to_go(State(state), request).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// [`generate_support_packet`] minus the transport, shared with the local router: the permission
+/// (`Err`), then the licence — `Some` is the unlicensed 403, `None` is "licensed — forward", and
+/// the caller picks the transport, because the packet itself (`GenerateSupportPacket`, a zip of
+/// logs, config and diagnostics) is not ported on either router.
+pub(crate) async fn support_packet_answer(
+    state: &AppState,
+    session: &AuthenticatedSession,
+) -> Result<Option<Response>, ApiError> {
     if !state
         .app
         .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await
     {
-        return ApiError::from(make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_SYSTEM],
-        ))
-        .into_response();
+        )));
     }
-
-    refuse_or_forward(
-        state,
-        "Api4.generateSupportPacket",
-        "api.no_license",
-        403,
-        request,
-    )
-    .await
+    match state.app.license_state().await {
+        Ok(mm_app::license::LicenseState::Licensed) => {
+            tracing::Span::current().record("licensed", true);
+            Ok(None)
+        }
+        Ok(mm_app::license::LicenseState::Unlicensed) => {
+            tracing::Span::current().record("licensed", false);
+            Ok(Some(refusal(
+                "Api4.generateSupportPacket",
+                "api.no_license",
+                403,
+            )))
+        }
+        Err(err) => Err(ApiError::from(err)),
+    }
 }
 
 /// Port of `getCPAGroup` (api4/custom_profile_attributes.go:295).
@@ -433,20 +453,29 @@ pub async fn download_job(
     _session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !is_valid_id(&job_id) {
-        return ApiError::invalid_url_param("job_id").into_response();
+    match download_job_answer(&state, &job_id) {
+        Some(response) => response,
+        None => crate::proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+/// [`download_job`] minus the transport, shared with the local router. `None` is "the setting
+/// is on — forward", and the caller picks the socket or the port.
+pub(crate) fn download_job_answer(state: &AppState, job_id: &str) -> Option<Response> {
+    if !is_valid_id(job_id) {
+        return Some(ApiError::invalid_url_param("job_id").into_response());
     }
 
     let enabled = state.app.config().message_export_download_export_results;
     tracing::Span::current().record("enabled", enabled);
     if enabled {
-        return crate::proxy::forward_to_go(State(state), request).await;
+        return None;
     }
-    refusal(
+    Some(refusal(
         "downloadExportResultsNotEnabled",
         "app.job.download_export_results_not_enabled",
         501,
-    )
+    ))
 }
 
 /// Port of `getFileLink` (api4/file.go:709) — `GET /api/v4/files/{file_id}/link`.

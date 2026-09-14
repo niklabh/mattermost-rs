@@ -225,4 +225,7 @@ mod parity {
     pub mod notify_admin_trigger;
     pub mod onboarding_complete;
     pub mod user_updates;
+
+    // Appended 2026-09-14, same reason: the miscellaneous local-mode families.
+    pub mod local_misc;
 }
