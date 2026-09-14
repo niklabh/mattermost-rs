@@ -52,7 +52,9 @@ use mm_model::post_list::{PostList, PostMap};
 use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
-use mm_model::utils::{AppError, AppResult, etag, get_millis, remove_duplicate_strings};
+use mm_model::utils::{
+    AppError, AppResult, StringInterface, etag, get_millis, remove_duplicate_strings,
+};
 use mm_store::post_store::{
     GetPostThreadOptions, GetPostsAroundOptions, GetPostsOptions, ThreadDirection,
 };
@@ -93,23 +95,22 @@ pub enum PrepareError {
 /// | `boards` | `getEmbedForPost` returns a `boards` embed carrying the prop verbatim (:553) |
 /// | `mm_blocks`, `blocks`, `cards` | `InteractiveBlocksImageURLs` and `AllStrings` walk the three interactive dialects (post.go:846) |
 /// | `unsafe_links` | `HasUnsafeLinks` short-circuits `getEmbedsAndImages` and empties `getImagesForPost` (:283, :617) |
-/// | `channel_mentions` | `sanitizeChannelMentionsForUser` rewrites the prop from fresh channel rows (:376) |
 /// | `previewed_post` | feeds `getLinkMetadata`'s permalink lookup (:568) |
 ///
 /// `override_icon_emoji` is deliberately **absent**: its branch is additionally gated on
 /// `EnablePostIconOverride`, so it only refuses when that setting is on. See
-/// [`App::prepare_post_for_client`].
+/// [`App::prepare_post_for_client`]. `channel_mentions` is absent since 2026-09-14: its branch,
+/// `sanitizeChannelMentionsForUser`, is [`App::sanitize_channel_mentions_for_user`].
 ///
 /// `"boards"` is a bare string literal in Go too (post_metadata.go:553) — there is no
 /// `model.PostProps*` constant for it, and inventing one here would hide that.
-pub const REFUSED_PROPS: [&str; 8] = [
+pub const REFUSED_PROPS: [&str; 7] = [
     POST_PROPS_ATTACHMENTS,
     "boards",
     POST_PROPS_MM_BLOCKS,
     POST_PROPS_BLOCK_KIT_BLOCKS,
     POST_PROPS_ADAPTIVE_CARDS,
     POST_PROPS_UNSAFE_LINKS,
-    POST_PROPS_CHANNEL_MENTIONS,
     POST_PROPS_PREVIEWED_POST,
 ];
 
@@ -558,14 +559,14 @@ impl App {
     /// The returned `bool` is `isMemberForPreviews`, which Go initialises to **`true`** and only
     /// lowers inside the permalink-embed branch. That branch needs a non-empty `Metadata.Embeds`
     /// — impossible here, because any post that could carry an embed was refused upstream — so
-    /// this always answers `true` on the shapes it serves. Channel-mention sanitisation is
-    /// refused via [`REFUSED_PROPS`], and ABAC file sanitisation is inert without an enterprise
-    /// licence (see the module docs).
+    /// this always answers `true` on the shapes it serves. Channel mentions are rewritten for
+    /// the viewer by [`App::sanitize_channel_mentions_for_user`]; ABAC file sanitisation is
+    /// inert without an enterprise licence (see the module docs).
     #[tracing::instrument(skip_all, fields(post_id = %post.id))]
     pub async fn sanitize_post_metadata_for_user(
         &self,
-        post: Post,
-        _user_id: &str,
+        mut post: Post,
+        user_id: &str,
     ) -> Result<(Post, bool), PrepareError> {
         if post
             .metadata
@@ -575,7 +576,75 @@ impl App {
             return Err(PrepareError::Unreproducible("post carries embeds"));
         }
         refuse_on_props(&post)?;
+        self.sanitize_channel_mentions_for_user(&mut post, user_id)
+            .await;
         Ok((post, true))
+    }
+
+    /// Port of `app.App.sanitizeChannelMentionsForUser` (post_metadata.go:370) — the **read**
+    /// side of a `~channel` mention, run for the viewer on every HTTP path that prepares a post.
+    ///
+    /// The prop the post carries is not trusted; each entry is re-resolved from the database by
+    /// `team_name` and the entry's key, and kept only when the viewer may resolve the channel
+    /// ([`App::has_permission_to_resolve_channel_mention`]). What is kept is **rewritten**:
+    /// `display_name` fresh from the row, `team_name` copied from the prop ("team renames are
+    /// extremely rare"), and **no `id`** — so a post read back has a two-key entry where the
+    /// create response and the `posted` frame had three. An entry with no `team_name`, or whose
+    /// channel does not resolve, is dropped silently; a prop that is not an object is left as it
+    /// is. No survivor removes the prop.
+    #[tracing::instrument(skip_all, fields(post_id = %post.id, user_id = %user_id))]
+    pub(crate) async fn sanitize_channel_mentions_for_user(&self, post: &mut Post, user_id: &str) {
+        let Some(mentions) = post
+            .get_prop(POST_PROPS_CHANNEL_MENTIONS)
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+        else {
+            return;
+        };
+
+        let mut sanitized = StringInterface::new();
+        for (channel_name, data) in mentions {
+            let Some(data) = data.as_object() else {
+                continue;
+            };
+            let team_name = data
+                .get("team_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if team_name.is_empty() {
+                // No team information, skip this mention
+                continue;
+            }
+            // Fetch the channel from database (gets fresh data)
+            let Ok(channel) = self
+                .get_channel_by_name_for_team_name(&channel_name, team_name, true)
+                .await
+            else {
+                // Channel not found or error fetching, skip
+                continue;
+            };
+            if self
+                .has_permission_to_resolve_channel_mention(user_id, &channel)
+                .await
+            {
+                sanitized.insert(
+                    channel_name,
+                    serde_json::json!({
+                        "display_name": channel.display_name,
+                        "team_name": team_name,
+                    }),
+                );
+            }
+        }
+
+        if sanitized.is_empty() {
+            post.del_prop(POST_PROPS_CHANNEL_MENTIONS);
+        } else {
+            post.add_prop(
+                POST_PROPS_CHANNEL_MENTIONS,
+                serde_json::Value::Object(sanitized),
+            );
+        }
     }
 
     /// Port of `app.App.GetPostsPage` (post.go:1337).
@@ -1406,7 +1475,9 @@ mod tests {
     }
 
     #[test]
-    fn channel_mentions_are_refused() {
+    fn channel_mentions_are_no_longer_refused() {
+        // Since 2026-09-14 the prop is rewritten for the viewer by
+        // `sanitize_channel_mentions_for_user` rather than refused.
         let mut post = post_with_message("hi");
         let mut props = mm_model::utils::StringInterface::new();
         props.insert(
@@ -1414,7 +1485,7 @@ mod tests {
             serde_json::json!({"town-square": {"display_name": "Town Square"}}),
         );
         post.props = Some(props);
-        assert!(refuse_on_props(&post).is_err());
+        assert!(refuse_on_props(&post).is_ok());
     }
 
     #[test]

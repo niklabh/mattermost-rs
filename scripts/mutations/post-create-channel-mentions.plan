@@ -1,0 +1,26 @@
+# Mutation plan for a `~channel` mention on `POST /api/v4/posts` — FillInPostProps, the
+# per-viewer rewrite on a read, and the `channel_mentions` broadcast hook.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-create-channel-mentions.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# Not mutated because the stack cannot see them: the team-lookup failure arm in FillInPostProps
+# (every mentioned channel's team exists), the hook suite's channel-lookup failure arm (every
+# id on a frame is a live channel), and the raiser's pre-strip of the prop from the shared frame
+# (the hook rewrites every recipient's copy, so the strip only shows when the hook itself fails). The last two lines are the no-op controls and must SURVIVE.
+
+fill-poster-permission-ignored	crates/mm-app/src/post_write.rs	                if !self\n                    .has_permission_to_resolve_channel_mention(&post.user_id, &channel)\n                    .await\n                {\n                    continue;\n                }	                if self\n                    .has_permission_to_resolve_channel_mention(&post.user_id, &channel)\n                    .await\n                {\n                    continue;\n                }	api	post_create_channel_mentions
+fill-id-dropped	crates/mm-app/src/post_write.rs	                        "id": channel.id,	                        "id": "",	api	post_create_channel_mentions
+fill-hint-not-consumed	crates/mm-app/src/post_write.rs	            post.del_prop(POST_PROPS_CURRENT_TEAM_ID);	            let _ = POST_PROPS_CURRENT_TEAM_ID;	api	post_create_channel_mentions
+fill-hint-ignored	crates/mm-app/src/post_write.rs	                    team_id = current.to_owned();	                    let _ = current;	api	post_create_channel_mentions
+fill-stale-prop-kept	crates/mm-app/src/post_write.rs	        } else if post.get_props().is_some() {\n            post.del_prop(POST_PROPS_CHANNEL_MENTIONS);\n        }	        }	api	post_create_channel_mentions
+sanitize-viewer-permission-ignored	crates/mm-app/src/post.rs	            if self\n                .has_permission_to_resolve_channel_mention(user_id, &channel)\n                .await\n            {	            if !user_id.is_empty() {	api	post_create_channel_mentions
+sanitize-keeps-id	crates/mm-app/src/post.rs	                        "display_name": channel.display_name,\n                        "team_name": team_name,\n                    }),	                        "display_name": channel.display_name,\n                        "team_name": team_name,\n                        "id": channel.id,\n                    }),	api	post_create_channel_mentions
+sanitize-empty-keeps-prop	crates/mm-app/src/post.rs	        if sanitized.is_empty() {\n            post.del_prop(POST_PROPS_CHANNEL_MENTIONS);	        if sanitized.is_empty() && user_id.is_empty() {\n            post.del_prop(POST_PROPS_CHANNEL_MENTIONS);	api	post_create_channel_mentions
+hook-keeps-unresolvable	crates/mm-app/src/broadcast_hooks.rs	                if suite\n                    .has_permission_to_resolve_channel_mention(&conn.user_id, channel_id)\n                    .await\n                {	                if !suite\n                    .has_permission_to_resolve_channel_mention(&conn.user_id, channel_id)\n                    .await\n                {	api	post_create_channel_mentions
+hook-empty-id-resolved	crates/mm-app/src/broadcast_hooks.rs	                    Some(id) if !id.is_empty() => id,	                    Some(id) => id,	unit	broadcast_hooks::
+publish-hook-not-attached	crates/mm-app/src/notification.rs	                broadcast.add_hook(BROADCAST_CHANNEL_MENTIONS, args);	                let _ = (BROADCAST_CHANNEL_MENTIONS, args);	api	post_create_channel_mentions
+system-post-fill-skipped	crates/mm-app/src/post_write.rs	        match self.fill_in_post_props(&mut post, Some(channel)).await {	        match Ok::<(), PrepareError>(()) {	api	post_create_channel_mentions
+control-reorder-entry-keys	crates/mm-app/src/post_write.rs	                        "display_name": channel.display_name,\n                        "team_name": team.name,\n                        // Used by the WebSocket broadcast hook for permission checks\n                        "id": channel.id,	                        "id": channel.id,\n                        "display_name": channel.display_name,\n                        "team_name": team.name,	api	post_create_channel_mentions
+control-annotate-binding	crates/mm-app/src/broadcast_hooks.rs	            let mut filtered = StringInterface::new();	            let mut filtered: StringInterface = StringInterface::new();	api	post_create_channel_mentions

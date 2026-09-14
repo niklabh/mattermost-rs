@@ -42,8 +42,9 @@ use mm_model::group::Group;
 use mm_model::license::minimum_professional_license;
 use mm_model::permission::{PERMISSION_USE_CHANNEL_MENTIONS, PERMISSION_USE_GROUP_MENTIONS};
 use mm_model::post::{
-    POST_PROPS_ADDED_USER_ID, POST_PROPS_FROM_WEBHOOK, POST_PROPS_OVERRIDE_USERNAME,
-    POST_TYPE_ADD_TO_CHANNEL, POST_TYPE_HEADER_CHANGE, POST_TYPE_PURPOSE_CHANGE, Post,
+    POST_PROPS_ADDED_USER_ID, POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_FROM_WEBHOOK,
+    POST_PROPS_OVERRIDE_USERNAME, POST_TYPE_ADD_TO_CHANNEL, POST_TYPE_HEADER_CHANGE,
+    POST_TYPE_PURPOSE_CHANGE, Post,
 };
 use mm_model::post_list::PostList;
 use mm_model::status::Status;
@@ -65,7 +66,8 @@ use mm_store::{ChannelStore, FileInfoStore, StatusStore, ThreadStore, UserStore}
 
 use crate::App;
 use crate::broadcast_hooks::{
-    BROADCAST_ADD_FOLLOWERS, BROADCAST_ADD_MENTIONS, BROADCAST_POSTED_ACK,
+    BROADCAST_ADD_FOLLOWERS, BROADCAST_ADD_MENTIONS, BROADCAST_CHANNEL_MENTIONS,
+    BROADCAST_POSTED_ACK,
 };
 use crate::mention::{MentionKeywords, MentionResults, MentionType, get_explicit_mentions};
 use crate::thread_read::MM_BLOCKS_ENABLED;
@@ -732,7 +734,8 @@ impl App {
             }
         }
 
-        self.publish_posted_event_with_hooks(post, message).await?;
+        self.publish_websocket_event_for_post_with_hooks(post, message)
+            .await?;
 
         // If this is a reply in a thread, notify participants.
         if !suppress_notifications && is_crt_allowed && !post.root_id.is_empty() {
@@ -1030,12 +1033,31 @@ impl App {
     /// `channel_mentions` prop would have been removed — neither exists on a post that reaches
     /// here, since links and `~` mentions are forwarded — and the two hooks they would attach
     /// are therefore not attached.
-    async fn publish_posted_event_with_hooks(
+    pub(crate) async fn publish_websocket_event_for_post_with_hooks(
         &self,
         post: &Post,
         mut message: WebSocketEvent,
     ) -> AppResult<()> {
-        let post_json = post.to_json().map_err(|err| {
+        // Extract the metadata that needs per-recipient filtering before serialisation, then
+        // strip it: the precomputed frame every connection shares is secure by default, and the
+        // `channel_mentions` hook puts back, per recipient, what that recipient may resolve.
+        // Go mutates the post it was handed and `CreatePost` answers with that post — with the
+        // prop re-added by `setupBroadcastHookForChannelMentions` — so the caller's copy keeps
+        // it here and only the frame's copy loses it.
+        let channel_mentions = post
+            .get_prop(POST_PROPS_CHANNEL_MENTIONS)
+            .and_then(serde_json::Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let post_json = if channel_mentions.is_empty() {
+            post.to_json()
+        } else {
+            // Owned because the frame's post is the caller's post minus one prop; see above.
+            let mut stripped = post.clone();
+            stripped.del_prop(POST_PROPS_CHANNEL_MENTIONS);
+            stripped.to_json()
+        }
+        .map_err(|err| {
             tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
             AppError::boxed(
                 "publishWebsocketEventForPost",
@@ -1046,6 +1068,22 @@ impl App {
             )
         })?;
         message.add("post", serde_json::Value::String(post_json));
+
+        // `setupBroadcastHookForPermalink` — no permalink previews on the shapes served.
+        // `setupBroadcastHookForChannelMentions`: nothing to register without mentions.
+        if !channel_mentions.is_empty() {
+            let mut args = StringInterface::new();
+            args.insert(
+                "channel_mentions".to_owned(),
+                serde_json::Value::Object(channel_mentions),
+            );
+            if let Some(broadcast) = message.broadcast.as_mut() {
+                broadcast.add_hook(BROADCAST_CHANNEL_MENTIONS, args);
+            }
+        }
+        // `processBroadcastHookForBurnOnRead` and `setupBroadcastHookForAbacFiles` — the first
+        // is for a refused type, the second is off without ABAC.
+
         self.publish(message).await;
         Ok(())
     }

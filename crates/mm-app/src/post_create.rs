@@ -39,12 +39,11 @@
 use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_OPEN, Channel};
 use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
-    POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_CURRENT_TEAM_ID,
-    POST_PROPS_FROM_BOT, POST_PROPS_FROM_OAUTH_APP, POST_PROPS_FROM_PLUGIN,
-    POST_PROPS_FROM_WEBHOOK, POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_OVERRIDE_ICON_EMOJI,
-    POST_PROPS_OVERRIDE_ICON_URL, POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_SILENT_NOTIFICATION,
-    POST_PROPS_WEBHOOK_DISPLAY_NAME, POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ,
-    POST_TYPE_EPHEMERAL, Post,
+    POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_FROM_BOT,
+    POST_PROPS_FROM_OAUTH_APP, POST_PROPS_FROM_PLUGIN, POST_PROPS_FROM_WEBHOOK,
+    POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_OVERRIDE_ICON_EMOJI, POST_PROPS_OVERRIDE_ICON_URL,
+    POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_SILENT_NOTIFICATION, POST_PROPS_WEBHOOK_DISPLAY_NAME,
+    POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ, POST_TYPE_EPHEMERAL, Post,
 };
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostMetadata;
@@ -94,13 +93,15 @@ pub(crate) struct PendingPostEntry {
 /// | `from_bot`, `from_plugin` | same `MarkChannelsAsViewed` skip, and both are re-derived by Go rather than trusted |
 /// | `override_username`, `override_icon_url`, `override_icon_emoji`, `webhook_display_name` | the username/icon overrides, gated on two settings this port refuses on |
 /// | `mm_blocks_actions` | the strip is conditional on the session being an integration |
-/// | `current_team_id` | `FillInPostProps` deletes it, but only inside the channel-mention branch that is refused |
 /// | `ai_generated_by` | resolved to a username through a user lookup |
+///
+/// `current_team_id` left the list on 2026-09-14: `FillInPostProps` consumes it inside the
+/// channel-mention branch, which is served, and leaves it alone otherwise.
 ///
 /// **Hardened mode does not protect this list.** `ExperimentalEnableHardenedMode` is off by
 /// default, so `from_webhook` and the three overrides really are settable by any client on the
 /// public create-post API — which is why they are refused here rather than assumed absent.
-const REFUSED_CREATE_PROPS: [&str; 9] = [
+const REFUSED_CREATE_PROPS: [&str; 8] = [
     POST_PROPS_FROM_WEBHOOK,
     POST_PROPS_FROM_BOT,
     POST_PROPS_FROM_PLUGIN,
@@ -109,7 +110,6 @@ const REFUSED_CREATE_PROPS: [&str; 9] = [
     POST_PROPS_OVERRIDE_ICON_EMOJI,
     POST_PROPS_WEBHOOK_DISPLAY_NAME,
     POST_PROPS_MM_BLOCKS_ACTIONS,
-    POST_PROPS_CURRENT_TEAM_ID,
 ];
 
 impl App {
@@ -347,14 +347,6 @@ impl App {
                 "message may contain a link or a markdown image",
             ));
         }
-        // `FillInPostProps` resolves `~name` into the `channel_mentions` prop, and
-        // `getExplicitMentions` counts the channel's members as mentioned.
-        if post.message.contains('~') {
-            return Err(PrepareError::Unreproducible(
-                "a ~channel mention resolves channels and teams into a prop",
-            ));
-        }
-
         // `handleWebhookEvents` fires an outgoing webhook whose *response* Go turns into a second
         // post. Its own two gates come first and both are cheap: `EnableOutgoingWebhooks`, then
         // `channel.Type != ChannelTypeOpen` — a private channel never triggers one however many
@@ -678,7 +670,7 @@ impl App {
         // `FillInPostProps` reduces to its `else if post.GetProps() != nil` arm: every other
         // branch needs a `~` mention, an `@` on a licensed server, an `ai_generated_by` prop or a
         // burn-on-read type, and all four are refused.
-        self.fill_in_post_props(post).await?;
+        self.fill_in_post_props(post, Some(channel)).await?;
 
         // `runGuardedMessageWillBePosted` — no plugin environment, [D-183].
 

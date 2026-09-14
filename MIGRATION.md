@@ -12804,3 +12804,38 @@ a read guard per test so the 503 window never lands in a neighbour.
 
 [D-585] closed. The four post and file searches are unserved routes; the gate's doc names them.
 
+## `~channel` mentions on `POST /api/v4/posts` and `PUT /api/v4/posts/{id}` (2026-09-14)
+
+Route count unchanged at 463 of 764. `FillInPostProps`'s channel-mention branch is served: every
+`~name` is resolved in the post's channel's team (or, for a DM, the `current_team_id` hint the
+client sends, which is consumed) and written to `props.channel_mentions` as
+`{display_name, team_name, id}` when the **poster** may resolve it. Two consumers of that prop
+are ported with it: `sanitizeChannelMentionsForUser` rewrites it for the viewer on every HTTP
+body (`{display_name, team_name}`, minus what they may not resolve — the create and edit
+responses included, since they are sanitised after the publish), and the `channel_mentions`
+broadcast hook puts the stored entries back on the `posted`/`post_edited` frame per recipient.
+The hook needed the hub's hook trait to become async with a [`BroadcastHookSuite`] the hook
+asks for permissions; the three pure hooks wrap a ready future.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/post_write.rs` — `fill_in_post_props(post, channel)`, `publish_websocket_event_for_post` via the shared hook path | DONE |
+| app | `crates/mm-app/src/post.rs` — `sanitize_channel_mentions_for_user`; `channel_mentions` leaves `REFUSED_PROPS` | DONE |
+| app | `crates/mm-app/src/notification.rs` — `publish_websocket_event_for_post_with_hooks` strips the prop from the frame and attaches the hook | DONE |
+| hub | `crates/mm-app/src/hub.rs`, `broadcast_hooks.rs` — async `BroadcastHook::process`, `BroadcastHookSuite`, `ChannelMentionsBroadcastHook` (4 unit tests) | DONE |
+| test | `crates/mm-api/tests/parity/post_create_channel_mentions.rs` — 10, incl. a header notice | DONE |
+| mutation | `scripts/mutations/post-create-channel-mentions.plan` — 14 run, 12 caught, 2 controls survived | DONE |
+
+- **Three shapes of one prop.** The row and a permitted recipient's frame hold the id; every
+  HTTP body holds the rewrite without it. Measured on both, including the edit response.
+- **The hint narrows, it does not widen**: a `current_team_id` naming a team without the channel
+  resolves nothing, where an absent hint searches every team.
+- **`current_team_id` survives a post with no `~`** — Go deletes it only inside the branch.
+
+[D-401] narrowed: the `~` row is closed. [D-183] narrowed: four of nine hooks run.
+
+### The next route in this family
+
+The persistent notification on create (`forEachPersistentNotificationPost`, the row, the job), or
+the outgoing-webhook arm (`handleWebhookEvents`). Both are create shapes that still forward.
+

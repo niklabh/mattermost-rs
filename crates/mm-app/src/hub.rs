@@ -312,19 +312,42 @@ pub enum Presence {
     ThreadViewThreadChannel,
 }
 
+/// A boxed future, which is how a `dyn` trait carries an async method without `async_trait`.
+pub type HookFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+
 /// Port of `platform.BroadcastHook` (web_broadcast_hook.go:11).
 ///
 /// Implementations are in [`crate::broadcast_hooks`]. `args` is the map the raiser passed to
-/// `WebsocketBroadcast::add_hook` for this hook, positionally paired with its id.
+/// `WebsocketBroadcast::add_hook` for this hook, positionally paired with its id. `suite` is
+/// Go's `webConn.Suite` and `webConn.Platform.Store` folded into one: the lookups a hook makes
+/// on the recipient's behalf. The method is async because `channel_mentions` reads the database
+/// per connection; the three pure hooks return a ready future.
 pub trait BroadcastHook: Send + Sync {
     /// Modify `msg` for this connection, or leave it alone. An error is logged by the runner and
     /// does not stop the broadcast.
-    fn process(
-        &self,
-        msg: &mut HookedWebSocketEvent<'_>,
-        conn: &WebConn,
-        args: &StringInterface,
-    ) -> Result<(), BroadcastHookError>;
+    fn process<'a, 'e>(
+        &'a self,
+        msg: &'a mut HookedWebSocketEvent<'e>,
+        conn: &'a WebConn,
+        args: &'a StringInterface,
+        suite: &'a dyn BroadcastHookSuite,
+    ) -> HookFuture<'a, Result<(), BroadcastHookError>>
+    where
+        'e: 'a;
+}
+
+/// What a hook may ask of the server for the connection it is processing — the slice of
+/// `webConn.Suite` (`SuiteIFace`) and `webConn.Platform.Store` the ported hooks use.
+///
+/// One method so far. `channelMentionsBroadcastHook` does `Store.Channel().Get(channelID, true)`
+/// and then `Suite.HasPermissionToResolveChannelMention(rctx, webConn.UserId, channel)`; a
+/// channel the store cannot find is "not resolvable", so the two collapse into one question.
+pub trait BroadcastHookSuite: Send + Sync {
+    fn has_permission_to_resolve_channel_mention<'a>(
+        &'a self,
+        user_id: &'a str,
+        channel_id: &'a str,
+    ) -> HookFuture<'a, bool>;
 }
 
 /// Port of `platform.HookedWebSocketEvent` (web_broadcast_hook.go:42).
@@ -461,12 +484,13 @@ impl Hub {
     /// Go indexes `hookArgs[i]` unconditionally and would panic past the end. `add_hook` appends
     /// to both slices, so only a hand-built broadcast can get here with fewer args than ids; such
     /// a hook sees an empty map and reports its missing key through the ordinary error path.
-    pub fn run_broadcast_hooks(
+    pub async fn run_broadcast_hooks(
         &self,
         msg: &WebSocketEvent,
         conn: &WebConn,
         hook_ids: &[String],
         hook_args: &[StringInterface],
+        suite: &dyn BroadcastHookSuite,
     ) -> Option<WebSocketEvent> {
         if hook_ids.is_empty() {
             return None;
@@ -485,7 +509,7 @@ impl Hub {
                 continue;
             };
 
-            if let Err(err) = hook.process(&mut hooked, conn, args) {
+            if let Err(err) = hook.process(&mut hooked, conn, args, suite).await {
                 tracing::warn!(
                     hook_id = %hook_id,
                     error = %err,
@@ -612,6 +636,30 @@ impl Hub {
     }
 }
 
+impl BroadcastHookSuite for App {
+    /// `webConn.Platform.Store.Channel().Get(channelID, true)` — `allowFromCache`, not
+    /// `includeDeleted`; the query is `SqlChannelStore.Get`'s, which has no `DeleteAt` predicate
+    /// — then `Suite.HasPermissionToResolveChannelMention`. A channel the store does not answer
+    /// with is skipped by the hook, which is `false` here.
+    fn has_permission_to_resolve_channel_mention<'a>(
+        &'a self,
+        user_id: &'a str,
+        channel_id: &'a str,
+    ) -> HookFuture<'a, bool> {
+        Box::pin(async move {
+            let channel = match self.store().channel().get(channel_id).await {
+                Ok(channel) => channel,
+                Err(err) => {
+                    tracing::debug!(error = %err, channel_id, "channel mention hook: channel lookup failed");
+                    return false;
+                }
+            };
+            self.has_permission_to_resolve_channel_mention(user_id, &channel)
+                .await
+        })
+    }
+}
+
 impl App {
     /// Port of `PlatformService.Publish` (cluster.go:189) and `PublishSkipClusterSend`
     /// (cluster.go:220).
@@ -649,7 +697,8 @@ impl App {
             // `webConn.send <- h.runBroadcastHooks(msg, webConn, ...)` (web_hub.go:731).
             let hooked = self
                 .hub()
-                .run_broadcast_hooks(&event, &conn, &hooks, &hook_args);
+                .run_broadcast_hooks(&event, &conn, &hooks, &hook_args, self)
+                .await;
             if conn.try_send(broadcast_frame(&event, hooked)).is_err() {
                 if conn.is_active() {
                     tracing::error!(
@@ -1427,6 +1476,19 @@ mod tests {
 
     const POSTER: &str = "p0sterp0sterp0sterp0sterp0";
 
+    /// A suite that resolves nothing — the runner tests exercise the pure hooks only.
+    pub(crate) struct DenyAllSuite;
+
+    impl BroadcastHookSuite for DenyAllSuite {
+        fn has_permission_to_resolve_channel_mention<'a>(
+            &'a self,
+            _user_id: &'a str,
+            _channel_id: &'a str,
+        ) -> HookFuture<'a, bool> {
+            Box::pin(async { false })
+        }
+    }
+
     fn posted_event() -> WebSocketEvent {
         let mut event = WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", CHANNEL, "", None, "");
         event.add("post", json!("{}"));
@@ -1455,15 +1517,16 @@ mod tests {
         )
     }
 
-    #[test]
-    fn hooks_run_in_the_order_attached_and_posted_ack_sees_what_add_mentions_wrote() {
+    #[tokio::test]
+    async fn hooks_run_in_the_order_attached_and_posted_ack_sees_what_add_mentions_wrote() {
         let hub = Hub::new();
         let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), true);
         let event = posted_event();
 
         let (ids, args) = mentions_then_ack();
         let out = hub
-            .run_broadcast_hooks(&event, &conn, &ids, &args)
+            .run_broadcast_hooks(&event, &conn, &ids, &args, &DenyAllSuite)
+            .await
             .expect("add_mentions modified the event");
         let data = out.get_data().unwrap();
         assert_eq!(data["mentions"], json!(format!("[\"{USER}\"]")));
@@ -1475,7 +1538,8 @@ mod tests {
         ids.reverse();
         args.reverse();
         let out = hub
-            .run_broadcast_hooks(&event, &conn, &ids, &args)
+            .run_broadcast_hooks(&event, &conn, &ids, &args, &DenyAllSuite)
+            .await
             .expect("add_mentions still modifies the event");
         let data = out.get_data().unwrap();
         assert_eq!(data["mentions"], json!(format!("[\"{USER}\"]")));
@@ -1485,25 +1549,27 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_connection_the_hooks_do_not_touch_gets_no_copy() {
+    #[tokio::test]
+    async fn a_connection_the_hooks_do_not_touch_gets_no_copy() {
         let hub = Hub::new();
         // Not mentioned, and no ack flag.
         let (conn, _rx) = WebConn::new(CONN.to_owned(), session(OTHER_USER), false);
         let (ids, args) = mentions_then_ack();
         assert!(
-            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args)
+            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args, &DenyAllSuite)
+                .await
                 .is_none()
         );
         // No hooks at all: the early return.
         assert!(
-            hub.run_broadcast_hooks(&posted_event(), &conn, &[], &[])
+            hub.run_broadcast_hooks(&posted_event(), &conn, &[], &[], &DenyAllSuite)
+                .await
                 .is_none()
         );
     }
 
-    #[test]
-    fn an_unknown_hook_id_is_skipped_and_the_rest_still_run() {
+    #[tokio::test]
+    async fn an_unknown_hook_id_is_skipped_and_the_rest_still_run() {
         let hub = Hub::new();
         let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), false);
         let event = posted_event();
@@ -1514,8 +1580,10 @@ mod tests {
                 &event,
                 &conn,
                 &["no_such_hook".to_owned()],
-                &[StringInterface::new()]
+                &[StringInterface::new()],
+                &DenyAllSuite
             )
+            .await
             .is_none()
         );
 
@@ -1530,7 +1598,9 @@ mod tests {
                     map(json!({ "mentions": [OTHER_USER] })),
                     map(json!({ "mentions": [USER] })),
                 ],
+                &DenyAllSuite,
             )
+            .await
             .expect("add_mentions ran");
         assert_eq!(
             out.get_data().unwrap()["mentions"],
@@ -1538,8 +1608,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_failing_hook_is_logged_and_the_rest_still_run() {
+    #[tokio::test]
+    async fn a_failing_hook_is_logged_and_the_rest_still_run() {
         let hub = Hub::new();
         let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), false);
         // `add_mentions` with no args fails; the `add_followers` after it runs.
@@ -1552,7 +1622,9 @@ mod tests {
                     crate::broadcast_hooks::BROADCAST_ADD_FOLLOWERS.to_owned(),
                 ],
                 &[StringInterface::new(), map(json!({ "followers": [USER] }))],
+                &DenyAllSuite,
             )
+            .await
             .expect("add_followers ran");
         let data = out.get_data().unwrap();
         assert!(data.get("mentions").is_none());
@@ -1564,8 +1636,10 @@ mod tests {
                 &posted_event(),
                 &conn,
                 &[BROADCAST_ADD_MENTIONS.to_owned()],
-                &[]
+                &[],
+                &DenyAllSuite
             )
+            .await
             .is_none()
         );
     }
@@ -1624,14 +1698,15 @@ mod tests {
         assert_eq!(copy.get_data().unwrap()["post"], json!("{}"));
     }
 
-    #[test]
-    fn a_hub_without_a_registry_knows_no_hook() {
+    #[tokio::test]
+    async fn a_hub_without_a_registry_knows_no_hook() {
         // `with_hooks` is what the tests above bypass; make sure the registry is the only source.
         let hub = Hub::with_hooks(HashMap::new());
         let (conn, _rx) = WebConn::new(CONN.to_owned(), session(USER), true);
         let (ids, args) = mentions_then_ack();
         assert!(
-            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args)
+            hub.run_broadcast_hooks(&posted_event(), &conn, &ids, &args, &DenyAllSuite)
+                .await
                 .is_none()
         );
         // And the error type is nameable from here, which is all the trait needs of it.
