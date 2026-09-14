@@ -19,6 +19,7 @@ pub mod channel_move;
 pub mod channel_writes;
 pub mod channels;
 pub mod client_log;
+pub mod client_perf;
 pub mod cloud;
 pub mod commands;
 pub mod common_teams;
@@ -46,6 +47,7 @@ pub mod groups;
 pub mod images;
 /// The three job reads. `getJobs`, `getJob` and `getJobsByType`.
 pub mod jobs;
+pub mod latest_version;
 pub mod license;
 pub mod licensed_features;
 pub mod limits;
@@ -2515,6 +2517,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/redirect_location",
             partially_migrated(get(redirect_location::get_redirect_location)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/latest_version")` (api4/system.go:62) — the console's
+        // GitHub release lookup, `manage_system` and not a restricted admin.
+        .route(
+            "/api/v4/latest_version",
+            partially_migrated(get(latest_version::get_latest_version)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/client_perf")` (api4/metrics.go:14) — the webapp's
+        // performance report, which no server in this project has a metrics sink for.
+        .route(
+            "/api/v4/client_perf",
+            partially_migrated(post(client_perf::submit_performance_report)),
         )
         // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
         // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.

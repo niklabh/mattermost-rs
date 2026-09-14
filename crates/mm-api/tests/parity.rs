@@ -65,6 +65,7 @@ mod parity {
     pub mod channels_for_user;
     pub mod channels_member_count;
     pub mod client_log;
+    pub mod client_perf;
     pub mod cloud_and_workspaces;
     pub mod command_writes;
     pub mod commands;
@@ -106,6 +107,7 @@ mod parity {
     pub mod invite_info;
     pub mod job_writes;
     pub mod jobs;
+    pub mod latest_version;
     pub mod licence_gated_channels;
     pub mod license_client;
     pub mod licensed_features;

@@ -1,0 +1,21 @@
+# Mutation plan for `GET /api/v4/latest_version` and `POST /api/v4/client_perf`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/latest-version.plan
+#
+# Two routes with one decision each — the admin gate and the session — plus the status. Not
+# planned, because nothing reachable through the REST API distinguishes them from the original:
+# `session_has_permission_to_and_not_restricted_admin` against `session_has_permission_to` (the
+# stack has `RestrictSystemAdmin` off), dropping `is_valid` (GitHub never answers an id of 0),
+# the cache TTL direction (a refetch returns the same bytes), and `go_json_marshal` against
+# serde (the current release notes carry no `<`, `>` or `&`). Each is a known-equivalent
+# mutant on this deployment, documented here rather than run as a survivor.
+#
+# `control-reorder-two-headers` swaps the two response headers on client_perf; header order
+# is not observed by anything.
+
+lv-permission-inverted	crates/mm-api/src/latest_version.rs	    if !state\n        .app\n        .session_has_permission_to_and_not_restricted_admin	    if state\n        .app\n        .session_has_permission_to_and_not_restricted_admin	api	latest_version
+lv-status-created	crates/mm-api/src/latest_version.rs	        StatusCode::OK,	        StatusCode::CREATED,	api	latest_version
+cp-status-no-content	crates/mm-api/src/client_perf.rs	        StatusCode::OK,	        StatusCode::NO_CONTENT,	api	client_perf
+cp-session-optional	crates/mm-api/src/client_perf.rs	pub async fn submit_performance_report(_session: AuthenticatedSession) -> Response {	pub async fn submit_performance_report(_session: crate::auth_writes::OptionalSession) -> Response {	api	client_perf
+control-rename-release	crates/mm-api/src/latest_version.rs	    let release = state.app.get_latest_version(LATEST_VERSION_URL).await?;\n    let body = mm_model::utils::go_json_marshal(&release)	    let found = state.app.get_latest_version(LATEST_VERSION_URL).await?;\n    let body = mm_model::utils::go_json_marshal(&found)	api	latest_version
+control-reorder-two-headers	crates/mm-api/src/client_perf.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	client_perf

@@ -113,6 +113,90 @@ fn onboarding_row(stored: Option<String>) -> System {
     }
 }
 
+/// `latestVersionCache` (app/admin.go): one entry, kept for twenty-four hours.
+///
+/// A process-global rather than a field on [`App`] for the same reason Go's is a package
+/// variable — there is exactly one upstream and one answer, and a second `App` value (the
+/// licensed test server) sharing it is what Go does too.
+static LATEST_VERSION_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<
+        Option<(
+            std::time::Instant,
+            mm_model::github_release::GithubReleaseInfo,
+        )>,
+    >,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(None));
+
+/// `SetWithExpiry("latest_version_cache", …, 24*time.Hour)`.
+const LATEST_VERSION_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn latest_version_error(err: impl std::error::Error + Send + Sync + 'static) -> Box<AppError> {
+    Box::new(
+        AppError::new(
+            "GetLatestVersion",
+            mm_model::utils::NO_TRANSLATION,
+            None,
+            String::new(),
+            500,
+        )
+        .wrap(err),
+    )
+}
+
+impl App {
+    /// Port of `App.GetLatestVersion` (app/admin.go:204).
+    ///
+    /// The cached release if there is one under a day old; otherwise **one plain `GET`** of
+    /// `latest_version_url` — Go's `http.Get`, so the default client: redirects followed (ten,
+    /// as reqwest's default), **no outbound-connection guard** and **no timeout**, both
+    /// reproduced rather than improved on, because the guard would refuse nothing here (the URL
+    /// is a constant on the public internet) and a timeout would be a behaviour Go does not
+    /// have. GitHub refuses a request without a `User-Agent`, which Go's client always sends;
+    /// this one names this server.
+    ///
+    /// Every failure — transport, body, JSON, `IsValid` — is the same 500 with the
+    /// [`NO_TRANSLATION`](mm_model::utils::NO_TRANSLATION) id and the cause as the detail.
+    /// `json.Unmarshal` ignores GitHub's hundred other fields and this type's `serde(default)`
+    /// tolerates absent ones, so the only shape GitHub can answer with that fails is a release
+    /// whose `id` is zero.
+    #[tracing::instrument(skip_all, fields(cached))]
+    pub async fn get_latest_version(
+        &self,
+        latest_version_url: &str,
+    ) -> AppResult<mm_model::github_release::GithubReleaseInfo> {
+        if let Ok(cache) = LATEST_VERSION_CACHE.lock()
+            && let Some((stored, release)) = cache.as_ref()
+            && stored.elapsed() < LATEST_VERSION_TTL
+        {
+            tracing::Span::current().record("cached", true);
+            // The cache hands out a copy, as Go's does; the handler serialises it and drops it.
+            return Ok(release.clone());
+        }
+        tracing::Span::current().record("cached", false);
+
+        let response = reqwest::Client::builder()
+            .user_agent("mm-api")
+            .build()
+            .map_err(latest_version_error)?
+            .get(latest_version_url)
+            .send()
+            .await
+            .map_err(latest_version_error)?;
+        let body = response.bytes().await.map_err(latest_version_error)?;
+        let release: mm_model::github_release::GithubReleaseInfo =
+            serde_json::from_slice(&body).map_err(latest_version_error)?;
+        release
+            .is_valid()
+            .map_err(|err| latest_version_error(*err))?;
+
+        if let Ok(mut cache) = LATEST_VERSION_CACHE.lock() {
+            // The cache keeps its own copy; the caller gets the other.
+            *cache = Some((std::time::Instant::now(), release.clone()));
+        }
+        Ok(release)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13260,3 +13260,21 @@ verbatim hosts or CIDRs — a refusal is a transport error. `Config` gains the t
 - **Regenerating the fixtures drifts three unrelated files on this machine** — a random
   multipart boundary in `behaviour_filestore.json` and a missing tz database for
   `america/new_york` in the two scheduled-post files. Reverted, not committed.
+
+## `GET /api/v4/latest_version` and `POST /api/v4/client_perf` (2026-09-14)
+
+Route count **495 of 764**. `getLatestVersion`: `manage_system` and not a restricted admin,
+then one plain `http.Get` of the GitHub releases URL — no guard, no timeout, a day's cache —
+and the release `json.Marshal`ed with Go's HTML escaping and no newline; every failure the
+500 with the untranslated id. `submitPerformanceReport` is a session and then **nothing**:
+`Metrics()` is nil on the stack Go, on the licensed oracle (the sink is behind the
+`enterprise || sourceavailable` build tags and `MetricsSettings.Enable`), and structurally
+here, so every body — valid, invalid, not JSON — is a 200 with an empty body, measured on all
+three. The report model and its `IsValid` are not ported; no route reaches them.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/system.rs` — `get_latest_version`, the 24-hour cache | DONE |
+| api | `crates/mm-api/src/latest_version.rs`, `crates/mm-api/src/client_perf.rs`; both registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/latest_version.rs` — 2 (needs the network); `client_perf.rs` — 2 | DONE |
+| mutation | `scripts/mutations/latest-version.plan` — 6 run, 4 caught, 2 controls survived | DONE |
