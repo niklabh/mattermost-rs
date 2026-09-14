@@ -1,5 +1,6 @@
-//! Port of the **read** half of `channels/app/role.go` — `GetRole` (:23), `GetAllRoles` (:42),
-//! `Server.GetRoleByName` (:57) and the merge every one of them ends with (:107).
+//! Port of `channels/app/role.go`: the reads — `GetRole` (:23), `GetAllRoles` (:42),
+//! `Server.GetRoleByName` (:57) and the merge every one of them ends with (:107) — and, since
+//! 2026-09-14, `PatchRole` (:146), `UpdateRole` (:188) and `sendUpdatedRoleEvent` (:279).
 //!
 //! # A role on the wire is the database row, never the compiled default
 //!
@@ -32,9 +33,16 @@
 //! twelve lines of Go and are tested independently. Folding them together is worth doing and is
 //! not worth doing in a session whose sibling worktrees are editing that file.
 
-use mm_model::role::Role;
+use mm_model::role::{
+    BUILT_IN_SCHEME_MANAGED_ROLE_IDS, CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID,
+    CHANNEL_USER_ROLE_ID, NEW_SYSTEM_ROLE_IDS, Role, RolePatch,
+};
+use mm_model::scheme::{
+    SCHEME_SCOPE_CHANNEL, SCHEME_SCOPE_PLAYBOOK, SCHEME_SCOPE_RUN, SCHEME_SCOPE_TEAM,
+};
 use mm_model::utils::{AppError, AppResult};
-use mm_store::RoleStore;
+use mm_model::websocket_message::{WEBSOCKET_EVENT_ROLE_UPDATED, WebSocketEvent};
+use mm_store::{ChannelStore, RoleStore, SchemeStore, StoreError, TeamStore};
 
 use crate::App;
 
@@ -225,6 +233,246 @@ fn apply_higher_scoped(
         if let Some(permissions) = higher_scoped.get(&role.name) {
             role.merge_channel_higher_scoped_permissions(permissions);
         }
+    }
+}
+
+impl App {
+    /// Port of `App.PatchRole` (role.go:146) — the write behind `PUT /roles/{id}/patch`.
+    ///
+    /// **The no-op shortcut is on the set, not the request.** `reflect.DeepEqual(*patch
+    /// .Permissions, role.Permissions)` runs *after* the handler has sorted and de-duplicated
+    /// `patch.Permissions`, and the stored column is itself sorted, so a patch naming the stored
+    /// set in any order answers with the role exactly as read and touches nothing, while a patch
+    /// naming a different set is a write — `update_at` stamped, the event sent. A `null` or
+    /// absent `permissions` is **not** the shortcut: it falls through to `UpdateRole`, which
+    /// rewrites the row and re-stamps `update_at` even though the permissions do not change.
+    #[tracing::instrument(skip_all, fields(role_id = %role.id, no_op))]
+    pub async fn patch_role(&self, mut role: Role, patch: &RolePatch) -> AppResult<Role> {
+        if let Some(permissions) = &patch.permissions
+            && role.permissions.as_ref() == Some(permissions)
+        {
+            tracing::Span::current().record("no_op", true);
+            return Ok(role);
+        }
+        tracing::Span::current().record("no_op", false);
+
+        role.patch(patch);
+        let saved = self.update_role(&role).await?;
+        self.send_updated_role_event(&saved).await?;
+        Ok(saved)
+    }
+
+    /// Port of `App.UpdateRole` (role.go:188): the save, then the roles the change reaches.
+    ///
+    /// A built-in role that is not a channel role — and the four `NewSystemRoleIDs` — is
+    /// inherited by nothing, so the saved row comes straight back. A built-in **channel** role
+    /// is the default every channel scheme's roles merge their higher-scoped permissions from,
+    /// so every live channel-scheme role is re-merged and announced; any other role is taken
+    /// for a team-scheme default and the channel-scheme roles under it are. The announced roles
+    /// are the impacted ones **other than** this one — this one's event belongs to the caller.
+    ///
+    /// Go appends the *argument* (the role as patched, before the store stamped it) to the
+    /// impacted list and merges through that pointer, which is why what it returns is the
+    /// store's copy rather than the merged one; the same two values are kept apart here.
+    pub async fn update_role(&self, role: &Role) -> AppResult<Role> {
+        let saved = self
+            .store()
+            .role()
+            .save(role)
+            .await
+            .map_err(|err| match err {
+                StoreError::InvalidInput { .. } => AppError::boxed(
+                    "UpdateRole",
+                    "app.role.save.invalid_role.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ),
+                other => {
+                    tracing::error!(error = %other, "the role save failed");
+                    AppError::boxed(
+                        "UpdateRole",
+                        "app.role.save.insert.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+
+        let built_in_channel_roles = [
+            CHANNEL_GUEST_ROLE_ID,
+            CHANNEL_USER_ROLE_ID,
+            CHANNEL_ADMIN_ROLE_ID,
+        ];
+        let inherited_by_nothing = BUILT_IN_SCHEME_MANAGED_ROLE_IDS
+            .iter()
+            .filter(|name| !built_in_channel_roles.contains(name))
+            .chain(NEW_SYSTEM_ROLE_IDS.iter())
+            .any(|name| *name == saved.name);
+        if inherited_by_nothing {
+            return Ok(saved);
+        }
+
+        let impacted = if built_in_channel_roles.contains(&saved.name.as_str()) {
+            self.store().role().all_channel_scheme_roles().await
+        } else {
+            self.store()
+                .role()
+                .channel_roles_under_team_role(&saved.name)
+                .await
+        };
+        let mut impacted = impacted.map_err(|err| {
+            tracing::error!(error = %err, "the impacted roles could not be read");
+            AppError::boxed(
+                "UpdateRole",
+                "app.role.get.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+        // A copy, as in Go: the merge rewrites this entry's permissions and the caller keeps its
+        // own value.
+        impacted.push(role.clone());
+        self.merge_channel_higher_scoped_permissions(&mut impacted)
+            .await?;
+
+        for impacted_role in &impacted {
+            if impacted_role.name != saved.name {
+                self.send_updated_role_event(impacted_role).await?;
+            }
+        }
+
+        Ok(saved)
+    }
+
+    /// Port of `App.sendUpdatedRoleEvent` (role.go:279): `role_updated`, the role as a **JSON
+    /// string** under `role` — `json.Marshal`, HTML-escaped — to everyone for a built-in or
+    /// scheme-less role, to each team of a team scheme, to each channel of a channel scheme,
+    /// and to everyone again for a playbook or run scheme. A scheme that cannot be read is
+    /// logged and skipped, not an error; a scope Go does not know is the 500.
+    pub async fn send_updated_role_event(&self, role: &Role) -> AppResult<()> {
+        let json = mm_model::utils::go_json_marshal(role).map_err(|err| {
+            tracing::error!(error = %err, "failed to serialise the role for its event");
+            AppError::boxed(
+                "sendUpdatedRoleEvent",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+        // One string per event: `message.Add` stores the value on each event Go builds.
+        let event = |team_id: &str, channel_id: &str| {
+            let mut message = WebSocketEvent::new(
+                WEBSOCKET_EVENT_ROLE_UPDATED,
+                team_id,
+                channel_id,
+                "",
+                None,
+                "",
+            );
+            message.add("role", serde_json::Value::String(json.clone()));
+            message
+        };
+
+        // Built-in system roles apply to all users; broadcast globally without a DB lookup.
+        if role.built_in {
+            self.publish(event("", "")).await;
+            return Ok(());
+        }
+        // No owning scheme — treat as global (e.g. custom non-scheme role).
+        let Some(scheme_id) = role.scheme_id.as_deref() else {
+            self.publish(event("", "")).await;
+            return Ok(());
+        };
+        let scheme = match self.store().scheme().get(scheme_id).await {
+            Ok(Some(scheme)) => scheme,
+            Ok(None) => {
+                tracing::error!(role_id = %role.id, scheme_id, "Failed to look up scheme for role event; skipping broadcast");
+                return Ok(());
+            }
+            Err(err) => {
+                tracing::error!(role_id = %role.id, scheme_id, error = %err, "Failed to look up scheme for role event; skipping broadcast");
+                return Ok(());
+            }
+        };
+
+        const PAGE_SIZE: usize = 1000;
+        const MAX_BROADCASTS: usize = 100_000;
+        let store_error = |err: StoreError| {
+            tracing::error!(error = %err, "the scheme's holders could not be read");
+            AppError::boxed(
+                "sendUpdatedRoleEvent",
+                "app.role.send_updated_role_event.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        };
+        match scheme.scope.as_str() {
+            SCHEME_SCOPE_TEAM => {
+                let mut total = 0;
+                let mut offset = 0;
+                loop {
+                    let teams = self
+                        .store()
+                        .team()
+                        .get_teams_by_scheme(&scheme.id, offset, PAGE_SIZE as i64)
+                        .await
+                        .map_err(store_error)?;
+                    for team in &teams {
+                        self.publish(event(&team.id, "")).await;
+                    }
+                    total += teams.len();
+                    if teams.len() < PAGE_SIZE {
+                        break;
+                    }
+                    if total >= MAX_BROADCASTS {
+                        tracing::error!(scheme_id = %scheme.id, total, "sendUpdatedRoleEvent: hit broadcast limit for team scheme");
+                        break;
+                    }
+                    offset += PAGE_SIZE as i64;
+                }
+            }
+            SCHEME_SCOPE_CHANNEL => {
+                let mut total = 0;
+                let mut offset = 0;
+                loop {
+                    let channels = self
+                        .store()
+                        .channel()
+                        .get_channels_by_scheme(&scheme.id, offset, PAGE_SIZE as i64)
+                        .await
+                        .map_err(store_error)?;
+                    for channel in &channels {
+                        self.publish(event("", &channel.id)).await;
+                    }
+                    total += channels.len();
+                    if channels.len() < PAGE_SIZE {
+                        break;
+                    }
+                    if total >= MAX_BROADCASTS {
+                        tracing::error!(scheme_id = %scheme.id, total, "sendUpdatedRoleEvent: hit broadcast limit for channel scheme");
+                        break;
+                    }
+                    offset += PAGE_SIZE as i64;
+                }
+            }
+            // Playbook/run schemes don't map to teams or channels; broadcast globally.
+            SCHEME_SCOPE_PLAYBOOK | SCHEME_SCOPE_RUN => self.publish(event("", "")).await,
+            other => {
+                return Err(AppError::boxed(
+                    "sendUpdatedRoleEvent",
+                    "app.role.send_updated_role_event.unknown_scope",
+                    None,
+                    format!("unknown scheme scope: {other}"),
+                    500,
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

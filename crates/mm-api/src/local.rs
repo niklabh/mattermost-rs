@@ -77,7 +77,7 @@ use axum::extract::{Extension, Path as UrlPath, Query, RawPathParams, RawQuery, 
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, get, post};
+use axum::routing::{MethodRouter, get, post, put};
 use mm_model::session::Session;
 use mm_model::utils::AppError;
 
@@ -244,7 +244,7 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
                 get(local_get_user_status).put(local_update_user_status),
             ),
         )
-        // ---- `role_local.go`. Four of its five pairs; `{role_id}/patch` is unported.
+        // ---- `role_local.go`, all five pairs.
         .route(
             "/api/v4/roles",
             partially_migrated(get(local_get_all_roles)),
@@ -263,6 +263,10 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .route(
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(local_get_role)),
+        )
+        .route(
+            "/api/v4/roles/{role_id}/patch",
+            partially_migrated_with_ids(&state, put(local_patch_role)),
         )
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
@@ -500,6 +504,18 @@ async fn local_get_role_by_name(
     request: Request,
 ) -> Response {
     roles::get_role_by_name(state, path, local_session(), request).await
+}
+
+/// `patchRole` through `APILocal` (role_local.go:13).
+///
+/// Every gate in the handler is a `session_has_permission_to` or a licence check, so the local
+/// session passes them all and the row is written as an administrator would write it.
+async fn local_patch_role(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    request: Request,
+) -> Response {
+    roles::patch_role(state, path, local_session(), request).await
 }
 
 /// `getRolesByNames` through `APILocal` (role_local.go:12).

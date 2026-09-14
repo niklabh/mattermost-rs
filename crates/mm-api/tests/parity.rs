@@ -146,6 +146,7 @@ mod parity {
     pub mod recaps;
     pub mod recommended_channels;
     pub mod redirect_location;
+    pub mod role_patch;
     pub mod roles;
     pub mod schemes;
     pub mod server_limits;

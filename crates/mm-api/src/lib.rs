@@ -1617,11 +1617,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/roles",
             partially_migrated(get(roles::get_all_roles)),
         )
-        // `[A-Za-z0-9]+` matches the id middleware's rule exactly. `.../{role_id}/patch` (one
-        // segment longer) falls to `Router::fallback` and stays forwarded.
+        // `[A-Za-z0-9]+` matches the id middleware's rule exactly, on both paths.
         .route(
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(roles::get_role)),
+        )
+        // `BaseRoutes.Roles.Handle("/{role_id:[A-Za-z0-9]+}/patch")` (api4/role.go:28) — the
+        // console's permission editor.
+        .route(
+            "/api/v4/roles/{role_id}/patch",
+            partially_migrated_with_ids(&state, put(roles::patch_role)),
         )
         // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}`, which Go gives a
         // GET, a PUT and a DELETE. All three are served here now. Every other `/posts/...` path Go

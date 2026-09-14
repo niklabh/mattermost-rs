@@ -33,9 +33,21 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::permission::{PERMISSION_MANAGE_SYSTEM, make_permission_error};
-use mm_model::role::{Role, clean_role_names, is_valid_role_name};
-use mm_model::utils::{AppError, is_valid_id, sorted_array_from_json};
+use mm_model::permission::{
+    PERMISSION_MANAGE_ROLES, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_SYSTEM_ROLES,
+    PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+    PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_SYSTEM_ROLES, Permission, make_permission_error,
+};
+use mm_model::role::{
+    CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID, NEW_SYSTEM_ROLE_IDS,
+    PLAYBOOK_ADMIN_ROLE_ID, PLAYBOOK_MEMBER_ROLE_ID, RUN_ADMIN_ROLE_ID, RUN_MEMBER_ROLE_ID, Role,
+    RolePatch, SYSTEM_ADMIN_ROLE_ID, SYSTEM_GUEST_ROLE_ID, SYSTEM_USER_ROLE_ID, TEAM_ADMIN_ROLE_ID,
+    TEAM_GUEST_ROLE_ID, TEAM_USER_ROLE_ID, clean_role_names, is_valid_role_name,
+    permissions_changed_by_patch,
+};
+use mm_model::session::Session;
+use mm_model::utils::{AppError, is_valid_id, remove_duplicate_strings, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -361,6 +373,188 @@ fn parse_role_names(body: &[u8]) -> Result<Vec<String>, ApiError> {
 
     // Go's nil slice; the store short-circuits on it (role_store.go:265).
     Ok(cleaned.unwrap_or_default())
+}
+
+/// `notAllowedPermissions` (api4/role.go:16): the four no patch may add or remove, on any
+/// licence.
+fn not_allowed_permissions() -> [&'static Permission; 4] {
+    [
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_SYSTEM_ROLES,
+        &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_SYSTEM_ROLES,
+        &PERMISSION_MANAGE_ROLES,
+        &PERMISSION_MANAGE_SYSTEM,
+    ]
+}
+
+/// Port of `patchRole` (api4/role.go:130) — `PUT /api/v4/roles/{role_id}/patch`.
+///
+/// In Go's order, because three of the answers depend on it:
+///
+/// 1. `RequireRoleId`, then the body — `json.Decode` into `model.RolePatch`, the 400 naming
+///    **`role`**; see [`decode_role_patch`] for what that decoder accepts.
+/// 2. The role, by id (404), then the **first** permission gate: `manage_system` for the four
+///    `NewSystemRoleIDs` and `system_admin` / `system_user` / `system_guest`,
+///    `sysconsole_write_user_management_permissions` for everything else.
+/// 3. **Unlicensed**, a guest role (`system_guest`, `team_guest`, `channel_guest`) with
+///    `permissions` in the patch is the 501 `api.roles.patch_roles.license.error`.
+/// 4. With `permissions`: any permission the patch would add or remove that is in
+///    [`not_allowed_permissions`] is the 501 `not_allowed_permission.error`, naming it in the
+///    detail; then the list is **sorted and de-duplicated** (`RemoveDuplicateStrings`), which is
+///    the order the row is written in and the response carries.
+/// 5. **Licensed**, a guest role without the `GuestAccountsPermissions` feature is the same 501
+///    as step 3 — after step 4, so a not-allowed permission on a guest role is 4's answer.
+/// 6. The **second** gate: `sysconsole_write_user_management_permissions` again for the twelve
+///    scheme-default roles (`team_admin`, `channel_admin`, the three `*_user`, the three
+///    `*_guest`, the two playbook and the two run roles), and
+///    `sysconsole_write_user_management_system_roles` for every other role — the gate a
+///    `system_manager`, who holds the first permission but not this one, fails on a custom role.
+/// 7. [`mm_app::App::patch_role`], and the role `json.Encoder`-encoded with its newline.
+///
+/// The audit record Go writes around the patch has no port; nothing on the wire carries it.
+#[tracing::instrument(skip_all, fields(role_id = %role_id, role_name))]
+pub async fn patch_role(
+    State(state): State<AppState>,
+    Path(role_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match patch_role_checked(&state, &role_id, &session.0, request).await {
+        Ok(role) => serve_one_role(async { Ok(role) }).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn patch_role_checked(
+    state: &AppState,
+    role_id: &str,
+    session: &Session,
+    request: Request,
+) -> Result<Role, ApiError> {
+    if !is_valid_id(role_id) {
+        return Err(ApiError::invalid_url_param("role_id"));
+    }
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "the request body could not be read");
+            ApiError::invalid_param("role")
+        })?;
+    let mut patch = decode_role_patch(&bytes).ok_or_else(|| ApiError::invalid_param("role"))?;
+
+    let old_role = state.app.get_role(role_id).await?;
+    tracing::Span::current().record("role_name", &old_role.name);
+
+    // manage_system permission is required to patch system_admin and other protected system roles.
+    let protected = NEW_SYSTEM_ROLE_IDS
+        .iter()
+        .chain(
+            [
+                SYSTEM_ADMIN_ROLE_ID,
+                SYSTEM_USER_ROLE_ID,
+                SYSTEM_GUEST_ROLE_ID,
+            ]
+            .iter(),
+        )
+        .any(|name| *name == old_role.name);
+    let required = if protected {
+        &PERMISSION_MANAGE_SYSTEM
+    } else {
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS
+    };
+    if !state.app.session_has_permission_to(session, required).await {
+        return Err(ApiError::from(make_permission_error(session, &[required])));
+    }
+
+    let is_guest = matches!(
+        old_role.name.as_str(),
+        SYSTEM_GUEST_ROLE_ID | TEAM_GUEST_ROLE_ID | CHANNEL_GUEST_ROLE_ID
+    );
+    let license = state.app.license().await?;
+    if license.is_none() && patch.permissions.is_some() && is_guest {
+        return Err(patch_roles_error(
+            "api.roles.patch_roles.license.error",
+            String::new(),
+        ));
+    }
+
+    // Licensed instances can not change permissions in the blacklist set.
+    if patch.permissions.is_some() {
+        for permission in permissions_changed_by_patch(&old_role, &patch) {
+            if not_allowed_permissions()
+                .iter()
+                .any(|not_allowed| not_allowed.id == permission)
+            {
+                return Err(patch_roles_error(
+                    "api.roles.patch_roles.not_allowed_permission.error",
+                    format!("Cannot add or remove permission: {permission}"),
+                ));
+            }
+        }
+        if let Some(permissions) = patch.permissions.as_mut() {
+            remove_duplicate_strings(permissions);
+        }
+    }
+
+    // `*c.App.Channels().License().Features.GuestAccountsPermissions` — a nil feature flag
+    // would be Go's panic; every licence this server verifies carries the flag.
+    if let Some(license) = &license
+        && is_guest
+        && !license
+            .features
+            .as_ref()
+            .and_then(|features| features.guest_accounts_permissions)
+            .unwrap_or(false)
+    {
+        return Err(patch_roles_error(
+            "api.roles.patch_roles.license.error",
+            String::new(),
+        ));
+    }
+
+    let scheme_default = matches!(
+        old_role.name.as_str(),
+        TEAM_ADMIN_ROLE_ID
+            | CHANNEL_ADMIN_ROLE_ID
+            | SYSTEM_USER_ROLE_ID
+            | TEAM_USER_ROLE_ID
+            | CHANNEL_USER_ROLE_ID
+            | SYSTEM_GUEST_ROLE_ID
+            | TEAM_GUEST_ROLE_ID
+            | CHANNEL_GUEST_ROLE_ID
+            | PLAYBOOK_ADMIN_ROLE_ID
+            | PLAYBOOK_MEMBER_ROLE_ID
+            | RUN_ADMIN_ROLE_ID
+            | RUN_MEMBER_ROLE_ID
+    );
+    let required = if scheme_default {
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS
+    } else {
+        &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_SYSTEM_ROLES
+    };
+    if !state.app.session_has_permission_to(session, required).await {
+        return Err(ApiError::from(make_permission_error(session, &[required])));
+    }
+
+    Ok(state.app.patch_role(old_role, &patch).await?)
+}
+
+/// `model.NewAppError("Api4.PatchRoles", id, nil, details, 501)` — both of the handler's own
+/// refusals are `NotImplemented`, and both are attributed to `Api4.PatchRoles`, plural.
+fn patch_roles_error(id: &'static str, details: String) -> ApiError {
+    ApiError::from(AppError::new("Api4.PatchRoles", id, None, details, 501))
+}
+
+/// `json.NewDecoder(r.Body).Decode(&patch)`, as Go's decoder reads it: the **first** JSON value
+/// in the body, whatever follows it ignored; `null` is a decoded zero patch (no `permissions`),
+/// not an error — and it still reaches `UpdateRole`, which rewrites the row; an object is the
+/// patch, its unknown keys dropped; anything else, an empty body included, is the 400.
+fn decode_role_patch(bytes: &[u8]) -> Option<RolePatch> {
+    let mut values = serde_json::Deserializer::from_slice(bytes).into_iter::<serde_json::Value>();
+    match values.next()? {
+        Ok(serde_json::Value::Null) => Some(RolePatch::default()),
+        Ok(value @ serde_json::Value::Object(_)) => serde_json::from_value(value).ok(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

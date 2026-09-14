@@ -1,4 +1,5 @@
-//! Port of `SqlRoleStore` (channels/store/sqlstore/role_store.go) — the four read paths.
+//! Port of `SqlRoleStore` (channels/store/sqlstore/role_store.go) — the four read paths, the
+//! save, and the two channel-scheme reads `UpdateRole` needs.
 //!
 //! # `Permissions` is one text column, not a list
 //!
@@ -28,7 +29,7 @@ use sqlx::PgPool;
 
 use crate::error::StoreError;
 
-/// The read subset of Go's `store.RoleStore` that is ported.
+/// The subset of Go's `store.RoleStore` that is ported.
 pub trait RoleStore {
     /// Port of `SqlRoleStore.Get` (role_store.go:221).
     fn get(
@@ -56,6 +57,32 @@ pub trait RoleStore {
         &self,
         role_names: &[String],
     ) -> impl std::future::Future<Output = Result<BTreeMap<String, RolePermissions>, StoreError>> + Send;
+
+    /// Port of `SqlRoleStore.Save` (role_store.go:103) — an insert when `id` is empty, an
+    /// update of every column otherwise.
+    ///
+    /// `IsValidWithoutId` first, as [`StoreError::InvalidInput`], which the app layer answers
+    /// **400**; anything else is its 500. The returned role is Go's `dbRole.ToModel()`: the
+    /// input with `update_at` (and, on insert, `id` and `create_at`) stamped, and `permissions`
+    /// as the column reads back — de-duplicated in first-occurrence order by
+    /// `NewRoleFromModel`'s map, never `None`. It is **not** re-read from the table.
+    fn save(
+        &self,
+        role: &Role,
+    ) -> impl std::future::Future<Output = Result<Role, StoreError>> + Send;
+
+    /// Port of `SqlRoleStore.AllChannelSchemeRoles` (role_store.go:438): every live role of
+    /// every live channel-scoped scheme.
+    fn all_channel_scheme_roles(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Vec<Role>, StoreError>> + Send;
+
+    /// Port of `SqlRoleStore.ChannelRolesUnderTeamRole` (role_store.go:478): the channel-scheme
+    /// roles of every channel whose team's scheme names `role_name` as a default channel role.
+    fn channel_roles_under_team_role(
+        &self,
+        role_name: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Role>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -119,6 +146,22 @@ impl RoleRow {
 /// fields are produced, so the leading space Go's writer emits disappears.
 fn split_permissions(permissions: &str) -> Vec<String> {
     permissions.split_whitespace().map(str::to_owned).collect()
+}
+
+/// Port of `NewRoleFromModel`'s column writer (role_store.go:50-56): every permission prefixed
+/// with one space, **each kept once** — a `map[string]bool` drops repeats in first-occurrence
+/// order — so the column starts with a space and the leading one is what `Fields` drops on the
+/// way back.
+fn join_permissions(permissions: &[String]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut joined = String::new();
+    for permission in permissions {
+        if seen.insert(permission.as_str()) {
+            joined.push(' ');
+            joined.push_str(permission);
+        }
+    }
+    joined
 }
 
 impl RoleStore for SqlRoleStore {
@@ -261,6 +304,179 @@ impl RoleStore for SqlRoleStore {
     ) -> Result<BTreeMap<String, RolePermissions>, StoreError> {
         self.channel_higher_scoped_permissions_impl(role_names)
             .await
+    }
+
+    #[tracing::instrument(skip(self, role), fields(role_id = %role.id, role_name = %role.name))]
+    async fn save(&self, role: &Role) -> Result<Role, StoreError> {
+        role.is_valid_without_id()
+            .map_err(|err| StoreError::InvalidInput {
+                entity: "Role",
+                field: "<any>",
+                value: err.to_string(),
+            })?;
+
+        let permissions = join_permissions(role.permissions.as_deref().unwrap_or_default());
+        let now = mm_model::utils::get_millis();
+        // `ToModel` on the row that was written: the caller's fields, the stamps, and the
+        // permissions as `strings.Fields` reads the column back.
+        let saved = |id: String, create_at: i64| Role {
+            id,
+            name: role.name.clone(),
+            display_name: role.display_name.clone(),
+            description: role.description.clone(),
+            create_at,
+            update_at: now,
+            delete_at: role.delete_at,
+            permissions: Some(split_permissions(&permissions)),
+            scheme_managed: role.scheme_managed,
+            built_in: role.built_in,
+            scheme_id: role.scheme_id.clone(),
+        };
+
+        if role.id.is_empty() {
+            let id = mm_model::utils::new_id();
+            sqlx::query!(
+                r#"
+                INSERT INTO roles
+                    (id, name, displayname, description, permissions, createat, updateat,
+                     deleteat, schememanaged, builtin, schemeid)
+                VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10)
+                "#,
+                id,
+                role.name,
+                role.display_name,
+                role.description,
+                permissions,
+                now,
+                role.delete_at,
+                role.scheme_managed,
+                role.built_in,
+                role.scheme_id.as_deref(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save Role".to_owned(),
+                source,
+            })?;
+            return Ok(saved(id, now));
+        }
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE roles
+               SET updateat = $2, deleteat = $3, createat = $4, name = $5, displayname = $6,
+                   description = $7, permissions = $8, schememanaged = $9, builtin = $10,
+                   schemeid = $11
+             WHERE id = $1
+            "#,
+            role.id,
+            now,
+            role.delete_at,
+            role.create_at,
+            role.name,
+            role.display_name,
+            role.description,
+            permissions,
+            role.scheme_managed,
+            role.built_in,
+            role.scheme_id.as_deref(),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update Role".to_owned(),
+            source,
+        })?;
+        if result.rows_affected() != 1 {
+            // `fmt.Errorf("invalid number of updated rows, expected 1 but got %d", …)` — a plain
+            // error in Go, so the app layer's 500 rather than a not-found.
+            return Err(StoreError::Stale {
+                entity: "Role",
+                detail: "invalid number of updated rows, expected 1",
+            });
+        }
+        Ok(saved(role.id.clone(), role.create_at))
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn all_channel_scheme_roles(&self) -> Result<Vec<Role>, StoreError> {
+        let rows = sqlx::query_as!(
+            RoleRow,
+            r#"
+            SELECT roles.id,
+                   roles.name,
+                   roles.displayname   AS display_name,
+                   roles.description,
+                   roles.createat      AS create_at,
+                   roles.updateat      AS update_at,
+                   roles.deleteat      AS delete_at,
+                   roles.permissions,
+                   roles.schememanaged AS scheme_managed,
+                   roles.builtin       AS built_in,
+                   roles.schemeid      AS scheme_id
+              FROM roles
+              JOIN schemes ON roles.schemeid = schemes.id
+             WHERE schemes.scope = 'channel'
+               AND roles.deleteat = 0
+               AND schemes.deleteat = 0
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Roles".to_owned(),
+            source,
+        })?;
+        Ok(rows.into_iter().map(RoleRow::into_model).collect())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn channel_roles_under_team_role(
+        &self,
+        role_name: &str,
+    ) -> Result<Vec<Role>, StoreError> {
+        let rows = sqlx::query_as!(
+            RoleRow,
+            r#"
+            SELECT channelschemeroles.id,
+                   channelschemeroles.name,
+                   channelschemeroles.displayname   AS display_name,
+                   channelschemeroles.description,
+                   channelschemeroles.createat      AS create_at,
+                   channelschemeroles.updateat      AS update_at,
+                   channelschemeroles.deleteat      AS delete_at,
+                   channelschemeroles.permissions,
+                   channelschemeroles.schememanaged AS scheme_managed,
+                   channelschemeroles.builtin       AS built_in,
+                   channelschemeroles.schemeid      AS scheme_id
+              FROM roles AS higherscopedroles
+              JOIN schemes AS higherscopedschemes
+                ON (higherscopedroles.name = higherscopedschemes.defaultchannelguestrole
+                    OR higherscopedroles.name = higherscopedschemes.defaultchanneluserrole
+                    OR higherscopedroles.name = higherscopedschemes.defaultchanneladminrole)
+              JOIN teams ON teams.schemeid = higherscopedschemes.id
+              JOIN channels ON channels.teamid = teams.id
+              JOIN schemes AS channelschemes ON channels.schemeid = channelschemes.id
+              JOIN roles AS channelschemeroles ON channelschemeroles.schemeid = channelschemes.id
+             WHERE higherscopedschemes.scope = 'team'
+               AND higherscopedroles.name = $1
+               AND higherscopedroles.deleteat = 0
+               AND higherscopedschemes.deleteat = 0
+               AND teams.deleteat = 0
+               AND channels.deleteat = 0
+               AND channelschemes.deleteat = 0
+               AND channelschemeroles.deleteat = 0
+            "#,
+            role_name
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Roles".to_owned(),
+            source,
+        })?;
+        Ok(rows.into_iter().map(RoleRow::into_model).collect())
     }
 }
 

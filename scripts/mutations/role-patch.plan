@@ -1,0 +1,24 @@
+# Mutation plan for `PUT /api/v4/roles/{role_id}/patch`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/role-patch.plan
+#
+# The `role_patch` suite is the oracle. Two decisions are NOT planned, because no fixture can
+# tell them from the original:
+#   * The FIRST gate (protected -> manage_system, else write_permissions). The one actor who
+#     could distinguish it, `system_manager`, also fails the SECOND gate on every role where
+#     the first would differ, so both readings end 403 with an empty detailed_error — the
+#     permission id never reaches the wire. A wire-equivalent mutant.
+#   * The unlicensed guest license gate. Every way to invert it lets the write through to the
+#     built-in `system_guest` row, which the `roles` suite compares — debris a batch cannot
+#     roll back. Left to the suite, not the mutant.
+#
+# Every planned mutant that writes, writes only a synthetic `mmrspatch%` row (cleaned on the
+# next run) and is caught before the test reaches a built-in role — run one clean full suite
+# before quoting this tally.
+
+noop-check-inverted	crates/mm-app/src/role.rs	            && role.permissions.as_ref() == Some(permissions)	            && role.permissions.as_ref() != Some(permissions)	api	role_patch
+second-gate-inverted	crates/mm-api/src/roles.rs	    let required = if scheme_default {	    let required = if !scheme_default {	api	role_patch
+not-allowed-disabled	crates/mm-api/src/roles.rs	                .any(|not_allowed| not_allowed.id == permission)	                .any(|not_allowed| not_allowed.id == permission && false)	api	role_patch
+dedup-dropped	crates/mm-api/src/roles.rs	            remove_duplicate_strings(permissions);	            let _ = &permissions;	api	role_patch
+control-rename-saved	crates/mm-app/src/role.rs	        let saved = self.update_role(&role).await?;\n        self.send_updated_role_event(&saved).await?;\n        Ok(saved)	        let updated = self.update_role(&role).await?;\n        self.send_updated_role_event(&updated).await?;\n        Ok(updated)	api	role_patch
+control-reorder-guest-license	crates/mm-api/src/roles.rs	    let is_guest = matches!(\n        old_role.name.as_str(),\n        SYSTEM_GUEST_ROLE_ID | TEAM_GUEST_ROLE_ID | CHANNEL_GUEST_ROLE_ID\n    );\n    let license = state.app.license().await?;	    let license = state.app.license().await?;\n    let is_guest = matches!(\n        old_role.name.as_str(),\n        SYSTEM_GUEST_ROLE_ID | TEAM_GUEST_ROLE_ID | CHANNEL_GUEST_ROLE_ID\n    );	api	role_patch

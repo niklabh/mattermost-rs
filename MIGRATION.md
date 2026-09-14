@@ -13292,3 +13292,24 @@ this deployment — is the one 400 `api.image.get.app_error` for every `url`, pa
 | api | `crates/mm-api/src/image_proxy.rs`; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/image_proxy.rs` — 2 | DONE |
 | mutation | `scripts/mutations/image-proxy.plan` — 5 run, 3 caught, 2 controls survived | DONE |
+
+## `PUT /api/v4/roles/{role_id}/patch`, over the port and the socket (2026-09-14)
+
+Route count **497 of 764** (plus the local-mode twin). `patchRole` edits a role's permissions:
+the body (the 400 `role`, a `null` decoding to a permission-less patch that still rewrites the
+row), the role by id, the **first** gate — `manage_system` for the protected roles,
+`sysconsole_write_user_management_permissions` otherwise — the unlicensed guest-role 501, the
+`notAllowedPermissions` 501 over `PermissionsChangedByPatch`, `RemoveDuplicateStrings` (sort +
+dedupe, so the stored order is set-defined and the no-op shortcut is order-insensitive), the
+licensed guest-feature 501, then the **second** gate — `write_permissions` for the twelve
+scheme-default roles, `write_user_management_system_roles` for the rest. `App::patch_role` /
+`update_role` save the row and `send_updated_role_event` broadcasts `role_updated`; the impacted
+channel-scheme re-merge fires only under a licence and is exercised by the unit path.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/role_store.rs` — `save`, `all_channel_scheme_roles`, `channel_roles_under_team_role` | DONE |
+| app | `crates/mm-app/src/role.rs` — `patch_role`, `update_role`, `send_updated_role_event` | DONE |
+| api | `crates/mm-api/src/roles.rs` — `patch_role`; `PUT` in `lib.rs`, `local_patch_role` in `local.rs` | DONE |
+| test | `crates/mm-api/tests/parity/role_patch.rs` — 3 (write+socket+refusals, licensed manager two-gate) | DONE |
+| mutation | `scripts/mutations/role-patch.plan` — 6 run, 4 caught, 2 controls survived | DONE |
