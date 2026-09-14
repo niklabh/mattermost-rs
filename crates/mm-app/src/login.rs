@@ -519,8 +519,9 @@ impl App {
     ///    signal beats the user-agent sniff.
     /// 4. Build the session — roles from `GetRawRoles`, the three `isMobile`/`isSaml`/`isOAuthUser`
     ///    props, and a fresh CSRF token.
-    /// 5. **Set the expiry** from the mobile or the web length. The SSO length is unreachable
-    ///    from this route: `IsSaml` and `IsOAuthUser` are always false here.
+    /// 5. **Set the expiry** from the mobile, the SSO or the web length, in that order of
+    ///    precedence. `login` never sets `IsSaml`/`IsOAuthUser`, so it sees only the first and
+    ///    the last; the desktop-token login sets them from the account and takes the middle.
     /// 6. **Revoke other sessions holding the same device id**, which is a write — and it happens
     ///    before the session exists, so a failure at step 7 leaves those revocations done.
     /// 7. Add the three user-agent props, then `CreateSession`.
@@ -592,10 +593,11 @@ impl App {
 
         let hours = if is_mobile {
             self.config().session_length_mobile_in_hours
+        } else if opts.is_oauth_user || opts.is_saml {
+            // Go's middle arm (app/login.go:176): an SSO account that is not on a mobile device
+            // gets the SSO length — reached from the desktop-token login, never from `login`.
+            self.config().session_length_sso_in_hours
         } else {
-            // Go's middle arm — `IsOAuthUser || IsSaml` and `SessionLengthSSOInHours` — is
-            // unreachable from `login`, which never sets either flag. Not modelled; see the
-            // module doc.
             self.config().session_length_web_in_hours
         };
         self.set_session_expire_in_hours(&mut session, hours);

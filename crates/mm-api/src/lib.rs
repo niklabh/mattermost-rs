@@ -642,10 +642,11 @@ pub fn router(state: AppState) -> Router {
         //
         // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
         // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
-        // [D-430]. `/login/sso/code-exchange` and `/login/desktop_token` are deliberately
-        // **not** registered: leaving them off this router is what keeps them forwarded, and
-        // each needs SSO or the desktop-token store. `/login/cws` is served since 2026-09-14 —
-        // its first statement is the Cloud-licence refusal, which is all this deployment reaches.
+        // [D-430]. `/login/sso/code-exchange` is deliberately **not** registered: leaving it off
+        // this router is what keeps it forwarded, and it needs SSO. `/login/cws` is served since
+        // 2026-09-14 — its first statement is the Cloud-licence refusal, which is all this
+        // deployment reaches — and `/login/desktop_token` since the same day, on the
+        // desktop-token store.
         .route(
             "/api/v4/users/login",
             partially_migrated(post(login::login)),
@@ -653,6 +654,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/login/cws",
             partially_migrated(post(login::login_cws)),
+        )
+        .route(
+            "/api/v4/users/login/desktop_token",
+            partially_migrated(post(login::login_with_desktop_token)),
         )
         .route(
             "/api/v4/users/login/type",
@@ -664,10 +669,9 @@ pub fn router(state: AppState) -> Router {
         // branch table in `user_auth::switch_account_type` and leaves every other method on the
         // path forwarded through `partially_migrated`.
         //
-        // Its two unregistered neighbours — `/login/sso/code-exchange` and
-        // `/login/desktop_token` — are untouched: each needs SSO or the desktop-token store, and
-        // each is a sibling rather than a child of this path, so nothing about this registration
-        // reaches them.
+        // Its unregistered neighbour — `/login/sso/code-exchange` — is untouched: it needs SSO,
+        // and it is a sibling rather than a child of this path, so nothing about this
+        // registration reaches it.
         .route(
             "/api/v4/users/login/switch",
             partially_migrated(post(user_auth::switch_account_type)),
@@ -3496,8 +3500,9 @@ mod tests {
     ///
     /// # Non-vacuity
     ///
-    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token`, which this server
-    /// deliberately forwards, and confirming the assertion fails. It does.
+    /// Checked by temporarily adding `POST /api/v4/users/login/sso/code-exchange`, which this
+    /// server deliberately forwards, and confirming the assertion fails. It does. (The check was
+    /// first made with `/login/desktop_token`, before that route was served.)
     #[tokio::test]
     async fn the_login_routes_and_their_neighbours_are_all_still_answered_here() {
         use axum::http::{Method, Request, StatusCode};
@@ -3634,9 +3639,10 @@ mod tests {
     ///
     /// # Non-vacuity
     ///
-    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token` — a route this
+    /// Checked by temporarily adding `POST /api/v4/users/login/sso/code-exchange` — a route this
     /// server deliberately forwards — to the `anonymous` list and confirming the `x-mmrs-served-by`
-    /// assertion fails on it. It does.
+    /// assertion fails on it. It does. (First made with `/login/desktop_token`, before it was
+    /// served.)
     #[tokio::test]
     async fn the_user_creation_routes_and_their_neighbours_are_all_still_answered_here() {
         use axum::http::{Method, Request, StatusCode};

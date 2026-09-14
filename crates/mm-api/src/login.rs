@@ -561,8 +561,6 @@ async fn split_body(request: Request) -> Result<(Request, Vec<u8>), ApiError> {
     Ok((rebuilt, bytes.to_vec()))
 }
 
-/// `User.Sanitize(map[string]bool{})` never leaves a password behind, and this route is the one
-/// where a leak would hand over a live credential rather than a profile field.
 /// Port of `loginCWS` (api4/user.go:2345) — `POST /api/v4/users/login/cws`, the Customer Web
 /// Server hand-off, `APIHandlerTrustRequester` (no session).
 ///
@@ -598,6 +596,133 @@ pub async fn login_cws(
     .into_response()
 }
 
+/// Port of `loginWithDesktopToken` (api4/user.go:2300) — `POST /api/v4/users/login/desktop_token`,
+/// an `APIHandler` (no session) behind a route-level limit of 2/s that is not ported ([D-430]).
+///
+/// The desktop app's half of an SSO login: the browser finished OAuth or SAML and was handed a
+/// `DesktopTokens` row; the app posts that token here and gets a session. So the body is a
+/// `MapFromJSON` map with `token` and `device_id`, the token is traded through
+/// [`mm_app::App::validate_desktop_token`] with a cut-off of three minutes ago, and the user it
+/// names must be an OAuth or SAML account — an email or LDAP account is the 401
+/// `api.user.login_with_desktop_token.not_oauth_or_saml_user.app_error`, **after** its tokens
+/// were already consumed by the validation.
+///
+/// # Three things `login` does that this does not
+///
+/// - **No `Sanitize`.** `login` calls `user.Sanitize(map[string]bool{})`; this encodes the row
+///   `GetUser` returned as it is. For an SSO account that row has an empty password and
+///   `auth_data` set to the provider's subject, so `auth_data` reaches the wire here and nowhere
+///   else on a login. Reproduced, since wire format wins.
+/// - **Cookies are unconditional.** `AttachSessionCookies` is called without the
+///   `X-Requested-With: XMLHttpRequest` gate.
+/// - **No terms of service.** The `terms_of_service_*` pair is not looked up.
+///
+/// The session takes the **SSO** length: `DoLogin` is called with `IsOAuthUser`/`IsSaml` set
+/// from the account, which is its middle arm — `SessionLengthSSOInHours`, not the web length —
+/// unless a `device_id` makes it mobile. The cookies' `Max-Age` stays the web length, as always.
+#[tracing::instrument(skip_all, fields(outcome))]
+pub async fn login_with_desktop_token(State(state): State<AppState>, request: Request) -> Response {
+    match desktop_token_login(state, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn desktop_token_login(state: AppState, request: Request) -> Result<Response, ApiError> {
+    let headers = request.headers().clone();
+    let (_, bytes) = split_body(request).await?;
+    let props = map_from_json(&bytes);
+    let get = |key: &str| props.get(key).map_or("", String::as_str);
+    let token = get("token");
+    let device_id = get("device_id");
+
+    // `time.Now().Add(-model.DesktopTokenTTL).Unix()` — seconds, like the column.
+    let expiry_time = get_millis() / 1000 - mm_app::desktop_login::DESKTOP_TOKEN_TTL_SECONDS;
+    let user = state
+        .app
+        .validate_desktop_token(token, expiry_time)
+        .await
+        .map_err(|err| {
+            tracing::Span::current().record("outcome", "invalid_token");
+            ApiError::from(*err)
+        })?;
+
+    let is_oauth_user = user.is_oauth_user();
+    let is_saml_user = user.is_saml_user();
+    if !is_oauth_user && !is_saml_user {
+        tracing::Span::current().record("outcome", "not_sso");
+        return Err(ApiError::from(AppError::new(
+            "loginWithDesktopToken",
+            "api.user.login_with_desktop_token.not_oauth_or_saml_user.app_error",
+            None,
+            String::new(),
+            401,
+        )));
+    }
+
+    let opts = LoginOptions {
+        device_id: device_id.to_owned(),
+        is_oauth_user,
+        is_saml: is_saml_user,
+        ..LoginOptions::default()
+    };
+    let session = state
+        .app
+        .do_login(&user, &opts, user_agent(&headers))
+        .await?;
+    tracing::Span::current().record("outcome", "session");
+
+    let mut body = serde_json::to_vec(&user).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise User");
+        ApiError::from(AppError::new(
+            "loginWithDesktopToken",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    // `json.NewEncoder(w).Encode(user)` — with the trailing newline. See [D-086].
+    body.push(b'\n');
+
+    let mut response = (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response();
+
+    let token = axum::http::HeaderValue::from_str(&session.token).map_err(|err| {
+        tracing::error!(error = %err, "the minted session token is not a header value");
+        ApiError::from(AppError::new(
+            "loginWithDesktopToken",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    response.headers_mut().insert(HEADER_TOKEN, token);
+
+    for cookie in session_cookies(&state, &headers, &session) {
+        match axum::http::HeaderValue::from_str(&cookie) {
+            Ok(value) => {
+                response.headers_mut().append("Set-Cookie", value);
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "a session cookie is not a header value");
+            }
+        }
+    }
+
+    Ok(response)
+}
+
+/// `User.Sanitize(map[string]bool{})` never leaves a password behind, and this route is the one
+/// where a leak would hand over a live credential rather than a profile field.
 #[cfg(test)]
 mod tests {
     use super::*;

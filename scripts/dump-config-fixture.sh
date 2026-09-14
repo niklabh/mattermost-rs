@@ -75,6 +75,9 @@ MODELLED = {
         # The web session length, read by `login` for both the session ExpiresAt and the
         # Max-Age of all three cookies. Both keys for the same reason as the mobile pair.
         "SessionLengthWebInHours", "SessionLengthWebInDays",
+        # The SSO session length, read by DoLogin for the desktop-token login sessions.
+        # Both keys again, though this cascade has no `isUpdate` arm.
+        "SessionLengthSSOInHours", "SessionLengthSSOInDays",
         "MaximumLoginAttempts", "EnableMultifactorAuthentication",
         # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
         "EnableAPIUserDeletion",

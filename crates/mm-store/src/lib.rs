@@ -21,6 +21,7 @@ pub mod channel_member_history_store;
 pub mod channel_store;
 pub mod command_store;
 pub mod config_store;
+pub mod desktop_tokens_store;
 pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
@@ -66,6 +67,7 @@ pub use channel_member_history_store::{ChannelMemberHistoryStore, SqlChannelMemb
 pub use channel_store::{ChannelSave, ChannelStore, SqlChannelStore, UnreadsAndMentions};
 pub use command_store::{CommandStore, SqlCommandStore};
 pub use config_store::{ConfigStore, SqlConfigStore};
+pub use desktop_tokens_store::{DesktopTokensStore, SqlDesktopTokensStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
@@ -121,6 +123,7 @@ pub struct SqlStore {
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
     notify_admin: SqlNotifyAdminStore,
+    desktop_tokens: SqlDesktopTokensStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -187,6 +190,7 @@ impl SqlStore {
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
             notify_admin: SqlNotifyAdminStore::new(pool.clone()),
+            desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -305,6 +309,11 @@ impl SqlStore {
     /// Port of `store.Store.NotifyAdmin()`.
     pub fn notify_admin(&self) -> &SqlNotifyAdminStore {
         &self.notify_admin
+    }
+
+    /// Port of `store.Store.DesktopTokens()`.
+    pub fn desktop_tokens(&self) -> &SqlDesktopTokensStore {
+        &self.desktop_tokens
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {

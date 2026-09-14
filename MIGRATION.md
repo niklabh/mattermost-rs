@@ -12987,3 +12987,28 @@ it is without an Enterprise Advanced licence and the ABAC setting; with both it 
 - **The `{}` arm is unmeasured**: the indicator setting is on for the stack and is not flipped.
 - **The policy body is `json.Marshal`**: no trailing newline; the attribute reads' `{}` would be
   encoder-written, with one.
+
+## `POST /api/v4/users/login/desktop_token` (2026-09-14)
+
+Route count **475 of 764**. The desktop app's half of an SSO login: a `DesktopTokens` row the
+browser-side completion wrote is traded for a session. `ValidateDesktopToken` reads the row
+behind a cut-off of three minutes (Unix **seconds**, like the column), deletes the token on a
+miss and *every* token of the account on a hit, and the handler then refuses any account that is
+not OAuth or SAML with the 401 `not_oauth_or_saml_user` — after the tokens are already spent.
+The session takes `DoLogin`'s middle arm, the **SSO** length, which `login` never reached and
+`Config` did not carry; the user is written **unsanitised** (`auth_data` reaches the wire) and
+the three cookies are unconditional. Go's 2/s rate limit on the route is not ported ([D-430]).
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `session_length_sso_in_hours`, the one session cascade with no `isUpdate` arm; fixture reprojected (83 keys) | DONE |
+| store | `crates/mm-store/src/desktop_tokens_store.rs` — `get_user_id`, `delete`, `delete_by_user_id`; `Insert` and `DeleteOlderThan` belong to the SSO pages and the expiry job | DONE |
+| app | `crates/mm-app/src/desktop_login.rs` — `validate_desktop_token`; `login::do_login` gains the SSO-length arm | DONE |
+| api | `crates/mm-api/src/login.rs` — `login_with_desktop_token`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/desktop_login.rs` — 4, tokens planted by SQL, accounts made SSO through Go's `PUT /users/{id}/auth` so Go's user cache agrees | DONE |
+| mutation | `scripts/mutations/desktop-login.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+
+- **Go caches user rows**: an `UPDATE users SET authservice` underneath it leaves Go answering
+  for the plain account. The suite converts accounts through Go's own route for that reason.
+- **The SSO length is 720 on the stack where the web length is 4320**, which is what lets the
+  suite tell the two arms apart.

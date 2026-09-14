@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT userid AS \"user_id!\"\n              FROM desktoptokens\n             WHERE token = $1 AND createat >= $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ac904c64143ba9d217483c25fe467a37d42dc5eb094527473317b9c37f03320f"
+}

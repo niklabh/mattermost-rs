@@ -773,6 +773,16 @@ pub struct Config {
     /// `Expires` of all three cookies (app/login.go:277).
     pub session_length_web_in_hours: i64,
 
+    /// `ServiceSettings.SessionLengthSSOInHours` (config.go:426, defaulted at :785).
+    ///
+    /// The third session length, and the one cascade of the three with **no `isUpdate` arm**:
+    /// `SessionLengthSSOInDays` is filled with 30 whether the document is new or old, and the
+    /// hours follow as `days * 24` — so an absent key is **720** on every server, where the web
+    /// and mobile lengths are 4320 on an updated one. Read by `DoLogin` for a session whose
+    /// `LoginOptions` say `IsOAuthUser` or `IsSaml` and that is not mobile — the desktop-token
+    /// login's sessions. The cookies stay on the web length (app/login.go:277).
+    pub session_length_sso_in_hours: i64,
+
     /// `ServiceSettings.EnableMultifactorAuthentication` (config.go:406, defaulted **`false`**
     /// at :571).
     ///
@@ -1261,6 +1271,8 @@ impl Default for Config {
             // `30 * 24`, the fresh-install arm — the same cascade and the same reasoning as
             // `session_length_mobile_in_hours` above.
             session_length_web_in_hours: 720,
+            // `30 * 24`, and the only arm: the SSO cascade has no `isUpdate` branch.
+            session_length_sso_in_hours: 720,
             enable_multifactor_authentication: false,
             // `new(*s.EnableSignUpWithEmail)`, and that is defaulted `true` immediately above it
             // (config.go:2173), so an empty config resolves to `true` in two steps.
@@ -1788,6 +1800,11 @@ impl Config {
                 "MM_SERVICESETTINGS_SESSIONLENGTHWEBINHOURS",
                 default.session_length_web_in_hours,
             ),
+            session_length_sso_in_hours: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONLENGTHSSOINHOURS",
+                default.session_length_sso_in_hours,
+            ),
             enable_multifactor_authentication: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION",
@@ -2213,6 +2230,12 @@ impl Config {
                 .session_length_web_in_hours
                 .or_else(|| service.session_length_web_in_days.map(|days| days * 24))
                 .unwrap_or(if is_update { 180 * 24 } else { 30 * 24 }),
+            // The SSO cascade (config.go:781) is the same two steps without the `isUpdate`
+            // fork at the bottom: 30 days, whatever the document's age.
+            session_length_sso_in_hours: service
+                .session_length_sso_in_hours
+                .or_else(|| service.session_length_sso_in_days.map(|days| days * 24))
+                .unwrap_or(30 * 24),
             enable_multifactor_authentication: service
                 .enable_multifactor_authentication
                 .unwrap_or(default.enable_multifactor_authentication),
@@ -2634,6 +2657,12 @@ struct ServiceSettingsDocument {
     /// Only ever read as the fallback for the field above, exactly as the mobile pair below.
     #[serde(rename = "SessionLengthWebInDays")]
     session_length_web_in_days: Option<i64>,
+    #[serde(rename = "SessionLengthSSOInHours")]
+    session_length_sso_in_hours: Option<i64>,
+    /// The fallback for the field above, like the two pairs around it — but with no `isUpdate`
+    /// arm behind it.
+    #[serde(rename = "SessionLengthSSOInDays")]
+    session_length_sso_in_days: Option<i64>,
     #[serde(rename = "EnableMultifactorAuthentication")]
     enable_multifactor_authentication: Option<bool>,
     #[serde(rename = "EnableAPIUserDeletion")]
@@ -3536,8 +3565,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 81,
-            "the fixture covers {keys} settings and Config reads 81 from the document. \
+            keys, 83,
+            "the fixture covers {keys} settings and Config reads 83 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3561,6 +3590,7 @@ mod go_parity {
                 "SessionIdleTimeoutInMinutes": 17,
                 "ExtendSessionLengthWithActivity": true,
                 "SessionLengthWebInHours": 19,
+                "SessionLengthSSOInHours": 23,
                 "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
@@ -3697,6 +3727,23 @@ mod go_parity {
         )
         .expect("valid document");
         assert_eq!(both.session_length_web_in_hours, 7);
+
+        // The SSO length is a third key with the same two steps and no update arm: 30 days
+        // even on a document that has a `SiteURL`, where the other two answer 180.
+        let sso = Config::from_document(
+            r#"{"ServiceSettings":{"SiteURL":"","SessionLengthSSOInDays":2}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(sso.session_length_sso_in_hours, 48);
+        assert_eq!(sso.session_length_web_in_hours, 4320);
+        let sso_absent =
+            Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
+        assert_eq!(sso_absent.session_length_sso_in_hours, 720);
+        let sso_hours = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthSSOInDays":2,"SessionLengthSSOInHours":5}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(sso_hours.session_length_sso_in_hours, 5);
 
         // No key at all, and a `SiteURL` present: the update arm, 180 days.
         let update =

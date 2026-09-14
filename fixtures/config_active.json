@@ -108,6 +108,8 @@
     "SessionIdleTimeoutInMinutes": 43200,
     "SessionLengthMobileInDays": 180,
     "SessionLengthMobileInHours": 4320,
+    "SessionLengthSSOInDays": 30,
+    "SessionLengthSSOInHours": 720,
     "SessionLengthWebInDays": 180,
     "SessionLengthWebInHours": 4320,
     "SiteURL": "",

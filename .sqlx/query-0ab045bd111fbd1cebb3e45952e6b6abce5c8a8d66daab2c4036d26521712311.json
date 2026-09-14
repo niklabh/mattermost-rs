@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM desktoptokens WHERE userid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0ab045bd111fbd1cebb3e45952e6b6abce5c8a8d66daab2c4036d26521712311"
+}
