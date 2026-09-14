@@ -1,0 +1,35 @@
+# Mutation plan for the user family on the local socket (`crates/mm-api/src/local_users.rs`,
+# the port of `api4/user_local.go`).
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-users.plan
+#
+# The seventeen wrapped HTTP handlers are mutated by their own plans. What this file tests is
+# what the local family adds: the `local*` functions that are the HTTP handler *minus* a check
+# (the permission gates of `getUsers`, the self check of `getUploadsForUser`, the restrictions
+# of the single-user reads), the session each wrapper hands its handler, and the transport a
+# shared handler's forward branch takes when the request came in on the socket.
+#
+# `proxy-forwards-a-socket-request-over-the-port` is the line worth reading twice. Every shared
+# handler forwards through `proxy::forward_to_go`, which since this family checks for the
+# `GoLocalSocket` request extension and dials the socket. Without that check the MFA
+# deactivation — the one forward `the_local_auth_token_and_conversion_routes_match_over_the_socket`
+# reaches — goes over the port to `APISessionRequiredMfa`, which is a 401 for a request Go's
+# local handler answers 200.
+#
+# Not planned, because equivalent: moving the role-parameter forward after the local 400s.
+# `?role=…&not_in_channel=…` is a `team_id` 400 either way — served here, or forwarded to a Go
+# that validates the role first and then refuses the same thing — and the suite has no way to
+# tell those apart that it should want.
+local-users-list-runs-the-http-gates	crates/mm-api/src/local_users.rs	        GetUsersVariant::Local,	        GetUsersVariant::Http,	api	local_users
+local-users-list-drops-the-team-id-check	crates/mm-api/src/local_users.rs	    if !query.not_in_channel.is_empty() && query.in_team.is_empty() {\n        return Some("team_id");	    if false && !query.not_in_channel.is_empty() && query.in_team.is_empty() {\n        return Some("team_id");	api	local_users
+local-users-list-accepts-sort-admin	crates/mm-api/src/local_users.rs	const LOCAL_SORTS: &[&str] = &["last_activity_at", "create_at", "status"];	const LOCAL_SORTS: &[&str] = &["last_activity_at", "create_at", "status", "admin"];	api	local_users
+local-users-list-reads-in-group	crates/mm-api/src/local_users.rs	    } else if !query.in_channel.is_empty() {\n        Branch::InChannel\n    } else {\n        Branch::All\n    }	    } else if !query.in_channel.is_empty() {\n        Branch::InChannel\n    } else if !query.in_group.is_empty() {\n        Branch::InGroup\n    } else {\n        Branch::All\n    }	api	local_users
+local-get-user-uses-an-ordinary-session	crates/mm-api/src/local_users.rs	    let user = match state.app.get_user(user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n    match users::respond_with_user(\n        &state,\n        &headers,\n        &local_session(),	    let user = match state.app.get_user(user_id).await {\n        Ok(user) => user,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n    match users::respond_with_user(\n        &state,\n        &headers,\n        &crate::auth::AuthenticatedSession(mm_model::session::Session::default()),	api	local_users
+local-users-by-ids-use-an-ordinary-session	crates/mm-api/src/local_users.rs	    match users::serve_users_by_ids(&state, &local_session(), request).await {	    match users::serve_users_by_ids(\n        &state,\n        &crate::auth::AuthenticatedSession(mm_model::session::Session::default()),\n        request,\n    )\n    .await\n    {	api	local_users
+local-delete-forwards-the-soft-arm	crates/mm-api/src/local_users.rs	    if permanent {\n        tracing::Span::current().record("forwarded", true);\n        return forward_over_unix(&go.0, request).await;\n    }	    if !permanent {\n        tracing::Span::current().record("forwarded", true);\n        return forward_over_unix(&go.0, request).await;\n    }	api	local_users
+local-uploads-keep-the-self-check	crates/mm-api/src/local_users.rs	    match uploads::uploads_for_user_response(&state, &user_id).await {	    match match require_local_user_id(&user_id) {\n        Ok(id) => uploads::uploads_for_user_response(&state, id).await,\n        Err(err) => Err(err),\n    } {	api	local_users
+local-auth-data-limit-off-by-one	crates/mm-api/src/users.rs	    if auth_data.is_empty() || auth_data.len() > mm_model::user::USER_AUTH_DATA_MAX_LENGTH {	    if auth_data.is_empty() || auth_data.len() >= mm_model::user::USER_AUTH_DATA_MAX_LENGTH {	api	local_users
+local-create-user-as-a-signup	crates/mm-api/src/local_users.rs	    user_creates::create_user(state, OptionalSession(Some(local_session().0)), request).await	    user_creates::create_user(state, OptionalSession(None), request).await	api	local_users
+proxy-forwards-a-socket-request-over-the-port	crates/mm-api/src/proxy.rs	    if let Some(go) = request.extensions().get::<crate::local::GoLocalSocket>() {	    if let (Some(go), true) = (request.extensions().get::<crate::local::GoLocalSocket>(), false) {	api	local_users
+control-rename-a-binding-and-its-use	crates/mm-api/src/local_users.rs	    let raw_without_team = query_first(query.as_deref(), "without_team").unwrap_or_default();\n    if let Some(parameter) = local_get_users_refusal(&parsed, &raw_without_team) {	    let without_team_raw = query_first(query.as_deref(), "without_team").unwrap_or_default();\n    if let Some(parameter) = local_get_users_refusal(&parsed, &without_team_raw) {	api	local_users
+control-swap-two-independent-registrations	crates/mm-api/src/local_users.rs	            "/api/v4/users/{user_id}/roles",\n            partially_migrated_with_ids(state, put(local_update_user_roles)),\n        )\n        .route(\n            "/api/v4/users/{user_id}/mfa",\n            partially_migrated_with_ids(state, put(local_update_user_mfa)),\n        )	            "/api/v4/users/{user_id}/mfa",\n            partially_migrated_with_ids(state, put(local_update_user_mfa)),\n        )\n        .route(\n            "/api/v4/users/{user_id}/roles",\n            partially_migrated_with_ids(state, put(local_update_user_roles)),\n        )	api	local_users

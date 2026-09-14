@@ -124,6 +124,16 @@ async fn serve_uploads_for_user(
         )));
     }
 
+    uploads_for_user_response(state, user_id).await
+}
+
+/// The list itself, shared with `localGetUploadsForUser` (api4/user_local.go), which calls
+/// `GetUploadSessionsForUser(c.Params.UserId)` with **no `RequireUserId` and no self check** — so
+/// over the socket the segment is used as sent, `me` included, and an unknown id is `[]`.
+pub(crate) async fn uploads_for_user_response(
+    state: &AppState,
+    user_id: &str,
+) -> Result<Response, ApiError> {
     let uploads = state.app.get_upload_sessions_for_user(user_id).await?;
 
     // `json.Marshal` then `w.Write` — **no** trailing newline, unlike `getUpload` one module

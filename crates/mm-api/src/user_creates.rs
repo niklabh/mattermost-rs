@@ -475,16 +475,22 @@ pub async fn verify_user_email_without_token(
 
     state.app.sanitize_profile(&mut user, true);
 
+    // `json.NewEncoder(w).Encode(user)` — the encoder's trailing newline ([D-086]). Missed until
+    // the local-socket suite compared this body byte for byte (2026-09-14); the HTTP suite
+    // compares it as JSON.
     match serde_json::to_vec(&user) {
-        Ok(body) => (
-            StatusCode::OK,
-            [
-                ("Content-Type", "application/json"),
-                ("x-mmrs-served-by", "rust"),
-            ],
-            body,
-        )
-            .into_response(),
+        Ok(mut body) => {
+            body.push(b'\n');
+            (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "application/json"),
+                    ("x-mmrs-served-by", "rust"),
+                ],
+                body,
+            )
+                .into_response()
+        }
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise User");
             ApiError::from(AppError::new(

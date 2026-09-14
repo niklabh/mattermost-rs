@@ -52,8 +52,24 @@ fn forwardable(headers: &HeaderMap) -> HeaderMap {
 /// Mounted as the router's fallback, so it catches every path no handler claimed. Adding a
 /// migrated route is therefore purely additive: nothing here needs an entry removed from a list,
 /// and there is no list to forget to update.
+/// # A request that arrived on the local socket is forwarded over the local socket
+///
+/// The local router (`crate::local`) carries the Go server's socket path as a
+/// [`crate::local::GoLocalSocket`] request extension, and the HTTP handlers it shares with the
+/// TCP router forward through *this* function when they cannot answer. Dialling the port for
+/// such a request would reach `APISessionRequired` instead of `APILocal` — a 401 where Go's
+/// socket answers — so the extension, when present, redirects the leg to
+/// [`crate::local::forward_over_unix`] before anything here runs. The check is on the request
+/// and not on a parameter because the handlers that forward are written once for both routers;
+/// the transport is a property of where the request came from, not of who is answering it.
 #[tracing::instrument(skip_all, fields(method = %request.method(), path = request.uri().path(), upstream_status))]
 pub async fn forward_to_go(State(state): State<AppState>, request: Request) -> Response {
+    if let Some(go) = request.extensions().get::<crate::local::GoLocalSocket>() {
+        // Cloned because the path is borrowed from the request that is about to be moved.
+        let socket = std::sync::Arc::clone(&go.0);
+        return crate::local::forward_over_unix(&socket, request).await;
+    }
+
     let (parts, body) = request.into_parts();
 
     // The path and query go through untouched. Reconstructing them from parsed components would

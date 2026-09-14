@@ -104,7 +104,7 @@ pub(crate) enum ActivityUpdate {
 /// # Not ported
 ///
 /// Privacy settings are the stand-ins from `AppState` (D-085).
-async fn respond_with_user(
+pub(crate) async fn respond_with_user(
     state: &AppState,
     headers: &HeaderMap,
     session: &AuthenticatedSession,
@@ -269,7 +269,7 @@ pub async fn get_user(
 /// the id class by exactly `_`, `-` and `.`, the same three characters the `plugin_id` exception
 /// in `lib.rs` names. A segment outside it never matches Go's route and falls to the mux 404,
 /// so it must be forwarded rather than answered — [D-150]'s rule under a different alphabet.
-fn segment_matches_username_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_username_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
@@ -844,28 +844,10 @@ pub async fn get_user_by_email_at(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    // `strings.ToLower` is Go's simple mapping, which is not Rust's `to_lowercase` on every
-    // input — see [`go_to_lower`].
-    let email = go_to_lower(email);
-    if !mm_model::utils::is_valid_email(&email) {
-        return ApiError::invalid_url_param("email").into_response();
-    }
-
-    let is_admin = state
-        .app
-        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
-        .await;
-    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
-    if options.get("email") != Some(&true) {
-        return ApiError::from(AppError::boxed(
-            "getUserByEmail",
-            "api.user.get_user_by_email.permissions.app_error",
-            None,
-            format!("userId={}", session.0.user_id),
-            403,
-        ))
-        .into_response();
-    }
+    let email = match email_lookup_prologue(&state, &session, email).await {
+        Ok(email) => email,
+        Err(err) => return err.into_response(),
+    };
 
     // The nil-restrictions fast path, checked before the fetch — the same one
     // [`get_user_by_username`] takes, and for the same reason: a caller whose restrictions are
@@ -881,7 +863,7 @@ pub async fn get_user_by_email_at(
     }
     tracing::Span::current().record("forwarded", false);
 
-    let mut user = match state.app.get_user_by_email(&email).await {
+    let user = match state.app.get_user_by_email(&email).await {
         Ok(user) => user,
         // Restrictions are nil for this caller, so Go surfaces the fetch error as-is.
         Err(err) => return ApiError::from(err).into_response(),
@@ -889,6 +871,58 @@ pub async fn get_user_by_email_at(
 
     // `UserCanSeeOtherUser`: self is its first branch, nil restrictions its second. True by
     // construction after the fast path above.
+    respond_user_by_email(&state, &headers, &session, user).await
+}
+
+/// `getUserByEmail`'s two steps before the lookup, shared with `localGetUserByEmail`
+/// (api4/user_local.go), which has the same two and none of the restrictions after them:
+/// `SanitizeEmail` — lower-case, then `IsValidEmail`, a 400 naming `email` as a *url* param —
+/// and the `GetSanitizeOptions(IsSystemAdmin())["email"]` gate, a 403 for anyone the privacy
+/// setting hides addresses from. Returns the lowered address.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn email_lookup_prologue(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    email: &str,
+) -> Result<String, ApiError> {
+    // `strings.ToLower` is Go's simple mapping, which is not Rust's `to_lowercase` on every
+    // input — see [`go_to_lower`].
+    let email = go_to_lower(email);
+    if !mm_model::utils::is_valid_email(&email) {
+        return Err(ApiError::invalid_url_param("email"));
+    }
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
+    if options.get("email") != Some(&true) {
+        return Err(ApiError::from(AppError::boxed(
+            "getUserByEmail",
+            "api.user.get_user_by_email.permissions.app_error",
+            None,
+            format!("userId={}", session.0.user_id),
+            403,
+        )));
+    }
+    Ok(email)
+}
+
+/// The tail of `getUserByEmail` and `localGetUserByEmail`, identical in both: the etag, the 304,
+/// `SanitizeProfile(user, IsSystemAdmin())` with **no self branch and no terms of service**, and
+/// the encoder's newline.
+pub(crate) async fn respond_user_by_email(
+    state: &AppState,
+    headers: &HeaderMap,
+    session: &AuthenticatedSession,
+    mut user: User,
+) -> Response {
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
 
     let etag = user.etag(state.show_full_name(), state.show_email_address());
     if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
@@ -1033,7 +1067,7 @@ pub async fn get_users_by_ids(
     }
 }
 
-async fn serve_users_by_ids(
+pub(crate) async fn serve_users_by_ids(
     state: &AppState,
     session: &AuthenticatedSession,
     request: axum::extract::Request,
@@ -1095,33 +1129,33 @@ async fn serve_users_by_ids(
 /// applies on the way in: `url.Values.Get` for the strings and `strconv.ParseBool` — error
 /// discarded — for the flags.
 #[derive(Debug, Default, PartialEq, Eq)]
-struct GetUsersQuery {
-    in_team: String,
-    not_in_team: String,
-    in_channel: String,
-    not_in_channel: String,
-    in_group: String,
-    not_in_group: String,
-    group_constrained: bool,
-    without_team: bool,
-    inactive: bool,
-    active: bool,
-    role: String,
-    roles: String,
-    channel_roles: String,
-    team_roles: String,
-    sort: String,
+pub(crate) struct GetUsersQuery {
+    pub(crate) in_team: String,
+    pub(crate) not_in_team: String,
+    pub(crate) in_channel: String,
+    pub(crate) not_in_channel: String,
+    pub(crate) in_group: String,
+    pub(crate) not_in_group: String,
+    pub(crate) group_constrained: bool,
+    pub(crate) without_team: bool,
+    pub(crate) inactive: bool,
+    pub(crate) active: bool,
+    pub(crate) role: String,
+    pub(crate) roles: String,
+    pub(crate) channel_roles: String,
+    pub(crate) team_roles: String,
+    pub(crate) sort: String,
     /// Read only inside the two `not_in_*` branches (api4/user.go:1021, 1062).
-    abac_match_only: bool,
+    pub(crate) abac_match_only: bool,
     /// `c.Params.Page` / `c.Params.PerPage` from the shared middleware — never a 400, whatever
     /// the caller sends. There is **no `since` here**: `UserGetOptions.UpdatedAfter` exists but
     /// `getUsers` never sets it, so the store's `UpdatedAfter` filter is unreachable from this
     /// route (it is `POST /users/ids` that has `since`).
-    page: i64,
-    per_page: i64,
+    pub(crate) page: i64,
+    pub(crate) per_page: i64,
 }
 
-fn parse_get_users_request(query: Option<&str>) -> GetUsersQuery {
+pub(crate) fn parse_get_users_request(query: Option<&str>) -> GetUsersQuery {
     let get = |key: &str| crate::channels::query_first(query, key).unwrap_or_default();
     GetUsersQuery {
         in_team: get("in_team"),
@@ -1153,7 +1187,7 @@ fn parse_get_users_request(query: Option<&str>) -> GetUsersQuery {
 /// lets the forwarding rules below be scoped to the parameters Go actually reads on the arm it
 /// picked, rather than to the parameters merely present in the query string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Branch {
+pub(crate) enum Branch {
     WithoutTeam,
     NotInChannel,
     NotInTeam,
@@ -1366,7 +1400,16 @@ pub async fn get_users(
     }
     tracing::Span::current().record("forwarded", false);
 
-    match serve_users(&state, &headers, &session, &parsed, branch).await {
+    match serve_users(
+        &state,
+        &headers,
+        &session,
+        &parsed,
+        branch,
+        GetUsersVariant::Http,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -1384,13 +1427,33 @@ fn etag_matches(headers: &HeaderMap, etag: &str) -> bool {
 /// The dispatch itself: one arm per served branch, each with its own permission gate, in Go's
 /// order. Returns the etag alongside the users so the caller can set the header only when Go
 /// would — `if etag != ""` (api4/user.go:1136).
-async fn serve_users(
+/// Which Go function [`serve_users`] is standing in for.
+///
+/// `getUsers` (api4/user.go) and `localGetUsers` (api4/user_local.go) dispatch to the same store
+/// calls but are two functions, and they differ in exactly two things this port can observe: the
+/// HTTP one gates each arm on a `SessionHasPermissionTo{Channel,Team}` and touches the session's
+/// last activity; the local one does neither. The gates are not merely short-circuited for a
+/// local session — `SessionHasPermissionToChannel` fetches the channel first and denies when it
+/// does not exist (app/authorization.go), so `?in_channel=<no such channel>` is a **403 over the
+/// port and `[]` over the socket**. A flag rather than a copy of the function, so the two cannot
+/// drift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GetUsersVariant {
+    /// `getUsers`: the permission gates run and the session is touched.
+    Http,
+    /// `localGetUsers`: no gates, no touch — `ViewRestrictions: nil` and `IsSystemAdmin()` true.
+    Local,
+}
+
+pub(crate) async fn serve_users(
     state: &AppState,
     headers: &HeaderMap,
     session: &AuthenticatedSession,
     query: &GetUsersQuery,
     branch: Branch,
+    variant: GetUsersVariant,
 ) -> Result<Response, ApiError> {
+    let gated = variant == GetUsersVariant::Http;
     let page = UserPage {
         page: query.page,
         per_page: query.per_page,
@@ -1400,14 +1463,18 @@ async fn serve_users(
 
     let (users, etag) = match branch {
         Branch::NotInChannel => {
-            let (allowed, _) = state
-                .app
-                .session_has_permission_to_channel(
-                    &session.0,
-                    &query.not_in_channel,
-                    &PERMISSION_READ_CHANNEL,
-                )
-                .await;
+            let (allowed, _) = if gated {
+                state
+                    .app
+                    .session_has_permission_to_channel(
+                        &session.0,
+                        &query.not_in_channel,
+                        &PERMISSION_READ_CHANNEL,
+                    )
+                    .await
+            } else {
+                (true, false)
+            };
             if !allowed {
                 return Err(ApiError::from(make_permission_error(
                     &session.0,
@@ -1421,14 +1488,15 @@ async fn serve_users(
             (users, None)
         }
         Branch::NotInTeam => {
-            if !state
-                .app
-                .session_has_permission_to_team(
-                    &session.0,
-                    &query.not_in_team,
-                    &PERMISSION_VIEW_TEAM,
-                )
-                .await
+            if gated
+                && !state
+                    .app
+                    .session_has_permission_to_team(
+                        &session.0,
+                        &query.not_in_team,
+                        &PERMISSION_VIEW_TEAM,
+                    )
+                    .await
             {
                 return Err(ApiError::from(make_permission_error(
                     &session.0,
@@ -1454,10 +1522,15 @@ async fn serve_users(
             (users, Some(etag))
         }
         Branch::InTeam => {
-            if !state
-                .app
-                .session_has_permission_to_team(&session.0, &query.in_team, &PERMISSION_VIEW_TEAM)
-                .await
+            if gated
+                && !state
+                    .app
+                    .session_has_permission_to_team(
+                        &session.0,
+                        &query.in_team,
+                        &PERMISSION_VIEW_TEAM,
+                    )
+                    .await
             {
                 return Err(ApiError::from(make_permission_error(
                     &session.0,
@@ -1482,14 +1555,18 @@ async fn serve_users(
             (users, Some(etag))
         }
         Branch::InChannel => {
-            let (allowed, _) = state
-                .app
-                .session_has_permission_to_channel(
-                    &session.0,
-                    &query.in_channel,
-                    &PERMISSION_READ_CHANNEL,
-                )
-                .await;
+            let (allowed, _) = if gated {
+                state
+                    .app
+                    .session_has_permission_to_channel(
+                        &session.0,
+                        &query.in_channel,
+                        &PERMISSION_READ_CHANNEL,
+                    )
+                    .await
+            } else {
+                (true, false)
+            };
             if !allowed {
                 return Err(ApiError::from(make_permission_error(
                     &session.0,
@@ -1535,11 +1612,14 @@ async fn serve_users(
     // `c.App.Srv().Platform().UpdateLastActivityAtIfNeeded(*c.AppContext.Session())`
     // (api4/user.go:1169) — the second of Go's four call sites, and the second this server
     // reaches. It sits after the two etag arms, so the 304s returned above do not refresh the
-    // session, exactly as in `respond_with_user`. See [`ActivityUpdate`].
-    state
-        .app
-        .update_last_activity_at_if_needed(&session.0)
-        .await;
+    // session, exactly as in `respond_with_user`. See [`ActivityUpdate`]. `localGetUsers` has
+    // no such line.
+    if gated {
+        state
+            .app
+            .update_last_activity_at_if_needed(&session.0)
+            .await;
+    }
 
     let body = serde_json::to_vec(&users).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the user list");
@@ -2467,15 +2547,9 @@ async fn serve_user_by_auth_data(
         )));
     }
 
-    // Two separate `SetInvalidParam("value")` calls, one for empty and one for over-long, and
-    // they produce the **same** body — so the bound is invisible to a client except as the
-    // difference between a 400 and a 200.
-    let auth_data = query_first(query, "value").unwrap_or_default();
-    if auth_data.is_empty() || auth_data.len() > mm_model::user::USER_AUTH_DATA_MAX_LENGTH {
-        return Err(ApiError::invalid_param("value"));
-    }
+    let auth_data = auth_data_value(query)?;
 
-    let mut user = state.app.get_user_by_auth_data(&auth_data).await?;
+    let user = state.app.get_user_by_auth_data(&auth_data).await?;
     tracing::Span::current().record("user_id", user.id.as_str());
 
     let can_see = match state
@@ -2497,7 +2571,33 @@ async fn serve_user_by_auth_data(
         )));
     }
 
-    // Unconditional here, unlike `getUser`, which guards it with self-or-admin.
+    respond_user_by_auth_data(state, headers, user)
+        .await
+        .map(Some)
+}
+
+/// The `value` parameter of `getUserByAuthData` and `localGetUserByAuthData`, validated as both
+/// do: two separate `SetInvalidParam("value")` calls, one for empty and one for over-long, and
+/// they produce the **same** body — so the bound is invisible to a client except as the
+/// difference between a 400 and a 200.
+#[allow(clippy::result_large_err)]
+pub(crate) fn auth_data_value(query: Option<&str>) -> Result<String, ApiError> {
+    let auth_data = query_first(query, "value").unwrap_or_default();
+    if auth_data.is_empty() || auth_data.len() > mm_model::user::USER_AUTH_DATA_MAX_LENGTH {
+        return Err(ApiError::invalid_param("value"));
+    }
+    Ok(auth_data)
+}
+
+/// The tail of `getUserByAuthData` and `localGetUserByAuthData` after the row is found: the
+/// terms of service (unconditional, unlike `getUser`), the etag, and `SanitizeProfile(user,
+/// true)` — `true` because the HTTP route's `IsSystemAdmin` gate has already refused everyone
+/// else, and because a local session *is* a system admin to that check.
+pub(crate) async fn respond_user_by_auth_data(
+    state: &AppState,
+    headers: &HeaderMap,
+    mut user: User,
+) -> Result<Response, ApiError> {
     match state.app.get_user_terms_of_service(&user.id).await {
         Ok(terms) => {
             user.terms_of_service_id = terms.terms_of_service_id;
@@ -2511,9 +2611,7 @@ async fn serve_user_by_auth_data(
     if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
         && if_none_match == etag
     {
-        return Ok(Some(
-            (StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response(),
-        ));
+        return Ok((StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response());
     }
 
     // `c.App.SanitizeProfile(user, c.IsSystemAdmin())`, and the caller is a system admin by the
@@ -2535,18 +2633,16 @@ async fn serve_user_by_auth_data(
     })?;
     body.push(b'\n');
 
-    Ok(Some(
-        (
-            StatusCode::OK,
-            [
-                (HEADER_ETAG_SERVER, etag.as_str()),
-                ("Content-Type", "application/json"),
-                ("x-mmrs-served-by", "rust"),
-            ],
-            body,
-        )
-            .into_response(),
-    ))
+    Ok((
+        StatusCode::OK,
+        [
+            (HEADER_ETAG_SERVER, etag.as_str()),
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 /// Port of `getUsersWithInvalidEmails` (api4/user.go:4234) — `GET /api/v4/users/invalid_emails`.
