@@ -13141,3 +13141,19 @@ everything past those refusals (the fake-password swap, the SMTP send) is forwar
 | api | `crates/mm-api/src/email_test.rs` — the nil-field check read off the serialised section; registered in `lib.rs` | DONE |
 | test | `crates/mm-api/tests/parity/email_test.rs` — 1, the fixture's full section with `SMTPServer` swapped | DONE |
 | mutation | `scripts/mutations/email-test.plan` — 8 run, 6 caught, 2 controls survived | DONE |
+
+## `POST /api/v4/logs` (2026-09-14)
+
+Route count **483 of 764** on this branch. `postLog`, the client's log line: with
+`ServiceSettings.EnableDeveloper` off, no session is the 403 and a non-admin's line is forced to
+debug; the body is Go's `map[string]string` decode — every key kept, a non-string value as `""`
+(the entry exists before its value fails; **measured**, where serde would drop the map) — the
+message cut at 399 bytes and prefixed, the line written at error only for `level == "ERROR"`,
+and the map echoed back, keys sorted, with the encoder's newline. `Config` gains the flag.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `enable_developer`; fixture reprojected | DONE |
+| api | `crates/mm-api/src/client_log.rs`; the `POST` on `/logs` in `lib.rs`, the `GET` (the server's log file) still forwarded | DONE |
+| test | `crates/mm-api/tests/parity/client_log.rs` — 1, the echoes byte for byte | DONE |
+| mutation | `scripts/mutations/client-log.plan` — 9 run, 7 caught, 2 controls survived | DONE |

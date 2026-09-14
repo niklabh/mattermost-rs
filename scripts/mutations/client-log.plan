@@ -1,0 +1,16 @@
+# Mutation plan for POST /logs — the developer gate, the forced level, the map decode, the cut,
+# and the echo.
+#
+#   scripts/mutate-batch.sh scripts/mutations/client-log.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+developer-gate-inverted	crates/mm-api/src/client_log.rs	    if !state.app.config().enable_developer {	    if state.app.config().enable_developer {	api	client_log
+no-session-is-401	crates/mm-api/src/client_log.rs	                "api.context.permissions.app_error",\n                None,\n                String::new(),\n                403,	                "api.context.permissions.app_error",\n                None,\n                String::new(),\n                401,	api	client_log
+mistyped-value-dropped	crates/mm-api/src/client_log.rs	                _ => (key, String::new()),	                _ => (key, value.to_string()),	api	client_log
+cut-at-400	crates/mm-api/src/client_log.rs	const MESSAGE_CUT: usize = 399;	const MESSAGE_CUT: usize = 400;	api	client_log
+cut-threshold-off	crates/mm-api/src/client_log.rs	    let cut = if raw.len() > 400 {	    let cut = if raw.len() > 399 {	api	client_log
+prefix-misspelt	crates/mm-api/src/client_log.rs	const MESSAGE_PREFIX: &str = "Client Logs API Endpoint Message: ";	const MESSAGE_PREFIX: &str = "Client Logs API Endpoint Message:";	api	client_log
+newline-dropped	crates/mm-api/src/client_log.rs	    body.push(b'\\n');	    body.push(b' ');	api	client_log
+control-rename-cut	crates/mm-api/src/client_log.rs	    let cut = if raw.len() > 400 {\n        String::from_utf8_lossy(&raw.as_bytes()[..MESSAGE_CUT]).into_owned()\n    } else {\n        raw.to_owned()\n    };\n    let message = format!("{MESSAGE_PREFIX}{cut}");	    let trimmed = if raw.len() > 400 {\n        String::from_utf8_lossy(&raw.as_bytes()[..MESSAGE_CUT]).into_owned()\n    } else {\n        raw.to_owned()\n    };\n    let message = format!("{MESSAGE_PREFIX}{trimmed}");	api	client_log
+control-reorder-headers	crates/mm-api/src/client_log.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),	api	client_log
