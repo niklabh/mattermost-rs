@@ -563,6 +563,41 @@ async fn split_body(request: Request) -> Result<(Request, Vec<u8>), ApiError> {
 
 /// `User.Sanitize(map[string]bool{})` never leaves a password behind, and this route is the one
 /// where a leak would hand over a live credential rather than a profile field.
+/// Port of `loginCWS` (api4/user.go:2345) — `POST /api/v4/users/login/cws`, the Customer Web
+/// Server hand-off, `APIHandlerTrustRequester` (no session).
+///
+/// **Its first statement is `License().IsCloud()`**, and the 401 `api.user.login_cws.license.error`
+/// it gives when that is false comes before the form is parsed. `IsCloud` is nil-safe and reads
+/// `Features.Cloud`, which no licence this deployment can carry sets — the stack's Enterprise
+/// licence included — so the whole route is that refusal here. A Cloud licence would reach the
+/// token exchange and the redirect, which is forwarded rather than guessed at.
+#[tracing::instrument(skip_all, fields(cloud))]
+pub async fn login_cws(
+    axum::extract::State(state): axum::extract::State<crate::AppState>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    let cloud = match state.app.license().await {
+        Ok(license) => license.is_some_and(|l| l.is_cloud()),
+        Err(err) => return crate::error::ApiError::from(*err).into_response(),
+    };
+    tracing::Span::current().record("cloud", cloud);
+    if cloud {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing a Cloud login to Go");
+        return crate::proxy::forward_to_go(axum::extract::State(state), request).await;
+    }
+    crate::error::ApiError::from(mm_model::utils::AppError::new(
+        "loginCWS",
+        "api.user.login_cws.license.error",
+        None,
+        String::new(),
+        401,
+    ))
+    .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -46,6 +46,7 @@ pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
 pub mod login;
+pub mod migrate_auth;
 pub mod multipart;
 pub mod oauth;
 pub mod permissions;
@@ -455,6 +456,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/search",
             partially_migrated(post(users::search_users)),
         )
+        // `BaseRoutes.Users.Handle("/migrate_auth/ldap")` and `("/migrate_auth/saml")`
+        // (api4/user.go:103-104): two static segments under `/users/`.
+        .route(
+            "/api/v4/users/migrate_auth/ldap",
+            partially_migrated(post(migrate_auth::migrate_auth_to_ldap)),
+        )
+        .route(
+            "/api/v4/users/migrate_auth/saml",
+            partially_migrated(post(migrate_auth::migrate_auth_to_saml)),
+        )
         // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
         // usernames it found in a page of posts.
         .route(
@@ -623,12 +634,17 @@ pub fn router(state: AppState) -> Router {
         //
         // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
         // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
-        // [D-430]. `/login/sso/code-exchange`, `/login/desktop_token`, `/login/switch` and
-        // `/login/cws` are deliberately **not** registered: leaving them off this router is what
-        // keeps them forwarded, and each needs SSO, a licence or CWS.
+        // [D-430]. `/login/sso/code-exchange` and `/login/desktop_token` are deliberately
+        // **not** registered: leaving them off this router is what keeps them forwarded, and
+        // each needs SSO or the desktop-token store. `/login/cws` is served since 2026-09-14 —
+        // its first statement is the Cloud-licence refusal, which is all this deployment reaches.
         .route(
             "/api/v4/users/login",
             partially_migrated(post(login::login)),
+        )
+        .route(
+            "/api/v4/users/login/cws",
+            partially_migrated(post(login::login_cws)),
         )
         .route(
             "/api/v4/users/login/type",
@@ -640,10 +656,10 @@ pub fn router(state: AppState) -> Router {
         // branch table in `user_auth::switch_account_type` and leaves every other method on the
         // path forwarded through `partially_migrated`.
         //
-        // Its three unregistered neighbours — `/login/sso/code-exchange`, `/login/desktop_token`
-        // and `/login/cws` — are untouched: each needs SSO, a licence or CWS, and each is a
-        // sibling rather than a child of this path, so nothing about this registration reaches
-        // them.
+        // Its two unregistered neighbours — `/login/sso/code-exchange` and
+        // `/login/desktop_token` — are untouched: each needs SSO or the desktop-token store, and
+        // each is a sibling rather than a child of this path, so nothing about this registration
+        // reaches them.
         .route(
             "/api/v4/users/login/switch",
             partially_migrated(post(user_auth::switch_account_type)),

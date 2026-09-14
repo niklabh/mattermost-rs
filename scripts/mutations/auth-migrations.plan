@@ -1,0 +1,18 @@
+# Mutation plan for the two auth migrations and the cloud login — validation order, the
+# permission, and the refusal each ends in.
+#
+#   scripts/mutate-batch.sh scripts/mutations/auth-migrations.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# The last two lines are the no-op controls and must SURVIVE.
+# Dropped after the first batch: `from-empty-accepted` (the `!from.is_empty()` guard) survived because
+# `""` is rejected by the provider list anyway — an equivalent mutant, so the guard was removed instead.
+
+ldap-third-provider-wrong	crates/mm-api/src/migrate_auth.rs	    if !from_is_valid(from, "saml") {	    if !from_is_valid(from, "ldap") {	api	auth_migrations
+force-type-unchecked	crates/mm-api/src/migrate_auth.rs	    if props.get("force").and_then(|v| v.as_bool()).is_none() {	    if props.get("force").is_none() {	api	auth_migrations
+matches-type-unchecked	crates/mm-api/src/migrate_auth.rs	    if props.get("matches").and_then(|v| v.as_object()).is_none() {	    if props.get("matches").is_none() {	api	auth_migrations
+ldap-permission-skipped	crates/mm-api/src/migrate_auth.rs	        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        ))\n        .into_response();\n    }\n\n    // The licence's LDAP feature	        let _ = make_permission_error(&session.0, &[&PERMISSION_MANAGE_SYSTEM]);\n    }\n\n    // The licence's LDAP feature	api	auth_migrations
+saml-status-403	crates/mm-api/src/migrate_auth.rs	    not_available(\n        "api.migrateAuthToSaml",\n        "api.admin.saml.not_available.app_error",\n    )	    ApiError::from(AppError::new(\n        "api.migrateAuthToSaml",\n        "api.admin.saml.not_available.app_error",\n        None,\n        String::new(),\n        403,\n    ))\n    .into_response()	api	auth_migrations
+cws-gate-inverted	crates/mm-api/src/login.rs	    if cloud {\n        tracing::Span::current().record("forwarded", true);	    if !cloud {\n        tracing::Span::current().record("forwarded", true);	api	auth_migrations
+control-annotate-cloud	crates/mm-api/src/login.rs	    let cloud = match state.app.license().await {	    let cloud: bool = match state.app.license().await {	api	auth_migrations
+control-annotate-from	crates/mm-api/src/migrate_auth.rs	fn from_is_valid(from: &str, third: &str) -> bool {	fn from_is_valid(from: &str, third: &str) -> bool /* providers */ {	api	auth_migrations

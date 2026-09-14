@@ -68,6 +68,20 @@ async fn assert_served_by_rust(client: &reqwest::Client, token: &str, path: &str
     );
 }
 
+/// `data_retention` has no worker on this build, so no row of that type is ever legitimate
+/// here — the two empty-page tests count on that. A row can still appear: a mutation batch
+/// running `job_writes` with the worker-set check mutated lets this server create one, and the
+/// batch restores the code, not the table. Swept, rather than trusted absent.
+async fn sweep_data_retention_jobs() {
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    sqlx::query("DELETE FROM jobs WHERE type = 'data_retention'")
+        .execute(&pool)
+        .await
+        .expect("swept");
+}
+
 /// **The finding this suite exists for.** An empty `getJobs` page is the four bytes `null`; an
 /// empty `getJobsByType` page is `[]`. Same admin, same database, same zero `data_retention` rows.
 #[tokio::test]
@@ -76,6 +90,7 @@ async fn an_empty_page_is_null_on_one_route_and_empty_on_the_other() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    sweep_data_retention_jobs().await;
     let client = client();
     let token = go_minted_token(&client).await;
 
@@ -100,6 +115,7 @@ async fn a_status_filter_turns_getjobs_null_into_empty() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    sweep_data_retention_jobs().await;
     let client = client();
     let token = go_minted_token(&client).await;
 

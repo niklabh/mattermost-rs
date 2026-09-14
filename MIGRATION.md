@@ -12904,3 +12904,23 @@ A job created here is run by Go's worker off the shared table.
   bodies differ there and the suite compares around it.
 - **The team-admin policy-ownership arm** of the sync matrices is enterprise ABAC and answers
   `false` here, as an unlicensed Go does.
+
+## The two auth migrations and the cloud login (2026-09-14)
+
+Route count **471 of 764**. `POST /users/migrate_auth/ldap` and `/saml` validate their body in
+Go's order (each fault its own 400), require `manage_system`, and then answer the 501
+`api.admin.{ldap,saml}.not_available.app_error` — the licence arm and the nil
+`AccountMigration()` arm carry the same id, so the licensed pair agrees and the migration is
+reachable on neither ([D-571]). `POST /users/login/cws`, with no session, is the 401
+`api.user.login_cws.license.error` before the form is read: `IsCloud` is false for every licence
+this deployment can hold; a Cloud one forwards.
+
+| layer | file | status |
+|---|---|---|
+| api | `crates/mm-api/src/migrate_auth.rs` — two handlers; `login::login_cws`; registered in `lib.rs` | DONE |
+| test | `crates/mm-api/tests/parity/auth_migrations.rs` — 3, unlicensed and licensed pairs | DONE |
+| mutation | `scripts/mutations/auth-migrations.plan` — 8 run, 6 caught, 2 controls survived (one equivalent mutant dropped, see the plan header) | DONE |
+
+- **The migrations' `from` list differs by one provider**: `saml` is accepted by the LDAP
+  migration and `ldap` by the SAML one; `""` fails both.
+- **The cloud login is served without a session**, as `APIHandlerTrustRequester` registers it.
