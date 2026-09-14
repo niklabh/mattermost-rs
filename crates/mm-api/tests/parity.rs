@@ -93,6 +93,7 @@ mod parity {
     pub mod file_bytes;
     pub mod file_info;
     pub mod file_store_test;
+    pub mod file_upload;
     pub mod flagged_posts;
     pub mod gated_families;
     pub mod gated_reads;
@@ -190,6 +191,7 @@ mod parity {
     pub mod threads_for_user;
     pub mod token_writes;
     pub mod typing;
+    pub mod upload_write;
     pub mod user_access_tokens;
     pub mod user_audits;
     pub mod user_auth;

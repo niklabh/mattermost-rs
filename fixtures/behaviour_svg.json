@@ -1,0 +1,445 @@
+{
+  "parse_svg": [
+    {
+      "name": "plain",
+      "svg": "\u003csvg width=\"120\" height=\"80\"\u003e\u003c/svg\u003e",
+      "width": 120,
+      "height": 80,
+      "err": ""
+    },
+    {
+      "name": "self_closing",
+      "svg": "\u003csvg width=\"120\" height=\"80\"/\u003e",
+      "width": 120,
+      "height": 80,
+      "err": ""
+    },
+    {
+      "name": "xmlns",
+      "svg": "\u003csvg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\"\u003e\u003c/svg\u003e",
+      "width": 120,
+      "height": 80,
+      "err": ""
+    },
+    {
+      "name": "prologue",
+      "svg": "\u003c?xml version=\"1.0\" encoding=\"UTF-8\"?\u003e\u003c!-- c --\u003e\u003c!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\"\u003e\u003csvg width=\"12\" height=\"34\"\u003e\u003c/svg\u003e",
+      "width": 12,
+      "height": 34,
+      "err": ""
+    },
+    {
+      "name": "leading_whitespace",
+      "svg": "\n\n   \u003csvg width=\"1\" height=\"2\"\u003e\u003c/svg\u003e",
+      "width": 1,
+      "height": 2,
+      "err": ""
+    },
+    {
+      "name": "bom",
+      "svg": "﻿\u003csvg width=\"1\" height=\"2\"\u003e\u003c/svg\u003e",
+      "width": 1,
+      "height": 2,
+      "err": ""
+    },
+    {
+      "name": "viewbox_only",
+      "svg": "\u003csvg viewBox=\"0 0 300 150\"\u003e\u003c/svg\u003e",
+      "width": 300,
+      "height": 150,
+      "err": ""
+    },
+    {
+      "name": "viewbox_before_size",
+      "svg": "\u003csvg viewBox=\"0 0 300 150\" width=\"10\" height=\"20\"\u003e\u003c/svg\u003e",
+      "width": 300,
+      "height": 150,
+      "err": ""
+    },
+    {
+      "name": "size_before_viewbox",
+      "svg": "\u003csvg width=\"10\" height=\"20\" viewBox=\"0 0 300 150\"\u003e\u003c/svg\u003e",
+      "width": 300,
+      "height": 150,
+      "err": ""
+    },
+    {
+      "name": "viewbox_three_fields",
+      "svg": "\u003csvg viewBox=\"0 0 300\" width=\"10\" height=\"20\"\u003e\u003c/svg\u003e",
+      "width": 10,
+      "height": 20,
+      "err": ""
+    },
+    {
+      "name": "viewbox_five_fields",
+      "svg": "\u003csvg viewBox=\"0 0 300 150 7\" width=\"10\" height=\"20\"\u003e\u003c/svg\u003e",
+      "width": 10,
+      "height": 20,
+      "err": ""
+    },
+    {
+      "name": "viewbox_commas",
+      "svg": "\u003csvg viewBox=\"0,0,300,150\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "viewbox_floats",
+      "svg": "\u003csvg viewBox=\"0 0 300.5 150.25\"\u003e\u003c/svg\u003e",
+      "width": 300,
+      "height": 150,
+      "err": ""
+    },
+    {
+      "name": "viewbox_bad_then_size",
+      "svg": "\u003csvg viewBox=\"0 0 abc def\" width=\"10\" height=\"20\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": ""
+    },
+    {
+      "name": "viewbox_tabs",
+      "svg": "\u003csvg viewBox=\"0\t0\t300\t150\"\u003e\u003c/svg\u003e",
+      "width": 300,
+      "height": 150,
+      "err": ""
+    },
+    {
+      "name": "px_units",
+      "svg": "\u003csvg width=\"100px\" height=\"50px\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "percent",
+      "svg": "\u003csvg width=\"100%\" height=\"50%\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "float_size",
+      "svg": "\u003csvg width=\"100.5\" height=\"50.9\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "exponent",
+      "svg": "\u003csvg width=\"1e2\" height=\"5e1\"\u003e\u003c/svg\u003e",
+      "width": 1,
+      "height": 5,
+      "err": ""
+    },
+    {
+      "name": "negative",
+      "svg": "\u003csvg width=\"-100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": -100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "hex",
+      "svg": "\u003csvg width=\"0x10\" height=\"0x20\"\u003e\u003c/svg\u003e",
+      "width": 16,
+      "height": 32,
+      "err": ""
+    },
+    {
+      "name": "underscore",
+      "svg": "\u003csvg width=\"1_000\" height=\"2_000\"\u003e\u003c/svg\u003e",
+      "width": 1000,
+      "height": 2000,
+      "err": ""
+    },
+    {
+      "name": "leading_space",
+      "svg": "\u003csvg width=\" 100\" height=\"\t50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "trailing_space",
+      "svg": "\u003csvg width=\"100 \" height=\"50 \"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "two_numbers",
+      "svg": "\u003csvg width=\"100 200\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "empty_value",
+      "svg": "\u003csvg width=\"\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "letters",
+      "svg": "\u003csvg width=\"abc\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "expected integer"
+    },
+    {
+      "name": "width_only",
+      "svg": "\u003csvg width=\"100\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 0,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "height_only",
+      "svg": "\u003csvg height=\"100\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 100,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "zero_width",
+      "svg": "\u003csvg width=\"0\" height=\"100\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 100,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "no_attrs",
+      "svg": "\u003csvg\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "namespaced_attrs",
+      "svg": "\u003csvg svg:width=\"100\" svg:height=\"50\" xmlns:svg=\"http://www.w3.org/2000/svg\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "single_quotes",
+      "svg": "\u003csvg width='100' height='50'\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "entity_digits",
+      "svg": "\u003csvg width=\"\u0026#49;\u0026#48;\" height=\"\u0026#x32;0\"\u003e\u003c/svg\u003e",
+      "width": 10,
+      "height": 20,
+      "err": ""
+    },
+    {
+      "name": "entity_amp",
+      "svg": "\u003csvg width=\"1\u0026amp;0\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 1,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "undefined_entity",
+      "svg": "\u003csvg width=\"\u0026foo;\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: invalid character entity \u0026foo;"
+    },
+    {
+      "name": "uppercase_attr",
+      "svg": "\u003csvg WIDTH=\"100\" HEIGHT=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "first_element_not_svg",
+      "svg": "\u003cg width=\"7\" height=\"8\"\u003e\u003csvg width=\"100\" height=\"50\"/\u003e\u003c/g\u003e",
+      "width": 7,
+      "height": 8,
+      "err": ""
+    },
+    {
+      "name": "nested_after_root",
+      "svg": "\u003csvg\u003e\u003crect width=\"100\" height=\"50\"/\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "unable to extract SVG dimensions"
+    },
+    {
+      "name": "duplicate_width",
+      "svg": "\u003csvg width=\"1\" width=\"2\" height=\"3\"\u003e\u003c/svg\u003e",
+      "width": 2,
+      "height": 3,
+      "err": ""
+    },
+    {
+      "name": "multiline_tag",
+      "svg": "\u003csvg\n  width=\"100\"\n  height=\"50\"\n\u003e\n\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "text_before_root",
+      "svg": "hello \u003csvg width=\"100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "unterminated_tag",
+      "svg": "\u003csvg width=\"100\" height=\"50\"",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: unexpected EOF"
+    },
+    {
+      "name": "unterminated_attr",
+      "svg": "\u003csvg width=\"100 height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: invalid XML name: 50"
+    },
+    {
+      "name": "garbage",
+      "svg": "not xml at all",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "empty",
+      "svg": "",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "whitespace_only",
+      "svg": "   \n",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "latin1_decl",
+      "svg": "\u003c?xml version=\"1.0\" encoding=\"ISO-8859-1\"?\u003e\u003csvg width=\"100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "xml: encoding \"ISO-8859-1\" declared but Decoder.CharsetReader is nil"
+    },
+    {
+      "name": "utf16_decl",
+      "svg": "\u003c?xml version=\"1.0\" encoding=\"UTF-16\"?\u003e\u003csvg width=\"100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "xml: encoding \"UTF-16\" declared but Decoder.CharsetReader is nil"
+    },
+    {
+      "name": "comment_only",
+      "svg": "\u003c!-- nothing --\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "processing_instruction_only",
+      "svg": "\u003c?xml version=\"1.0\"?\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "EOF"
+    },
+    {
+      "name": "cdata_before_root",
+      "svg": "\u003c![CDATA[x]]\u003e\u003csvg width=\"100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "unclosed_comment",
+      "svg": "\u003c!-- \u003csvg width=\"100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: unexpected EOF"
+    },
+    {
+      "name": "attr_no_quotes",
+      "svg": "\u003csvg width=100 height=50\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: unquoted or missing attribute value in element"
+    },
+    {
+      "name": "plus_sign",
+      "svg": "\u003csvg width=\"+100\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "huge",
+      "svg": "\u003csvg width=\"99999999999999999999\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "strconv.ParseInt: parsing \"99999999999999999999\": value out of range"
+    },
+    {
+      "name": "int64_max",
+      "svg": "\u003csvg width=\"9223372036854775807\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 9223372036854775807,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "octal_like",
+      "svg": "\u003csvg width=\"0100\" height=\"050\"\u003e\u003c/svg\u003e",
+      "width": 64,
+      "height": 40,
+      "err": ""
+    },
+    {
+      "name": "newline_in_value",
+      "svg": "\u003csvg width=\"100\n\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 100,
+      "height": 50,
+      "err": ""
+    },
+    {
+      "name": "png_bytes",
+      "svg": "\ufffdPNG\r\n\u001a\n",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 3: invalid UTF-8"
+    },
+    {
+      "name": "doctype_with_subset",
+      "svg": "\u003c!DOCTYPE svg [\u003c!ENTITY w \"100\"\u003e]\u003e\u003csvg width=\"\u0026w;\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: invalid character entity \u0026w;"
+    },
+    {
+      "name": "root_after_nonascii",
+      "svg": "\u003csvg width=\"１００\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "expected integer"
+    },
+    {
+      "name": "null_byte",
+      "svg": "\u003csvg width=\"100\u0000\" height=\"50\"\u003e\u003c/svg\u003e",
+      "width": 0,
+      "height": 0,
+      "err": "XML syntax error on line 1: illegal character code U+0000"
+    }
+  ]
+}

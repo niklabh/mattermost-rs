@@ -38,8 +38,10 @@
   },
   "FileSettings": {
     "DriverName": "local",
+    "EnableFileAttachments": true,
     "EnablePublicLink": false,
-    "MaxFileSize": 104857600
+    "MaxFileSize": 104857600,
+    "MaxImageResolution": 33177600
   },
   "GitLabSettings": {
     "Enable": false
@@ -71,6 +73,9 @@
   },
   "OpenIdSettings": {
     "Enable": false
+  },
+  "PluginSettings": {
+    "Directory": "./plugins"
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,

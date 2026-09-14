@@ -102,7 +102,13 @@ MODELLED = {
     "ExperimentalSettings": ["RestrictSystemAdmin", "EnableSharedChannels"],
     "ConnectedWorkspacesSettings": ["EnableSharedChannels"],
     "ImageProxySettings": ["Enable"],
-    "FileSettings": ["DriverName", "EnablePublicLink", "MaxFileSize"],
+    "FileSettings": [
+        "DriverName", "EnablePublicLink", "MaxFileSize",
+        # The attachment switch and the pixel cap, read by the three file-writing routes.
+        "EnableFileAttachments", "MaxImageResolution",
+    ],
+    # Read by createUpload for an import upload: the directory-conflict check.
+    "PluginSettings": ["Directory"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",

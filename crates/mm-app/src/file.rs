@@ -202,6 +202,8 @@ mod backend_errors {
     pub const WRITE_FILE: (&str, &str) = ("WriteFile", "api.file.write_file.app_error");
     /// `App.MoveFile` (app/file.go:249).
     pub const MOVE_FILE: (&str, &str) = ("MoveFile", "api.file.move_file.app_error");
+    /// `App.AppendFile` (app/file.go:307).
+    pub const APPEND_FILE: (&str, &str) = ("AppendFile", "api.file.append_file.app_error");
 }
 
 impl App {
@@ -285,6 +287,15 @@ impl App {
             .write_file(data, path)
             .await
             .map_err(|err| Self::backend_error(backend_errors::WRITE_FILE, err))
+    }
+
+    /// Port of `app.App.AppendFile` (app/file.go:307) — the resumed-upload write. Bytes rather
+    /// than a reader, for the reason given on [`App::write_file`].
+    pub async fn append_file(&self, data: &[u8], path: &str) -> Result<i64, PrepareError> {
+        self.file_backend()
+            .append_file(data, path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::APPEND_FILE, err))
     }
 
     /// Port of `app.App.MoveFile` (app/file.go:249).

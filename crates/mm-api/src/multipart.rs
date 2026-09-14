@@ -95,6 +95,63 @@ impl Form {
     }
 }
 
+/// The boundary of a `multipart/form-data` `Content-Type`, distinguishing the three verdicts
+/// `parseMultipartRequestHeader` (api4/upload.go:45) gives: [`MultipartError::NotMultipart`] for a
+/// missing or non-form-data type (Go's `ErrNotMultipart`, treated by `doUploadData` as a simple
+/// body), [`MultipartError::MissingBoundary`] (Go's `ErrMissingBoundary`, a 400), and a boundary.
+pub fn boundary_of(content_type: Option<&str>) -> Result<String, MultipartError> {
+    multipart_boundary(content_type)
+}
+
+/// The raw bytes of the **first** MIME part, whatever its disposition — `mr.NextPart()` then a
+/// read of that part, which is all `doUploadData` (api4/upload.go:150) does with a multipart
+/// chunk. `None` when the body has no part before its closing delimiter.
+pub fn first_part(
+    content_type: Option<&str>,
+    body: &[u8],
+) -> Result<Option<Vec<u8>>, MultipartError> {
+    let boundary = multipart_boundary(content_type)?;
+    let dash_boundary = format!("--{boundary}").into_bytes();
+    let mut cursor = 0usize;
+    let mut newline: Option<&'static [u8]> = None;
+
+    loop {
+        let Some(line_end) = line_end(body, cursor) else {
+            return Ok(None);
+        };
+        let line = &body[cursor..line_end.0];
+        let terminator = &body[line_end.0..line_end.1];
+        cursor = line_end.1;
+
+        // Everything up to the first real delimiter is preamble; only the first part matters, and
+        // the loop returns the moment it finds one, so a line before it is discarded whatever it
+        // is.
+        if !line.starts_with(&dash_boundary) {
+            continue;
+        }
+        let rest: Vec<u8> = line[dash_boundary.len()..]
+            .iter()
+            .copied()
+            .skip_while(|b| *b == b' ' || *b == b'\t')
+            .collect();
+        if rest.starts_with(b"--") {
+            return Ok(None); // closing delimiter with no part
+        }
+        if !rest.is_empty() {
+            continue; // still preamble: a line that only starts with the boundary bytes
+        }
+
+        let nl = *newline.get_or_insert(if terminator == b"\r\n" {
+            b"\r\n"
+        } else {
+            b"\n"
+        });
+        let _headers = read_part_headers(body, &mut cursor, nl)?;
+        let data = read_part_body(body, &mut cursor, nl, &dash_boundary)?;
+        return Ok(Some(data));
+    }
+}
+
 /// Port of `http.Request.multipartReader` (net/http/request.go:474) followed by
 /// `Reader.ReadForm`.
 ///

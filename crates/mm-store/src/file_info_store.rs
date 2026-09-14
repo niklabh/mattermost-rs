@@ -1,4 +1,4 @@
-//! Port of `SqlFileInfoStore` (channels/store/sqlstore/file_info_store.go): `GetByIds`,
+//! Port of `SqlFileInfoStore` (channels/store/sqlstore/file_info_store.go): `Save`, `GetByIds`,
 //! `Get`, `GetForPost`, `AttachToPost` and `DeleteForPost`.
 //!
 //! `GetByIds` unblocks `metadata.files` on `GET /api/v4/posts/{post_id}` and the whole of
@@ -30,8 +30,23 @@ use sqlx::PgPool;
 
 use crate::error::StoreError;
 
-/// Port of `store.FileInfoStore`, narrowed to the one read a post handler makes.
+/// Port of `store.FileInfoStore`, narrowed to what the served routes reach.
 pub trait FileInfoStore {
+    /// Port of `SqlFileInfoStore.Save` (file_info_store.go:113) — the row an upload creates.
+    ///
+    /// `PreSave`, `IsValid` (returned as [`StoreError::Invalid`], which the app layer passes
+    /// through as the model's own 400 — Go's `errors.As(err, &appErr)`), then an `INSERT` of
+    /// **twenty** columns: every one but `Archived`, which is left to its `false` default. So an
+    /// `Archived` a caller set is discarded by the write and read back as `false`.
+    ///
+    /// `Width` and `Height` are `int` in Go and `integer` in Postgres; a value past `i32` is a
+    /// driver error there and [`StoreError::Argument`] here, and no decoder this port trusts
+    /// produces one.
+    fn save(
+        &self,
+        info: FileInfo,
+    ) -> impl std::future::Future<Output = Result<FileInfo, StoreError>> + Send;
+
     /// Port of `SqlFileInfoStore.GetByIds` (file_info_store.go:135).
     fn get_by_ids(
         &self,
@@ -123,6 +138,64 @@ impl SqlFileInfoStore {
 }
 
 impl FileInfoStore for SqlFileInfoStore {
+    #[tracing::instrument(skip_all, fields(file_id, name = %info.name))]
+    async fn save(&self, mut info: FileInfo) -> Result<FileInfo, StoreError> {
+        info.pre_save();
+        if let Err(app_error) = info.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "FileInfo",
+                app_error,
+            });
+        }
+        tracing::Span::current().record("file_id", &info.id);
+
+        let out_of_range = |_| StoreError::Argument {
+            entity: "FileInfo",
+            detail: "width or height does not fit the integer column",
+        };
+        let width = i32::try_from(info.width).map_err(out_of_range)?;
+        let height = i32::try_from(info.height).map_err(out_of_range)?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO fileinfo
+                (id, creatorid, postid, channelid, createat, updateat, deleteat, path,
+                 thumbnailpath, previewpath, name, extension, size, mimetype, width, height,
+                 haspreviewimage, minipreview, content, remoteid)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                    $18, $19, $20)
+            "#,
+            info.id,
+            info.creator_id,
+            info.post_id,
+            info.channel_id,
+            info.create_at,
+            info.update_at,
+            info.delete_at,
+            info.path,
+            info.thumbnail_path,
+            info.preview_path,
+            info.name,
+            info.extension,
+            info.size,
+            info.mime_type,
+            width,
+            height,
+            info.has_preview_image,
+            info.mini_preview.as_deref(),
+            info.content,
+            info.remote_id.as_deref(),
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to save FileInfo".to_owned(),
+            source,
+        })?;
+
+        Ok(info)
+    }
+
     /// # Two different sources, and the default one is a materialized view
     ///
     /// With `includeDeleted` false — the only value `App.GetStorageUsage` passes — Go reads

@@ -195,6 +195,11 @@ impl FileBackend {
         self.local()?.write_file(data, path).await
     }
 
+    /// Port of `FileBackend.AppendFile`.
+    pub async fn append_file(&self, data: &[u8], path: &str) -> Result<i64, FileStoreError> {
+        self.local()?.append_file(data, path).await
+    }
+
     /// Port of `FileBackend.RemoveFile`.
     pub async fn remove_file(&self, path: &str) -> Result<(), FileStoreError> {
         self.local()?.remove_file(path).await
@@ -318,6 +323,30 @@ impl LocalFileBackend {
         file.flush()
             .await
             .map_err(|err| FileStoreError::io("write", path, err))?;
+        Ok(i64::try_from(data.len()).unwrap_or(i64::MAX))
+    }
+
+    /// Port of `LocalFileBackend.AppendFile` (localstore.go:172): `os.Stat` first — so a
+    /// missing file is an error and never a create, which is what makes a resumed upload whose
+    /// first chunk was removed fail rather than start over silently — then `O_WRONLY|O_APPEND`.
+    /// No `MkdirAll`, unlike the write.
+    async fn append_file(&self, data: &[u8], path: &str) -> Result<i64, FileStoreError> {
+        let full = self.resolve(path);
+        tokio::fs::metadata(&full)
+            .await
+            .map_err(|err| FileStoreError::io("stat", path, err))?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&full)
+            .await
+            .map_err(|err| FileStoreError::io("open", path, err))?;
+        file.write_all(data)
+            .await
+            .map_err(|err| FileStoreError::io("append", path, err))?;
+        file.flush()
+            .await
+            .map_err(|err| FileStoreError::io("append", path, err))?;
         Ok(i64::try_from(data.len()).unwrap_or(i64::MAX))
     }
 

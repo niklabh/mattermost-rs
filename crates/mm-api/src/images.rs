@@ -433,7 +433,7 @@ fn storage_not_configured(state: &AppState, where_: &'static str) -> Option<ApiE
 /// Go compares `r.ContentLength > MaxFileSize`, and an absent or unparseable `Content-Length`
 /// leaves it at `-1`, which never exceeds anything. So a chunked upload of any size passes this
 /// check and is caught — if at all — by the `MaxBytesReader` further in.
-fn declared_content_length(headers: &HeaderMap) -> Option<i64> {
+pub(crate) fn declared_content_length(headers: &HeaderMap) -> Option<i64> {
     headers
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
@@ -476,7 +476,7 @@ enum BodyRefusal {
 
 /// `bytes.MinRead` (bytes/buffer.go:21) — the slack `web.Handler.ServeHTTP` adds to the cap so
 /// that "file sizes close to max file size do not get cut off".
-const BYTES_MIN_READ: i64 = 512;
+pub(crate) const BYTES_MIN_READ: i64 = 512;
 
 async fn read_multipart_body(
     state: &AppState,
