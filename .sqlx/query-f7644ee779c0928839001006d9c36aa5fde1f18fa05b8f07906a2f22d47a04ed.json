@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM channelmembers\n             WHERE userid IN (SELECT id FROM users WHERE users.deleteat != 0)\n               AND channelmembers.channelid = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f7644ee779c0928839001006d9c36aa5fde1f18fa05b8f07906a2f22d47a04ed"
+}

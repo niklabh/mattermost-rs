@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE threads\n               SET threadteamid = $2\n             WHERE channelid = $1\n               AND EXISTS (SELECT 1 FROM teams WHERE id = $2)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "71bf87f6ee8eda541aad51a596ae8e72b42aba323dfa43cea6f347f14ccec6b6"
+}

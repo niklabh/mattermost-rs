@@ -17,6 +17,7 @@ pub mod channel_create;
 pub mod channel_join_request;
 pub mod channel_member;
 pub mod channel_moderation;
+pub mod channel_move;
 pub mod channel_view;
 pub mod channel_write;
 pub mod command;

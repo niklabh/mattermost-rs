@@ -76,6 +76,15 @@ use crate::error::StoreError;
 /// The subset of Go's `store.ChannelStore` sidebar surface that is ported: three reads and five
 /// writes.
 pub trait SidebarCategoryStore {
+    /// Port of `SqlChannelStore.UpdateSidebarChannelCategoryOnMove`
+    /// (channel_store_categories.go:978): despite the name, one `DELETE` of every
+    /// `SidebarChannels` row for the channel, every user's — a moved channel may have no matching
+    /// category on the new team, so it is dropped from all of them and re-sorted on next view.
+    fn update_sidebar_channel_category_on_move(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetSidebarCategoriesForTeamForUser`
     /// (channel_store_categories.go:542) — which is `GetSidebarCategories` (:546) under a second
     /// name, both delegating to the same `getSidebarCategoriesT`.
@@ -170,6 +179,24 @@ impl SqlSidebarCategoryStore {
 }
 
 impl SidebarCategoryStore for SqlSidebarCategoryStore {
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    async fn update_sidebar_channel_category_on_move(
+        &self,
+        channel_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "DELETE FROM sidebarchannels WHERE channelid = $1",
+            channel_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete SidebarChannels with channelId={channel_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id))]
     async fn get_sidebar_categories(
         &self,

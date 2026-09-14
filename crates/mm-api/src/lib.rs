@@ -14,6 +14,7 @@ pub mod bots;
 pub mod channel_admin;
 pub mod channel_creates;
 pub mod channel_member_writes;
+pub mod channel_move;
 pub mod channel_writes;
 pub mod channels;
 pub mod cloud;
@@ -1145,6 +1146,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/restore",
             partially_migrated_with_ids(&state, post(channel_writes::restore_channel)),
+        )
+        // `BaseRoutes.Channel.Handle("/move")` (api4/channel.go:87) — the admin re-homing.
+        .route(
+            "/api/v4/channels/{channel_id}/move",
+            partially_migrated_with_ids(&state, post(channel_move::move_channel)),
         )
         // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
         // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
@@ -4096,7 +4102,7 @@ mod tests {
         // register, plus the unregistered method on two paths it did. There is no Go server on
         // port 1, so a forwarded request answers without the header.
         let forwarded: Vec<(Method, String)> = vec![
-            (Method::POST, format!("/api/v4/channels/{CHANNEL}/move")),
+            // `/move` left this list on 2026-09-14, when it was served.
             (
                 Method::POST,
                 format!("/api/v4/channels/{CHANNEL}/convert_to_channel"),
