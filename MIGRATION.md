@@ -13912,3 +13912,19 @@ Mutation tally (`websocket-reconnect.plan`): 19 run, 16 caught, 2 controls survi
 `hello-for-the-first-reuse-too`, a "no hello" assertion made before a late hello could arrive —
 fixed with a collection window and re-run: caught. Full parity on stack 1: 3,782 passed, 19 failed,
 every one re-run green by module after the fixes above.
+
+## A guest's websocket visibility — `ShouldSendEventToGuest` over a full `UserCanSeeOtherUser` (2026-09-15)
+
+New: `crates/mm-api/tests/parity/websocket_guests.rs`, `scripts/mutations/websocket-guests.plan`.
+Closes [D-185]. No api4 pair is added; seven served routes stop forwarding a view-restricted caller.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app/user.go` `UserCanSeeOtherUser`, `GetViewUsersRestrictions` | `mm-app/src/user.rs` | DONE | parity | The restricted branch — a guest, in practice — was forwarded by every caller; now answered. |
+| `SqlTeamStore.GetUserTeamIds`, `UserBelongsToTeams`; `SqlChannelStore.UserBelongsToChannels` | `mm-store` | DONE | parity | An empty id list is `false` without a query, as squirrel's `(1=0)` makes it. |
+| `web_conn.go` `ShouldSendEventToGuest` | `mm-app/src/hub.rs` `guest_subject` | DONE | 1 unit + parity | Guests were sent neither `user_updated` nor `new_user` before, whoever it was about. |
+
+Mutation tally (`websocket-guests.plan`): 9 run, 5 caught, 2 controls survived, 2 equivalent —
+`team-arm-skipped` and `team-count-inverts-the-list` cannot be observed because the stock
+`team_guest` role has no `view_members`, so a guest's permitted-team list is always empty; the
+paired `team-permission-not-checked` was caught, which is how that is known.
