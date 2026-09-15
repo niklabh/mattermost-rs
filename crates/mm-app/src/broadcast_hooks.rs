@@ -8,9 +8,10 @@
 //!
 //! # Which hooks exist here
 //!
-//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Four are ported — the
-//! three `SendNotifications` attaches to every `posted` event, and the one
-//! `publishWebsocketEventForPost` attaches when the post mentions a channel:
+//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Five are ported — the
+//! three `SendNotifications` attaches to every `posted` event, the one
+//! `publishWebsocketEventForPost` attaches when the post mentions a channel, and the filter the
+//! channel-join-request events carry:
 //!
 //! | id | args (JSON types, as `add_hook` must supply them) | effect on a connection |
 //! |---|---|---|
@@ -18,17 +19,17 @@
 //! | [`BROADCAST_ADD_FOLLOWERS`] | `followers`: array of user ids | same, key `followers` |
 //! | [`BROADCAST_POSTED_ACK`] | `posted_user_id`: string, `channel_type`: string, `users`: array of user ids | `data.should_ack = true` for a `?posted_ack=true` connection that is not the poster's, when the frame already carries `mentions`/`followers`, or the channel is a DM, or the user is in `users` |
 //! | [`BROADCAST_CHANNEL_MENTIONS`] | `channel_mentions`: object, name → `{display_name, team_name, id}` | re-decodes `data.post`, puts back under `props.channel_mentions` only the entries whose `id` the recipient may resolve, and re-encodes |
+//! | [`BROADCAST_ONLY_CHANNEL_ADMINS`] | `channel_admin_user_ids`: array of user ids | user **not** in the list → the event is rejected, on the broadcast's shared event unless an earlier hook copied it (see `HookedWebSocketEvent::reject`) |
 //!
 //! `posted_ack` reads what `add_mentions` and `add_followers` wrote, so **attach it after them**
 //! — Go's own comment says this "works since we currently do have an order for broadcast hooks".
 //! `channel_mentions` re-encodes the post, so a hooked recipient's `post` string is a fresh
 //! marshal rather than the precomputed one — the same bytes, since both are `Post.ToJSON`.
 //!
-//! The other five — `permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`,
-//! `only_channel_admins` — are not registered. An event carrying one of their ids reaches the
-//! runner, which logs Go's `Unable to find broadcast hook` warning and skips it, so the frame
-//! leaves unmodified and precomputed. Their ids are declared below so a raiser can attach them
-//! today; `channel_join_request` already attaches `only_channel_admins`. See [D-183].
+//! The other four — `permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files` — are not
+//! registered. An event carrying one of their ids reaches the runner, which logs Go's `Unable to
+//! find broadcast hook` warning and skips it, so the frame leaves unmodified and precomputed.
+//! Their ids are declared below so a raiser can attach them today. See [D-183].
 //!
 //! # `getTypedArg` in a single process
 //!
