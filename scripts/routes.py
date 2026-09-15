@@ -195,7 +195,45 @@ def served(source=LIBRS):
     Takes the file so the same parser reads both routers: `lib.rs` for the HTTP one and
     `local.rs` for the unix-socket one.
     """
-    text = source.read_text()
+    return served_in(source.read_text())
+
+
+def function_body(text, name):
+    """The brace-delimited body of `fn <name>(` in `text`, or None when it is not declared."""
+    m = re.search(r'\bfn\s+' + re.escape(name) + r'\s*[(<]', text)
+    if not m:
+        return None
+    start = text.find("{", m.end())
+    depth, i = 1, start + 1
+    while depth and i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    return text[start:i]
+
+
+def merged_local_sources():
+    """The router functions `local::router` merges, as (module file, function name) pairs.
+
+    A family lands on the socket by `.merge(crate::<module>::<fn>(&state))`. Before 2026-09-15
+    every such module was named `local_<family>.rs`, and the inventory globbed for that name. The
+    config and licence writes broke the convention — their socket registrations live in a
+    `local_routes` fn beside the HTTP handlers in `config_writes.rs` — and five served pairs were
+    reported as unserved. Following the merge lines is the honest source; parsing only the named
+    function keeps a module's HTTP-side registrations (if it ever had any) out of the local set.
+    """
+    if not LOCALRS.exists():
+        return []
+    out = []
+    for m in re.finditer(r'\.merge\(\s*crate::([a-z_0-9]+)::([a-z_0-9]+)\s*\(', LOCALRS.read_text()):
+        out.append((LOCALRS.parent / f"{m.group(1)}.rs", m.group(2)))
+    return out
+
+
+def served_in(text):
+    """`served`, over source text rather than a file — see `merged_local_sources`."""
     out = set()
     for m in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
         depth, i = 1, m.end()
@@ -241,6 +279,11 @@ def main():
         have_local |= served(LOCALRS)
         for module in sorted(LOCALRS.parent.glob("local_*.rs")):
             have_local |= served(module)
+        for module, function in merged_local_sources():
+            body = function_body(module.read_text(), function) if module.exists() else None
+            if body is None:
+                sys.exit(f"local.rs merges {module.name}::{function}, which is not declared there")
+            have_local |= served_in(body)
     want_local = "--local" in args
 
     for r in routes:
