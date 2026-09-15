@@ -878,8 +878,13 @@ async fn the_config_and_environment_reads_are_served_licensed() {
     let http = client();
     let admin = go_minted_token(&http).await;
 
+    // Held shared across the read: the licensed Go reads the same `Configurations` row that
+    // `auth_certs` flips and `configlic` patches under the exclusive half, and a Go read before
+    // a flip and ours after it differed in the whole document (a sharded run, 2026-09-15).
+    let document = common::CONFIG_DOCUMENT.read().await;
     let ((go_status, go), (rs_status, rs)) =
         fetch_licensed_pair(&http, &pair, Some(&admin), "/api/v4/config").await;
+    drop(document);
     assert_eq!(go_status, 200, "{}", text(&go));
     assert_eq!(rs_status, 200, "{}", text(&rs));
     let mut go: serde_json::Value = serde_json::from_slice(&go).unwrap();
