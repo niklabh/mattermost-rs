@@ -183,7 +183,15 @@ pub(crate) fn routes(state: &AppState) -> Router<AppState> {
         )
         // ---- `config_local.go:19` and `:24` — the two `local*` handlers. The `PUT`, `/patch`,
         // `/reload` and `/migrate` pairs fall to the fallbacks.
-        .route("/api/v4/config", partially_migrated(get(local_get_config)))
+        // `PUT /config` is `localUpdateConfig` (config_local.go:20), served from
+        // `config_writes` since 2026-09-15; it shares this method router because axum allows
+        // one registration per path.
+        .route(
+            "/api/v4/config",
+            partially_migrated(
+                get(local_get_config).put(crate::config_writes::local_update_config),
+            ),
+        )
         .route(
             "/api/v4/config/client",
             partially_migrated(get(local_get_client_config)),

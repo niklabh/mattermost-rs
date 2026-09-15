@@ -3142,3 +3142,12 @@ pub async fn set_bot_fixture_text(bot_user_id: &str, description: &str, display_
         .await
         .expect("the bot display name is set");
 }
+
+/// **The active configuration document is one resource.** `GET /config` and `localGetConfig`
+/// compare it byte for byte between the two servers, and `parity::configlic` patches it through
+/// this server — a forwarded write that lands in Go's `Configurations` table — and restores it.
+/// A read taken from Go before the patch and from us after it would differ in the patched key
+/// for a reason that is not the route's. Readers of the whole document hold this shared; the
+/// write holds it exclusively from the patch to the restore. The client-config maps are not
+/// affected: the patched keys are not projected into them.
+pub static CONFIG_DOCUMENT: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
