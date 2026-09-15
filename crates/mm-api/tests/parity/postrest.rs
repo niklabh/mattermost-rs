@@ -174,7 +174,22 @@ async fn plant_burn_on_read_post(
 }
 
 /// Remove every row this suite plants, at the start of a run.
+/// Once per test binary, like `common::purge_api_fixtures`.
+///
+/// It used to run at the start of **every** `fixture` call — ten tests — and it deletes every
+/// `mmrsprest%` post, so a later test's fixture removed the posts an earlier test was still using.
+/// Rust then read the missing row from the database and refused with 400 where Go, serving the
+/// row from its cache, answered its own 403 or 404: `do_post_action_gates_match_go` and
+/// `reveal_and_burn_refusals_are_served` failed together in a sharded run while passing alone
+/// (2026-09-15). Every planted id is unique (`planted_id`), and nothing in this module counts rows
+/// across it, so one sweep for an aborted earlier run is all the purge was ever for. The export
+/// test removes its own jobs at its end.
 async fn purge() {
+    static PURGED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    PURGED.get_or_init(purge_once).await;
+}
+
+async fn purge_once() {
     let Some(pool) = fixture_pool().await else {
         return;
     };
