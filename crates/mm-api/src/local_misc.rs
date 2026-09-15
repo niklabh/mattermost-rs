@@ -56,7 +56,7 @@ use crate::{
     upload_write, uploads, user_convert,
 };
 
-/// The thirty-one registrations, merged into [`crate::local::router`].
+/// The thirty-three registrations, merged into [`crate::local::router`].
 pub(crate) fn routes(state: &AppState) -> Router<AppState> {
     Router::new()
         // ---- `job_local.go`, all seven. `{job_id:[A-Za-z0-9]+}` is id-shaped, so the id
@@ -745,6 +745,6 @@ mod tests {
             .lines()
             .filter(|line| line.trim_start().starts_with("async fn local_"))
             .count();
-        assert_eq!(wrappers, 31 + 1);
+        assert_eq!(wrappers, 33 + 1);
     }
 }
