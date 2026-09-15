@@ -314,10 +314,10 @@ async fn get_statuses_by_ids(state: &AppState, request: &WebSocketRequest) -> Ha
 
 /// `hub.SendMessage(conn, resp)`.
 fn send(state: &AppState, conn: &Arc<WebConn>, response: WebSocketResponse) {
-    state.app.hub().send_to_connection(
-        &conn.connection_id,
-        OutgoingFrame::Response(Box::new(response)),
-    );
+    state
+        .app
+        .hub()
+        .send_message(conn, OutgoingFrame::Response(Box::new(response)));
 }
 
 /// `err.WipeDetailed(); NewWebSocketError(r.Seq, err)`.

@@ -13854,3 +13854,30 @@ invented at different offsets (a config field, a `let` binding, a test document'
 keep-both block whose two sides both end inside a call shares one closing tail. Resolving in a
 scratch copy of `git merge-tree`'s output and parsing it with `rustfmt --check` before touching the
 tree caught both kinds.
+
+## Websocket reconnect replay — the dead queue and `PopulateWebConnConfig` (2026-09-15)
+
+New: `crates/mm-api/tests/parity/websocket_reconnect.rs`, `scripts/mutations/websocket-reconnect.plan`.
+Closes [D-181]. No api4 pair is added; the hub item of the denominator advances.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web_conn.go` dead queue (665-772), `PopulateWebConnConfig`, `writePump` prelude | `mm-app/src/hub.rs` `DeadQueue`, `mm-api/src/websocket.rs` `resume_prelude` | DONE | 13 unit + 5 parity | Unit tests are transcribed from the Go source — the functions are unexported, so there is no generated corpus; the parity suite is the evidence. |
+| `web_hub.go` register/unregister/checkConn arms, `hubConnectionIndex` | `mm-app/src/hub.rs` `Hub::park`, `check_conn`, `close_and_remove`, `App::hub_unregister` | DONE | parity | A disconnected connection stays indexed and inactive; `total_websocket_connections` counts active only. The reaper runs lazily, not on a ticker (`Hub::reap_if_due`). |
+| `platform/status.go` `SetStatusLastActivityAt`, `UpdateWebConnUserActivity` | `mm-app/src/status.rs`, `session.rs` | DONE | — | Read only by the five-minute reaper and the away test; not reachable in a parity run. |
+
+Findings:
+
+- **A parked connection keeps receiving.** The first thing a resumed client is told is the
+  `offline` its own disconnect raised, numbered straight on from its count.
+- **A manual status blocks the disconnect's offline** (`QueueSetStatusOffline`'s guard) — the
+  fixture was caught by it twice: manual aways, then a REST write, which is always manual.
+- **A resumed socket is not isolated**: another suite's `new_user` can sit in the parked queue, so
+  the replay tests look for their own status changes rather than the next frame.
+- **Stack 1's Go had been launched from a removed worktree's directory** (`authcerts`); 14 of the
+  full run's failures were that, and all passed after restarting it from this worktree.
+
+Mutation tally (`websocket-reconnect.plan`): 19 run, 16 caught, 2 controls survived, 1 survivor —
+`hello-for-the-first-reuse-too`, a "no hello" assertion made before a late hello could arrive —
+fixed with a collection window and re-run: caught. Full parity on stack 1: 3,782 passed, 19 failed,
+every one re-run green by module after the fixes above.

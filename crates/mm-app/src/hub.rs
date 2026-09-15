@@ -25,12 +25,13 @@
 //!   the non-precomputed encoding — see [`OutgoingFrame`]. The hooks themselves live in
 //!   [`crate::broadcast_hooks`]: three of Go's nine are registered, and an id the registry does
 //!   not know is logged and skipped, which is the seam for the other six ([D-183]).
+//! - **reconnect replay**: a disconnected connection is parked inactive with its queues
+//!   ([`Hub::park`]), a client that comes back with its `connection_id` inherits them
+//!   ([`Hub::check_conn`]), and the write pump replays from the [`DeadQueue`] or, when the
+//!   client missed more than it holds, sends a new `hello` under a new id.
 //!
 //! Not ported, each for a stated reason:
 //!
-//! - **The dead queue and reconnect replay** (`web_conn.go:665-772`, `PopulateWebConnConfig`).
-//!   A reconnecting client with a known `connection_id` and `sequence_number` gets a fresh
-//!   connection here instead of the frames it missed. See [D-181].
 //! - **Cluster send.** `Publish` mirrors an event to other nodes through `clusterIFace`
 //!   (`cluster.go:189`); there is one node, and the strangler's *other* process is the Go server,
 //!   which has its own hub. See [D-182] — a client connected to this server does not see events
@@ -52,8 +53,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 
 use mm_model::session::Session;
 use mm_model::utils::{StringInterface, get_millis, new_id};
@@ -84,6 +85,159 @@ const WEB_CONN_MEMBER_CACHE_TIME: i64 = 1000 * 60 * 30;
 /// `<>` rather than `""` because a mobile client may legitimately set the active channel to the
 /// empty string, and Go has to tell that apart from never having been told.
 pub const UNSET_PRESENCE_INDICATOR: &str = "<>";
+
+/// Port of `platform.deadQueueSize` (web_conn.go:42).
+pub const DEAD_QUEUE_SIZE: usize = 128;
+
+/// Port of `platform.inactiveConnReaperInterval` (web_hub.go:25) — five minutes, in
+/// milliseconds. Both how often the reaper runs and how long an inactive connection's last
+/// activity may be past before it is dropped.
+const INACTIVE_CONN_REAPER_INTERVAL: i64 = 5 * 60 * 1000;
+
+/// One event the write pump has written: the frame with its sequence set, and which of the two
+/// encodings it left in — a replay must send the same bytes.
+#[derive(Debug, Clone)]
+pub struct DeadQueueEntry {
+    pub event: WebSocketEvent,
+    pub precomputed: bool,
+}
+
+/// Port of `WebConn.deadQueue` and `deadQueuePointer` (web_conn.go:109-117) and the five functions
+/// over them (web_conn.go:665-772): a ring of the last [`DEAD_QUEUE_SIZE`] events written to a
+/// connection, kept so a client that drops can be sent what it missed.
+///
+/// The functions are Go's line for line, **including their assumptions**: that sequence numbers
+/// rise by one between neighbours, that the ring is filled from slot 0 without gaps, and that a
+/// sequence decreasing between two slots marks the wrap. The write pump is the only writer and
+/// keeps all three true.
+///
+/// **Provisional oracle.** The Go functions are unexported, so `reference/dump` cannot call them
+/// and there is no generated corpus; the unit tests below are transcribed from the Go source, and
+/// `parity::websocket_reconnect` is the evidence that the whole path agrees.
+#[derive(Debug)]
+pub struct DeadQueue {
+    slots: Vec<Option<DeadQueueEntry>>,
+    /// The next slot to write.
+    pointer: usize,
+}
+
+impl Default for DeadQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DeadQueue {
+    pub fn new() -> Self {
+        Self {
+            slots: vec![None; DEAD_QUEUE_SIZE],
+            pointer: 0,
+        }
+    }
+
+    /// Port of `addToDeadQueue` (web_conn.go:665).
+    pub fn add(&mut self, entry: DeadQueueEntry) {
+        self.slots[self.pointer] = Some(entry);
+        self.pointer = (self.pointer + 1) % DEAD_QUEUE_SIZE;
+    }
+
+    /// Port of `_hasMsgLoss` (web_conn.go:685): whether the newest entry is **not** the one just
+    /// before `seq`. An empty queue has lost nothing.
+    pub fn has_msg_loss(&self, seq: i64) -> bool {
+        let index = if self.pointer == 0 {
+            if self.slots[0].is_none() {
+                return false;
+            }
+            DEAD_QUEUE_SIZE - 1
+        } else {
+            self.pointer - 1
+        };
+        // Go dereferences the slot unconditionally; it is never empty on a path the pump can
+        // reach. An empty one is reported as loss, which sends the client a fresh `hello` rather
+        // than silence.
+        self.slots[index]
+            .as_ref()
+            .is_none_or(|entry| entry.event.get_sequence() != seq - 1)
+    }
+
+    /// Port of `_isInDeadQueue` (web_conn.go:710): the slot holding `seq`, scanning from slot 0
+    /// and **stopping at the first empty slot**.
+    pub fn position_of(&self, seq: i64) -> Option<usize> {
+        for slot in &self.slots {
+            match slot {
+                None => return None,
+                Some(entry) if entry.event.get_sequence() == seq => {
+                    return self.slots.iter().position(|s| std::ptr::eq(s, slot));
+                }
+                Some(_) => {}
+            }
+        }
+        None
+    }
+
+    /// Port of `clearDeadQueue` (web_conn.go:726): empty up to the first gap, pointer to 0.
+    pub fn clear(&mut self) {
+        for slot in &mut self.slots {
+            if slot.is_none() {
+                break;
+            }
+            *slot = None;
+        }
+        self.pointer = 0;
+    }
+
+    /// The frames `drainDeadQueue` (web_conn.go:739) writes, from `index` to the newest.
+    ///
+    /// Before the ring has wrapped — the pointer's slot is still empty — that is `index` up to the
+    /// pointer. After, it walks forward from `index` through the end of the ring and stops where
+    /// the sequence goes *down*, which is the oldest entry. Go's loop has no other exit; the cap
+    /// of one lap here only turns an impossible infinite loop into a stop.
+    pub fn drain_from(&self, index: usize) -> Vec<&DeadQueueEntry> {
+        if self.slots[0].is_none() {
+            return Vec::new();
+        }
+        if self.slots[self.pointer].is_none() {
+            return (index..self.pointer)
+                .filter_map(|i| self.slots[i].as_ref())
+                .collect();
+        }
+        let mut out = Vec::new();
+        let mut current = index;
+        for _ in 0..DEAD_QUEUE_SIZE {
+            let Some(entry) = self.slots[current].as_ref() else {
+                break;
+            };
+            out.push(entry);
+            current = (current + 1) % DEAD_QUEUE_SIZE;
+            let Some(next) = self.slots[current].as_ref() else {
+                break;
+            };
+            if entry.event.get_sequence() > next.event.get_sequence() {
+                break;
+            }
+        }
+        out
+    }
+}
+
+/// What a disconnected connection leaves for a client that comes back: the active queue, still
+/// receiving broadcasts, and the dead queue of what was already written.
+#[derive(Debug)]
+pub struct ParkedQueues {
+    pub active: mpsc::Receiver<OutgoingFrame>,
+    pub dead: DeadQueue,
+}
+
+/// Port of `platform.CheckConnResult` (web_conn.go:151) — what a resumed connection inherits.
+#[derive(Debug)]
+pub struct CheckConnResult {
+    /// The same channel's sending half: the broadcasts already queued and those still to come go
+    /// to one receiver, which the new pump takes over.
+    send: mpsc::Sender<OutgoingFrame>,
+    pub queues: ParkedQueues,
+    /// The old connection's `reuse_count` plus one.
+    pub reuse_count: usize,
+}
 
 /// One frame bound for a connection.
 ///
@@ -125,7 +279,9 @@ pub enum OutgoingFrame {
 /// with a broadcast.
 #[derive(Debug)]
 pub struct WebConn {
-    pub connection_id: String,
+    /// Go's `WebConn.connectionID`: set at construction and **replaced** at most once, by the
+    /// write pump, when a client comes back having missed more than the dead queue holds.
+    connection_id: RwLock<String>,
 
     /// Go's `WebConn.UserId`. A lock rather than a plain field because Go **assigns** it after
     /// construction: `authentication_challenge` sets `conn.UserId = session.UserId`
@@ -163,6 +319,21 @@ pub struct WebConn {
     /// every [`WEB_CONN_MEMBER_CACHE_TIME`] ms. Only the *keys* are ever read; the roles come
     /// along because the store call returns them.
     all_channel_members: RwLock<Option<(HashMap<String, String>, i64)>>,
+
+    /// Go's `reuseCount`: how many times this connection's queues have been handed to a client
+    /// that reconnected. `hello` is queued on registration only when it is zero.
+    pub reuse_count: usize,
+
+    /// Go's `lastUserActivityAt`: construction time, then whatever `UpdateActivity` records for
+    /// this connection's session. Read by the reaper and by the unregister arm's away test.
+    last_user_activity_at: AtomicI64,
+
+    /// The queues this connection left in the hub when its socket went away — see [`Hub::park`].
+    parked: Mutex<Option<ParkedQueues>>,
+
+    /// Go's `close(wc.send)` as the write pump sees it: the hub has removed this connection and
+    /// the socket should close. See [`Hub::close_and_remove`].
+    close: tokio::sync::Notify,
 }
 
 impl WebConn {
@@ -170,26 +341,97 @@ impl WebConn {
     /// plugin connect hook.
     ///
     /// Returns the connection and the receiving half of its queue; `mm-api`'s write pump owns the
-    /// receiver, so a dropped receiver is how the hub learns the socket is gone.
+    /// receiver until the socket goes away, then parks it in the hub ([`Hub::park`]).
     pub fn new(
         connection_id: String,
         session: Session,
         posted_ack: bool,
     ) -> (Arc<WebConn>, mpsc::Receiver<OutgoingFrame>) {
         let (tx, rx) = mpsc::channel(SEND_QUEUE_SIZE);
-        let conn = Arc::new(WebConn {
+        (
+            Self::build(connection_id, session, posted_ack, tx, 0, true),
+            rx,
+        )
+    }
+
+    /// `NewWebConn` given a config `PopulateWebConnConfig` filled from a found connection
+    /// (web_conn.go:183-190): the old id and queues, `reuse_count` one higher, and **not active**
+    /// until [`Hub::register`] makes it so. Returns the queues for the write pump.
+    pub fn resume(
+        connection_id: String,
+        session: Session,
+        posted_ack: bool,
+        found: CheckConnResult,
+    ) -> (Arc<WebConn>, ParkedQueues) {
+        let conn = Self::build(
             connection_id,
+            session,
+            posted_ack,
+            found.send,
+            found.reuse_count,
+            false,
+        );
+        (conn, found.queues)
+    }
+
+    fn build(
+        connection_id: String,
+        session: Session,
+        posted_ack: bool,
+        send: mpsc::Sender<OutgoingFrame>,
+        reuse_count: usize,
+        active: bool,
+    ) -> Arc<WebConn> {
+        Arc::new(WebConn {
+            connection_id: RwLock::new(connection_id),
             user_id: RwLock::new(session.user_id.clone()),
             posted_ack,
             session: RwLock::new(session),
-            active: AtomicBool::new(true),
-            send: tx,
+            active: AtomicBool::new(active),
+            send,
             active_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
             active_rhs_thread_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
             active_thread_view_thread_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
             all_channel_members: RwLock::new(None),
-        });
-        (conn, rx)
+            reuse_count,
+            last_user_activity_at: AtomicI64::new(get_millis()),
+            parked: Mutex::new(None),
+            close: tokio::sync::Notify::new(),
+        })
+    }
+
+    /// Go's `GetConnectionID`.
+    pub fn connection_id(&self) -> String {
+        self.connection_id
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Go's `SetConnectionID` (web_conn.go:323) — the write pump's, on message loss.
+    pub fn set_connection_id(&self, connection_id: impl Into<String>) {
+        *self
+            .connection_id
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = connection_id.into();
+    }
+
+    pub fn last_user_activity_at(&self) -> i64 {
+        self.last_user_activity_at.load(Ordering::Acquire)
+    }
+
+    /// Resolves once the hub has closed and removed this connection ([`Hub::close_and_remove`]).
+    /// The notification is stored if nobody is waiting, so a pump that starts waiting late still
+    /// sees it.
+    pub async fn closed(&self) {
+        self.close.notified().await;
+    }
+
+    fn take_parked(&self) -> Option<ParkedQueues> {
+        self.parked
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
     }
 
     /// A snapshot of the session. Cloned rather than borrowed so no caller holds the lock across
@@ -488,6 +730,8 @@ pub struct Hub {
     /// Go's `Hub.broadcastHooks`, handed to every hub by `hubStart` (web_hub.go:136) from
     /// `Server.makeBroadcastHooks`.
     broadcast_hooks: HashMap<&'static str, Box<dyn BroadcastHook>>,
+    /// When the inactive-connection reaper last ran — see [`Hub::reap_if_due`].
+    last_reap: AtomicI64,
 }
 
 impl fmt::Debug for Hub {
@@ -518,6 +762,7 @@ impl Hub {
         Self {
             index: RwLock::new(HubIndex::default()),
             broadcast_hooks,
+            last_reap: AtomicI64::new(get_millis()),
         }
     }
 
@@ -568,52 +813,136 @@ impl Hub {
         hooked.into_copy()
     }
 
+    fn write_index(&self) -> RwLockWriteGuard<'_, HubIndex> {
+        self.index
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Port of `Hub.Register` (web_hub.go:378) plus the register arm of the hub loop
-    /// (web_hub.go:588).
+    /// (web_hub.go:586).
     ///
-    /// Sends `hello` as the connection's first frame. Go gates that on `reuseCount == 0`; every
-    /// registration here is fresh, because reconnect replay is not ported ([D-181]), so the gate
-    /// is always open and is not reproduced as a branch that can only take one value.
+    /// Marks the connection active and indexes it, then queues `hello` — **only when
+    /// `reuse_count` is zero**. A resumed client keeps the id it already has; if it missed too
+    /// much to resume, the write pump sends it a new `hello` itself. Go also requires
+    /// `IsBasicAuthenticated`; every caller registers a connection whose session it has just
+    /// resolved, so that half cannot be false here.
     pub fn register(&self, conn: Arc<WebConn>, hello: WebSocketEvent) {
         conn.set_active(true);
         {
-            let mut index = self
-                .index
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            index
-                .by_conn
-                .insert(conn.connection_id.clone(), conn.clone());
+            let mut index = self.write_index();
+            self.reap_if_due(&mut index);
+            index.by_conn.insert(conn.connection_id(), conn.clone());
             index
                 .by_user
                 .entry(conn.user_id())
                 .or_default()
                 .push(conn.clone());
         }
-        // A queue that is full at registration cannot happen — it was just created — so the
-        // error arm is unreachable rather than ignored.
-        // `hello` does *not* go through `PrecomputeJSON` — it is queued directly by the hub loop
-        // (web_hub.go:604), so it leaves compact and newline-terminated.
-        let _ = conn.try_send(OutgoingFrame::Event {
-            event: Box::new(hello),
-            precomputed: false,
-        });
+        if conn.reuse_count == 0 {
+            // A fresh queue cannot be full, so the error arm is unreachable rather than ignored.
+            // `hello` does *not* go through `PrecomputeJSON` — it is queued directly by the hub
+            // loop (web_hub.go:604), so it leaves compact and newline-terminated.
+            let _ = conn.try_send(OutgoingFrame::Event {
+                event: Box::new(hello),
+                precomputed: false,
+            });
+        }
     }
 
-    /// Port of `Hub.Unregister` (web_hub.go:392) and `closeAndRemoveConn` (web_hub.go:825).
-    pub fn unregister(&self, connection_id: &str) {
-        let mut index = self
-            .index
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(conn) = index.by_conn.remove(connection_id) else {
-            return;
-        };
+    /// The first half of the unregister arm (web_hub.go:607): the connection goes **inactive and
+    /// stays indexed**, holding its queues for a client that comes back ([`Hub::check_conn`]).
+    /// Broadcasts keep reaching it and wait in the queue until it is resumed, reaped, or the
+    /// queue fills. A connection the hub has already removed drops its queues instead.
+    ///
+    /// The status half needs the app — see [`App::hub_unregister`].
+    pub fn park(&self, conn: &Arc<WebConn>, queues: ParkedQueues) {
+        let mut index = self.write_index();
         conn.set_active(false);
-        if let Some(conns) = index.by_user.get_mut(&conn.user_id()) {
-            conns.retain(|c| c.connection_id != connection_id);
-            if conns.is_empty() {
-                index.by_user.remove(&conn.user_id());
+        if index_has(&index, conn) {
+            *conn
+                .parked
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(queues);
+        }
+        self.reap_if_due(&mut index);
+    }
+
+    /// Port of `Hub.CheckConn` (web_hub.go:414) and its arm (web_hub.go:568), which is
+    /// `hubConnectionIndex.RemoveInactiveByConnectionID` (web_hub.go:1017).
+    ///
+    /// An **inactive** connection of this user whose id is `connection_id` is taken out of the
+    /// index and its queues handed over, with `reuse_count` one higher. An active connection with
+    /// that id is not a match — its client never left — and neither is another user's.
+    pub fn check_conn(&self, user_id: &str, connection_id: &str) -> Option<CheckConnResult> {
+        if user_id.is_empty() {
+            return None;
+        }
+        let mut index = self.write_index();
+        self.reap_if_due(&mut index);
+        let conn = index
+            .by_user
+            .get(user_id)?
+            .iter()
+            .find(|c| c.connection_id() == connection_id && !c.is_active())?
+            .clone();
+        remove_from_index(&mut index, &conn);
+        let queues = conn.take_parked()?;
+        Some(CheckConnResult {
+            // Cloned: the resumed connection must feed the very channel whose receiver it inherits.
+            send: conn.send.clone(),
+            queues,
+            reuse_count: conn.reuse_count + 1,
+        })
+    }
+
+    /// Port of `closeAndRemoveConn` (web_hub.go:825): out of the index and its queues dropped,
+    /// and a live socket told to close — Go closes the send channel, and the write pump answers
+    /// that with a close frame.
+    pub fn close_and_remove(&self, conn: &Arc<WebConn>) {
+        {
+            let mut index = self.write_index();
+            remove_from_index(&mut index, conn);
+        }
+        drop(conn.take_parked());
+        conn.close.notify_one();
+    }
+
+    /// Port of `hubConnectionIndex.RemoveInactiveConnections` (web_hub.go:1033) — drop every
+    /// inactive connection whose last activity is more than [`INACTIVE_CONN_REAPER_INTERVAL`] ago.
+    ///
+    /// Go runs it on a five-minute ticker; this hub has no loop of its own, so it runs on the
+    /// first registration, park or resume lookup after five minutes have passed. Either way a
+    /// connection can outlive the threshold by up to one interval, and the check a resuming
+    /// client depends on — "is it still there" — runs the reaper first, so it never finds one Go's
+    /// ticker would already have dropped.
+    fn reap_if_due(&self, index: &mut HubIndex) {
+        let now = get_millis();
+        if now - self.last_reap.load(Ordering::Acquire) < INACTIVE_CONN_REAPER_INTERVAL {
+            return;
+        }
+        self.last_reap.store(now, Ordering::Release);
+        let stale: Vec<Arc<WebConn>> = index
+            .by_conn
+            .values()
+            .filter(|c| {
+                !c.is_active() && now - c.last_user_activity_at() > INACTIVE_CONN_REAPER_INTERVAL
+            })
+            .cloned()
+            .collect();
+        for conn in stale {
+            remove_from_index(index, &conn);
+            drop(conn.take_parked());
+        }
+    }
+
+    /// Port of `Hub.UpdateActivity` (web_hub.go:480) and its arm (web_hub.go:691): the active
+    /// connections of this user that authenticated with this token record `activity_at`.
+    pub fn update_activity(&self, user_id: &str, session_token: &str, activity_at: i64) {
+        for conn in self.for_user(user_id) {
+            if conn.is_active() && conn.session().token == session_token {
+                conn.last_user_activity_at
+                    .store(activity_at, Ordering::Release);
             }
         }
     }
@@ -671,13 +1000,17 @@ impl Hub {
             .count()
     }
 
-    /// Total live connections. Not a Go method; used by tests and the hub's own logging.
+    /// Port of `hubConnectionIndex.AllActive` (web_hub.go:1045) — Go's `Hub.connectionCount`,
+    /// which is what `total_websocket_connections` reports. **Active only**: a parked connection
+    /// is indexed and not counted.
     pub fn conn_count(&self) -> usize {
         self.index
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .by_conn
-            .len()
+            .values()
+            .filter(|c| c.is_active())
+            .count()
     }
 
     /// The hub leg of `PlatformService.InvalidateCacheForUser` (web_hub.go:233).
@@ -698,12 +1031,52 @@ impl Hub {
         }
     }
 
-    /// Send one frame to one connection. Port of `Hub.SendMessage` (web_hub.go:492).
-    pub fn send_to_connection(&self, connection_id: &str, frame: OutgoingFrame) {
-        if let Some(conn) = self.for_connection(connection_id)
-            && conn.try_send(frame).is_err()
-        {
-            self.unregister(connection_id);
+    /// Port of `Hub.SendMessage` (web_hub.go:492) and the direct-message arm (web_hub.go:700): a
+    /// frame for a connection the hub does not hold is dropped, and a full queue closes and
+    /// removes the connection.
+    pub fn send_message(&self, conn: &Arc<WebConn>, frame: OutgoingFrame) {
+        let held = index_has(
+            &self
+                .index
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            conn,
+        );
+        if !held {
+            return;
+        }
+        if conn.try_send(frame).is_err() {
+            if conn.is_active() {
+                tracing::error!(
+                    user_id = %conn.user_id(),
+                    conn_id = %conn.connection_id(),
+                    "webhub.broadcast: cannot send, closing websocket for user"
+                );
+            }
+            self.close_and_remove(conn);
+        }
+    }
+}
+
+/// Port of `hubConnectionIndex.Has` (web_hub.go:969), by identity.
+fn index_has(index: &HubIndex, conn: &Arc<WebConn>) -> bool {
+    index.by_conn.values().any(|c| Arc::ptr_eq(c, conn))
+}
+
+/// Port of `hubConnectionIndex.Remove` (web_hub.go:902), by identity.
+///
+/// Go deletes the by-id entry under the connection's **current** id, and after a lost-message
+/// reconnect that is not the id it was indexed under, so the old key leaks and keeps pointing at
+/// the connection. Nothing can reach it through that key — a broadcast addressed to it finds a
+/// connection `Has` no longer holds — so removing every entry for the connection is the same
+/// behaviour without the leak.
+fn remove_from_index(index: &mut HubIndex, conn: &Arc<WebConn>) {
+    index.by_conn.retain(|_, c| !Arc::ptr_eq(c, conn));
+    let user_id = conn.user_id();
+    if let Some(conns) = index.by_user.get_mut(&user_id) {
+        conns.retain(|c| !Arc::ptr_eq(c, conn));
+        if conns.is_empty() {
+            index.by_user.remove(&user_id);
         }
     }
 }
@@ -772,14 +1145,15 @@ impl App {
                 .run_broadcast_hooks(&event, &conn, &hooks, &hook_args, self)
                 .await;
             if conn.try_send(broadcast_frame(&event, hooked)).is_err() {
+                // "Don't log the warning if it's an inactive connection."
                 if conn.is_active() {
                     tracing::error!(
                         user_id = %conn.user_id(),
-                        conn_id = %conn.connection_id,
+                        conn_id = %conn.connection_id(),
                         "webhub.broadcast: cannot send, closing websocket for user"
                     );
                 }
-                self.hub().unregister(&conn.connection_id);
+                self.hub().close_and_remove(&conn);
             }
         }
     }
@@ -897,7 +1271,7 @@ impl App {
         );
         hello.add(
             "connection_id",
-            serde_json::Value::String(conn.connection_id.clone()),
+            serde_json::Value::String(conn.connection_id().clone()),
         );
         if let Ok(hostname) = hostname() {
             hello.add("server_hostname", serde_json::Value::String(hostname));
@@ -934,6 +1308,45 @@ impl App {
     /// cache is.
     pub fn clear_session_cache_for_user(&self, user_id: &str) {
         self.hub().invalidate_user(user_id);
+    }
+
+    /// Port of `PlatformService.HubUnregister` (web_hub.go:190) and the whole unregister arm
+    /// (web_hub.go:607): park the connection ([`Hub::park`]), then settle the user's status.
+    ///
+    /// - **No active connection left** — including none at all — is `QueueSetStatusOffline`. Go
+    ///   batches that and flushes every 500ms; the guard, the status written, the cache, the row
+    ///   and the broadcast are `SetStatusOffline`'s, which runs here at once. The broadcast reaches
+    ///   the parked connection too, so a client that resumes is told it went offline.
+    /// - **Otherwise**, the newest activity among the active connections decides: if even that is
+    ///   past the away timeout, `SetStatusLastActivityAt` records it and lets the user go away.
+    ///
+    /// Go's cluster count is skipped: there is one node.
+    pub async fn hub_unregister(&self, conn: &Arc<WebConn>, queues: ParkedQueues) {
+        self.hub().park(conn, queues);
+
+        let user_id = conn.user_id();
+        if user_id.is_empty() {
+            return;
+        }
+        let conns = self.hub().for_user(&user_id);
+        if conns.iter().all(|c| !c.is_active()) {
+            self.set_status_offline(&user_id, false, false).await;
+            return;
+        }
+        let latest_activity = conns
+            .iter()
+            .filter(|c| c.is_active())
+            .map(|c| c.last_user_activity_at())
+            .max()
+            .unwrap_or(0);
+        if crate::status::is_user_away(
+            get_millis(),
+            latest_activity,
+            self.config().user_status_away_timeout,
+        ) {
+            self.set_status_last_activity_at(&user_id, latest_activity)
+                .await;
+        }
     }
 }
 
@@ -993,10 +1406,10 @@ pub fn addressing_verdict(
     }
 
     if !broadcast.connection_id.is_empty() {
-        return verdict(conn.connection_id == broadcast.connection_id);
+        return verdict(conn.connection_id() == broadcast.connection_id);
     }
 
-    if conn.connection_id == broadcast.omit_connection_id {
+    if conn.connection_id() == broadcast.omit_connection_id {
         return Verdict::Skip;
     }
 
@@ -1522,7 +1935,7 @@ mod tests {
     }
 
     #[test]
-    fn register_queues_hello_and_unregister_removes_the_connection() {
+    fn register_queues_hello_and_close_and_remove_takes_the_connection_out() {
         let hub = Hub::new();
         let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER), false);
         hub.register(
@@ -1540,7 +1953,7 @@ mod tests {
             other => panic!("expected an event, got {other:?}"),
         }
 
-        hub.unregister(CONN);
+        hub.close_and_remove(&conn);
         assert_eq!(hub.conn_count(), 0);
         assert_eq!(hub.conn_count_for_user(USER), 0);
         // Not the same assertion: `conn_count_for_user` filters on `is_active`, so a connection
@@ -1549,11 +1962,291 @@ mod tests {
         // connection.
         assert!(
             hub.for_user(USER).is_empty(),
-            "unregister must remove the connection from the user index, not just deactivate it"
+            "removal must take the connection out of the user index, not just deactivate it"
         );
-        // Unregistering twice is a no-op, as Go's is.
-        hub.unregister(CONN);
+        // Removing twice is a no-op, as Go's is.
+        hub.close_and_remove(&conn);
         assert_eq!(hub.conn_count(), 0);
+    }
+
+    fn hello() -> WebSocketEvent {
+        event(mm_model::websocket_message::WEBSOCKET_EVENT_HELLO)
+    }
+
+    fn parked(rx: mpsc::Receiver<OutgoingFrame>) -> ParkedQueues {
+        ParkedQueues {
+            active: rx,
+            dead: DeadQueue::new(),
+        }
+    }
+
+    #[test]
+    fn a_parked_connection_stays_indexed_inactive_uncounted_and_keeps_receiving() {
+        let hub = Hub::new();
+        let (conn, rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        hub.register(conn.clone(), hello());
+        hub.park(&conn, parked(rx));
+
+        assert!(!conn.is_active());
+        assert_eq!(hub.conn_count(), 0, "a parked connection is not counted");
+        assert_eq!(hub.conn_count_for_user(USER), 0);
+        assert_eq!(hub.for_user(USER).len(), 1, "but it is still indexed");
+
+        // A frame sent while it is parked waits in the queue.
+        hub.send_message(
+            &conn,
+            OutgoingFrame::Response(Box::new(WebSocketResponse::new("OK", 9, None))),
+        );
+        let mut found = hub.check_conn(USER, CONN).expect("the parked connection");
+        let mut kinds = Vec::new();
+        while let Ok(frame) = found.queues.active.try_recv() {
+            kinds.push(match frame {
+                OutgoingFrame::Event { event, .. } => event.event_type().to_owned(),
+                OutgoingFrame::Response(response) => format!("response {}", response.seq_reply),
+            });
+        }
+        assert_eq!(kinds, ["hello", "response 9"]);
+    }
+
+    #[test]
+    fn check_conn_takes_only_an_inactive_connection_of_that_user_with_that_id() {
+        let hub = Hub::new();
+        let (conn, rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        hub.register(conn.clone(), hello());
+
+        assert!(
+            hub.check_conn(USER, CONN).is_none(),
+            "an active connection's client never left"
+        );
+        hub.park(&conn, parked(rx));
+        assert!(hub.check_conn(OTHER_USER, CONN).is_none(), "another user's");
+        assert!(hub.check_conn(USER, CHANNEL).is_none(), "another id");
+        assert!(hub.check_conn("", CONN).is_none(), "no user at all");
+
+        let found = hub.check_conn(USER, CONN).expect("the match");
+        assert_eq!(found.reuse_count, 1);
+        assert!(hub.for_user(USER).is_empty(), "taken out of the index");
+        assert!(hub.check_conn(USER, CONN).is_none(), "and so found once");
+    }
+
+    #[test]
+    fn a_resumed_connection_is_registered_without_hello_and_counts_its_reuse() {
+        let hub = Hub::new();
+        let (conn, rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        hub.register(conn.clone(), hello());
+        hub.park(&conn, parked(rx));
+
+        let found = hub.check_conn(USER, CONN).expect("parked");
+        let (resumed, mut queues) = WebConn::resume(CONN.to_owned(), session(USER), false, found);
+        assert!(!resumed.is_active(), "not active until registered");
+        hub.register(resumed.clone(), hello());
+        assert!(resumed.is_active());
+        assert_eq!(resumed.reuse_count, 1);
+
+        // The first registration's hello is still queued; the second registration added none.
+        let mut hellos = 0;
+        while queues.active.try_recv().is_ok() {
+            hellos += 1;
+        }
+        assert_eq!(hellos, 1);
+
+        // A second round counts again.
+        hub.park(&resumed, queues);
+        assert_eq!(hub.check_conn(USER, CONN).map(|f| f.reuse_count), Some(2));
+    }
+
+    #[test]
+    fn a_full_queue_closes_and_removes_a_parked_connection() {
+        let hub = Hub::new();
+        let (conn, rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        hub.register(conn.clone(), hello());
+        hub.park(&conn, parked(rx));
+
+        for seq in 0..=SEND_QUEUE_SIZE as i64 {
+            hub.send_message(
+                &conn,
+                OutgoingFrame::Response(Box::new(WebSocketResponse::new("OK", seq, None))),
+            );
+        }
+        assert!(hub.for_user(USER).is_empty());
+        assert!(hub.check_conn(USER, CONN).is_none());
+    }
+
+    #[test]
+    fn a_frame_for_a_connection_the_hub_does_not_hold_is_dropped() {
+        let hub = Hub::new();
+        let (conn, mut rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        hub.send_message(
+            &conn,
+            OutgoingFrame::Response(Box::new(WebSocketResponse::new("OK", 1, None))),
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_reaper_drops_only_inactive_connections_idle_past_the_interval() {
+        let hub = Hub::new();
+        let now = get_millis();
+        let mk = |id: &str| WebConn::new(id.to_owned(), session(USER), false);
+
+        let (stale, stale_rx) = mk("stalestalestalestalestale1");
+        let (recent, recent_rx) = mk("recentrecentrecentrecentre");
+        let (active, _active_rx) = mk("activeactiveactiveactiveac");
+        for c in [&stale, &recent, &active] {
+            hub.register(c.clone(), hello());
+        }
+        hub.park(&stale, parked(stale_rx));
+        hub.park(&recent, parked(recent_rx));
+        stale.last_user_activity_at.store(
+            now - INACTIVE_CONN_REAPER_INTERVAL - 1_000,
+            Ordering::Release,
+        );
+        recent.last_user_activity_at.store(
+            now - INACTIVE_CONN_REAPER_INTERVAL + 1_000,
+            Ordering::Release,
+        );
+        active
+            .last_user_activity_at
+            .store(now - 10 * INACTIVE_CONN_REAPER_INTERVAL, Ordering::Release);
+
+        // Not due yet: nothing is reaped.
+        assert!(hub.check_conn(USER, NOBODY_CONN).is_none());
+        assert_eq!(hub.for_user(USER).len(), 3);
+
+        hub.last_reap
+            .store(now - INACTIVE_CONN_REAPER_INTERVAL, Ordering::Release);
+        assert!(hub.check_conn(USER, NOBODY_CONN).is_none());
+        let left: Vec<String> = hub
+            .for_user(USER)
+            .iter()
+            .map(|c| c.connection_id())
+            .collect();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert!(!left.contains(&stale.connection_id()));
+    }
+
+    #[test]
+    fn update_activity_touches_only_active_connections_holding_that_token() {
+        let hub = Hub::new();
+        let (a, _a_rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        let (b, b_rx) = WebConn::new(CHANNEL.to_owned(), session(USER), false);
+        let mut other = session(USER);
+        other.token = "another".to_owned();
+        let (c, _c_rx) = WebConn::new(TEAM.to_owned(), other, false);
+        for conn in [&a, &b, &c] {
+            hub.register(conn.clone(), hello());
+            conn.last_user_activity_at.store(1, Ordering::Release);
+        }
+        hub.park(&b, parked(b_rx));
+
+        hub.update_activity(USER, "token", 42);
+        assert_eq!(a.last_user_activity_at(), 42);
+        assert_eq!(b.last_user_activity_at(), 1, "inactive");
+        assert_eq!(c.last_user_activity_at(), 1, "another token");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // the dead queue
+    // -----------------------------------------------------------------------------------------
+
+    const NOBODY_CONN: &str = "nobodynobodynobodynobodyno";
+
+    fn entry(seq: i64) -> DeadQueueEntry {
+        DeadQueueEntry {
+            event: event(WEBSOCKET_EVENT_POSTED).set_sequence(seq),
+            precomputed: seq % 2 == 0,
+        }
+    }
+
+    fn filled(seqs: std::ops::Range<i64>) -> DeadQueue {
+        let mut queue = DeadQueue::new();
+        for seq in seqs {
+            queue.add(entry(seq));
+        }
+        queue
+    }
+
+    fn seqs(entries: Vec<&DeadQueueEntry>) -> Vec<i64> {
+        entries.iter().map(|e| e.event.get_sequence()).collect()
+    }
+
+    #[test]
+    fn an_empty_dead_queue_has_lost_nothing_and_holds_nothing() {
+        let queue = DeadQueue::new();
+        assert!(!queue.has_msg_loss(5));
+        assert!(!queue.has_msg_loss(0));
+        assert_eq!(queue.position_of(0), None);
+        assert!(queue.drain_from(0).is_empty());
+    }
+
+    #[test]
+    fn loss_is_judged_against_the_newest_entry_only() {
+        let queue = filled(0..4);
+        assert!(!queue.has_msg_loss(4), "the next one after the newest");
+        assert!(queue.has_msg_loss(3), "the newest itself");
+        assert!(queue.has_msg_loss(2));
+        assert!(queue.has_msg_loss(40));
+    }
+
+    #[test]
+    fn a_queue_whose_pointer_wrapped_to_zero_judges_loss_by_its_last_slot() {
+        let queue = filled(0..DEAD_QUEUE_SIZE as i64);
+        assert_eq!(queue.pointer, 0);
+        assert!(!queue.has_msg_loss(DEAD_QUEUE_SIZE as i64));
+        assert!(queue.has_msg_loss(DEAD_QUEUE_SIZE as i64 + 1));
+    }
+
+    #[test]
+    fn position_of_finds_a_slot_and_stops_at_the_first_gap() {
+        let queue = filled(5..8);
+        assert_eq!(queue.position_of(6), Some(1));
+        assert_eq!(queue.position_of(8), None);
+        assert_eq!(queue.position_of(4), None);
+
+        let wrapped = filled(0..130);
+        assert_eq!(wrapped.position_of(128), Some(0));
+        assert_eq!(wrapped.position_of(2), Some(2));
+        assert_eq!(wrapped.position_of(1), None, "overwritten");
+    }
+
+    #[test]
+    fn a_drain_before_the_wrap_runs_from_the_index_to_the_pointer() {
+        let queue = filled(0..5);
+        assert_eq!(seqs(queue.drain_from(2)), [2, 3, 4]);
+        assert_eq!(seqs(queue.drain_from(0)), [0, 1, 2, 3, 4]);
+        let kept: Vec<bool> = queue.drain_from(3).iter().map(|e| e.precomputed).collect();
+        assert_eq!(
+            kept,
+            [false, true],
+            "each frame keeps the encoding it left in"
+        );
+    }
+
+    #[test]
+    fn a_drain_after_the_wrap_runs_through_the_end_to_the_newest() {
+        let wrapped = filled(0..130); // slots 0 and 1 hold 128 and 129; slot 2 the oldest, 2
+        let from_126 = wrapped.position_of(126).expect("present");
+        assert_eq!(seqs(wrapped.drain_from(from_126)), [126, 127, 128, 129]);
+        assert_eq!(seqs(wrapped.drain_from(0)), [128, 129]);
+        let everything = seqs(wrapped.drain_from(2));
+        assert_eq!(everything.len(), DEAD_QUEUE_SIZE);
+        assert_eq!(everything.first(), Some(&2));
+        assert_eq!(everything.last(), Some(&129));
+
+        // Exactly full: the pointer is back at 0 and the stop is the wrap to slot 0.
+        let full = filled(0..DEAD_QUEUE_SIZE as i64);
+        assert_eq!(seqs(full.drain_from(125)), [125, 126, 127]);
+    }
+
+    #[test]
+    fn clear_empties_the_queue_and_resets_the_pointer() {
+        let mut queue = filled(0..3);
+        queue.clear();
+        assert_eq!(queue.pointer, 0);
+        assert!(queue.slots.iter().all(Option::is_none));
+        assert!(!queue.has_msg_loss(7));
+        queue.add(entry(0));
+        assert_eq!(queue.position_of(0), Some(0));
     }
 
     // -----------------------------------------------------------------------------------------
