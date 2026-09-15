@@ -196,50 +196,60 @@ pub async fn fetch_both_raw(
     (get(GO).await, get(RUST).await)
 }
 
-/// The first channel of the first team the fixture user belongs to.
+/// The seeded team's `town-square` — see [`a_team_and_channel_the_user_is_in`].
 pub async fn a_channel_the_user_is_in(client: &reqwest::Client, token: &str) -> String {
     a_team_and_channel_the_user_is_in(client, token).await.1
 }
 
-/// `(team_id, channel_id)`, discovered through Go's own API. Ids are minted per database, so
-/// hardcoding one survives only until the volume is recreated — which [D-130] required.
+/// The team `scripts/stack.sh seed` creates for the fixture user. Every stack has it, and no suite
+/// creates, purges or deletes it.
+pub const SEEDED_TEAM_NAME: &str = "slice-team";
+
+/// `(team_id, channel_id)`: the seeded team and its `town-square`, discovered through Go's own API
+/// by **name**. Ids are minted per database, so hardcoding one survives only until the volume is
+/// recreated — which [D-130] required.
+///
+/// # Why by name, and not "the first team"
+///
+/// This used to take the first entry of `GET /users/me/teams` and that team's first channel. The
+/// fixture user is the admin, who creates — and so belongs to — every team any suite creates, and
+/// Go's order put those first: on stack 0 on 2026-09-15 the list opened with
+/// `mmrscreatepostteambackdate` and held `mmrsfilesearch-team` ahead of `slice-team`. So a caller
+/// could build its fixture on another suite's team, and that suite's purge — which deletes its own
+/// teams' channels, posts and file infos by SQL when its fixture initialises — then removed the
+/// caller's rows mid-run. `file_info` lost seven tests that way in the first sharded run after the
+/// file-search merge: our reads 404 from the database while Go still served its cache. "The first
+/// channel" had the same hole, since suites add channels to whatever team they are handed. The
+/// seeded team is nobody's fixture, and `town-square` cannot be archived.
 pub async fn a_team_and_channel_the_user_is_in(
     client: &reqwest::Client,
     token: &str,
 ) -> (String, String) {
-    let teams: serde_json::Value = client
-        .get(format!("{GO}/api/v4/users/me/teams"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("Go answers")
-        .json()
-        .await
-        .expect("teams decode");
-    let team_id = teams
-        .as_array()
-        .and_then(|t| t.first())
-        .and_then(|t| t["id"].as_str())
-        .expect("the fixture user belongs to at least one team");
-
-    let channels: serde_json::Value = client
-        .get(format!("{GO}/api/v4/users/me/teams/{team_id}/channels"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("Go answers")
-        .json()
-        .await
-        .expect("channels decode");
-
-    let channel_id = channels
-        .as_array()
-        .and_then(|c| c.first())
-        .and_then(|c| c["id"].as_str())
-        .expect("the fixture user is in at least one channel")
-        .to_owned();
-
-    (team_id.to_owned(), channel_id)
+    let get = async |path: String, what: &str| -> String {
+        let response = client
+            .get(format!("{GO}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("Go answers");
+        assert!(
+            response.status().is_success(),
+            "{what} was not found — was the stack seeded (`scripts/stack.sh seed`)?"
+        );
+        let body: serde_json::Value = response.json().await.expect("the body decodes");
+        body["id"].as_str().expect("an id").to_owned()
+    };
+    let team_id = get(
+        format!("/api/v4/teams/name/{SEEDED_TEAM_NAME}"),
+        "the seeded team",
+    )
+    .await;
+    let channel_id = get(
+        format!("/api/v4/teams/{team_id}/channels/name/town-square"),
+        "the seeded team's town-square",
+    )
+    .await;
+    (team_id, channel_id)
 }
 
 /// **`Systems.ActiveLicenseId` is one row for the whole installation**, and more than one suite

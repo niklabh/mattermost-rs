@@ -1131,7 +1131,12 @@ async fn add_reaction_and_remove_reaction_are_different_permissions() {
     }
     let http = client();
     let admin = go_minted_token(&http).await;
-    let (team, channel) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    // A channel of its own, which the plain user below never joins. The shared helper returns
+    // the seeded team's `town-square`, and joining a team joins its `town-square` — so a post
+    // there made the user a channel member holding `channel_user`, whose `add_reaction` let
+    // the add through (2026-09-15, when the helper was pinned to the seeded team).
+    let channel = common::create_channel(&http, &admin, &team, "reactremove").await;
 
     // **`purge_api_fixtures` before `plant_role`, not after.** The purge sweeps `mmrs_role_%`
     // rows, and `create_plain_user` calls it — so planting first and creating the user second
@@ -1186,4 +1191,5 @@ async fn add_reaction_and_remove_reaction_are_different_permissions() {
     );
 
     delete_plain_user(&http, &admin, &plain.id).await;
+    common::delete_channel(&http, &admin, &channel).await;
 }
