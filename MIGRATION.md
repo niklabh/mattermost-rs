@@ -13634,3 +13634,33 @@ reconcile only logs on such a row — the suite plants ruled parents.
   reached by any served branch — every `publish*` that would call it sits past the nil check.
 - **Store methods added:** `AccessControlPolicy.{Get,Save,SearchPolicies}`. `SetActiveStatus*`
   and `GetAll` are only reached through the service and stay unported under [D-571].
+## The rest of `api4/post.go`, `report.go`'s writes and `integration_action.go` (2026-09-15)
+
+**+13 HTTP pairs / +0 local-mode pairs on base f4f0a5a.** `setPostReminder`, `restorePostVersion`,
+`moveThread`, `rewriteMessage`, `revealPost`, `burnPost`, `getPostsForReporting`,
+`startUsersBatchExport`, `doPostAction`, `openDialog`, `submitDialog`, `lookupDialog`,
+`executeDialogAction`. Every refusal is served; the branches left to Go are decided before any
+write and each has an OPEN entry: DM/GM reminder ([D-720], narrows [D-420]), the author's burn
+([D-721]), a cookie-carrying action ([D-722]), any integration call the outbound guard allows
+([D-723]), a licensed `moveThread` ([D-724]), the agents bridge ([D-725]). A restore that changes
+the file set forwards through the existing `update_post` refusal.
+
+Three things a reader would otherwise get wrong. `GetSinglePost` **reveals a burn-on-read post
+for the session's user** before any handler sees it (`App::reveal_single_burn_on_read_post`), so
+after a burn the post is a 404 and `RevealPost`'s own 403 `read_receipt_expired` is unreachable
+through the route. `getPostsForReporting` reads `s.postsQuery`, which has **no reply-count
+subquery** — every row is `reply_count: 0`, measured. And `openDialog` is `APIHandler`: no
+session, the user is the one inside the trigger id, verified with the stack's P-256 key.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/main.go` — `ReportPostOptions`, `ReportPostOptionsCursor`, `ReportPostListResponse`, `RewriteRequest`, `RewriteResponse` | DONE |
+| model | `crates/mm-model/src/post_rest.rs` — the reporting cursor codec and `Validate`; `integration_action.rs` — `validate_action_query`; 10 tests | DONE |
+| config | `burn_on_read_duration_seconds`, `outgoing_integration_requests_timeout`, `enable_permalink_previews`, `feature_flag_move_threads_enabled`, `feature_flag_mm_blocks_enabled`; fixture reprojected (99 keys) | DONE |
+| store | `read_receipt_store.rs` (`save`, `update`, `get`, `get_by_post`, `get_unread_count_for_post`), `temporary_post_store.rs` (`get`, `save`), `PostStore::get_posts_for_reporting` | DONE |
+| app | `crates/mm-app/src/post_rest.rs`; `post.rs` — the burn-on-read reveal in `get_post_if_authorized` and a lone-permalink embed (`sole_permalink_in`); `http_guard.rs` — `GuardedClient::permits` | DONE |
+| api | `crates/mm-api/src/postrest.rs`; 13 registrations in `lib.rs` (`/posts/rewrite` pinned like `/ephemeral`; `{action_id}` gets its `[A-Za-z0-9_-]+` class) | DONE |
+| test | `crates/mm-api/tests/parity/postrest.rs` — 10, bodies byte-identical on the served 200s, events compared on both sockets, reporting and export on the licensed pair | DONE |
+| mutation | `scripts/mutations/postrest.plan` — 15 run, 13 caught, 2 controls survived | DONE |
+
+New dependency: `p256` (workspace; mm-app, mm-api dev) for `DecodeAndVerifyTriggerId`'s ECDSA verify.

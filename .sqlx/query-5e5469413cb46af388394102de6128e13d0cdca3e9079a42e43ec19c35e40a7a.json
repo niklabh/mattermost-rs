@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT channelschemeroles.id,\n                   channelschemeroles.name,\n                   channelschemeroles.displayname   AS display_name,\n                   channelschemeroles.description,\n                   channelschemeroles.createat      AS create_at,\n                   channelschemeroles.updateat      AS update_at,\n                   channelschemeroles.deleteat      AS delete_at,\n                   channelschemeroles.permissions,\n                   channelschemeroles.schememanaged AS scheme_managed,\n                   channelschemeroles.builtin       AS built_in,\n                   channelschemeroles.schemeid      AS scheme_id\n              FROM roles AS higherscopedroles\n              JOIN schemes AS higherscopedschemes\n                ON (higherscopedroles.name = higherscopedschemes.defaultchannelguestrole\n                    OR higherscopedroles.name = higherscopedschemes.defaultchanneluserrole\n                    OR higherscopedroles.name = higherscopedschemes.defaultchanneladminrole)\n              JOIN teams ON teams.schemeid = higherscopedschemes.id\n              JOIN channels ON channels.teamid = teams.id\n              JOIN schemes AS channelschemes ON channels.schemeid = channelschemes.id\n              JOIN roles AS channelschemeroles ON channelschemeroles.schemeid = channelschemes.id\n             WHERE higherscopedschemes.scope = 'team'\n               AND higherscopedroles.name = $1\n               AND higherscopedroles.deleteat = 0\n               AND higherscopedschemes.deleteat = 0\n               AND teams.deleteat = 0\n               AND channels.deleteat = 0\n               AND channelschemes.deleteat = 0\n               AND channelschemeroles.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "update_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "delete_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "permissions",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "scheme_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "built_in",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "scheme_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "5e5469413cb46af388394102de6128e13d0cdca3e9079a42e43ec19c35e40a7a"
+}

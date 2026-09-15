@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO temporaryposts (postid, type, expireat, message, fileids)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (postid) DO UPDATE\n                 SET type = $2, expireat = $3, message = $4, fileids = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39019e62986fbd06a5d69888b057d30676f0608e9e666dc7040ebf4d8c2d3caa"
+}

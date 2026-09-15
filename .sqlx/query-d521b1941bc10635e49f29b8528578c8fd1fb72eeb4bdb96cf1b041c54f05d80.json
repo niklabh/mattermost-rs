@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE uploadsessions\n               SET type = $2::text::upload_session_type,\n                   createat = $3,\n                   userid = $4,\n                   channelid = $5,\n                   filename = $6,\n                   path = $7,\n                   filesize = $8,\n                   fileoffset = $9,\n                   remoteid = $10,\n                   reqfileid = $11\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d521b1941bc10635e49f29b8528578c8fd1fb72eeb4bdb96cf1b041c54f05d80"
+}

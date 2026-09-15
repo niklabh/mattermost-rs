@@ -248,4 +248,7 @@ mod parity {
     // Appended 2026-09-15: the SAML/LDAP/audit certificate and enterprise-gate routes.
     pub mod auth_certs;
     pub mod local_auth_certs;
+    // Appended 2026-09-15: the rest of api4/post.go, report.go's writes and
+    // integration_action.go.
+    pub mod postrest;
 }

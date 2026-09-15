@@ -40,6 +40,7 @@ pub mod product_notices_store;
 /// The five CPA reads across `PropertyGroups`, `PropertyFields` and `PropertyValues`.
 pub mod property_store;
 pub mod reaction_store;
+pub mod read_receipt_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
@@ -48,6 +49,7 @@ pub mod sidebar_category_store;
 pub mod status_store;
 pub mod system_store;
 pub mod team_store;
+pub mod temporary_post_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
 pub mod token_store;
@@ -85,6 +87,7 @@ pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
+pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
@@ -94,6 +97,7 @@ pub use sidebar_category_store::{
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
+pub use temporary_post_store::{SqlTemporaryPostStore, TemporaryPostStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use token_store::{SqlTokenStore, TokenStore};
@@ -126,6 +130,8 @@ pub struct SqlStore {
     file_info: SqlFileInfoStore,
     notify_admin: SqlNotifyAdminStore,
     desktop_tokens: SqlDesktopTokensStore,
+    read_receipt: SqlReadReceiptStore,
+    temporary_post: SqlTemporaryPostStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -194,6 +200,8 @@ impl SqlStore {
             file_info: SqlFileInfoStore::new(pool.clone()),
             notify_admin: SqlNotifyAdminStore::new(pool.clone()),
             desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
+            read_receipt: SqlReadReceiptStore::new(pool.clone()),
+            temporary_post: SqlTemporaryPostStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -318,6 +326,16 @@ impl SqlStore {
     /// Port of `store.Store.DesktopTokens()`.
     pub fn desktop_tokens(&self) -> &SqlDesktopTokensStore {
         &self.desktop_tokens
+    }
+
+    /// Port of `store.Store.ReadReceipt()`.
+    pub fn read_receipt(&self) -> &SqlReadReceiptStore {
+        &self.read_receipt
+    }
+
+    /// Port of `store.Store.TemporaryPost()`.
+    pub fn temporary_post(&self) -> &SqlTemporaryPostStore {
+        &self.temporary_post
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {

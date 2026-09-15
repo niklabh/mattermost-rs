@@ -149,6 +149,12 @@ sha2 = { version = "0.10", features = ["oid"] }
 # only the public-key verify path is used, so the timing caveats on its private-key operations do
 # not apply here.
 rsa = { version = "0.9", features = ["getrandom"] }
+# The interactive-dialog trigger id is `clientTriggerId:userId:millis:` signed with the
+# installation's P-256 key (`Systems.AsymmetricSigningKey`), SHA-256 digest, ASN.1 DER signature
+# — `model.GenerateTriggerId` / `DecodeAndVerifyTriggerId` (integration_action.go:636, :664).
+# `POST /actions/dialogs/open` verifies one before it publishes anything, and a verifier that
+# cannot check the signature would open a dialog for anyone who can base64.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
 # `bcrypt` is the LEGACY hasher, kept because rows written before Mattermost's PBKDF2 migration
 # are still bcrypt and `GetHasherFromPHCString` still routes to it. Chosen over rolling blowfish

@@ -142,6 +142,50 @@ pub fn message_may_contain_a_link(message: &str) -> bool {
         || message.contains('<')
 }
 
+/// The referenced post id when `message`'s **only** candidate link is a permalink Go's
+/// autolinker would find and `looksLikeAPermalink` (post_metadata.go:808) would accept:
+/// one `://` in the whole message, the whitespace-delimited token around it starting `http://`
+/// or `https://`, equal to `{site_url}/{team}/pl/{id}` with the team `[0-9a-z_-]{1,64}` and the
+/// id `[a-z0-9]{26}`, and none of [`message_may_contain_a_link`]'s other needles or a backtick
+/// (an autolink inside a code span is not a link). Anything looser is `None`, and the caller
+/// refuses the message rather than guessing which link Go would pick.
+pub fn sole_permalink_in(message: &str, site_url: &str) -> Option<String> {
+    if site_url.is_empty()
+        || message.matches("://").count() != 1
+        || message.contains("www")
+        || message.contains("![")
+        || message.contains('<')
+        || message.contains('`')
+    {
+        return None;
+    }
+    let token = message
+        .split_whitespace()
+        .find(|token| token.contains("://"))?;
+    if !(token.starts_with("http://") || token.starts_with("https://")) {
+        return None;
+    }
+    let path = token.strip_prefix(site_url)?;
+    let path = path.strip_prefix('/').unwrap_or(path);
+    let (team, rest) = path.split_once("/pl/")?;
+    if team.is_empty()
+        || team.len() > 64
+        || !team
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+    {
+        return None;
+    }
+    if rest.len() != 26
+        || !rest
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(rest.to_owned())
+}
+
 impl App {
     /// Port of `app.App.GetPostInfo` (app/post.go:2977) — the body of
     /// `GET /api/v4/posts/{post_id}/info`, assembled from what the handler already fetched.
@@ -233,6 +277,12 @@ impl App {
         incl_deleted: bool,
     ) -> AppResult<(Post, bool)> {
         let post = self.get_single_post(post_id, incl_deleted).await?;
+        // `GetSinglePost` ends with `revealSingleBurnOnReadPost` for the session's user
+        // (app/post.go:1537) — a no-op on every other type. Applied here rather than inside
+        // `get_single_post`, which has no session to reveal for.
+        let post = self
+            .reveal_single_burn_on_read_post(post, &session.user_id)
+            .await?;
 
         let channel = self.get_channel(&post.channel_id).await?;
 
@@ -291,7 +341,7 @@ impl App {
         opts: PreparePostForClientOpts,
     ) -> Result<Post, PrepareError> {
         let mut post = self.prepare_post_for_client(post, opts).await?;
-        self.get_embeds_and_images(&mut post)?;
+        self.get_embeds_and_images(&mut post).await?;
         self.prepare_post_files_for_client(&mut post, opts).await;
         Ok(post)
     }
@@ -307,10 +357,17 @@ impl App {
         if original.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
             return Err(PrepareError::Unreproducible("plugin post type"));
         }
-        // `revealSingleBurnOnReadPost` (post_helpers.go:335) and the burn-on-read block at
-        // post_metadata.go:217 need the ReadReceipt and TemporaryPost stores and the caller's
-        // session identity; neither is ported.
-        if original.post_type == POST_TYPE_BURN_ON_READ {
+        // The burn-on-read block at post_metadata.go:217 reads the ReadReceipt and TemporaryPost
+        // stores and the caller's session identity — **unless `Metadata.ExpireAt` is already
+        // set**, in which case both of its arms are skipped and the post is prepared like any
+        // other. `revealPost` sets it (`enrichPostWithExpirationMetadata`, post.go:4025) before
+        // preparing the revealed copy, and that is the one burn-on-read shape served here.
+        if original.post_type == POST_TYPE_BURN_ON_READ
+            && original
+                .metadata
+                .as_ref()
+                .is_none_or(|metadata| metadata.expire_at == 0)
+        {
             return Err(PrepareError::Unreproducible("burn-on-read post"));
         }
 
@@ -579,10 +636,56 @@ impl App {
     /// `getEmbedForPost` returns `(nil, nil)` when there is no first link and no attachment or
     /// board prop, and `getImagesForPost` returns an empty map when the message holds no
     /// markdown images. `omitempty` drops both, which is why a plain post's metadata is `{}`.
-    fn get_embeds_and_images(&self, post: &mut Post) -> Result<(), PrepareError> {
+    ///
+    /// # One link shape is reproduced: a lone permalink
+    ///
+    /// `getEmbedForPost` → `getLinkMetadata` → `getLinkMetadataForPermalink` (post_metadata.go:902)
+    /// builds a `permalink` embed from rows this server already reads — the referenced post,
+    /// its channel and its team — with no outbound request and no `LinkMetadata` row. So a
+    /// message whose **only** link is `{SiteURL}/{team}/pl/{post_id}` ([`sole_permalink_in`])
+    /// gets that embed here; `setPostReminder`'s confirmation is exactly that shape. Every
+    /// other link still refuses. Two things Go does around it are not reproduced: the
+    /// per-process `linkCache` (a second preview of the same post within the hour comes from
+    /// the cache in Go and is rebuilt here — the same rows unless the post was edited between),
+    /// and `populatePostListTranslations`, which needs the autotranslation service.
+    async fn get_embeds_and_images(&self, post: &mut Post) -> Result<(), PrepareError> {
         // `getFirstLink` reads `post.Message` and nothing else — and the message it reads is
         // the one the deleted-post short circuit may already have emptied, which is why this
         // check has to sit here rather than at the top of the pipeline.
+        if let Some(referenced_post_id) = sole_permalink_in(
+            &post.message,
+            self.config().site_url.as_deref().unwrap_or(""),
+        ) {
+            // `!EnablePermalinkPreviews` sends the URL down `getLinkMetadataForURL` instead: an
+            // outbound fetch and a `LinkMetadata` row, neither reproduced.
+            if !self.config().enable_permalink_previews {
+                return Err(PrepareError::Unreproducible(
+                    "permalink previews are off, so the link is fetched",
+                ));
+            }
+            if let Some(preview) = self
+                .link_metadata_for_permalink(&referenced_post_id)
+                .await?
+            {
+                let data = serde_json::to_value(&preview).map_err(|err| {
+                    PrepareError::App(AppError::boxed(
+                        "getEmbedsAndImages",
+                        "api.marshal_error",
+                        None,
+                        err.to_string(),
+                        500,
+                    ))
+                })?;
+                if let Some(metadata) = post.metadata.as_mut() {
+                    metadata.embeds.push(mm_model::post_embed::PostEmbed {
+                        type_: mm_model::post_embed::POST_EMBED_PERMALINK.to_owned(),
+                        url: String::new(),
+                        data: Some(data),
+                    });
+                }
+            }
+            return Ok(());
+        }
         if message_may_contain_a_link(&post.message) {
             return Err(PrepareError::Unreproducible(
                 "message may contain a link or a markdown image",
@@ -591,6 +694,83 @@ impl App {
         // Go sets `Embeds` to an empty slice and `Images` to an empty map. Both are `omitempty`,
         // so the fields' defaults already serialise identically; nothing to write.
         Ok(())
+    }
+
+    /// Port of `app.App.getLinkMetadataForPermalink` (post_metadata.go:902), as
+    /// `getEmbedsAndImages` consumes it: an `AppError` from any of the reads means **no embed**
+    /// (logged at debug, and a 404 not even that), never a failed request. `None` is that
+    /// outcome.
+    ///
+    /// The referenced post is prepared with `IncludePriority` unless it itself contains a
+    /// permalink (`containsPermalink`), in which case the preview carries the bare row. A
+    /// referenced post with any other link is refused here, since which link Go's autolinker
+    /// finds first is not reproduced.
+    async fn link_metadata_for_permalink(
+        &self,
+        referenced_post_id: &str,
+    ) -> Result<Option<mm_model::permalink::PreviewPost>, PrepareError> {
+        let referenced = match self.get_single_post(referenced_post_id, false).await {
+            Ok(post) => post,
+            Err(err) => {
+                if err.status_code != 404 {
+                    tracing::debug!(error = %err, "Failed to get embedded content for a post");
+                }
+                return Ok(None);
+            }
+        };
+        if referenced.post_type == POST_TYPE_BURN_ON_READ {
+            // The 403 `api.post.get_link_metadata_for_permalink.burn_on_read.app_error`,
+            // which the caller logs and drops.
+            tracing::debug!(post_id = %referenced.id, "Failed to get embedded content for a post: burn-on-read");
+            return Ok(None);
+        }
+        let channel = match self.get_channel(&referenced.channel_id).await {
+            Ok(channel) => channel,
+            Err(err) => {
+                if err.status_code != 404 {
+                    tracing::debug!(error = %err, "Failed to get embedded content for a post");
+                }
+                return Ok(None);
+            }
+        };
+        let team = if channel.channel_type == mm_model::channel::CHANNEL_TYPE_DIRECT
+            || channel.channel_type == mm_model::channel::CHANNEL_TYPE_GROUP
+        {
+            Team::default()
+        } else {
+            match self.get_team(&channel.team_id).await {
+                Ok(team) => team,
+                Err(err) => {
+                    if err.status_code != 404 {
+                        tracing::debug!(error = %err, "Failed to get embedded content for a post");
+                    }
+                    return Ok(None);
+                }
+            }
+        };
+
+        let site_url = self.config().site_url.clone().unwrap_or_default();
+        let previewed = if sole_permalink_in(&referenced.message, &site_url).is_some() {
+            referenced
+        } else if message_may_contain_a_link(&referenced.message) {
+            return Err(PrepareError::Unreproducible(
+                "the previewed post carries a link that is not a lone permalink",
+            ));
+        } else {
+            Box::pin(self.prepare_post_for_client_with_embeds_and_images(
+                &referenced,
+                PreparePostForClientOpts {
+                    include_priority: true,
+                    ..PreparePostForClientOpts::default()
+                },
+            ))
+            .await?
+        };
+        Ok(mm_model::permalink::new_preview_post(
+            Some(&previewed),
+            &team,
+            &channel,
+        ))
     }
 
     /// Port of `app.App.SanitizePostMetadataForUser` (post_metadata.go:332).

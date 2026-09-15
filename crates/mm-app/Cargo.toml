@@ -31,6 +31,8 @@ base64.workspace = true
 rand.workspace = true
 # Licence signature verification — see the workspace manifest.
 rsa.workspace = true
+# Trigger-id signature verification for `openDialog` — see the workspace manifest.
+p256.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
