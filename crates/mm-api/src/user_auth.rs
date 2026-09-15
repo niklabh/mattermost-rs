@@ -80,7 +80,7 @@ use mm_model::user::external::USER_AUTH_SERVICE_LDAP;
 use mm_model::utils::AppError;
 
 use crate::AppState;
-use crate::auth::AuthenticatedSession;
+use crate::auth::{AuthenticatedSession, MfaSetupSession};
 use crate::auth_writes::OptionalSession;
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
@@ -289,9 +289,11 @@ pub async fn update_user_auth(
 pub async fn update_user_mfa(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
-    session: AuthenticatedSession,
+    mfa_session: MfaSetupSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredMfa`: the one session extractor that does not ask `MfaRequired`.
+    let session = AuthenticatedSession(mfa_session.0);
     let user_id = match mfa_prologue(&state, &session, user_id).await {
         Ok(user_id) => user_id,
         Err(response) => return response,
@@ -356,9 +358,11 @@ pub async fn update_user_mfa(
 pub async fn generate_mfa_secret(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
-    session: AuthenticatedSession,
+    mfa_session: MfaSetupSession,
     request: Request,
 ) -> Response {
+    // `APISessionRequiredMfa`: the one session extractor that does not ask `MfaRequired`.
+    let session = AuthenticatedSession(mfa_session.0);
     let user_id = match mfa_prologue(&state, &session, user_id).await {
         Ok(user_id) => user_id,
         Err(response) => return response,

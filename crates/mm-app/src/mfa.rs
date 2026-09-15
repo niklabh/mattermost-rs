@@ -1,8 +1,8 @@
 //! Port of `App.MFARequired` (app/authentication.go:378).
 //!
-//! The one caller today is the websocket's `IsMFAAuthenticated` (web_conn.go:811), through
-//! [`App::conn_is_authenticated`](crate::App::conn_is_authenticated). REST's `RequireMfa` is not
-//! wired yet ([D-801]).
+//! Two callers: the websocket's `IsMFAAuthenticated` (web_conn.go:811), through
+//! [`App::conn_is_authenticated`](crate::App::conn_is_authenticated), and REST's `RequireMfa`,
+//! through `mm_api::auth::AuthenticatedSession`.
 //!
 //! # Three gates, then the user
 //!

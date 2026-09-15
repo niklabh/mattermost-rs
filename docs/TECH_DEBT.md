@@ -9112,15 +9112,7 @@ because both read the same view rows. **What is owed:** after the user row is wr
 `App::notices_cache()` — logged on failure, never returned, as Go's goroutine does. Both pieces
 exist since 2026-09-15; the call site is the user family's.
 
-## D-801 · REST routes do not enforce MFA
+## D-801 · REST routes do not enforce MFA — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-15 (websocket MFA)
-
-Go's `ServeHTTP` calls `c.MfaRequired()` for every handler registered with `RequireMfa`
-(web/handlers.go:345) — nearly every `APISessionRequired` route. `mm_api::auth`'s session extractor
-never asks, so on a licensed server with MFA enabled and enforced a user who has not set MFA up is
-served here where Go answers `api.context.mfa_required.app_error` at 403. **Fail-open.**
-
-`App::mfa_required` is ported and used by the websocket; what is owed is the extractor call, the
-`/api/v4/users/me` exemption (which needs the request path against the site URL's subpath), and
-the list of handlers Go registers *without* `RequireMfa`, which must stay exempt.
+`mm_api::auth::AuthenticatedSession` asks `App::mfa_required` last; `MfaSetupSession` exempts the two
+MFA-setup routes. `parity::rest_mfa` compares it on the licensed MFA pair.

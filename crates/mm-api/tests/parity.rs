@@ -148,6 +148,7 @@ mod parity {
     pub mod recaps;
     pub mod recommended_channels;
     pub mod redirect_location;
+    pub mod rest_mfa;
     pub mod role_patch;
     pub mod roles;
     pub mod schemes;

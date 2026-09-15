@@ -130,6 +130,14 @@ impl SessionRejection {
     /// with no `Authorization` header and no cookie gets a bare 401 from the running server,
     /// while the same request with a bad token gets a `Set-Cookie`. Nothing to clear is not the
     /// same as something to clear.
+    /// `MfaRequired`'s refusal, as `c.Err`: the error unchanged, no cookie cleared.
+    fn mfa_required(err: Box<mm_model::utils::AppError>) -> Self {
+        Self {
+            error: ApiError::from(err),
+            clear_session_cookie: None,
+        }
+    }
+
     fn no_token() -> Self {
         Self {
             error: ApiError::unauthenticated(),
@@ -223,46 +231,113 @@ impl IntoResponse for SessionRejection {
     }
 }
 
+/// The session half shared by [`AuthenticatedSession`] and [`MfaSetupSession`] — everything
+/// `ServeHTTP` does before `MfaRequired`.
+async fn resolve_required_session(
+    parts: &Parts,
+    state: &AppState,
+) -> Result<Session, SessionRejection> {
+    let Some((token, _location)) = parse_auth_token(parts) else {
+        // Go's `ApiSessionRequired` with no token at all returns
+        // `api.context.session_expired.app_error` rather than a "missing token" id.
+        return Err(SessionRejection::no_token());
+    };
+
+    // Port of `handlers.go:273-280`. **`GetSession`'s error id does not reach the client.**
+    // The web layer keeps a 500 as-is and replaces every other failure with the generic
+    // `api.context.session_expired.app_error`, so a wrong token, an expired session, a
+    // session revoked for idleness and a session id used as a token all produce one
+    // indistinguishable 401 — which is the point: none of them tells a caller whether the
+    // credential ever existed.
+    //
+    // This server used to return `api.context.invalid_token.error` here, which is the id
+    // `App::GetSession` builds and Go then discards. Clients switch on the id, so that was a
+    // wire divergence on every migrated route; it was found by the parity suite for the idle
+    // timeout, which is the first test to compare a 401 body against Go's.
+    //
+    // `h.RequireSession` is true for every route that takes this extractor at all — a handler
+    // that did not need a session would not name it.
+    //
+    // Not ported: `c.RemoveSessionCookie(w, r)`, which Go calls first. See [D-169].
+    let session = state.app.get_session(&token).await.map_err(|err| {
+        SessionRejection::for_get_session_error(err, || state.app.config().subpath())
+    })?;
+    Ok(session)
+}
+
 impl FromRequestParts<AppState> for AuthenticatedSession {
+    type Rejection = SessionRejection;
+
+    /// `APISessionRequired` and its `TrustRequester` and `DisableWhenBusy` variants — every
+    /// handler Go registers with `RequireMfa: true` (api4/handlers.go:57, :165, :186).
+    ///
+    /// **`MfaRequired` runs last** (web/handlers.go:345), after the session is resolved. It does
+    /// nothing unless the licence, `EnableMultifactorAuthentication` and
+    /// `EnforceMultifactorAuthentication` all say so; then a user who has not set MFA up is
+    /// refused at 403 on every route but `/api/v4/users/me` and the two that set it up
+    /// ([`MfaSetupSession`]). The refusal clears no cookie: the session is valid.
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let session = resolve_required_session(parts, state).await?;
+        let is_users_me = is_users_me_path(parts.uri.path(), &state.app.config().subpath());
+        state
+            .app
+            .mfa_required(Some(&session), is_users_me)
+            .await
+            .map_err(SessionRejection::mfa_required)?;
+        Ok(AuthenticatedSession(session))
+    }
+}
+
+/// `APISessionRequiredMfa` (api4/handlers.go:115) — identical to [`AuthenticatedSession`] except
+/// `RequireMfa: false`. Taken only by `PUT /users/{user_id}/mfa` and
+/// `POST /users/{user_id}/mfa/generate`: a user who owes MFA has to be able to set it up.
+pub struct MfaSetupSession(pub Session);
+
+impl FromRequestParts<AppState> for MfaSetupSession {
     type Rejection = SessionRejection;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let Some((token, _location)) = parse_auth_token(parts) else {
-            // Go's `ApiSessionRequired` with no token at all returns
-            // `api.context.session_expired.app_error` rather than a "missing token" id.
-            return Err(SessionRejection::no_token());
-        };
-
-        // Port of `handlers.go:273-280`. **`GetSession`'s error id does not reach the client.**
-        // The web layer keeps a 500 as-is and replaces every other failure with the generic
-        // `api.context.session_expired.app_error`, so a wrong token, an expired session, a
-        // session revoked for idleness and a session id used as a token all produce one
-        // indistinguishable 401 — which is the point: none of them tells a caller whether the
-        // credential ever existed.
-        //
-        // This server used to return `api.context.invalid_token.error` here, which is the id
-        // `App::GetSession` builds and Go then discards. Clients switch on the id, so that was a
-        // wire divergence on every migrated route; it was found by the parity suite for the idle
-        // timeout, which is the first test to compare a 401 body against Go's.
-        //
-        // `h.RequireSession` is true for every route that takes this extractor at all — a handler
-        // that did not need a session would not name it.
-        //
-        // Not ported: `c.RemoveSessionCookie(w, r)`, which Go calls first. See [D-169].
-        let session = state.app.get_session(&token).await.map_err(|err| {
-            SessionRejection::for_get_session_error(err, || state.app.config().subpath())
-        })?;
-        Ok(AuthenticatedSession(session))
+        Ok(MfaSetupSession(
+            resolve_required_session(parts, state).await?,
+        ))
     }
+}
+
+/// `rctx.Path() == path.Join(subpath, "/api/v4/users/me")` (app/authentication.go:411) — the
+/// request's **path only**, query excluded, compared exactly: `/api/v4/users/me/` and
+/// `/api/v4/users/me/teams` are not the exemption.
+fn is_users_me_path(path: &str, subpath: &str) -> bool {
+    path == mm_model::go_path::join(&[subpath, "/api/v4/users/me"])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::http::Request;
+
+    #[test]
+    fn only_the_exact_users_me_path_under_the_subpath_is_exempt() {
+        assert!(is_users_me_path("/api/v4/users/me", "/"));
+        assert!(is_users_me_path("/mm/api/v4/users/me", "/mm"));
+        assert!(
+            !is_users_me_path("/api/v4/users/me", "/mm"),
+            "the subpath is part of it"
+        );
+        for other in [
+            "/api/v4/users/me/",
+            "/api/v4/users/me/teams",
+            "/api/v4/users/ME",
+            "/api/v4/users/abcdefghijklmnopqrstuvwxyz",
+        ] {
+            assert!(!is_users_me_path(other, "/"), "{other}");
+        }
+    }
 
     fn parts_with(headers: &[(&str, &str)], uri: &str) -> Parts {
         let mut builder = Request::builder().uri(uri);
