@@ -119,6 +119,9 @@ pub mod config;
 /// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
+/// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
+/// Appended for the same reason as `config`.
+pub mod marketplace_visit;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -3107,6 +3110,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/config/environment",
             partially_migrated(get(config::get_environment_config)),
+        )
+        // ---- `api4/plugin.go:42-43` (2026-09-15) ----
+        //
+        // The one literal path served under `/plugins`. Nothing else there is registered, so
+        // every other `/plugins/*` request still falls to the router's fallback — the suite
+        // `marketplace_visit` asserts six of the neighbours come back Go's.
+        .route(
+            "/api/v4/plugins/marketplace/first_admin_visit",
+            partially_migrated(
+                get(marketplace_visit::get_first_admin_visit_marketplace_status)
+                    .post(marketplace_visit::set_first_admin_visit_marketplace_status),
+            ),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,

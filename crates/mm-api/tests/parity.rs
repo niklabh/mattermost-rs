@@ -240,4 +240,7 @@ mod parity {
     pub mod local_misc;
     // Appended 2026-09-14: the team, webhook and command families on the socket.
     pub mod local_teams;
+    // Appended 2026-09-15: the cmdremote family (commands, remote cluster, boards, uploads on
+    // the socket, first_admin_visit).
+    pub mod marketplace_visit;
 }
