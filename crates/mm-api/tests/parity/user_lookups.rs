@@ -356,20 +356,36 @@ async fn with_the_open_server_off_the_route_serves_a_page() {
         return;
     };
 
-    let response = client
-        .get(format!("{}{INVALID_PATH}?per_page=200", server.base))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("the second server answers");
-    assert_eq!(
-        response.status(),
-        200,
-        "with the gate open the route serves — so the 400 above is the gate and not the handler"
-    );
-    let body = response.bytes().await.expect("a body").to_vec();
-    assert_eq!(body.last(), Some(&b'\n'), "the encoder's newline");
-    let users: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    // Every page, not page 0: a full run holds more than 200 active users at its peak, and the
+    // subject — created mid-run — fell onto page 1 (2026-09-15, see D-800). The route pages by
+    // `LIMIT per_page OFFSET page * per_page`, so an empty page is the end.
+    let mut all_users = Vec::new();
+    for page in 0.. {
+        let response = client
+            .get(format!(
+                "{}{INVALID_PATH}?page={page}&per_page=200",
+                server.base
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the second server answers");
+        assert_eq!(
+            response.status(),
+            200,
+            "with the gate open the route serves — so the 400 above is the gate and not the handler"
+        );
+        let body = response.bytes().await.expect("a body").to_vec();
+        assert_eq!(body.last(), Some(&b'\n'), "the encoder's newline");
+        let users: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        let users = users.as_array().expect("an array").clone();
+        if users.is_empty() {
+            break;
+        }
+        assert!(page < 50, "the route never returned an empty page");
+        all_users.extend(users);
+    }
+    let users = serde_json::Value::Array(all_users);
     let ids: Vec<&str> = users
         .as_array()
         .expect("an array")

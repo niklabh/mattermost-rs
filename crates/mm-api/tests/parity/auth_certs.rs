@@ -297,7 +297,12 @@ async fn saml_certificate_status_is_gated_and_read_from_the_live_document() {
     let plain = create_plain_user(&client, &admin, &team_id, "authcertstatus").await;
 
     let path = "/api/v4/saml/certificate/status";
+    // The status is read from the live configuration document, which the SAML removes below and
+    // `parity::configlic` both write while other tests run. Held shared, so a Go read before a
+    // patch and our read after it cannot differ for the patch's sake (a full run, 2026-09-15).
+    let document = common::CONFIG_DOCUMENT.read().await;
     let (go, rs) = fetch_both(&client, &admin, path).await;
+    drop(document);
     assert_eq!(go, rs, "the status bodies differ");
     assert!(
         go.ends_with(b"}\n"),
@@ -810,6 +815,10 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     let post = reqwest::Method::POST;
     let delete = reqwest::Method::DELETE;
     let status_path = "/api/v4/saml/certificate/status";
+    // The SAML removes below flip `SamlSettings.Encrypt` in the shared configuration document, and
+    // it stays flipped until `restore_saml_encrypt`. Held exclusively across that span, like
+    // `parity::configlic`'s own patch, so no whole-document reader sees the flipped value.
+    let document = common::CONFIG_DOCUMENT.write().await;
     let saml_encrypt_before = saml_encrypt(&client, &admin).await;
 
     let (form_type, no_part) = multipart(&[("other", "x")]);
@@ -974,6 +983,7 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     assert_eq!(go, rs);
     assert_eq!(go, b"{\"idp_certificate_file\":false,\"private_key_file\":false,\"public_certificate_file\":false}\n");
     restore_saml_encrypt(&client, &admin, saml_encrypt_before).await;
+    drop(document);
 
     // `addSamlIdpCertificate` branches on `Content-Type` before it parses anything.
     let idp = "/api/v4/saml/certificate/idp";
