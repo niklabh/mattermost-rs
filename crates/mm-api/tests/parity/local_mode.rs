@@ -313,23 +313,27 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
 /// carrying it changes nothing. A mutation that stopped dropping it survived the whole suite
 /// until this existed.
 ///
-/// `cel/check` is chosen because it is an enterprise route on an unlicensed server: it reads the
-/// body, refuses with a deterministic 501 and touches nothing. A forwarded write that *worked*
-/// would be a fixture this suite has to clean up.
+/// `ldap/migrateid` is chosen because the body decides its answer: an absent or unreadable body is
+/// the 400 naming `toAttribute`, and only a body that arrived intact reaches the unlicensed 501
+/// `api.ldap_groups.license_error` — which is refused before `MigrateIdLDAP`, so nothing is
+/// written. (`access_control_policies/cel/check` played this part until that family was served.)
 #[tokio::test]
 async fn a_forwarded_post_carries_its_body() {
     if !sockets_enabled() {
         return;
     }
-    const PATH: &str = "/api/v4/access_control_policies/cel/check";
-    const BODY: &str = r#"{"expression":"1 == 1"}"#;
+    const PATH: &str = "/api/v4/ldap/migrateid";
+    const BODY: &str = r#"{"toAttribute":"objectGUID"}"#;
 
     let (go_status, _, go_body) =
         post_over_socket(&go_socket().expect("present"), PATH, BODY).await;
     let (rust_status, rust_headers, rust_body) =
         post_over_socket(&rust_socket().expect("present"), PATH, BODY).await;
 
-    assert_eq!(go_status, 501, "unlicensed, so the policy engine refuses");
+    assert_eq!(
+        go_status, 501,
+        "the body arrived, so the licence refusal is reached rather than the 400"
+    );
     assert_eq!(rust_status, go_status);
     assert!(
         rust_headers.get("x-mmrs-served-by").is_none(),
