@@ -653,17 +653,29 @@ async fn the_elasticsearch_routes_check_the_body_before_the_gate() {
         )
         .await;
     }
-    for body in [None, Some(&b"null"[..]), Some(b"{bad")] {
-        assert_same_error(
+    // A body that decodes to nothing — none, `null`, not JSON — is **never sent to Go**. Go's
+    // handler substitutes `c.App.Config()`, the live running configuration, and then writes
+    // `BulkIndexingTimeWindowSeconds = new(0)` through that pointer: the first such request
+    // leaves Go's `GET /config` showing a key its stored document does not have, for the life
+    // of the process and before the permission check, so it breaks every config comparison
+    // that runs after this suite. Go's answers were measured once on 2026-09-15 (a member is the
+    // 403, the administrator the 501) and are asserted here against ours alone.
+    let rust_only = async |token: &str, body: Option<&[u8]>, status: u16, id: &str| {
+        let (got, bytes, served) = request_raw(
             &client,
+            RUST,
             Method::POST,
-            Some(&plain.token),
+            Some(token),
             "/api/v4/elasticsearch/test",
             body,
-            403,
-            "api.context.permissions.app_error",
         )
         .await;
+        assert_eq!(served.as_deref(), Some("rust"));
+        assert_eq!(got, status, "{}", String::from_utf8_lossy(&bytes));
+        assert_eq!(json(&bytes)["id"], id);
+    };
+    for body in [None, Some(&b"null"[..]), Some(b"{bad")] {
+        rust_only(&plain.token, body, 403, "api.context.permissions.app_error").await;
     }
     assert_same_error(
         &client,
@@ -676,13 +688,11 @@ async fn the_elasticsearch_routes_check_the_body_before_the_gate() {
     )
     .await;
 
-    // The administrator: no engine on either side, after the password check.
+    // The administrator: no engine on either side, after the password check. The empty bodies
+    // are ours alone, for the reason above.
     for body in [None, Some(&b"null"[..])] {
-        assert_same_error(
-            &client,
-            Method::POST,
-            Some(&admin),
-            "/api/v4/elasticsearch/test",
+        rust_only(
+            &admin,
             body,
             501,
             "ent.elasticsearch.test_config.license.error",

@@ -820,6 +820,17 @@ fn decode_elasticsearch_body(bytes: &[u8]) -> Result<Option<ElasticsearchTestSet
 /// `test_elasticsearch_settings_nil`) — and only then `SessionHasPermissionToAndNotRestrictedAdmin(
 /// test_elasticsearch)`. So a caller with no rights learns whether their body was complete. Then
 /// `App::test_elasticsearch`: the re-enter-password 400, or the 501 this build always ends in.
+///
+/// # Go writes into its running configuration here, and this port does not
+///
+/// For a body that decodes to nothing, Go's `cfg` **is** `c.App.Config()` — the live pointer —
+/// and the `BulkIndexingTimeWindowSeconds = new(0)` patch lands in the server's configuration,
+/// before the permission check: after one such request from anyone, Go's `GET /config` carries
+/// `"BulkIndexingTimeWindowSeconds": 0`, which its stored document does not, until the process
+/// restarts. This handler reads the stored document and patches nothing, so the two `GET /config`
+/// answers diverge on that one key exactly when Go has been sent such a body. Measured
+/// 2026-09-15, when the parity suite's own empty-body requests broke `config_reads`; the suite
+/// no longer sends them to Go.
 #[tracing::instrument(skip_all, fields(body_used))]
 pub async fn test_elasticsearch(
     State(state): State<AppState>,

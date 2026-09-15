@@ -13531,6 +13531,12 @@ which needed `os.Getwd`'s `$PWD` rule ported and mm-api launched from the Go run
 | test | `crates/mm-api/tests/parity/sysops.rs` — 9; the socket integrity comparison reads Go-us-Go, since the rest of the module moves orphan rows between reads | DONE |
 | mutation | `scripts/mutations/sysops.plan` — 19 run, 17 caught, 2 controls survived; `sysops-notices.plan` — 10 run, 8 caught, 2 controls survived (the semver operators and the config-entry type rule are caught by the library oracle under `unit`) | DONE |
 
+**Go writes into its running configuration** on `POST /elasticsearch/test` with a body that
+decodes to nothing (`cfg` is `c.App.Config()`, then patched), so after one such request Go's
+`GET /config` carries `BulkIndexingTimeWindowSeconds: 0` until it restarts. The suite once sent
+those bodies to Go and broke `config_reads` for every run after it; it now asserts them against
+ours alone, with Go's answers measured once.
+
 **Not comparable, by design:** three `standard` analytics rows (websocket count, the two pool
 counts) are each process's own and compared by name and position only. **Not verified by
 parity:** the upgrade permission branches (every stack is arm64, so both servers stop at the
