@@ -165,6 +165,15 @@ MODELLED = {
     "Office365Settings": ["Enable"],
     "MessageExportSettings": ["DownloadExportResults"],
     "CloudSettings": ["PreviewModalBucketURL"],
+    # The intensive-query cap on GET /api/v4/analytics/old.
+    "AnalyticsSettings": ["MaxUsersForStatistics"],
+    # The file switch and directory the three log routes read.
+    "LogSettings": ["EnableFile", "FileLocation"],
+    # The notice gates, feed and refresh period behind GET /api/v4/system/notices/{team_id}.
+    "AnnouncementSettings": [
+        "AdminNoticesEnabled", "UserNoticesEnabled", "NoticesURL", "NoticesFetchFrequency",
+        "NoticesSkipCache",
+    ],
 }
 
 full = json.load(sys.stdin)

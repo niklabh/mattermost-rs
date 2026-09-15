@@ -264,4 +264,6 @@ mod parity {
     pub mod local_uploads;
     pub mod marketplace_visit;
     pub mod remote_cluster;
+    // Appended 2026-09-15: the system-operations family.
+    pub mod sysops;
 }

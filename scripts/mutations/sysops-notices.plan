@@ -1,0 +1,22 @@
+# Mutation plan for `GET /api/v4/system/notices/{team_id}` — the notice cache and matcher.
+#
+#   scripts/mutate-batch.sh scripts/mutations/sysops-notices.plan
+#
+# Every line is a decision `parity::sysops::the_product_notices_match_for_a_viewer_and_a_fresh_user`
+# has a row for: the viewed check, the hard-coded English message, the client-version parse
+# that runs whether or not a range needs it, the server-version and config-entry checks that
+# `crt-user-always-on` (CollapsedThreads = always_on on this stack) exercises. The two semver
+# operators and the config-entry type rule run under `unit` against the library oracle, since no
+# notice in today's feed sits on their boundary. The audience check is not planned: no
+# sysadmin-audience notice passes its other conditions on this stack. One no-op control.
+
+notices-viewed-hides	crates/mm-app/src/product_notices.rs	} else if view.viewed > 0 {	} else if view.viewed > 1 {	api	sysops::the_product_notices
+notices-client-version-always-parsed	crates/mm-app/src/product_notices.rs	let client_version = new_version(inputs.client_version)\n            .ok_or_else(|| format!("Cannot parse version range {}", inputs.client_version))?;	let client_version = new_version(inputs.client_version).or_else(|| new_version("0.0.0")).ok_or_else(|| String::new())?;	api	sysops::the_product_notices
+notices-message-is-english	crates/mm-app/src/product_notices.rs	.and_then(|m| m.get("en"))	.and_then(|m| m.get("fr"))	api	sysops::the_product_notices
+notices-server-version-checked	crates/mm-app/src/product_notices.rs	if !inputs.is_cloud {\n            if let Some(server_versions) = &cnd.server_version {	if inputs.is_cloud {\n            if let Some(server_versions) = &cnd.server_version {	api	sysops::the_product_notices
+notices-config-entry-checked	crates/mm-app/src/product_notices.rs	if !config_entry_matches(config, path, expected) {	if config_entry_matches(config, path, expected) {	api	sysops::the_product_notices
+semver-lt-is-strict	crates/mm-model/src/notice_conditions.rs	"<" => v.less_than(&self.con),	"<" => v.compare(&self.con) != Ordering::Greater,	unit	notice_conditions
+semver-gte-includes-equal	crates/mm-model/src/notice_conditions.rs	">=" | "=>" => v.compare(&self.con) != Ordering::Less,	">=" | "=>" => v.compare(&self.con) == Ordering::Greater,	unit	notice_conditions
+config-entry-type-rule	crates/mm-model/src/notice_conditions.rs	        (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => a == b,\n        _ => false,	        (serde_json::Value::Bool(a), serde_json::Value::Bool(b)) => a == b,\n        (serde_json::Value::Number(a), serde_json::Value::Number(b)) => a == b,\n        _ => false,	unit	notice_conditions
+control-reword-debug-log	crates/mm-app/src/product_notices.rs	"notice condition error"	"notice condition failed"	api	sysops::the_product_notices
+control-reorder-view-columns	crates/mm-store/src/product_notices_store.rs	SELECT userid AS "user_id!", noticeid AS "notice_id!",	SELECT noticeid AS "notice_id!", userid AS "user_id!",	api	sysops::the_product_notices

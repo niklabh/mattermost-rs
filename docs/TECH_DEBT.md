@@ -9124,3 +9124,48 @@ value — the path is not an api4 route at all and falls to the webapp's static 
 answer is a 500 naming Go's own `client/root.html` path; on, `manualtesting.ManualTest` drives Go's
 REST client against its own listen address to seed users and teams. Neither is an API handler this
 server can reproduce without porting the static webapp handler, so both forward.
+## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+
+`testNotifications` (api4/system.go:233) is `App.SendTestMessage` (app/post.go:3422) and nothing
+else: the system bot, `GetOrCreateDirectChannel(user, bot)`, the user's locale for the one
+message string, then `CreatePost(…, CreatePostFlags{ForceNotification: true})` and `ReturnStatusOK`.
+Every piece but the flag is ported; `mm_app::post_create::CreatePostFlags` carries `set_online`
+and `silent_notification` only, and the flag is the post family's to add (it sets the
+`force_notification` prop after `SanitizeProps` and drives the push through the user's
+do-not-disturb). **What is owed:** the flag on `CreatePostFlags`, then `App::send_test_message`
+and the two-line handler in `mm_api::sysops`. The route forwards whole today; the parity suite
+pins that in `the_two_forwarded_routes_are_still_gos`.
+
+## D-682 · `POST /api/v4/upgrade_to_enterprise`'s upgrade arm forwards: the procedure is the Go binary's
+
+**Status** OPEN · **Severity** decision · **Raised** 2026-09-15 (system.go)
+
+Past the five refusals (`mm_api::sysops::upgrade_to_enterprise`) Go spawns `upgrader.UpgradeToE0`:
+download `mattermost-<version>-linux-amd64.tar.gz`, verify the detached signature against the
+embedded key, swap `mattermost/bin/mattermost` over the running executable, then report 100% and
+let `POST /restart` exec it. There is no enterprise build of this server to fetch, so the arm
+forwards to Go — whose own binary is what the procedure replaces — and the status and restart
+routes then report this process, which has not been upgraded. Reachable only on a Linux amd64
+host whose executable directory the process may write; every stack in this project is arm64 and
+both servers answer `system_not_supported` before the arm. **What is owed:** a decision when the
+Go server is gone — most likely that the route answers `already-enterprise` (429), since a
+server with no Team Edition to upgrade *from* is the enterprise-ready case — recorded here so it
+is decided rather than inherited.
+
+## D-683 · A user created here is not marked as having viewed the current product notices
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+
+`App.CreateUser` ends with `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` (app/user.go:413),
+which writes a `ProductNoticeViewState` row with `Viewed = 1` for every notice in the cache, so a
+brand-new user is not shown the notices already current on the day they joined. The Rust
+`App::create_user` (`mm_app::user_create`) does not, so a user created through this server's
+`POST /api/v4/users` is shown notices from their first request that a Go-created user never sees —
+`GET /api/v4/system/notices/{team_id}` then differs between the two for that user, on both servers,
+because both read the same view rows. **What is owed:** after the user row is written, the call
+`self.store().product_notices().view(&user.id, &ids)` over the ids in
+`App::notices_cache()` — logged on failure, never returned, as Go's goroutine does. Both pieces
+exist since 2026-09-15; the call site is the user family's.
+

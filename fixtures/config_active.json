@@ -6,6 +6,16 @@
     "EnableAttributeBasedAccessControl": false,
     "EnableChannelPolicyIndicators": true
   },
+  "AnalyticsSettings": {
+    "MaxUsersForStatistics": 2500
+  },
+  "AnnouncementSettings": {
+    "AdminNoticesEnabled": true,
+    "NoticesFetchFrequency": 3600,
+    "NoticesSkipCache": false,
+    "NoticesURL": "https://notices.mattermost.com/",
+    "UserNoticesEnabled": true
+  },
   "ClientRequirements": {
     "AndroidLatestVersion": "",
     "AndroidMinVersion": "",
@@ -65,6 +75,10 @@
   },
   "LocalizationSettings": {
     "DefaultClientLocale": "en"
+  },
+  "LogSettings": {
+    "EnableFile": true,
+    "FileLocation": ""
   },
   "MessageExportSettings": {
     "DownloadExportResults": false

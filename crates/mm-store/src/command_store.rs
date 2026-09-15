@@ -101,6 +101,13 @@ pub trait CommandStore {
         command_id: &str,
         time: i64,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlCommandStore.AnalyticsCommandCount` (command_store.go:245): live commands
+    /// (`DeleteAt = 0`), for one team or (`""`) all.
+    fn analytics_command_count(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -378,6 +385,28 @@ impl CommandStore for SqlCommandStore {
         })?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, count))]
+    async fn analytics_command_count(&self, team_id: &str) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM commands
+             WHERE deleteat = 0
+               AND ($1 = '' OR teamid = $1)
+            "#,
+            team_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("unable to count the commands: team_id={team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
     }
 }
 

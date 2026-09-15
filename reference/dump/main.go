@@ -1241,6 +1241,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
+	if err := writeNoticeConditionsBehaviourFixture(*out); err != nil {
+		fmt.Fprintln(os.Stderr, "notice conditions behaviour fixture:", err)
+		os.Exit(1)
+	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_product_notices.json"))
 
 	if err := writeOAuthDCRBehaviourFixture(*out); err != nil {

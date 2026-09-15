@@ -46,6 +46,16 @@
 # `mutate.sh` did not, so every `api`-suite mutation ran against a server configured unlike the
 # one the tests were written against.
 #
+# **Launched from the Go server's run directory, since 2026-09-15.** `GET /api/v4/logs` and its
+# two siblings read `LogSettings.FileLocation`, which is `""` on a stock server and then means
+# "the `logs` directory found beside the working directory or the binary" (`fileutils.FindDir`),
+# validated against a logging root found the same way. Two servers resolve that to the same file
+# only when they run from the same place, so `mm-api` starts with the Go server's `$RUN` as its
+# working directory — the layout `go-server.sh` builds, whose `logs/mattermost.log` is the file
+# Go writes. Nothing else this process reads is relative to the working directory: the file
+# directory is absolute above, and the config document's `./plugins`-style defaults now resolve
+# to the same directories Go resolves them to.
+#
 # The three local-mode variables opened the unix-socket admin API, 2026-09-11. They are the same
 # names Go reads, and the socket paths are the per-stack ones from `stack-env.sh` —
 # `MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION` names the **Go** server's socket, which is mm-api's
@@ -63,6 +73,7 @@ mmrs_launch_mm_api() {
   source "$root/scripts/stack-env.sh"
   local log="${1:-/tmp/mmrs-mm-api$MMRS_STACK_SUFFIX.log}"
   (
+    cd "$root/reference/.build/mmroot$MMRS_RUN_SUFFIX" || exit 1
     DATABASE_URL="$DATABASE_URL" \
     MM_API_LISTEN="127.0.0.1:$MMRS_API_PORT" \
     MM_GO_UPSTREAM="$MMRS_GO_BASE" \

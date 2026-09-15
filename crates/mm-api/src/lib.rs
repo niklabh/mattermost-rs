@@ -146,6 +146,9 @@ pub mod remote_cluster;
 /// `local_auth_certs`. Appended for the same reason as `config`.
 pub mod auth_certs;
 pub mod local_auth_certs;
+// Appended 2026-09-15: the system-operations family.
+pub mod local_sysops;
+pub mod sysops;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -2667,17 +2670,74 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/image",
             partially_migrated(get(image_proxy::get_image)),
         )
-        // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
-        // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.
+        // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), both methods: the `POST` is a
+        // client's log line (`postLog`, `APIHandler`); the `GET` is the server's own log file
+        // (`getLogs`, `APISessionRequired`), served since 2026-09-15 with the rest of the
+        // system-operations family below.
         .route(
             "/api/v4/logs",
-            partially_migrated(post(client_log::post_log)),
+            partially_migrated(get(sysops::get_logs).post(client_log::post_log)),
         )
         // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
-        // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
+        // `/notices/{team_id}` (system.go:75), served since 2026-09-15 from this process's copy
+        // of the notice feed. The literal wins over the parameter on both routers.
         .route(
             "/api/v4/system/notices/view",
             partially_migrated(put(product_notices::update_viewed_product_notices)),
+        )
+        .route(
+            "/api/v4/system/notices/{team_id}",
+            partially_migrated_with_ids(&state, get(sysops::get_product_notices)),
+        )
+        // ---- the system-operations family (api4/system.go, api4/elasticsearch.go), 2026-09-15.
+        // Every path here is literal, so `mux_segments_or_forward` is not involved.
+        // `BaseRoutes.APIRoot.Handle("/logs/download")` and `("/logs/query")` (system.go:57-58).
+        .route(
+            "/api/v4/logs/download",
+            partially_migrated(get(sysops::download_logs)),
+        )
+        .route(
+            "/api/v4/logs/query",
+            partially_migrated(post(sysops::query_logs)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/analytics/old")` (system.go:61).
+        .route(
+            "/api/v4/analytics/old",
+            partially_migrated(get(sysops::get_analytics)),
+        )
+        // `("/database/recycle")` and `("/caches/invalidate")` (system.go:54-55).
+        .route(
+            "/api/v4/database/recycle",
+            partially_migrated(post(sysops::database_recycle)),
+        )
+        .route(
+            "/api/v4/caches/invalidate",
+            partially_migrated(post(sysops::invalidate_caches)),
+        )
+        // `("/restart")` (system.go:74).
+        .route("/api/v4/restart", partially_migrated(post(sysops::restart)))
+        // The three enterprise-upgrade routes (system.go:71-73).
+        .route(
+            "/api/v4/upgrade_to_enterprise",
+            partially_migrated(post(sysops::upgrade_to_enterprise)),
+        )
+        .route(
+            "/api/v4/upgrade_to_enterprise/status",
+            partially_migrated(get(sysops::upgrade_to_enterprise_status)),
+        )
+        .route(
+            "/api/v4/upgrade_to_enterprise/allowed",
+            partially_migrated(get(sysops::is_allowed_to_upgrade_to_enterprise)),
+        )
+        // `api.BaseRoutes.Elasticsearch.Handle("/test")` and `("/purge_indexes")`
+        // (elasticsearch.go:15-16).
+        .route(
+            "/api/v4/elasticsearch/test",
+            partially_migrated(post(sysops::test_elasticsearch)),
+        )
+        .route(
+            "/api/v4/elasticsearch/purge_indexes",
+            partially_migrated(post(sysops::purge_elasticsearch_indexes)),
         )
         // `api4/user.go`'s two remaining literal-path reads. Both sit under `/api/v4/users`
         // beside `{user_id}`, and gorilla matches literals before parameters — so `auth_data`

@@ -251,6 +251,56 @@ pub trait PostStore {
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.AnalyticsPostCount` (post_store.go:2401) under the zero
+    /// `PostCountOptions` — the notice cache's `cachedPostCount`: `COUNT(*) FROM Posts`, deleted
+    /// and system posts included, every team. The other option combinations arrive with the
+    /// routes that need them.
+    fn analytics_post_count_total(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCountByTeam` (post_store.go:2455), which is
+    /// `countByTeam`: `COALESCE(SUM(num), 0)` over the **`posts_by_team_day` materialized
+    /// view**, not a count over `Posts`. The view is refreshed by a job, so the figure lags the
+    /// table on both servers by the same amount — that is what makes it comparable.
+    fn analytics_post_count_by_team(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCountsByDay` (post_store.go:2469) after its date
+    /// arithmetic: `countPostsByDay` / `countBotPostsByDay` over the `posts_by_team_day` /
+    /// `bot_posts_by_team_day` views, `day` between the two bounds inclusive, newest first,
+    /// **30 rows**. With a team the row is the view's own `num`; without one the days are
+    /// summed across teams.
+    ///
+    /// The bounds are dates here where Go binds `YYYY-MM-DD` strings against the `date`
+    /// column: Postgres casts the string, and binding the date directly is the same comparison
+    /// with the cast done on this side of the wire.
+    fn analytics_post_counts_by_day(
+        &self,
+        team_id: &str,
+        bots_only: bool,
+        start_day: chrono::NaiveDate,
+        end_day: chrono::NaiveDate,
+    ) -> impl std::future::Future<
+        Output = Result<mm_model::analytics_row::AnalyticsRows, StoreError>,
+    > + Send;
+
+    /// Port of `SqlPostStore.AnalyticsUserCountsWithPostsByDay` (post_store.go:2482): distinct
+    /// authors per calendar day of `CreateAt` (the **database's** zone, since
+    /// `TO_TIMESTAMP` is evaluated there), between the two millisecond bounds inclusive, newest
+    /// first, 30 rows. This one reads `Posts` itself, deleted rows and all — there is no
+    /// `DeleteAt` predicate and no type filter.
+    fn analytics_user_counts_with_posts_by_day(
+        &self,
+        team_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> impl std::future::Future<
+        Output = Result<mm_model::analytics_row::AnalyticsRows, StoreError>,
+    > + Send;
+
     /// Port of `SqlPostStore.GetMaxPostSize` (post_store.go:2747) and the `determineMaxPostSize`
     /// (:2721) it memoises.
     ///
@@ -1669,6 +1719,180 @@ impl PostStore for SqlPostStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_post_count_total(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "value!" FROM posts p"#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to count Posts".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, count))]
+    async fn analytics_post_count_by_team(&self, team_id: &str) -> Result<i64, StoreError> {
+        // `SUM(num)` is `numeric`; Go scans it into an `int64` and the cast is that scan.
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COALESCE(SUM(num), 0)::bigint AS "total!"
+              FROM posts_by_team_day
+             WHERE ($1 = '' OR teamid = $1)
+            "#,
+            team_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count Posts by team: teamID: {team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, bots_only, rows))]
+    async fn analytics_post_counts_by_day(
+        &self,
+        team_id: &str,
+        bots_only: bool,
+        start_day: chrono::NaiveDate,
+        end_day: chrono::NaiveDate,
+    ) -> Result<mm_model::analytics_row::AnalyticsRows, StoreError> {
+        use mm_model::analytics_row::AnalyticsRow;
+
+        // Four statements rather than one with a `CASE` on the view name — a view is not a
+        // parameter. `Value` is Go's `float64` scan of `num` / `SUM(num)`; the casts are that
+        // scan.
+        let rows = match (team_id.is_empty(), bots_only) {
+            (false, false) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!", num::float8 AS "value!"
+                      FROM posts_by_team_day
+                     WHERE teamid = $1 AND day >= $2 AND day <= $3
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    team_id,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (true, false) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!",
+                           COALESCE(SUM(num), 0)::float8 AS "value!"
+                      FROM posts_by_team_day
+                     WHERE day >= $1 AND day <= $2
+                     GROUP BY 1
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (false, true) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!", num::float8 AS "value!"
+                      FROM bot_posts_by_team_day
+                     WHERE teamid = $1 AND day >= $2 AND day <= $3
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    team_id,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (true, true) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!",
+                           COALESCE(SUM(num), 0)::float8 AS "value!"
+                      FROM bot_posts_by_team_day
+                     WHERE day >= $1 AND day <= $2
+                     GROUP BY 1
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+        .map_err(|source| StoreError::Db {
+            context: if bots_only {
+                format!("failed to find bot posts with teamId={team_id}")
+            } else {
+                format!("failed to find posts with teamId={team_id}")
+            },
+            source,
+        })?;
+
+        tracing::Span::current().record("rows", rows.len());
+        Ok(mm_model::analytics_row::AnalyticsRows(rows))
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, rows))]
+    async fn analytics_user_counts_with_posts_by_day(
+        &self,
+        team_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<mm_model::analytics_row::AnalyticsRows, StoreError> {
+        use mm_model::analytics_row::AnalyticsRow;
+
+        // Go writes the team filter into an `INNER JOIN Channels … AND Channels.TeamId = ?` and
+        // no join at all without a team. A `LEFT JOIN` with the team in the `WHERE` is the same
+        // set both ways: with a team, a post whose channel is missing fails the comparison; with
+        // none, the join contributes nothing.
+        let rows = sqlx::query_as!(
+            AnalyticsRow,
+            r#"
+            SELECT TO_CHAR(DATE(TO_TIMESTAMP(p.createat / 1000)), 'YYYY-MM-DD') AS "name!",
+                   COUNT(DISTINCT p.userid)::float8 AS "value!"
+              FROM posts p
+              LEFT JOIN channels c ON p.channelid = c.id
+             WHERE ($1 = '' OR c.teamid = $1)
+               AND p.createat >= $2 AND p.createat <= $3
+             GROUP BY DATE(TO_TIMESTAMP(p.createat / 1000))
+             ORDER BY 1 DESC
+             LIMIT 30
+            "#,
+            team_id,
+            start_ms,
+            end_ms,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Posts with teamId={team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("rows", rows.len());
+        Ok(mm_model::analytics_row::AnalyticsRows(rows))
     }
 
     /// Port of `SqlPostStore.getFlaggedPosts` (post_store.go:535).
