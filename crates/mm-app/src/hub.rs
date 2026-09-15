@@ -41,8 +41,6 @@
 //!   does not check the flag; both arrive with the first hook that needs them ([D-183]).
 //! - **The MFA arm of `IsAuthenticated`.** `MFARequired` is not ported, so a connection whose user
 //!   owes MFA is treated as authenticated. See [D-184].
-//! - **`ShouldSendEventToGuest`.** Needs `UserCanSeeOtherUser`, not ported; guests therefore see
-//!   `user_updated` and `new_user` for users Go would hide from them. See [D-185].
 //!
 //! # Where the sequence number is assigned
 //!
@@ -1190,7 +1188,7 @@ impl App {
         match addressing_verdict(conn, event, has_manage_system) {
             Verdict::Send => true,
             Verdict::Skip => false,
-            Verdict::GuestVisibility => guest_visibility(event.event_type()),
+            Verdict::GuestVisibility => self.should_send_event_to_guest(conn, event).await,
             Verdict::RequiresChannelMembership(channel_id) => {
                 let members = match conn.cached_channel_members() {
                     Some(members) => members,
@@ -1211,6 +1209,28 @@ impl App {
                     },
                 };
                 members.contains_key(&channel_id)
+            }
+        }
+    }
+
+    /// Port of `(*WebConn).ShouldSendEventToGuest` (web_conn.go:852): for the two user events,
+    /// whether this guest may see the user — [`App::user_can_see_other_user`], asked as the
+    /// connection's user. A lookup that fails withholds the event, as Go's does.
+    async fn should_send_event_to_guest(&self, conn: &WebConn, event: &WebSocketEvent) -> bool {
+        match guest_subject(event) {
+            GuestSubject::Anyone => true,
+            GuestSubject::Nobody => false,
+            GuestSubject::User(other_user_id) => {
+                match self
+                    .user_can_see_other_user(&conn.user_id(), &other_user_id)
+                    .await
+                {
+                    Ok(can_see) => can_see,
+                    Err(err) => {
+                        tracing::error!(error = %err, "webhub.shouldSendEvent.");
+                        false
+                    }
+                }
             }
         }
     }
@@ -1455,20 +1475,46 @@ pub fn addressing_verdict(
     Verdict::Send
 }
 
-/// Port of `(*WebConn).ShouldSendEventToGuest` (web_conn.go:852) — **the default arm only**.
+/// Whom a guest's visibility decision is about — the pure half of `ShouldSendEventToGuest`
+/// (web_conn.go:852).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuestSubject {
+    /// Any other event: sent.
+    Anyone,
+    /// A guest-scoped event Go cannot read the user from: withheld.
+    Nobody,
+    /// Sent only if the guest may see this user.
+    User(String),
+}
+
+/// Exactly two event types are scoped for a guest, and each names its user differently:
 ///
-/// The two interesting arms need `UserCanSeeOtherUser`, which is not ported, so a guest here
-/// receives `user_updated` and `new_user` for users Go would have hidden. Recorded as [D-185]
-/// rather than approximated: guessing at the visibility rule would be worse than a stated gap.
-///
-/// A free function rather than a method: it needs nothing from `App`, and as a method the
-/// mutation that made it `true` for every event survived the suite, because no test could reach
-/// it without a database.
-pub fn guest_visibility(event_type: &str) -> bool {
-    !matches!(
-        event_type,
-        WEBSOCKET_EVENT_USER_UPDATED | WEBSOCKET_EVENT_NEW_USER
-    )
+/// - `user_updated` carries the **user object** — Go's `data["user"].(*model.User)`, which holds
+///   for every event a server raises itself. Anything else there fails the assertion and the event
+///   is withheld; an object with no `id` is a user with the empty id, as a zero `*model.User` is.
+/// - `new_user` carries **`user_id`**, a string. Go's assertion is unchecked and would panic on
+///   anything else; that is withheld here rather than reproduced.
+pub fn guest_subject(event: &WebSocketEvent) -> GuestSubject {
+    let data = event.get_data();
+    match event.event_type() {
+        WEBSOCKET_EVENT_USER_UPDATED => match data.and_then(|d| d.get("user")) {
+            Some(serde_json::Value::Object(user)) => GuestSubject::User(
+                user.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            _ => GuestSubject::Nobody,
+        },
+        WEBSOCKET_EVENT_NEW_USER => match data
+            .and_then(|d| d.get("user_id"))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(user_id) => GuestSubject::User(user_id.to_owned()),
+            None => GuestSubject::Nobody,
+        },
+        _ => GuestSubject::Anyone,
+    }
 }
 
 /// The frame a broadcast leaves in, given what the hooks did to it.
@@ -1820,16 +1866,49 @@ mod tests {
     }
 
     #[test]
-    fn the_guest_rule_hides_exactly_two_event_types() {
-        // The rule itself, separately from the fall-through that reaches it. As a method on `App`
-        // this was unreachable from a unit test and a mutation replacing the whole body with
-        // `true` survived.
-        assert!(!guest_visibility(WEBSOCKET_EVENT_USER_UPDATED));
-        assert!(!guest_visibility(
-            mm_model::websocket_message::WEBSOCKET_EVENT_NEW_USER
-        ));
-        assert!(guest_visibility(WEBSOCKET_EVENT_POSTED));
-        assert!(guest_visibility(WEBSOCKET_EVENT_PREFERENCES_CHANGED));
+    fn a_guest_is_scoped_on_exactly_two_events_and_each_names_its_user_its_own_way() {
+        let mut updated = event(WEBSOCKET_EVENT_USER_UPDATED);
+        updated.add(
+            "user",
+            serde_json::json!({"id": OTHER_USER, "username": "x"}),
+        );
+        assert_eq!(
+            guest_subject(&updated),
+            GuestSubject::User(OTHER_USER.to_owned())
+        );
+
+        let mut anonymous = event(WEBSOCKET_EVENT_USER_UPDATED);
+        anonymous.add("user", serde_json::json!({"username": "x"}));
+        assert_eq!(guest_subject(&anonymous), GuestSubject::User(String::new()));
+
+        // Not the user object: the assertion fails, and so does `user_id` in its place.
+        for not_a_user in [serde_json::json!(OTHER_USER), serde_json::json!(null)] {
+            let mut odd = event(WEBSOCKET_EVENT_USER_UPDATED);
+            odd.add("user", not_a_user);
+            assert_eq!(guest_subject(&odd), GuestSubject::Nobody);
+        }
+        let mut wrong_key = event(WEBSOCKET_EVENT_USER_UPDATED);
+        wrong_key.add("user_id", serde_json::json!(OTHER_USER));
+        assert_eq!(guest_subject(&wrong_key), GuestSubject::Nobody);
+
+        let mut new_user = event(WEBSOCKET_EVENT_NEW_USER);
+        new_user.add("user_id", serde_json::json!(OTHER_USER));
+        assert_eq!(
+            guest_subject(&new_user),
+            GuestSubject::User(OTHER_USER.to_owned())
+        );
+        let mut new_user_object = event(WEBSOCKET_EVENT_NEW_USER);
+        new_user_object.add("user", serde_json::json!({"id": OTHER_USER}));
+        assert_eq!(guest_subject(&new_user_object), GuestSubject::Nobody);
+
+        assert_eq!(
+            guest_subject(&event(WEBSOCKET_EVENT_POSTED)),
+            GuestSubject::Anyone
+        );
+        assert_eq!(
+            guest_subject(&event(WEBSOCKET_EVENT_PREFERENCES_CHANGED)),
+            GuestSubject::Anyone
+        );
     }
 
     #[test]

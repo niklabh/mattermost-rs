@@ -2526,10 +2526,8 @@ pub async fn get_user_by_auth_data(
     }
 }
 
-/// `Ok(None)` means "forward": the only branch that produces it is a caller under view-user
-/// restrictions, which `mm_app::App::user_can_see_other_user` cannot reproduce. That caller
-/// cannot exist on this route — the `IsSystemAdmin` gate above refuses everyone who is not an
-/// admin, and an admin holds `view_members` — so the arm is here for shape, not for traffic.
+/// Never `Ok(None)` since `UserCanSeeOtherUser` answers view restrictions itself (2026-09-15); the
+/// `Option` is kept for the handler's shape.
 async fn serve_user_by_auth_data(
     state: &AppState,
     query: Option<&str>,
@@ -2558,11 +2556,7 @@ async fn serve_user_by_auth_data(
         .await
     {
         Ok(can_see) => can_see,
-        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, "forwarding to Go");
-            return Ok(None);
-        }
-        Err(mm_app::post::PrepareError::App(err)) => return Err(ApiError::from(*err)),
+        Err(err) => return Err(ApiError::from(*err)),
     };
     if !can_see {
         return Err(ApiError::from(make_permission_error(

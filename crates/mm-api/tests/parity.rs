@@ -220,6 +220,7 @@ mod parity {
     pub mod webhook_writes;
     pub mod websocket;
     pub mod websocket_actions;
+    pub mod websocket_guests;
     pub mod websocket_hooks;
     pub mod websocket_reconnect;
 

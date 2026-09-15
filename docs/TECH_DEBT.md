@@ -5949,21 +5949,10 @@ is not one this server can serve at all — but it is a *fail-open* difference a
 backlog rather than a code comment for that reason. Closing it means porting `MFARequired`, which
 is HTTP work that this route will then inherit for free.
 
-## D-185 · Guests receive `user_updated` and `new_user` for users Go hides from them
+## D-185 · Guests receive `user_updated` and `new_user` for users Go hides from them — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
-
-`ShouldSendEventToGuest` (`web_conn.go:852`) special-cases exactly two event types and asks
-`UserCanSeeOtherUser` whether this guest may see the user the event is about. That function is not
-ported, so `mm_app::hub::guest_visibility` implements the *default* arm — every other event passes
-— and the two special cases are withheld unconditionally.
-
-That is the safe direction (a guest sees less, not more), and it is deliberately not approximated:
-guessing at the visibility rule would produce a confident wrong answer where a stated gap produces
-none. It becomes wrong in the other direction only if `UserCanSeeOtherUser` would have returned
-true, which for a guest is the minority case.
-
-**Owed:** `UserCanSeeOtherUser`, which several `/users` routes will need anyway.
+`ShouldSendEventToGuest` is ported (`mm_app::hub::guest_subject`, `App::should_send_event_to_guest`)
+over a full `UserCanSeeOtherUser`; `parity::websocket_guests` compares it on the licensed guest pair.
 
 ## D-187 · Binary (msgpack) websocket frames are refused
 

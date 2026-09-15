@@ -7,7 +7,7 @@ use mm_model::user::User;
 use mm_model::user_autocomplete::{UserAutocompleteInChannel, UserAutocompleteInTeam};
 use mm_model::utils::{AppError, AppResult};
 use mm_store::user_store::UserSearchOptions;
-use mm_store::{StoreError, UserStore};
+use mm_store::{ChannelStore, StoreError, TeamStore, UserStore};
 
 use crate::App;
 
@@ -25,6 +25,14 @@ pub enum ViewUsersRestriction {
     Restricted,
 }
 
+/// Port of `model.ViewUsersRestrictions` (model/user.go:273): the teams and channels through which
+/// a restricted user may see other users.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ViewUsersRestrictions {
+    pub teams: Vec<String>,
+    pub channels: Vec<String>,
+}
+
 impl App {
     /// Port of `app.App.GetViewUsersRestrictions` (app/user.go:2756), narrowed to its verdict.
     ///
@@ -36,13 +44,11 @@ impl App {
     /// are licensed. A deployment that edits `system_user` through the roles API can reach the
     /// other branch; nothing else can.
     ///
-    /// # So the lists are not built here
+    /// # The lists
     ///
-    /// Go would go on to read the caller's team ids, re-check `view_members` per team, and read
-    /// every channel membership — to produce two lists whose only consumers are
-    /// `applyViewRestrictionsFilter` and the profile queries, none of which this port has. Naming
-    /// the verdict and stopping is the honest shape: it ports the gate, ships no SQL that no test
-    /// can reach, and lets `mm_api::users` forward the case Go answers differently.
+    /// Callers that only branch on the verdict use this; the ones that need the teams and
+    /// channels — `UserCanSeeOtherUser`, and through it the websocket's guest rule — use
+    /// [`App::view_users_restrictions`].
     ///
     /// Note the permission is checked against the **user's own stored roles**
     /// (`HasPermissionTo`), not the session's — so a session minted with narrower roles than the
@@ -1021,38 +1027,139 @@ fn get_user_error(err: StoreError) -> Box<AppError> {
 }
 
 impl App {
+    /// Port of `app.App.GetViewUsersRestrictions` (app/user.go:2756) in full — `None` for a
+    /// caller holding `view_members`, and otherwise the two lists: the caller's teams (deleted
+    /// ones excluded) **in which it holds `view_members`**, and every channel it is a member of,
+    /// **archived channels included**. [`App::get_view_users_restrictions`] is the same gate
+    /// without the lists.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    pub async fn view_users_restrictions(
+        &self,
+        user_id: &str,
+    ) -> AppResult<Option<ViewUsersRestrictions>> {
+        if self
+            .has_permission_to(user_id, &PERMISSION_VIEW_MEMBERS)
+            .await
+        {
+            return Ok(None);
+        }
+
+        let team_ids = self
+            .store()
+            .team()
+            .get_user_team_ids(user_id)
+            .await
+            .map_err(|err| {
+                Box::new(
+                    AppError::new(
+                        "GetViewUsersRestrictions",
+                        "app.team.get_user_team_ids.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                    .wrap(err),
+                )
+            })?;
+        let mut teams = Vec::new();
+        for team_id in team_ids {
+            if self
+                .has_permission_to_team(user_id, &team_id, &PERMISSION_VIEW_MEMBERS)
+                .await
+            {
+                teams.push(team_id);
+            }
+        }
+
+        let channels = self
+            .store()
+            .channel()
+            .get_all_channel_members_for_user(user_id, true)
+            .await
+            .map_err(|err| {
+                Box::new(
+                    AppError::new(
+                        "GetViewUsersRestrictions",
+                        "app.channel.get_channels.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                    .wrap(err),
+                )
+            })?
+            .into_keys()
+            .collect();
+
+        Ok(Some(ViewUsersRestrictions { teams, channels }))
+    }
+
     /// Port of `app.App.UserCanSeeOtherUser` (app/user.go:2710).
     ///
-    /// Three of its four branches are here and the fourth is forwarded:
-    ///
-    /// - **The caller asking about themselves is true**, checked first and without touching a
-    ///   store — so a user with no permissions at all can always read their own profile image.
-    /// - **No view restrictions is true**, which is every account on a stock server; see
-    ///   [`App::get_view_users_restrictions`] for why.
-    /// - **Restricted** would go on to ask whether the *other* user shares a team or a channel
-    ///   with the caller, through two store methods this port does not have
-    ///   (`Team().UserBelongsToTeams`, `Channel().UserBelongsToChannels`). Refused as
-    ///   [`crate::post::PrepareError::Unreproducible`] so the handler forwards.
-    ///
-    /// The restricted branch is reachable only for a guest account or a deployment that has
-    /// edited `system_user`'s permissions, which is why forwarding it costs nothing in practice.
+    /// Self is always visible, and so is everyone when the caller has no view restrictions —
+    /// every account on a stock server. A restricted caller — a guest, in practice — sees a user
+    /// who is a current member of one of its permitted teams, **or** a member of one of its
+    /// channels; the team test runs first and each list is skipped when empty.
     pub async fn user_can_see_other_user(
         &self,
         user_id: &str,
         other_user_id: &str,
-    ) -> Result<bool, crate::post::PrepareError> {
+    ) -> AppResult<bool> {
         if user_id == other_user_id {
             return Ok(true);
         }
 
-        match self.get_view_users_restrictions(user_id).await {
-            crate::user::ViewUsersRestriction::None => Ok(true),
-            crate::user::ViewUsersRestriction::Restricted => {
-                Err(crate::post::PrepareError::Unreproducible(
-                    "view-user restrictions need the team and channel membership lookups",
-                ))
+        let Some(restrictions) = self.view_users_restrictions(user_id).await? else {
+            return Ok(true);
+        };
+
+        if !restrictions.teams.is_empty() {
+            let belongs = self
+                .store()
+                .team()
+                .user_belongs_to_teams(other_user_id, &restrictions.teams)
+                .await
+                .map_err(|err| {
+                    Box::new(
+                        AppError::new(
+                            "UserCanSeeOtherUser",
+                            "app.team.user_belongs_to_teams.app_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                        .wrap(err),
+                    )
+                })?;
+            if belongs {
+                return Ok(true);
             }
         }
+
+        if !restrictions.channels.is_empty() {
+            let belongs = self
+                .store()
+                .channel()
+                .user_belongs_to_channels(other_user_id, &restrictions.channels)
+                .await
+                .map_err(|err| {
+                    Box::new(
+                        AppError::new(
+                            "userBelongsToChannels",
+                            "app.channel.user_belongs_to_channels.app_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                        .wrap(err),
+                    )
+                })?;
+            if belongs {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 

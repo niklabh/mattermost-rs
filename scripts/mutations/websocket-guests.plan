@@ -1,0 +1,18 @@
+# Mutation plan for a guest's websocket visibility — D-185 (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/websocket-guests.plan
+#
+# `ShouldSendEventToGuest` over a full `UserCanSeeOtherUser`. The two team mutations are a pair:
+# whichever one the fixture catches says whether a guest holds `view_members` in its team, and the
+# other surviving is that fact, not a gap. Not planned, each equivalent under any fixture the REST
+# API can build: the archived-channel flag on the membership read, the membership DeleteAt on the
+# team count, and the lookup-error arm. The last two lines are no-op controls and must SURVIVE.
+guest-user-updated-without-a-user-is-anyone	crates/mm-app/src/hub.rs	            _ => GuestSubject::Nobody,	            _ => GuestSubject::Anyone,	unit	hub::
+guest-verdict-ignored	crates/mm-app/src/hub.rs	                    Ok(can_see) => can_see,	                    Ok(_) => true,	api	websocket_guests
+channel-arm-skipped	crates/mm-app/src/user.rs	        if !restrictions.channels.is_empty() {	        if false && !restrictions.channels.is_empty() {	api	websocket_guests
+team-arm-skipped	crates/mm-app/src/user.rs	        if !restrictions.teams.is_empty() {	        if false && !restrictions.teams.is_empty() {	api	websocket_guests
+team-permission-not-checked	crates/mm-app/src/user.rs	            if self\n                .has_permission_to_team(user_id, &team_id, &PERMISSION_VIEW_MEMBERS)	            if true || self\n                .has_permission_to_team(user_id, &team_id, &PERMISSION_VIEW_MEMBERS)	api	websocket_guests
+channel-count-inverts-the-list	crates/mm-store/src/channel_store.rs	         WHERE userid = $1\n           AND channelid = ANY($2)	         WHERE userid = $1\n           AND channelid <> ALL($2)	api	websocket_guests
+team-count-inverts-the-list	crates/mm-store/src/team_store.rs	         WHERE userid = $1\n           AND teamid = ANY($2)	         WHERE userid = $1\n           AND teamid <> ALL($2)	api	websocket_guests
+control-swap-the-two-constant-arms	crates/mm-app/src/hub.rs	            GuestSubject::Anyone => true,\n            GuestSubject::Nobody => false,	            GuestSubject::Nobody => false,\n            GuestSubject::Anyone => true,	api	websocket_guests
+control-flip-the-self-comparison	crates/mm-app/src/user.rs	        if user_id == other_user_id {\n            return Ok(true);\n        }\n\n        let Some(restrictions)	        if other_user_id == user_id {\n            return Ok(true);\n        }\n\n        let Some(restrictions)	api	websocket_guests

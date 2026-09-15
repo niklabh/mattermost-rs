@@ -487,12 +487,7 @@ pub async fn can_user_direct_message(
     {
         Ok(true) => {}
         Ok(false) => return answer(false),
-        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-            tracing::Span::current().record("forwarded", true);
-            tracing::debug!(reason, "forwarding a restricted view to Go");
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
-        Err(mm_app::post::PrepareError::App(err)) => return ApiError::from(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     }
 
     let licence = match state.app.license().await {

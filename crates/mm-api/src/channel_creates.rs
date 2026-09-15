@@ -274,8 +274,8 @@ async fn serve_create_channel(
 /// # Then `UserCanSeeOtherUser`, whose refusal is a third different 403
 ///
 /// `view_members`. On a stock server nobody is under view restrictions so it always passes; a
-/// caller who *is* restricted needs two store lookups this port does not have, and that request
-/// is forwarded rather than guessed (see `mm_app::App::user_can_see_other_user`).
+/// restricted caller — a guest — passes only for a user it shares a team or a channel with (see
+/// `mm_app::App::user_can_see_other_user`).
 #[tracing::instrument(skip_all, fields(forwarded = false))]
 pub async fn create_direct_channel(
     State(state): State<AppState>,
@@ -332,8 +332,8 @@ pub async fn create_direct_channel(
     }
 }
 
-/// `Ok(None)` means "forward" — either a view-restricted caller or a
-/// `RestrictDirectMessage = "team"` installation. Both are decided before anything is written.
+/// `Ok(None)` means "forward" — a `RestrictDirectMessage = "team"` installation, decided before
+/// anything is written.
 async fn serve_create_direct_channel(
     state: &AppState,
     session: &Session,
@@ -374,11 +374,7 @@ async fn serve_create_direct_channel(
         Ok(false) => {
             return Err(make_permission_error(session, &[&PERMISSION_VIEW_MEMBERS]).into());
         }
-        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, "forwarding to Go");
-            return Ok(None);
-        }
-        Err(mm_app::post::PrepareError::App(err)) => return Err(ApiError::from(*err)),
+        Err(err) => return Err(ApiError::from(*err)),
     }
 
     // The two ids keep the **body's** order, which is what decides `creator_id` on the event.
@@ -497,11 +493,7 @@ async fn serve_create_group_channel(
         {
             Ok(true) => {}
             Ok(false) => can_see_all = false,
-            Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-                tracing::debug!(reason, "forwarding to Go");
-                return Ok(None);
-            }
-            Err(mm_app::post::PrepareError::App(err)) => return Err(ApiError::from(*err)),
+            Err(err) => return Err(ApiError::from(*err)),
         }
     }
 
