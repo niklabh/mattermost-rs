@@ -2937,6 +2937,54 @@ impl SocketProbe {
         }
     }
 
+    /// Connect with a token and a query string and **read nothing**: no `hello` is expected,
+    /// because a resumed connection is not sent one and a malformed resumption closes the socket
+    /// instead. The caller collects what it expects.
+    pub async fn connect_raw_with_query(base: &str, token: &str, query: &str) -> SocketProbe {
+        let separator = if query.is_empty() { "" } else { "?" };
+        let url = format!(
+            "{}/api/v4/websocket{separator}{query}",
+            base.replace("http://", "ws://")
+        );
+        let mut request =
+            tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                url.as_str(),
+            )
+            .expect("a websocket request");
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {token}").parse().expect("a header value"),
+        );
+        let (socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// [`SocketProbe::connect_anonymous`] with a query string.
+    pub async fn connect_anonymous_with_query(base: &str, query: &str) -> SocketProbe {
+        let separator = if query.is_empty() { "" } else { "?" };
+        let url = format!(
+            "{}/api/v4/websocket{separator}{query}",
+            base.replace("http://", "ws://")
+        );
+        let (socket, _) = tokio_tungstenite::connect_async(url.as_str())
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// Close from the client side with a close frame, the way a browser tab going away does.
+    pub async fn close(mut self) {
+        let _ = self.socket.close(None).await;
+    }
+
     /// Send one `WebSocketRequest`.
     pub async fn send(&mut self, request: serde_json::Value) {
         self.socket

@@ -5873,28 +5873,11 @@ branch.
 
 ---
 
-## D-181 · Websocket reconnect replay is not ported
+## D-181 · Websocket reconnect replay is not ported — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub, phase 0 of the
-write routes)
-
-Go keeps a 128-slot **dead queue** of every frame it has written to a connection
-(`web_conn.go:665`). A client that drops and reconnects presents its `connection_id` and
-`sequence_number`; `PopulateWebConnConfig` finds the old connection, and `writePump` either drains
-the frames it missed (`drainDeadQueue`) or — when the sequence is too old to be in the queue —
-mints a *new* connection id, resets the sequence to 0 and re-sends `hello`.
-
-`mm_app::hub` implements none of it. Every connection is fresh: `connection_id` and
-`sequence_number` on the query string are read by nobody, so a reconnecting client silently
-**loses every event raised while it was disconnected** rather than being told to refetch.
-
-What makes this more than an efficiency gap is the third branch. Go's `hasMsgLoss` path is how a
-client *learns* it has a hole: a second `hello` with a new connection id is the signal to reload
-state. This server never sends one, so a client cannot distinguish "you missed nothing" from "you
-missed an hour".
-
-**Owed:** the dead queue, `PopulateWebConnConfig`'s three-way branch, and the `reuseCount == 0`
-gate on `hello` that currently has only one reachable value.
+The dead queue, `PopulateWebConnConfig` and the write pump's three-way resumption are ported:
+`mm_app::hub::DeadQueue`, `Hub::park`/`check_conn`, and `mm_api::websocket::resume_prelude`.
+`parity::websocket_reconnect` compares them.
 
 ## D-182 · A client on mm-api does not see events raised by Go-served routes
 

@@ -1,0 +1,29 @@
+# Mutation plan for websocket reconnect replay — D-181 (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/websocket-reconnect.plan
+#
+# The decisions a reader could get wrong: the dead queue's off-by-one and wrap direction, the
+# reuse gate on hello, which connection a resume may take, what parking keeps, the message-loss
+# arm's new id and restarted counter, and the offline an unregister owes. Not planned: a missing
+# sequence number is refused by the parse either way (equivalent), and the activity update is
+# read only by a five-minute reaper and a five-minute away test. The last two lines are no-op
+# controls and must SURVIVE.
+dq-loss-compares-the-newest-to-seq-itself	crates/mm-app/src/hub.rs	            .is_none_or(|entry| entry.event.get_sequence() != seq - 1)	            .is_none_or(|entry| entry.event.get_sequence() != seq)	unit	hub::
+dq-drain-ignores-the-wrap	crates/mm-app/src/hub.rs	        if self.slots[self.pointer].is_none() {	        if self.pointer > 0 || self.slots[0].is_some() {	unit	hub::
+dq-drain-stops-on-a-rise	crates/mm-app/src/hub.rs	            if entry.event.get_sequence() > next.event.get_sequence() {	            if entry.event.get_sequence() < next.event.get_sequence() {	unit	hub::
+hello-for-the-first-reuse-too	crates/mm-app/src/hub.rs	        if conn.reuse_count == 0 {	        if conn.reuse_count <= 1 {	api	websocket_reconnect
+park-drops-the-queues-of-an-indexed-connection	crates/mm-app/src/hub.rs	        if index_has(&index, conn) {	        if !index_has(&index, conn) {	api	websocket_reconnect
+resume-takes-an-active-connection	crates/mm-app/src/hub.rs	            .find(|c| c.connection_id() == connection_id && !c.is_active())?	            .find(|c| c.connection_id() == connection_id)?	api	websocket_reconnect
+reuse-count-not-incremented	crates/mm-app/src/hub.rs	            reuse_count: conn.reuse_count + 1,	            reuse_count: conn.reuse_count,	api	websocket_reconnect
+reaper-ignores-activity	crates/mm-app/src/hub.rs	                !c.is_active() && now - c.last_user_activity_at() > INACTIVE_CONN_REAPER_INTERVAL	                !c.is_active()	unit	hub::
+activity-ignores-the-token	crates/mm-app/src/hub.rs	            if conn.is_active() && conn.session().token == session_token {	            if conn.is_active() {	unit	hub::
+conn-count-includes-parked	crates/mm-app/src/hub.rs	            .by_conn\n            .values()\n            .filter(|c| c.is_active())\n            .count()	            .by_conn\n            .values()\n            .count()	unit	hub::
+unregister-offline-only-with-no-connections	crates/mm-app/src/hub.rs	        if conns.iter().all(|c| !c.is_active()) {	        if conns.is_empty() {	api	websocket_reconnect
+resume-skips-the-id-check	crates/mm-api/src/websocket.rs	    if !is_valid_id(connection_id) {	    if connection_id.is_empty() {	api	websocket_reconnect
+anonymous-resumption-is-parsed	crates/mm-api/src/websocket.rs	    let resumed = if requested_id.is_empty() || user_id.is_empty() {	    let resumed = if requested_id.is_empty() {	api	websocket_reconnect
+prelude-never-runs	crates/mm-api/src/websocket.rs	    if sequence != 0\n	    if sequence == i64::MIN\n	api	websocket_reconnect
+written-events-not-recorded	crates/mm-api/src/websocket.rs	                                queues.dead.add(DeadQueueEntry { event, precomputed });	                                let _ = (&event, precomputed);	api	websocket_reconnect
+loss-keeps-the-connection-id	crates/mm-api/src/websocket.rs	        conn.set_connection_id(new_connection_id());	        let _ = new_connection_id();	api	websocket_reconnect
+loss-keeps-the-counter	crates/mm-api/src/websocket.rs	        *sequence = 0;\n	        let _ = 0;\n	api	websocket_reconnect
+control-name-the-loss-decision	crates/mm-api/src/websocket.rs	    if dead.has_msg_loss(*sequence) {	    let lost = dead.has_msg_loss(*sequence);\n    if lost {	api	websocket_reconnect
+control-lock-before-the-empty-user-return	crates/mm-app/src/hub.rs	        if user_id.is_empty() {\n            return None;\n        }\n        let mut index = self.write_index();	        let mut index = self.write_index();\n        if user_id.is_empty() {\n            return None;\n        }	unit	hub::

@@ -192,6 +192,18 @@ impl App {
         Ok(status_map)
     }
 
+    /// Port of `PlatformService.SetStatusLastActivityAt` (platform/status.go:262): record the
+    /// activity **in the cache only**, then let `SetStatusAwayIfNeeded` decide from it. A user
+    /// with no status does nothing. The one caller is the hub's unregister arm.
+    pub async fn set_status_last_activity_at(&self, user_id: &str, activity_at: i64) {
+        let Ok(mut status) = self.get_status(user_id).await else {
+            return;
+        };
+        status.last_activity_at = activity_at;
+        self.add_status_cache(&status);
+        self.set_status_away_if_needed(user_id, false).await;
+    }
+
     /// Port of `PlatformService.GetStatusFromCache` (platform/status.go).
     fn status_from_cache(&self, user_id: &str) -> Option<Status> {
         self.status_cache
@@ -484,7 +496,7 @@ impl App {
 ///
 /// `LastActivityAt` is **milliseconds** and `UserStatusAwayTimeout` is **seconds**, hence the
 /// `* 1000`. The comparison is `>=`, so a user idle for exactly the timeout is away.
-fn is_user_away(now: i64, last_activity_at: i64, away_timeout_secs: i64) -> bool {
+pub(crate) fn is_user_away(now: i64, last_activity_at: i64, away_timeout_secs: i64) -> bool {
     now - last_activity_at >= away_timeout_secs * 1000
 }
 
