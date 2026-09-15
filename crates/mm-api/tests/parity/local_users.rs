@@ -127,6 +127,29 @@ async fn both_stable(path: &str) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
     last
 }
 
+/// A list read bracketed by Go: ours is accepted when it equals the Go read just before it or the
+/// one just after it.
+///
+/// `both_stable` retries until one Go read and one of ours agree, which never happened within five
+/// tries for `GET /users?in_team=<seeded team>&per_page=200` in a sharded run (2026-09-15): the
+/// shared helper now returns the seeded team, which every suite's plain users join and leave, so
+/// that page changes throughout a full run. A port that answers wrongly matches neither Go read.
+async fn both_bracketed(path: &str) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let (mut go_before, mut ours) = both("GET", path).await;
+    for _ in 0..8 {
+        if ours == go_before {
+            return (go_before, ours);
+        }
+        let (go_after, ours_next) = both("GET", path).await;
+        if ours == go_after {
+            return (go_after, ours);
+        }
+        go_before = go_after;
+        ours = ours_next;
+    }
+    (go_before, ours)
+}
+
 /// [`both_stable`] for a read sent with a body (`POST /users/ids`). Only for requests that write
 /// nothing: it repeats the request until the two servers agree.
 async fn both_json_stable(
@@ -367,7 +390,7 @@ async fn the_local_user_list_matches_over_the_socket() {
         // Not a 400 on the socket: the `inactive && active` check is the HTTP handler's.
         "/api/v4/users?inactive=true&active=true&per_page=3".to_owned(),
     ] {
-        let ((go_status, go_body), (rs_status, rs_body)) = both_stable(&path).await;
+        let ((go_status, go_body), (rs_status, rs_body)) = both_bracketed(&path).await;
         assert_eq!(
             go_status,
             200,
