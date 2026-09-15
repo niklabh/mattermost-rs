@@ -27,7 +27,7 @@ logs-query-bad-filter-is-a-500	crates/mm-api/src/sysops.rs	"api.system.logs.inva
 logs-query-other-nodes-read-nothing	crates/mm-app/src/logs.rs	if node_name == DEFAULT_NODE {	if node_name != DEFAULT_NODE {	api	sysops
 restart-sleeps-a-second	crates/mm-api/src/sysops.rs	tokio::time::sleep(std::time::Duration::from_secs(1)).await;	tokio::time::sleep(std::time::Duration::from_millis(1)).await;	api	sysops
 upgrade-refuses-an-enterprise-build	crates/mm-api/src/sysops.rs	if BUILD_ENTERPRISE_READY == "true" {	if BUILD_ENTERPRISE_READY != "true" {	api	sysops
-upgrade-status-is-the-upgraders	crates/mm-api/src/sysops.rs	let (percentage, error) = upgrade_to_e0_status();	let (percentage, error) = (1, None);	api	sysops
+upgrade-status-is-the-upgraders	crates/mm-api/src/sysops.rs	let (percentage, error) = upgrade_to_e0_status();	let (percentage, error): (i64, Option<String>) = (1, None);	api	sysops
 integrity-child-id-column-is-selected	crates/mm-store/src/lib.rs	if !child_id_attr.is_empty() {	if child_id_attr.is_empty() {	api	sysops
 integrity-empty-parent-is-not-an-orphan	crates/mm-store/src/lib.rs	if *can_parent_id_be_empty {	if false {	api	sysops
 control-rename-rows	crates/mm-api/src/sysops.rs	let rows = state.app.get_analytics(&name, &team_id).await?;\n    let Some(rows) = rows else {	let report = state.app.get_analytics(&name, &team_id).await?;\n    let Some(rows) = report else {	api	sysops

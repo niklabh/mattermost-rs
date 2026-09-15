@@ -839,40 +839,75 @@ async fn the_local_pairs_match_over_the_socket() {
         return;
     }
 
-    let ((go_status, go_body), (rs_status, rs_body)) = both("POST", "/api/v4/integrity").await;
-    assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
-    assert_eq!(rs_status, 200, "{}", String::from_utf8_lossy(&rs_body));
-    assert!(
-        !rs_body.ends_with(b"\n"),
-        "json.Marshal writes no trailing newline"
-    );
-    let go = json(&go_body);
-    let rs = json(&rs_body);
-    assert_eq!(go.as_array().map(Vec::len), Some(41));
-    assert_eq!(rs.as_array().map(Vec::len), Some(41));
-    // Headers and order are exact; records are compared sorted within each check.
-    for (i, (g, r)) in go
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(rs.as_array().unwrap())
-        .enumerate()
-    {
-        assert_eq!(g["err"], r["err"], "check {i}");
-        for key in [
-            "parent_name",
-            "child_name",
-            "parent_id_attr",
-            "child_id_attr",
-        ] {
-            assert_eq!(g["data"][key], r["data"][key], "check {i} {key}");
+    // Go, us, Go — the rest of this module creates, purges and archives rows while this runs,
+    // and any of them can move an orphan set between two reads. Ours must equal one of the two
+    // Go reads that bracket it; a Go that did not move while ours still differs is a divergence.
+    let read = async || {
+        let ((go_status, go_body), (rs_status, rs_body)) = both("POST", "/api/v4/integrity").await;
+        assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
+        assert_eq!(rs_status, 200, "{}", String::from_utf8_lossy(&rs_body));
+        assert!(
+            !rs_body.ends_with(b"\n"),
+            "json.Marshal writes no trailing newline"
+        );
+        (json(&go_body), json(&rs_body))
+    };
+    let mut last = None;
+    for attempt in 1..=10u64 {
+        let (before, ours) = read().await;
+        let (after, _) = read().await;
+        for list in [&before, &ours] {
+            assert_eq!(list.as_array().map(Vec::len), Some(41));
         }
+        // Headers and order are exact whatever the churn.
+        for (i, (g, r)) in before
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(ours.as_array().unwrap())
+            .enumerate()
+        {
+            assert_eq!(g["err"], r["err"], "check {i}");
+            for key in [
+                "parent_name",
+                "child_name",
+                "parent_id_attr",
+                "child_id_attr",
+            ] {
+                assert_eq!(g["data"][key], r["data"][key], "check {i} {key}");
+            }
+        }
+        let (before, ours, after) = (
+            normalise_integrity(before),
+            normalise_integrity(ours),
+            normalise_integrity(after),
+        );
+        if ours == before || ours == after {
+            last = None;
+            break;
+        }
+        let quiet = before == after;
+        last = Some((before, ours));
+        if quiet {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200 * attempt)).await;
     }
-    assert_eq!(normalise_integrity(go), normalise_integrity(rs));
-    // Byte for byte where the planner agreed on the order, which it does on this stack; a
-    // difference here with equal sorted records is a tie, not a divergence.
-    if go_body != rs_body {
-        eprintln!("integrity bodies differ only in record order within a check");
+    if let Some((go, rs)) = last {
+        let differing: Vec<String> = go
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(rs.as_array().unwrap())
+            .filter(|(g, r)| g != r)
+            .map(|(g, _)| {
+                format!(
+                    "{}.{}",
+                    g["data"]["child_name"], g["data"]["parent_id_attr"]
+                )
+            })
+            .collect();
+        panic!("the integrity records differ from Go's in {differing:?}");
     }
 
     // `GET /logs` under the local session passes the gate; the verdict is the stack's.
