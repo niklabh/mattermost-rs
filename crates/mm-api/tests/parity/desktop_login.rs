@@ -166,6 +166,18 @@ async fn session_by_token(pool: &sqlx::PgPool, token: &str) -> SessionRow {
     }
 }
 
+/// Two servers' session lengths, equal to within a few seconds.
+///
+/// Both stamp `ExpiresAt` from a clock read taken before the session is saved and `CreateAt` is
+/// set (`SetSessionExpireInHours`, then the store's `PreSave`), so `ExpiresAt - CreateAt` is the
+/// configured length minus however long the login took between the two reads. Rounding absorbs
+/// that on an idle stack; under a full run one login took long enough that ours read 2,591,998
+/// seconds against Go's 2,592,000 while passing alone twice (2026-09-15). A real difference — the
+/// SSO length against the web length — is hours, not seconds.
+fn assert_same_length(go: i64, ours: i64, context: &str) {
+    assert!((go - ours).abs() <= 5, "{context}: Go {go}s, ours {ours}s");
+}
+
 /// The fields of the success body that cannot agree across two sequential logins: Go's login
 /// stamps `LastLogin` after reading the row it serialises, so ours reads Go's stamp and Go read
 /// the one before it. `update_at` moves with it.
@@ -397,9 +409,10 @@ async fn an_sso_account_gets_a_session_of_the_sso_length_and_the_token_is_spent(
             .unwrap();
         let go_session = session_by_token(&pool, go_token).await;
         let rs_session = session_by_token(&pool, rs_token).await;
-        assert_eq!(
-            go_session.length_seconds, rs_session.length_seconds,
-            "{service}: the session length"
+        assert_same_length(
+            go_session.length_seconds,
+            rs_session.length_seconds,
+            &format!("{service}: the session length"),
         );
         assert_eq!(
             go_session.props["isOAuthUser"], oauth,
@@ -508,7 +521,11 @@ async fn the_session_is_not_the_web_length() {
         session_by_token(&pool, go_headers.get("Token").unwrap().to_str().unwrap()).await;
     let rs_mobile =
         session_by_token(&pool, rs_headers.get("Token").unwrap().to_str().unwrap()).await;
-    assert_eq!(go_mobile.length_seconds, rs_mobile.length_seconds);
+    assert_same_length(
+        go_mobile.length_seconds,
+        rs_mobile.length_seconds,
+        "the mobile session length",
+    );
     assert_eq!(go_mobile.props["isMobile"], "true");
     assert_eq!(rs_mobile.props["isMobile"], "true");
     assert!(rs_mobile.device_id.starts_with("apple_rn:"));
