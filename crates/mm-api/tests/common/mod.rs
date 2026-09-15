@@ -1259,6 +1259,12 @@ async fn purge_api_fixtures_once() {
         // Values first: they are keyed on a field id and nothing else selects them.
         "DELETE FROM propertyvalues WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR id LIKE 'mmrsdel%' OR fieldid LIKE 'mmrscpa%' OR fieldid LIKE 'mmrsprop%' OR fieldid LIKE 'mmrsdel%'",
         "DELETE FROM propertyfields WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR id LIKE 'mmrsdel%'",
+        // Policy rows planted by `parity/access_control_policies` — parents scoped to a
+        // `mmrs-parity-` team and a child on one of its channels. Nothing above reaches the
+        // table, and a leftover parent keeps its (deleted) team's id in `scope_id`; the
+        // reconcile that suite runs would then find the child's channel gone and skip.
+        "DELETE FROM accesscontrolpolicyhistory WHERE name LIKE 'mmrsabac%'",
+        "DELETE FROM accesscontrolpolicies WHERE name LIKE 'mmrsabac%'",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }
