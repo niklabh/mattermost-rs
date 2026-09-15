@@ -8999,6 +8999,11 @@ thread-local registry whose destructor deactivates them (every test is `#[tokio:
 current-thread runtime — zero `multi_thread` flavours — and libtest gives each test its own thread,
 so the destructor runs at test end, after partial moves and temporaries alike); a separate
 `create_fixture_user` for the 62 once-cell initialisers opts out. Do it after the 2026-09-15 round's
-branches merge, since it touches most test files. Until then, `scripts/parity.sh`'s "PASSES ALONE"
-line is the only guard, and a merge verification must read the failure messages rather than the
-count.
+branches merge, since it touches most test files.
+
+**Mitigated the same day, not closed.** `scripts/parity.sh` now runs the parity binary in two
+sequential shards balanced by `create_plain_user` sites, so each shard's purge retires the
+previous shard's users. Measured on stack 0 with the same sampler: the peak fell from **252 to
+170**, create-user refusals from five to **zero**, and the sharded run executed the same 1,745
+parity tests as the unsharded one. The headroom is about 80 users; per-test retirement is still
+owed, and `MMRS_PARITY_SHARDS=3` is the stopgap if the peak climbs back.

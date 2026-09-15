@@ -3,6 +3,8 @@
 # lock (see stack-lock.sh).
 #
 #   scripts/parity.sh                               cargo test --workspace (unit + store + api)
+#                                                   — the parity binary in MMRS_PARITY_SHARDS (2) runs
+#   MMRS_PARITY_PLAN_ONLY=1 scripts/parity.sh       print the shard plan and exit, touching no stack
 #   scripts/parity.sh -p mm-api --test parity      just the parity suite
 #   scripts/parity.sh --test parity users_me       one module's tests
 #
@@ -12,6 +14,95 @@
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
+
+# # The parity binary runs in shards (D-800)
+#
+# An unlicensed Go refuses a new user once 250 active non-bot users exist, and one run of the
+# parity binary creates ~230 plain users that nothing retires before the binary exits — 62 once-cell
+# fixtures alone hold ~150 for the whole run. Measured on stack 0, 2026-09-15: a peak of 252, and
+# five create-user refusals failing tests that pass alone. Every new suite raises the peak.
+#
+# So the no-argument run executes the parity binary once per shard, sequentially. Each invocation
+# is a new process, so `purge_api_fixtures` runs again at its start and deletes the previous
+# shard's `mmrsplain%` users; the peak is roughly one shard's share. Shards are balanced by
+# `create_plain_user(` call sites per module (plus one, so user-free modules spread too), and
+# built from the `pub mod` list in `tests/parity.rs`, so a new module is always assigned. A shard
+# is expressed as `--skip parity::<module>::` for every module outside it: a module missing from
+# every other shard's list is never skipped, which duplicates a module rather than dropping one.
+#
+# What this changes besides the peak: modules in different shards no longer run concurrently, so
+# a race between two suites shows up only when they share a shard.
+parity_shard_plan() {
+  local shards=${MMRS_PARITY_SHARDS:-2}
+  local -a mods ordered
+  local line m w k best
+  mods=(${(f)"$(sed -nE 's/^[[:space:]]*pub mod ([a-z0-9_]+);.*/\1/p' "$ROOT/crates/mm-api/tests/parity.rs")"})
+  ordered=(${(f)"$(for m in $mods; do
+      w=$(grep -c 'create_plain_user(' "$ROOT/crates/mm-api/tests/parity/$m.rs" 2>/dev/null || true)
+      echo "$(( ${w:-0} + 1 )) $m"
+    done | sort -k1,1nr -k2,2)"})
+  typeset -gA MMRS_SHARD_OF
+  typeset -ga MMRS_SHARD_LOAD MMRS_SHARD_COUNT
+  MMRS_SHARD_OF=()
+  MMRS_SHARD_LOAD=()
+  MMRS_SHARD_COUNT=()
+  for k in {1..$shards}; do
+    MMRS_SHARD_LOAD[$k]=0
+    MMRS_SHARD_COUNT[$k]=0
+  done
+  for line in $ordered; do
+    w=${line%% *}
+    m=${line#* }
+    best=1
+    for k in {1..$shards}; do
+      if (( MMRS_SHARD_LOAD[$k] < MMRS_SHARD_LOAD[$best] )); then best=$k; fi
+    done
+    MMRS_SHARD_OF[$m]=$best
+    MMRS_SHARD_LOAD[$best]=$(( MMRS_SHARD_LOAD[$best] + w ))
+    MMRS_SHARD_COUNT[$best]=$(( MMRS_SHARD_COUNT[$best] + 1 ))
+  done
+  typeset -g MMRS_SHARDS=$shards
+  typeset -g MMRS_SHARD_MODULES=${#mods}
+}
+
+parity_shard_print() {
+  local k
+  echo "parity shards: $MMRS_SHARDS over $MMRS_SHARD_MODULES modules"
+  for k in {1..$MMRS_SHARDS}; do
+    echo "  shard $k: ${MMRS_SHARD_COUNT[$k]} modules, weight ${MMRS_SHARD_LOAD[$k]}"
+  done
+  # A duplicated `pub mod` line would collapse into one key and silently shrink the plan.
+  if [ "${#MMRS_SHARD_OF}" -ne "$MMRS_SHARD_MODULES" ]; then
+    echo "  the shard plan assigned ${#MMRS_SHARD_OF} of $MMRS_SHARD_MODULES modules" >&2
+    return 1
+  fi
+}
+
+# Sets MMRS_SKIPS to the `--skip` arguments that confine the parity binary to shard $1.
+parity_shard_skips() {
+  local m
+  typeset -ga MMRS_SKIPS
+  MMRS_SKIPS=()
+  for m in ${(k)MMRS_SHARD_OF}; do
+    if [ "${MMRS_SHARD_OF[$m]}" != "$1" ]; then
+      MMRS_SKIPS+=(--skip "parity::${m}::")
+    fi
+  done
+}
+
+if [ -n "${MMRS_PARITY_PLAN_ONLY:-}" ]; then
+  parity_shard_plan
+  parity_shard_print
+  total_skipped=0
+  for k in {1..$MMRS_SHARDS}; do
+    parity_shard_skips "$k"
+    echo "  shard $k skips $(( ${#MMRS_SKIPS} / 2 )) modules, e.g. ${MMRS_SKIPS[2]}"
+    total_skipped=$(( total_skipped + ${#MMRS_SKIPS} / 2 ))
+  done
+  # Across N shards every module is skipped N-1 times: that is "in exactly one shard".
+  echo "  modules skipped in total: $total_skipped (expected $(( MMRS_SHARD_MODULES * (MMRS_SHARDS - 1) )))"
+  exit 0
+fi
 # `MMRS_STACK` selects the stack; unset means 0, the historical :5432/:8065/:8066 layout.
 source "$ROOT/scripts/stack-env.sh"
 export MM_STORE_DB=1 MM_PARITY_STACK=1
@@ -83,8 +174,21 @@ LOG=$(mktemp "/tmp/mmrs-parity$MMRS_STACK_SUFFIX-XXXX.log")
 # `tee`'s, always 0 — and the summary then printed GREEN over a run cargo had just called
 # failed. Measured, once, on this line.
 if [ $# -eq 0 ]; then
-  cargo test --workspace --no-fail-fast 2>&1 | tee "$LOG"
+  # Every binary but the parity tests, then the parity binary shard by shard — see the header.
+  # All of it goes to one log, so the counts and the isolation re-runs below read it unchanged;
+  # "targets" therefore counts the parity binary once per shard, plus once with every test skipped.
+  parity_shard_plan
+  parity_shard_print > "$LOG"
+  cat "$LOG"
+  cargo test --workspace --no-fail-fast -- --skip parity:: 2>&1 | tee -a "$LOG"
   RC=${pipestatus[1]}
+  for k in {1..$MMRS_SHARDS}; do
+    parity_shard_skips "$k"
+    echo "---- parity shard $k of $MMRS_SHARDS ----" | tee -a "$LOG"
+    cargo test -p mm-api --test parity --no-fail-fast -- "${MMRS_SKIPS[@]}" 2>&1 | tee -a "$LOG"
+    shard_rc=${pipestatus[1]}
+    if [ "$RC" -eq 0 ]; then RC=$shard_rc; fi
+  done
 else
   cargo test "$@" --no-fail-fast 2>&1 | tee "$LOG"
   RC=${pipestatus[1]}
