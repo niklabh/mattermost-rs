@@ -63,6 +63,7 @@
   "GuestAccountsSettings": {
     "Enable": false,
     "EnableGuestMagicLink": false,
+    "EnforceMultifactorAuthentication": false,
     "RestrictCreationToDomains": ""
   },
   "ImageProxySettings": {
@@ -133,6 +134,7 @@
     "EnablePostUsernameOverride": false,
     "EnableTesting": false,
     "EnableUserStatuses": true,
+    "EnforceMultifactorAuthentication": false,
     "ExperimentalEnableAuthenticationTransfer": true,
     "ExperimentalEnableHardenedMode": false,
     "ExtendSessionLengthWithActivity": false,

@@ -931,6 +931,11 @@ pub struct Config {
     /// *after* claiming a slot and a forward at that point would count the attempt twice.
     pub enable_multifactor_authentication: bool,
 
+    /// `ServiceSettings.EnforceMultifactorAuthentication` (config.go:407, defaulted **`false`** at
+    /// :576). The third of `MFARequired`'s three gates, with the licence's MFA feature and
+    /// [`Config::enable_multifactor_authentication`]: on, a user without MFA is refused.
+    pub enforce_multifactor_authentication: bool,
+
     /// `EmailSettings.EnableSignInWithEmail` (config.go:2141), defaulted at :2177 to whatever
     /// `EnableSignUpWithEmail` is — which is itself defaulted **`true`** at :2173.
     ///
@@ -998,6 +1003,10 @@ pub struct Config {
     /// that branch. Its live reader is `getLoginType`, whose 404 gate is the conjunction of this,
     /// [`Config::enable_guest_magic_link`] and the licence.
     pub guest_accounts_enable: bool,
+
+    /// `GuestAccountsSettings.EnforceMultifactorAuthentication` (config.go:3947, defaulted
+    /// **`false`** at :3966). Off, `MFARequired` exempts guests whatever the service setting says.
+    pub guest_accounts_enforce_multifactor_authentication: bool,
 
     /// `GuestAccountsSettings.EnableGuestMagicLink` (config.go:3949, defaulted **`false`** at
     /// :3973).
@@ -1498,6 +1507,7 @@ impl Default for Config {
             // `30 * 24`, and the only arm: the SSO cascade has no `isUpdate` branch.
             session_length_sso_in_hours: 720,
             enable_multifactor_authentication: false,
+            enforce_multifactor_authentication: false,
             // `new(*s.EnableSignUpWithEmail)`, and that is defaulted `true` immediately above it
             // (config.go:2173), so an empty config resolves to `true` in two steps.
             enable_sign_in_with_email: true,
@@ -1512,6 +1522,7 @@ impl Default for Config {
             google_enable: false,
             office365_enable: false,
             guest_accounts_enable: false,
+            guest_accounts_enforce_multifactor_authentication: false,
             enable_guest_magic_link: false,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
@@ -2156,6 +2167,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION",
                 default.enable_multifactor_authentication,
             ),
+            enforce_multifactor_authentication: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION",
+                default.enforce_multifactor_authentication,
+            ),
             send_push_notifications: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS",
@@ -2190,6 +2206,11 @@ impl Config {
                 lookup,
                 "MM_GUESTACCOUNTSSETTINGS_ENABLE",
                 default.guest_accounts_enable,
+            ),
+            guest_accounts_enforce_multifactor_authentication: lookup_bool(
+                lookup,
+                "MM_GUESTACCOUNTSSETTINGS_ENFORCEMULTIFACTORAUTHENTICATION",
+                default.guest_accounts_enforce_multifactor_authentication,
             ),
             enable_guest_magic_link: lookup_bool(
                 lookup,
@@ -2696,6 +2717,9 @@ impl Config {
             enable_multifactor_authentication: service
                 .enable_multifactor_authentication
                 .unwrap_or(default.enable_multifactor_authentication),
+            enforce_multifactor_authentication: service
+                .enforce_multifactor_authentication
+                .unwrap_or(default.enforce_multifactor_authentication),
             enable_sign_in_with_email: email_settings
                 .enable_sign_in_with_email
                 .unwrap_or(default.enable_sign_in_with_email),
@@ -2707,6 +2731,9 @@ impl Config {
             guest_accounts_enable: guest_accounts
                 .enable
                 .unwrap_or(default.guest_accounts_enable),
+            guest_accounts_enforce_multifactor_authentication: guest_accounts
+                .enforce_multifactor_authentication
+                .unwrap_or(default.guest_accounts_enforce_multifactor_authentication),
             enable_guest_magic_link: guest_accounts
                 .enable_guest_magic_link
                 .unwrap_or(default.enable_guest_magic_link),
@@ -3128,6 +3155,8 @@ struct GuestAccountsSettingsDocument {
     enable: Option<bool>,
     #[serde(rename = "EnableGuestMagicLink")]
     enable_guest_magic_link: Option<bool>,
+    #[serde(rename = "EnforceMultifactorAuthentication")]
+    enforce_multifactor_authentication: Option<bool>,
 }
 
 /// The one field of `AccessControlSettings` a migrated route reads.
@@ -3196,6 +3225,8 @@ struct ServiceSettingsDocument {
     session_length_sso_in_days: Option<i64>,
     #[serde(rename = "EnableMultifactorAuthentication")]
     enable_multifactor_authentication: Option<bool>,
+    #[serde(rename = "EnforceMultifactorAuthentication")]
+    enforce_multifactor_authentication: Option<bool>,
     #[serde(rename = "EnableAPIUserDeletion")]
     enable_api_user_deletion: Option<bool>,
     #[serde(rename = "EnableAPITriggerAdminNotifications")]
@@ -4207,8 +4238,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 111,
-            "the fixture covers {keys} settings and Config reads 111 from the document. \
+            keys, 113,
+            "the fixture covers {keys} settings and Config reads 113 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4241,7 +4272,8 @@ mod go_parity {
                 "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
                 "EnableInsecureOutgoingConnections": true,
-                "EnableMultifactorAuthentication": true
+                "EnableMultifactorAuthentication": true,
+                "EnforceMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
@@ -4254,7 +4286,7 @@ mod go_parity {
             "GoogleSettings": { "Enable": true },
             "OpenIdSettings": { "Enable": true },
             "Office365Settings": { "Enable": true },
-            "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
+            "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true, "EnforceMultifactorAuthentication": true },
             "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
             "PluginSettings": { "Enable": false, "EnableMarketplace": false },
@@ -4332,6 +4364,7 @@ mod go_parity {
         // invisible on a stock document where all five agree.
         assert_eq!(config.session_length_web_in_hours, 19);
         assert!(config.enable_multifactor_authentication);
+        assert!(config.enforce_multifactor_authentication);
         assert!(!config.enable_sign_in_with_email);
         assert!(!config.send_push_notifications);
         assert!(!config.enable_sign_in_with_username);
@@ -4342,6 +4375,7 @@ mod go_parity {
         assert!(config.openid_enable);
         assert!(config.office365_enable);
         assert!(config.guest_accounts_enable);
+        assert!(config.guest_accounts_enforce_multifactor_authentication);
         assert!(config.enable_guest_magic_link);
         // The three the built-in slash-command registry reads; each defaults to `true`.
         assert!(!config.plugin_enable);

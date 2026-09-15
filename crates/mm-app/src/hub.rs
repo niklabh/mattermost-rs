@@ -39,8 +39,6 @@
 //! - **`Reject`** (`web_conn.go:577`). A rejected event is skipped by Go's write pump. None of
 //!   the three registered hooks rejects, so [`HookedWebSocketEvent`] has no `reject` and the pump
 //!   does not check the flag; both arrive with the first hook that needs them ([D-183]).
-//! - **The MFA arm of `IsAuthenticated`.** `MFARequired` is not ported, so a connection whose user
-//!   owes MFA is treated as authenticated. See [D-184].
 //!
 //! # Where the sequence number is assigned
 //!
@@ -1235,15 +1233,27 @@ impl App {
         }
     }
 
-    /// Port of `(*WebConn).IsAuthenticated` (web_conn.go:824), basic half — which is also
-    /// `IsBasicAuthenticated` (web_conn.go:782), the check the pong handler makes.
+    /// Port of `(*WebConn).IsAuthenticated` (web_conn.go:824): the basic half
+    /// ([`App::conn_is_basic_authenticated`]) **and** `IsMFAAuthenticated` (web_conn.go:811).
+    /// Asked by the router before any `wsapi` action and by the fan-out before every event; the
+    /// pong handler and registration ask the basic half alone, so a user who owes MFA still gets a
+    /// registered socket and a `hello`, and nothing else.
+    ///
+    /// The MFA half is [`App::mfa_required`] with no request path, so the `/users/me` exemption
+    /// never applies. On a server that does not enforce MFA it returns before any lookup.
+    pub async fn conn_is_authenticated(&self, conn: &WebConn) -> bool {
+        if !self.conn_is_basic_authenticated(conn).await {
+            return false;
+        }
+        let session = conn.session();
+        self.mfa_required(Some(&session), false).await.is_ok()
+    }
+
+    /// Port of `(*WebConn).IsBasicAuthenticated` (web_conn.go:782).
     ///
     /// Go re-fetches the session by token once it has expired, and gives up — clearing the
-    /// connection's session — if the fetch fails. The MFA half is not ported ([D-184]).
-    ///
-    /// Public because the socket router asks it before any `wsapi` action (websocket_router.go:109)
-    /// — the question is the expiry-aware one, not "was a user ever attached".
-    pub async fn conn_is_authenticated(&self, conn: &WebConn) -> bool {
+    /// connection's session — if the fetch fails.
+    pub async fn conn_is_basic_authenticated(&self, conn: &WebConn) -> bool {
         let session = conn.session();
         if session.expires_at >= get_millis() {
             return true;

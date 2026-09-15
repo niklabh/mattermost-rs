@@ -374,7 +374,7 @@ async fn serve_socket(
                     Some(Ok(Message::Pong(_))) => {
                         read_deadline = tokio::time::Instant::now() + PONG_WAIT;
                         // The pong handler (web_conn.go:449).
-                        if state.app.conn_is_authenticated(&conn).await {
+                        if state.app.conn_is_basic_authenticated(&conn).await {
                             let app = state.app.clone(); // outlives the borrow, as above
                             let user_id = conn.user_id();
                             tokio::spawn(async move {

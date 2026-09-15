@@ -1,0 +1,19 @@
+# Mutation plan for the MFA half of a websocket connection's authentication — D-184 (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/websocket-mfa.plan
+#
+# The decision `MFARequired` makes is pure past its two lookups, so most of the plan is unit-level;
+# the two api lines prove the hub asks it and that the Rust side of the pair reads enforcement from
+# the environment. Not planned, each unobservable or equivalent: the empty-session-id refusal (every
+# real session has an id), the OAuth exemption (no OAuth session in the fixture), and the pong
+# handler asking only the basic half (a sixty-second wait). The last two lines are no-op controls.
+gate-is-not-a-conjunction	crates/mm-app/src/mfa.rs	    licensed_mfa && enabled && enforced	    licensed_mfa && enabled || enforced	unit	mfa::
+guest-enforcement-inverted	crates/mm-app/src/mfa.rs	    if user.is_guest() && !guest_enforcement {	    if user.is_guest() && guest_enforcement {	unit	mfa::
+ldap-accounts-exempt	crates/mm-app/src/mfa.rs	        && user.auth_service != USER_AUTH_SERVICE_EMAIL\n        && user.auth_service != USER_AUTH_SERVICE_LDAP	        && user.auth_service != USER_AUTH_SERVICE_EMAIL	unit	mfa::
+bots-owe-mfa	crates/mm-app/src/mfa.rs	    if user.is_bot {\n        return false;\n    }	    if false && user.is_bot {\n        return false;\n    }	unit	mfa::
+enrolment-ignored	crates/mm-app/src/mfa.rs	    !user.mfa_active\n}	    true\n}	unit	mfa::
+feature-defaults-not-applied	crates/mm-app/src/mfa.rs	    features.set_defaults();\n	    let _ = &mut features;\n	unit	mfa::
+hub-skips-the-mfa-half	crates/mm-app/src/hub.rs	        self.mfa_required(Some(&session), false).await.is_ok()	        !session.id.is_empty() || session.id.is_empty()	api	websocket_mfa
+enforcement-env-not-read	crates/mm-app/src/config.rs	                "MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION",	                "MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION_UNREAD",	api	websocket_mfa
+control-rename-the-resolved-features	crates/mm-app/src/mfa.rs	    let mut features = license.features.clone().unwrap_or_default();\n    features.set_defaults();\n    features.mfa.unwrap_or(false)	    let mut resolved = license.features.clone().unwrap_or_default();\n    resolved.set_defaults();\n    resolved.mfa.unwrap_or(false)	unit	mfa::
+control-swap-the-path-and-bot-exemptions	crates/mm-app/src/mfa.rs	    // "Special case to let user get themself"\n    if is_users_me_path {\n        return false;\n    }\n    // "Bots are exempt"\n    if user.is_bot {\n        return false;\n    }	    // "Bots are exempt"\n    if user.is_bot {\n        return false;\n    }\n    // "Special case to let user get themself"\n    if is_users_me_path {\n        return false;\n    }	unit	mfa::

@@ -78,7 +78,7 @@ MODELLED = {
         # The SSO session length, read by DoLogin for the desktop-token login sessions.
         # Both keys again, though this cascade has no `isUpdate` arm.
         "SessionLengthSSOInHours", "SessionLengthSSOInDays",
-        "MaximumLoginAttempts", "EnableMultifactorAuthentication",
+        "MaximumLoginAttempts", "EnableMultifactorAuthentication", "EnforceMultifactorAuthentication",
         # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
         "EnableAPIUserDeletion",
         # The first gate on POST /api/v4/users/trigger-notify-admin-posts.
@@ -156,7 +156,7 @@ MODELLED = {
     ],
     # `users.CreateUser` replaces an unsupported submitted locale with this.
     "LocalizationSettings": ["DefaultClientLocale"],
-    "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink"],
+    "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink", "EnforceMultifactorAuthentication"],
     # The five flags the deferred error mask in `login` reads. Any one of them being on
     # replaces every masked failure id with `api.user.login.invalid_credentials_sso`.
     "GitLabSettings": ["Enable"],

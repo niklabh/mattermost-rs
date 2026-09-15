@@ -2584,6 +2584,8 @@ static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
     tokio::sync::OnceCell::const_new();
 static LICENSED_GUEST: tokio::sync::OnceCell<(SecondServer, String, String)> =
     tokio::sync::OnceCell::const_new();
+static LICENSED_MFA: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
 
 /// The signed licence and the key file `scripts/go-licensed.sh` left, or a panic naming the
 /// script — a suite whose oracle is absent must not pass quietly.
@@ -2732,6 +2734,49 @@ pub async fn licensed_guest() -> LicensedPair {
         .await;
     LicensedPair {
         go: licensed_guest_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// The licensed **MFA** oracle's base URL — `MMRS_LICENSED_VARIANT=mfa scripts/go-licensed.sh
+/// port`: the same licence, MFA enabled and enforced as environment overrides.
+pub fn licensed_mfa_go() -> String {
+    format!("http://localhost:{}", go_port() + 34)
+}
+
+/// The mm-api port for the MFA pair: 8092 on stack 0.
+const LICENSED_MFA_RUST_PORT: u16 = 8092;
+
+/// The licensed pair with `ServiceSettings.EnableMultifactorAuthentication` and
+/// `EnforceMultifactorAuthentication` on, for `MFARequired`. Same rules as [`licensed`].
+pub async fn licensed_mfa() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED_MFA
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            let go = licensed_mfa_go();
+            require_licensed_go(&go, "licensed mfa").await;
+            let server = start_licensed_rust(
+                LICENSED_MFA_RUST_PORT,
+                &go,
+                go_port() + 34,
+                &signed,
+                &key_file,
+                &[
+                    ("MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION", "true"),
+                    (
+                        "MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION",
+                        "true",
+                    ),
+                ],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_mfa_go(),
         rust: server.base.clone(),
         signed: signed.clone(),
         key_file: key_file.clone(),

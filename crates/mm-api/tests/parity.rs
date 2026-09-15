@@ -222,6 +222,7 @@ mod parity {
     pub mod websocket_actions;
     pub mod websocket_guests;
     pub mod websocket_hooks;
+    pub mod websocket_mfa;
     pub mod websocket_reconnect;
 
     // Appended 2026-09-11: the local-mode (unix socket) API. Out of alphabetical order on

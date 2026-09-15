@@ -68,6 +68,7 @@ pub mod login;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
 pub mod marketplace_visit;
 pub mod mention;
+pub mod mfa;
 /// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
 pub mod mime;
 pub mod notification;
