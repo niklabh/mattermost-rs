@@ -818,7 +818,9 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     // The SAML removes below flip `SamlSettings.Encrypt` in the shared configuration document, and
     // it stays flipped until `restore_saml_encrypt`. Held exclusively across that span, like
     // `parity::configlic`'s own patch, so no whole-document reader sees the flipped value.
-    let document = common::CONFIG_DOCUMENT.write().await;
+    // Held to the end of the test, not only across the SAML flip: the IdP, LDAP and audit
+    // certificate adds below each write a filename into the same document until removed.
+    let _document = common::CONFIG_DOCUMENT.write().await;
     let saml_encrypt_before = saml_encrypt(&client, &admin).await;
 
     let (form_type, no_part) = multipart(&[("other", "x")]);
@@ -983,7 +985,6 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     assert_eq!(go, rs);
     assert_eq!(go, b"{\"idp_certificate_file\":false,\"private_key_file\":false,\"public_certificate_file\":false}\n");
     restore_saml_encrypt(&client, &admin, saml_encrypt_before).await;
-    drop(document);
 
     // `addSamlIdpCertificate` branches on `Content-Type` before it parses anything.
     let idp = "/api/v4/saml/certificate/idp";

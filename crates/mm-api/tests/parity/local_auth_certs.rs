@@ -132,6 +132,11 @@ async fn the_ldap_certificate_pairs_over_the_socket() {
     }
     let go = go_socket().expect("checked by sockets_enabled");
     let rust = rust_socket().expect("checked by sockets_enabled");
+    // Held for the whole test: each add writes `LdapSettings.PublicCertificateFile` or
+    // `PrivateCertificateFile` into the shared configuration document until its remove. A
+    // whole-document reader between the two saw `ldap-public.crt` from us and `""` from the
+    // licensed Go, which never reloads (`licensed_sweep`, a sharded run, 2026-09-15).
+    let _document = common::CONFIG_DOCUMENT.write().await;
     let (form_type, no_part) = multipart(&[("other", "x")]);
     let (_, one_part) = multipart(&[(
         "certificate",
