@@ -120,6 +120,12 @@ pub mod config;
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
 
+/// `api4/saml.go`, `api4/ldap.go` and `api4/audit_logging.go` — the certificate and
+/// enterprise-gate routes (22 HTTP pairs), and their seven local-mode twins in
+/// `local_auth_certs`. Appended for the same reason as `config`.
+pub mod auth_certs;
+pub mod local_auth_certs;
+
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
@@ -3108,6 +3114,9 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/config/environment",
             partially_migrated(get(config::get_environment_config)),
         )
+        // `api4/saml.go`, `api4/ldap.go`, `api4/audit_logging.go` — the certificate and
+        // enterprise-gate routes, in their own module.
+        .merge(auth_certs::routes(&state))
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
         // which it then leaves alone. See [`go_global_headers`].

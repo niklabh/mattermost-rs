@@ -237,7 +237,7 @@ fn multipart_boundary(content_type: Option<&str>) -> Result<String, MultipartErr
 /// valid UTF-8. A Rust `String` cannot hold that, so `filename*=utf-8''%ff` is decoded lossily
 /// here and byte-exactly there. No route this server answers reads a filename's *content* — see
 /// [D-410].
-fn parse_media_type(raw: &str) -> Option<(String, HashMap<String, String>)> {
+pub(crate) fn parse_media_type(raw: &str) -> Option<(String, HashMap<String, String>)> {
     let base = raw.split(';').next().unwrap_or(raw);
     let media_type = base.trim().to_ascii_lowercase();
     if !is_well_formed_media_type(&media_type) {

@@ -56,6 +56,20 @@ pub trait ConfigStore {
     fn load_active(
         &self,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
+
+    /// Port of `DatabaseStore.HasFile` (config/database.go:290): whether a configuration file of
+    /// that name was persisted — `SELECT COUNT(*) FROM ConfigurationFiles WHERE Name = ?`, then
+    /// `count != 0`.
+    ///
+    /// The name is whatever the configuration holds, and the default of every certificate-file
+    /// setting is `""`, so the empty name is a real query that finds nothing rather than a
+    /// short-circuit — Go makes no such check either. `SetFile`, `GetFile` and `RemoveFile` are
+    /// not ported: every route that would call them writes the configuration document too, and
+    /// forwards to Go before either write (see `mm_app::auth_certs`).
+    fn has_file(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -92,5 +106,25 @@ impl ConfigStore for SqlConfigStore {
         tracing::Span::current().record("found", value.is_some());
         tracing::Span::current().record("bytes", value.as_deref().map_or(0, str::len));
         Ok(value)
+    }
+
+    /// `COUNT(*)` scanned into an `int64`, compared with zero (database.go:302). `query_scalar!`
+    /// types the aggregate as nullable because Postgres does not promise otherwise; a `NULL` here
+    /// would be a count of nothing, which is what the `unwrap_or(0)` says.
+    #[tracing::instrument(skip_all, fields(name = %name, found))]
+    async fn has_file(&self, name: &str) -> Result<bool, StoreError> {
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM configurationfiles WHERE name = $1",
+            name
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to scan count of rows for {name}"),
+            source,
+        })?;
+        let found = count.unwrap_or(0) != 0;
+        tracing::Span::current().record("found", found);
+        Ok(found)
     }
 }

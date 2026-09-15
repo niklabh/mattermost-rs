@@ -4226,6 +4226,10 @@ mod go_parity {
         async fn load_active(&self) -> Result<Option<String>, mm_store::StoreError> {
             Ok(self.0.clone())
         }
+
+        async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
+            Ok(false)
+        }
     }
 
     /// `load` reads the document. Without this, every assertion in this module could hold while
