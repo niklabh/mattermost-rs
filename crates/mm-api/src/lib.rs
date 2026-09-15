@@ -125,6 +125,8 @@ pub mod websocket;
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
 pub mod config;
 
+/// Port of `api4/board.go` — `POST /boards`, served only with `IntegratedBoards` on.
+pub mod boards;
 /// The `/api/v4/config` writes and `config_local.go` (2026-09-15) — the gates served, the save
 /// forwarded; see the module docs. Appended for the same reason as `config`.
 pub mod config_writes;
@@ -133,6 +135,11 @@ pub mod license_writes;
 /// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
+/// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
+/// Appended for the same reason as `config`.
+pub mod marketplace_visit;
+/// Port of the five `RemoteClusterTokenRequired` routes of `api4/remote_cluster.go`.
+pub mod remote_cluster;
 
 /// `api4/saml.go`, `api4/ldap.go` and `api4/audit_logging.go` — the certificate and
 /// enterprise-gate routes (22 HTTP pairs), and their seven local-mode twins in
@@ -3088,9 +3095,9 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(commands::list_commands).post(commands::create_command)),
         )
         // `POST` is **not** registered here, and that is load-bearing: `/api/v4/commands/execute`
-        // is a static sibling this router does not carry, so a `POST` to it matches this pattern
-        // and reaches the method fallback, which forwards it to Go. Registering `create_command`
-        // on `{command_id}` as well would swallow `executeCommand` instead.
+        // is a static sibling, registered on its own below (2026-09-15), and axum prefers the
+        // literal. Registering `create_command` on `{command_id}` as well would still be wrong —
+        // Go has no `POST /commands/{command_id}`, so that method must reach Go's 405/404.
         .route(
             "/api/v4/commands/{command_id}",
             partially_migrated_with_ids(
@@ -3396,6 +3403,72 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(
                 &state,
                 post(access_control_policies::search_channels_for_access_control_policy),
+            ),
+        )
+        // ---- `api4/plugin.go:42-43` (2026-09-15) ----
+        //
+        // The one literal path served under `/plugins`. Nothing else there is registered, so
+        // every other `/plugins/*` request still falls to the router's fallback — the suite
+        // `marketplace_visit` asserts six of the neighbours come back Go's.
+        .route(
+            "/api/v4/plugins/marketplace/first_admin_visit",
+            partially_migrated(
+                get(marketplace_visit::get_first_admin_visit_marketplace_status)
+                    .post(marketplace_visit::set_first_admin_visit_marketplace_status),
+            ),
+        )
+        // ---- `api4/board.go` (2026-09-15) ----
+        //
+        // Registered by Go only when `IntegratedBoards` is on; the handler forwards when it is
+        // off so Go writes its own mux 404, as the `views` routes do.
+        .route(
+            "/api/v4/boards",
+            partially_migrated(post(boards::create_board)),
+        )
+        // ---- `api4/remote_cluster.go`, the five `RemoteClusterTokenRequired` routes
+        // (2026-09-15). All gated identically; `remote_cluster_token_gate` is the whole served
+        // surface — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
+        // literal siblings of `{remote_id}` (registered above), each with an underscore or
+        // shorter than an id, so mux and axum both prefer these literals.
+        .route(
+            "/api/v4/remotecluster/ping",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/msg",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/confirm_invite",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/upload/{upload_id}",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // Go names this segment `{user_id}`, but axum requires one capture name per tree
+        // position and `{remote_id}` already holds it (the CRUD routes above); the gate never
+        // reads it and the two charsets accept the same segments, so the wire is identical.
+        .route(
+            "/api/v4/remotecluster/{remote_id}/image",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // ---- `api4/command.go:19,26,27` (2026-09-15): execute and the two autocomplete reads.
+        // Each serves its refusals and forwards whatever would run a command or depends on
+        // plugin commands or a non-English locale — see the end of `commands.rs`.
+        .route(
+            "/api/v4/commands/execute",
+            partially_migrated(post(commands::execute_command)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete",
+            partially_migrated_with_ids(&state, get(commands::list_autocomplete_commands)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete_suggestions",
+            partially_migrated_with_ids(
+                &state,
+                get(commands::list_command_autocomplete_suggestions),
             ),
         )
         .fallback(proxy::forward_to_go)

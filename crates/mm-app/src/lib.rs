@@ -13,6 +13,8 @@ pub mod auth;
 /// Appended rather than filed alphabetically: this list is shared by every worktree.
 pub mod auth_certs;
 pub mod authorization;
+/// Port of `app/board.go` — `CreateBoardChannel`.
+pub mod board;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
@@ -28,6 +30,11 @@ pub mod channel_move;
 pub mod channel_view;
 pub mod channel_write;
 pub mod command;
+/// The built-in slash-command registry (`GetCommand` only), `ListAutocompleteCommands` and the
+/// dispatch half of `ExecuteCommand`.
+pub mod command_provider;
+/// Port of `app/command_autocomplete.go` — `GetSuggestions`.
+pub mod command_suggestions;
 pub mod common_teams;
 pub mod config;
 pub mod custom_profile_attributes;
@@ -58,6 +65,8 @@ pub mod job;
 pub mod license;
 pub mod limits;
 pub mod login;
+/// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
+pub mod marketplace_visit;
 pub mod mention;
 /// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
 pub mod mime;

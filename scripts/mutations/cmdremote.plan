@@ -1,0 +1,24 @@
+# Mutation plan for the cmdremote family — POST /boards, the two first_admin_visit routes and
+# the five RemoteClusterTokenRequired gate routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/cmdremote.plan
+#
+# Each line changes a decision a reader could plausibly get wrong and that a fixture already
+# distinguishes; the two controls are a no-op closure rename and a swap of two independent route
+# registrations. Filters name the api suite under test, or a unit-test name for the two `unit`
+# lines. `board.rs`'s option-skipping and store-error ladder are unit-tested against a corpus, so
+# they are checked in the `unit` suite; everything else is proven end to end against the boards
+# oracle and the stack.
+board-accepts-a-nonboard-type	crates/mm-api/src/boards.rs	    if !channel.is_board() {	    if channel.is_board() {	api	boards
+board-accepts-an-empty-team	crates/mm-api/src/boards.rs	    if channel.team_id.is_empty() {	    if !channel.team_id.is_empty() {	api	boards
+board-keeps-the-body-creator	crates/mm-api/src/boards.rs	    channel.creator_id.clone_from(&session.0.user_id);	    channel.creator_id = "ignoredcreator000000000000".to_owned();	api	boards
+board-member-is-not-admin	crates/mm-app/src/board.rs	            scheme_admin: true,	            scheme_admin: false,	api	boards
+marketplace-missing-row-is-true	crates/mm-app/src/marketplace_visit.rs	            .unwrap_or_else(|| "false".to_owned());	            .unwrap_or_else(|| "true".to_owned());	api	marketplace_visit
+marketplace-write-is-false	crates/mm-app/src/marketplace_visit.rs	            value: "true".to_owned(),	            value: "false".to_owned(),	api	marketplace_visit
+marketplace-get-skips-the-permission	crates/mm-api/src/marketplace_visit.rs	    require_manage_system(state, session).await?;\n    let row = state.app.first_admin_visit_marketplace_status().await?;	    let _ = session;\n    let row = state.app.first_admin_visit_marketplace_status().await?;	api	marketplace_visit
+marketplace-set-skips-the-permission	crates/mm-api/src/marketplace_visit.rs	    require_manage_system(state, session).await?;\n    state.app.set_first_admin_visit_marketplace_status().await?;	    let _ = session;\n    state.app.set_first_admin_visit_marketplace_status().await?;	api	marketplace_visit
+remotecluster-gate-inverted	crates/mm-api/src/remote_cluster.rs	    if !has_service {	    if has_service {	api	remote_cluster
+board-kanban-skips-a-valid-option	crates/mm-app/src/board.rs	            && !id.is_empty()	            && id.is_empty()	unit	kanban_view_has_a_column
+board-store-ladder-limit-id	crates/mm-app/src/board.rs	        StoreError::LimitExceeded { .. } => AppError::boxed(\n            WHERE,\n            "app.channel.create_board_channel.limit.app_error",	        StoreError::LimitExceeded { .. } => AppError::boxed(\n            WHERE,\n            "app.channel.create_board_channel.invalid.app_error",	unit	store_errors_map
+control-rename-a-closure-binding	crates/mm-api/src/remote_cluster.rs	        Ok(license) => license.is_some_and(|license| license.has_remote_cluster_service()),	        Ok(license) => license.is_some_and(|l| l.has_remote_cluster_service()),	api	remote_cluster
+control-swap-two-independent-registrations	crates/mm-api/src/lib.rs	            "/api/v4/remotecluster/ping",\n            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),\n        )\n        .route(\n            "/api/v4/remotecluster/msg",	            "/api/v4/remotecluster/msg",\n            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),\n        )\n        .route(\n            "/api/v4/remotecluster/ping",	api	remote_cluster

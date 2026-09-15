@@ -13698,3 +13698,69 @@ picks which id. The agents bridge is never available on a server that hosts no p
   `LastAccessibleFileTime`, which forwards; the ABAC file-download check, which is `true` because
   `AccessControl` is nil on this build. Property write fields are compared **modulo** id,
   timestamps and a per-server name, since both servers write one table.
+## The cmdremote family — slash commands, boards, first_admin_visit, the remote-cluster gate and socket uploads (2026-09-15)
+
+**+11 HTTP pairs / +2 local-mode pairs on base `f4f0a5a`** (612 of 764 served at base). Of the
+fourteen-pair family, thirteen are served; `GET /manualtest` forwards ([D-782]).
+
+- **`POST /boards`** (`api4/board.go`, `crates/mm-api/src/boards.rs`, `crates/mm-app/src/board.rs`).
+  Registered by Go only under `IntegratedBoards`, off at the pinned SHA — so the flag-off request
+  forwards and Go writes its own mux 404, exactly as `views` does; the flag-on shape is measured
+  against `scripts/go-boards.sh`. A board channel and its default kanban view (one column per
+  `status` property option) are one transaction (`ChannelStore::save_board_channel`, no
+  `PublicChannels` upsert), the creator becomes channel admin with a join-history row, and
+  `board_created` + `view_created` are broadcast. Go's own `GetChannel` filters to message
+  channel types, so a board is invisible to `GET /channels/{id}` on Go itself — the suite reads
+  the `views`/`channelmembers` rows for its oracle. New store methods:
+  `ChannelStore::save_board_channel` and `PropertyStore::get_field_by_name_for_object_type`;
+  `ViewStore::save`'s insert was factored into `save_view_t` so the board transaction can run it.
+- **`GET`/`POST /plugins/marketplace/first_admin_visit`** (`api4/plugin.go`,
+  `crates/mm-api/src/marketplace_visit.rs`, `crates/mm-app/src/marketplace_visit.rs`). The only
+  `/plugins` routes served: a `System`-table read that synthesises `"false"` for a missing row,
+  and a write that upserts `"true"` and broadcasts
+  `first_admin_visit_marketplace_status_received`. The `POST` is `APIHandler`, so an anonymous
+  caller is the 403 `manage_system` refusal, not a 401. The suite proves six `/plugins`
+  neighbours and the two other methods still forward.
+- **The five `RemoteClusterTokenRequired` routes** (`api4/remote_cluster.go`,
+  `crates/mm-api/src/remote_cluster.rs`): `ping`, `msg`, `confirm_invite`, `upload/{upload_id}`,
+  `{user_id}/image`. All reduce to the token gate, which needs a licence with the remote-cluster
+  service; this build has none, so every request is the 401 `session_expired` before any handler,
+  served and proven. A licensed request forwards ([D-780]).
+- **`POST /uploads` and `POST /uploads/{upload_id}` on the socket** (`api4/upload_local.go`,
+  `crates/mm-api/src/local_misc.rs` wrappers over `upload_write`). The local session's user id is
+  empty, so a create is a 400 on `user_id` and an attachment data upload a 403; an import session
+  takes the `manage_system` branch and the socket feeds it its bytes — the served pair.
+- **`POST /commands/execute`, `GET /teams/{team_id}/commands/autocomplete` and
+  `.../autocomplete_suggestions`** (`api4/command.go`, the end of `crates/mm-api/src/commands.rs`,
+  `crates/mm-app/src/command_provider.rs`, `crates/mm-app/src/command_suggestions.rs`). All 35
+  built-in `GetCommand`s are ported with their English strings (a table generated from and
+  unit-checked against `en.json`); no `DoCommand` is. Execute serves every refusal, the
+  `EnableCommands` 501, the team/user lookups Go makes *before* matching (so a DM naming no team is
+  the team 404 even for `/shrug`) and the not-found 404, and forwards anything that would run.
+  The two reads serve the list and the suggestions. All three forward while Go may have plugin
+  commands — decided by Go's plugin directory, named by `MM_GO_PLUGIN_DIRECTORY` in
+  `scripts/mm-api-env.sh`, empty on the stack — and the reads forward a request whose
+  `Accept-Language` does not resolve to `en` (Go's `T` comes from that header alone,
+  web/handlers.go:191). Two facts a reader would get wrong: Go's built-in list order is **random
+  per call** (map iteration; the suite compares it as a set), and the suggestions body has **no**
+  trailing newline where the list does. Config gained `PluginSettings.Enable`,
+  `PluginSettings.EnableMarketplace` and `EmailSettings.SendEmailNotifications` (the fixture now
+  has 99 keys). What still forwards is [D-781].
+- **Forwarded:** `GET /manualtest`, registered by Go only under `EnableTesting` (off on the stack,
+  where the path falls to the webapp's static root handler, a 500 naming Go's own client
+  directory) ([D-782]).
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `plugin_enable`, `plugin_enable_marketplace`, `send_email_notifications`; `fixtures/config_active.json` reprojected (99 keys) | DONE |
+| store | `channel_store.rs` (`save_board_channel`), `property_store.rs` (`get_field_by_name_for_object_type`), `view_store.rs` (`save_view_t`) | DONE |
+| app | `board.rs`, `marketplace_visit.rs`, `command_provider.rs` (registry, `list_autocomplete_commands`, `command_dispatch`), `command_suggestions.rs` | DONE |
+| api | `boards.rs`, `marketplace_visit.rs`, `remote_cluster.rs`, `local_misc.rs` (two upload wrappers), `commands.rs` (three handlers) | DONE |
+| test | `parity/boards.rs` (4), `parity/marketplace_visit.rs` (3), `parity/remote_cluster.rs` (2), `parity/local_uploads.rs` (2), `parity/command_dispatch.rs` (5); `command_writes.rs`'s execute guard rewritten | DONE |
+| mutation | `scripts/mutations/cmdremote.plan` — 13 run, 11 caught, 2 controls survived; `scripts/mutations/cmddispatch.plan` — PENDING | DONE |
+
+**Parity risks:** the licensed remote-cluster session path is not exercised (no planted
+`RemoteClusters` row) and forwards. The plugin-present branch of the command gate is never taken
+on the stack (Go's plugin directory is empty), and the suggestions' admin/user role distinction is
+unobservable here — every command carries `system_user`. The restricted-DM branches of execute
+need `RestrictDirectMessage = team` and are untested.

@@ -178,11 +178,11 @@ struct Boards {
 }
 
 /// A boards-on Go server and a boards-on `mm-api` pointed at it, plus a token both accept.
-struct Lit {
-    go: String,
-    rust: String,
-    token: String,
-    http: reqwest::Client,
+pub(crate) struct Lit {
+    pub(crate) go: String,
+    pub(crate) rust: String,
+    pub(crate) token: String,
+    pub(crate) http: reqwest::Client,
 }
 
 /// `MMRS_GO_PORT + 30`, the port `scripts/go-boards.sh` binds — derived from [`GO`] so a worktree
@@ -210,7 +210,7 @@ static LIT: tokio::sync::OnceCell<Option<Boards>> = tokio::sync::OnceCell::const
 ///
 /// The *processes* are shared and the *client* is not — see [`Boards`] for why each half is the
 /// way it is.
-async fn lit() -> Option<Lit> {
+pub(crate) async fn lit() -> Option<Lit> {
     let boards = LIT.get_or_init(start_boards).await.as_ref()?;
     let http = client();
     let token = go_minted_token(&http).await;
@@ -277,7 +277,7 @@ async fn start_boards() -> Option<Boards> {
 }
 
 impl Lit {
-    async fn send(
+    pub(crate) async fn send(
         &self,
         base: &str,
         verb: &str,
@@ -303,7 +303,7 @@ impl Lit {
     }
 
     /// Run the same request against both and return `((go_status, go_body), (rs_status, rs_body))`.
-    async fn both(
+    pub(crate) async fn both(
         &self,
         verb: &str,
         path: &str,

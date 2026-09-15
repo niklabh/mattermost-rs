@@ -534,11 +534,25 @@ pub struct Config {
     /// inside the plugin directory or vice versa (`fileutils.CheckDirectoryConflict`).
     pub plugin_directory: String,
 
-    /// `PluginSettings.Enable` (config.go:3621, defaulted **`true`**). Off, `GetPluginsEnvironment`
-    /// is nil and the agents bridge reports `plugin_env_not_initialized`; on, it reports
-    /// `plugin_not_active`, since this server hosts no plugins — read by
-    /// [`crate::App::ai_plugin_bridge_status`].
+    /// `PluginSettings.Enable` (config.go:3609, defaulted **`true`** at :3622). Two readers:
+    /// off, `GetPluginsEnvironment` is nil and the agents bridge reports
+    /// `plugin_env_not_initialized` — on, `plugin_not_active`, since this server hosts no plugins
+    /// ([`crate::App::ai_plugin_bridge_status`]); and it is half of the `/marketplace` built-in
+    /// slash command's `AutoComplete` flag (slashcommands/command_marketplace.go:31), which decides
+    /// whether `GET /teams/{team_id}/commands/autocomplete` lists it at all.
     pub plugin_enable: bool,
+
+    /// `PluginSettings.EnableMarketplace` (config.go:3611, defaulted **`true`** —
+    /// `PluginSettingsDefaultEnableMarketplace` — at :3674). The other half of the `/marketplace`
+    /// command's `AutoComplete`; see [`Config::plugin_enable`].
+    pub plugin_enable_marketplace: bool,
+
+    /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
+    /// unconditionally — not from `isUpdate`).
+    ///
+    /// One of the three settings the `/invite_people` built-in command ANDs into its
+    /// `AutoComplete` flag (slashcommands/command_invite_people.go:32).
+    pub send_email_notifications: bool,
 
     /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
     ///
@@ -1382,6 +1396,8 @@ impl Default for Config {
             // config.go:268 — `PluginSettingsDefaultDirectory`.
             plugin_directory: "./plugins".to_owned(),
             plugin_enable: true,
+            plugin_enable_marketplace: true,
+            send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
             saml_enable_sync_with_ldap: false,
@@ -1829,6 +1845,16 @@ impl Config {
             plugin_directory: lookup("MM_PLUGINSETTINGS_DIRECTORY")
                 .unwrap_or(default.plugin_directory),
             plugin_enable: lookup_bool(lookup, "MM_PLUGINSETTINGS_ENABLE", default.plugin_enable),
+            plugin_enable_marketplace: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEMARKETPLACE",
+                default.plugin_enable_marketplace,
+            ),
+            send_email_notifications: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS",
+                default.send_email_notifications,
+            ),
             ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
                 .unwrap_or(default.ldap_picture_attribute),
             saml_enable_sync_with_ldap: lookup_bool(
@@ -2484,6 +2510,12 @@ impl Config {
                 .unwrap_or(default.file_max_image_resolution),
             plugin_directory: non_empty_or(plugin_settings.directory, default.plugin_directory),
             plugin_enable: plugin_settings.enable.unwrap_or(default.plugin_enable),
+            plugin_enable_marketplace: plugin_settings
+                .enable_marketplace
+                .unwrap_or(default.plugin_enable_marketplace),
+            send_email_notifications: email_settings
+                .send_email_notifications
+                .unwrap_or(default.send_email_notifications),
             ldap_picture_attribute: ldap_settings
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
@@ -2919,6 +2951,8 @@ struct EmailSettingsDocument {
     enable_sign_in_with_username: Option<bool>,
     #[serde(rename = "SendPushNotifications")]
     send_push_notifications: Option<bool>,
+    #[serde(rename = "SendEmailNotifications")]
+    send_email_notifications: Option<bool>,
 }
 
 /// The one field of `LocalizationSettings` a migrated route reads.
@@ -3190,6 +3224,8 @@ struct PluginSettingsDocument {
     directory: Option<String>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
+    #[serde(rename = "EnableMarketplace")]
+    enable_marketplace: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -4027,8 +4063,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 101,
-            "the fixture covers {keys} settings and Config reads 101 from the document. \
+            keys, 103,
+            "the fixture covers {keys} settings and Config reads 103 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4067,7 +4103,6 @@ mod go_parity {
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
             "ImageProxySettings": { "Enable": true },
             "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
-            "PluginSettings": { "Enable": false },
             "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
             "LdapSettings": { "PictureAttribute": "thumbnailPhoto", "Enable": true },
             "SamlSettings": { "EnableSyncWithLdap": true, "Enable": true },
@@ -4078,10 +4113,12 @@ mod go_parity {
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
             "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
+            "PluginSettings": { "Enable": false, "EnableMarketplace": false },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false,
-                "SendPushNotifications": false
+                "SendPushNotifications": false,
+                "SendEmailNotifications": false
             },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
         }"#;
@@ -4094,7 +4131,6 @@ mod go_parity {
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);
         assert!(!config.enable_file_search);
-        assert!(!config.plugin_enable);
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
@@ -4148,6 +4184,10 @@ mod go_parity {
         assert!(config.office365_enable);
         assert!(config.guest_accounts_enable);
         assert!(config.enable_guest_magic_link);
+        // The three the built-in slash-command registry reads; each defaults to `true`.
+        assert!(!config.plugin_enable);
+        assert!(!config.plugin_enable_marketplace);
+        assert!(!config.send_email_notifications);
     }
 
     /// The five SSO flags the error mask reads are five **different** keys.

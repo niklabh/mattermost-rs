@@ -9086,3 +9086,41 @@ answered as a `channel_id → name` map. **What is owed:** a Go process with the
 `go-licensed.sh` variant with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true`, as the guest
 variant does for its setting), then the handler with the flag, licence and team-id gates, the
 group/field-id lookup by name, and a parity suite against that process.
+## D-780 · The five RemoteClusterTokenRequired routes are served as their gate; the licensed session path forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go)
+
+`ping`, `msg`, `confirm_invite`, `upload/{upload_id}` and `{user_id}/image`
+(`crates/mm-api/src/remote_cluster.rs`) are gated by `RemoteClusterTokenRequired`, which needs a
+licence carrying `HasRemoteClusterService` **and** a session whose type is `RemoteClusterToken`.
+On this unlicensed build every request is the 401 `api.context.session_expired.app_error` before
+any handler runs, which is served and proven by parity. A licence with the remote-cluster service
+present would make the answer turn on resolving an `X-RemoteCluster-Token` against the
+`RemoteClusters` table (`GetRemoteClusterSession`); that session path and its store are unported,
+so a licensed request forwards. Owed: the remote-cluster session and the five handler bodies
+(`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`, `doUploadData`, `SetProfileImage`), which need
+the `RemoteClusterService`, nil on this build.
+
+## D-781 · Slash commands that would run, and suggestions that fetch a list, are forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (command.go)
+
+The three command routes are served (`crates/mm-api/src/commands.rs`), and forward in four cases:
+a command that would **run** — any built-in provider (no `DoCommand` is ported: `/echo`,
+`/header`, `/join`, `/msg`, `/mute`, `/invite` and the other 29) or a custom command (the outgoing
+webhook in `DoCommandRequest`, then `CreateCommandPost` or an ephemeral post); a suggestion
+input that reaches a **dynamic list** argument (`/secure-connection remove`, `/share-channel
+invite`/`uninvite` — the providers' `GetAutoCompleteListItems`); any request while Go's plugin
+directory holds a bundle (plugin commands are Go runtime state); and a list or suggestions request
+whose `Accept-Language` is not English (no i18n bundle, [D-092]). Owed, in that order of yield:
+the custom-command webhook path, then the providers one file at a time, then i18n.
+
+## D-782 · `GET /manualtest` is forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+
+Registered only when `ServiceSettings.EnableTesting` is on (api4/api.go:414). Off — the stack's
+value — the path is not an api4 route at all and falls to the webapp's static root handler, whose
+answer is a 500 naming Go's own `client/root.html` path; on, `manualtesting.ManualTest` drives Go's
+REST client against its own listen address to seed users and teams. Neither is an API handler this
+server can reproduce without porting the static webapp handler, so both forward.

@@ -65,6 +65,19 @@ pub trait PropertyStore {
 
     /// Port of `SqlPropertyFieldStore.GetMany` (property_field_store.go:120), **without** its
     /// cardinality check — see the method's own docs.
+    /// Port of `SqlPropertyFieldStore.GetFieldByNameForObjectType` (property_field_store.go:95).
+    ///
+    /// `objectType` is matched **exactly** — the empty string is itself a valid object type, not
+    /// a wildcard — and `TargetID` likewise, so the boards group's post-level fields (`TargetID`
+    /// empty) are found with an empty target. `DeleteAt = 0` is part of the predicate.
+    fn get_field_by_name_for_object_type(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        object_type: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<PropertyField, StoreError>> + Send;
+
     fn get_many_fields(
         &self,
         group_id: &str,
@@ -273,6 +286,62 @@ impl PropertyStore for SqlPropertyStore {
         .ok_or_else(|| StoreError::NotFound {
             entity: "PropertyField",
             criteria: format!("Id={id}"),
+        })?;
+
+        tracing::Span::current().record("found", true);
+        row.into_field()
+    }
+
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, object_type = %object_type, name = %name, found = false))]
+    async fn get_field_by_name_for_object_type(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        object_type: &str,
+        name: &str,
+    ) -> Result<PropertyField, StoreError> {
+        let row = sqlx::query_as!(
+            PropertyFieldRow,
+            r#"
+            SELECT id                                   AS "id!",
+                   groupid                              AS "groupid!",
+                   name                                 AS "name!",
+                   COALESCE(type::text, '')             AS "type_text!",
+                   attrs                                AS "attrs?",
+                   COALESCE(targetid, '')               AS "targetid!",
+                   COALESCE(targettype, '')             AS "targettype!",
+                   objecttype                           AS "objecttype!",
+                   protected                            AS "protected!",
+                   permissionfield::text                AS "permissionfield?",
+                   permissionvalues::text               AS "permissionvalues?",
+                   permissionoptions::text              AS "permissionoptions?",
+                   linkedfieldid                        AS "linkedfieldid?",
+                   createat                             AS "createat!",
+                   updateat                             AS "updateat!",
+                   deleteat                             AS "deleteat!",
+                   COALESCE(createdby, '')              AS "createdby!",
+                   COALESCE(updatedby, '')              AS "updatedby!"
+              FROM propertyfields
+             WHERE groupid = $1
+               AND targetid = $2
+               AND name = $3
+               AND deleteat = 0
+               AND objecttype = $4
+            "#,
+            group_id,
+            target_id,
+            name,
+            object_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_field_get_by_name_select".to_owned(),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "PropertyField",
+            criteria: name.to_owned(),
         })?;
 
         tracing::Span::current().record("found", true);

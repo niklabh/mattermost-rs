@@ -30,6 +30,7 @@
     "EnableSignInWithUsername": true,
     "EnableSignUpWithEmail": true,
     "RequireEmailVerification": false,
+    "SendEmailNotifications": true,
     "SendPushNotifications": false
   },
   "ExperimentalSettings": {
@@ -76,7 +77,8 @@
   },
   "PluginSettings": {
     "Directory": "./plugins",
-    "Enable": true
+    "Enable": true,
+    "EnableMarketplace": true
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,

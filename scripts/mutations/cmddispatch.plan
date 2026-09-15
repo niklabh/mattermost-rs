@@ -1,0 +1,27 @@
+# Mutation plan for the three slash-command routes that reach the built-in registry —
+# POST /commands/execute and the two team autocomplete reads (the end of commands.rs,
+# command_provider.rs, command_suggestions.rs).
+#
+#   scripts/mutate-batch.sh scripts/mutations/cmddispatch.plan
+#
+# Every line was traced to a fixture in parity/command_dispatch.rs that changes under it before
+# launch. Not planned, because the stack cannot show them: the admin/user role in suggestions
+# (every command here carries system_user) and the plugin-present half of the plugin gate (Go
+# plugin directory is empty). The two controls are a closure rename and a swap of two route
+# registrations with different paths.
+execute-accepts-a-malformed-channel-id	crates/mm-api/src/commands.rs	    if args.command.len() <= 1 || !args.command.starts_with('/') || !is_valid_id(&args.channel_id) {	    if args.command.len() <= 1 || !args.command.starts_with('/') {	api	command_dispatch
+execute-runs-in-an-archived-channel	crates/mm-api/src/commands.rs	    if channel.delete_at != 0 {	    if channel.delete_at != 0 && false {	api	command_dispatch
+execute-keeps-the-body-team-id	crates/mm-api/src/commands.rs	        args.team_id.clone_from(&channel.team_id);	        let _ = &channel.team_id;	api	command_dispatch
+execute-dm-membership-check-inverted	crates/mm-api/src/commands.rs	        if session.0.get_team_by_team_id(&args.team_id).is_none()	        if session.0.get_team_by_team_id(&args.team_id).is_some()	api	command_dispatch
+execute-plugin-gate-inverted	crates/mm-api/src/commands.rs	    if go_may_have_plugin_commands() {	    if !go_may_have_plugin_commands() {	api	command_dispatch
+dispatch-skips-the-team-lookup	crates/mm-app/src/command_provider.rs	        self.get_team(team_id).await?;	        let _ = team_id;	api	command_dispatch
+dispatch-never-matches-a-custom-command	crates/mm-app/src/command_provider.rs	.any(|command| command.trigger == trigger)	.any(|command| command.trigger == trigger && false)	api	command_dispatch
+list-does-not-sanitise-custom-commands	crates/mm-app/src/command_provider.rs	                    command.sanitize();	                    let _ = &command;	api	command_dispatch
+list-lets-a-built-in-shadow-a-custom-command	crates/mm-app/src/command_provider.rs	                    if command.auto_complete && seen.insert(command.trigger.clone()) {\n                        commands.push(*command);	                    if command.auto_complete {\n                        commands.push(*command);	api	command_dispatch
+list-ignores-a-custom-commands-autocomplete-flag	crates/mm-app/src/command_provider.rs	                if command.auto_complete && seen.insert(command.trigger.clone()) {\n                    command.sanitize();	                if seen.insert(command.trigger.clone()) {\n                    command.sanitize();	api	command_dispatch
+locale-prefers-the-short-tag	crates/mm-app/src/command_provider.rs	    if crate::i18n::is_supported_locale(full) {\n        full\n    } else if crate::i18n::is_supported_locale(short) {\n        short	    if crate::i18n::is_supported_locale(short) {\n        short\n    } else if crate::i18n::is_supported_locale(full) {\n        full	api	command_dispatch
+suggestions-accept-no-user-input	crates/mm-api/src/commands.rs	    if user_input.is_empty() {	    if user_input.is_empty() && false {	api	command_dispatch
+suggestions-are-not-sorted	crates/mm-app/src/command_suggestions.rs	    commands.sort_by_key(|command| go_to_lower(&command.trigger));	    commands.sort_by_key(|_| 0u8);	api	command_dispatch
+named-argument-keeps-the-lone-space	crates/mm-app/src/command_suggestions.rs	        to_be_parsed = if changed_to_be_parsed == " " {	        to_be_parsed = if changed_to_be_parsed == "never" {	api	command_dispatch
+control-rename-a-closure-binding	crates/mm-api/src/commands.rs	        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());	        .map(|header| String::from_utf8_lossy(header.as_bytes()).into_owned());	api	command_dispatch
+control-swap-two-independent-registrations	crates/mm-api/src/lib.rs	            "/api/v4/teams/{team_id}/commands/autocomplete",\n            partially_migrated_with_ids(&state, get(commands::list_autocomplete_commands)),\n        )\n        .route(\n            "/api/v4/teams/{team_id}/commands/autocomplete_suggestions",\n            partially_migrated_with_ids(\n                &state,\n                get(commands::list_command_autocomplete_suggestions),\n            ),	            "/api/v4/teams/{team_id}/commands/autocomplete_suggestions",\n            partially_migrated_with_ids(\n                &state,\n                get(commands::list_command_autocomplete_suggestions),\n            ),\n        )\n        .route(\n            "/api/v4/teams/{team_id}/commands/autocomplete",\n            partially_migrated_with_ids(&state, get(commands::list_autocomplete_commands)),	api	command_dispatch

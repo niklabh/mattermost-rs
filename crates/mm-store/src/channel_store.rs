@@ -829,6 +829,21 @@ pub trait ChannelStore {
         max_channels_per_team: i64,
     ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.SaveBoardChannel` (channel_store.go:753) — a board's channel row
+    /// and its default kanban view in **one transaction**, through the same `saveChannelT` as
+    /// [`ChannelStore::save`] but **without** the `PublicChannels` upsert: boards must not appear
+    /// there. Refuses a non-board `Type` and a set `DeleteAt` before touching the database.
+    ///
+    /// Mutates both arguments the way Go returns them: the channel gets its id and timestamps,
+    /// the view its `ChannelId`, id and timestamps. [`ChannelSave::Existing`] is the name
+    /// conflict, with nothing written.
+    fn save_board_channel(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+        view: &mut mm_model::view::View,
+    ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.SaveDirectChannel` (channel_store.go:712).
     ///
     /// One transaction over three writes: the channel row and both memberships. **`team_id` is
@@ -1725,6 +1740,16 @@ impl ChannelStore for SqlChannelStore {
         max_channels_per_team: i64,
     ) -> Result<ChannelSave, StoreError> {
         save(&self.pool, channel, max_channels_per_team).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_type = %channel.channel_type, team_id = %channel.team_id))]
+    async fn save_board_channel(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+        view: &mut mm_model::view::View,
+    ) -> Result<ChannelSave, StoreError> {
+        save_board_channel(&self.pool, channel, max_channels_per_team, view).await
     }
 
     #[tracing::instrument(skip_all, fields(name = %channel.name))]
@@ -6553,6 +6578,53 @@ pub async fn set_delete_at(
 /// `store.sql_channel.save.direct_channel.app_error`. Folding the two into one variant would
 /// swap one 400's id for another's.
 ///
+/// Port of `SqlChannelStore.SaveBoardChannel` (channel_store.go:753). See the trait method.
+pub async fn save_board_channel(
+    pool: &PgPool,
+    channel: &mut Channel,
+    max_channels_per_team: i64,
+    view: &mut mm_model::view::View,
+) -> Result<ChannelSave, StoreError> {
+    if channel.delete_at != 0 {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "DeleteAt",
+            value: channel.delete_at.to_string(),
+        });
+    }
+    if !channel.is_board() {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Type",
+            value: channel.channel_type.clone(),
+        });
+    }
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let saved = save_channel_t(&mut tx, channel, max_channels_per_team).await?;
+    if let ChannelSave::Existing(existing) = saved {
+        // Go returns the duplicate beside `ErrConflict` and `finalizeTransactionX` rolls back.
+        drop(tx);
+        return Ok(ChannelSave::Existing(existing));
+    }
+
+    // Do NOT call `upsert_public_channel` — boards must not appear in PublicChannels.
+
+    view.channel_id.clone_from(&channel.id);
+    crate::view_store::save_view_t(&mut *tx, view).await?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(ChannelSave::Saved)
+}
+
 /// A group channel is *not* refused here: `createGroupChannel` (app/channel.go:572) reaches this
 /// same function with `Type == 'G'`, which is why the direct-channel guard names only `D`.
 pub async fn save(
