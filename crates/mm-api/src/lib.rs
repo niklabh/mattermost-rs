@@ -41,6 +41,7 @@ pub mod gated_reads;
 
 /// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod channel_join_requests;
+pub mod file_search;
 /// `uploadFileStream` — the classic `POST /api/v4/files` upload.
 pub mod file_upload;
 pub mod files;
@@ -1715,6 +1716,23 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/posts/search",
             partially_migrated_with_ids(&state, post(post_search::search_posts_in_team)),
+        )
+        // `BaseRoutes.Team.Handle("/files/search")` (api4/file.go:41) — the file twin of the
+        // route above, two literal segments under `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/files/search",
+            partially_migrated_with_ids(&state, post(file_search::search_files_in_team)),
+        )
+        // `BaseRoutes.Files.Handle("/search")` (api4/file.go:42) — a literal sibling of
+        // `/files/{file_id}` below, whose `GET` is pinned so `files::get_file`'s 400 for the
+        // seven-character segment is not lost to axum's method router (see
+        // `file_search::invalid_file_id_param`).
+        .route(
+            "/api/v4/files/search",
+            partially_migrated(
+                post(file_search::search_files_in_all_teams)
+                    .get(file_search::invalid_file_id_param),
+            ),
         )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
@@ -3622,6 +3640,8 @@ mod tests {
             (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
             (Method::POST, "/api/v4/posts/search".to_owned()),
             (Method::POST, format!("/api/v4/teams/{USER}/posts/search")),
+            (Method::POST, "/api/v4/files/search".to_owned()),
+            (Method::POST, format!("/api/v4/teams/{USER}/files/search")),
         ];
 
         for (method, path) in served {

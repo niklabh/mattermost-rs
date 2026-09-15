@@ -101,6 +101,7 @@
     "EnableDeveloper": false,
     "EnableDynamicClientRegistration": false,
     "EnableEmailInvitations": true,
+    "EnableFileSearch": true,
     "EnableIncomingWebhooks": true,
     "EnableInsecureOutgoingConnections": false,
     "EnableLinkPreviews": true,

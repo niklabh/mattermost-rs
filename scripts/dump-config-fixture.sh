@@ -92,6 +92,8 @@ MODELLED = {
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
         # The 501 gate on the two post-search routes.
         "EnablePostSearch",
+        # The 501 gate on the two file-search routes.
+        "EnableFileSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is

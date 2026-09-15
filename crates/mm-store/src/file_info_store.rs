@@ -26,9 +26,14 @@
 //! until someone writes the column directly, which is exactly what the parity fixture does.
 
 use mm_model::file_info::FileInfo;
+use mm_model::file_info_list::FileInfoList;
+use mm_model::search_params::{SearchParams, is_search_params_list_valid};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
+use crate::post_store::{
+    SPECIAL_SEARCH_CHARS, mark_wildcards, remove_non_alpha_numeric_unquoted_terms,
+};
 
 /// Port of `store.FileInfoStore`, narrowed to what the served routes reach.
 pub trait FileInfoStore {
@@ -124,6 +129,20 @@ pub trait FileInfoStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.Search` (file_info_store.go:537) — the database file search
+    /// behind `POST /api/v4/files/search` and `POST /api/v4/teams/{team_id}/files/search`.
+    ///
+    /// `page > 0` is an empty list before anything is read ("we don't support paging for DB
+    /// search"); `IsSearchParamsListValid` is [`StoreError::Invalid`]. `per_page` is not a
+    /// parameter because Go never reads it past that first `if`.
+    fn search(
+        &self,
+        params_list: Vec<SearchParams>,
+        user_id: &str,
+        team_id: &str,
+        page: i64,
+    ) -> impl std::future::Future<Output = Result<FileInfoList, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -551,5 +570,306 @@ impl FileInfoStore for SqlFileInfoStore {
             remote_id: Some(row.remote_id),
             archived: row.archived,
         })
+    }
+
+    /// # One statement, every params element ANDed into it
+    ///
+    /// Go's loop appends each element's predicates to the **same** builder — unlike
+    /// `SqlPostStore`, which runs one query per element and merges. `ParseSearchParams` gives
+    /// every element the same filters (`search_params.go:355-380` builds each from one flag
+    /// set), so the channel, user, extension and date predicates are bound once from the first
+    /// element; only the term clause differs per element, and those are bound as a `text[]`
+    /// with an `ALL`-shaped `NOT EXISTS`, which is the same conjunction. `IncludeDeletedChannels`
+    /// is the same on every element by `IsSearchParamsListValid`.
+    ///
+    /// # The term clause is not the post one
+    ///
+    /// Three differences from `SqlPostStore.search`, each Go's own text (file_info_store.go:633-
+    /// 670): the special characters are blanked in `Terms` whether or not the element is a
+    /// hashtag search; every `-` becomes a space rather than only the non-word ones (the comment
+    /// about `photo-2024.jpg` is Go's); and there is no quoted-phrase pass — `strings.Fields`
+    /// splits on whitespace and joins with ` & ` / ` | `, and the excluded terms become
+    /// ` & !(a | b)`. Whatever this builds is bound and parsed by Postgres, so a query Postgres
+    /// rejects (a terms string that is all spaces builds `()`) is logged and answered as an
+    /// **empty list**, exactly as Go swallows the store error.
+    ///
+    /// # `archived` is dropped, as in `get_by_ids`
+    ///
+    /// The rows scan into `fileInfoWithChannelID` and go through `ToModel()`, which omits
+    /// `Archived` — see the module docs.
+    #[tracing::instrument(skip(self, params_list), fields(team_id = %team_id, elements = params_list.len(), page))]
+    async fn search(
+        &self,
+        mut params_list: Vec<SearchParams>,
+        user_id: &str,
+        team_id: &str,
+        page: i64,
+    ) -> Result<FileInfoList, StoreError> {
+        if page > 0 {
+            return Ok(FileInfoList::new());
+        }
+
+        is_search_params_list_valid(&params_list).map_err(|app_error| StoreError::Invalid {
+            entity: "SearchParams",
+            app_error,
+        })?;
+
+        let mut list = FileInfoList::new();
+        let Some(first) = params_list.first() else {
+            // Go's loop adds nothing and the base query runs; the app never sends an empty list
+            // (it answers before the store), so this arm is a type-level courtesy.
+            list.make_non_nil();
+            return Ok(list);
+        };
+
+        // `buildCreateDateFilterClause`'s shape, inline: `on:` returns early, so none of the
+        // other five bounds is applied beside it.
+        let mut on_date = None;
+        let mut excluded_date = None;
+        let mut after_date = None;
+        let mut before_date = None;
+        let mut excluded_after_date = None;
+        let mut excluded_before_date = None;
+        if !first.on_date.is_empty() {
+            on_date = Some(first.get_on_date_millis());
+        } else {
+            if !first.excluded_date.is_empty() {
+                excluded_date = Some(first.get_excluded_date_millis());
+            }
+            if !first.after_date.is_empty() {
+                after_date = Some(first.get_after_date_millis());
+            }
+            if !first.before_date.is_empty() {
+                before_date = Some(first.get_before_date_millis());
+            }
+            if !first.excluded_after_date.is_empty() {
+                excluded_after_date = Some(first.get_excluded_after_date_millis());
+            }
+            if !first.excluded_before_date.is_empty() {
+                excluded_before_date = Some(first.get_excluded_before_date_millis());
+            }
+        }
+
+        fn non_empty(list: &[String]) -> Option<&[String]> {
+            (!list.is_empty()).then_some(list)
+        }
+        let include_deleted_channels = first.include_deleted_channels;
+        let in_channels = non_empty(&first.in_channels).map(<[String]>::to_vec);
+        let excluded_channels = non_empty(&first.excluded_channels).map(<[String]>::to_vec);
+        let extensions = non_empty(&first.extensions).map(<[String]>::to_vec);
+        let excluded_extensions = non_empty(&first.excluded_extensions).map(<[String]>::to_vec);
+        let from_users = non_empty(&first.from_users).map(<[String]>::to_vec);
+        let excluded_users = non_empty(&first.excluded_users).map(<[String]>::to_vec);
+
+        let mut ts_queries: Vec<String> = Vec::with_capacity(params_list.len());
+        for params in &mut params_list {
+            params.terms = remove_non_alpha_numeric_unquoted_terms(&params.terms, " ");
+            if let Some(query) =
+                file_ts_query(&params.terms, &params.excluded_terms, params.or_terms)
+            {
+                ts_queries.push(query);
+            }
+        }
+        let ts_queries = (!ts_queries.is_empty()).then_some(ts_queries);
+
+        let text_config = crate::channel_store::default_text_search_config(&self.pool).await?;
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT fileinfo.id                            AS "id!",
+                   fileinfo.creatorid                     AS "creator_id!",
+                   fileinfo.postid                        AS "post_id!",
+                   COALESCE(fileinfo.channelid, '')       AS "channel_id!",
+                   fileinfo.createat                      AS "create_at!",
+                   fileinfo.updateat                      AS "update_at!",
+                   fileinfo.deleteat                      AS "delete_at!",
+                   fileinfo.path                          AS "path!",
+                   fileinfo.thumbnailpath                 AS "thumbnail_path!",
+                   fileinfo.previewpath                   AS "preview_path!",
+                   fileinfo.name                          AS "name!",
+                   fileinfo.extension                     AS "extension!",
+                   fileinfo.size                          AS "size!",
+                   fileinfo.mimetype                      AS "mime_type!",
+                   fileinfo.width                         AS "width!",
+                   fileinfo.height                        AS "height!",
+                   fileinfo.haspreviewimage               AS "has_preview_image!",
+                   fileinfo.minipreview                   AS "mini_preview?",
+                   COALESCE(fileinfo.content, '')         AS "content!",
+                   COALESCE(fileinfo.remoteid, '')        AS "remote_id!"
+              FROM fileinfo
+              LEFT JOIN channels AS c ON c.id = fileinfo.channelid
+              LEFT JOIN channelmembers AS cm ON c.id = cm.channelid
+             WHERE fileinfo.deleteat = 0
+               AND (fileinfo.creatorid = 'bookmark' OR fileinfo.postid <> '')
+               AND NOT EXISTS (SELECT 1 FROM temporaryposts
+                                WHERE temporaryposts.postid = fileinfo.postid)
+               AND ($1::text = '' OR c.teamid = $1 OR c.teamid = '')
+               AND ($2::bool OR c.deleteat = 0)
+               AND cm.userid = $3
+               AND ($4::text[] IS NULL OR c.id = ANY($4))
+               AND ($5::text[] IS NULL OR fileinfo.extension = ANY($5))
+               AND ($6::text[] IS NULL OR fileinfo.extension <> ALL($6))
+               AND ($7::text[] IS NULL OR c.id <> ALL($7))
+               AND ($8::text[] IS NULL OR fileinfo.creatorid = ANY($8))
+               AND ($9::text[] IS NULL OR fileinfo.creatorid <> ALL($9))
+               AND ($10::bigint IS NULL OR fileinfo.createat BETWEEN $10 AND $11::bigint)
+               AND ($12::bigint IS NULL OR fileinfo.createat NOT BETWEEN $12 AND $13::bigint)
+               AND ($14::bigint IS NULL OR fileinfo.createat >= $14)
+               AND ($15::bigint IS NULL OR fileinfo.createat <= $15)
+               AND ($16::bigint IS NULL OR fileinfo.createat < $16)
+               AND ($17::bigint IS NULL OR fileinfo.createat > $17)
+               AND ($18::text[] IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM unnest($18::text[]) AS q
+                         WHERE NOT (to_tsvector($19::text::regconfig, fileinfo.name)
+                                        @@ to_tsquery($19::text::regconfig, q)
+                                    OR to_tsvector($19::text::regconfig,
+                                                   translate(fileinfo.name, '.,-', '   '))
+                                        @@ to_tsquery($19::text::regconfig, q)
+                                    OR to_tsvector($19::text::regconfig, fileinfo.content)
+                                        @@ to_tsquery($19::text::regconfig, q))))
+             ORDER BY fileinfo.createat DESC
+             LIMIT 100
+            "#,
+            team_id,
+            include_deleted_channels,
+            user_id,
+            in_channels.as_deref(),
+            extensions.as_deref(),
+            excluded_extensions.as_deref(),
+            excluded_channels.as_deref(),
+            from_users.as_deref(),
+            excluded_users.as_deref(),
+            on_date.map(|(start, _)| start),
+            on_date.map(|(_, end)| end),
+            excluded_date.map(|(start, _)| start),
+            excluded_date.map(|(_, end)| end),
+            after_date,
+            before_date,
+            excluded_after_date,
+            excluded_before_date,
+            ts_queries.as_deref(),
+            text_config,
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        match rows {
+            Err(source) => {
+                // Go: `mlog.Warn("Query error searching files.", ...)` and an empty list —
+                // "it is of no use to the user".
+                tracing::warn!(error = %source, "query error searching files");
+            }
+            Ok(rows) => {
+                for row in rows {
+                    let info = FileInfo {
+                        id: row.id,
+                        creator_id: row.creator_id,
+                        post_id: row.post_id,
+                        channel_id: row.channel_id,
+                        create_at: row.create_at,
+                        update_at: row.update_at,
+                        delete_at: row.delete_at,
+                        path: row.path,
+                        thumbnail_path: row.thumbnail_path,
+                        preview_path: row.preview_path,
+                        name: row.name,
+                        extension: row.extension,
+                        size: row.size,
+                        mime_type: row.mime_type,
+                        width: i64::from(row.width),
+                        height: i64::from(row.height),
+                        has_preview_image: row.has_preview_image,
+                        mini_preview: row.mini_preview,
+                        content: row.content,
+                        remote_id: Some(row.remote_id),
+                        // `ToModel()` omits this field — see the module docs.
+                        archived: false,
+                    };
+                    list.add_order(info.id.as_str());
+                    list.add_file_info(info);
+                }
+            }
+        }
+        list.make_non_nil();
+        Ok(list)
+    }
+}
+
+/// The tsquery text one params element contributes (file_info_store.go:633-670), or `None` when
+/// both term strings are empty after the character blanking — "we've already confirmed that we
+/// have a channel or user to search for".
+///
+/// Go tests emptiness **after** the special characters and hyphens are blanked but **before**
+/// the wildcard pass, so a terms string of `-` is ` `, which is not empty, and builds `()`.
+pub(crate) fn file_ts_query(terms: &str, excluded_terms: &str, or_terms: bool) -> Option<String> {
+    let mut terms = terms.to_owned();
+    let mut excluded_terms = excluded_terms.to_owned();
+    for c in SPECIAL_SEARCH_CHARS {
+        terms = terms.replace(c, " ");
+        excluded_terms = excluded_terms.replace(c, " ");
+    }
+    terms = terms.replace('-', " ");
+    excluded_terms = excluded_terms.replace('-', " ");
+
+    if terms.is_empty() && excluded_terms.is_empty() {
+        return None;
+    }
+
+    let terms = mark_wildcards(&terms);
+    let excluded_terms = mark_wildcards(&excluded_terms);
+
+    let mut exclude_clause = String::new();
+    if !excluded_terms.is_empty() {
+        exclude_clause = format!(
+            " & !({})",
+            excluded_terms
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
+    }
+    let joiner = if or_terms { " | " } else { " & " };
+    Some(format!(
+        "({}){exclude_clause}",
+        terms.split_whitespace().collect::<Vec<_>>().join(joiner)
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_ts_query;
+
+    /// Transcribed from file_info_store.go:633-670: the helpers are unexported and the parity
+    /// suite is their oracle; these pin the string the suite then sends through Postgres.
+    #[test]
+    fn the_file_ts_query_is_gos_text() {
+        assert_eq!(
+            file_ts_query("photo 2024", "", false).as_deref(),
+            Some("(photo & 2024)")
+        );
+        assert_eq!(
+            file_ts_query("photo 2024", "", true).as_deref(),
+            Some("(photo | 2024)")
+        );
+        // Hyphens become spaces whatever flanks them, unlike the post search.
+        assert_eq!(
+            file_ts_query("photo-2024.jpg", "", false).as_deref(),
+            Some("(photo & 2024.jpg)")
+        );
+        // A star at a word end is a prefix; excluded terms are always OR-joined and negated.
+        assert_eq!(
+            file_ts_query("pho* report", "old draft", false).as_deref(),
+            Some("(pho:* & report) & !(old | draft)")
+        );
+        // Special characters are blanked before the split.
+        assert_eq!(
+            file_ts_query("a:b(c)", "", false).as_deref(),
+            Some("(a & b & c)")
+        );
+        // Emptiness is tested after the blanking: `-` alone builds `()`, which Postgres rejects.
+        assert_eq!(file_ts_query("-", "", false).as_deref(), Some("()"));
+        assert_eq!(file_ts_query("", " ", false).as_deref(), Some("() & !()"));
+        assert_eq!(file_ts_query("", "", false), None);
     }
 }

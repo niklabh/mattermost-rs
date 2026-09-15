@@ -238,6 +238,11 @@ pub struct Config {
     /// store — read by [`crate::App::search_posts_for_user`].
     pub enable_post_search: bool,
 
+    /// `ServiceSettings.EnableFileSearch` (config.go:441, defaulted **`true`** at :696). Off,
+    /// `SearchFilesInTeamForUser` answers 501 `store.sql_file_info.search.disabled` before
+    /// touching the store — read by [`crate::App::search_files_in_team_for_user`].
+    pub enable_file_search: bool,
+
     /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
@@ -1261,6 +1266,7 @@ impl Default for Config {
             enable_email_invitations: false,
             enable_link_previews: true,
             enable_post_search: true,
+            enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
@@ -1566,6 +1572,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEPOSTSEARCH",
                 default.enable_post_search,
+            ),
+            enable_file_search: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEFILESEARCH",
+                default.enable_file_search,
             ),
             allowed_untrusted_internal_connections: lookup(
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
@@ -2226,6 +2237,9 @@ impl Config {
             enable_post_search: service
                 .enable_post_search
                 .unwrap_or(default.enable_post_search),
+            enable_file_search: service
+                .enable_file_search
+                .unwrap_or(default.enable_file_search),
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
@@ -2888,6 +2902,8 @@ struct ServiceSettingsDocument {
     enable_link_previews: Option<bool>,
     #[serde(rename = "EnablePostSearch")]
     enable_post_search: Option<bool>,
+    #[serde(rename = "EnableFileSearch")]
+    enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -3162,6 +3178,7 @@ mod tests {
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
         assert!(config.enable_post_search, "config.go:692 — new(true)");
+        assert!(config.enable_file_search, "config.go:696 — new(true)");
         assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
         // `getUsersWithInvalidEmails` answers 400 when this is **on**, so a wrong default turns
         // a working route into an unconditional refusal on any server that has not set it. The
@@ -3847,6 +3864,7 @@ mod go_parity {
                 "EnableEmailInvitations": true,
                 "EnableLinkPreviews": false,
                 "EnablePostSearch": false,
+                "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true
@@ -3880,6 +3898,7 @@ mod go_parity {
         assert!(config.enable_email_invitations);
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);
+        assert!(!config.enable_file_search);
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
