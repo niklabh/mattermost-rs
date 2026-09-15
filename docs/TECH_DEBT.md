@@ -8880,3 +8880,59 @@ function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` br
 serves the HTTP twin's branch as well. The parity test that will cover it already sends the
 request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
 forward today and would assert the served answer then.
+
+---
+
+## D-700 · The configuration save path is forwarded: `SetDefaults`, `IsValid`, the `access:` merge and `Store.Set` are unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (config.go, config_local.go)
+
+`PUT /config`, `PUT /config/patch` and their socket twins serve every gate before the merge
+(`mm_api::config_writes`) and forward the save. Behind the forward: `config.Merge` through the
+per-field `access:` tags (`writeFilter`, api4/config.go:432 — the ~1,300 tags `mm_model::config`
+does not carry), `Config.SetDefaults` and `Config.IsValid` (seventy Go functions between them),
+`HandleMessageExportConfig`, and `Store.Set` (config/store.go:168): `Desanitize`,
+`applyEnvironmentMap`, `fixConfig`, `IsValid` again, `removeEnvOverrides`, and
+`DatabaseStore.persist` — the SHA dedupe, `Active = NULL` on the old row, one new row.
+`localMigrateConfig`'s `config.Migrate` is the same store code over two DSNs. **What is owed:**
+the model's defaults and validation section by section, then `ConfigStore::set` and the app
+function — *and*, for as long as the Go server runs beside this one, a way to make it reload:
+`config.DatabaseStore` has no watcher, so a row this process writes is invisible to Go until
+its `ReloadConfig` runs, which is `POST /config/reload` over the local socket. The parity suite
+that will cover it already sends the writes (`parity::configlic`) and asserts the forward.
+
+## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (config.go)
+
+`mm_app::App::config()` returns the `Config` projection loaded once in `App::new`
+(`Config::load`, then never again), while `getConfig`, `localGetConfig` and the write gates
+re-read the `Configurations` row per request (`load_model_config`). So after any configuration
+write — Go's own, or one forwarded through this server — the full-document reads and the
+`config_writes` gates see the new value at once and every ported gate that consults the
+projection (`show_full_name`, `enable_open_server`, `restrict_system_admin`, the file settings,
+the ninety-odd others) keeps the old one until this process restarts. Go's config listeners have
+no counterpart. **What is owed:** a reloadable projection — `ArcSwap`/`RwLock` behind `config()`
+with a reload on `POST /config/reload` and after a forwarded save, or a per-request read with a
+short TTL — and a parity test that patches a projected setting and reads a gated route back.
+Not fixed in the session that found it because `config()` returns `&Config` to several hundred
+call sites across seven concurrent worktrees.
+
+## D-702 · `SaveLicense`, `RemoveLicense` with a licence in force, and the trial request are forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (license.go, license_local.go)
+
+`POST /license` serves the permission, the multipart parse, `LicenseFromBytes` and the trial
+gate, then forwards `SaveLicense` (platform/license.go:132): `Store.User().Count` and
+`AnalyticsGetSingleChannelGuestCount` for the seat check, `IsExpired`, the job-server stop/start,
+`SetLicense` (the in-memory swap Go answers every `License()` from), `LicenseStore::save`,
+`System.SaveOrUpdate(ActiveLicenseId)`, `PermanentDeleteByName(HostedPurchaseNeedsScreening)`,
+`ReloadConfig` and `InvalidateAllCaches`. `DELETE /license` serves the no-licence case and
+forwards the other, for the same reason: the copy that must change is the Go process's.
+`POST /trial-license` is served to the nil `LicenseManager` this build has; the outbound request
+to the licence server (`RequestTrialLicense`, `RequestTrialLicenseWithExtraFields`) sits behind
+that nil. **What is owed:** `LicenseStore::save`, the two user counts (owned by the user store),
+the app functions, and — while Go runs — no relay exists at all: Go re-reads `Licenses` only in
+its own `SaveLicense`, so a licence saved here would leave Go unlicensed until it restarts. The
+success branch cannot be exercised on the shared stack without saving a licence, which
+`parity::configlic` never does.

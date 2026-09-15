@@ -13500,3 +13500,44 @@ Found on the way: the two hook lists marshalled through `serde_json`, so a callb
 | api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
 | test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
 | mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+## The config and licence writes — `config.go`, `license.go` and their `_local` twins (2026-09-15)
+
+**+7 HTTP pairs / +6 local-mode pairs on base `f4f0a5a`** (612 of 764). `PUT /config`,
+`PUT /config/patch`, `POST /config/reload`, `POST /license`, `DELETE /license`,
+`POST /license/preview`, `POST /trial-license`; on the socket `PUT /config`, `PUT /config/patch`,
+`POST /config/reload`, `POST /config/migrate`, `POST /license`, `DELETE /license`. Each handler
+is a run of gates in front of a save, and the line is the same on all thirteen: **the gates are
+served, the save is forwarded** — because `SetDefaults`/`IsValid`/`Store.Set` are unported
+([D-700]) *and* because the Go process holds both the configuration and the licence in memory
+with nothing watching the tables, so the process that must observe a write is the one that must
+make it. How each server sees the other's write, measured by `parity::configlic`: Go sees a write
+because Go made it; this server sees it on the next request, since `getConfig`, `localGetConfig`
+and the write gates re-read the row per request — but `App::config()`, the projected ninety
+settings, is a start-up snapshot and does not ([D-701]). The same test patches `SiteURL`, an
+environment override on the stack, and proves it moves nothing: the answer, both reads and the
+persisted row keep the override's value (`removeEnvOverrides`). Two things a reader would
+otherwise get wrong: an omitted `SiteURL` on `PUT /config` is a cleared one — `{}` is the
+`clear_siteurl` 400 — *unless* the body sets `EnableDeveloper`, when `SetDefaults` fills
+`http://localhost:8065`; and a `null` section is a no-op decode in Go, not a 400, so nulls are
+dropped before the typed decode. On the licence side `previewLicense` is served whole (no
+`Features.SetDefaults`, a sparse `features` echoes sparse), `POST /license` reaches the trial
+gate — a **500** `upgrade_needed` where `/trial-license` gives a 403 for the same nil manager —
+and `localAddLicense` writes `http.Error` plain text for the two pre-part failures and forwards
+a failure inside the parse so the text stays Go's.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/license.rs` — `license_from_bytes` (validate + decode, no defaults), `validate_license_bytes`, `license_validation_app_error` (the `NewLicenseValidationAppError` mapping plus the 500 `LicenseFromBytes` adds) | DONE |
+| api | `crates/mm-api/src/config_writes.rs` — the three HTTP handlers, the four socket ones, `decode_config`; 5 unit tests | DONE |
+| api | `crates/mm-api/src/license_writes.rs` — the four HTTP handlers, the two socket ones; 3 unit tests | DONE |
+| api | `lib.rs` — `.put` on the existing `/config` router, five new paths; `local.rs` — two merges; `local_misc.rs` — `.put` on the socket's `/config` | DONE |
+| test | `crates/mm-api/tests/parity/configlic.rs` — 5: 18 config refusals, the forwarded patch/PUT/reload with the document restored under the new `common::CONFIG_DOCUMENT` lock (taken shared by the two full-document reads), 20 licence refusals, the licensed pair past the signature (a trial licence signed with the oracle's key, never saved), 26 socket cases | DONE |
+| mutation | `scripts/mutations/configlic.plan` — 15 run, 15 caught, 2 controls survived | DONE |
+
+- **Forwarded:** every save (D-700, D-702), `RemoveLicense` with a licence in force,
+  `config.Migrate`, a migrate body that does not decode (Go salvages a partial map, D-026),
+  a socket licence upload that fails *inside* the multipart parse (Go's own error text).
+- **Not verified by parity:** the 413 for a licence upload past `MaxFileSize + 512`, the
+  wrong-environment licence ids (no test/dev key on the stack), `api.unmarshal_error` for a
+  validly signed non-JSON licence (needs the oracle's key and is reachable, not yet sent), and
+  the `PluginSettings.MarketplaceURL` refusal only while the stack's `EnableUploads` is off.
