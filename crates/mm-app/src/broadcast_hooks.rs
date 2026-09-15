@@ -62,10 +62,10 @@ pub const BROADCAST_BURN_ON_READ: &str = "burn_on_read";
 pub const BROADCAST_BURN_ON_READ_REACTION: &str = "burn_on_read_reaction";
 /// `broadcastAbacFiles` (web_broadcast_hooks.go:27). Declared, not registered.
 pub const BROADCAST_ABAC_FILES: &str = "abac_files";
-/// `broadcastOnlyChannelAdmins` (web_broadcast_hooks.go:28). Declared, not registered.
+/// `broadcastOnlyChannelAdmins` (web_broadcast_hooks.go:28).
 pub const BROADCAST_ONLY_CHANNEL_ADMINS: &str = "only_channel_admins";
 
-/// Port of `Server.makeBroadcastHooks` (web_broadcast_hooks.go:31), reduced to the four hooks
+/// Port of `Server.makeBroadcastHooks` (web_broadcast_hooks.go:31), reduced to the five hooks
 /// that are ported. The map is what `hubStart` hands each hub (web_hub.go:124).
 pub fn make_broadcast_hooks() -> HashMap<&'static str, Box<dyn BroadcastHook>> {
     let mut hooks: HashMap<&'static str, Box<dyn BroadcastHook>> = HashMap::new();
@@ -76,7 +76,57 @@ pub fn make_broadcast_hooks() -> HashMap<&'static str, Box<dyn BroadcastHook>> {
         BROADCAST_CHANNEL_MENTIONS,
         Box::new(ChannelMentionsBroadcastHook),
     );
+    hooks.insert(
+        BROADCAST_ONLY_CHANNEL_ADMINS,
+        Box::new(OnlyChannelAdminsBroadcastHook),
+    );
     hooks
+}
+
+/// Port of `onlyChannelAdminsBroadcastHook` (web_broadcast_hooks.go:517): a connection whose user
+/// is not in the precomputed `channel_admin_user_ids` has the event **rejected**.
+///
+/// The channel-addressed broadcast is the outer bound and this is the filter, so a plain member of
+/// a discoverable private channel is not told who asked to join it. The rejection lands on the
+/// broadcast's shared event when no earlier hook copied it — see
+/// [`HookedWebSocketEvent::reject`] for what that does to admins. An argument that does not decode
+/// is an error, which rejects nobody: Go returns before `Reject`.
+struct OnlyChannelAdminsBroadcastHook;
+
+impl BroadcastHook for OnlyChannelAdminsBroadcastHook {
+    fn process<'a, 'e>(
+        &'a self,
+        msg: &'a mut HookedWebSocketEvent<'e>,
+        conn: &'a WebConn,
+        args: &'a StringInterface,
+        _suite: &'a dyn BroadcastHookSuite,
+    ) -> HookFuture<'a, Result<(), BroadcastHookError>>
+    where
+        'e: 'a,
+    {
+        Box::pin(std::future::ready(Self::process_sync(msg, conn, args)))
+    }
+}
+
+impl OnlyChannelAdminsBroadcastHook {
+    fn process_sync(
+        msg: &mut HookedWebSocketEvent<'_>,
+        conn: &WebConn,
+        args: &StringInterface,
+    ) -> Result<(), BroadcastHookError> {
+        let admin_user_ids =
+            string_array_arg(args, "channel_admin_user_ids").map_err(|source| {
+                BroadcastHookError::InvalidArg {
+                    hook: "onlyChannelAdminsBroadcastHook",
+                    key: "channel_admin_user_ids",
+                    source,
+                }
+            })?;
+        if !admin_user_ids.contains(&conn.user_id()) {
+            msg.reject();
+        }
+        Ok(())
+    }
 }
 
 /// What a hook returns to the runner, which logs it as Go does (`Error processing hook`) and

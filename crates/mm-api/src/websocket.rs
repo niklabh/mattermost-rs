@@ -323,7 +323,17 @@ async fn serve_socket(
                 // newline is Go's `json.Encoder.Encode`, which every non-precomputed frame goes
                 // through.
                 let text = match frame {
-                    OutgoingFrame::Event { event, precomputed } => {
+                    OutgoingFrame::Event { event, precomputed, rejected } => {
+                        // `if evtOk && evt.IsRejected() { continue }` (web_conn.go:571): skipped
+                        // before it takes a sequence number or a dead-queue slot. A hook's copy
+                        // carries its own rejection; the shared event's is the broadcast's flag.
+                        if event.is_rejected()
+                            || rejected
+                                .as_ref()
+                                .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))
+                        {
+                            continue;
+                        }
                         let event = event.set_sequence(sequence);
                         sequence += 1;
                         match encode_event(&event, precomputed) {
