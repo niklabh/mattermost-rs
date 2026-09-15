@@ -2893,6 +2893,50 @@ impl SocketProbe {
         probe
     }
 
+    /// Connect with **no token** — the connection both servers upgrade and do not register. No
+    /// `hello` is expected, and nothing addressed to a user will arrive until it authenticates
+    /// over the socket.
+    pub async fn connect_anonymous(base: &str) -> SocketProbe {
+        let url = format!("{}/api/v4/websocket", base.replace("http://", "ws://"));
+        let (socket, _) = tokio_tungstenite::connect_async(url.as_str())
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// Send one text frame verbatim — for frames that are not a well-formed `WebSocketRequest`.
+    pub async fn send_text(&mut self, text: &str) {
+        self.socket
+            .send(Message::Text(text.to_owned().into()))
+            .await
+            .expect("the socket accepts a frame");
+    }
+
+    /// Read until the server closes the connection or `window` expires; true if it closed.
+    ///
+    /// A close handshake, a reset without one and end-of-stream all count — Go closes some
+    /// connections with a close frame (`writePump` on a closed queue) and others by dropping the
+    /// TCP connection (`readPump`'s deferred `Close`). Text frames that arrive first are kept.
+    pub async fn closed_within(&mut self, window: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match tokio::time::timeout(remaining, self.socket.next()).await {
+                Ok(Some(Ok(Message::Text(text)))) => self.raw.push(text.to_string()),
+                Ok(Some(Ok(Message::Close(_)))) => return true,
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(_))) | Ok(None) => return true,
+                Err(_) => return false,
+            }
+        }
+    }
+
     /// Send one `WebSocketRequest`.
     pub async fn send(&mut self, request: serde_json::Value) {
         self.socket

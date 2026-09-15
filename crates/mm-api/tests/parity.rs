@@ -219,6 +219,7 @@ mod parity {
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
+    pub mod websocket_actions;
     pub mod websocket_hooks;
 
     // Appended 2026-09-11: the local-mode (unix socket) API. Out of alphabetical order on

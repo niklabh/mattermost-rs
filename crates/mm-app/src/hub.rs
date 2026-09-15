@@ -126,7 +126,17 @@ pub enum OutgoingFrame {
 #[derive(Debug)]
 pub struct WebConn {
     pub connection_id: String,
-    pub user_id: String,
+
+    /// Go's `WebConn.UserId`. A lock rather than a plain field because Go **assigns** it after
+    /// construction: `authentication_challenge` sets `conn.UserId = session.UserId`
+    /// (websocket_router.go:57) on a connection that was upgraded with no session. Until
+    /// 2026-09-15 this was an immutable field filled from the upgrade-time session, so a
+    /// connection that authenticated over the socket was registered under the user `""` — and
+    /// every user-addressed event, `hello` included, was addressed to nobody.
+    ///
+    /// Deliberately **not** derived from [`WebConn::session`]: Go's `InvalidateCache` clears the
+    /// session and leaves `UserId`, and the hub index is keyed by this value.
+    user_id: RwLock<String>,
 
     /// Go's `WebConn.PostedAck`: the client connected with `?posted_ack=true`
     /// (api4/websocket.go:81). Read by one thing only — the `posted_ack` broadcast hook — and it
@@ -169,7 +179,7 @@ impl WebConn {
         let (tx, rx) = mpsc::channel(SEND_QUEUE_SIZE);
         let conn = Arc::new(WebConn {
             connection_id,
-            user_id: session.user_id.clone(),
+            user_id: RwLock::new(session.user_id.clone()),
             posted_ack,
             session: RwLock::new(session),
             active: AtomicBool::new(true),
@@ -189,6 +199,23 @@ impl WebConn {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    /// Go's `WebConn.UserId`, read. Cloned for the same reason [`WebConn::session`] is.
+    pub fn user_id(&self) -> String {
+        self.user_id
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// `conn.UserId = session.UserId` (websocket_router.go:57). Call before [`Hub::register`]:
+    /// the index is keyed by this value at registration.
+    pub fn set_user_id(&self, user_id: impl Into<String>) {
+        *self
+            .user_id
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = user_id.into();
     }
 
     /// Port of `(*WebConn).SetSession` (web_conn.go:398).
@@ -250,7 +277,27 @@ impl WebConn {
         self.session().get_team_by_team_id(team_id).is_some()
     }
 
-    /// Port of `(*WebConn).InvalidateCache` (web_conn.go:774), membership half only.
+    /// Port of `(*WebConn).InvalidateCache` (web_conn.go:774): the membership cache, the session
+    /// and its expiry all go — **the token stays**.
+    ///
+    /// Go keeps the token in its own field, so after this `IsBasicAuthenticated` sees an expiry of
+    /// zero and re-reads the session by that token: a session that is still valid comes back with
+    /// whatever changed (roles, team memberships), and a revoked one clears the token and leaves
+    /// the connection unauthenticated. Here the token lives inside [`Session`], so it is carried
+    /// over into an otherwise empty one, which [`App::conn_is_authenticated`] treats identically.
+    pub fn invalidate_cache(&self) {
+        self.invalidate_channel_members();
+        let mut session = self
+            .session
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *session = Session {
+            token: std::mem::take(&mut session.token),
+            ..Session::default()
+        };
+    }
+
+    /// The membership half of [`WebConn::invalidate_cache`] alone.
     pub fn invalidate_channel_members(&self) {
         *self
             .all_channel_members
@@ -539,7 +586,7 @@ impl Hub {
                 .insert(conn.connection_id.clone(), conn.clone());
             index
                 .by_user
-                .entry(conn.user_id.clone())
+                .entry(conn.user_id())
                 .or_default()
                 .push(conn.clone());
         }
@@ -563,10 +610,10 @@ impl Hub {
             return;
         };
         conn.set_active(false);
-        if let Some(conns) = index.by_user.get_mut(&conn.user_id) {
+        if let Some(conns) = index.by_user.get_mut(&conn.user_id()) {
             conns.retain(|c| c.connection_id != connection_id);
             if conns.is_empty() {
-                index.by_user.remove(&conn.user_id);
+                index.by_user.remove(&conn.user_id());
             }
         }
     }
@@ -592,12 +639,17 @@ impl Hub {
             .cloned()
     }
 
-    /// Port of `hubConnectionIndex.InvalidateAll` as `PlatformService.InvalidateAllCaches`
-    /// reaches it (platform/cluster_handlers.go:130): every live connection drops its
-    /// channel-membership cache and rebuilds it on its next event.
+    /// Port of `Hub.InvalidateAll` (web_hub.go:471) and its arm (web_hub.go:679), reached from
+    /// `ClearSessionCacheForAllUsersSkipClusterSend` (cluster_handlers.go:85) — every connection
+    /// is [`WebConn::invalidate_cache`]d **and loses its token**, so the next authentication check
+    /// short-circuits to unauthenticated instead of re-reading a session by it.
+    ///
+    /// Not reached from `InvalidateAllCaches`, which purges the session cache only; see
+    /// [`App::invalidate_all_caches`].
     pub fn invalidate_all(&self) {
         for conn in self.all() {
-            conn.invalidate_channel_members();
+            conn.invalidate_cache();
+            conn.set_session(Session::default());
         }
     }
 
@@ -628,10 +680,21 @@ impl Hub {
             .len()
     }
 
-    /// Port of `PlatformService.InvalidateCacheForUser` (web_hub.go:233), membership half.
+    /// The hub leg of `PlatformService.InvalidateCacheForUser` (web_hub.go:233).
+    ///
+    /// Until 2026-09-15 this dropped only the membership cache. Go's chain is
+    /// `InvalidateChannelCacheForUser` → `invalidateWebConnSessionCacheForUser` → `Hub.InvalidateUser`,
+    /// whose arm (web_hub.go:663) is the full [`WebConn::invalidate_cache`] — so the session goes
+    /// too, and a connection re-reads it on its next event.
     pub fn invalidate_channel_members_for_user(&self, user_id: &str) {
+        self.invalidate_user(user_id);
+    }
+
+    /// Port of `Hub.InvalidateUser` (web_hub.go:462) and its arm (web_hub.go:663), with
+    /// `EnableWebHubChannelIteration` off — the default, and the only index this hub keeps.
+    pub fn invalidate_user(&self, user_id: &str) {
         for conn in self.for_user(user_id) {
-            conn.invalidate_channel_members();
+            conn.invalidate_cache();
         }
     }
 
@@ -711,7 +774,7 @@ impl App {
             if conn.try_send(broadcast_frame(&event, hooked)).is_err() {
                 if conn.is_active() {
                     tracing::error!(
-                        user_id = %conn.user_id,
+                        user_id = %conn.user_id(),
                         conn_id = %conn.connection_id,
                         "webhub.broadcast: cannot send, closing websocket for user"
                     );
@@ -760,7 +823,7 @@ impl App {
                     None => match self
                         .store()
                         .channel()
-                        .get_all_channel_members_for_user(&conn.user_id, false)
+                        .get_all_channel_members_for_user(&conn.user_id(), false)
                         .await
                     {
                         Ok(members) => {
@@ -778,11 +841,15 @@ impl App {
         }
     }
 
-    /// Port of `(*WebConn).IsAuthenticated` (web_conn.go:824), basic half.
+    /// Port of `(*WebConn).IsAuthenticated` (web_conn.go:824), basic half — which is also
+    /// `IsBasicAuthenticated` (web_conn.go:782), the check the pong handler makes.
     ///
     /// Go re-fetches the session by token once it has expired, and gives up — clearing the
     /// connection's session — if the fetch fails. The MFA half is not ported ([D-184]).
-    async fn conn_is_authenticated(&self, conn: &WebConn) -> bool {
+    ///
+    /// Public because the socket router asks it before any `wsapi` action (websocket_router.go:109)
+    /// — the question is the expiry-aware one, not "was a user ever attached".
+    pub async fn conn_is_authenticated(&self, conn: &WebConn) -> bool {
         let session = conn.session();
         if session.expires_at >= get_millis() {
             return true;
@@ -822,7 +889,8 @@ impl App {
     /// same; its value is this server's own, and always will be: there is nothing to defer, so
     /// this is stated here rather than in the backlog. `server_hostname` differs the same way.
     pub fn hello_message(&self, conn: &WebConn) -> WebSocketEvent {
-        let mut hello = WebSocketEvent::new(WEBSOCKET_EVENT_HELLO, "", "", &conn.user_id, None, "");
+        let mut hello =
+            WebSocketEvent::new(WEBSOCKET_EVENT_HELLO, "", "", &conn.user_id(), None, "");
         hello.add(
             "server_version",
             serde_json::Value::String(self.server_version_string()),
@@ -852,6 +920,20 @@ impl App {
     /// The hub this app publishes through.
     pub fn hub(&self) -> &Hub {
         &self.hub
+    }
+
+    /// Port of `App.ClearSessionCacheForUser` (app/session.go:309) and
+    /// `PlatformService.ClearUserSessionCache` (platform/session.go:105).
+    ///
+    /// Go clears two things: its session cache, which this server does not keep ([D-087]), and —
+    /// through `ClearSessionCacheForUserSkipClusterSend` (cluster_handlers.go:76) — every live
+    /// websocket connection's copy of the session. **The second is not a cache in the sense
+    /// [D-087] means.** A connection authenticated with a session keeps acting as it until told
+    /// otherwise: a revoked session keeps receiving events, and a changed role or team membership
+    /// is not seen by the addressing filters. So this is not a no-op here, whatever the session
+    /// cache is.
+    pub fn clear_session_cache_for_user(&self, user_id: &str) {
+        self.hub().invalidate_user(user_id);
     }
 }
 
@@ -919,13 +1001,13 @@ pub fn addressing_verdict(
     }
 
     if !broadcast.user_id.is_empty() {
-        return verdict(conn.user_id == broadcast.user_id);
+        return verdict(conn.user_id() == broadcast.user_id);
     }
 
     if let Some(omit_users) = &broadcast.omit_users
         && !omit_users.is_empty()
         // Go tests key *presence*, not the bool's value: `omit_users: {u: false}` still omits.
-        && omit_users.contains_key(&conn.user_id)
+        && omit_users.contains_key(&conn.user_id())
     {
         return Verdict::Skip;
     }

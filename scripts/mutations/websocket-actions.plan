@@ -1,0 +1,33 @@
+# Mutation plan for the six wsapi actions and the socket lifecycle around them (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/websocket-actions.plan
+#
+# Worth mutating: Go's lenient type rules (a non-string is empty, not refused), the two unchecked
+# assertions in posted_notify_ack, the decoder that reads one value, the auth window, the user id a
+# challenge must set, the status cache write-back, and the defaults a reader could flip. The last two
+# lines are no-op controls and must SURVIVE.
+#
+# Not planned, with reasons: is_valid_id on channel_id is equivalent under test (an invalid id fails
+# the permission lookup with the same refusal); the pong-away spawn and the no-reset-on-text read
+# deadline need a 60s and a 100s wait; the wrapper session re-read is shadowed by hub invalidation
+# on every same-server revocation the suite can produce.
+ack-non-string-status-is-accepted	crates/mm-api/src/wsapi.rs	        Some(_) => true,	        Some(_) => false,	unit	wsapi::
+ack-reason-assertion-inverted	crates/mm-api/src/wsapi.rs	reason.is_some_and(|reason| !matches!(reason, serde_json::Value::String(_)))	reason.is_some_and(|reason| matches!(reason, serde_json::Value::String(_)))	unit	wsapi::
+ping-node-id-is-not-empty	crates/mm-api/src/wsapi.rs	        "node_id".to_owned(),\n        serde_json::Value::String(String::new()),	        "node_id".to_owned(),\n        serde_json::Value::String("node".to_owned()),	unit	wsapi::
+array-keeps-non-strings	crates/mm-model/src/utils.rs	            .filter_map(|item| item.as_str().map(str::to_owned))	            .map(|item| item.as_str().map_or_else(|| item.to_string(), str::to_owned))	unit	array_from_interface
+plugin-prefix-is-routed	crates/mm-api/src/websocket.rs	    if request.action.starts_with(WEBSOCKET_MESSAGE_PLUGIN_PREFIX) {	    if request.action.starts_with("custom_never_") {	api	websocket_actions
+decoder-refuses-trailing-bytes	crates/mm-api/src/websocket.rs	    let request = match serde_json::Deserializer::from_str(text)\n        .into_iter::<WebSocketRequest>()\n        .next()\n    {	    let request = match Some(serde_json::from_str::<WebSocketRequest>(text)) {	api	websocket_actions
+decode-failure-keeps-the-socket	crates/mm-api/src/websocket.rs	            tracing::debug!(error = %err, "websocket.Decode");\n            return ControlFlow::Break(());	            tracing::debug!(error = %err, "websocket.Decode");\n            return ControlFlow::Continue(());	api	websocket_actions
+auth-ticker-never-closes	crates/mm-api/src/websocket.rs	"websocket.authTicker: did not authenticate");\n                    break;	"websocket.authTicker: did not authenticate");\n                    auth_pending = false;	api	websocket_actions
+challenge-leaves-the-user-id-unset	crates/mm-api/src/websocket.rs	    conn.set_user_id(user_id);\n	    let _ = user_id;\n	api	websocket_actions
+connect-does-not-mark-online	crates/mm-api/src/websocket.rs	        spawn_mark_online(&state, conn.session());	        let _ = conn.session();	api	websocket_actions
+router-skips-the-authentication-check	crates/mm-api/src/websocket.rs	            if !state.app.conn_is_authenticated(conn).await {	            if false {	api	websocket_actions
+typing-permission-not-checked	crates/mm-api/src/wsapi.rs	    if !has_permission {\n        return Err(invalid_param_error(&request.action, "channel_id"));	    if has_permission && !has_permission {\n        return Err(invalid_param_error(&request.action, "channel_id"));	api	websocket_actions
+typing-non-string-parent-is-not-empty	crates/mm-api/src/wsapi.rs	        .unwrap_or("");	        .unwrap_or("x");	api	websocket_actions
+active-status-manual-defaults-true	crates/mm-api/src/wsapi.rs	        .unwrap_or(false);\n\n    if user_is_active {	        .unwrap_or(true);\n\n    if user_is_active {	api	websocket_actions
+active-status-branches-swapped	crates/mm-api/src/wsapi.rs	    if user_is_active {	    if !user_is_active {	api	websocket_actions
+by-ids-unknown-is-not-offline	crates/mm-app/src/status.rs	                .or_insert_with(|| serde_json::Value::String(STATUS_OFFLINE.to_owned()));	                .or_insert_with(|| serde_json::Value::String("away".to_owned()));	api	websocket_actions
+by-ids-does-not-cache-what-it-read	crates/mm-app/src/status.rs	            for status in statuses {\n                self.add_status_cache(&status);	            for status in statuses {	api	websocket_actions
+get-statuses-keeps-offline	crates/mm-model/src/status.rs	        if status.status != STATUS_OFFLINE {	        if !status.status.is_empty() {	api	websocket_actions
+control-rename-user-ids-binding	crates/mm-api/src/wsapi.rs	    let user_ids = array_from_interface(field(request, "user_ids"));	    let ids = array_from_interface(field(request, "user_ids"));\n    let user_ids = ids;	api	websocket_actions
+control-mark-online-before-register	crates/mm-api/src/websocket.rs	    let hello = state.app.hello_message(conn);\n    state.app.hub().register(conn.clone(), hello);\n    spawn_mark_online(state, conn.session());	    spawn_mark_online(state, conn.session());\n    let hello = state.app.hello_message(conn);\n    state.app.hub().register(conn.clone(), hello);	api	websocket_actions

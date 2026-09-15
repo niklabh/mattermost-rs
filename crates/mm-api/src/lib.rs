@@ -120,6 +120,7 @@ pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
+pub mod wsapi;
 
 /// The three `/api/v4/config` reads. Appended rather than filed alphabetically, because this
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.

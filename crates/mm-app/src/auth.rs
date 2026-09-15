@@ -891,7 +891,11 @@ impl App {
                     String::new(),
                     500,
                 )
-            })
+            })?;
+
+        // `ps.ClearUserSessionCache(session.UserId)` (platform/session.go:238).
+        self.clear_session_cache_for_user(&session.user_id);
+        Ok(())
     }
 }
 

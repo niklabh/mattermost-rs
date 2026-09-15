@@ -1,6 +1,8 @@
 //! Port of `app.GetUserStatusesByIds` (channels/app/status.go:16), which is one line over
 //! `PlatformService.GetUserStatusesByIds` (channels/app/platform/status.go:136).
 
+use std::collections::HashMap;
+
 use mm_model::status::{STATUS_OFFLINE, Status};
 use mm_model::utils::{AppError, AppResult};
 use mm_store::StatusStore;
@@ -112,6 +114,83 @@ impl App {
     // whether a status changed. That is [D-182]/[D-190] again and it ends when Go does; see
     // [D-191] for why the alternative — forwarding until then — was rejected.
     // ---------------------------------------------------------------------------------------
+
+    /// Port of `PlatformService.GetAllStatuses` (platform/status.go:41) — **the cache, not the
+    /// table.** Only statuses this process has set or read are in it, so the websocket
+    /// `get_statuses` answers differently on a freshly started server than on one that has been
+    /// running, and differently here than on the Go server next door ([D-182]'s shape). That is
+    /// Go's own semantics, reproduced rather than "fixed" with a table scan.
+    pub fn get_all_statuses(&self) -> HashMap<String, Status> {
+        if !self.config().enable_user_statuses {
+            return HashMap::new();
+        }
+        self.status_cache
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// Port of `PlatformService.GetStatusesByIds` (platform/status.go:77) — the websocket
+    /// `get_statuses_by_ids`, **not** the REST `POST /users/status/ids`, which is
+    /// [`App::get_user_statuses_by_ids`] and answers a list of objects.
+    ///
+    /// Cache first; the misses from the table, **written back into the cache**; and `offline` for
+    /// every id still unanswered, including ids that name no user. The answer is a map of id to
+    /// status string, so a repeated id collapses and order is not a question.
+    ///
+    /// The write-back is observable: after this call, [`App::get_all_statuses`] includes every
+    /// user it found a row for.
+    #[tracing::instrument(skip_all, fields(asked = user_ids.len()))]
+    pub async fn get_statuses_by_ids(
+        &self,
+        user_ids: &[String],
+    ) -> AppResult<mm_model::utils::StringInterface> {
+        let mut status_map = mm_model::utils::StringInterface::new();
+        if !self.config().enable_user_statuses {
+            return Ok(status_map);
+        }
+
+        let mut missing_user_ids: Vec<String> = Vec::new();
+        for user_id in user_ids {
+            match self.status_from_cache(user_id) {
+                Some(status) => {
+                    status_map.insert(user_id.clone(), serde_json::Value::String(status.status));
+                }
+                None => missing_user_ids.push(user_id.clone()),
+            }
+        }
+
+        if !missing_user_ids.is_empty() {
+            let statuses = self
+                .store()
+                .status()
+                .get_by_ids(&missing_user_ids)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "status lookup failed");
+                    AppError::boxed(
+                        "GetStatusesByIds",
+                        "app.status.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            for status in statuses {
+                self.add_status_cache(&status);
+                status_map.insert(status.user_id, serde_json::Value::String(status.status));
+            }
+        }
+
+        // "For the case where the user does not have a row in the Status table and cache".
+        for user_id in missing_user_ids {
+            status_map
+                .entry(user_id)
+                .or_insert_with(|| serde_json::Value::String(STATUS_OFFLINE.to_owned()));
+        }
+
+        Ok(status_map)
+    }
 
     /// Port of `PlatformService.GetStatusFromCache` (platform/status.go).
     fn status_from_cache(&self, user_id: &str) -> Option<Status> {

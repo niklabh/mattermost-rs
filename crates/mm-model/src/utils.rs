@@ -56,6 +56,52 @@ pub type StringMap = BTreeMap<String, String>;
 /// `Post.Props` and `Channel.Props` serialise byte-for-byte like Go's. See [D-027].
 pub type StringInterface = serde_json::Map<String, serde_json::Value>;
 
+/// Port of `model.ArrayFromInterface` (utils.go:568).
+///
+/// Lenient twice over: anything that is not a JSON array is an **empty** list rather than an
+/// error, and inside an array every element that is not a string is **skipped** rather than
+/// refused. So `["a", 1, null, "b"]` is `["a", "b"]`, and `"a"` is `[]` — a caller that refuses
+/// an empty result (the websocket `get_statuses_by_ids`) therefore refuses a bare string too.
+/// `data` is `None` for an absent key, which is Go's `nil`.
+pub fn array_from_interface(data: Option<&serde_json::Value>) -> Vec<String> {
+    match data {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod array_from_interface_tests {
+    use super::array_from_interface;
+    use serde_json::json;
+
+    #[test]
+    fn only_an_array_yields_anything_and_only_its_strings_survive() {
+        assert_eq!(
+            array_from_interface(Some(&json!(["a", 1, null, "b", ["c"], {"d": 1}, true, ""]))),
+            vec!["a".to_owned(), "b".to_owned(), String::new()],
+            "non-strings are skipped; an empty string is still a string"
+        );
+        for not_an_array in [
+            json!("a"),
+            json!(1),
+            json!(null),
+            json!({"0": "a"}),
+            json!(true),
+        ] {
+            assert!(
+                array_from_interface(Some(&not_an_array)).is_empty(),
+                "{not_an_array} is not an array"
+            );
+        }
+        assert!(array_from_interface(None).is_empty());
+        assert!(array_from_interface(Some(&json!([]))).is_empty());
+    }
+}
+
 /// Port of `strconv.ParseBool`.
 ///
 /// **Not** Rust's `str::parse::<bool>()`, which accepts only `"true"` and `"false"`. Go

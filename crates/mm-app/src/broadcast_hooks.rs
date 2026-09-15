@@ -193,11 +193,13 @@ impl AddMentionsBroadcastHook {
             }
         })?;
 
-        if !mentions.is_empty() && mentions.contains(&conn.user_id) {
+        if !mentions.is_empty() && mentions.contains(&conn.user_id()) {
             // Note that the client expects this field to be stringified
             msg.add(
                 "mentions",
-                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(&conn.user_id)))),
+                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(
+                    &conn.user_id(),
+                )))),
             );
         }
 
@@ -238,11 +240,13 @@ impl AddFollowersBroadcastHook {
             }
         })?;
 
-        if !followers.is_empty() && followers.contains(&conn.user_id) {
+        if !followers.is_empty() && followers.contains(&conn.user_id()) {
             // Note that the client expects this field to be stringified
             msg.add(
                 "followers",
-                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(&conn.user_id)))),
+                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(
+                    &conn.user_id(),
+                )))),
             );
         }
 
@@ -298,7 +302,7 @@ impl PostedAckBroadcastHook {
         })?;
 
         // Don't ACK your own posts
-        if posted_user_id == conn.user_id {
+        if posted_user_id == conn.user_id() {
             return Ok(());
         }
 
@@ -332,7 +336,7 @@ impl PostedAckBroadcastHook {
                 source,
             })?;
 
-        if !users.is_empty() && users.contains(&conn.user_id) {
+        if !users.is_empty() && users.contains(&conn.user_id()) {
             msg.add("should_ack", serde_json::Value::Bool(true));
             increment_websocket_counter(conn);
         }
@@ -395,7 +399,7 @@ impl BroadcastHook for ChannelMentionsBroadcastHook {
                     _ => continue,
                 };
                 if suite
-                    .has_permission_to_resolve_channel_mention(&conn.user_id, channel_id)
+                    .has_permission_to_resolve_channel_mention(&conn.user_id(), channel_id)
                     .await
                 {
                     filtered.insert(channel_name, channel_info);

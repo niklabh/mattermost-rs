@@ -313,6 +313,8 @@ impl App {
                 })?;
         }
 
+        // `ps.ClearUserSessionCache(userID)` (platform/session.go:342).
+        self.clear_session_cache_for_user(user_id);
         Ok(())
     }
 
@@ -372,6 +374,9 @@ impl App {
                     500,
                 )
             })?;
+
+        // `ClearAllUsersSessionCache` (platform/session.go:178) — its hub leg is `Hub.InvalidateAll`.
+        self.hub().invalidate_all();
 
         Ok(())
     }

@@ -5994,31 +5994,11 @@ No stock Mattermost client sends msgpack over the socket today (the tags exist f
 path), so nothing reachable is affected. It is owed rather than accepted because the tags are on
 the wire type and a client is entitled to use them.
 
-## D-188 · The six `wsapi` actions are not served
+## D-188 · The six `wsapi` actions are not served — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
-
-`channels/wsapi` registers six actions on the websocket router, and this port serves none of them:
-
-| Action | What it needs |
-|---|---|
-| `ping` | nothing — four constants and `GetMillis` |
-| `user_typing` | a channel permission check and the server-busy gate; `App::publish_user_typing` and `mm_api::system::refuse_when_busy` exist since 2026-09-13 (the REST route is served) |
-| `user_update_active_status` | `SetStatusOnline` / `SetStatusAwayIfNeeded` — status **writes** |
-| `get_statuses` | `GetAllStatuses`, which reads Go's in-memory status cache, not a table |
-| `get_statuses_by_ids` | `mm_app::status::get_user_statuses_by_ids`, already ported |
-| `posted_notify_ack` | notification metrics, which do not exist here |
-
-All six currently answer `api.web_socket_router.bad_action.app_error` at 500 — Go's *unknown
-action* error — which is a wrong answer rather than a missing one, and that is why this is an
-entry and not a note.
-
-`get_statuses` is the one with a real question behind it: Go returns the contents of a cache this
-server does not have, so "every row in `Status`" is a different answer on a freshly started Go
-process. It needs measuring before it is ported, not translating.
-
-**Two of the six are nearly free** (`ping`, `get_statuses_by_ids`) and should go first, with the
-rest following the status-write routes that give them their app layer.
+All six are served by `crates/mm-api/src/wsapi.rs`; `parity::websocket_actions` compares them.
+`get_statuses` answers this process's status cache, as Go's answers Go's — see
+`App::get_all_statuses`.
 
 ## D-189 · The route inventory read a literal gorilla segment as a parameter — CLOSED 2026-09-08
 

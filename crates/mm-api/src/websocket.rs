@@ -1,8 +1,8 @@
-//! Port of `api4/websocket.go` and the *read* and *write* pumps of
-//! `app/platform/web_conn.go`.
+//! Port of `api4/websocket.go`, the *read* and *write* pumps of `app/platform/web_conn.go`, and
+//! the router in `app/platform/websocket_router.go`.
 //!
 //! Go splits the socket across three goroutines per connection — `readPump`, `writePump` and a
-//! plugin consumer. This port runs one task with a `select!` over the three sources, because the
+//! plugin consumer. This port runs one task with a `select!` over the sources, because the
 //! plugin consumer has nothing to consume and the remaining two never contend: the read side's
 //! only slow operation is an action handler, and the write side's queue absorbs a broadcast while
 //! one runs. The observable difference is that a broadcast arriving *during* an action handler
@@ -14,8 +14,18 @@
 //!    sets `RequireSession: false` (handlers.go:567) — so a connection with no token, or with a
 //!    token that no longer resolves, is upgraded and simply receives nothing until it
 //!    authenticates over the socket.
-//! 2. An authenticated connection is registered with the hub, whose first frame is `hello`.
-//! 3. Server pings every 60s; the client's pong resets a 100s read deadline.
+//! 2. An authenticated connection is registered with the hub, whose first frame is `hello`, and
+//!    the user is marked online (`NewWebConn`, web_conn.go:202).
+//! 3. A connection that has no token **five seconds** after the upgrade is closed
+//!    (`authTicker`, web_conn.go:625). Authenticating over the socket inside that window keeps it.
+//! 4. Server pings every 60s; the client's pong resets a 100s read deadline and, on an
+//!    authenticated connection, lets the user go `away` if they have been idle.
+//!
+//! # A connection that is not registered hears nothing back
+//!
+//! Every response goes through `hub.SendMessage`, which drops a message for a connection the hub
+//! does not hold (web_hub.go:701). So an anonymous connection's `ping` is not answered with
+//! `not_authenticated` — it is not answered at all, on either server.
 //!
 //! # The query-string token is a 401, and that is not a websocket rule
 //!
@@ -24,6 +34,7 @@
 //! this is the only route in this server that accepts an optional session, and the check sits
 //! between "no token" and "valid token" — the two cases that would otherwise both upgrade.
 
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,17 +55,24 @@ use mm_model::websocket_request::WebSocketRequest;
 use crate::AppState;
 use crate::auth::{TokenLocation, parse_auth_token};
 use crate::error::ApiError;
+use crate::wsapi;
 
 /// Port of `platform.pongWaitTime` (web_conn.go:38).
 const PONG_WAIT: Duration = Duration::from_secs(100);
 /// Port of `platform.pingInterval` (web_conn.go:39) — 60% of the pong wait.
 const PING_INTERVAL: Duration = Duration::from_secs(60);
+/// Port of `platform.authCheckInterval` (web_conn.go:40).
+const AUTH_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// Port of `model.SocketMaxMessageSizeKb`, used by Go as the read limit and the buffer sizes.
 const SOCKET_MAX_MESSAGE_SIZE: usize = 8 * 1024;
 
+/// Port of `platform.websocketMessagePluginPrefix` (web_conn.go:52). An action with this prefix
+/// is for plugins only and never reaches the router — so it is neither answered nor refused.
+const WEBSOCKET_MESSAGE_PLUGIN_PREFIX: &str = "custom_";
+
 /// Go's `model.StatusOk`. Lives in `client4.go`, which this project never reads, so the value is
 /// repeated rather than imported — the same choice `mm-model` made for `StatusFail`.
-const STATUS_OK: &str = "OK";
+pub(crate) const STATUS_OK: &str = "OK";
 
 /// `postedAckParam` (api4/websocket.go:21).
 const POSTED_ACK_PARAM: &str = "posted_ack";
@@ -155,6 +173,19 @@ async fn resolve_optional_session(
     Ok(Some(session))
 }
 
+/// `ps.Go(func() { SetStatusOnline(userID, false); UpdateLastActivityAtIfNeeded(session) })` —
+/// written twice in Go, in `NewWebConn` (web_conn.go:203) and after a successful
+/// `authentication_challenge` (websocket_router.go:66), and off the socket's own path both times.
+fn spawn_mark_online(state: &AppState, session: Session) {
+    // A clone of the app handle: the task outlives this borrow, and `App` is a set of shared
+    // handles made to be cloned per task.
+    let app = state.app.clone();
+    tokio::spawn(async move {
+        app.set_status_online(&session.user_id, false).await;
+        app.update_last_activity_at_if_needed(&session).await;
+    });
+}
+
 /// Port of `(*WebConn).Pump` (web_conn.go:408): register, run both pumps, unregister.
 async fn serve_socket(
     state: AppState,
@@ -173,6 +204,7 @@ async fn serve_socket(
     // Go registers only when the session carries a user (websocket.go:113). An unregistered
     // connection still runs both pumps: it can authenticate later over the socket.
     if authenticated {
+        spawn_mark_online(&state, conn.session());
         let hello = state.app.hello_message(&conn);
         state.app.hub().register(conn.clone(), hello);
     }
@@ -183,6 +215,12 @@ async fn serve_socket(
     ping.tick().await; // the first tick is immediate; Go's ticker is not
 
     let mut read_deadline = tokio::time::Instant::now() + PONG_WAIT;
+
+    // Go's `authTicker` fires every five seconds until it first finds a token, then stops; it
+    // closes the connection on the first tick that finds none. So only the first tick can ever
+    // decide anything, and a single deadline is the whole of it.
+    let auth_deadline = tokio::time::Instant::now() + AUTH_CHECK_INTERVAL;
+    let mut auth_pending = true;
 
     loop {
         tokio::select! {
@@ -230,8 +268,12 @@ async fn serve_socket(
             incoming = socket.recv() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        read_deadline = tokio::time::Instant::now() + PONG_WAIT;
-                        dispatch_text(&state, &conn, text.as_str()).await;
+                        // No deadline reset: Go sets the read deadline once and moves it only in
+                        // the pong handler (web_conn.go:443-449), so a chatty client that never
+                        // pongs is still dropped at 100s.
+                        if dispatch_text(&state, &conn, text.as_str()).await.is_break() {
+                            break;
+                        }
                     }
                     Some(Ok(Message::Binary(_))) => {
                         // Go decodes msgpack here, and rejects binary frames outright from an
@@ -243,10 +285,19 @@ async fn serve_socket(
                     }
                     Some(Ok(Message::Pong(_))) => {
                         read_deadline = tokio::time::Instant::now() + PONG_WAIT;
+                        // The pong handler (web_conn.go:449).
+                        if state.app.conn_is_authenticated(&conn).await {
+                            let app = state.app.clone(); // outlives the borrow, as above
+                            let user_id = conn.user_id();
+                            tokio::spawn(async move {
+                                app.set_status_away_if_needed(&user_id, false).await;
+                            });
+                        }
                     }
                     Some(Ok(Message::Ping(_))) => {
-                        // axum answers pings itself; the deadline still moves, as Go's does.
-                        read_deadline = tokio::time::Instant::now() + PONG_WAIT;
+                        // axum answers pings itself. Go's read deadline moves only on a pong or
+                        // a data frame; a client ping reaching gorilla's default handler does
+                        // not reset it, and neither does it here.
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(err)) => {
@@ -267,10 +318,50 @@ async fn serve_socket(
                 tracing::debug!(conn_id = %connection_id, "websocket: read deadline exceeded");
                 break;
             }
+
+            _ = tokio::time::sleep_until(auth_deadline), if auth_pending => {
+                if conn.session().token.is_empty() {
+                    tracing::debug!(conn_id = %connection_id, "websocket.authTicker: did not authenticate");
+                    break;
+                }
+                auth_pending = false;
+            }
         }
     }
 
     state.app.hub().unregister(&connection_id);
+}
+
+/// The body of `readPump`'s loop (web_conn.go:463) for one text frame: decode, then route unless
+/// the action belongs to plugins. `Break` closes the connection.
+async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) -> ControlFlow<()> {
+    // `json.NewDecoder(rd).Decode(&req)` reads **one** JSON value and never looks past it, so
+    // `{"seq":1,"action":"ping"} trailing` is a ping. `from_str` would refuse the trailing bytes;
+    // the stream deserializer stops where the decoder does.
+    let request = match serde_json::Deserializer::from_str(text)
+        .into_iter::<WebSocketRequest>()
+        .next()
+    {
+        Some(Ok(request)) => request,
+        Some(Err(err)) => {
+            // `readPump` returns on a decode failure, which closes the socket.
+            tracing::debug!(error = %err, "websocket.Decode");
+            return ControlFlow::Break(());
+        }
+        None => {
+            // An empty or all-whitespace frame is `io.EOF` from the decoder — the same return.
+            tracing::debug!("websocket.Decode: empty frame");
+            return ControlFlow::Break(());
+        }
+    };
+
+    // "Messages which actions are prefixed with the plugin prefix should only be dispatched to
+    // the plugins" — and there is no plugin host.
+    if request.action.starts_with(WEBSOCKET_MESSAGE_PLUGIN_PREFIX) {
+        return ControlFlow::Continue(());
+    }
+
+    serve_web_socket(state, conn, &request).await
 }
 
 /// Port of `(*WebSocketRouter).ServeWebSocket` (websocket_router.go:26).
@@ -278,44 +369,38 @@ async fn serve_socket(
 /// The two actions the router itself owns — `authentication_challenge` and `presence` — are
 /// handled before the authentication test, exactly as Go orders them: the first has to work on an
 /// unauthenticated connection, and the second is a presence hint that Go accepts from anyone.
-///
-/// The `wsapi` action table (`ping`, `user_typing`, `get_statuses`, `get_statuses_by_ids`,
-/// `user_update_active_status`, `posted_notify_ack`) is **not** served here; every one of them
-/// answers Go's own unknown-action error. See [D-188].
-async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) {
-    let request: WebSocketRequest = match serde_json::from_str(text) {
-        Ok(request) => request,
-        Err(err) => {
-            // Go's `readPump` returns — closing the socket — on a decode failure. Reproduced by
-            // the caller breaking out of the loop is not possible from here, so the frame is
-            // dropped and logged; a malformed frame is not something a real client sends.
-            tracing::debug!(error = %err, "websocket.Decode");
-            return;
-        }
-    };
-
+/// Everything else is refused when the connection is not authenticated, then looked up in the
+/// [`wsapi`] table, and an unknown name is `bad_action` at 500.
+async fn serve_web_socket(
+    state: &AppState,
+    conn: &Arc<WebConn>,
+    request: &WebSocketRequest,
+) -> ControlFlow<()> {
     if request.action.is_empty() {
         return_error(state, conn, request.seq, no_action_error());
-        return;
+        return ControlFlow::Continue(());
     }
     if request.seq <= 0 {
         return_error(state, conn, request.seq, bad_seq_error());
-        return;
+        return ControlFlow::Continue(());
     }
 
     match request.action.as_str() {
-        WEBSOCKET_AUTHENTICATION_CHALLENGE => {
-            authentication_challenge(state, conn, &request).await;
-        }
+        WEBSOCKET_AUTHENTICATION_CHALLENGE => authentication_challenge(state, conn, request).await,
         WEBSOCKET_PRESENCE_INDICATOR => {
-            presence(state, conn, &request);
+            presence(state, conn, request);
+            ControlFlow::Continue(())
         }
         _ => {
-            if conn.session().user_id.is_empty() {
+            if !state.app.conn_is_authenticated(conn).await {
                 return_error(state, conn, request.seq, not_authenticated_error());
-                return;
+                return ControlFlow::Continue(());
             }
-            return_error(state, conn, request.seq, bad_action_error());
+            let Some(action) = wsapi::Action::from_name(&request.action) else {
+                return_error(state, conn, request.seq, bad_action_error());
+                return ControlFlow::Continue(());
+            };
+            wsapi::serve_web_socket(state, conn, action, request).await
         }
     }
 }
@@ -323,15 +408,15 @@ async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) {
 /// The `authentication_challenge` arm (websocket_router.go:39).
 ///
 /// Go closes the socket outright when the token is absent or does not resolve — not an error
-/// frame, a disconnect. That is reproduced by dropping the connection from the hub, which ends
-/// the pump.
+/// frame, a disconnect — so both are `Break`. A connection that already has a token ignores the
+/// challenge entirely, without an answer.
 async fn authentication_challenge(
     state: &AppState,
     conn: &Arc<WebConn>,
     request: &WebSocketRequest,
-) {
+) -> ControlFlow<()> {
     if !conn.session().token.is_empty() {
-        return;
+        return ControlFlow::Continue(());
     }
     let Some(token) = request
         .data
@@ -339,27 +424,32 @@ async fn authentication_challenge(
         .and_then(|data| data.get("token"))
         .and_then(|token| token.as_str())
     else {
-        state.app.hub().unregister(&conn.connection_id);
-        return;
+        return ControlFlow::Break(());
     };
 
     let session = match state.app.get_session(token).await {
         Ok(session) => session,
         Err(err) => {
             tracing::warn!(error = %err, "Error while getting session token");
-            state.app.hub().unregister(&conn.connection_id);
-            return;
+            return ControlFlow::Break(());
         }
     };
 
+    // `SetSession`, `SetSessionToken`, `conn.UserId = session.UserId`, then `HubRegister` — the
+    // user id first, because the hub indexes the connection by it.
+    let user_id = session.user_id.clone();
     conn.set_session(session);
+    conn.set_user_id(user_id);
     let hello = state.app.hello_message(conn);
     state.app.hub().register(conn.clone(), hello);
+    spawn_mark_online(state, conn.session());
+
     send_response(
         state,
         conn,
         WebSocketResponse::new(STATUS_OK, request.seq, None),
     );
+    ControlFlow::Continue(())
 }
 
 /// The `presence` arm (websocket_router.go:82).
