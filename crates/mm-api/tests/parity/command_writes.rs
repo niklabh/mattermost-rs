@@ -1400,12 +1400,13 @@ async fn the_ownership_ladder_answers_404_then_403_on_every_write() {
     }
 }
 
-/// **`POST /api/v4/commands/execute` must still reach Go.** It shares a path pattern with
-/// `{command_id}`, on which this module registers `PUT`, `DELETE` and `GET` but deliberately not
-/// `POST` — so the method fallback forwards it. Registering `create_command` there instead of on
-/// `/api/v4/commands` would swallow the execute route silently.
+/// **`POST /api/v4/commands/execute` is its own route, not `{command_id}`'s.** It shares a path
+/// pattern with `{command_id}`, on which this module registers `PUT`, `DELETE` and `GET` but not
+/// `POST`; execute is registered as the literal beside it (2026-09-15). A body with no channel id
+/// is refused by execute itself — the 400 `start.app_error` — on both servers, which a `POST`
+/// swallowed by `{command_id}` could not produce.
 #[tokio::test]
-async fn the_execute_route_is_still_forwarded() {
+async fn the_execute_route_is_its_own_literal() {
     if !stack_enabled() {
         return;
     }
@@ -1413,19 +1414,34 @@ async fn the_execute_route_is_still_forwarded() {
     let http = client();
     let token = go_minted_token(&http).await;
 
-    let response = http
-        .post(format!("{RUST}/api/v4/commands/execute"))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({ "command": "/away", "channel_id": "" }))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(
-        response
+    let send = async |base: &str| {
+        let response = http
+            .post(format!("{base}/api/v4/commands/execute"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&serde_json::json!({ "command": "/away", "channel_id": "" }))
+            .send()
+            .await
+            .expect("answers");
+        let served = response
             .headers()
             .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "executeCommand is not ported and must be forwarded"
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let status = response.status().as_u16();
+        (
+            status,
+            response.bytes().await.expect("reads").to_vec(),
+            served,
+        )
+    };
+    let (go_status, go_body, _) = send(GO).await;
+    let (rs_status, rs_body, served) = send(RUST).await;
+    assert_eq!(
+        served.as_deref(),
+        Some("rust"),
+        "executeCommand is served here"
     );
+    assert_eq!((go_status, rs_status), (400, 400));
+    let go = common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "execute");
+    assert_eq!(go["id"], "api.command.execute_command.start.app_error");
 }

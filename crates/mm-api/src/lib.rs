@@ -2920,9 +2920,9 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(commands::list_commands).post(commands::create_command)),
         )
         // `POST` is **not** registered here, and that is load-bearing: `/api/v4/commands/execute`
-        // is a static sibling this router does not carry, so a `POST` to it matches this pattern
-        // and reaches the method fallback, which forwards it to Go. Registering `create_command`
-        // on `{command_id}` as well would swallow `executeCommand` instead.
+        // is a static sibling, registered on its own below (2026-09-15), and axum prefers the
+        // literal. Registering `create_command` on `{command_id}` as well would still be wrong —
+        // Go has no `POST /commands/{command_id}`, so that method must reach Go's 405/404.
         .route(
             "/api/v4/commands/{command_id}",
             partially_migrated_with_ids(
@@ -3162,6 +3162,24 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/remotecluster/{remote_id}/image",
             partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // ---- `api4/command.go:19,26,27` (2026-09-15): execute and the two autocomplete reads.
+        // Each serves its refusals and forwards whatever would run a command or depends on
+        // plugin commands or a non-English locale — see the end of `commands.rs`.
+        .route(
+            "/api/v4/commands/execute",
+            partially_migrated(post(commands::execute_command)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete",
+            partially_migrated_with_ids(&state, get(commands::list_autocomplete_commands)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete_suggestions",
+            partially_migrated_with_ids(
+                &state,
+                get(commands::list_command_autocomplete_suggestions),
+            ),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,

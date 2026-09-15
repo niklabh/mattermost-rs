@@ -111,8 +111,9 @@ MODELLED = {
         # The attachment switch and the pixel cap, read by the three file-writing routes.
         "EnableFileAttachments", "MaxImageResolution",
     ],
-    # Read by createUpload for an import upload: the directory-conflict check.
-    "PluginSettings": ["Directory"],
+    # Directory is read by createUpload for an import upload. Enable and EnableMarketplace
+    # decide the marketplace slash command AutoComplete flag in the built-in command registry.
+    "PluginSettings": ["Directory", "Enable", "EnableMarketplace"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -143,6 +144,8 @@ MODELLED = {
         # The gate on POST /api/v4/notifications/ack. Defaulted from isUpdate, so the value in
         # the live document is what decides between the 501 and the push proxy.
         "SendPushNotifications",
+        # One of the three settings the invite_people slash command ANDs into AutoComplete.
+        "SendEmailNotifications",
     ],
     # `users.CreateUser` replaces an unsupported submitted locale with this.
     "LocalizationSettings": ["DefaultClientLocale"],

@@ -24,6 +24,11 @@ pub mod channel_move;
 pub mod channel_view;
 pub mod channel_write;
 pub mod command;
+/// The built-in slash-command registry (`GetCommand` only), `ListAutocompleteCommands` and the
+/// dispatch half of `ExecuteCommand`.
+pub mod command_provider;
+/// Port of `app/command_autocomplete.go` — `GetSuggestions`.
+pub mod command_suggestions;
 pub mod common_teams;
 pub mod config;
 pub mod custom_profile_attributes;

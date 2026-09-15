@@ -51,6 +51,13 @@
 # `MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION` names the **Go** server's socket, which is mm-api's
 # forward target, and `MM_API_LOCAL_SOCKET` is mm-api's own. Pointing both at one path is refused
 # at startup. `scripts/go-server.sh` sets the matching pair on the other side.
+#
+# `MM_GO_PLUGIN_DIRECTORY` (2026-09-15) is, like `MM_GO_UPSTREAM`, a fact about the **Go peer**
+# rather than a Mattermost setting: the directory the stack Go server scans for plugin bundles
+# (its `PluginSettings.Directory`, `./plugins`, resolved against its own run directory). The
+# slash-command routes answer only while it holds no plugin, since a plugin may register
+# commands this server cannot see. It is not `MM_PLUGINSETTINGS_DIRECTORY`, which `GET /config`
+# would report. Unset, those routes forward.
 mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
@@ -69,6 +76,7 @@ mmrs_launch_mm_api() {
     MM_SERVICESETTINGS_ENABLELOCALMODE=true \
     MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
     MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \
+    MM_GO_PLUGIN_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/plugins" \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }
