@@ -13757,10 +13757,16 @@ fourteen-pair family, thirteen are served; `GET /manualtest` forwards ([D-782]).
 | app | `board.rs`, `marketplace_visit.rs`, `command_provider.rs` (registry, `list_autocomplete_commands`, `command_dispatch`), `command_suggestions.rs` | DONE |
 | api | `boards.rs`, `marketplace_visit.rs`, `remote_cluster.rs`, `local_misc.rs` (two upload wrappers), `commands.rs` (three handlers) | DONE |
 | test | `parity/boards.rs` (4), `parity/marketplace_visit.rs` (3), `parity/remote_cluster.rs` (2), `parity/local_uploads.rs` (2), `parity/command_dispatch.rs` (5); `command_writes.rs`'s execute guard rewritten | DONE |
-| mutation | `scripts/mutations/cmdremote.plan` — 13 run, 11 caught, 2 controls survived; `scripts/mutations/cmddispatch.plan` — PENDING | DONE |
+| mutation | `scripts/mutations/cmdremote.plan` — 13 run, 11 caught, 2 controls survived; `scripts/mutations/cmddispatch.plan` — 16 run, 14 caught, 2 controls survived | DONE |
 
 **Parity risks:** the licensed remote-cluster session path is not exercised (no planted
 `RemoteClusters` row) and forwards. The plugin-present branch of the command gate is never taken
 on the stack (Go's plugin directory is empty), and the suggestions' admin/user role distinction is
 unobservable here — every command carries `system_user`. The restricted-DM branches of execute
 need `RestrictDirectMessage = team` and are untested.
+
+Found by the full run: serving the three remote-cluster literals broke `cloud_and_workspaces`'s
+"still forwarded" list (entries removed); the socket import uploads left files in the shared
+import directory, and with two of them `GET /imports` lists in filesystem order on Go and sorted
+here, failing `exports_and_uploads` and `local_misc` (the suite now deletes what it writes). That
+listing-order difference is real and pre-existing, and a bare directory of one file hides it.
