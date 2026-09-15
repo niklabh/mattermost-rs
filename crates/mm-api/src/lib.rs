@@ -39,6 +39,7 @@ pub mod file_store_test;
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
 
+pub mod agents;
 /// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod channel_join_requests;
 pub mod file_search;
@@ -1733,6 +1734,19 @@ pub fn router(state: AppState) -> Router {
                 post(file_search::search_files_in_all_teams)
                     .get(file_search::invalid_file_id_param),
             ),
+        )
+        // `api4/agents.go` (api.go:340-341): three reads under two prefixes, no parameters.
+        .route(
+            "/api/v4/agents",
+            partially_migrated(get(agents::get_agents)),
+        )
+        .route(
+            "/api/v4/agents/status",
+            partially_migrated(get(agents::get_agents_status)),
+        )
+        .route(
+            "/api/v4/llmservices",
+            partially_migrated(get(agents::get_llm_services)),
         )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
@@ -3642,6 +3656,9 @@ mod tests {
             (Method::POST, format!("/api/v4/teams/{USER}/posts/search")),
             (Method::POST, "/api/v4/files/search".to_owned()),
             (Method::POST, format!("/api/v4/teams/{USER}/files/search")),
+            (Method::GET, "/api/v4/agents".to_owned()),
+            (Method::GET, "/api/v4/agents/status".to_owned()),
+            (Method::GET, "/api/v4/llmservices".to_owned()),
         ];
 
         for (method, path) in served {

@@ -114,7 +114,7 @@ MODELLED = {
         "EnableFileAttachments", "MaxImageResolution",
     ],
     # Read by createUpload for an import upload: the directory-conflict check.
-    "PluginSettings": ["Directory"],
+    "PluginSettings": ["Directory", "Enable"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",

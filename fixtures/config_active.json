@@ -75,7 +75,8 @@
     "Enable": false
   },
   "PluginSettings": {
-    "Directory": "./plugins"
+    "Directory": "./plugins",
+    "Enable": true
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,

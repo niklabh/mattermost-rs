@@ -241,5 +241,6 @@ mod parity {
     // Appended 2026-09-14: the team, webhook and command families on the socket.
     pub mod local_teams;
     // Appended 2026-09-15: the searchmisc family.
+    pub mod agents;
     pub mod file_search;
 }

@@ -3,6 +3,8 @@
 //! Depends on `mm-store`; knows nothing about HTTP. Handlers live in `mm-api` and call into here,
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
+/// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.
+pub mod agents;
 pub mod analytics;
 pub mod audit;
 pub mod auth;
@@ -30,7 +32,6 @@ pub mod draft;
 pub mod emoji;
 /// Port of the file-backend half of `app/export.go`.
 pub mod export;
-/// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.
 pub mod file;
 pub mod file_search;
 /// Port of `UploadFileX` — the single-file upload behind `POST /api/v4/files`.
