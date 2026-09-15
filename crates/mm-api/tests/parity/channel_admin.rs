@@ -786,7 +786,10 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
     let f = group_fixture(&client, &token).await;
 
     let whole = minus(&f.channel, &format!("group_ids={GROUP_ONE}"));
-    let (go_whole, rs_whole) = common::fetch_both(&client, &token, &whole).await;
+    // Bracketed (Go, Rust, Go), not a single pair: a full run once put chgb on page 1 for Go and
+    // chgc for us, milliseconds apart. The query orders by the unique `Users.Username` on both
+    // servers, so only a row changing between the two reads explains it (2026-09-15).
+    let (go_whole, rs_whole) = common::fetch_both_stable(&client, &token, &whole).await;
     assert_eq!(go_whole, rs_whole, "{whole}");
     let whole: serde_json::Value = serde_json::from_slice(&go_whole).expect("the body decodes");
     let total = whole["total_count"].as_u64().expect("a count");
@@ -798,7 +801,7 @@ async fn paging_slices_the_page_and_leaves_the_total_alone() {
             &f.channel,
             &format!("group_ids={GROUP_ONE}&page={page}&per_page=1"),
         );
-        let (go, rs) = common::fetch_both(&client, &token, &p).await;
+        let (go, rs) = common::fetch_both_stable(&client, &token, &p).await;
         assert_eq!(go, rs, "{p}: {}", String::from_utf8_lossy(&rs));
         let body: serde_json::Value = serde_json::from_slice(&go).expect("the body decodes");
         assert_eq!(

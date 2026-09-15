@@ -878,7 +878,7 @@ async fn the_configuration_gate_answers_501_on_all_four() {
     let me = common::logged_in_user_id();
 
     let Some(server) = common::SecondServer::start(
-        8074,
+        8089,
         &[("MM_TEAMSETTINGS_ENABLECUSTOMUSERSTATUSES", "false")],
     )
     .await

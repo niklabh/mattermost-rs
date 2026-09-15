@@ -278,7 +278,7 @@ async fn disabled_attachments_refuses_with_403() {
         return;
     }
     let Some(server) =
-        common::SecondServer::start(8091, &[("MM_FILESETTINGS_ENABLEFILEATTACHMENTS", "false")])
+        common::SecondServer::start(8088, &[("MM_FILESETTINGS_ENABLEFILEATTACHMENTS", "false")])
             .await
     else {
         return;

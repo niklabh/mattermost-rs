@@ -221,8 +221,11 @@ async fn the_team_reads_match_over_the_socket() {
     common::invalidate_go_caches(&client, &token).await;
 
     // The full list is racy — sibling tests create and delete teams while this one runs — so
-    // the comparison is of this team's entry, plus the claim that both lists carry it.
-    let ((go_status, go_body), (rs_status, rs_body)) = both("GET", "/api/v4/teams").await;
+    // the comparison is of this team's entry, plus the claim that both lists carry it. The page
+    // is the maximum, 200: Go's default is 60, and a full run holds more teams than that at
+    // once, so this team fell onto page two and "Go lists the fixture team" failed (2026-09-15).
+    let ((go_status, go_body), (rs_status, rs_body)) =
+        both("GET", "/api/v4/teams?per_page=200").await;
     assert_eq!((go_status, rs_status), (200, 200), "GET /teams");
     let mine = |body: &[u8]| -> Option<serde_json::Value> {
         parse(body)

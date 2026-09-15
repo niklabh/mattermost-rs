@@ -242,4 +242,6 @@ mod parity {
     pub mod local_teams;
     // Appended 2026-09-15: the config and licence writes, HTTP and socket.
     pub mod configlic;
+    // Appended 2026-09-15: no two SecondServers share a port (needs no stack).
+    pub mod second_server_ports;
 }
