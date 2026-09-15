@@ -906,7 +906,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_registry_holds_exactly_the_four_ported_hooks() {
+    async fn the_registry_holds_exactly_the_five_ported_hooks() {
         let hooks = make_broadcast_hooks();
         let mut ids: Vec<_> = hooks.keys().copied().collect();
         ids.sort_unstable();
@@ -916,6 +916,7 @@ mod tests {
                 BROADCAST_ADD_FOLLOWERS,
                 BROADCAST_ADD_MENTIONS,
                 BROADCAST_CHANNEL_MENTIONS,
+                BROADCAST_ONLY_CHANNEL_ADMINS,
                 BROADCAST_POSTED_ACK
             ]
         );
