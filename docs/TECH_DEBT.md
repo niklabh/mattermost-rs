@@ -8974,3 +8974,31 @@ channel join paths with `ReAddRemovedMembers`. **What is owed:** those two store
 app function; the parity row that sends an LDAP user through the route asserts the forward today.
 
 ---
+
+## D-800 · The parity binary's plain users approach Go's unlicensed seat limit mid-run; create-user refusals fail tests that pass alone
+
+**Status** OPEN · **Severity** harness · **Raised** 2026-09-15 (app/limits.go:14, app/user.go:334)
+
+An unlicensed Go refuses `createUserOrGuest` with `api.user.create_user.user_limits.exceeded` once
+`Store.User().Count` — active, non-bot, non-remote users — reaches `maxUsersHardLimit`, **250**. The
+licensed oracles are exempt (their licence does not enforce seats), so only the stack Go bites.
+Measured on stack 0 during a full `scripts/parity.sh` run after the authcerts merge: active users
+went from 24 to a **peak of 252** (bots included in that sample), and two of the run's three
+failures were that refusal (`users_list::the_unfiltered_list_matches_go`,
+`user_updates::a_stranger_is_refused_identically`), both passing alone. Every suite merged after
+that raises the peak.
+
+The cause is breadth, not a hotspot. `create_plain_user` has 508 call sites in 159 files and
+`delete_plain_user` 313; no file leaves more than seven users behind, and 62 once-cell fixtures
+create plain users that must live for the whole binary. `purge_api_fixtures` clears them only at
+the **start** of the next run, so within one run nothing a test forgot is ever retired.
+
+**What is owed:** retire each plain user when the test that created it ends, without touching the
+508 call sites. The design this session measured: `create_plain_user` records the id in a
+thread-local registry whose destructor deactivates them (every test is `#[tokio::test]` on the
+current-thread runtime — zero `multi_thread` flavours — and libtest gives each test its own thread,
+so the destructor runs at test end, after partial moves and temporaries alike); a separate
+`create_fixture_user` for the 62 once-cell initialisers opts out. Do it after the 2026-09-15 round's
+branches merge, since it touches most test files. Until then, `scripts/parity.sh`'s "PASSES ALONE"
+line is the only guard, and a merge verification must read the failure messages rather than the
+count.
