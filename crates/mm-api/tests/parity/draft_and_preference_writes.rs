@@ -397,8 +397,8 @@ async fn the_draft_events_omit_the_originating_connection() {
     upsert_draft(&http, GO, &token, &body, None).await;
     upsert_draft(&http, RUST, &token, &body, None).await;
 
-    go_socket.collect_for(Duration::from_millis(900)).await;
-    rust_socket.collect_for(Duration::from_millis(900)).await;
+    await_draft_events(&mut go_socket, "draft_created", &channel, 1).await;
+    await_draft_events(&mut rust_socket, "draft_created", &channel, 1).await;
 
     let go_events = draft_events(&go_socket, "draft_created", &channel);
     let rust_events = draft_events(&rust_socket, "draft_created", &channel);
@@ -426,8 +426,8 @@ async fn the_draft_events_omit_the_originating_connection() {
     let connection = "mmrsconnectionid1234567890";
     upsert_draft(&http, GO, &token, &body, Some(connection)).await;
     upsert_draft(&http, RUST, &token, &body, Some(connection)).await;
-    go_socket.collect_for(Duration::from_millis(900)).await;
-    rust_socket.collect_for(Duration::from_millis(900)).await;
+    await_draft_events(&mut go_socket, "draft_created", &channel, 2).await;
+    await_draft_events(&mut rust_socket, "draft_created", &channel, 2).await;
 
     let go_omitting = draft_events(&go_socket, "draft_created", &channel);
     let rust_omitting = draft_events(&rust_socket, "draft_created", &channel);
@@ -443,7 +443,7 @@ async fn the_draft_events_omit_the_originating_connection() {
     );
 
     delete_draft(&http, RUST, &token, &channel, None).await;
-    rust_socket.collect_for(Duration::from_millis(900)).await;
+    await_draft_events(&mut rust_socket, "draft_deleted", &channel, 1).await;
     assert_eq!(
         draft_events(&rust_socket, "draft_deleted", &channel).len(),
         1,
@@ -460,14 +460,43 @@ fn draft_events(probe: &SocketProbe, event_type: &str, channel_id: &str) -> Vec<
     probe
         .events_named(event_type)
         .into_iter()
-        .filter(|frame| {
-            frame["data"]["draft"]
-                .as_str()
-                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-                .and_then(|draft| draft["channel_id"].as_str().map(|id| id == channel_id))
-                .unwrap_or(false)
-        })
+        .filter(|frame| is_draft_event(frame, event_type, channel_id))
         .collect()
+}
+
+/// Whether `frame` is a `event_type` draft event for `channel_id`.
+fn is_draft_event(frame: &serde_json::Value, event_type: &str, channel_id: &str) -> bool {
+    frame["event"] == event_type
+        && frame["data"]["draft"]
+            .as_str()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|draft| draft["channel_id"].as_str().map(|id| id == channel_id))
+            .unwrap_or(false)
+}
+
+/// Wait until `probe` holds at least `count` `event_type` draft events for `channel_id`, then a
+/// short settle window so a duplicate still shows up in the count.
+///
+/// A fixed 900 ms window used to stand in for both halves. In a sharded run on 2026-09-15 Go's
+/// `draft_created` had not arrived inside it: only other suites' `new_user` frames had. Waiting
+/// for the event keeps the count meaningful at any server speed; the settle window keeps "exactly
+/// one" meaning one.
+async fn await_draft_events(
+    probe: &mut SocketProbe,
+    event_type: &str,
+    channel_id: &str,
+    count: usize,
+) {
+    probe
+        .collect_until(Duration::from_secs(10), |frames| {
+            frames
+                .iter()
+                .filter(|frame| is_draft_event(frame, event_type, channel_id))
+                .count()
+                >= count
+        })
+        .await;
+    probe.collect_for(Duration::from_millis(300)).await;
 }
 
 #[tokio::test]
