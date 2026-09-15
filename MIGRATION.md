@@ -13500,3 +13500,39 @@ Found on the way: the two hook lists marshalled through `serde_json`, so a callb
 | api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
 | test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
 | mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+## The system-operations family — `api4/system.go`, `system_local.go`, `elasticsearch.go` (2026-09-15)
+
+**+13 HTTP pairs / +2 local-mode pairs on base f4f0a5a.** `GET /analytics/old`,
+`POST /caches/invalidate`, `POST /database/recycle`, `GET /logs`, `GET /logs/download`,
+`POST /logs/query`, `POST /restart`, the three `/upgrade_to_enterprise` routes,
+`GET /system/notices/{team_id}`, and the two `/elasticsearch` routes; on the socket,
+`POST /integrity` and `GET /logs`. Left forwarded: `POST /notifications/test` ([D-680]).
+
+Decisions a reader would otherwise have to rediscover (each is on its handler's doc comment):
+`POST /caches/invalidate` purges this process's three in-memory caches **and posts a copy of the
+request to Go**, because while the proxy is on the caches that actually go stale are Go's;
+`POST /restart` restarts only the process it reached, and on every stack is Go's one-second 200
+that execs nothing (`Server.Restart` returns a nil-wrapped error when no upgrade ran);
+`POST /database/recycle` closes this pool's idle connections, since sqlx cannot change a live
+pool's lifetime; the upgrade arm past the refusals forwards ([D-682]). Two Go behaviours are
+reproduced rather than fixed: `?name=extra_counts&team_id=…` is a 500 on both servers (squirrel's
+`Where("TeamId", id)` is a broken statement), and the log routes are a 403 on any checkout where
+`reference/.build` is a symlink (`ValidateLogFilePath` resolves the file's links, not the root's) —
+which needed `os.Getwd`'s `$PWD` rule ported and mm-api launched from the Go run directory.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/behaviour_notice_conditions.go` — Masterminds semver parse and ~2,700 constraint checks, the reflog date grammar, `validateConfigEntry`'s dynamic-type equality | DONE |
+| model | `crates/mm-model/src/notice_conditions.rs` — both grammars from the library sources (the date grammar's broken hyphen range kept); 4 oracle tests | DONE |
+| config | `max_users_for_statistics`, `log_enable_file`, `log_file_location`, and five `AnnouncementSettings`; fixture reprojected, **104 keys** | DONE |
+| store | the nine `Analytics*` methods plus `FileInfo.CountAll`, `Session.AnalyticsSessionCount`, `Command.AnalyticsCommandCount`; `ProductNotices.get_views`/`clear_old_notices`; `SqlStore::check_integrity` (41 checks), `recycle_db_connections`, `get_db_version`, the two pool counts | DONE |
+| app | `analytics.rs`, `logs.rs`, `upgrader.rs`, `searchengine.rs`, `product_notices.rs` (cache, hourly refresh, matcher), `system.rs` (restart, cache invalidation, recycle, integrity) | DONE |
+| api | `crates/mm-api/src/sysops.rs`, `local_sysops.rs`; start-up notice fetch in `main.rs` | DONE |
+| test | `crates/mm-api/tests/parity/sysops.rs` — 9; the socket integrity comparison reads Go-us-Go, since the rest of the module moves orphan rows between reads | DONE |
+| mutation | `scripts/mutations/sysops.plan` — 19 run, 17 caught, 2 controls survived; `sysops-notices.plan` — 10 run, 8 caught, 2 controls survived (the semver operators and the config-entry type rule are caught by the library oracle under `unit`) | DONE |
+
+**Not comparable, by design:** three `standard` analytics rows (websocket count, the two pool
+counts) are each process's own and compared by name and position only. **Not verified by
+parity:** the upgrade permission branches (every stack is arm64, so both servers stop at the
+architecture) and the Elasticsearch engine itself (nil on both). [D-683]: a user created here is
+not marked as having viewed the current notices; that call site belongs to the user family.
