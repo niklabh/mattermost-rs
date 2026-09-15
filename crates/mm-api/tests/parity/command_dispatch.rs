@@ -134,7 +134,7 @@ async fn the_autocomplete_list_matches_go_as_a_set() {
         return;
     }
     let token = go_minted_token(&client()).await;
-    let team = create_team(&client(), &token, "cmdlist").await;
+    let team = create_team(&client(), &token, "cdlist").await;
     unplant("l").await;
     plant(
         "l",
@@ -217,9 +217,9 @@ async fn the_autocomplete_refusals_match() {
         return;
     }
     let admin = go_minted_token(&client()).await;
-    let team = create_team(&client(), &admin, "cmdref").await;
-    let other = create_team(&client(), &admin, "cmdrefo").await;
-    let outsider = create_plain_user(&client(), &admin, &other, "cmdref").await;
+    let team = create_team(&client(), &admin, "cdref").await;
+    let other = create_team(&client(), &admin, "cdrefo").await;
+    let outsider = create_plain_user(&client(), &admin, &other, "cdref").await;
 
     let cases: Vec<RefusalCase<'_>> = vec![
         (

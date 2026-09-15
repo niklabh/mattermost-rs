@@ -475,21 +475,9 @@ async fn the_unmigrated_neighbours_are_forwarded() {
         // (`CloudSettings.PreviewModalBucketURL` is empty), which is why it never had the cloud
         // gate the routes around it do.
         // `/api/v4/cloud/webhook` left this list on 2026-09-14: its wrapper's 401 is served now.
-        (
-            m("POST"),
-            "/api/v4/remotecluster/ping",
-            "RemoteClusterTokenRequired",
-        ),
-        (
-            m("POST"),
-            "/api/v4/remotecluster/msg",
-            "RemoteClusterTokenRequired",
-        ),
-        (
-            m("POST"),
-            "/api/v4/remotecluster/confirm_invite",
-            "RemoteClusterTokenRequired",
-        ),
+        // `POST /api/v4/remotecluster/{ping,msg,confirm_invite}` left it on 2026-09-15: their
+        // `RemoteClusterTokenRequired` gate is served (`mm_api::remote_cluster`, suite
+        // `remote_cluster`).
         // `/api/v4/sharedchannels/users/{id}/can_dm/{id}` left it the same day: served, and
         // `true` for any visible pair while the sync service is off.
         (

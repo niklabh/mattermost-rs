@@ -189,7 +189,7 @@ async fn a_local_upload_feeds_an_import_and_refuses_an_attachment() {
             }),
         )
         .await;
-        let id = session["id"].as_str().expect("an id");
+        let id = session["id"].as_str().expect("an id").to_owned();
         let (status, served_by, body) = send(
             socket,
             &format!("/api/v4/uploads/{id}"),
@@ -215,6 +215,19 @@ async fn a_local_upload_feeds_an_import_and_refuses_an_attachment() {
         assert_eq!(info["name"], "mmrs-local-import.zip");
         assert_eq!(info["size"], payload.len());
         infos.push(normalise(info));
+
+        // The completed upload is `<ImportSettings.Directory>/<session id>_<filename>`, in the
+        // file store both servers share. `GET /imports` lists that directory in filesystem order
+        // on Go and sorted here, so a second leftover file makes the two listings differ for
+        // every suite that reads them. Remove it through Go's own delete.
+        let name = format!("{id}_mmrs-local-import.zip");
+        let deleted = client
+            .delete(format!("{GO}/api/v4/imports/{name}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("Go answers");
+        assert_eq!(deleted.status(), 200, "the import file {name} is removed");
     }
     assert_eq!(infos[0], infos[1], "the two import FileInfos differ");
 }
