@@ -155,7 +155,7 @@ fn connection_id(request: &Request) -> String {
 /// Go's decoder reads one value and ignores whatever follows, where `serde_json::from_slice`
 /// rejects the trailing token — which would turn a body Go accepts into a 400. An empty body is
 /// `io.EOF`, an error rather than a zero value, so it is `None` here too.
-fn first_value(body: &[u8]) -> Option<serde_json::Value> {
+pub(crate) fn first_value(body: &[u8]) -> Option<serde_json::Value> {
     serde_json::Deserializer::from_slice(body)
         .into_iter::<serde_json::Value>()
         .next()?
@@ -170,7 +170,7 @@ fn first_value(body: &[u8]) -> Option<serde_json::Value> {
 /// would otherwise decode to an all-default patch and a caller sending `[]` would get a *write*
 /// where Go gives a 400). A literal `null` decodes without error in Go and leaves the pointer
 /// nil, which lands on the same `None`.
-fn decode_struct<T: serde::de::DeserializeOwned>(body: &[u8]) -> Option<T> {
+pub(crate) fn decode_struct<T: serde::de::DeserializeOwned>(body: &[u8]) -> Option<T> {
     match first_value(body)? {
         object @ serde_json::Value::Object(_) => serde_json::from_value(object).ok(),
         _ => None,
@@ -753,7 +753,7 @@ async fn cpa_patch_values(
 
 /// `isOptionsOnlyPatch` (api4/properties.go:928): nothing but `attrs`, and `attrs` holding
 /// exactly the one key `options`.
-fn is_options_only_patch(patch: &PropertyFieldPatch) -> bool {
+pub(crate) fn is_options_only_patch(patch: &PropertyFieldPatch) -> bool {
     if patch.name.is_some()
         || patch.type_.is_some()
         || patch.target_id.is_some()

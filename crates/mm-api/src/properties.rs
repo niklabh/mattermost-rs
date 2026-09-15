@@ -97,10 +97,10 @@ use crate::proxy;
 /// can be left out of the broadcast for its own change. Spelled here as it is in
 /// [`crate::views`] and [`crate::drafts`]; it is one constant in Go and three in this crate, which
 /// is a duplication worth collapsing the next time a fourth appears.
-const CONNECTION_ID_HEADER: &str = "Connection-Id";
+pub(crate) const CONNECTION_ID_HEADER: &str = "Connection-Id";
 
 /// `json.NewEncoder(w).Encode(v)` — a JSON body **with** the encoder's trailing newline ([D-086]).
-fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
+pub(crate) fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
     let mut body = match serde_json::to_vec(value) {
         Ok(body) => body,
         Err(err) => {
@@ -129,18 +129,21 @@ fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
 }
 
 /// `c.SetPermissionError(perm)` (web/context.go) — 403 `api.context.permissions.app_error`.
-fn permission_error(session: &mm_model::session::Session, permission: &Permission) -> ApiError {
+pub(crate) fn permission_error(
+    session: &mm_model::session::Session,
+    permission: &Permission,
+) -> ApiError {
     ApiError::from(make_permission_error(session, &[permission]))
 }
 
 /// One of the refusals `api4/properties.go` mints by hand, all of which carry an empty
 /// `detailed_error` on the wire once `WipeDetailed` has run.
-fn refusal(where_: &'static str, id: &'static str, status: i32) -> ApiError {
+pub(crate) fn refusal(where_: &'static str, id: &'static str, status: i32) -> ApiError {
     ApiError::from(AppError::new(where_, id, None, String::new(), status))
 }
 
 /// What [`v2_group`] decided.
-enum Group {
+pub(crate) enum Group {
     /// The group resolved and nothing unported stands between the request and the store.
     Serve(Box<PropertyGroup>),
     /// Hand the request to Go: either the family is not registered there at all, or this is a
@@ -162,7 +165,7 @@ enum Group {
 /// ported ([`mm_app::property_hooks`]), so a licensed read of that group is served like any
 /// other. The one forward left is `session_attributes` with its feature flag on, which turns on
 /// an Enterprise Advanced licence this server can only establish as false.
-async fn v2_group(state: &AppState, group_name: &str, where_: &'static str) -> Group {
+pub(crate) async fn v2_group(state: &AppState, group_name: &str, where_: &'static str) -> Group {
     let group = match state.app.property_group(group_name).await {
         Ok(group) => group,
         Err(err) => return Group::Failed(ApiError::from(err)),

@@ -244,5 +244,6 @@ mod parity {
     pub mod agents;
     pub mod file_search;
     pub mod outgoing_oauth_writes;
+    pub mod properties_writes;
     pub mod retention_search;
 }

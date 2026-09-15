@@ -75,6 +75,7 @@ pub mod posts;
 pub mod preferences;
 pub mod product_notices;
 pub mod properties;
+pub mod properties_writes;
 pub mod proxy;
 pub mod push_ack;
 pub mod reactions;
@@ -2830,7 +2831,10 @@ pub fn router(state: AppState) -> Router {
         // reach Go for its 404 rather than our handler for a 400. See `segment_matches_go_mux_for`.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields",
-            partially_migrated_with_ids(&state, get(properties::get_property_fields)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_fields).post(properties_writes::create_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/fields/search",
@@ -2842,15 +2846,27 @@ pub fn router(state: AppState) -> Router {
         // there is no precedence question with it.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}",
-            partially_migrated_with_ids(&state, delete(properties::delete_property_field)),
+            partially_migrated_with_ids(
+                &state,
+                delete(properties::delete_property_field)
+                    .patch(properties_writes::patch_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/values/{target_id}",
-            partially_migrated_with_ids(&state, get(properties::get_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_values)
+                    .patch(properties_writes::patch_property_values),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/system/values",
-            partially_migrated_with_ids(&state, get(properties::get_system_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_system_property_values)
+                    .patch(properties_writes::patch_system_property_values),
+            ),
         )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.
@@ -3712,6 +3728,22 @@ mod tests {
             (
                 Method::POST,
                 format!("/api/v4/data_retention/policies/{USER}/channels/search"),
+            ),
+            (
+                Method::POST,
+                "/api/v4/properties/groups/boards/channel/fields".to_owned(),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/fields/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/values/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                "/api/v4/properties/groups/boards/system/values".to_owned(),
             ),
         ];
 
