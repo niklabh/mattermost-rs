@@ -16,8 +16,8 @@ use crate::common;
 
 use common::{
     ACTIVE_LICENCE_ROW, GO, RUST, a_team_and_channel_the_user_is_in,
-    assert_error_bodies_match_except_known_gaps, client, create_plain_user, go_minted_token,
-    licensed, request_raw, stack_enabled,
+    assert_error_bodies_match_except_known_gaps, client, create_plain_user, delete_plain_user,
+    go_minted_token, licensed, request_raw, stack_enabled,
 };
 
 const ID: &str = "abcdefghijklmnopqrstuvwxyz";
@@ -83,6 +83,8 @@ async fn a_plain_user_is_refused_the_write_permission() {
         let go: serde_json::Value = serde_json::from_slice(&go).unwrap();
         assert_eq!(go["id"], "api.context.permissions.app_error", "{path}");
     }
+    // Unlicensed Go refuses a create at 250 active users (limits.go:124); do not hold one past the test.
+    delete_plain_user(&client, &admin, &plain.id).await;
 }
 
 /// The admin passes the permission and meets the closed setting: 501 `configuration_disabled`

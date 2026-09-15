@@ -59,6 +59,15 @@ impl App {
     ///
     /// Same skeleton as [`App::search_posts_for_user`]: parse, the `EnableFileSearch` 501, the
     /// `*` skip with an empty list when nothing survives, the store, then the two filters.
+    ///
+    /// # The `*` skip is unreachable from REST, and kept anyway
+    ///
+    /// `ParseSearchParams` trims a term's leading punctuation with `^[^\pL\d\s#"]+`, which does
+    /// not keep `*`, so a word that is exactly `*` trims to nothing and never becomes an
+    /// element's `Terms`; a quoted `"*"` keeps its quotes. No request can make `params.terms ==
+    /// "*"` here, so removing the check is an equivalent mutation — it survived
+    /// `scripts/mutations/searchmisc.plan` for that reason, not for want of a fixture. Ported
+    /// because Go has it and a future caller that builds params by hand would reach it.
     /// `perPage` is parsed by the handler and never read past the store's `page > 0` test, so it
     /// is not a parameter here.
     #[tracing::instrument(

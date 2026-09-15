@@ -15,7 +15,8 @@ use crate::common;
 
 use common::{
     GO, RUST, a_team_and_channel_the_user_is_in, assert_error_bodies_match_except_known_gaps,
-    client, create_plain_user, fixture_pool, go_minted_token, post_both_raw, stack_enabled,
+    client, create_plain_user, delete_plain_user, fixture_pool, go_minted_token, post_both_raw,
+    stack_enabled,
 };
 
 const POLICY: &str = "mmrsretentionsearch0000001";
@@ -439,4 +440,6 @@ async fn the_refusals_come_in_gos_order() {
             .expect("answers");
         assert_eq!(response.status(), 401, "{base}");
     }
+    // Unlicensed Go refuses a create at 250 active users (limits.go:124); do not hold one past the test.
+    delete_plain_user(&client, &admin, &plain.id).await;
 }

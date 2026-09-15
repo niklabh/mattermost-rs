@@ -724,7 +724,7 @@ mod tests {
         assert!(decode_items(b"5").is_none());
         assert!(decode_items(b"").is_none());
         assert!(decode_items(b"[1]").is_none());
-        let items = decode_items(br#"[{"field_id":"abc","value":"x"} trailing"#).unwrap();
+        let items = decode_items(br#"[{"field_id":"abc","value":"x"}] trailing"#).unwrap();
         assert_eq!(items[0].field_id, "abc");
     }
 
