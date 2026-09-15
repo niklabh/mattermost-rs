@@ -557,7 +557,7 @@ async fn search_all_channels_for_user(
 /// `searchAllChannels` reads seventeen of the eighteen fields, so this one cannot use the
 /// term-only struct its two neighbours share. The `null`- and array-refusing behaviour is the
 /// same and is documented there.
-async fn decode_full_channel_search(
+pub(crate) async fn decode_full_channel_search(
     request: Request,
 ) -> Result<mm_model::channel_search::ChannelSearch, ApiError> {
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
