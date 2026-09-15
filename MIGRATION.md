@@ -13500,3 +13500,47 @@ Found on the way: the two hook lists marshalled through `serde_json`, so a callb
 | api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
 | test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
 | mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+## `api4/access_control.go` and its local twins on a nil service (2026-09-15)
+
+**+16 HTTP pairs / +14 local-mode pairs on base `f4f0a5a`** (612 of 764). `InitAccessControlPolicy`
+is registered unconditionally (api4/api.go:408), so every route answers on a build whose
+access-control service is nil ([D-571]); what each answers is the chain of gates in front of
+the service, ported in Go's order — decoding, the three feature flags (all `true` by default and
+environment-only, like every flag), the system / delegated-team / delegated-channel rungs, the
+parameter validations — and then the app function, which is the nil-service 501 named after it
+(`mm_app::access_control_policy`, one constant per Go function). The rungs read the store before
+the service does, and that is where the port has substance: `ValidateTeamAdminPolicyOwnership`
+is two `SearchPolicies` (explicit scope, then channel inference) and decides a team admin's 403
+against the service's 501 on the read, delete, batch-activate, assign and resource routes;
+`ReconcilePolicyTeamScope` — search, `Get`, `Save` with the history move and the revision bump —
+runs on every `assign`/`unassign` that names no resources, which is a **200** on both servers;
+and two routes never ask the service at all: the CEL field autocomplete (the `access_control`
+property group through the property hooks with the caller's *raw* user id, the four native
+descriptors on the first page, `after` compared on `CreateAt: 1` so it excludes nothing real) and
+the parent-filtered `SearchAllChannels`. Things a reader would otherwise get wrong: the delegated
+permission check is the `get_policy` **501, not a 404**, so its channel-permission fallback never
+runs and a channel admin is refused on their own channel; `PUT /activate` with no entries skips
+the permission loop and is the 501 for anyone; `team_ids` on assign/unassign is the
+feature-disabled 501 before any permission, licensed or not on this stack; `GET /{id}/activate`
+refuses a cookie session with a 401 before its permission, and checks the permission before
+`active`; a team admin's team policy with a non-empty rule expression is the **500**
+`validation_error` (the 501 wrapped); a parent policy without rules fails `IsValid`, so Go's
+reconcile only logs on such a row — the suite plants ruled parents.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `feature_flag_permission_policies`, `feature_flag_channel_permission_policies`, `feature_flag_policy_simulation` and the two `Is*Enabled` conjunctions; environment-or-default, not in the fixture (92 keys, unchanged) | DONE |
+| store | `crates/mm-store/src/access_control_policy_store.rs` — `get`, `save`, `search_policies` (every filter, the count without the cursor, `include_children` stamping); `Data` marshalled in Go's field order so `Save`'s changed-revision comparison is between two outputs of one function; 2 unit tests; `.sqlx` carries the seven queries | DONE |
+| app | `crates/mm-app/src/access_control_policy.rs` — the fourteen nil-service constants, ownership, reconcile, the channel assignment and eligibility checks, the simulation users-in-scope check, the autocomplete; 1 unit test | DONE |
+| api | `crates/mm-api/src/access_control_policies.rs` — the sixteen handlers; `local_access_control.rs` — the fourteen local registrations (the HTTP handlers under `local_session()`, no `local*` variants exist); registered in `lib.rs` and merged in `local.rs`; 2 unit tests | DONE |
+| test | `crates/mm-api/tests/parity/access_control_policies.rs` — 11, over four callers and both sockets; three parents and a child planted by SQL for the ownership and reconcile rows; the licensed pair for `team_ids` and the planted-field autocomplete; a purge line in `common` | DONE |
+| mutation | `scripts/mutations/abac.plan` — 18 run, 16 caught, 2 controls survived | DONE |
+
+- **Not verified by parity:** the three feature-flag 501s (`permission_policies`,
+  `channel_permission_policies`, `policy_simulation`) — every flag is on for both servers and
+  cannot be turned off on the shared stack; the success tails past the service (`json.Marshal(np)`,
+  `PopulateAccessControlPolicyChildCounts`, the masking) are written to type but never reached.
+- **Left forwarded:** nothing in the family. `Channel.InvalidateChannel`, named as owned, is not
+  reached by any served branch — every `publish*` that would call it sits past the nil check.
+- **Store methods added:** `AccessControlPolicy.{Get,Save,SearchPolicies}`. `SetActiveStatus*`
+  and `GetAll` are only reached through the service and stay unported under [D-571].
