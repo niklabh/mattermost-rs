@@ -1,0 +1,26 @@
+# Mutation plan for the postrest family: the rest of api4/post.go, report.go's two writes and
+# integration_action.go.
+#
+#   scripts/mutate-batch.sh scripts/mutations/postrest.plan
+#
+# Every decision here has a row in parity::postrest that tells the right answer from the wrong
+# one: the reporting fixture has system join posts, a deleted post and a reply (so the flags and
+# the cursor tie-break change a page); the reveal twin's post expires before the reader window
+# (so min and max differ) and the reader is the only other member (so the all-read branch
+# runs); the openURL block action is reached with integration_format card. Two no-op controls.
+
+report-exclude-system-inverted	crates/mm-store/src/post_store.rs	AND (NOT $7::bool OR posts.type NOT LIKE 'system_%')	AND ($7::bool OR posts.type NOT LIKE 'system_%')	api	postrest
+report-cursor-not-strict	crates/mm-store/src/post_store.rs	posts.createat END, posts.id) > ($2, $3))	posts.createat END, posts.id) >= ($2, $3))	api	postrest
+report-include-deleted-inverted	crates/mm-store/src/post_store.rs	AND ($6::bool OR posts.deleteat = 0)	AND (NOT $6::bool OR posts.deleteat = 0)	api	postrest
+report-cursor-names-the-extra-row	crates/mm-store/src/post_store.rs	.checked_sub(1)	.checked_sub(0)	api	postrest
+report-desc-starts-at-zero	crates/mm-api/src/postrest.rs	            i64::MAX\n	            0\n	api	postrest
+reveal-receipt-takes-the-later-expiry	crates/mm-app/src/post_rest.rs	post_expire_at.min(current_time + read_duration_millis)	post_expire_at.max(current_time + read_duration_millis)	api	postrest
+reveal-all-read-when-some-unread	crates/mm-app/src/post_rest.rs	if unread > 0 {	if unread >= 0 {	api	postrest
+burn-live-receipt-is-a-noop	crates/mm-app/src/post_rest.rs	if receipt.expire_at < current_time {\n            return Ok(());	if receipt.expire_at > current_time {\n            return Ok(());	api	postrest
+reveal-events-on-repeat-not-first	crates/mm-app/src/post_rest.rs	if first_reveal {	if !first_reveal {	api	postrest
+reminder-forwards-team-not-dm	crates/mm-app/src/post_rest.rs	if metadata.team_name.is_empty() {	if !metadata.team_name.is_empty() {	api	postrest
+action-blocks-flag-inverted	crates/mm-app/src/post_rest.rs	if !self.config().feature_flag_mm_blocks_enabled {	if self.config().feature_flag_mm_blocks_enabled {	api	postrest
+trigger-id-expiry-inverted	crates/mm-app/src/post_rest.rs	if age_millis > i64	if age_millis < i64	api	postrest
+plugin-path-refused-not-forwarded	crates/mm-app/src/post_rest.rs	return OutboundDisposition::Forward("a /plugins/ path is served by the plugin host");	return OutboundDisposition::Refused;	api	postrest
+control-rename-read-duration	crates/mm-app/src/post_rest.rs	let read_duration_millis = self.config().burn_on_read_duration_seconds * 1000;\n        let receipt = ReadReceipt {\n            user_id: user_id.to_owned(),\n            post_id: post.id.clone(),\n            expire_at: post_expire_at.min(current_time + read_duration_millis),	let reader_window_millis = self.config().burn_on_read_duration_seconds * 1000;\n        let receipt = ReadReceipt {\n            user_id: user_id.to_owned(),\n            post_id: post.id.clone(),\n            expire_at: post_expire_at.min(current_time + reader_window_millis),	api	postrest
+control-reorder-receipt-columns	crates/mm-store/src/read_receipt_store.rs	r#"SELECT postid AS "post_id!", userid AS "user_id!", expireat AS "expire_at!"\n                 FROM readreceipts\n                WHERE postid = $1"#,	r#"SELECT userid AS "user_id!", postid AS "post_id!", expireat AS "expire_at!"\n                 FROM readreceipts\n                WHERE postid = $1"#,	api	postrest

@@ -8880,3 +8880,65 @@ function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` br
 serves the HTTP twin's branch as well. The parity test that will cover it already sends the
 request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
 forward today and would assert the served answer then.
+
+## D-720 · `setPostReminder` on a DM or group-channel post forwards: its permalink is fetched, not previewed
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+Narrows [D-420]. The team-channel reminder is served, confirmation embed included
+(`mm_app::post::sole_permalink_in`, `App::link_metadata_for_permalink`). A post whose channel has
+no team gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so Go sends the URL
+through `getLinkMetadataForURL`: an outbound fetch plus a `LinkMetadata` row. `App::set_post_reminder`
+refuses that branch before writing. **What is owed:** the generic link-metadata path
+(OpenGraph fetch, `LinkMetadata` store, the link cache), which [D-401] also owes.
+
+## D-721 · The author's own `burnPost` forwards: `PermanentDeletePostDataRetainStub` is unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+`App.BurnPost` for `post.UserId == userID` (app/post.go:4132) runs the content-flagging deletion
+(app/content_flagging.go:687): files, edit histories, persistent notifications, acknowledgements,
+priority, reminders, then the post, each step recorded in a `PostDeletionReport`.
+`App::burn_post` refuses it before reading anything. **What is owed:** that function and its
+store deletes. `parity::postrest::reveal_and_burn_refusals_are_served` asserts the forward.
+
+## D-722 · `doPostAction` with a `cookie` forwards: the cookie is AES-GCM under `PostActionCookieSecret`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+`DecryptPostActionCookie` (model/integration_action.go:1337) plus
+`ParseDecryptedActionCookiePayload`, then the cookie path of `resolvePostActionSetup`
+(ephemeral posts). Nothing is observable before the decrypt, so the handler forwards the whole
+request. **What is owed:** an `aes-gcm` dependency, the `Systems.PostActionCookieSecret` read,
+and `setupFromLegacyCookie` / `setupFromMmBlocksCookie`.
+
+## D-723 · Integration calls the outbound guard allows are forwarded: `DoActionRequest` and its response handling
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+All four dialog/action routes serve every refusal and the guard's own 400
+(`OutboundDisposition::Refused`), but a URL the guard permits — or a `/plugins/` path, or the
+site's own `/plugins/` subtree — is handed to Go: the signed trigger id, the upstream `POST`,
+`applyPostActionUpdate`, the ephemeral text, the dialog response validation. The stack's
+allow-list is empty, so no oracle can reach an integration today. **What is owed:** a stack with
+an allow-listed echo integration, then the send and response halves.
+
+## D-724 · A licensed `moveThread` with `MoveThreadsEnabled` forwards: `App.MoveThread` is unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+The 501 gate is served. Past it: the wrangler permission checks (`PermittedWranglerRoles`,
+`AllowedEmailDomain` — not in `Config`), `ValidateMoveOrCopy`, `CopyWranglerPostlist` and the
+system post. The flag is environment-only and off on every oracle, including the licensed pair.
+**What is owed:** the wrangler settings, the copy, and a licensed oracle started with
+`MM_FEATUREFLAGS_MOVETHREADSENABLED=true`.
+
+## D-725 · `rewriteMessage` forwards at the agents bridge
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+Every refusal ahead of `agentsBridge.AgentCompletion` is served (`App::rewrite_message_gates`);
+the completion is a request into the AI plugin (`mattermost-plugin-ai` bridge client), and without
+the plugin Go answers the 500 `app.post.rewrite.agent_call_failed`. **What is owed:** the plugin
+host's inter-plugin request path, then the prompt builders (`getRewritePromptForAction`,
+`buildThreadContextForRewrite`, `buildRewriteSystemPrompt`).
