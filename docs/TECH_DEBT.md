@@ -5904,7 +5904,7 @@ Two ways to close it, and the choice is not obvious:
 Recorded rather than solved because (2) is the plan and (1) would be scaffolding on scaffolding.
 It stops being a hole when the last publishing route is migrated.
 
-## D-183 · Broadcast hooks: the runner and four of nine hooks run; five are still skipped
+## D-183 · Broadcast hooks: the runner, `Reject` and five of nine hooks run; four are still skipped
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
 **Narrowed** 2026-09-14 — the runner, `add_mentions`, `add_followers`, `posted_ack` and
@@ -5919,10 +5919,9 @@ hooks `SendNotifications` attaches to `posted` are in `mm_app::broadcast_hooks`,
 per recipient through `hub::BroadcastHookSuite`; `posted_ack` reads `WebConn::posted_ack`, set
 from `?posted_ack=true` on connect.
 
-**Still owed — the five hooks `makeBroadcastHooks` registers that this server does not:**
-`permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`, `only_channel_admins`; plus
-the `Reject` path (`msg.Event().Reject()`, skipped by the write pump at web_conn.go:577) that
-`burn_on_read_reaction`, `abac_files` and `only_channel_admins` use. An event carrying one of
+**Still owed — the four hooks `makeBroadcastHooks` registers that this server does not:**
+`permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`. The `Reject` path two of
+them use is ported, with `only_channel_admins` (2026-09-15). An event carrying one of
 their ids is logged (`Unable to find broadcast hook`) and leaves unmodified, precomputed. Their
 ids are declared in `broadcast_hooks` so a raiser can attach them now — `channel_join_request`
 attaches `only_channel_admins` already, and that one *widens an audience* when skipped
@@ -7164,36 +7163,11 @@ asserts rather than something a reader has to trust.
 
 ---
 
-## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member
+## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (app/channel_join_request.go)
-
-`broadcastChannelJoinRequestCreated` and `broadcastChannelJoinRequestUpdated` publish to
-`Broadcast{ChannelId: …}` — the channel's whole membership — and then narrow the audience with
-`useOnlyChannelAdminsHook`, whose `Process` **rejects** the event for any connection whose user is
-not in the precomputed admin set (app/web_broadcast_hooks.go:519). The fan-out is the outer bound
-and the hook is the filter.
-
-[D-183] records that this server strips the hook fields and does not run the hooks. Until now that
-was a fidelity gap — the stock `posted` hook *adds* fields. This is the first ported event whose
-hook **removes recipients**, so dropping it does not degrade a payload, it widens an audience: a
-plain member of a discoverable private channel would be told that a named user has asked to join
-it, and with what status, where Go tells only the channel admins.
-
-**What is owed:** `platform.HookedWebSocketEvent`'s reject path in the hub, plus the
-`only_channel_admins` hook itself. Nothing smaller fixes it — the admin set is already computed
-correctly and attached to the event (`channel_admin_user_ids`), so the missing half is entirely in
-`mm-ws`.
-
-**Why it is not urgent, and why that is not a reason to close it.** The seven routes that raise
-these events are dark: `FeatureFlags.DiscoverableChannels` is false at the pinned SHA ([D-153]), so
-nothing on this deployment can publish either event. The moment that flag is turned on this becomes
-a disclosure bug, which is why it is recorded rather than left to the doc comment on
-`publish_channel_join_request_event`.
-
-**Where the finding lives in the code:** the module docs of
-`crates/mm-app/src/channel_join_request.rs` and the doc comment on
-`App::publish_channel_join_request_event`.
+`broadcast_hooks::OnlyChannelAdminsBroadcastHook` runs, with the shared-event `Reject` path
+(`HookedWebSocketEvent::reject`); see
+`parity::channel_join_requests::a_join_request_reaches_a_lone_admin_and_never_a_plain_member`.
 
 ---
 

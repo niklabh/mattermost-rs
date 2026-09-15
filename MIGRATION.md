@@ -13943,3 +13943,19 @@ New: `crates/mm-app/src/mfa.rs`, `crates/mm-api/tests/parity/websocket_mfa.rs`,
 
 Mutation tally (`websocket-mfa.plan`): 10 run, 8 caught, 2 controls survived. The first parity run
 failed on the test itself — it compared two `ping` answers whole, `server_time` included.
+
+## `only_channel_admins` and the shared-event `Reject` path (2026-09-15)
+
+New: `scripts/mutations/websocket-join-admins.plan`; the test
+`parity::channel_join_requests::a_join_request_reaches_a_lone_admin_and_never_a_plain_member`.
+Closes [D-340]; narrows [D-183] to four hooks.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web_broadcast_hooks.go` `onlyChannelAdminsBroadcastHook` | `mm-app/src/broadcast_hooks.rs` | DONE | 2 unit + parity | A join request was announced to every channel member; now only the channel's scheme admins. |
+| `HookedWebSocketEvent` via `msg.Event().Reject()`, `writePump`'s `IsRejected` skip | `mm-app/src/hub.rs`, `mm-api/src/websocket.rs` | DONE | 2 unit | `Event()` is the shared original unless a hook copied it, so one member's rejection reaches every frame of the broadcast not yet written — admins included. Reproduced with a per-broadcast flag; see `HookedWebSocketEvent::reject`. |
+
+Only the deterministic halves are asserted — a lone admin hears the request, a plain member never
+does. Whether an admin hears it while a member is also connected is a race in Go.
+
+Mutation tally (`websocket-join-admins.plan`): 9 run, 7 caught, 2 controls survived.

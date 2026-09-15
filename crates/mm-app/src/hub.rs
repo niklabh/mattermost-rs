@@ -36,9 +36,6 @@
 //!   (`cluster.go:189`); there is one node, and the strangler's *other* process is the Go server,
 //!   which has its own hub. See [D-182] — a client connected to this server does not see events
 //!   raised by a route still served by Go.
-//! - **`Reject`** (`web_conn.go:577`). A rejected event is skipped by Go's write pump. None of
-//!   the three registered hooks rejects, so [`HookedWebSocketEvent`] has no `reject` and the pump
-//!   does not check the flag; both arrive with the first hook that needs them ([D-183]).
 //!
 //! # Where the sequence number is assigned
 //!
@@ -264,6 +261,12 @@ pub enum OutgoingFrame {
         event: Box<WebSocketEvent>,
         /// True when this frame took `Hub.Broadcast`'s precompute path — see above.
         precomputed: bool,
+        /// The rejection flag of the **broadcast's shared event** — `Some` only for a frame that
+        /// is that event, and so shares its fate. Go queues one pointer per connection and the
+        /// write pump asks `IsRejected` when it dequeues (web_conn.go:571), so a rejection by any
+        /// connection of the broadcast reaches every frame not yet written. A hook's own copy
+        /// carries its rejection on the event itself instead.
+        rejected: Option<Arc<AtomicBool>>,
     },
     Response(Box<WebSocketResponse>),
 }
@@ -651,6 +654,8 @@ pub trait BroadcastHookSuite: Send + Sync {
 pub struct HookedWebSocketEvent<'a> {
     original: &'a WebSocketEvent,
     copy: Option<WebSocketEvent>,
+    /// Set by [`HookedWebSocketEvent::reject`] when no copy exists — the shared event itself.
+    original_rejected: bool,
 }
 
 impl<'a> HookedWebSocketEvent<'a> {
@@ -659,6 +664,7 @@ impl<'a> HookedWebSocketEvent<'a> {
         Self {
             original,
             copy: None,
+            original_rejected: false,
         }
     }
 
@@ -667,6 +673,19 @@ impl<'a> HookedWebSocketEvent<'a> {
         self.copy_if_necessary();
         if let Some(copy) = self.copy.as_mut() {
             copy.add(key, value);
+        }
+    }
+
+    /// `msg.Event().Reject()` — the call `only_channel_admins` makes (web_broadcast_hooks.go:532).
+    ///
+    /// `Event()` is the copy when a hook has already modified the event, and the **shared original**
+    /// otherwise. So a rejection after a copy stays on this connection, and a rejection with none
+    /// rejects the broadcast's one event for every connection whose frame is not yet written —
+    /// admins included, in `only_channel_admins`' case. Go's behaviour, reproduced.
+    pub fn reject(&mut self) {
+        match self.copy.as_mut() {
+            Some(copy) => copy.reject(),
+            None => self.original_rejected = true,
         }
     }
 
@@ -780,6 +799,29 @@ impl Hub {
         hook_args: &[StringInterface],
         suite: &dyn BroadcastHookSuite,
     ) -> Option<WebSocketEvent> {
+        self.run_broadcast_hooks_rejecting(
+            msg,
+            conn,
+            hook_ids,
+            hook_args,
+            suite,
+            &AtomicBool::new(false),
+        )
+        .await
+    }
+
+    /// [`Hub::run_broadcast_hooks`] within a broadcast: a hook that rejects the shared event sets
+    /// `shared_rejected`, the flag every frame of that broadcast carries (see
+    /// [`OutgoingFrame::Event`]).
+    pub async fn run_broadcast_hooks_rejecting(
+        &self,
+        msg: &WebSocketEvent,
+        conn: &WebConn,
+        hook_ids: &[String],
+        hook_args: &[StringInterface],
+        suite: &dyn BroadcastHookSuite,
+        shared_rejected: &AtomicBool,
+    ) -> Option<WebSocketEvent> {
         if hook_ids.is_empty() {
             return None;
         }
@@ -806,6 +848,9 @@ impl Hub {
             }
         }
 
+        if hooked.original_rejected {
+            shared_rejected.store(true, Ordering::Release);
+        }
         hooked.into_copy()
     }
 
@@ -842,6 +887,7 @@ impl Hub {
             let _ = conn.try_send(OutgoingFrame::Event {
                 event: Box::new(hello),
                 precomputed: false,
+                rejected: None,
             });
         }
     }
@@ -1131,6 +1177,8 @@ impl App {
             self.hub().all()
         };
 
+        // Go's `msg` is one pointer for the whole fan-out; its `rejected` field is this flag.
+        let shared_rejected = Arc::new(AtomicBool::new(false));
         for conn in targets {
             if !self.should_send_event(&conn, &event).await {
                 continue;
@@ -1138,9 +1186,19 @@ impl App {
             // `webConn.send <- h.runBroadcastHooks(msg, webConn, ...)` (web_hub.go:731).
             let hooked = self
                 .hub()
-                .run_broadcast_hooks(&event, &conn, &hooks, &hook_args, self)
+                .run_broadcast_hooks_rejecting(
+                    &event,
+                    &conn,
+                    &hooks,
+                    &hook_args,
+                    self,
+                    &shared_rejected,
+                )
                 .await;
-            if conn.try_send(broadcast_frame(&event, hooked)).is_err() {
+            if conn
+                .try_send(broadcast_frame(&event, hooked, Some(&shared_rejected)))
+                .is_err()
+            {
                 // "Don't log the warning if it's an inactive connection."
                 if conn.is_active() {
                     tracing::error!(
@@ -1533,16 +1591,25 @@ pub fn guest_subject(event: &WebSocketEvent) -> GuestSubject {
 /// goes out precomputed; a copy a hook made has had that precomputation removed
 /// (`RemovePrecomputedJSON`) and goes out through `json.Encoder`. Two encodings, one bit — and a
 /// client can see which it got.
-pub fn broadcast_frame(event: &WebSocketEvent, hooked: Option<WebSocketEvent>) -> OutgoingFrame {
+///
+/// `shared_rejected` is the broadcast's rejection flag; only the shared-event frame carries it.
+pub fn broadcast_frame(
+    event: &WebSocketEvent,
+    hooked: Option<WebSocketEvent>,
+    shared_rejected: Option<&Arc<AtomicBool>>,
+) -> OutgoingFrame {
     match hooked {
         Some(modified) => OutgoingFrame::Event {
             event: Box::new(modified),
             precomputed: false,
+            rejected: None,
         },
         None => OutgoingFrame::Event {
-            // One clone per connection, as Go shares one pointer: the queue owns its frame.
+            // One clone per connection, as Go shares one pointer: the queue owns its frame, and
+            // the shared flag stands in for the pointer's `rejected` field.
             event: Box::new(event.clone()),
             precomputed: true,
+            rejected: shared_rejected.cloned(),
         },
     }
 }
@@ -1990,6 +2057,7 @@ mod tests {
             conn.try_send(OutgoingFrame::Event {
                 event: Box::new(event(WEBSOCKET_EVENT_POSTED)),
                 precomputed: true,
+                rejected: None,
             })
             .expect("queue has room");
         }
@@ -2035,7 +2103,9 @@ mod tests {
         assert_eq!(hub.conn_count(), 1);
         assert_eq!(hub.conn_count_for_user(USER), 1);
         match rx.try_recv().expect("hello was queued") {
-            OutgoingFrame::Event { event, precomputed } => {
+            OutgoingFrame::Event {
+                event, precomputed, ..
+            } => {
                 assert_eq!(event.event_type(), "hello");
                 assert!(!precomputed, "hello does not take Go's precompute path");
             }
@@ -2232,6 +2302,112 @@ mod tests {
         assert_eq!(a.last_user_activity_at(), 42);
         assert_eq!(b.last_user_activity_at(), 1, "inactive");
         assert_eq!(c.last_user_activity_at(), 1, "another token");
+    }
+
+    fn admins(ids: &[&str]) -> StringInterface {
+        [("channel_admin_user_ids".to_owned(), json!(ids))]
+            .into_iter()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_non_admin_rejects_the_shared_event_and_an_admin_does_not() {
+        let hub = Hub::new();
+        let shared_event = event(WEBSOCKET_EVENT_POSTED);
+        let ids = vec![crate::broadcast_hooks::BROADCAST_ONLY_CHANNEL_ADMINS.to_owned()];
+        let args = vec![admins(&[USER])];
+        let (admin, _admin_rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        let (member, _member_rx) = WebConn::new(CHANNEL.to_owned(), session(OTHER_USER), false);
+        let shared = Arc::new(AtomicBool::new(false));
+
+        let copy = hub
+            .run_broadcast_hooks_rejecting(
+                &shared_event,
+                &admin,
+                &ids,
+                &args,
+                &DenyAllSuite,
+                &shared,
+            )
+            .await;
+        assert!(copy.is_none(), "the hook copies nothing");
+        assert!(!shared.load(Ordering::Acquire), "an admin rejects nothing");
+        let admin_frame = broadcast_frame(&shared_event, copy, Some(&shared));
+
+        let copy = hub
+            .run_broadcast_hooks_rejecting(
+                &shared_event,
+                &member,
+                &ids,
+                &args,
+                &DenyAllSuite,
+                &shared,
+            )
+            .await;
+        assert!(copy.is_none(), "rejecting makes no copy");
+        assert!(
+            shared.load(Ordering::Acquire),
+            "a non-admin rejects the shared event"
+        );
+
+        // The admin's frame was built first and shares the flag, so it is rejected too — Go's
+        // one pointer, dequeued after the member's hook ran.
+        match admin_frame {
+            OutgoingFrame::Event {
+                rejected: Some(flag),
+                ..
+            } => assert!(flag.load(Ordering::Acquire)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rejection_after_a_copy_stays_on_that_connection() {
+        let hub = Hub::new();
+        let (member, _rx) = WebConn::new(CONN.to_owned(), session(USER), false);
+        let ids = vec![
+            BROADCAST_ADD_MENTIONS.to_owned(),
+            crate::broadcast_hooks::BROADCAST_ONLY_CHANNEL_ADMINS.to_owned(),
+        ];
+        let args = vec![
+            [("mentions".to_owned(), json!([USER]))]
+                .into_iter()
+                .collect(),
+            admins(&[OTHER_USER]),
+        ];
+        let shared = Arc::new(AtomicBool::new(false));
+
+        let copy = hub
+            .run_broadcast_hooks_rejecting(
+                &posted_event(),
+                &member,
+                &ids,
+                &args,
+                &DenyAllSuite,
+                &shared,
+            )
+            .await
+            .expect("add_mentions copied the event");
+        assert!(
+            copy.is_rejected(),
+            "the copy is what Event() returns, so the copy is rejected"
+        );
+        assert!(
+            !shared.load(Ordering::Acquire),
+            "the shared event is untouched"
+        );
+        match broadcast_frame(&posted_event(), Some(copy), Some(&shared)) {
+            OutgoingFrame::Event {
+                event, rejected, ..
+            } => {
+                assert!(event.is_rejected());
+                assert!(
+                    rejected.is_none(),
+                    "a copy does not carry the broadcast's flag"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2521,10 +2697,11 @@ mod tests {
     fn a_hooked_copy_leaves_unprecomputed_and_an_untouched_event_precomputed() {
         let event = posted_event();
 
-        match broadcast_frame(&event, None) {
+        match broadcast_frame(&event, None, None) {
             OutgoingFrame::Event {
                 event: sent,
                 precomputed,
+                ..
             } => {
                 assert!(precomputed, "the shared event takes Go's precompute path");
                 assert_eq!(*sent, event);
@@ -2534,10 +2711,11 @@ mod tests {
 
         let mut modified = event.deep_copy_like_go();
         modified.add("should_ack", json!(true));
-        match broadcast_frame(&event, Some(modified.clone())) {
+        match broadcast_frame(&event, Some(modified.clone()), None) {
             OutgoingFrame::Event {
                 event: sent,
                 precomputed,
+                ..
             } => {
                 assert!(
                     !precomputed,
