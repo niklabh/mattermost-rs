@@ -13812,3 +13812,45 @@ counts) are each process's own and compared by name and position only. **Not ver
 parity:** the upgrade permission branches (every stack is arm64, so both servers stop at the
 architecture) and the Elasticsearch engine itself (nil on both). [D-683]: a user created here is
 not marked as having viewed the current notices; that call site belongs to the user family.
+
+## The 2026-09-15 round: seven families in parallel, and the harness that verifies them
+
+**612 → 739 of 764 pairs.** Seven worktree agents on stacks 1–7, merged serially on stack 0.
+Each family's own section above holds its findings; this is the index and the tallies.
+
+| family | pairs on base `f4f0a5a` | mutation tally | merge |
+|---|---|---|---|
+| config and licence writes | +7 HTTP, +6 local | 17 run, 15 caught, 2 controls survived | `0d0807d` |
+| SAML, LDAP, audit-log certificates | +22 HTTP, +8 local | 17 run, 15 caught, 2 controls survived | `08ce20a` |
+| access-control policies | +16 HTTP, +14 local | 18 run, 16 caught, 2 controls survived | `6a25894` |
+| post remainder, reports, integration actions | +13 HTTP | 15 run, 13 caught, 2 controls survived | `7a58e56` |
+| file search, retention searches, property and OAuth writes, agents | +15 HTTP | 20 run, 17 caught, 2 controls and 1 equivalent mutation survived | `728a7a0` |
+| command execute, remote cluster, boards, socket uploads | +11 HTTP, +2 local | 29 run, 25 caught, 4 controls survived (two plans) | `523c573`, `09dd546` |
+| system operations, notices, elasticsearch (all but `POST /notifications/test`, [D-680]) | +13 HTTP, +2 local | 29 run, 25 caught, 4 controls survived (two plans) | `2034a85` |
+
+**The harness changes, which every later full run depends on:**
+
+- `scripts/parity.sh` runs the parity binary in two shards (`6e2d5f7`): one run peaked at 252 active
+  users against Go's unlicensed limit of 250; sharded, about 150. Per-test retirement is still owed —
+  [D-800].
+- `a_team_and_channel_the_user_is_in` returns the seeded `slice-team` and its `town-square`, by name
+  (`8b8b756`): "the first team" had become another suite's fixture team, which its own purge deleted
+  mid-run.
+- `parity::second_server_ports` fails on two `SecondServer`s sharing a port (`a1260dc`); the uploads
+  suites had been killing the licensed pair.
+- Races closed by lock, bracket or scope: the SAML config flip and every certificate write, and
+  their readers (`de67a97`, `4ac00de`, `fe9477f`), the post-info open-invite flip (`1f5276b`), the shared admin's row and the seeded team's user lists (`d77a1ec`, `f951866`), the
+  token page (`4caec75`), a module-wide per-fixture purge (`f89a299`), a fixed websocket window
+  (`19a0237`), a bot mid-plant (`9a07878`), two servers' session clocks (`e152820`), and one in 256
+  licence signatures ending in a zero byte (`33e6efd`).
+- The recreated `system-bot` is handed to the seeded admin (`d87d983`): owned by another suite's
+  temporary admin, it was disabled with that admin, and every export job the licensed Go ran
+  failed looking it up.
+- `scripts/routes.py` follows `.merge(...)` registrations on both routers (`be9e0b6`, `bb9ddf2`);
+  families registered that way had been counted as unserved.
+
+**Merge hazards met three times, for the next round:** git silently keeps an item two branches
+invented at different offsets (a config field, a `let` binding, a test document's JSON key), and a
+keep-both block whose two sides both end inside a call shares one closing tail. Resolving in a
+scratch copy of `git merge-tree`'s output and parsing it with `rustfmt --check` before touching the
+tree caught both kinds.
