@@ -124,6 +124,8 @@ pub mod local_teams;
 /// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
 /// Appended for the same reason as `config`.
 pub mod marketplace_visit;
+/// Port of the five `RemoteClusterTokenRequired` routes of `api4/remote_cluster.go`.
+pub mod remote_cluster;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -3132,6 +3134,34 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/boards",
             partially_migrated(post(boards::create_board)),
+        )
+        // ---- `api4/remote_cluster.go`, the five `RemoteClusterTokenRequired` routes
+        // (2026-09-15). All gated identically; `remote_cluster_token_gate` is the whole served
+        // surface — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
+        // literal siblings of `{remote_id}` (registered above), each with an underscore or
+        // shorter than an id, so mux and axum both prefer these literals.
+        .route(
+            "/api/v4/remotecluster/ping",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/msg",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/confirm_invite",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/upload/{upload_id}",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // Go names this segment `{user_id}`, but axum requires one capture name per tree
+        // position and `{remote_id}` already holds it (the CRUD routes above); the gate never
+        // reads it and the two charsets accept the same segments, so the wire is identical.
+        .route(
+            "/api/v4/remotecluster/{remote_id}/image",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,

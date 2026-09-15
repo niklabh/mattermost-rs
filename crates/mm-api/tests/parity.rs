@@ -245,4 +245,5 @@ mod parity {
     pub mod boards;
     pub mod local_uploads;
     pub mod marketplace_visit;
+    pub mod remote_cluster;
 }
