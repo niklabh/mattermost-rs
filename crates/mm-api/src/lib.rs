@@ -66,6 +66,7 @@ pub mod migrate_auth;
 pub mod multipart;
 pub mod notify_admin;
 pub mod oauth;
+pub mod outgoing_oauth_writes;
 pub mod permissions;
 pub mod post_acks;
 pub mod post_search;
@@ -80,6 +81,7 @@ pub mod reactions;
 pub mod recaps;
 pub mod redirect_location;
 pub mod reports;
+pub mod retention_search;
 pub mod roles;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
@@ -2487,6 +2489,16 @@ pub fn router(state: AppState) -> Router {
                     .delete(data_retention::remove_teams_from_policy),
             ),
         )
+        // `searchTeamsInPolicy` and `searchChannelsInPolicy` (data_retention.go:25, :29) —
+        // one literal deeper than the two list routes, no parameter sibling at that depth.
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/teams/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_teams_in_policy)),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/channels/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_channels_in_policy)),
+        )
         .route(
             "/api/v4/data_retention/policies/{policy_id}/channels",
             partially_migrated_with_ids(
@@ -2848,11 +2860,29 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/oauth/outgoing_connections",
-            partially_migrated(get(gated_reads::list_outgoing_oauth_connections)),
+            partially_migrated(
+                get(gated_reads::list_outgoing_oauth_connections)
+                    .post(outgoing_oauth_writes::create_outgoing_oauth_connection),
+            ),
+        )
+        // `BaseRoutes.OutgoingOAuthConnections.Handle("/validate")` — a literal sibling of the
+        // `{outgoing_oauth_connection_id}` route below; `validate` is eight characters, so it
+        // would have been the `GET` read's `RequireOutgoingOAuthConnectionId`-after-the-gate
+        // 501 anyway. Only the `POST` is registered by Go.
+        .route(
+            "/api/v4/oauth/outgoing_connections/validate",
+            partially_migrated(post(
+                outgoing_oauth_writes::validate_outgoing_oauth_connection_credentials,
+            )),
         )
         .route(
             "/api/v4/oauth/outgoing_connections/{outgoing_oauth_connection_id}",
-            partially_migrated_with_ids(&state, get(gated_reads::get_outgoing_oauth_connection)),
+            partially_migrated_with_ids(
+                &state,
+                get(gated_reads::get_outgoing_oauth_connection)
+                    .put(outgoing_oauth_writes::update_outgoing_oauth_connection)
+                    .delete(outgoing_oauth_writes::delete_outgoing_oauth_connection),
+            ),
         )
         .route(
             "/api/v4/jobs/{job_id}/download",
@@ -3659,6 +3689,30 @@ mod tests {
             (Method::GET, "/api/v4/agents".to_owned()),
             (Method::GET, "/api/v4/agents/status".to_owned()),
             (Method::GET, "/api/v4/llmservices".to_owned()),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections".to_owned(),
+            ),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections/validate".to_owned(),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/teams/search"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/channels/search"),
+            ),
         ];
 
         for (method, path) in served {
