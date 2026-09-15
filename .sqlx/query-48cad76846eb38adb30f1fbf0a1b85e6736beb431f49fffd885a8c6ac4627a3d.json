@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE accesscontrolpolicies SET name = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48cad76846eb38adb30f1fbf0a1b85e6736beb431f49fffd885a8c6ac4627a3d"
+}

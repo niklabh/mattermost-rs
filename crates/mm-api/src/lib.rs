@@ -6,6 +6,7 @@
 //! the proxy is the fallback.
 
 pub mod access_control;
+pub mod access_control_policies;
 pub mod audits;
 pub mod auth;
 pub mod auth_writes;
@@ -56,6 +57,7 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod local_access_control;
 pub mod local_channels;
 pub mod local_misc;
 pub mod local_users;
@@ -3148,6 +3150,92 @@ pub fn router(state: AppState) -> Router {
         // `api4/saml.go`, `api4/ldap.go`, `api4/audit_logging.go` — the certificate and
         // enterprise-gate routes, in their own module.
         .merge(auth_certs::routes(&state))
+        // ---- `api4/access_control.go` (2026-09-15): the sixteen policy routes ----
+        //
+        // `BaseRoutes.AccessControlPolicies` is `/access_control_policies` and
+        // `BaseRoutes.AccessControlPolicy` is `/access_control_policies/{policy_id:[A-Za-z0-9]+}`
+        // (api4/api.go:335-336); registered unconditionally, so every pair answers on a build
+        // whose access-control service is nil — see `access_control_policies`.
+        .route(
+            "/api/v4/access_control_policies",
+            partially_migrated(put(access_control_policies::create_access_control_policy)),
+        )
+        .route(
+            "/api/v4/access_control_policies/search",
+            partially_migrated(post(
+                access_control_policies::search_access_control_policies,
+            )),
+        )
+        .route(
+            "/api/v4/access_control_policies/activate",
+            partially_migrated(put(access_control_policies::set_active_status)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/check",
+            partially_migrated(post(access_control_policies::check_expression)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/test",
+            partially_migrated(post(access_control_policies::test_expression)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/simulate_users",
+            partially_migrated(post(access_control_policies::simulate_policy_for_users)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/validate_requester",
+            partially_migrated(post(
+                access_control_policies::validate_expression_against_requester,
+            )),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/autocomplete/fields",
+            partially_migrated(get(access_control_policies::get_fields_autocomplete)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/visual_ast",
+            partially_migrated(post(access_control_policies::convert_to_visual_ast)),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control_policies::get_access_control_policy)
+                    .delete(access_control_policies::delete_access_control_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/activate",
+            partially_migrated_with_ids(&state, get(access_control_policies::update_active_status)),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/assign",
+            partially_migrated_with_ids(
+                &state,
+                post(access_control_policies::assign_access_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/unassign",
+            partially_migrated_with_ids(
+                &state,
+                delete(access_control_policies::unassign_access_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/resources/channels",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control_policies::get_channels_for_access_control_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/resources/channels/search",
+            partially_migrated_with_ids(
+                &state,
+                post(access_control_policies::search_channels_for_access_control_policy),
+            ),
+        )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
         // which it then leaves alone. See [`go_global_headers`].

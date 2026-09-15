@@ -313,23 +313,33 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
 /// carrying it changes nothing. A mutation that stopped dropping it survived the whole suite
 /// until this existed.
 ///
-/// `cel/check` is chosen because it is an enterprise route on an unlicensed server: it reads the
-/// body, refuses with a deterministic 501 and touches nothing. A forwarded write that *worked*
-/// would be a fixture this suite has to clean up.
+/// `plugins/reattach` is chosen because the body decides its answer and nothing is ever written: an
+/// absent body fails `json.NewDecoder` (`api4.plugin.reattachPlugin.invalid_request`), while `{}`
+/// decodes and is refused by `PluginReattachRequest.IsValid` for its nil manifest
+/// (`plugin_reattach_request.is_valid.manifest.app_error`) before `App.ReattachPlugin` runs. Both
+/// are 400, so the error id is what proves the body arrived. Only the socket registers this route,
+/// and the plugin host is the last thing this port will serve, so it should stay forwarded for a
+/// long time. Earlier examples were `access_control_policies/cel/check` and `ldap/migrateid`, each
+/// retired the day its family was served.
 #[tokio::test]
 async fn a_forwarded_post_carries_its_body() {
     if !sockets_enabled() {
         return;
     }
-    const PATH: &str = "/api/v4/access_control_policies/cel/check";
-    const BODY: &str = r#"{"expression":"1 == 1"}"#;
+    const PATH: &str = "/api/v4/plugins/reattach";
+    const BODY: &str = "{}";
 
     let (go_status, _, go_body) =
         post_over_socket(&go_socket().expect("present"), PATH, BODY).await;
     let (rust_status, rust_headers, rust_body) =
         post_over_socket(&rust_socket().expect("present"), PATH, BODY).await;
 
-    assert_eq!(go_status, 501, "unlicensed, so the policy engine refuses");
+    assert_eq!(go_status, 400, "{}", String::from_utf8_lossy(&go_body));
+    assert!(
+        String::from_utf8_lossy(&go_body).contains("plugin_reattach_request.is_valid.manifest"),
+        "the body arrived, so validation refused it rather than the decoder: {}",
+        String::from_utf8_lossy(&go_body)
+    );
     assert_eq!(rust_status, go_status);
     assert!(
         rust_headers.get("x-mmrs-served-by").is_none(),

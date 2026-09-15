@@ -715,6 +715,22 @@ pub struct Config {
     /// reaches the persisted document, which is exactly what [D-153] records.
     pub feature_flag_discoverable_channels: bool,
 
+    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
+    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
+    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
+    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
+    /// type-less search drops permission policies from its page. Environment-or-default like
+    /// [`Config::feature_flag_burn_on_read`].
+    pub feature_flag_permission_policies: bool,
+    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
+    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
+    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
+    pub feature_flag_channel_permission_policies: bool,
+    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
+    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
+    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
+    pub feature_flag_policy_simulation: bool,
+
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -1206,6 +1222,18 @@ impl Config {
         self.feature_flag_burn_on_read && self.enable_burn_on_read
     }
 
+    /// Port of `FeatureFlags.IsChannelPermissionPoliciesEnabled` (feature_flags.go:232): the
+    /// sub-flag **and** the `PermissionPolicies` umbrella.
+    pub fn channel_permission_policies_enabled(&self) -> bool {
+        self.feature_flag_permission_policies && self.feature_flag_channel_permission_policies
+    }
+
+    /// Port of `FeatureFlags.IsPolicySimulationEnabled` (feature_flags.go:242): the sub-flag
+    /// **and** the umbrella.
+    pub fn policy_simulation_enabled(&self) -> bool {
+        self.feature_flag_permission_policies && self.feature_flag_policy_simulation
+    }
+
     /// `InitProperties`' five-way registration `if` (api4/properties.go:23).
     ///
     /// When every one of the five is off, gorilla/mux has never heard of the nine property paths
@@ -1337,6 +1365,10 @@ impl Default for Config {
             feature_flag_post_attributes: false,
             // feature_flags.go:208 — `false`, like the other four.
             feature_flag_discoverable_channels: false,
+            // feature_flags.go:172-175 — all three **`true`**.
+            feature_flag_permission_policies: true,
+            feature_flag_channel_permission_policies: true,
+            feature_flag_policy_simulation: true,
             // feature_flags.go:185 — **`true`**, and the only one of the five that is.
             feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
@@ -1892,6 +1924,21 @@ impl Config {
                 "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
                 default.feature_flag_discoverable_channels,
             ),
+            feature_flag_permission_policies: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_PERMISSIONPOLICIES",
+                default.feature_flag_permission_policies,
+            ),
+            feature_flag_channel_permission_policies: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_CHANNELPERMISSIONPOLICIES",
+                default.feature_flag_channel_permission_policies,
+            ),
+            feature_flag_policy_simulation: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_POLICYSIMULATION",
+                default.feature_flag_policy_simulation,
+            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -2155,6 +2202,10 @@ impl Config {
             feature_flag_classification_markings: default.feature_flag_classification_markings,
             feature_flag_post_attributes: default.feature_flag_post_attributes,
             feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
+            feature_flag_permission_policies: default.feature_flag_permission_policies,
+            feature_flag_channel_permission_policies: default
+                .feature_flag_channel_permission_policies,
+            feature_flag_policy_simulation: default.feature_flag_policy_simulation,
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),

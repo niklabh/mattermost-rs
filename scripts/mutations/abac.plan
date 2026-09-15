@@ -1,0 +1,30 @@
+# Mutation plan for the sixteen `api4/access_control.go` routes and their local twins —
+# `crates/mm-api/src/access_control_policies.rs`, `crates/mm-app/src/access_control_policy.rs`
+# and `crates/mm-store/src/access_control_policy_store.rs`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/abac.plan
+#
+# Every route ends in the nil-service 501, so what the suite pins is the order and the shape of
+# the gates in front of it: which rung a delegated admin passes, what the store says about
+# ownership, and the one write on this build (the team-scope reconcile). Permission *names* are
+# not on the wire ([D-092]), so no line swaps one for another; each line moves a status, an id,
+# or a row the suite reads back. The two controls are a contiguous rename and a swap of two
+# registrations with different paths.
+cel-team-rung-needs-only-view-team	crates/mm-api/src/access_control_policies.rs	.session_has_permission_to_team(&session.0, team_id, &PERMISSION_MANAGE_TEAM_ACCESS_RULES)	.session_has_permission_to_team(&session.0, team_id, &mm_model::permission::PERMISSION_VIEW_TEAM)	api	access_control_policies
+activate-batch-checks-ownership-of-the-teams-own-entry	crates/mm-api/src/access_control_policies.rs	                if entry.id != list.team_id {	                if entry.id == list.team_id {	api	access_control_policies
+activate-batch-gates-an-empty-list	crates/mm-api/src/access_control_policies.rs	        for entry in &entries {	        if entries.is_empty() {\n            return permission_error(&session, &PERMISSION_MANAGE_CHANNEL_ACCESS_RULES);\n        }\n        for entry in &entries {	api	access_control_policies
+assign-feature-gate-after-permissions	crates/mm-api/src/access_control_policies.rs	    if !team_ids.is_empty() {	    if !team_ids.is_empty() && false {	api	access_control_policies
+assign-skips-the-reconcile	crates/mm-api/src/access_control_policies.rs	    if let Err(err) = state.app.reconcile_policy_team_scope(&policy_id).await {\n        tracing::warn!(policy_id = %policy_id, error = %err.id, "Failed to reconcile policy team scope after assign");	    if let Err(err) = Ok::<(), Box<mm_model::utils::AppError>>(()) {\n        tracing::warn!(policy_id = %policy_id, error = %err.id, "Failed to reconcile policy team scope after assign");	api	access_control_policies
+reconcile-clears-instead-of-stamping	crates/mm-app/src/access_control_policy.rs	            [team_id] => (ACCESS_CONTROL_POLICY_SCOPE_TEAM, *team_id),	            [team_id] => ("", *team_id),	api	access_control_policies
+ownership-ignores-the-scope	crates/mm-app/src/access_control_policy.rs	                scope: ACCESS_CONTROL_POLICY_SCOPE_TEAM.to_owned(),	                scope: String::new(),	api	access_control_policies
+ownership-ignores-the-team-inference	crates/mm-app/src/access_control_policy.rs	                team_id: team_id.to_owned(),	                team_id: String::new(),	api	access_control_policies
+store-team-inference-inverted	crates/mm-store/src/access_control_policy_store.rs	                            HAVING COUNT(DISTINCT teamid) = 1 AND MIN(teamid) = $9)\n                    END)\n               AND ($10::text = '' OR p.id > $10)	                            HAVING COUNT(DISTINCT teamid) = 1 AND MIN(teamid) <> $9)\n                    END)\n               AND ($10::text = '' OR p.id > $10)	api	access_control_policies
+store-revision-skips-one	crates/mm-store/src/access_control_policy_store.rs	        let revision = previous.map_or(1, |previous| previous + 1);	        let revision = previous.map_or(1, |previous| previous + 2);	api	access_control_policies
+autocomplete-sentinel-is-not-the-first-page	crates/mm-app/src/access_control_policy.rs	        if after.is_empty() || after == "0".repeat(26) {	        if after.is_empty() {	api	access_control_policies
+simulation-out-of-scope-becomes-a-500	crates/mm-app/src/access_control_policy.rs	                    if err.is_not_found() {	                    if !err.is_not_found() {	api	access_control_policies
+simulation-cross-team-check-inverted	crates/mm-api/src/access_control_policies.rs	        if channel.team_id != params.team_id {	        if channel.team_id == params.team_id {	api	access_control_policies
+toggle-accepts-cookies-and-refuses-headers	crates/mm-api/src/access_control_policies.rs	location != TokenLocation::Cookie	location == TokenLocation::Cookie	api	access_control_policies
+create-team-admin-ownership-without-an-id	crates/mm-api/src/access_control_policies.rs	                if !policy.id.is_empty() {	                if true {	api	access_control_policies
+self-inclusion-checks-empty-expressions	crates/mm-app/src/access_control_policy.rs	        if expression.is_empty() {	        if false {	api	access_control_policies
+control-rename-a-binding-and-its-use	crates/mm-api/src/access_control_policies.rs	    let team_id = query_first(query, "team_id").unwrap_or_default();\n    if let Err(response) = cel_tooling_gate(&state, &session, &channel_id, &team_id).await {	    let team = query_first(query, "team_id").unwrap_or_default();\n    if let Err(response) = cel_tooling_gate(&state, &session, &channel_id, &team).await {	api	access_control_policies
+control-swap-two-independent-registrations	crates/mm-api/src/local_access_control.rs	            "/api/v4/access_control_policies/cel/check",\n            partially_migrated(post(local_check_expression)),\n        )\n        .route(\n            "/api/v4/access_control_policies/cel/test",\n            partially_migrated(post(local_test_expression)),	            "/api/v4/access_control_policies/cel/test",\n            partially_migrated(post(local_test_expression)),\n        )\n        .route(\n            "/api/v4/access_control_policies/cel/check",\n            partially_migrated(post(local_check_expression)),	api	access_control_policies
