@@ -54,6 +54,12 @@ struct Fixture {
     team_id: String,
     team2_id: String,
     channel_id: String,
+    /// An **archived** private channel in the team, carrying the one child policy. Archived so
+    /// that no other suite's server-wide `access_control_policy_enforced` list sees it (they
+    /// exclude deleted channels), while the ownership inference join and `GetMany` — neither
+    /// filters `DeleteAt` — still do. Planted after the archive: archiving deletes the
+    /// channel's policy row.
+    child_channel_id: String,
     member: common::PlainUser,
     team_admin: common::PlainUser,
     channel_admin: common::PlainUser,
@@ -130,6 +136,9 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
             let team_id = create_team(client, token, "abac").await;
             let team2_id = create_team(client, token, "abac2").await;
             let channel_id = create_channel_typed(client, token, &team_id, "abac", "P").await;
+            let child_channel_id =
+                create_channel_typed(client, token, &team_id, "abacchild", "P").await;
+            common::delete_channel(client, token, &child_channel_id).await;
             let member = create_plain_user(client, token, &team_id, "abacm").await;
             let team_admin = create_plain_user(client, token, &team_id, "abact").await;
             let channel_admin = create_plain_user(client, token, &team_id, "abacc").await;
@@ -148,11 +157,12 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
                 &format!("/api/v4/channels/{channel_id}/members/{}", channel_admin.id),
             )
             .await;
-            plant_policies(&team_id, &channel_id).await;
+            plant_policies(&team_id, &child_channel_id).await;
             Fixture {
                 team_id,
                 team2_id,
                 channel_id,
+                child_channel_id,
                 member,
                 team_admin,
                 channel_admin,
@@ -1564,7 +1574,7 @@ async fn ownership_is_decided_by_the_store() {
                 &f.team_admin.token,
                 "POST",
                 &search,
-                Some(r#"{"term":""}"#),
+                Some(r#"{"term":"","include_deleted":true}"#),
                 200,
             )
             .await;
@@ -1576,7 +1586,7 @@ async fn ownership_is_decided_by_the_store() {
                 .filter_map(|c| c["id"].as_str())
                 .collect();
             if policy == INFERRED {
-                assert_eq!(ids, vec![f.channel_id.as_str()], "the one child");
+                assert_eq!(ids, vec![f.child_channel_id.as_str()], "the one child");
             } else {
                 assert!(ids.is_empty(), "{policy} has no child");
             }
@@ -1601,12 +1611,12 @@ async fn ownership_is_decided_by_the_store() {
         &admin,
         "POST",
         &search,
-        Some(r#"{"term":""}"#),
+        Some(r#"{"term":"","include_deleted":true}"#),
         200,
     )
     .await;
     assert!(
-        String::from_utf8_lossy(&body).contains(&f.channel_id),
+        String::from_utf8_lossy(&body).contains(&f.child_channel_id),
         "the child is listed"
     );
     let body = both(
@@ -2041,7 +2051,13 @@ async fn the_local_pairs_match_over_the_socket() {
         ),
         ("GET", &list, None, 501, GET_501),
         ("GET", &list_bad, None, 400, LIMIT_400),
-        ("POST", &search, Some(r#"{"term":""}"#), 200, ""),
+        (
+            "POST",
+            &search,
+            Some(r#"{"term":"","include_deleted":true}"#),
+            200,
+            "",
+        ),
         ("POST", &search, Some("null"), 400, BAD_BODY),
     ];
     for (method, path, body, status, id) in rows {
