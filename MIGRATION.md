@@ -13854,3 +13854,34 @@ invented at different offsets (a config field, a `let` binding, a test document'
 keep-both block whose two sides both end inside a call shares one closing tail. Resolving in a
 scratch copy of `git merge-tree`'s output and parsing it with `rustfmt --check` before touching the
 tree caught both kinds.
+
+## The websocket hub's six actions, and sockets that follow session changes (2026-09-15)
+
+New: `crates/mm-api/src/wsapi.rs`, `crates/mm-api/tests/parity/websocket_actions.rs`,
+`scripts/mutations/websocket-actions.plan`. Closes [D-188]. No api4 route+method pair is added —
+these are socket actions — so the headline count is unchanged; the hub item of the denominator
+advances.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `wsapi/{system,status,user}.go`, `websocket_handler.go` | `mm-api/src/wsapi.rs` | DONE | 5 unit + 13 parity | Every refusal of `user_typing` is a 400 naming `channel_id`, where the REST route answers 403 for the permission. A non-string `posted_notify_ack` status panics Go; the port closes the socket and that branch is unit-tested only. |
+| `websocket_router.go`, `web_conn.go` read/write pumps | `mm-api/src/websocket.rs` | DONE | parity | 5s auth window, one JSON value per frame, `custom_` actions unrouted, online on connect. See the module doc. |
+| `platform/status.go` `GetAllStatuses`, `GetStatusesByIds` | `mm-app/src/status.rs` | DONE | parity | Cache first, misses written back — observable through `get_statuses`. |
+| `ClearSessionCacheForUser` → `Hub.InvalidateUser` | `mm-app/src/hub.rs` + nine callers | DONE | parity (logout) | See `App::clear_session_cache_for_user`. |
+
+Findings, each written in the code it constrains:
+
+- **A socket that authenticated over the socket was filed under the user `""`** and received no
+  user-addressed event, `hello` included (`WebConn::user_id`).
+- **Revoking a session never reached a live socket.** The logout parity test failed on its first run
+  for exactly that; Go's `RevokeSession` ends in `Hub.InvalidateUser`.
+- **`invalidate_all_caches` reset every socket's membership cache, which Go's does not**
+  (`App::invalidate_all_caches`).
+- **REST status reads cannot tell the servers apart.** `GET /users/{id}/status` falls back to the
+  shared `Status` row, so a mutation removing the Rust connect-time online survived; the test now
+  asks each server's own cache through `get_statuses`.
+
+Mutation tally (`websocket-actions.plan`): 20 run, 17 caught, 2 controls survived, 1 survivor —
+the fixture above — fixed and re-run: caught. Full parity: 3,779 passed, 1 failed
+(`licensed_sweep::a_priority_post_passes_the_tier_gate_licensed`, which passes alone — a cross-suite
+race not yet found).

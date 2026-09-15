@@ -580,19 +580,21 @@ async fn user_update_active_status_needs_a_boolean_and_sets_the_status_it_names(
     }
 
     // Connecting marked the user online on both (`NewWebConn`), off the socket's own path — so
-    // poll briefly rather than read once.
-    for base in [GO, RUST] {
-        let mut status = Value::Null;
-        for _ in 0..30 {
-            status = get_status(&http, base, &f.stater.token, &f.stater.id).await;
-            if status["status"] == "online" {
+    // poll. Through each server's own cache (`get_statuses`), not REST: REST falls back to the
+    // shared `Status` row, and the row the Go connection wrote would answer for a Rust connection
+    // that never set anything. Measured: a mutation removing the Rust side's online survived.
+    for (base, probe) in [(GO, &mut go), (RUST, &mut rust)] {
+        let mut data = Value::Null;
+        for attempt in 0..30 {
+            data = ask(probe, 100 + attempt, "get_statuses", None).await["data"].clone();
+            if data[&f.stater.id] == "online" {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         assert_eq!(
-            status["status"], "online",
-            "{base}: connecting did not mark the user online: {status}"
+            data[&f.stater.id], "online",
+            "{base}: connecting did not mark the user online in this server's cache: {data}"
         );
     }
 
