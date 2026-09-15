@@ -2,8 +2,9 @@
 //! `listCommands` (:260), and the five writes — `createCommand` (:31), `updateCommand` (:82),
 //! `moveCommand` (:143), `deleteCommand` (:214) and `regenCommandToken` (:506).
 //!
-//! `executeCommand` and the two autocomplete routes are not here: they reach the built-in
-//! provider registry and the plugin host.
+//! `executeCommand` and the two autocomplete routes are at the end of the file (2026-09-15):
+//! their refusals and the built-in registry's definitions are served, and anything that would run
+//! a command, or depends on plugin commands or a non-English locale, is forwarded.
 //!
 //! # The 404-for-a-403 rule covers the writes too, but not uniformly
 //!
@@ -663,6 +664,383 @@ pub async fn regen_command_token(
         body,
     )
         .into_response()
+}
+
+// =================================================================================================
+// executeCommand, listAutocompleteCommands, listCommandAutocompleteSuggestions (2026-09-15)
+// =================================================================================================
+//
+// The three routes the module header used to exclude. What each serves and what it hands over:
+//
+// - **`POST /commands/execute`** serves every refusal in `executeCommand` and the dispatch
+//   decision in front of the providers — the 501 for `EnableCommands` off, the team and user
+//   lookups `tryExecuteCustomCommand` makes before it matches, and the 404 for a trigger nothing
+//   matches. It **forwards** the moment something would *run*: a custom command (an outgoing
+//   webhook, then a post), any built-in provider (no `DoCommand` is ported), or any command at all
+//   while Go may have plugin commands. See [`mm_app::command_provider`] and [D-781].
+// - **`GET /teams/{team_id}/commands/autocomplete`** serves the list, built-ins included, for an
+//   English request while Go can have no plugin commands; otherwise it forwards.
+// - **`GET /teams/{team_id}/commands/autocomplete_suggestions`** serves the suggestions under the
+//   same two conditions, and forwards when the parser reaches a dynamic list argument.
+
+/// Whether the Go server beside us may have plugin-registered slash commands — `true` means "do
+/// not answer anything that depends on the command set".
+///
+/// Plugin commands live only in Go's memory (`a.ch.pluginCommands`, app/plugin_commands.go:106),
+/// registered by a running plugin; a plugin can only run from a bundle Go found under its plugin
+/// directory, whose scan skips non-directories and dot-names and keeps a directory with a
+/// manifest (`scanSearchPath`, plugin/environment.go:91; `FindManifest` tries `plugin.yml`,
+/// `plugin.yaml` and `plugin.json`, model/manifest.go:456). So an empty directory is a proof of
+/// no plugin commands, and anything else — including not knowing where the directory is — is not.
+///
+/// The directory is **Go's**, named by `MM_GO_PLUGIN_DIRECTORY` (set by `scripts/mm-api-env.sh`
+/// beside `MM_GO_UPSTREAM`), not `PluginSettings.Directory`: that setting is relative to the Go
+/// process's working directory, which is not this process's, and overriding the setting itself
+/// would change what `GET /config` reports. Unset means forward.
+fn go_may_have_plugin_commands() -> bool {
+    let Some(directory) = std::env::var_os("MM_GO_PLUGIN_DIRECTORY") else {
+        return true;
+    };
+    let Ok(entries) = std::fs::read_dir(&directory) else {
+        return true;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return true;
+        };
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let path = entry.path();
+        if ["plugin.yml", "plugin.yaml", "plugin.json"]
+            .iter()
+            .any(|manifest| path.join(manifest).exists())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the request's translate function is English — see
+/// [`mm_app::command_provider::request_translation_locale`]. The header is read as bytes, because
+/// Go's `r.Header.Get` is a Go string whatever it contains.
+fn request_is_english(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
+    let accept_language = headers
+        .get(axum::http::header::ACCEPT_LANGUAGE)
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
+    mm_app::command_provider::request_translation_locale(
+        accept_language.as_deref(),
+        &state.app.config().default_client_locale,
+    ) == "en"
+}
+
+/// `c.RequireTeamId()` then the `view_team` gate — the opening both autocomplete routes share.
+async fn require_team_view(
+    state: &AppState,
+    team_id: &str,
+    session: &AuthenticatedSession,
+) -> Result<(), ApiError> {
+    if !is_valid_id(team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_TEAM],
+        )));
+    }
+    Ok(())
+}
+
+/// Port of `listAutocompleteCommands` (api4/command.go:433) —
+/// `GET /api/v4/teams/{team_id}/commands/autocomplete`.
+///
+/// The built-ins in the body are in a fixed order where Go's are in map order; the parity suite
+/// compares the list as a set for that reason, and every other byte of each element exactly.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded = false))]
+pub async fn list_autocomplete_commands(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_team_view(&state, &team_id, &session).await {
+        return err.into_response();
+    }
+    if go_may_have_plugin_commands() || !request_is_english(&state, request.headers()) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    match state.app.list_autocomplete_commands(&team_id).await {
+        Ok(Some(commands)) => encoded_ok(&commands, "listAutocompleteCommands")
+            .unwrap_or_else(IntoResponse::into_response),
+        Ok(None) => {
+            tracing::Span::current().record("forwarded", true);
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `listCommandAutocompleteSuggestions` (api4/command.go:455) —
+/// `GET /api/v4/teams/{team_id}/commands/autocomplete_suggestions`.
+///
+/// Refusals in Go's order: the team id, `view_team`, then a missing or empty `user_input` — the
+/// 400 naming **`userInput`**, camel-cased unlike the query key. The role is `system_admin` for
+/// anyone holding `manage_system`, `system_user` otherwise. The body is `json.Marshal`'s, so **no
+/// trailing newline**, unlike the list beside it.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded = false))]
+pub async fn list_command_autocomplete_suggestions(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_team_view(&state, &team_id, &session).await {
+        return err.into_response();
+    }
+    let role_id = if state
+        .app
+        .session_has_permission_to(&session.0, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        mm_model::role::SYSTEM_ADMIN_ROLE_ID
+    } else {
+        mm_model::role::SYSTEM_USER_ROLE_ID
+    };
+    let user_input = query_first(request.uri().query(), "user_input").unwrap_or_default();
+    if user_input.is_empty() {
+        return ApiError::invalid_param("userInput").into_response();
+    }
+    let user_input = user_input
+        .strip_prefix('/')
+        .unwrap_or(&user_input)
+        .to_owned();
+
+    if go_may_have_plugin_commands() || !request_is_english(&state, request.headers()) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    let mut commands = match state.app.list_autocomplete_commands(&team_id).await {
+        Ok(Some(commands)) => commands,
+        Ok(None) => {
+            tracing::Span::current().record("forwarded", true);
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    match mm_app::command_suggestions::get_suggestions(&mut commands, &user_input, role_id) {
+        Ok(suggestions) => match mm_model::utils::go_json_marshal(&suggestions) {
+            Ok(body) => (
+                StatusCode::OK,
+                [
+                    ("Content-Type", "application/json"),
+                    ("x-mmrs-served-by", "rust"),
+                ],
+                body,
+            )
+                .into_response(),
+            Err(err) => {
+                tracing::error!(error = %err, "failed to serialise suggestions");
+                ApiError::from(AppError::new(
+                    "listCommandAutocompleteSuggestions",
+                    "api.marshal_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+                .into_response()
+            }
+        },
+        Err(mm_app::command_suggestions::NeedsGo) => {
+            tracing::Span::current().record("forwarded", true);
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+/// What `serve_execute` decided.
+enum Execute {
+    Answer(Response),
+    Forward,
+}
+
+/// Port of `executeCommand` (api4/command.go:357) — `POST /api/v4/commands/execute`.
+///
+/// # The refusals, in Go's order
+///
+/// 1. the body does not decode → 400 naming `command_args` (a `null` body is the zero
+///    `CommandArgs` and falls to 2);
+/// 2. `len(command) <= 1` bytes, no leading `/`, or `channel_id` not an id → 400
+///    `api.command.execute_command.start.app_error`;
+/// 3. no `create_post` on the channel — which is also what a well-formed id naming no channel
+///    gets — → 403;
+/// 4. `GetChannel`'s own error;
+/// 5. an archived channel → 400 `api.command.execute_command.deleted.error`;
+/// 6. a direct or group channel: a restricted DM → 400 `restricted_dm.error`; a `team_id` the
+///    session is not a member of, without system-wide `create_post` → 403.
+///
+/// Then [`mm_app::App::command_dispatch`]. For a non-DM channel the body's `team_id` is replaced
+/// by the channel's, so a command cannot be run against another team.
+///
+/// # A Go bug reproduced
+///
+/// When `CheckIfChannelIsRestrictedDM` fails, the handler assigns the *channel* lookup's error —
+/// nil by then — to `c.Err` and returns: a **200 with an empty body**. Unreachable on a stock
+/// server (`RestrictDirectMessage` is `any`), and kept because the fix belongs to Go.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, forwarded = false))]
+pub async fn execute_command(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::debug!(error = %err, "could not read the execute body");
+            return ApiError::invalid_param("command_args").into_response();
+        }
+    };
+    match serve_execute(&state, &session, &bytes).await {
+        Ok(Execute::Answer(response)) => response,
+        Ok(Execute::Forward) => {
+            tracing::Span::current().record("forwarded", true);
+            // `Bytes` is reference-counted: this hands the same buffer to the forward.
+            let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_execute(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    bytes: &[u8],
+) -> Result<Execute, ApiError> {
+    const WHERE: &str = "executeCommand";
+
+    let mut args = match mm_model::utils::decode_one_from_json::<
+        Option<mm_model::command_args::CommandArgs>,
+    >(bytes)
+    {
+        Ok(args) => args.unwrap_or_default(),
+        Err(err) => {
+            tracing::debug!(error = %err, "command_args did not decode");
+            return Err(ApiError::invalid_param("command_args"));
+        }
+    };
+
+    if args.command.len() <= 1 || !args.command.starts_with('/') || !is_valid_id(&args.channel_id) {
+        return Err(ApiError::from(AppError::new(
+            WHERE,
+            "api.command.execute_command.start.app_error",
+            None,
+            String::new(),
+            400,
+        )));
+    }
+
+    let create_post = &mm_model::permission::PERMISSION_CREATE_POST;
+    let (permitted, _) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &args.channel_id, create_post)
+        .await;
+    if !permitted {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[create_post],
+        )));
+    }
+
+    let channel = state.app.get_channel(&args.channel_id).await?;
+    if channel.delete_at != 0 {
+        return Err(ApiError::from(AppError::new(
+            "createPost",
+            "api.command.execute_command.deleted.error",
+            None,
+            String::new(),
+            400,
+        )));
+    }
+
+    if !channel.is_group_or_direct() {
+        args.team_id.clone_from(&channel.team_id);
+    } else {
+        match state.app.check_if_channel_is_restricted_dm(&channel).await {
+            // `c.Err = err` with the channel lookup's nil error — see the doc comment.
+            Err(_) => {
+                return Ok(Execute::Answer(
+                    (
+                        StatusCode::OK,
+                        [
+                            ("Content-Type", "application/json"),
+                            ("x-mmrs-served-by", "rust"),
+                        ],
+                    )
+                        .into_response(),
+                ));
+            }
+            Ok(mm_app::channel::RestrictedDm::Yes) => {
+                return Err(ApiError::from(AppError::new(
+                    "createPost",
+                    "api.command.execute_command.restricted_dm.error",
+                    None,
+                    String::new(),
+                    400,
+                )));
+            }
+            Ok(_) => {}
+        }
+        if session.0.get_team_by_team_id(&args.team_id).is_none()
+            && !state
+                .app
+                .session_has_permission_to(&session.0, create_post)
+                .await
+        {
+            return Err(ApiError::from(make_permission_error(
+                &session.0,
+                &[create_post],
+            )));
+        }
+    }
+
+    // `ExecuteCommand`'s own prefix check (app/command.go:230) — unreachable after step 2.
+    let Some(trigger) = mm_app::command_provider::command_trigger(&args.command) else {
+        return Err(ApiError::from(AppError::new(
+            "command",
+            "api.command.execute_command.format.app_error",
+            None,
+            String::new(),
+            400,
+        )));
+    };
+
+    // `tryExecutePluginCommand` runs first, and a plugin command overrides everything.
+    if go_may_have_plugin_commands() {
+        return Ok(Execute::Forward);
+    }
+
+    match state
+        .app
+        .command_dispatch(&args.team_id, &session.0.user_id, &trigger)
+        .await?
+    {
+        mm_app::command_provider::CommandDispatch::NotFound(err) => Err(ApiError::from(err)),
+        mm_app::command_provider::CommandDispatch::Custom
+        | mm_app::command_provider::CommandDispatch::BuiltIn
+        | mm_app::command_provider::CommandDispatch::Undecidable => Ok(Execute::Forward),
+    }
 }
 
 #[cfg(test)]

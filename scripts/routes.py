@@ -195,7 +195,55 @@ def served(source=LIBRS):
     Takes the file so the same parser reads both routers: `lib.rs` for the HTTP one and
     `local.rs` for the unix-socket one.
     """
-    text = source.read_text()
+    return served_in(source.read_text())
+
+
+def function_body(text, name):
+    """The brace-delimited body of `fn <name>(` in `text`, or None when it is not declared."""
+    m = re.search(r'\bfn\s+' + re.escape(name) + r'\s*[(<]', text)
+    if not m:
+        return None
+    start = text.find("{", m.end())
+    depth, i = 1, start + 1
+    while depth and i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+        i += 1
+    return text[start:i]
+
+
+def merged_sources(router):
+    """The router functions `router` merges, as (module file, function name) pairs.
+
+    A family registers by `.merge(<module>::<fn>(...))` — `crate::`-qualified on the socket router,
+    bare on the HTTP one. Both are followed, because on 2026-09-15 each router gained its first
+    family registered this way (`config_writes` on the socket, `auth_certs` on the port) and the
+    inventory reported them as unserved: 5 socket pairs, then 22 HTTP pairs.
+    """
+    if not router.exists():
+        return []
+    out = []
+    pattern = r'\.merge\(\s*(?:crate::)?([a-z_0-9]+)::([a-z_0-9]+)\s*\('
+    for m in re.finditer(pattern, router.read_text()):
+        out.append((router.parent / f"{m.group(1)}.rs", m.group(2)))
+    return out
+
+
+def served_through_merges(router):
+    """Every pair registered by the functions `router` merges — see `merged_sources`."""
+    out = set()
+    for module, function in merged_sources(router):
+        body = function_body(module.read_text(), function) if module.exists() else None
+        if body is None:
+            sys.exit(f"{router.name} merges {module.name}::{function}, which is not declared there")
+        out |= served_in(body)
+    return out
+
+
+def served_in(text):
+    """`served`, over source text rather than a file — see `merged_local_sources`."""
     out = set()
     for m in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
         depth, i = 1, m.end()
@@ -232,7 +280,7 @@ def served(source=LIBRS):
 def main():
     args = set(sys.argv[1:])
     routes = collect()
-    have = served()
+    have = served() | served_through_merges(LIBRS)
     # The local router is `local.rs` plus the `local_<family>.rs` modules it `.merge`s — a family
     # ports as its own module (see `local::router`), so a parse of `local.rs` alone would miss
     # every merged family. Union them all.
@@ -241,6 +289,7 @@ def main():
         have_local |= served(LOCALRS)
         for module in sorted(LOCALRS.parent.glob("local_*.rs")):
             have_local |= served(module)
+        have_local |= served_through_merges(LOCALRS)
     want_local = "--local" in args
 
     for r in routes:

@@ -217,8 +217,17 @@ async fn an_empty_page_is_an_empty_array() {
 
     unplant_tokens().await;
 
+    // Page 0 of the whole installation's tokens is compared, not asserted empty. Another suite
+    // owns a live token for the length of the binary — `post_create_silent`'s fixture mints one
+    // for the seeded bot through Go and never revokes it, because its tests post with it — and
+    // `unplant_tokens` removes only this suite's `mmrstok…` rows. In a sharded run where that
+    // fixture ran first, Go's page 0 held its token and the literal `[]` failed on both servers
+    // (2026-09-15). Bracketed (Go, us, Go), since the mint can land between two reads.
+    let (go, rs) = common::fetch_both_stable(&client, &token, "/api/v4/users/tokens").await;
+    assert_eq!(rs, go, "/api/v4/users/tokens");
+
+    // These two are empty however many tokens exist, so they carry the `[]`-not-`null` assertion.
     for path in [
-        "/api/v4/users/tokens",
         "/api/v4/users/tokens?page=99",
         // A user who has never minted one.
         "/api/v4/users/zzzzzzzzzzzzzzzzzzzzzzzzzz/tokens",

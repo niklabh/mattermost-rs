@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT postid AS \"post_id!\", type AS \"type_!\", expireat AS \"expire_at!\",\n                      message AS \"message?\", fileids AS \"file_ids?\"\n                 FROM temporaryposts\n                WHERE postid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "type_!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "expire_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "message?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c6bc013a39b1b7beb5afb241170f0f39069aec9522cb507459bc8a7f21939fa2"
+}

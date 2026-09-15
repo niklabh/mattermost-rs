@@ -139,7 +139,7 @@ fn invalid_body() -> ApiError {
 }
 
 /// The first JSON value in the body, Go-style: see the module docs.
-fn decode_search_parameter(bytes: &[u8]) -> Result<SearchParameter, ApiError> {
+pub(crate) fn decode_search_parameter(bytes: &[u8]) -> Result<SearchParameter, ApiError> {
     let mut values =
         serde_json::Deserializer::from_slice(bytes).into_iter::<Option<SearchParameter>>();
     match values.next() {

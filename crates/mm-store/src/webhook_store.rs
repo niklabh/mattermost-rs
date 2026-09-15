@@ -38,6 +38,25 @@ pub trait WebhookStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlWebhookStore.AnalyticsOutgoingCount` (webhook_store.go:433).
+    ///
+    /// # With a team it is a **500**, and that is Go's, not ours
+    ///
+    /// Go writes the team filter as `queryBuilder.Where("TeamId", teamId)` — squirrel's
+    /// string form, which takes the first argument as a verbatim SQL fragment and the rest as
+    /// its placeholders' values. The fragment has no placeholder, so the statement Postgres
+    /// receives ends `AND TeamId` with one parameter it never asked for, and the database
+    /// refuses it. Every `GET /api/v4/analytics/old?name=extra_counts&team_id=…` is therefore
+    /// `app.webhooks.analytics_outgoing_count.app_error` on the Go server, whatever the team
+    /// (measured 2026-09-15 with a real team id and with `zzz`). This port issues the same
+    /// broken statement rather than the one Go meant to write, so the two servers refuse
+    /// together; the day Go fixes it, the `Where` becomes `sq.Eq{"TeamId": teamId}` and this
+    /// becomes the incoming count's predicate.
+    fn analytics_outgoing_count(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlWebhookStore.GetOutgoingListByUser` (webhook_store.go:283) — every team.
     fn get_outgoing_list_by_user(
         &self,
@@ -686,6 +705,34 @@ impl WebhookStore for SqlWebhookStore {
         .await
         .map_err(|source| StoreError::Db {
             context: "failed to count IncomingWebhooks".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, count))]
+    async fn analytics_outgoing_count(&self, team_id: &str) -> Result<i64, StoreError> {
+        let count = if team_id.is_empty() {
+            sqlx::query_scalar!(
+                r#"SELECT COUNT(*) AS "count!" FROM outgoingwebhooks WHERE deleteat = 0"#
+            )
+            .fetch_one(&self.pool)
+            .await
+        } else {
+            // Go's statement, verbatim: a bare `TeamId` where a predicate should be, and a
+            // parameter with no placeholder to land in. See the trait's doc comment before
+            // "fixing" this — the refusal is the wire format.
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM outgoingwebhooks WHERE deleteat = 0 AND teamid",
+            )
+            .bind(team_id)
+            .fetch_one(&self.pool)
+            .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: "failed to count OutgoingWebhooks".to_owned(),
             source,
         })?;
 

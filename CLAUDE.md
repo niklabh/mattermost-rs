@@ -49,27 +49,39 @@ So:
    local-mode socket API and the licensed/enterprise handlers — so a route no client hits is
    deferred, not dropped, and "no client calls this" is not a reason to close a gap unported.
 
-## The end state is a Go server that is not running
+## The end state: everything portable in Rust, Go only where the code is private
 
-**Added 2026-09-07, on the maintainer's direction.** The strangler proxy is *test apparatus*, not
-the destination. It exists so a half-migrated server stays honest and byte-comparable against Go;
-it is not a licence to leave a route in Go indefinitely, and it must never be the reason a piece
-of work is skipped.
+**Revised 2026-09-15, on the maintainer's direction.** It replaces "a Go server that is not
+running" (2026-09-07). The reference tree does not hold the Enterprise implementations. SAML,
+LDAP, the access-control policy engine, the cluster bus, message export and the rest register
+from private code, and on every build we can run they are nil interfaces. A Go server that never
+runs is therefore not reachable. Forwarding the calls that need that code is the end state, not
+a temporary compromise.
 
-Two things follow, and they override any local reading of the rules above:
+What this means in practice:
 
-- **The denominator is everything.** 762 api4 route+method pairs, plus the websocket hub, the
-  plugin host, jobs, and the cluster interfaces — none of which are in the 762. Progress reported
-  against a subset that excludes enterprise or local-mode routes is progress reported against the
-  wrong number. Do not do it.
-- **Nothing about this project's status gates development.** There are no users and no deployment,
-  so a staleness window, a licensed feature, a missing client, or an unpopular route is a fact to
-  record and route around — never a blocker. See also the standing rule that licensing does not
-  gate development.
+- **Port every piece of Go logic that the public tree contains.** That includes the handler's
+  checks in Go's order, the licence and setting gates, and what Go answers when the enterprise
+  interface is nil. This is best effort, not optional: "it is an enterprise route" is not a
+  reason to skip the parts that are public.
+- **Forward only what depends on private code, or on state only the Go process holds.** Each
+  forward is decided before anything is written. It is stated in the handler's doc comment and
+  has a `docs/TECH_DEBT.md` entry naming the private dependency, so it is visible rather than
+  silent.
+- **The strangler proxy stays.** It is test apparatus for byte parity, and it is also the
+  permanent route to Go for the forwarded branches. It must still never be the reason portable
+  work is skipped.
+- **The denominator is still everything.** 762 api4 route+method pairs, plus the websocket hub,
+  the plugin host, jobs and the cluster interfaces. Report progress against the full count, and
+  say separately how much of it is forwarded because the code is private. Never quote a
+  percentage over a subset.
+- **Nothing about this project's status gates development.** There are no users and no
+  deployment, so a staleness window, a licensed feature, a missing client or an unpopular route is
+  a fact to record and route around, never a blocker. Licensing does not gate development.
 
 What does *not* change is rules 1-3. Porting breadth-first without a route to exercise it is how
-this project accumulated ~20,000 lines of unreachable model code, and wanting the whole thing in
-Rust is a reason to sequence that work behind routes, not a reason to repeat it.
+this project accumulated ~20,000 lines of unreachable model code, so sequence the portable work
+behind routes.
 
 ## Reading the Go tree
 

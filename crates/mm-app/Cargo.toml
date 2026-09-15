@@ -31,7 +31,12 @@ base64.workspace = true
 rand.workspace = true
 # Licence signature verification — see the workspace manifest.
 rsa.workspace = true
+# Trigger-id signature verification for `openDialog` — see the workspace manifest.
+p256.workspace = true
 subtle.workspace = true
+# `getpwuid_r`, for the upgrader's port of `os/user.LookupId` — the username of the binary's
+# owner and of this process, which `CanIUpgradeToE0`'s three permission errors carry.
+libc = "0.2"
 
 [dev-dependencies]
 # Only to construct a `sqlx::Error` when testing the store-error-to-AppError mapping. The crate

@@ -65,6 +65,13 @@ pub trait UserStore {
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.AnalyticsGetInactiveUsersCount` (user_store.go:1500): deactivated
+    /// accounts (`DeleteAt > 0`) that are **not bots** — the `LEFT JOIN Bots … IS NULL` half is
+    /// what keeps a deactivated bot out of the "inactive users" figure.
+    fn analytics_get_inactive_users_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
@@ -1118,6 +1125,27 @@ impl UserStore for SqlUserStore {
         .await
         .map_err(|source| StoreError::Db {
             context: "failed to count single-channel guest Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_get_inactive_users_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(u.id) AS "count!"
+              FROM users u
+              LEFT JOIN bots b ON u.id = b.userid
+             WHERE u.deleteat > 0
+               AND b.userid IS NULL
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count inactive Users".to_owned(),
             source,
         })?;
         tracing::Span::current().record("count", count);

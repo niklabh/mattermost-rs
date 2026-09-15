@@ -748,6 +748,31 @@ pub const MAX_DIALOG_FILE_IDS: usize = 10;
 /// the file-upload limit — that is [`MAX_DIALOG_FILE_IDS`].
 pub const MAX_DIALOG_SUBMISSION_ID_SHAPED_TOKEN_SCAN: usize = 256;
 
+/// Port of `model.ValidateActionQuery` (integration_action.go:1172): at most
+/// [`MAX_ACTION_QUERY_ENTRIES`] entries, each key at most [`MAX_ACTION_QUERY_KEY_LENGTH`]
+/// **bytes** and each value at most [`MAX_ACTION_QUERY_VALUE_LENGTH`] (Go's `len` on a
+/// string). The error text only ever reaches `detailed_error`.
+pub fn validate_action_query(q: &crate::utils::StringMap) -> Result<(), String> {
+    if q.len() > MAX_ACTION_QUERY_ENTRIES {
+        return Err(format!(
+            "query exceeds maximum of {MAX_ACTION_QUERY_ENTRIES} entries"
+        ));
+    }
+    for (key, value) in q {
+        if key.len() > MAX_ACTION_QUERY_KEY_LENGTH {
+            return Err(format!(
+                "query key exceeds {MAX_ACTION_QUERY_KEY_LENGTH} chars"
+            ));
+        }
+        if value.len() > MAX_ACTION_QUERY_VALUE_LENGTH {
+            return Err(format!(
+                "query value for {key:?} exceeds {MAX_ACTION_QUERY_VALUE_LENGTH} chars"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Go's reference-time layouts. They are kept as constants because they are exported API, but
 /// nothing here passes them to a parser: `time.Parse`'s behaviour is reproduced directly by
 /// [`parse_go_iso_date`] and [`parse_go_iso_date_time`], which are pinned against Go.

@@ -92,6 +92,13 @@ MODELLED = {
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
         # The 501 gate on the two post-search routes.
         "EnablePostSearch",
+        # The reader window of a burn-on-read reveal and the outbound budget (also the
+        # trigger-id age limit) of the integration-action routes.
+        "BurnOnReadDurationSeconds", "OutgoingIntegrationRequestsTimeout",
+        # Whether a permalink is previewed from its post or fetched like any other link.
+        "EnablePermalinkPreviews",
+        # The 501 gate on the two file-search routes.
+        "EnableFileSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
@@ -111,8 +118,9 @@ MODELLED = {
         # The attachment switch and the pixel cap, read by the three file-writing routes.
         "EnableFileAttachments", "MaxImageResolution",
     ],
-    # Read by createUpload for an import upload: the directory-conflict check.
-    "PluginSettings": ["Directory"],
+    # Directory is read by createUpload for an import upload. Enable and EnableMarketplace
+    # decide the marketplace slash command AutoComplete flag in the built-in command registry.
+    "PluginSettings": ["Directory", "Enable", "EnableMarketplace"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -143,6 +151,8 @@ MODELLED = {
         # The gate on POST /api/v4/notifications/ack. Defaulted from isUpdate, so the value in
         # the live document is what decides between the 501 and the push proxy.
         "SendPushNotifications",
+        # One of the three settings the invite_people slash command ANDs into AutoComplete.
+        "SendEmailNotifications",
     ],
     # `users.CreateUser` replaces an unsupported submitted locale with this.
     "LocalizationSettings": ["DefaultClientLocale"],
@@ -155,6 +165,15 @@ MODELLED = {
     "Office365Settings": ["Enable"],
     "MessageExportSettings": ["DownloadExportResults"],
     "CloudSettings": ["PreviewModalBucketURL"],
+    # The intensive-query cap on GET /api/v4/analytics/old.
+    "AnalyticsSettings": ["MaxUsersForStatistics"],
+    # The file switch and directory the three log routes read.
+    "LogSettings": ["EnableFile", "FileLocation"],
+    # The notice gates, feed and refresh period behind GET /api/v4/system/notices/{team_id}.
+    "AnnouncementSettings": [
+        "AdminNoticesEnabled", "UserNoticesEnabled", "NoticesURL", "NoticesFetchFrequency",
+        "NoticesSkipCache",
+    ],
 }
 
 full = json.load(sys.stdin)

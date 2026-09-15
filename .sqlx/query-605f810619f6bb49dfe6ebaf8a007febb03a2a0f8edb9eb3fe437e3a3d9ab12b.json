@@ -1,0 +1,99 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT p.id, p.name, p.type AS \"type_\", p.active, p.createat, p.revision, p.version,\n                   p.data, p.props,\n                   CASE WHEN $12::bool THEN COALESCE((SELECT JSON_AGG(c.id)\n                        FROM accesscontrolpolicies c\n                       WHERE c.type != 'parent'\n                         AND c.data->'imports' @> JSONB_BUILD_ARRAY(p.id)), '[]'::json) END AS \"child_ids: serde_json::Value\",\n                   CASE WHEN $12::bool THEN COALESCE((SELECT COUNT(*)\n                        FROM accesscontrolpolicies c\n                       WHERE c.type = 'channel'\n                         AND c.data->'imports' @> JSONB_BUILD_ARRAY(p.id)), 0) END AS \"channel_count\",\n                   CASE WHEN $12::bool THEN COALESCE((SELECT COUNT(*)\n                        FROM accesscontrolpolicies c\n                       WHERE c.type = 'team'\n                         AND c.data->'imports' @> JSONB_BUILD_ARRAY(p.id)), 0) END AS \"team_count\"\n              FROM accesscontrolpolicies p\n             WHERE ($1::text = '' OR LOWER(p.name) LIKE LOWER($1) ESCAPE '*')\n               AND ($2::text = '' OR p.type = $2)\n               AND ($3::text = '' OR p.data->'imports' @> to_jsonb($3::text))\n               AND (cardinality($4::text[]) = 0 OR EXISTS (\n                        SELECT 1\n                          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.data->'rules') = 'array'\n                                                         THEN p.data->'rules' ELSE '[]'::jsonb END) AS rule,\n                               unnest($4::text[]) AS wanted(action)\n                         WHERE rule->'actions' @> to_jsonb(wanted.action)))\n               AND (NOT $5::bool OR p.active = true)\n               AND (cardinality($6::text[]) = 0 OR p.id = ANY($6))\n               AND ($7::text = '' OR $8::text = ''\n                    OR (p.data->>'scope' = $7 AND p.data->>'scope_id' = $8))\n               AND ($9::text = '' OR CASE\n                    WHEN $2 = 'channel' THEN p.id IN (SELECT id FROM channels WHERE teamid = $9)\n                    ELSE ($2 <> '' OR p.type = 'parent')\n                         AND p.id IN (\n                            SELECT parent_id FROM (\n                                SELECT ch.teamid,\n                                       jsonb_array_elements_text(COALESCE(NULLIF(cp.data->'imports', 'null'::jsonb), '[]'::jsonb)) AS parent_id\n                                  FROM accesscontrolpolicies cp\n                                  JOIN channels ch ON ch.id = cp.id\n                                 WHERE cp.type = 'channel'\n                            ) team_children\n                            GROUP BY parent_id\n                            HAVING COUNT(DISTINCT teamid) = 1 AND MIN(teamid) = $9)\n                    END)\n               AND ($10::text = '' OR p.id > $10)\n             ORDER BY p.id ASC\n             LIMIT $11\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "revision",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "version",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "data",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "props",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "child_ids: serde_json::Value",
+        "type_info": "Json"
+      },
+      {
+        "ordinal": 10,
+        "name": "channel_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "team_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Bool",
+        "TextArray",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "605f810619f6bb49dfe6ebaf8a007febb03a2a0f8edb9eb3fe437e3a3d9ab12b"
+}

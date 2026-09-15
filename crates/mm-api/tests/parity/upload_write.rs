@@ -349,7 +349,7 @@ async fn disabled_attachments_refuses_create_with_501() {
         return;
     }
     let Some(server) =
-        common::SecondServer::start(8090, &[("MM_FILESETTINGS_ENABLEFILEATTACHMENTS", "false")])
+        common::SecondServer::start(8087, &[("MM_FILESETTINGS_ENABLEFILEATTACHMENTS", "false")])
             .await
     else {
         return;

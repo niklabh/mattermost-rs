@@ -203,52 +203,62 @@ fn clamp_page(opts: &ViewQueryOpts) -> (i64, i64) {
     (page, per_page)
 }
 
+/// Port of `saveViewT` (view_store.go:43-74) against any executor — the pool for
+/// [`ViewStore::save`], a transaction for `SqlChannelStore::save_board_channel`, which writes a
+/// board's channel row and its default kanban view atomically.
+#[tracing::instrument(skip_all, fields(channel_id = %view.channel_id, view_id))]
+pub(crate) async fn save_view_t<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+    view: &mut View,
+) -> Result<(), StoreError> {
+    // `saveViewT` runs both of these itself "so callers can't forget to validate"
+    // (view_store.go:51). The order is load-bearing: `PreSave` mints the id and the
+    // timestamps that `IsValid` then requires to be non-empty and non-zero.
+    view.pre_save();
+    if let Err(app_error) = view.is_valid() {
+        return Err(StoreError::Invalid {
+            entity: "View",
+            app_error,
+        });
+    }
+    tracing::Span::current().record("view_id", &view.id);
+
+    let sort_order = sort_order_column(view.sort_order)?;
+    let props = props_column(view.props.as_ref());
+
+    sqlx::query!(
+        r#"
+        INSERT INTO views
+            (id, channelid, type, creatorid, title,
+             description, sortorder, props,
+             createat, updateat, deleteat)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "#,
+        view.id,
+        view.channel_id,
+        view.view_type,
+        view.creator_id,
+        view.title,
+        view.description,
+        sort_order,
+        props,
+        view.create_at,
+        view.update_at,
+        view.delete_at,
+    )
+    .execute(executor)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to save view".to_owned(),
+        source,
+    })?;
+
+    Ok(())
+}
+
 impl ViewStore for SqlViewStore {
-    #[tracing::instrument(skip(self, view), fields(channel_id = %view.channel_id, view_id))]
     async fn save(&self, view: &mut View) -> Result<(), StoreError> {
-        // `saveViewT` runs both of these itself "so callers can't forget to validate"
-        // (view_store.go:51). The order is load-bearing: `PreSave` mints the id and the
-        // timestamps that `IsValid` then requires to be non-empty and non-zero.
-        view.pre_save();
-        if let Err(app_error) = view.is_valid() {
-            return Err(StoreError::Invalid {
-                entity: "View",
-                app_error,
-            });
-        }
-        tracing::Span::current().record("view_id", &view.id);
-
-        let sort_order = sort_order_column(view.sort_order)?;
-        let props = props_column(view.props.as_ref());
-
-        sqlx::query!(
-            r#"
-            INSERT INTO views
-                (id, channelid, type, creatorid, title,
-                 description, sortorder, props,
-                 createat, updateat, deleteat)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            "#,
-            view.id,
-            view.channel_id,
-            view.view_type,
-            view.creator_id,
-            view.title,
-            view.description,
-            sort_order,
-            props,
-            view.create_at,
-            view.update_at,
-            view.delete_at,
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|source| StoreError::Db {
-            context: "failed to save view".to_owned(),
-            source,
-        })?;
-
-        Ok(())
+        save_view_t(&self.pool, view).await
     }
 
     #[tracing::instrument(skip(self), fields(view_id = %id, found))]

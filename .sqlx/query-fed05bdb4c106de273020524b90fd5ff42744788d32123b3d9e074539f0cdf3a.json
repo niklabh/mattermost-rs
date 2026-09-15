@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO accesscontrolpolicyhistory\n                        (id, name, type, createat, revision, version, data, props)\n                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int4",
+        "Varchar",
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fed05bdb4c106de273020524b90fd5ff42744788d32123b3d9e074539f0cdf3a"
+}

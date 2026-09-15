@@ -221,6 +221,13 @@ impl GuardedClient {
         Ok(Some(permitted))
     }
 
+    /// Whether the dialer would be allowed to reach `host:port` at all — the guard's decision
+    /// without the request. `Ok` when the host is allowed verbatim or at least one resolved
+    /// address is permitted; the refusal or the lookup failure otherwise.
+    pub async fn permits(&self, host: &str, port: u16) -> Result<(), GuardError> {
+        self.resolve(host, port).await.map(|_| ())
+    }
+
     /// A `HEAD` that does not follow redirects, so the `Location` header is the answer.
     #[tracing::instrument(skip(self), fields(host))]
     pub async fn head_without_redirects(&self, url: &str) -> Result<reqwest::Response, GuardError> {

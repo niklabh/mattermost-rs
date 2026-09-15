@@ -65,6 +65,19 @@ pub trait PropertyStore {
 
     /// Port of `SqlPropertyFieldStore.GetMany` (property_field_store.go:120), **without** its
     /// cardinality check — see the method's own docs.
+    /// Port of `SqlPropertyFieldStore.GetFieldByNameForObjectType` (property_field_store.go:95).
+    ///
+    /// `objectType` is matched **exactly** — the empty string is itself a valid object type, not
+    /// a wildcard — and `TargetID` likewise, so the boards group's post-level fields (`TargetID`
+    /// empty) are found with an empty target. `DeleteAt = 0` is part of the predicate.
+    fn get_field_by_name_for_object_type(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        object_type: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<PropertyField, StoreError>> + Send;
+
     fn get_many_fields(
         &self,
         group_id: &str,
@@ -273,6 +286,62 @@ impl PropertyStore for SqlPropertyStore {
         .ok_or_else(|| StoreError::NotFound {
             entity: "PropertyField",
             criteria: format!("Id={id}"),
+        })?;
+
+        tracing::Span::current().record("found", true);
+        row.into_field()
+    }
+
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, object_type = %object_type, name = %name, found = false))]
+    async fn get_field_by_name_for_object_type(
+        &self,
+        group_id: &str,
+        target_id: &str,
+        object_type: &str,
+        name: &str,
+    ) -> Result<PropertyField, StoreError> {
+        let row = sqlx::query_as!(
+            PropertyFieldRow,
+            r#"
+            SELECT id                                   AS "id!",
+                   groupid                              AS "groupid!",
+                   name                                 AS "name!",
+                   COALESCE(type::text, '')             AS "type_text!",
+                   attrs                                AS "attrs?",
+                   COALESCE(targetid, '')               AS "targetid!",
+                   COALESCE(targettype, '')             AS "targettype!",
+                   objecttype                           AS "objecttype!",
+                   protected                            AS "protected!",
+                   permissionfield::text                AS "permissionfield?",
+                   permissionvalues::text               AS "permissionvalues?",
+                   permissionoptions::text              AS "permissionoptions?",
+                   linkedfieldid                        AS "linkedfieldid?",
+                   createat                             AS "createat!",
+                   updateat                             AS "updateat!",
+                   deleteat                             AS "deleteat!",
+                   COALESCE(createdby, '')              AS "createdby!",
+                   COALESCE(updatedby, '')              AS "updatedby!"
+              FROM propertyfields
+             WHERE groupid = $1
+               AND targetid = $2
+               AND name = $3
+               AND deleteat = 0
+               AND objecttype = $4
+            "#,
+            group_id,
+            target_id,
+            name,
+            object_type
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_field_get_by_name_select".to_owned(),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "PropertyField",
+            criteria: name.to_owned(),
         })?;
 
         tracing::Span::current().record("found", true);
@@ -1027,12 +1096,18 @@ impl PropertyStore for SqlPropertyStore {
         Ok(count)
     }
 
-    /// # A system-level name conflicts at every level, and the same level is checked first
+    /// # Three levels, three `COALESCE`s, and the same level is always checked first
     ///
-    /// `checkSystemLevelConflict` is `COALESCE` over three `LIMIT 1` subqueries — system, then
-    /// team, then channel — each on the same object type, group, name and `DeleteAt = 0`, each
-    /// excluding `exclude_id` when one is given. The first non-null wins, so a name held at both
-    /// team and channel level reports `team`. Legacy (PSAv1) fields skip the check entirely.
+    /// `CheckPropertyNameConflict` (property_field_store.go:579) dispatches on the target type,
+    /// and each arm is `COALESCE` over three `LIMIT 1` subqueries on the same object type,
+    /// group, name and `DeleteAt = 0`, each excluding `exclude_id` when one is given; the first
+    /// non-null wins. **System**: system, team, channel — a system name conflicts with the name
+    /// at any level anywhere. **Team**: the same team's team-level row, any system row, then a
+    /// channel row whose channel is *in that team* (`JOIN Channels ON c.TeamId = target`).
+    /// **Channel**: the same channel's row, any system row, then the team-level row of *the
+    /// channel's team* (`TargetID = (SELECT TeamId FROM Channels WHERE Id = target)`), which for
+    /// a direct channel is the empty team id and matches nothing. Legacy (PSAv1) fields skip
+    /// the check entirely, and an unknown target type is "let DB constraint handle".
     #[tracing::instrument(skip_all, fields(name = %field.name, target_type = %field.target_type, level))]
     async fn check_property_name_conflict(
         &self,
@@ -1044,12 +1119,76 @@ impl PropertyStore for SqlPropertyStore {
         }
         match field.target_type.as_str() {
             mm_model::property_field::PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => {}
-            mm_model::property_field::PROPERTY_FIELD_TARGET_LEVEL_TEAM
-            | mm_model::property_field::PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {
-                return Err(StoreError::Argument {
-                    entity: "PropertyField",
-                    detail: "team- and channel-level name conflict checks are not ported",
-                });
+            mm_model::property_field::PROPERTY_FIELD_TARGET_LEVEL_TEAM => {
+                let level = sqlx::query_scalar!(
+                    r#"
+                    SELECT COALESCE(
+                             (SELECT 'team' FROM propertyfields
+                               WHERE objecttype = $1 AND groupid = $2 AND targettype = 'team'
+                                 AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)
+                                 AND targetid = $5
+                               LIMIT 1),
+                             (SELECT 'system' FROM propertyfields
+                               WHERE objecttype = $1 AND groupid = $2 AND targettype = 'system'
+                                 AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)
+                               LIMIT 1),
+                             (SELECT 'channel' FROM propertyfields pf
+                                JOIN channels c ON c.id = pf.targetid AND c.teamid = $5
+                               WHERE pf.objecttype = $1 AND pf.groupid = $2
+                                 AND pf.targettype = 'channel' AND pf.name = $3
+                                 AND pf.deleteat = 0 AND ($4::text = '' OR pf.id <> $4)
+                               LIMIT 1),
+                             '') AS "level!"
+                    "#,
+                    field.object_type,
+                    field.group_id,
+                    field.name,
+                    exclude_id,
+                    field.target_id,
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: "property_field_check_conflict_team".to_owned(),
+                    source,
+                })?;
+                tracing::Span::current().record("level", &level);
+                return Ok(level);
+            }
+            mm_model::property_field::PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {
+                let level = sqlx::query_scalar!(
+                    r#"
+                    SELECT COALESCE(
+                             (SELECT 'channel' FROM propertyfields
+                               WHERE objecttype = $1 AND groupid = $2 AND targettype = 'channel'
+                                 AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)
+                                 AND targetid = $5
+                               LIMIT 1),
+                             (SELECT 'system' FROM propertyfields
+                               WHERE objecttype = $1 AND groupid = $2 AND targettype = 'system'
+                                 AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)
+                               LIMIT 1),
+                             (SELECT 'team' FROM propertyfields
+                               WHERE objecttype = $1 AND groupid = $2 AND targettype = 'team'
+                                 AND name = $3 AND deleteat = 0 AND ($4::text = '' OR id <> $4)
+                                 AND targetid = (SELECT teamid FROM channels WHERE id = $5)
+                               LIMIT 1),
+                             '') AS "level!"
+                    "#,
+                    field.object_type,
+                    field.group_id,
+                    field.name,
+                    exclude_id,
+                    field.target_id,
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: "property_field_check_conflict_channel".to_owned(),
+                    source,
+                })?;
+                tracing::Span::current().record("level", &level);
+                return Ok(level);
             }
             // "Unknown target type - let DB constraint handle"
             _ => return Ok(String::new()),

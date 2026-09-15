@@ -829,6 +829,21 @@ pub trait ChannelStore {
         max_channels_per_team: i64,
     ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.SaveBoardChannel` (channel_store.go:753) — a board's channel row
+    /// and its default kanban view in **one transaction**, through the same `saveChannelT` as
+    /// [`ChannelStore::save`] but **without** the `PublicChannels` upsert: boards must not appear
+    /// there. Refuses a non-board `Type` and a set `DeleteAt` before touching the database.
+    ///
+    /// Mutates both arguments the way Go returns them: the channel gets its id and timestamps,
+    /// the view its `ChannelId`, id and timestamps. [`ChannelSave::Existing`] is the name
+    /// conflict, with nothing written.
+    fn save_board_channel(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+        view: &mut mm_model::view::View,
+    ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.SaveDirectChannel` (channel_store.go:712).
     ///
     /// One transaction over three writes: the channel row and both memberships. **`team_id` is
@@ -859,6 +874,18 @@ pub trait ChannelStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.AnalyticsCountAll` (channel_store.go:2812) — channels per
+    /// `Type`, for one team or (`""`) all of them.
+    ///
+    /// **Every row counts, archived ones included**: there is no `DeleteAt` predicate. The only
+    /// exclusion is `nonMessageBackingChannelTypes`, which today is the space type alone. Keys
+    /// are the type letters; a type with no rows is absent, and the caller reads `0` for it,
+    /// which is what indexing Go's `map[ChannelType]int64` does.
+    fn analytics_count_all(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<HashMap<String, i64>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1727,6 +1754,16 @@ impl ChannelStore for SqlChannelStore {
         save(&self.pool, channel, max_channels_per_team).await
     }
 
+    #[tracing::instrument(skip_all, fields(channel_type = %channel.channel_type, team_id = %channel.team_id))]
+    async fn save_board_channel(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+        view: &mut mm_model::view::View,
+    ) -> Result<ChannelSave, StoreError> {
+        save_board_channel(&self.pool, channel, max_channels_per_team, view).await
+    }
+
     #[tracing::instrument(skip_all, fields(name = %channel.name))]
     async fn save_direct_channel(
         &self,
@@ -1740,6 +1777,33 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip(self), fields(team_id = %team_id))]
     async fn count_team_channels(&self, team_id: &str) -> Result<i64, StoreError> {
         count_team_channels(&self.pool, team_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, types))]
+    async fn analytics_count_all(&self, team_id: &str) -> Result<HashMap<String, i64>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT type::text AS "channel_type!", COUNT(*) AS "count!"
+              FROM channels
+             WHERE ($1 = '' OR teamid = $1)
+               AND type::text <> $2
+             GROUP BY type
+            "#,
+            team_id,
+            CHANNEL_TYPE_SPACE,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Channels by type".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("types", rows.len());
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.channel_type, row.count))
+            .collect())
     }
 }
 
@@ -6553,6 +6617,53 @@ pub async fn set_delete_at(
 /// `store.sql_channel.save.direct_channel.app_error`. Folding the two into one variant would
 /// swap one 400's id for another's.
 ///
+/// Port of `SqlChannelStore.SaveBoardChannel` (channel_store.go:753). See the trait method.
+pub async fn save_board_channel(
+    pool: &PgPool,
+    channel: &mut Channel,
+    max_channels_per_team: i64,
+    view: &mut mm_model::view::View,
+) -> Result<ChannelSave, StoreError> {
+    if channel.delete_at != 0 {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "DeleteAt",
+            value: channel.delete_at.to_string(),
+        });
+    }
+    if !channel.is_board() {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Type",
+            value: channel.channel_type.clone(),
+        });
+    }
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let saved = save_channel_t(&mut tx, channel, max_channels_per_team).await?;
+    if let ChannelSave::Existing(existing) = saved {
+        // Go returns the duplicate beside `ErrConflict` and `finalizeTransactionX` rolls back.
+        drop(tx);
+        return Ok(ChannelSave::Existing(existing));
+    }
+
+    // Do NOT call `upsert_public_channel` — boards must not appear in PublicChannels.
+
+    view.channel_id.clone_from(&channel.id);
+    crate::view_store::save_view_t(&mut *tx, view).await?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(ChannelSave::Saved)
+}
+
 /// A group channel is *not* refused here: `createGroupChannel` (app/channel.go:572) reaches this
 /// same function with `Type == 'G'`, which is why the direct-channel guard names only `D`.
 pub async fn save(
@@ -7166,13 +7277,16 @@ const CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT: i64 = 100;
 /// `private && !public` is `c.Type = 'P'`; **everything else**, including both set and neither
 /// set, is `c.Type IN ('O','P')`. Setting both is therefore the same request as setting neither.
 ///
-/// # `policy_id` filtering is not reached from the REST API
+/// # `policy_id` is Go's first `else if`, and it silences `exclude_policy_constrained`
 ///
-/// `channelSearchQuery`'s first branch — `PolicyID != ""`, an inner join that narrows to one
-/// retention policy — has no caller in api4: `searchAllChannels` never sets the field, and
-/// `ChannelSearch` has no json tag for it. Only the `exclude_policy_constrained` and
-/// `include_policy_id` branches below are reachable, so only those are ported; a future data
-/// retention route wanting the first must add it and a test that sends it.
+/// `channelSearchQuery` (channel_store.go:3690) is a three-way `if / else if / else if`: a
+/// non-empty `PolicyID` inner-joins `RetentionPoliciesChannels` on that policy, **and then the
+/// `ExcludePolicyConstrained` branch never runs**; only with no policy does the exclusion apply.
+/// `ChannelSearch` has no json tag for the field, so the only caller that sets it is
+/// `searchChannelsInPolicy` (data_retention.go:374), which pins it from the URL. The inner join
+/// is an `EXISTS` here — `ChannelId` is the table's primary key, so the join cannot multiply
+/// rows — and the exclusion predicate is guarded on the policy being empty, which is the
+/// `else if`.
 #[tracing::instrument(skip(pool, opts), fields(term_len = term.len(), found, total))]
 pub async fn search_all_channels(
     pool: &PgPool,
@@ -7248,7 +7362,10 @@ pub async fn search_all_channels(
           FROM channels c
           JOIN teams t ON t.id = c.teamid
          WHERE (($5 AND c.deleteat <> 0) OR (NOT $5 AND ($6 OR c.deleteat = 0)))
-           AND (NOT $4 OR NOT EXISTS (
+           AND ($24::text = '' OR EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id AND rpc.policyid = $24))
+           AND ($24::text <> '' OR NOT $4 OR NOT EXISTS (
                    SELECT 1 FROM retentionpolicieschannels rpc
                     WHERE rpc.channelid = c.id))
            AND (NOT $7
@@ -7312,6 +7429,7 @@ pub async fn search_all_channels(
         opts.parent_access_control_policy_id,
         &parent_policy_json,
         opts.access_control_policy_enforced,
+        opts.policy_id,
     )
     .fetch_all(pool)
     .await
@@ -7343,7 +7461,10 @@ pub async fn search_all_channels(
           FROM channels c
           JOIN teams t ON t.id = c.teamid
          WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)))
-           AND (NOT $3 OR NOT EXISTS (
+           AND ($21::text = '' OR EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id AND rpc.policyid = $21))
+           AND ($21::text <> '' OR NOT $3 OR NOT EXISTS (
                    SELECT 1 FROM retentionpolicieschannels rpc
                     WHERE rpc.channelid = c.id))
            AND (NOT $4
@@ -7402,6 +7523,7 @@ pub async fn search_all_channels(
         opts.parent_access_control_policy_id,
         &parent_policy_json,
         opts.access_control_policy_enforced,
+        opts.policy_id,
     )
     .fetch_one(pool)
     .await

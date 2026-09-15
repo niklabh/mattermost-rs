@@ -3,10 +3,18 @@
 //! Depends on `mm-store`; knows nothing about HTTP. Handlers live in `mm-api` and call into here,
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
+pub mod access_control_policy;
+pub mod agents;
 pub mod analytics;
 pub mod audit;
 pub mod auth;
+/// The nil-interface halves of `app/saml.go`, `app/ldap.go` and `app/audit.go` — what the
+/// certificate and enterprise-gate routes reach on a build with no SAML or LDAP implementation.
+/// Appended rather than filed alphabetically: this list is shared by every worktree.
+pub mod auth_certs;
 pub mod authorization;
+/// Port of `app/board.go` — `CreateBoardChannel`.
+pub mod board;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
@@ -22,6 +30,11 @@ pub mod channel_move;
 pub mod channel_view;
 pub mod channel_write;
 pub mod command;
+/// The built-in slash-command registry (`GetCommand` only), `ListAutocompleteCommands` and the
+/// dispatch half of `ExecuteCommand`.
+pub mod command_provider;
+/// Port of `app/command_autocomplete.go` — `GetSuggestions`.
+pub mod command_suggestions;
 pub mod common_teams;
 pub mod config;
 pub mod custom_profile_attributes;
@@ -32,6 +45,7 @@ pub mod emoji;
 pub mod export;
 /// The read side of `app/file.go` — `FileInfo` rows and, through [`filestore`], file bytes.
 pub mod file;
+pub mod file_search;
 /// Port of `UploadFileX` — the single-file upload behind `POST /api/v4/files`.
 pub mod file_upload;
 /// Port of `platform/shared/filestore` — the local driver, and a refusal for the other two.
@@ -51,6 +65,8 @@ pub mod job;
 pub mod license;
 pub mod limits;
 pub mod login;
+/// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
+pub mod marketplace_visit;
 pub mod mention;
 /// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
 pub mod mime;
@@ -62,10 +78,13 @@ pub mod password;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_create;
+pub mod post_rest;
 pub mod post_search;
 pub mod post_unread;
 pub mod post_write;
 pub mod preference;
+// Appended 2026-09-15: the notice cache and `GetProductNotices`.
+pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
 pub mod reaction;
@@ -100,6 +119,10 @@ pub mod utils;
 /// Port of `app/view.go` — the integrated-boards (kanban view) surface.
 pub mod view;
 pub mod webhook;
+// Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
+pub mod logs;
+pub mod searchengine;
+pub mod upgrader;
 
 use mm_store::SqlStore;
 
@@ -162,6 +185,9 @@ pub struct App {
     /// The verified licence for the current `Licenses.Id`, shared across clones so the RSA work
     /// happens once per licence rather than once per request.
     license_cache: std::sync::Arc<crate::license::LicenseCache>,
+    /// Go's `Channels.cachedNotices` and the three counts beside it — see
+    /// `crate::product_notices`. Shared across clones for the same reason as the hub.
+    notices_cache: crate::product_notices::SharedNoticesCache,
 }
 
 impl App {
@@ -206,6 +232,9 @@ impl App {
             license_keys,
             env_license,
             license_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            notices_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                crate::product_notices::NoticesCache::default(),
+            )),
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
@@ -217,6 +246,11 @@ impl App {
                 std::collections::HashSet::new(),
             )),
         }
+    }
+
+    /// The notice cache — `a.ch.cachedNotices` and its counts.
+    pub fn notices_cache(&self) -> &crate::product_notices::SharedNoticesCache {
+        &self.notices_cache
     }
 
     /// Port of `app.App.Srv().Store()`.

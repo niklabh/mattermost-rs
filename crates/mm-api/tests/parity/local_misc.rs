@@ -118,6 +118,8 @@ async fn the_local_config_matches_and_is_not_sanitized() {
     if !sockets_enabled() {
         return;
     }
+    // Shared: `parity::configlic` patches the document under the exclusive half.
+    let _document = common::CONFIG_DOCUMENT.read().await;
     let ((go_status, go_body), (rs_status, rs_body)) = both("GET", "/api/v4/config").await;
     assert_eq!(go_status, 200);
     assert_eq!(rs_status, 200);

@@ -6,6 +6,7 @@
 //! the proxy is the fallback.
 
 pub mod access_control;
+pub mod access_control_policies;
 pub mod audits;
 pub mod auth;
 pub mod auth_writes;
@@ -39,8 +40,10 @@ pub mod file_store_test;
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
 
+pub mod agents;
 /// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod channel_join_requests;
+pub mod file_search;
 /// `uploadFileStream` — the classic `POST /api/v4/files` upload.
 pub mod file_upload;
 pub mod files;
@@ -56,6 +59,7 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod local_access_control;
 pub mod local_channels;
 pub mod local_misc;
 pub mod local_users;
@@ -64,20 +68,25 @@ pub mod migrate_auth;
 pub mod multipart;
 pub mod notify_admin;
 pub mod oauth;
+pub mod outgoing_oauth_writes;
 pub mod permissions;
 pub mod post_acks;
 pub mod post_search;
 pub mod post_writes;
+/// The rest of `api4/post.go`, `api4/report.go`'s writes and `api4/integration_action.go`.
+pub mod postrest;
 pub mod posts;
 pub mod preferences;
 pub mod product_notices;
 pub mod properties;
+pub mod properties_writes;
 pub mod proxy;
 pub mod push_ack;
 pub mod reactions;
 pub mod recaps;
 pub mod redirect_location;
 pub mod reports;
+pub mod retention_search;
 pub mod roles;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
@@ -116,9 +125,30 @@ pub mod websocket;
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
 pub mod config;
 
+/// Port of `api4/board.go` — `POST /boards`, served only with `IntegratedBoards` on.
+pub mod boards;
+/// The `/api/v4/config` writes and `config_local.go` (2026-09-15) — the gates served, the save
+/// forwarded; see the module docs. Appended for the same reason as `config`.
+pub mod config_writes;
+/// The licence writes of `license.go` and `license_local.go` (2026-09-15).
+pub mod license_writes;
 /// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
+/// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
+/// Appended for the same reason as `config`.
+pub mod marketplace_visit;
+/// Port of the five `RemoteClusterTokenRequired` routes of `api4/remote_cluster.go`.
+pub mod remote_cluster;
+
+/// `api4/saml.go`, `api4/ldap.go` and `api4/audit_logging.go` — the certificate and
+/// enterprise-gate routes (22 HTTP pairs), and their seven local-mode twins in
+/// `local_auth_certs`. Appended for the same reason as `config`.
+pub mod auth_certs;
+pub mod local_auth_certs;
+// Appended 2026-09-15: the system-operations family.
+pub mod local_sysops;
+pub mod sysops;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -235,6 +265,14 @@ fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
                 && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         }
         "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),
+        // `{action_id:[A-Za-z0-9_-]+}` (api4/integration_action.go:17) — the one `_id`
+        // parameter besides `plugin_id` with a wider class: `_` and `-` are in it.
+        "action_id" => {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        }
         _ if parameter_is_id_shaped(name) => segment_matches_go_mux(value),
         _ => true,
     }
@@ -1716,6 +1754,36 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/posts/search",
             partially_migrated_with_ids(&state, post(post_search::search_posts_in_team)),
         )
+        // `BaseRoutes.Team.Handle("/files/search")` (api4/file.go:41) — the file twin of the
+        // route above, two literal segments under `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/files/search",
+            partially_migrated_with_ids(&state, post(file_search::search_files_in_team)),
+        )
+        // `BaseRoutes.Files.Handle("/search")` (api4/file.go:42) — a literal sibling of
+        // `/files/{file_id}` below, whose `GET` is pinned so `files::get_file`'s 400 for the
+        // seven-character segment is not lost to axum's method router (see
+        // `file_search::invalid_file_id_param`).
+        .route(
+            "/api/v4/files/search",
+            partially_migrated(
+                post(file_search::search_files_in_all_teams)
+                    .get(file_search::invalid_file_id_param),
+            ),
+        )
+        // `api4/agents.go` (api.go:340-341): three reads under two prefixes, no parameters.
+        .route(
+            "/api/v4/agents",
+            partially_migrated(get(agents::get_agents)),
+        )
+        .route(
+            "/api/v4/agents/status",
+            partially_migrated(get(agents::get_agents_status)),
+        )
+        .route(
+            "/api/v4/llmservices",
+            partially_migrated(get(agents::get_llm_services)),
+        )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
         // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not
@@ -2455,6 +2523,16 @@ pub fn router(state: AppState) -> Router {
                     .delete(data_retention::remove_teams_from_policy),
             ),
         )
+        // `searchTeamsInPolicy` and `searchChannelsInPolicy` (data_retention.go:25, :29) —
+        // one literal deeper than the two list routes, no parameter sibling at that depth.
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/teams/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_teams_in_policy)),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/channels/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_channels_in_policy)),
+        )
         .route(
             "/api/v4/data_retention/policies/{policy_id}/channels",
             partially_migrated_with_ids(
@@ -2592,17 +2670,74 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/image",
             partially_migrated(get(image_proxy::get_image)),
         )
-        // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), the `POST` — a client's log
-        // line, `APIHandler`. The `GET` (`getLogs`, the server's own log file) stays forwarded.
+        // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), both methods: the `POST` is a
+        // client's log line (`postLog`, `APIHandler`); the `GET` is the server's own log file
+        // (`getLogs`, `APISessionRequired`), served since 2026-09-15 with the rest of the
+        // system-operations family below.
         .route(
             "/api/v4/logs",
-            partially_migrated(post(client_log::post_log)),
+            partially_migrated(get(sysops::get_logs).post(client_log::post_log)),
         )
         // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
-        // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
+        // `/notices/{team_id}` (system.go:75), served since 2026-09-15 from this process's copy
+        // of the notice feed. The literal wins over the parameter on both routers.
         .route(
             "/api/v4/system/notices/view",
             partially_migrated(put(product_notices::update_viewed_product_notices)),
+        )
+        .route(
+            "/api/v4/system/notices/{team_id}",
+            partially_migrated_with_ids(&state, get(sysops::get_product_notices)),
+        )
+        // ---- the system-operations family (api4/system.go, api4/elasticsearch.go), 2026-09-15.
+        // Every path here is literal, so `mux_segments_or_forward` is not involved.
+        // `BaseRoutes.APIRoot.Handle("/logs/download")` and `("/logs/query")` (system.go:57-58).
+        .route(
+            "/api/v4/logs/download",
+            partially_migrated(get(sysops::download_logs)),
+        )
+        .route(
+            "/api/v4/logs/query",
+            partially_migrated(post(sysops::query_logs)),
+        )
+        // `BaseRoutes.APIRoot.Handle("/analytics/old")` (system.go:61).
+        .route(
+            "/api/v4/analytics/old",
+            partially_migrated(get(sysops::get_analytics)),
+        )
+        // `("/database/recycle")` and `("/caches/invalidate")` (system.go:54-55).
+        .route(
+            "/api/v4/database/recycle",
+            partially_migrated(post(sysops::database_recycle)),
+        )
+        .route(
+            "/api/v4/caches/invalidate",
+            partially_migrated(post(sysops::invalidate_caches)),
+        )
+        // `("/restart")` (system.go:74).
+        .route("/api/v4/restart", partially_migrated(post(sysops::restart)))
+        // The three enterprise-upgrade routes (system.go:71-73).
+        .route(
+            "/api/v4/upgrade_to_enterprise",
+            partially_migrated(post(sysops::upgrade_to_enterprise)),
+        )
+        .route(
+            "/api/v4/upgrade_to_enterprise/status",
+            partially_migrated(get(sysops::upgrade_to_enterprise_status)),
+        )
+        .route(
+            "/api/v4/upgrade_to_enterprise/allowed",
+            partially_migrated(get(sysops::is_allowed_to_upgrade_to_enterprise)),
+        )
+        // `api.BaseRoutes.Elasticsearch.Handle("/test")` and `("/purge_indexes")`
+        // (elasticsearch.go:15-16).
+        .route(
+            "/api/v4/elasticsearch/test",
+            partially_migrated(post(sysops::test_elasticsearch)),
+        )
+        .route(
+            "/api/v4/elasticsearch/purge_indexes",
+            partially_migrated(post(sysops::purge_elasticsearch_indexes)),
         )
         // `api4/user.go`'s two remaining literal-path reads. Both sit under `/api/v4/users`
         // beside `{user_id}`, and gorilla matches literals before parameters — so `auth_data`
@@ -2627,6 +2762,80 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/reports/users/count",
             partially_migrated(get(reports::get_user_count_for_reporting)),
+        )
+        // `api4/report.go`'s two writes (report.go:22-23), appended 2026-09-15 beside the reads
+        // they share a prefix with. `/reports/users/export` is a literal under `/reports/users`
+        // exactly as `/count` is.
+        .route(
+            "/api/v4/reports/users/export",
+            partially_migrated(post(postrest::start_users_batch_export)),
+        )
+        .route(
+            "/api/v4/reports/posts",
+            partially_migrated(post(postrest::get_posts_for_reporting)),
+        )
+        // The rest of `BaseRoutes.Post` (api4/post.go:43-57): `/restore/{restore_version_id}`,
+        // `/move`, `/reveal` and `/burn` are siblings of `/thread` one or two segments under
+        // `{post_id}`, so they shadow nothing; `/actions/{action_id}` (integration_action.go:17)
+        // likewise. `{action_id}`'s class is `[A-Za-z0-9_-]+`, handled in
+        // `segment_matches_go_mux_for`.
+        .route(
+            "/api/v4/posts/{post_id}/restore/{restore_version_id}",
+            partially_migrated_with_ids(&state, post(postrest::restore_post_version)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/move",
+            partially_migrated_with_ids(&state, post(postrest::move_thread)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/reveal",
+            partially_migrated_with_ids(&state, get(postrest::reveal_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/burn",
+            partially_migrated_with_ids(&state, axum::routing::delete(postrest::burn_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/actions/{action_id}",
+            partially_migrated_with_ids(&state, post(postrest::do_post_action)),
+        )
+        // `BaseRoutes.Posts.Handle("/rewrite")` (api4/post.go:55) — a literal sibling of
+        // `{post_id}` like `/ids` and `/ephemeral`, and `rewrite` is inside the id class, so it
+        // needs the same three pins those carry: registering the literal shadows the
+        // parameterised route for every method, and the other two must still answer as Go's
+        // `{post_id}` handlers would for the segment `rewrite`.
+        .route(
+            "/api/v4/posts/rewrite",
+            partially_migrated(
+                post(postrest::rewrite_message)
+                    .get(invalid_post_id_param)
+                    .put(invalid_post_id_param)
+                    .delete(invalid_post_id_param),
+            ),
+        )
+        // `BaseRoutes.PostForUser.Handle("/reminder")` (api4/post.go:45), beside `/set_unread`
+        // and `/ack`.
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/reminder",
+            partially_migrated_with_ids(&state, post(postrest::set_post_reminder)),
+        )
+        // `InitAction`'s four dialog routes (api4/integration_action.go:18-21) under
+        // `BaseRoutes.APIRoot`. `/open` is `APIHandler`, the other three `APISessionRequired`.
+        .route(
+            "/api/v4/actions/dialogs/open",
+            partially_migrated(post(postrest::open_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/submit",
+            partially_migrated(post(postrest::submit_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/lookup",
+            partially_migrated(post(postrest::lookup_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/execute",
+            partially_migrated(post(postrest::execute_dialog_action)),
         )
         // `api4/group.go`'s eight remaining reads, every one of which opens with
         // `requireLicense`. `{syncable_type}` is gorilla's `teams|channels` alternation and is not
@@ -2786,7 +2995,10 @@ pub fn router(state: AppState) -> Router {
         // reach Go for its 404 rather than our handler for a 400. See `segment_matches_go_mux_for`.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields",
-            partially_migrated_with_ids(&state, get(properties::get_property_fields)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_fields).post(properties_writes::create_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/fields/search",
@@ -2798,15 +3010,27 @@ pub fn router(state: AppState) -> Router {
         // there is no precedence question with it.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}",
-            partially_migrated_with_ids(&state, delete(properties::delete_property_field)),
+            partially_migrated_with_ids(
+                &state,
+                delete(properties::delete_property_field)
+                    .patch(properties_writes::patch_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/values/{target_id}",
-            partially_migrated_with_ids(&state, get(properties::get_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_values)
+                    .patch(properties_writes::patch_property_values),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/system/values",
-            partially_migrated_with_ids(&state, get(properties::get_system_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_system_property_values)
+                    .patch(properties_writes::patch_system_property_values),
+            ),
         )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.
@@ -2816,11 +3040,29 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/oauth/outgoing_connections",
-            partially_migrated(get(gated_reads::list_outgoing_oauth_connections)),
+            partially_migrated(
+                get(gated_reads::list_outgoing_oauth_connections)
+                    .post(outgoing_oauth_writes::create_outgoing_oauth_connection),
+            ),
+        )
+        // `BaseRoutes.OutgoingOAuthConnections.Handle("/validate")` — a literal sibling of the
+        // `{outgoing_oauth_connection_id}` route below; `validate` is eight characters, so it
+        // would have been the `GET` read's `RequireOutgoingOAuthConnectionId`-after-the-gate
+        // 501 anyway. Only the `POST` is registered by Go.
+        .route(
+            "/api/v4/oauth/outgoing_connections/validate",
+            partially_migrated(post(
+                outgoing_oauth_writes::validate_outgoing_oauth_connection_credentials,
+            )),
         )
         .route(
             "/api/v4/oauth/outgoing_connections/{outgoing_oauth_connection_id}",
-            partially_migrated_with_ids(&state, get(gated_reads::get_outgoing_oauth_connection)),
+            partially_migrated_with_ids(
+                &state,
+                get(gated_reads::get_outgoing_oauth_connection)
+                    .put(outgoing_oauth_writes::update_outgoing_oauth_connection)
+                    .delete(outgoing_oauth_writes::delete_outgoing_oauth_connection),
+            ),
         )
         .route(
             "/api/v4/jobs/{job_id}/download",
@@ -2913,9 +3155,9 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(commands::list_commands).post(commands::create_command)),
         )
         // `POST` is **not** registered here, and that is load-bearing: `/api/v4/commands/execute`
-        // is a static sibling this router does not carry, so a `POST` to it matches this pattern
-        // and reaches the method fallback, which forwards it to Go. Registering `create_command`
-        // on `{command_id}` as well would swallow `executeCommand` instead.
+        // is a static sibling, registered on its own below (2026-09-15), and axum prefers the
+        // literal. Registering `create_command` on `{command_id}` as well would still be wrong —
+        // Go has no `POST /commands/{command_id}`, so that method must reach Go's 405/404.
         .route(
             "/api/v4/commands/{command_id}",
             partially_migrated_with_ids(
@@ -3092,11 +3334,11 @@ pub fn router(state: AppState) -> Router {
         )
         // ---- the config reads (2026-09-11) ----
         //
-        // `/config` shares its path with `PUT /config`, which is still Go's, so it must go
-        // through `partially_migrated` or the PUT becomes a 405 — see that function's comment.
+        // `PUT /config` joined the `GET` on 2026-09-15 — `config_writes::update_config`, whose
+        // gates are served and whose save is forwarded.
         .route(
             "/api/v4/config",
-            partially_migrated(get(config::get_config)),
+            partially_migrated(get(config::get_config).put(config_writes::update_config)),
         )
         // `APIHandler`, not `APISessionRequired`: an anonymous caller gets the limited map rather
         // than a 401, which is what every client reads before it can log in.
@@ -3107,6 +3349,187 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/config/environment",
             partially_migrated(get(config::get_environment_config)),
+        )
+        // ---- the config and licence writes (2026-09-15) ----
+        //
+        // `config.go:36-37`, `license.go:22-28`. Every handler serves its gates and forwards the
+        // save — see `config_writes` and `license_writes` for where the line is and why.
+        .route(
+            "/api/v4/config/patch",
+            partially_migrated(put(config_writes::patch_config)),
+        )
+        .route(
+            "/api/v4/config/reload",
+            partially_migrated(post(config_writes::reload_config)),
+        )
+        .route(
+            "/api/v4/license",
+            partially_migrated(
+                post(license_writes::add_license).delete(license_writes::remove_license),
+            ),
+        )
+        .route(
+            "/api/v4/license/preview",
+            partially_migrated(post(license_writes::preview_license)),
+        )
+        .route(
+            "/api/v4/trial-license",
+            partially_migrated(post(license_writes::request_trial_license)),
+        )
+        // `api4/saml.go`, `api4/ldap.go`, `api4/audit_logging.go` — the certificate and
+        // enterprise-gate routes, in their own module.
+        .merge(auth_certs::routes(&state))
+        // ---- `api4/access_control.go` (2026-09-15): the sixteen policy routes ----
+        //
+        // `BaseRoutes.AccessControlPolicies` is `/access_control_policies` and
+        // `BaseRoutes.AccessControlPolicy` is `/access_control_policies/{policy_id:[A-Za-z0-9]+}`
+        // (api4/api.go:335-336); registered unconditionally, so every pair answers on a build
+        // whose access-control service is nil — see `access_control_policies`.
+        .route(
+            "/api/v4/access_control_policies",
+            partially_migrated(put(access_control_policies::create_access_control_policy)),
+        )
+        .route(
+            "/api/v4/access_control_policies/search",
+            partially_migrated(post(
+                access_control_policies::search_access_control_policies,
+            )),
+        )
+        .route(
+            "/api/v4/access_control_policies/activate",
+            partially_migrated(put(access_control_policies::set_active_status)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/check",
+            partially_migrated(post(access_control_policies::check_expression)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/test",
+            partially_migrated(post(access_control_policies::test_expression)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/simulate_users",
+            partially_migrated(post(access_control_policies::simulate_policy_for_users)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/validate_requester",
+            partially_migrated(post(
+                access_control_policies::validate_expression_against_requester,
+            )),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/autocomplete/fields",
+            partially_migrated(get(access_control_policies::get_fields_autocomplete)),
+        )
+        .route(
+            "/api/v4/access_control_policies/cel/visual_ast",
+            partially_migrated(post(access_control_policies::convert_to_visual_ast)),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control_policies::get_access_control_policy)
+                    .delete(access_control_policies::delete_access_control_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/activate",
+            partially_migrated_with_ids(&state, get(access_control_policies::update_active_status)),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/assign",
+            partially_migrated_with_ids(
+                &state,
+                post(access_control_policies::assign_access_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/unassign",
+            partially_migrated_with_ids(
+                &state,
+                delete(access_control_policies::unassign_access_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/resources/channels",
+            partially_migrated_with_ids(
+                &state,
+                get(access_control_policies::get_channels_for_access_control_policy),
+            ),
+        )
+        .route(
+            "/api/v4/access_control_policies/{policy_id}/resources/channels/search",
+            partially_migrated_with_ids(
+                &state,
+                post(access_control_policies::search_channels_for_access_control_policy),
+            ),
+        )
+        // ---- `api4/plugin.go:42-43` (2026-09-15) ----
+        //
+        // The one literal path served under `/plugins`. Nothing else there is registered, so
+        // every other `/plugins/*` request still falls to the router's fallback — the suite
+        // `marketplace_visit` asserts six of the neighbours come back Go's.
+        .route(
+            "/api/v4/plugins/marketplace/first_admin_visit",
+            partially_migrated(
+                get(marketplace_visit::get_first_admin_visit_marketplace_status)
+                    .post(marketplace_visit::set_first_admin_visit_marketplace_status),
+            ),
+        )
+        // ---- `api4/board.go` (2026-09-15) ----
+        //
+        // Registered by Go only when `IntegratedBoards` is on; the handler forwards when it is
+        // off so Go writes its own mux 404, as the `views` routes do.
+        .route(
+            "/api/v4/boards",
+            partially_migrated(post(boards::create_board)),
+        )
+        // ---- `api4/remote_cluster.go`, the five `RemoteClusterTokenRequired` routes
+        // (2026-09-15). All gated identically; `remote_cluster_token_gate` is the whole served
+        // surface — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
+        // literal siblings of `{remote_id}` (registered above), each with an underscore or
+        // shorter than an id, so mux and axum both prefer these literals.
+        .route(
+            "/api/v4/remotecluster/ping",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/msg",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/confirm_invite",
+            partially_migrated(post(remote_cluster::remote_cluster_token_gate)),
+        )
+        .route(
+            "/api/v4/remotecluster/upload/{upload_id}",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // Go names this segment `{user_id}`, but axum requires one capture name per tree
+        // position and `{remote_id}` already holds it (the CRUD routes above); the gate never
+        // reads it and the two charsets accept the same segments, so the wire is identical.
+        .route(
+            "/api/v4/remotecluster/{remote_id}/image",
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+        )
+        // ---- `api4/command.go:19,26,27` (2026-09-15): execute and the two autocomplete reads.
+        // Each serves its refusals and forwards whatever would run a command or depends on
+        // plugin commands or a non-English locale — see the end of `commands.rs`.
+        .route(
+            "/api/v4/commands/execute",
+            partially_migrated(post(commands::execute_command)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete",
+            partially_migrated_with_ids(&state, get(commands::list_autocomplete_commands)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/commands/autocomplete_suggestions",
+            partially_migrated_with_ids(
+                &state,
+                get(commands::list_command_autocomplete_suggestions),
+            ),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
@@ -3622,6 +4045,51 @@ mod tests {
             (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
             (Method::POST, "/api/v4/posts/search".to_owned()),
             (Method::POST, format!("/api/v4/teams/{USER}/posts/search")),
+            (Method::POST, "/api/v4/files/search".to_owned()),
+            (Method::POST, format!("/api/v4/teams/{USER}/files/search")),
+            (Method::GET, "/api/v4/agents".to_owned()),
+            (Method::GET, "/api/v4/agents/status".to_owned()),
+            (Method::GET, "/api/v4/llmservices".to_owned()),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections".to_owned(),
+            ),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections/validate".to_owned(),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/teams/search"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/channels/search"),
+            ),
+            (
+                Method::POST,
+                "/api/v4/properties/groups/boards/channel/fields".to_owned(),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/fields/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/values/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                "/api/v4/properties/groups/boards/system/values".to_owned(),
+            ),
         ];
 
         for (method, path) in served {

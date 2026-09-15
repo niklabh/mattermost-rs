@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\"\n                 FROM channelmembers\n                 LEFT JOIN readreceipts\n                   ON channelmembers.userid = readreceipts.userid AND readreceipts.postid = $1\n                WHERE channelmembers.channelid = $2\n                  AND channelmembers.userid <> $3\n                  AND readreceipts.userid IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1817a0ad92b74ac0e7e2341546aaa438a53644633a10ba1f4af7aa0ec80db670"
+}

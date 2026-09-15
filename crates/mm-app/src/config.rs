@@ -238,6 +238,15 @@ pub struct Config {
     /// store — read by [`crate::App::search_posts_for_user`].
     pub enable_post_search: bool,
 
+    /// `ServiceSettings.EnablePermalinkPreviews` (config.go:397). Go default **`true`**. Off,
+    /// a permalink in a message is fetched like any other URL instead of previewed from the
+    /// referenced post (`getLinkMetadata`, post_metadata.go:882).
+    pub enable_permalink_previews: bool,
+    /// `ServiceSettings.EnableFileSearch` (config.go:441, defaulted **`true`** at :696). Off,
+    /// `SearchFilesInTeamForUser` answers 501 `store.sql_file_info.search.disabled` before
+    /// touching the store — read by [`crate::App::search_files_in_team_for_user`].
+    pub enable_file_search: bool,
+
     /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
@@ -410,6 +419,17 @@ pub struct Config {
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
+    /// `ServiceSettings.BurnOnReadDurationSeconds` (config.go:473). Go default **600** — ten
+    /// minutes, the reader's window: `revealPost` gives a first-time reader a receipt expiring
+    /// at `min(post expire_at, now + this * 1000)`.
+    pub burn_on_read_duration_seconds: i64,
+
+    /// `ServiceSettings.OutgoingIntegrationRequestsTimeout` (config.go:392), in **seconds**;
+    /// Go default **30** (`OutgoingIntegrationRequestsDefaultTimeout`, config.go:266). Both the
+    /// budget of an integration action's outbound `POST` and the age past which a dialog's
+    /// `trigger_id` is refused (`DecodeAndVerifyTriggerId`). `IsValid` refuses `<= 0`.
+    pub outgoing_integration_requests_timeout: i64,
+
     /// `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` (config.go:450). Go
     /// default **`true`** (config.go:873), which is the trap: the word "Experimental" reads like
     /// an opt-in and it is on out of the box.
@@ -449,6 +469,17 @@ pub struct Config {
     /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
     /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
     pub feature_flag_mobile_sso_code_exchange: bool,
+
+    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169
+    /// and environment-only like [`Config::feature_flag_burn_on_read`]. Off, `moveThread` is
+    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
+    /// and so is a licence-less server with the flag on.
+    pub feature_flag_move_threads_enabled: bool,
+
+    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214,
+    /// environment-only. Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
+    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
+    pub feature_flag_mm_blocks_enabled: bool,
 
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
@@ -502,6 +533,26 @@ pub struct Config {
     /// Read by `createUpload` for an `import` upload only: the import directory may not sit
     /// inside the plugin directory or vice versa (`fileutils.CheckDirectoryConflict`).
     pub plugin_directory: String,
+
+    /// `PluginSettings.Enable` (config.go:3609, defaulted **`true`** at :3622). Two readers:
+    /// off, `GetPluginsEnvironment` is nil and the agents bridge reports
+    /// `plugin_env_not_initialized` — on, `plugin_not_active`, since this server hosts no plugins
+    /// ([`crate::App::ai_plugin_bridge_status`]); and it is half of the `/marketplace` built-in
+    /// slash command's `AutoComplete` flag (slashcommands/command_marketplace.go:31), which decides
+    /// whether `GET /teams/{team_id}/commands/autocomplete` lists it at all.
+    pub plugin_enable: bool,
+
+    /// `PluginSettings.EnableMarketplace` (config.go:3611, defaulted **`true`** —
+    /// `PluginSettingsDefaultEnableMarketplace` — at :3674). The other half of the `/marketplace`
+    /// command's `AutoComplete`; see [`Config::plugin_enable`].
+    pub plugin_enable_marketplace: bool,
+
+    /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
+    /// unconditionally — not from `isUpdate`).
+    ///
+    /// One of the three settings the `/invite_people` built-in command ANDs into its
+    /// `AutoComplete` flag (slashcommands/command_invite_people.go:32).
+    pub send_email_notifications: bool,
 
     /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
     ///
@@ -714,6 +765,22 @@ pub struct Config {
     /// Environment-or-default like [`Config::feature_flag_burn_on_read`]: `FeatureFlags` never
     /// reaches the persisted document, which is exactly what [D-153] records.
     pub feature_flag_discoverable_channels: bool,
+
+    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
+    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
+    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
+    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
+    /// type-less search drops permission policies from its page. Environment-or-default like
+    /// [`Config::feature_flag_burn_on_read`].
+    pub feature_flag_permission_policies: bool,
+    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
+    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
+    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
+    pub feature_flag_channel_permission_policies: bool,
+    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
+    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
+    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
+    pub feature_flag_policy_simulation: bool,
 
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
@@ -1114,6 +1181,43 @@ pub struct Config {
     /// with a stack-local key is honoured by both sides of a comparison — and it is the only way a
     /// licence not signed by Mattermost is ever honoured here. Read by
     /// [`crate::license::LicenseKeys::from_config`].
+    /// `AnalyticsSettings.MaxUsersForStatistics` (config.go:1309), default 2500.
+    ///
+    /// Read by `getAnalytics`: a system user count above it skips the "intensive" query, so
+    /// `?name=user_counts_with_posts_day` answers the one-row `[{"name":"","value":-1}]`
+    /// sentinel instead of the daily series. The other four reports ignore it.
+    pub max_users_for_statistics: i64,
+
+    /// `LogSettings.EnableFile` (config.go:1614), default `true`.
+    ///
+    /// Read by the three log routes. Off, `GET /api/v4/logs` and `POST /api/v4/logs/query`
+    /// answer a single empty line rather than reading a file, and `GET /api/v4/logs/download`
+    /// is a 500 — none of them touches the filesystem.
+    pub log_enable_file: bool,
+
+    /// `LogSettings.FileLocation` (config.go:1617), default `""`.
+    ///
+    /// The directory the log file lives in; `""` means "the `logs` directory found beside the
+    /// working directory or the binary" (`fileutils.FindDir`). Read by the same three routes,
+    /// through `crate::logs::get_log_file_location`.
+    pub log_file_location: String,
+
+    /// `AnnouncementSettings.AdminNoticesEnabled` (config.go:2470), default `true`: with it off,
+    /// `GetProductNotices` answers `[]` to any team or system admin.
+    pub admin_notices_enabled: bool,
+    /// `AnnouncementSettings.UserNoticesEnabled` (config.go:2471), default `true`: with it off,
+    /// `GetProductNotices` answers `[]` to anyone but a system admin.
+    pub user_notices_enabled: bool,
+    /// `AnnouncementSettings.NoticesURL` (config.go:2472), default
+    /// `https://notices.mattermost.com/` — the feed `UpdateProductNotices` fetches.
+    pub notices_url: String,
+    /// `AnnouncementSettings.NoticesFetchFrequency` (config.go:2473), default 3600 seconds —
+    /// the refresh period of the notice cache.
+    pub notices_fetch_frequency: i64,
+    /// `AnnouncementSettings.NoticesSkipCache` (config.go:2474), default `false`: fetch without
+    /// the `ETag`/`Date` revalidation headers.
+    pub notices_skip_cache: bool,
+
     pub license_public_key: Option<String>,
 }
 
@@ -1206,6 +1310,18 @@ impl Config {
         self.feature_flag_burn_on_read && self.enable_burn_on_read
     }
 
+    /// Port of `FeatureFlags.IsChannelPermissionPoliciesEnabled` (feature_flags.go:232): the
+    /// sub-flag **and** the `PermissionPolicies` umbrella.
+    pub fn channel_permission_policies_enabled(&self) -> bool {
+        self.feature_flag_permission_policies && self.feature_flag_channel_permission_policies
+    }
+
+    /// Port of `FeatureFlags.IsPolicySimulationEnabled` (feature_flags.go:242): the sub-flag
+    /// **and** the umbrella.
+    pub fn policy_simulation_enabled(&self) -> bool {
+        self.feature_flag_permission_policies && self.feature_flag_policy_simulation
+    }
+
     /// `InitProperties`' five-way registration `if` (api4/properties.go:23).
     ///
     /// When every one of the five is off, gorilla/mux has never heard of the nine property paths
@@ -1261,6 +1377,9 @@ impl Default for Config {
             enable_email_invitations: false,
             enable_link_previews: true,
             enable_post_search: true,
+            // config.go:536 — `new(true)`.
+            enable_permalink_previews: true,
+            enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
@@ -1289,6 +1408,10 @@ impl Default for Config {
             // config.go:2653 — `[]string{}`.
             experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
+            // config.go:1038 — `new(600)`.
+            burn_on_read_duration_seconds: 600,
+            // config.go:620 — `OutgoingIntegrationRequestsDefaultTimeout`.
+            outgoing_integration_requests_timeout: 30,
             // config.go:873 — `new(true)`.
             experimental_enable_default_channel_leave_join_messages: true,
             // config.go:870 — `new(-1)`.
@@ -1297,6 +1420,8 @@ impl Default for Config {
             experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
             feature_flag_mobile_sso_code_exchange: false,
+            feature_flag_move_threads_enabled: false,
+            feature_flag_mm_blocks_enabled: true,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1307,6 +1432,9 @@ impl Default for Config {
             file_max_image_resolution: 7680 * 4320,
             // config.go:268 — `PluginSettingsDefaultDirectory`.
             plugin_directory: "./plugins".to_owned(),
+            plugin_enable: true,
+            plugin_enable_marketplace: true,
+            send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
             saml_enable_sync_with_ldap: false,
@@ -1337,6 +1465,10 @@ impl Default for Config {
             feature_flag_post_attributes: false,
             // feature_flags.go:208 — `false`, like the other four.
             feature_flag_discoverable_channels: false,
+            // feature_flags.go:172-175 — all three **`true`**.
+            feature_flag_permission_policies: true,
+            feature_flag_channel_permission_policies: true,
+            feature_flag_policy_simulation: true,
             // feature_flags.go:185 — **`true`**, and the only one of the five that is.
             feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
@@ -1419,6 +1551,14 @@ impl Default for Config {
             feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
             license_public_key: None,
+            max_users_for_statistics: 2500,
+            log_enable_file: true,
+            log_file_location: String::new(),
+            admin_notices_enabled: true,
+            user_notices_enabled: true,
+            notices_url: "https://notices.mattermost.com/".to_owned(),
+            notices_fetch_frequency: 3600,
+            notices_skip_cache: false,
         }
     }
 }
@@ -1567,6 +1707,16 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEPOSTSEARCH",
                 default.enable_post_search,
             ),
+            enable_permalink_previews: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEPERMALINKPREVIEWS",
+                default.enable_permalink_previews,
+            ),
+            enable_file_search: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEFILESEARCH",
+                default.enable_file_search,
+            ),
             allowed_untrusted_internal_connections: lookup(
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
@@ -1672,6 +1822,16 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
             ),
+            burn_on_read_duration_seconds: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_BURNONREADDURATIONSECONDS",
+                default.burn_on_read_duration_seconds,
+            ),
+            outgoing_integration_requests_timeout: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_OUTGOINGINTEGRATIONREQUESTSTIMEOUT",
+                default.outgoing_integration_requests_timeout,
+            ),
             experimental_enable_default_channel_leave_join_messages: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_EXPERIMENTALENABLEDEFAULTCHANNELLEAVEJOINMESSAGES",
@@ -1697,6 +1857,16 @@ impl Config {
                 "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
                 default.feature_flag_mobile_sso_code_exchange,
             ),
+            feature_flag_move_threads_enabled: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MOVETHREADSENABLED",
+                default.feature_flag_move_threads_enabled,
+            ),
+            feature_flag_mm_blocks_enabled: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MMBLOCKSENABLED",
+                default.feature_flag_mm_blocks_enabled,
+            ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
@@ -1719,6 +1889,17 @@ impl Config {
             ),
             plugin_directory: lookup("MM_PLUGINSETTINGS_DIRECTORY")
                 .unwrap_or(default.plugin_directory),
+            plugin_enable: lookup_bool(lookup, "MM_PLUGINSETTINGS_ENABLE", default.plugin_enable),
+            plugin_enable_marketplace: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEMARKETPLACE",
+                default.plugin_enable_marketplace,
+            ),
+            send_email_notifications: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS",
+                default.send_email_notifications,
+            ),
             ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
                 .unwrap_or(default.ldap_picture_attribute),
             saml_enable_sync_with_ldap: lookup_bool(
@@ -1892,6 +2073,21 @@ impl Config {
                 "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
                 default.feature_flag_discoverable_channels,
             ),
+            feature_flag_permission_policies: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_PERMISSIONPOLICIES",
+                default.feature_flag_permission_policies,
+            ),
+            feature_flag_channel_permission_policies: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_CHANNELPERMISSIONPOLICIES",
+                default.feature_flag_channel_permission_policies,
+            ),
+            feature_flag_policy_simulation: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_POLICYSIMULATION",
+                default.feature_flag_policy_simulation,
+            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -2056,6 +2252,40 @@ impl Config {
                 },
                 None => default.license_public_key,
             },
+            max_users_for_statistics: lookup_int(
+                lookup,
+                "MM_ANALYTICSSETTINGS_MAXUSERSFORSTATISTICS",
+                default.max_users_for_statistics,
+            ),
+            log_enable_file: lookup_bool(
+                lookup,
+                "MM_LOGSETTINGS_ENABLEFILE",
+                default.log_enable_file,
+            ),
+            log_file_location: lookup("MM_LOGSETTINGS_FILELOCATION")
+                .unwrap_or(default.log_file_location),
+            admin_notices_enabled: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_ADMINNOTICESENABLED",
+                default.admin_notices_enabled,
+            ),
+            user_notices_enabled: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_USERNOTICESENABLED",
+                default.user_notices_enabled,
+            ),
+            notices_url: lookup("MM_ANNOUNCEMENTSETTINGS_NOTICESURL")
+                .unwrap_or(default.notices_url),
+            notices_fetch_frequency: lookup_int(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_NOTICESFETCHFREQUENCY",
+                default.notices_fetch_frequency,
+            ),
+            notices_skip_cache: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_NOTICESSKIPCACHE",
+                default.notices_skip_cache,
+            ),
         }
     }
 
@@ -2093,7 +2323,9 @@ impl Config {
         let email_settings = parsed.email_settings.unwrap_or_default();
         let localization_settings = parsed.localization_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
+        let announcement = parsed.announcement_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
+        let plugin_settings = parsed.plugin_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
         let ldap_settings = parsed.ldap_settings.unwrap_or_default();
         let saml_settings = parsed.saml_settings.unwrap_or_default();
@@ -2155,6 +2387,10 @@ impl Config {
             feature_flag_classification_markings: default.feature_flag_classification_markings,
             feature_flag_post_attributes: default.feature_flag_post_attributes,
             feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
+            feature_flag_permission_policies: default.feature_flag_permission_policies,
+            feature_flag_channel_permission_policies: default
+                .feature_flag_channel_permission_policies,
+            feature_flag_policy_simulation: default.feature_flag_policy_simulation,
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),
@@ -2226,6 +2462,12 @@ impl Config {
             enable_post_search: service
                 .enable_post_search
                 .unwrap_or(default.enable_post_search),
+            enable_permalink_previews: service
+                .enable_permalink_previews
+                .unwrap_or(default.enable_permalink_previews),
+            enable_file_search: service
+                .enable_file_search
+                .unwrap_or(default.enable_file_search),
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
@@ -2308,6 +2550,12 @@ impl Config {
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            burn_on_read_duration_seconds: service
+                .burn_on_read_duration_seconds
+                .unwrap_or(default.burn_on_read_duration_seconds),
+            outgoing_integration_requests_timeout: service
+                .outgoing_integration_requests_timeout
+                .unwrap_or(default.outgoing_integration_requests_timeout),
             experimental_enable_default_channel_leave_join_messages: service
                 .experimental_enable_default_channel_leave_join_messages
                 .unwrap_or(default.experimental_enable_default_channel_leave_join_messages),
@@ -2322,6 +2570,8 @@ impl Config {
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
             feature_flag_burn_on_read: default.feature_flag_burn_on_read,
             feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
+            feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
+            feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2338,10 +2588,14 @@ impl Config {
             file_max_image_resolution: file_settings
                 .max_image_resolution
                 .unwrap_or(default.file_max_image_resolution),
-            plugin_directory: non_empty_or(
-                parsed.plugin_settings.unwrap_or_default().directory,
-                default.plugin_directory,
-            ),
+            plugin_directory: non_empty_or(plugin_settings.directory, default.plugin_directory),
+            plugin_enable: plugin_settings.enable.unwrap_or(default.plugin_enable),
+            plugin_enable_marketplace: plugin_settings
+                .enable_marketplace
+                .unwrap_or(default.plugin_enable_marketplace),
+            send_email_notifications: email_settings
+                .send_email_notifications
+                .unwrap_or(default.send_email_notifications),
             ldap_picture_attribute: ldap_settings
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
@@ -2545,6 +2799,33 @@ impl Config {
             // `apply_env`.
             license: default.license,
             license_public_key: default.license_public_key,
+            max_users_for_statistics: parsed
+                .analytics_settings
+                .as_ref()
+                .and_then(|a| a.max_users_for_statistics)
+                .unwrap_or(default.max_users_for_statistics),
+            log_enable_file: parsed
+                .log_settings
+                .as_ref()
+                .and_then(|l| l.enable_file)
+                .unwrap_or(default.log_enable_file),
+            log_file_location: parsed
+                .log_settings
+                .and_then(|l| l.file_location)
+                .unwrap_or(default.log_file_location),
+            admin_notices_enabled: announcement
+                .admin_notices_enabled
+                .unwrap_or(default.admin_notices_enabled),
+            user_notices_enabled: announcement
+                .user_notices_enabled
+                .unwrap_or(default.user_notices_enabled),
+            notices_url: announcement.notices_url.unwrap_or(default.notices_url),
+            notices_fetch_frequency: announcement
+                .notices_fetch_frequency
+                .unwrap_or(default.notices_fetch_frequency),
+            notices_skip_cache: announcement
+                .notices_skip_cache
+                .unwrap_or(default.notices_skip_cache),
         })
     }
 
@@ -2666,6 +2947,43 @@ struct Document {
     openid_settings: Option<EnableOnlySsoDocument>,
     #[serde(rename = "Office365Settings")]
     office365_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "AnalyticsSettings")]
+    analytics_settings: Option<AnalyticsSettingsDocument>,
+    #[serde(rename = "LogSettings")]
+    log_settings: Option<LogSettingsDocument>,
+    #[serde(rename = "AnnouncementSettings")]
+    announcement_settings: Option<AnnouncementSettingsDocument>,
+}
+
+/// The five fields of `AnnouncementSettings` the notice cache and `GetProductNotices` read.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AnnouncementSettingsDocument {
+    #[serde(rename = "AdminNoticesEnabled")]
+    admin_notices_enabled: Option<bool>,
+    #[serde(rename = "UserNoticesEnabled")]
+    user_notices_enabled: Option<bool>,
+    #[serde(rename = "NoticesURL")]
+    notices_url: Option<String>,
+    #[serde(rename = "NoticesFetchFrequency")]
+    notices_fetch_frequency: Option<i64>,
+    #[serde(rename = "NoticesSkipCache")]
+    notices_skip_cache: Option<bool>,
+}
+
+/// The one field of `AnalyticsSettings` a migrated route reads (`getAnalytics`).
+#[derive(Debug, Default, serde::Deserialize)]
+struct AnalyticsSettingsDocument {
+    #[serde(rename = "MaxUsersForStatistics")]
+    max_users_for_statistics: Option<i64>,
+}
+
+/// The two fields of `LogSettings` the log routes read.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LogSettingsDocument {
+    #[serde(rename = "EnableFile")]
+    enable_file: Option<bool>,
+    #[serde(rename = "FileLocation")]
+    file_location: Option<String>,
 }
 
 /// The two fields of `LdapSettings` a migrated route reads — `setProfileImage`'s 409, and the
@@ -2777,6 +3095,8 @@ struct EmailSettingsDocument {
     enable_sign_in_with_username: Option<bool>,
     #[serde(rename = "SendPushNotifications")]
     send_push_notifications: Option<bool>,
+    #[serde(rename = "SendEmailNotifications")]
+    send_email_notifications: Option<bool>,
 }
 
 /// The one field of `LocalizationSettings` a migrated route reads.
@@ -2888,6 +3208,10 @@ struct ServiceSettingsDocument {
     enable_link_previews: Option<bool>,
     #[serde(rename = "EnablePostSearch")]
     enable_post_search: Option<bool>,
+    #[serde(rename = "EnablePermalinkPreviews")]
+    enable_permalink_previews: Option<bool>,
+    #[serde(rename = "EnableFileSearch")]
+    enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -2957,6 +3281,10 @@ struct ServiceSettingsDocument {
     enable_api_team_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "BurnOnReadDurationSeconds")]
+    burn_on_read_duration_seconds: Option<i64>,
+    #[serde(rename = "OutgoingIntegrationRequestsTimeout")]
+    outgoing_integration_requests_timeout: Option<i64>,
     #[serde(rename = "ExperimentalEnableDefaultChannelLeaveJoinMessages")]
     experimental_enable_default_channel_leave_join_messages: Option<bool>,
     #[serde(rename = "PostEditTimeLimit")]
@@ -3038,6 +3366,10 @@ struct ImportSettingsDocument {
 struct PluginSettingsDocument {
     #[serde(rename = "Directory")]
     directory: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+    #[serde(rename = "EnableMarketplace")]
+    enable_marketplace: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3162,6 +3494,8 @@ mod tests {
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
         assert!(config.enable_post_search, "config.go:692 — new(true)");
+        assert!(config.enable_file_search, "config.go:696 — new(true)");
+        assert!(config.plugin_enable, "config.go:3621 — new(true)");
         assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
         // `getUsersWithInvalidEmails` answers 400 when this is **on**, so a wrong default turns
         // a working route into an unconditional refusal on any server that has not set it. The
@@ -3417,6 +3751,63 @@ mod tests {
             Some("http://from-the-document"),
             "with nothing set, the document survives"
         );
+    }
+
+    /// The two integers the post family reads, and the two flags. Defaults from Go, then the
+    /// document and the environment each moving them.
+    #[test]
+    fn the_burn_on_read_window_and_the_integration_timeout_are_read() {
+        let default = Config::default();
+        assert_eq!(default.burn_on_read_duration_seconds, 600, "config.go:1038");
+        assert_eq!(
+            default.outgoing_integration_requests_timeout, 30,
+            "config.go:266"
+        );
+        assert!(
+            !default.feature_flag_move_threads_enabled,
+            "feature_flags.go:169"
+        );
+        assert!(
+            default.feature_flag_mm_blocks_enabled,
+            "feature_flags.go:214"
+        );
+
+        let from_go = Config::from_document(include_str!("../../../fixtures/config_active.json"))
+            .expect("the fixture is a config document");
+        assert_eq!(from_go.burn_on_read_duration_seconds, 600);
+        assert_eq!(from_go.outgoing_integration_requests_timeout, 30);
+        assert!(from_go.enable_permalink_previews, "config.go:536");
+        assert!(
+            !Config::from_document(r#"{"ServiceSettings":{"EnablePermalinkPreviews":false}}"#)
+                .expect("valid document")
+                .enable_permalink_previews
+        );
+
+        let moved = Config::from_document(
+            r#"{"ServiceSettings":{"BurnOnReadDurationSeconds":7,"OutgoingIntegrationRequestsTimeout":9},"FeatureFlags":{"MoveThreadsEnabled":true}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(moved.burn_on_read_duration_seconds, 7);
+        assert_eq!(moved.outgoing_integration_requests_timeout, 9);
+        assert!(
+            !moved.feature_flag_move_threads_enabled,
+            "FeatureFlags is never read from the document"
+        );
+
+        let env = |key: &str| -> Option<String> {
+            match key {
+                "MM_SERVICESETTINGS_BURNONREADDURATIONSECONDS" => Some("11".to_owned()),
+                "MM_SERVICESETTINGS_OUTGOINGINTEGRATIONREQUESTSTIMEOUT" => Some("13".to_owned()),
+                "MM_FEATUREFLAGS_MOVETHREADSENABLED" => Some("true".to_owned()),
+                "MM_FEATUREFLAGS_MMBLOCKSENABLED" => Some("false".to_owned()),
+                _ => None,
+            }
+        };
+        let overridden = Config::default().apply_env_from(&env);
+        assert_eq!(overridden.burn_on_read_duration_seconds, 11);
+        assert_eq!(overridden.outgoing_integration_requests_timeout, 13);
+        assert!(overridden.feature_flag_move_threads_enabled);
+        assert!(!overridden.feature_flag_mm_blocks_enabled);
     }
 }
 
@@ -3816,8 +4207,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 96,
-            "the fixture covers {keys} settings and Config reads 96 from the document. \
+            keys, 111,
+            "the fixture covers {keys} settings and Config reads 111 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3847,6 +4238,7 @@ mod go_parity {
                 "EnableEmailInvitations": true,
                 "EnableLinkPreviews": false,
                 "EnablePostSearch": false,
+                "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true
@@ -3865,14 +4257,31 @@ mod go_parity {
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
             "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
+            "PluginSettings": { "Enable": false, "EnableMarketplace": false },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false,
-                "SendPushNotifications": false
+                "SendPushNotifications": false,
+                "SendEmailNotifications": false
             },
-            "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
+            "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false },
+            "AnalyticsSettings": { "MaxUsersForStatistics": 7 },
+            "LogSettings": { "EnableFile": false, "FileLocation": "/var/log/mm" },
+            "AnnouncementSettings": {
+                "AdminNoticesEnabled": false, "UserNoticesEnabled": false,
+                "NoticesURL": "http://feed.invalid/", "NoticesFetchFrequency": 11,
+                "NoticesSkipCache": true
+            }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
+        assert!(!config.admin_notices_enabled);
+        assert!(!config.user_notices_enabled);
+        assert_eq!(config.notices_url, "http://feed.invalid/");
+        assert_eq!(config.notices_fetch_frequency, 11);
+        assert!(config.notices_skip_cache);
+        assert_eq!(config.max_users_for_statistics, 7);
+        assert!(!config.log_enable_file);
+        assert_eq!(config.log_file_location, "/var/log/mm");
 
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);
@@ -3880,6 +4289,7 @@ mod go_parity {
         assert!(config.enable_email_invitations);
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);
+        assert!(!config.enable_file_search);
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
@@ -3933,6 +4343,10 @@ mod go_parity {
         assert!(config.office365_enable);
         assert!(config.guest_accounts_enable);
         assert!(config.enable_guest_magic_link);
+        // The three the built-in slash-command registry reads; each defaults to `true`.
+        assert!(!config.plugin_enable);
+        assert!(!config.plugin_enable_marketplace);
+        assert!(!config.send_email_notifications);
     }
 
     /// The five SSO flags the error mask reads are five **different** keys.
@@ -4225,6 +4639,10 @@ mod go_parity {
     impl mm_store::ConfigStore for FakeStore {
         async fn load_active(&self) -> Result<Option<String>, mm_store::StoreError> {
             Ok(self.0.clone())
+        }
+
+        async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
+            Ok(false)
         }
     }
 
@@ -6064,7 +6482,7 @@ fn join_commas(values: Option<&[String]>) -> String {
 }
 
 /// `model.SystemAsymmetricSigningKeyKey` (system.go:16).
-const SYSTEM_ASYMMETRIC_SIGNING_KEY: &str = "AsymmetricSigningKey";
+pub(crate) const SYSTEM_ASYMMETRIC_SIGNING_KEY: &str = "AsymmetricSigningKey";
 /// `model.SystemDiagnosticId` (system.go).
 const SYSTEM_DIAGNOSTIC_ID: &str = "DiagnosticId";
 /// `model.SystemInstallationDateKey` (system.go:18).
@@ -6102,6 +6520,25 @@ struct EcdsaKeyRow {
 /// `None` — the key row missing, a curve other than P-256, a coordinate that will not fit in 32
 /// bytes — means Go's `if key := ps.AsymmetricSigningKey(); key != nil` did not fire and the
 /// property is **absent** from the map rather than empty.
+/// The same row as a P-256 verifying key, for `DecodeAndVerifyTriggerId`'s `ecdsa.Verify`.
+/// `None` under the same conditions as [`asymmetric_signing_public_key`], plus a point that
+/// is not on the curve.
+pub(crate) fn asymmetric_signing_verifying_key(row: &str) -> Option<p256::ecdsa::VerifyingKey> {
+    let parsed: AsymmetricSigningKeyRow = serde_json::from_str(row).ok()?;
+    let key = parsed.ecdsa_key?;
+    if key.curve != "P-256" {
+        return None;
+    }
+    let x = decimal_to_fixed_bytes(key.x.get(), 32)?;
+    let y = decimal_to_fixed_bytes(key.y.get(), 32)?;
+    let point = p256::EncodedPoint::from_affine_coordinates(
+        p256::FieldBytes::from_slice(&x),
+        p256::FieldBytes::from_slice(&y),
+        false,
+    );
+    p256::ecdsa::VerifyingKey::from_encoded_point(&point).ok()
+}
+
 fn asymmetric_signing_public_key(row: &str) -> Option<String> {
     use base64::Engine as _;
 
@@ -6248,7 +6685,7 @@ impl crate::App {
 
     /// One `Systems` row, with a read failure treated as absence — which is what every caller
     /// here does with it.
-    async fn system_value(&self, name: &str) -> Option<String> {
+    pub(crate) async fn system_value(&self, name: &str) -> Option<String> {
         use mm_store::SystemStore as _;
         match self.store().system().get_by_name(name).await {
             Ok(value) => value,

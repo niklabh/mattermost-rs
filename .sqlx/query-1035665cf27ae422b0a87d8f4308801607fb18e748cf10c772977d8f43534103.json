@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE roles\n               SET updateat = $2, deleteat = $3, createat = $4, name = $5, displayname = $6,\n                   description = $7, permissions = $8, schememanaged = $9, builtin = $10,\n                   schemeid = $11\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Bool",
+        "Bool",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1035665cf27ae422b0a87d8f4308801607fb18e748cf10c772977d8f43534103"
+}

@@ -1,0 +1,31 @@
+# Mutation plan for the SAML, LDAP and audit-log certificate and enterprise-gate routes
+# (`mm_api::auth_certs`, `mm_api::local_auth_certs`, `mm_app::auth_certs`).
+#
+#   scripts/mutate-batch.sh scripts/mutations/auth-certs.plan
+#
+# Every line is a decision a reader could get wrong and that `parity::auth_certs` has a row to
+# catch: which filename each `HasFile` reads (the public certificate is installed when the status
+# is compared, so a swap reads a different answer), the count predicate behind it, the licence
+# gate and its order against the permission on `sync` (plain user, unlicensed: 501 not 403) and
+# on `migrateid` (403 not 501), the empty checks on `toAttribute` and `saml_metadata_url`, the
+# `null` refusal of `reset_auth_data`, the two halves of the auth-service rule, the PEM media
+# type and the missing-type branch of the idp add, the audit parser's two-part refusal, the LDAP
+# parser's id, and the third diagnostic test name. Two no-op controls close the plan.
+
+status-public-reads-private	crates/mm-app/src/auth_certs.rs	.has_config_file(saml.public_certificate_file.as_deref())	.has_config_file(saml.private_key_file.as_deref())	api	auth_certs
+has-file-count-inverted	crates/mm-store/src/config_store.rs	        let found = count.unwrap_or(0) != 0;	        let found = count.unwrap_or(0) == 0;	api	auth_certs
+ldap-licence-gate-open	crates/mm-api/src/auth_certs.rs	        Ok(_) => Some(app_error(where_, "api.ldap_groups.license_error", 501)),	        Ok(_) => None,	api	auth_certs
+sync-permission-before-licence	crates/mm-api/src/auth_certs.rs	    if let Some(refusal) = ldap_license_gate(&state, "api4.syncLdap").await {\n        return refusal.into_response();\n    }\n    let permission = &PERMISSION_CREATE_LDAP_SYNC_JOB;\n    if !state\n        .app\n        .session_has_permission_to(&session.0, permission)\n        .await\n    {\n        return permission_error(&session.0, permission).into_response();\n    }\n	    let permission = &PERMISSION_CREATE_LDAP_SYNC_JOB;\n    if !state\n        .app\n        .session_has_permission_to(&session.0, permission)\n        .await\n    {\n        return permission_error(&session.0, permission).into_response();\n    }\n    if let Some(refusal) = ldap_license_gate(&state, "api4.syncLdap").await {\n        return refusal.into_response();\n    }\n	api	auth_certs
+migrateid-licence-before-permission	crates/mm-api/src/auth_certs.rs	    let permission = &PERMISSION_MANAGE_SYSTEM;\n    if !state\n        .app\n        .session_has_permission_to(&session.0, permission)\n        .await\n    {\n        return permission_error(&session.0, permission).into_response();\n    }\n    if let Some(refusal) = ldap_license_gate(&state, "api4.idMigrateLdap").await {\n        return refusal.into_response();\n    }\n	    if let Some(refusal) = ldap_license_gate(&state, "api4.idMigrateLdap").await {\n        return refusal.into_response();\n    }\n    let permission = &PERMISSION_MANAGE_SYSTEM;\n    if !state\n        .app\n        .session_has_permission_to(&session.0, permission)\n        .await\n    {\n        return permission_error(&session.0, permission).into_response();\n    }\n	api	auth_certs
+toattribute-empty-accepted	crates/mm-api/src/auth_certs.rs	        Some(serde_json::Value::String(text)) if !text.is_empty() => text.as_str(),	        Some(serde_json::Value::String(text)) => text.as_str(),	api	auth_certs
+metadata-url-empty-accepted	crates/mm-api/src/auth_certs.rs	    if url.is_empty() {	    if url.is_empty() && false {	api	auth_certs
+reset-non-object-accepted	crates/mm-api/src/auth_certs.rs	        _ => return decode_error().into_response(),	        _ => ResetAuthDataParams::default(),	api	auth_certs
+group-sync-ldap-predicate-inverted	crates/mm-api/src/auth_certs.rs	    if user.auth_service != USER_AUTH_SERVICE_LDAP	    if user.auth_service == USER_AUTH_SERVICE_LDAP	api	auth_certs
+group-sync-saml-flag-inverted	crates/mm-api/src/auth_certs.rs	            || !state.app.config().saml_enable_sync_with_ldap)	            || state.app.config().saml_enable_sync_with_ldap)	api	auth_certs
+idp-pem-type-misspelt	crates/mm-api/src/auth_certs.rs	        "application/x-pem-file" => {	        "application/x-pem" => {	api	auth_certs
+idp-missing-type-dropped	crates/mm-api/src/auth_certs.rs	    if raw.is_empty() {	    if raw.is_empty() && false {	api	auth_certs
+audit-two-parts-tolerated	crates/mm-api/src/auth_certs.rs	                Some(files) if files.len() > 1 => Err(app_error(	                Some(files) if files.len() > 2 => Err(app_error(	api	auth_certs
+ldap-parse-id-is-no-file	crates/mm-api/src/auth_certs.rs	                    CertificateParser::Ldap => "api.admin.add_certificate.parseform.app_error",	                    CertificateParser::Ldap => "api.admin.add_certificate.no_file.app_error",	api	auth_certs
+diagnostics-group-attributes-dropped	crates/mm-api/src/auth_certs.rs	    if !test_type.is_valid() {	    if !test_type.is_valid() || test_type.as_str() == "group_attributes" {	api	auth_certs
+control-rename-content-type	crates/mm-api/src/auth_certs.rs	    let content_type = parts\n        .headers\n        .get(header::CONTENT_TYPE)\n        .and_then(|value| value.to_str().ok());\n    match parser.parse(content_type, &bytes) {	    let content_type_header = parts\n        .headers\n        .get(header::CONTENT_TYPE)\n        .and_then(|value| value.to_str().ok());\n    match parser.parse(content_type_header, &bytes) {	api	auth_certs
+control-reorder-field-names	crates/mm-api/src/auth_certs.rs	    names: &["include_deleted", "dry_run", "user_ids"],	    names: &["dry_run", "include_deleted", "user_ids"],	api	auth_certs

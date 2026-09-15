@@ -221,3 +221,162 @@ mod tests {
         assert_eq!(onboarding_row(Some("yes".into())).value, "yes");
     }
 }
+
+/// Why `Server.Restart` (app/server.go:856) did not exec.
+#[derive(Debug, thiserror::Error)]
+pub enum RestartError {
+    /// `errors.Wrap(err, "unable to restart because the system has not been upgraded")` with a
+    /// non-nil `err` — the upgrader's last error.
+    #[error("unable to restart because the system has not been upgraded: {0}")]
+    NotUpgraded(String),
+    /// `exec.LookPath(os.Args[0])` found nothing executable by that name.
+    #[error("exec: \"{0}\": executable file not found in $PATH")]
+    NotFound(String),
+    /// `os.Stat` or `syscall.Exec` itself.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+/// Port of `exec.LookPath` (os/exec/lp_unix.go): a name with a slash is checked as given;
+/// anything else is searched for along `PATH`. "Executable" is a regular file with any execute
+/// bit set.
+fn look_path(name: &str) -> Result<std::path::PathBuf, RestartError> {
+    use std::os::unix::fs::PermissionsExt;
+    let is_executable = |path: &std::path::Path| {
+        std::fs::metadata(path)
+            .is_ok_and(|info| info.is_file() && info.permissions().mode() & 0o111 != 0)
+    };
+    if name.contains('/') {
+        let path = std::path::PathBuf::from(name);
+        return if is_executable(&path) {
+            Ok(path)
+        } else {
+            Err(RestartError::NotFound(name.to_owned()))
+        };
+    }
+    for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
+        let dir = if dir.as_os_str().is_empty() {
+            std::path::PathBuf::from(".")
+        } else {
+            dir
+        };
+        let candidate = dir.join(name);
+        if is_executable(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(RestartError::NotFound(name.to_owned()))
+}
+
+impl App {
+    /// Port of `App.RecycleDatabaseConnection` (app/admin.go:148): the two log lines and the
+    /// store's recycle between them — see `SqlStore::recycle_db_connections` for how far sqlx
+    /// lets that go.
+    #[tracing::instrument(skip(self))]
+    pub async fn recycle_database_connection(&self) {
+        tracing::info!("Attempting to recycle database connections.");
+        self.store().recycle_db_connections().await;
+        tracing::info!("Finished recycling database connections.");
+    }
+
+    /// Port of `Server.InvalidateAllCaches` (app/admin.go:140) →
+    /// `PlatformService.InvalidateAllCachesSkipSend` (platform/cluster_handlers.go:137), for a
+    /// server with no cluster to forward the message to.
+    ///
+    /// # What there is to invalidate here
+    ///
+    /// Go purges the session cache (and, with it, every websocket connection's cached
+    /// membership), the status cache, six store-level caches, the link-metadata cache, and then
+    /// reloads the licence. This port keeps only three of those in memory — the status cache,
+    /// the hub's per-connection membership caches and the verified licence — and those three
+    /// are what is dropped; sessions and every store read go to the table on each request
+    /// ([D-087]), so there is nothing else to purge and nothing this call can make stale.
+    ///
+    /// # It does not reach the Go server's caches
+    ///
+    /// While the proxy is on, the Go process beside this one holds its own copies of all of
+    /// the above and this call cannot touch them; the handler
+    /// (`mm_api::sysops::invalidate_caches`) forwards a second copy of the request there for
+    /// exactly that reason, and says why.
+    #[tracing::instrument(skip(self))]
+    pub fn invalidate_all_caches(&self) -> AppResult {
+        tracing::info!("Purging all caches");
+        self.hub().invalidate_all();
+        self.status_cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        // `ps.LoadLicense()`: the next `license()` re-reads `ActiveLicenseId` and re-verifies
+        // the row rather than answering from the cache.
+        if let Ok(mut guard) = self.license_cache.write() {
+            *guard = None;
+        }
+        Ok(())
+    }
+
+    /// Port of `App.CheckIntegrity` (app/app.go:148), drained: Go hands back the channel the
+    /// store streams into and the handler collects it; the store here answers the collected
+    /// list directly.
+    pub async fn check_integrity(&self) -> Vec<mm_model::integrity::IntegrityCheckResult> {
+        self.store().check_integrity().await
+    }
+
+    /// Port of `Server.Restart` (app/server.go:856).
+    ///
+    /// # On a server that has not been upgraded, this is a no-op that reports success
+    ///
+    /// `UpgradeToE0Status()` is `(0, nil)` unless an upgrade ran, and the guard is
+    /// `errors.Wrap(err, "unable to restart …")` — which for a nil `err` is **nil**. So the
+    /// common case returns no error, execs nothing, and the handler that called it logs nothing:
+    /// `POST /api/v4/restart` on a stock server is a 200 after a one-second sleep and no
+    /// restart at all. Only an upgrader error is reported, and only a completed upgrade
+    /// (`percentage == 100`) execs — `exec.LookPath(os.Args[0])`, a stat, then `syscall.Exec`
+    /// with the same arguments and environment, which replaces this process in place. No
+    /// upgrade ever completes here (see `crate::upgrader`), so the exec is written down and
+    /// unreachable.
+    #[tracing::instrument(skip(self))]
+    pub fn restart(&self) -> Result<(), RestartError> {
+        let (percentage, error) = crate::upgrader::upgrade_to_e0_status();
+        if error.is_some() || percentage != 100 {
+            return match error {
+                Some(err) => Err(RestartError::NotUpgraded(err)),
+                None => Ok(()),
+            };
+        }
+
+        let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+        let arg0 = args
+            .first()
+            .map(|a| a.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let argv0 = look_path(&arg0)?;
+        std::fs::metadata(&argv0)?;
+        tracing::info!("Restarting server");
+        // `syscall.Exec` returns only on failure; so does this.
+        let err = std::os::unix::process::CommandExt::exec(
+            std::process::Command::new(&argv0).args(args.iter().skip(1)),
+        );
+        Err(RestartError::Io(err))
+    }
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+
+    /// A name with a slash is not searched; a bare name is found on `PATH`; neither is found
+    /// when nothing executable is there.
+    #[test]
+    fn look_path_matches_exec_look_path() {
+        assert!(look_path("sh").is_ok());
+        assert!(look_path("/bin/sh").is_ok() || look_path("/usr/bin/sh").is_ok());
+        assert!(matches!(
+            look_path("mmrs-no-such-executable-anywhere"),
+            Err(RestartError::NotFound(_))
+        ));
+        assert!(matches!(
+            look_path("./mmrs-no-such-executable-anywhere"),
+            Err(RestartError::NotFound(_))
+        ));
+    }
+}

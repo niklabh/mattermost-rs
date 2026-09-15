@@ -104,6 +104,10 @@ async fn the_latest_revision_is_byte_identical() {
     let client = client();
     let token = go_minted_token(&client).await;
     plant().await;
+    // Held for the whole test: `terms_of_service_licensed` publishes a revision that is the
+    // table's latest until it purges it, under this lock. Rust reads through and would see it
+    // while Go's cache still answers with the planted row — measured on a full run 2026-09-15.
+    let _cache = common::GO_CACHE.lock().await;
 
     let (go, rs) = fetch_both_stable(&client, &token, PATH).await;
     assert_eq!(
@@ -140,6 +144,10 @@ async fn the_older_revision_exists_and_is_not_returned() {
     let client = client();
     let token = go_minted_token(&client).await;
     plant().await;
+    // Held for the whole test: `terms_of_service_licensed` publishes a revision that is the
+    // table's latest until it purges it, under this lock. Rust reads through and would see it
+    // while Go's cache still answers with the planted row — measured on a full run 2026-09-15.
+    let _cache = common::GO_CACHE.lock().await;
 
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL is set by scripts/parity.sh");
     let pool = sqlx::postgres::PgPoolOptions::new()
@@ -171,6 +179,10 @@ async fn a_session_is_required_and_no_permission_is() {
     let client = client();
     let token = go_minted_token(&client).await;
     plant().await;
+    // Held for the whole test: `terms_of_service_licensed` publishes a revision that is the
+    // table's latest until it purges it, under this lock. Rust reads through and would see it
+    // while Go's cache still answers with the planted row — measured on a full run 2026-09-15.
+    let _cache = common::GO_CACHE.lock().await;
 
     // A plain user with no permissions at all gets the terms.
     let team = common::a_team_and_channel_the_user_is_in(&client, &token)
@@ -218,6 +230,10 @@ async fn the_post_beside_it_is_served_and_publishes_nothing() {
     let client = client();
     let token = go_minted_token(&client).await;
     plant().await;
+    // Held for the whole test: `terms_of_service_licensed` publishes a revision that is the
+    // table's latest until it purges it, under this lock. Rust reads through and would see it
+    // while Go's cache still answers with the planted row — measured on a full run 2026-09-15.
+    let _cache = common::GO_CACHE.lock().await;
 
     let latest_id = async || -> String {
         let (_, body) = fetch_both_raw(&client, &token, PATH).await.0;

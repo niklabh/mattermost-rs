@@ -8880,3 +8880,292 @@ function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` br
 serves the HTTP twin's branch as well. The parity test that will cover it already sends the
 request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
 forward today and would assert the served answer then.
+
+---
+
+## D-700 · The configuration save path is forwarded: `SetDefaults`, `IsValid`, the `access:` merge and `Store.Set` are unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (config.go, config_local.go)
+
+`PUT /config`, `PUT /config/patch` and their socket twins serve every gate before the merge
+(`mm_api::config_writes`) and forward the save. Behind the forward: `config.Merge` through the
+per-field `access:` tags (`writeFilter`, api4/config.go:432 — the ~1,300 tags `mm_model::config`
+does not carry), `Config.SetDefaults` and `Config.IsValid` (seventy Go functions between them),
+`HandleMessageExportConfig`, and `Store.Set` (config/store.go:168): `Desanitize`,
+`applyEnvironmentMap`, `fixConfig`, `IsValid` again, `removeEnvOverrides`, and
+`DatabaseStore.persist` — the SHA dedupe, `Active = NULL` on the old row, one new row.
+`localMigrateConfig`'s `config.Migrate` is the same store code over two DSNs. **What is owed:**
+the model's defaults and validation section by section, then `ConfigStore::set` and the app
+function — *and*, for as long as the Go server runs beside this one, a way to make it reload:
+`config.DatabaseStore` has no watcher, so a row this process writes is invisible to Go until
+its `ReloadConfig` runs, which is `POST /config/reload` over the local socket. The parity suite
+that will cover it already sends the writes (`parity::configlic`) and asserts the forward.
+
+## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (config.go)
+
+`mm_app::App::config()` returns the `Config` projection loaded once in `App::new`
+(`Config::load`, then never again), while `getConfig`, `localGetConfig` and the write gates
+re-read the `Configurations` row per request (`load_model_config`). So after any configuration
+write — Go's own, or one forwarded through this server — the full-document reads and the
+`config_writes` gates see the new value at once and every ported gate that consults the
+projection (`show_full_name`, `enable_open_server`, `restrict_system_admin`, the file settings,
+the ninety-odd others) keeps the old one until this process restarts. Go's config listeners have
+no counterpart. **What is owed:** a reloadable projection — `ArcSwap`/`RwLock` behind `config()`
+with a reload on `POST /config/reload` and after a forwarded save, or a per-request read with a
+short TTL — and a parity test that patches a projected setting and reads a gated route back.
+Not fixed in the session that found it because `config()` returns `&Config` to several hundred
+call sites across seven concurrent worktrees.
+
+## D-702 · `SaveLicense`, `RemoveLicense` with a licence in force, and the trial request are forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (license.go, license_local.go)
+
+`POST /license` serves the permission, the multipart parse, `LicenseFromBytes` and the trial
+gate, then forwards `SaveLicense` (platform/license.go:132): `Store.User().Count` and
+`AnalyticsGetSingleChannelGuestCount` for the seat check, `IsExpired`, the job-server stop/start,
+`SetLicense` (the in-memory swap Go answers every `License()` from), `LicenseStore::save`,
+`System.SaveOrUpdate(ActiveLicenseId)`, `PermanentDeleteByName(HostedPurchaseNeedsScreening)`,
+`ReloadConfig` and `InvalidateAllCaches`. `DELETE /license` serves the no-licence case and
+forwards the other, for the same reason: the copy that must change is the Go process's.
+`POST /trial-license` is served to the nil `LicenseManager` this build has; the outbound request
+to the licence server (`RequestTrialLicense`, `RequestTrialLicenseWithExtraFields`) sits behind
+that nil. **What is owed:** `LicenseStore::save`, the two user counts (owned by the user store),
+the app functions, and — while Go runs — no relay exists at all: Go re-reads `Licenses` only in
+its own `SaveLicense`, so a licence saved here would leave Go unlicensed until it restarts. The
+success branch cannot be exercised on the shared stack without saving a licence, which
+`parity::configlic` never does.
+## D-660 · The certificate writes of `saml.go`, `ldap.go` and `audit_logging.go` are Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (the certificate and gate routes)
+
+`POST`/`DELETE /api/v4/saml/certificate/{public,private,idp}`, `/api/v4/ldap/certificate/{public,
+private}` and `/api/v4/audit_logs/certificate` (and the four LDAP pairs on the local socket) serve
+the permission and the multipart parse — every 403 and 400 — and forward the request that would
+write. `App.AddSamlPublicCertificate` and its eleven siblings are `platform.SetConfigFile` /
+`RemoveConfigFile` (a `ConfigurationFiles` row) followed by `UpdateConfig`, which validates the
+whole `model.Config` and persists a new `Configurations` revision; `RemoveSamlPublicCertificate`
+also flips `SamlSettings.Encrypt` and `RemoveSamlIdpCertificate` flips `SamlSettings.Enable`.
+`mm_app::App::config()` is a value fixed at construction, and the configuration-document write
+belongs to the config family (worktree `configlic`), so a write made here would not be seen by the
+process that made it. `ConfigStore::has_file` is ported; `set_file` and `remove_file` are not,
+because no served branch reaches them.
+
+**What is owed:** `ConfigStore::set_file`/`remove_file` (database.go:261, 308 — an `UPDATE` then
+an `INSERT`, and a `DELETE`), the twelve `App` writers, and behind them the config family's
+`UpdateConfig` (`Config.IsValid` and `SaveConfig`), after which `mm_api::auth_certs::add_certificate`
+and `remove_certificate` write instead of forwarding. `parity::auth_certs::certificate_adds_serve_
+the_gate_and_the_parse_and_forward_the_write` already sends every write and asserts the forward;
+it would assert the served answer then, with the status comparisons unchanged.
+
+---
+
+## D-661 · `CreateDefaultMemberships` is unported; `group_sync_memberships` forwards past its gate
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (the certificate and gate routes)
+
+`POST /api/v4/ldap/users/{user_id}/group_sync_memberships` serves the permission, the user lookup
+(404, no `RequireUserId` — `me` is a two-byte id) and the auth-service rule (400 for anyone but an
+LDAP user or a SAML user with `EnableSyncWithLdap`), then forwards. `App.CreateDefaultMemberships`
+(app/syncables.go:128) is `createDefaultTeamMemberships` then `createDefaultChannelMemberships`
+scoped to the user, over `GroupStore.TeamMembersToAdd`/`ChannelMembersToAdd` and the team and
+channel join paths with `ReAddRemovedMembers`. **What is owed:** those two store queries and the
+app function; the parity row that sends an LDAP user through the route asserts the forward today.
+
+---
+
+## D-800 · The parity binary's plain users approach Go's unlicensed seat limit mid-run; create-user refusals fail tests that pass alone
+
+**Status** OPEN · **Severity** harness · **Raised** 2026-09-15 (app/limits.go:14, app/user.go:334)
+
+An unlicensed Go refuses `createUserOrGuest` with `api.user.create_user.user_limits.exceeded` once
+`Store.User().Count` — active, non-bot, non-remote users — reaches `maxUsersHardLimit`, **250**. The
+licensed oracles are exempt (their licence does not enforce seats), so only the stack Go bites.
+Measured on stack 0 during a full `scripts/parity.sh` run after the authcerts merge: active users
+went from 24 to a **peak of 252** (bots included in that sample), and two of the run's three
+failures were that refusal (`users_list::the_unfiltered_list_matches_go`,
+`user_updates::a_stranger_is_refused_identically`), both passing alone. Every suite merged after
+that raises the peak.
+
+The cause is breadth, not a hotspot. `create_plain_user` has 508 call sites in 159 files and
+`delete_plain_user` 313; no file leaves more than seven users behind, and 62 once-cell fixtures
+create plain users that must live for the whole binary. `purge_api_fixtures` clears them only at
+the **start** of the next run, so within one run nothing a test forgot is ever retired.
+
+**What is owed:** retire each plain user when the test that created it ends, without touching the
+508 call sites. The design this session measured: `create_plain_user` records the id in a
+thread-local registry whose destructor deactivates them (every test is `#[tokio::test]` on the
+current-thread runtime — zero `multi_thread` flavours — and libtest gives each test its own thread,
+so the destructor runs at test end, after partial moves and temporaries alike); a separate
+`create_fixture_user` for the 62 once-cell initialisers opts out. Do it after the 2026-09-15 round's
+branches merge, since it touches most test files.
+
+**Mitigated the same day, not closed.** `scripts/parity.sh` now runs the parity binary in two
+sequential shards balanced by `create_plain_user` sites, so each shard's purge retires the
+previous shard's users. Measured on stack 0 with the same sampler: the peak fell from **252 to
+170**, create-user refusals from five to **zero**, and the sharded run executed the same 1,745
+parity tests as the unsharded one. The headroom is about 80 users; per-test retirement is still
+owed, and `MMRS_PARITY_SHARDS=3` is the stopgap if the peak climbs back.
+## D-720 · `setPostReminder` on a DM or group-channel post forwards: its permalink is fetched, not previewed
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+Narrows [D-420]. The team-channel reminder is served, confirmation embed included
+(`mm_app::post::sole_permalink_in`, `App::link_metadata_for_permalink`). A post whose channel has
+no team gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so Go sends the URL
+through `getLinkMetadataForURL`: an outbound fetch plus a `LinkMetadata` row. `App::set_post_reminder`
+refuses that branch before writing. **What is owed:** the generic link-metadata path
+(OpenGraph fetch, `LinkMetadata` store, the link cache), which [D-401] also owes.
+
+## D-721 · The author's own `burnPost` forwards: `PermanentDeletePostDataRetainStub` is unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+`App.BurnPost` for `post.UserId == userID` (app/post.go:4132) runs the content-flagging deletion
+(app/content_flagging.go:687): files, edit histories, persistent notifications, acknowledgements,
+priority, reminders, then the post, each step recorded in a `PostDeletionReport`.
+`App::burn_post` refuses it before reading anything. **What is owed:** that function and its
+store deletes. `parity::postrest::reveal_and_burn_refusals_are_served` asserts the forward.
+
+## D-722 · `doPostAction` with a `cookie` forwards: the cookie is AES-GCM under `PostActionCookieSecret`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+`DecryptPostActionCookie` (model/integration_action.go:1337) plus
+`ParseDecryptedActionCookiePayload`, then the cookie path of `resolvePostActionSetup`
+(ephemeral posts). Nothing is observable before the decrypt, so the handler forwards the whole
+request. **What is owed:** an `aes-gcm` dependency, the `Systems.PostActionCookieSecret` read,
+and `setupFromLegacyCookie` / `setupFromMmBlocksCookie`.
+
+## D-723 · Integration calls the outbound guard allows are forwarded: `DoActionRequest` and its response handling
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+All four dialog/action routes serve every refusal and the guard's own 400
+(`OutboundDisposition::Refused`), but a URL the guard permits — or a `/plugins/` path, or the
+site's own `/plugins/` subtree — is handed to Go: the signed trigger id, the upstream `POST`,
+`applyPostActionUpdate`, the ephemeral text, the dialog response validation. The stack's
+allow-list is empty, so no oracle can reach an integration today. **What is owed:** a stack with
+an allow-listed echo integration, then the send and response halves.
+
+## D-724 · A licensed `moveThread` with `MoveThreadsEnabled` forwards: `App.MoveThread` is unported
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+The 501 gate is served. Past it: the wrangler permission checks (`PermittedWranglerRoles`,
+`AllowedEmailDomain` — not in `Config`), `ValidateMoveOrCopy`, `CopyWranglerPostlist` and the
+system post. The flag is environment-only and off on every oracle, including the licensed pair.
+**What is owed:** the wrangler settings, the copy, and a licensed oracle started with
+`MM_FEATUREFLAGS_MOVETHREADSENABLED=true`.
+
+## D-725 · `rewriteMessage` forwards at the agents bridge
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+
+Every refusal ahead of `agentsBridge.AgentCompletion` is served (`App::rewrite_message_gates`);
+the completion is a request into the AI plugin (`mattermost-plugin-ai` bridge client), and without
+the plugin Go answers the 500 `app.post.rewrite.agent_call_failed`. **What is owed:** the plugin
+host's inter-plugin request path, then the prompt builders (`getRewritePromptForAction`,
+`buildThreadContextForRewrite`, `buildRewriteSystemPrompt`).
+## D-740 · `GET /teams/{team_id}/channels/managed_categories` is forwarded: no oracle registers it
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+
+`getManagedCategories` (api4/channel.go:3302) is registered only when
+`FeatureFlags.ManagedChannelCategories` is on (channel.go:71), and the flag is off on the stack's
+Go **and** on the licensed oracle (measured: both answer gorilla's mux 404, and
+`FeatureFlagManagedChannelCategories` reads `false` in their client config). So the only answer
+any oracle gives is Go's own 404, which the fallback forward already reproduces and
+`parity::channel_search_all::the_managed_categories_route_is_a_404_on_both` pins. Behind the flag
+the handler is `RequireTeamId`, a `MinimumEnterpriseLicense` 501 `api.license_error`, then
+`App.GetVisibleManagedCategoryMappings` (app/channel_category.go:342): the caller's channels on
+the team, then `SearchPropertyValues` on the `managed_channel_categories` group (version 3) for
+the `category_name` field cached at startup by `cacheManagedCategoryIDs` (migrations.go:1152),
+answered as a `channel_id → name` map. **What is owed:** a Go process with the flag on (a
+`go-licensed.sh` variant with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true`, as the guest
+variant does for its setting), then the handler with the flag, licence and team-id gates, the
+group/field-id lookup by name, and a parity suite against that process.
+## D-780 · The five RemoteClusterTokenRequired routes are served as their gate; the licensed session path forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go)
+
+`ping`, `msg`, `confirm_invite`, `upload/{upload_id}` and `{user_id}/image`
+(`crates/mm-api/src/remote_cluster.rs`) are gated by `RemoteClusterTokenRequired`, which needs a
+licence carrying `HasRemoteClusterService` **and** a session whose type is `RemoteClusterToken`.
+On this unlicensed build every request is the 401 `api.context.session_expired.app_error` before
+any handler runs, which is served and proven by parity. A licence with the remote-cluster service
+present would make the answer turn on resolving an `X-RemoteCluster-Token` against the
+`RemoteClusters` table (`GetRemoteClusterSession`); that session path and its store are unported,
+so a licensed request forwards. Owed: the remote-cluster session and the five handler bodies
+(`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`, `doUploadData`, `SetProfileImage`), which need
+the `RemoteClusterService`, nil on this build.
+
+## D-781 · Slash commands that would run, and suggestions that fetch a list, are forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (command.go)
+
+The three command routes are served (`crates/mm-api/src/commands.rs`), and forward in four cases:
+a command that would **run** — any built-in provider (no `DoCommand` is ported: `/echo`,
+`/header`, `/join`, `/msg`, `/mute`, `/invite` and the other 29) or a custom command (the outgoing
+webhook in `DoCommandRequest`, then `CreateCommandPost` or an ephemeral post); a suggestion
+input that reaches a **dynamic list** argument (`/secure-connection remove`, `/share-channel
+invite`/`uninvite` — the providers' `GetAutoCompleteListItems`); any request while Go's plugin
+directory holds a bundle (plugin commands are Go runtime state); and a list or suggestions request
+whose `Accept-Language` is not English (no i18n bundle, [D-092]). Owed, in that order of yield:
+the custom-command webhook path, then the providers one file at a time, then i18n.
+
+## D-782 · `GET /manualtest` is forwarded
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+
+Registered only when `ServiceSettings.EnableTesting` is on (api4/api.go:414). Off — the stack's
+value — the path is not an api4 route at all and falls to the webapp's static root handler, whose
+answer is a 500 naming Go's own `client/root.html` path; on, `manualtesting.ManualTest` drives Go's
+REST client against its own listen address to seed users and teams. Neither is an API handler this
+server can reproduce without porting the static webapp handler, so both forward.
+## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+
+`testNotifications` (api4/system.go:233) is `App.SendTestMessage` (app/post.go:3422) and nothing
+else: the system bot, `GetOrCreateDirectChannel(user, bot)`, the user's locale for the one
+message string, then `CreatePost(…, CreatePostFlags{ForceNotification: true})` and `ReturnStatusOK`.
+Every piece but the flag is ported; `mm_app::post_create::CreatePostFlags` carries `set_online`
+and `silent_notification` only, and the flag is the post family's to add (it sets the
+`force_notification` prop after `SanitizeProps` and drives the push through the user's
+do-not-disturb). **What is owed:** the flag on `CreatePostFlags`, then `App::send_test_message`
+and the two-line handler in `mm_api::sysops`. The route forwards whole today; the parity suite
+pins that in `the_two_forwarded_routes_are_still_gos`.
+
+## D-682 · `POST /api/v4/upgrade_to_enterprise`'s upgrade arm forwards: the procedure is the Go binary's
+
+**Status** OPEN · **Severity** decision · **Raised** 2026-09-15 (system.go)
+
+Past the five refusals (`mm_api::sysops::upgrade_to_enterprise`) Go spawns `upgrader.UpgradeToE0`:
+download `mattermost-<version>-linux-amd64.tar.gz`, verify the detached signature against the
+embedded key, swap `mattermost/bin/mattermost` over the running executable, then report 100% and
+let `POST /restart` exec it. There is no enterprise build of this server to fetch, so the arm
+forwards to Go — whose own binary is what the procedure replaces — and the status and restart
+routes then report this process, which has not been upgraded. Reachable only on a Linux amd64
+host whose executable directory the process may write; every stack in this project is arm64 and
+both servers answer `system_not_supported` before the arm. **What is owed:** a decision when the
+Go server is gone — most likely that the route answers `already-enterprise` (429), since a
+server with no Team Edition to upgrade *from* is the enterprise-ready case — recorded here so it
+is decided rather than inherited.
+
+## D-683 · A user created here is not marked as having viewed the current product notices
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+
+`App.CreateUser` ends with `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` (app/user.go:413),
+which writes a `ProductNoticeViewState` row with `Viewed = 1` for every notice in the cache, so a
+brand-new user is not shown the notices already current on the day they joined. The Rust
+`App::create_user` (`mm_app::user_create`) does not, so a user created through this server's
+`POST /api/v4/users` is shown notices from their first request that a Go-created user never sees —
+`GET /api/v4/system/notices/{team_id}` then differs between the two for that user, on both servers,
+because both read the same view rows. **What is owed:** after the user row is written, the call
+`self.store().product_notices().view(&user.id, &ids)` over the ids in
+`App::notices_cache()` — logged on failure, never returned, as Go's goroutine does. Both pieces
+exist since 2026-09-15; the call site is the user family's.
+

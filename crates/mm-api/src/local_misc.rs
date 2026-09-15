@@ -53,10 +53,10 @@ use crate::local::{
 };
 use crate::{
     AppState, config, custom_profile_attributes as cpa, exports, gated_reads, jobs, preferences,
-    uploads, user_convert,
+    upload_write, uploads, user_convert,
 };
 
-/// The thirty-one registrations, merged into [`crate::local::router`].
+/// The thirty-three registrations, merged into [`crate::local::router`].
 pub(crate) fn routes(state: &AppState) -> Router<AppState> {
     Router::new()
         // ---- `job_local.go`, all seven. `{job_id:[A-Za-z0-9]+}` is id-shaped, so the id
@@ -165,11 +165,16 @@ pub(crate) fn routes(state: &AppState) -> Router<AppState> {
             "/api/v4/bots/{bot_user_id}/convert_to_user",
             partially_migrated_with_ids(state, post(local_convert_bot_to_user)),
         )
-        // ---- `upload_local.go:10`. The two `POST`s beside it (`createUpload`, `uploadData`)
-        // are another family's; the method fallback forwards them.
+        // ---- `upload_local.go:9-11` — all three pairs. `createUpload` and `uploadData` are the
+        // HTTP handlers under the local session (2026-09-15); see the two wrappers below for
+        // what an empty user id does to each.
+        .route(
+            "/api/v4/uploads",
+            partially_migrated(post(local_create_upload)),
+        )
         .route(
             "/api/v4/uploads/{upload_id}",
-            partially_migrated_with_ids(state, get(local_get_upload)),
+            partially_migrated_with_ids(state, get(local_get_upload).post(local_upload_data)),
         )
         // ---- `system_local.go:20` and `ldap_local.go:12`, each served up to its licence gate
         // exactly as on the HTTP router.
@@ -183,7 +188,15 @@ pub(crate) fn routes(state: &AppState) -> Router<AppState> {
         )
         // ---- `config_local.go:19` and `:24` — the two `local*` handlers. The `PUT`, `/patch`,
         // `/reload` and `/migrate` pairs fall to the fallbacks.
-        .route("/api/v4/config", partially_migrated(get(local_get_config)))
+        // `PUT /config` is `localUpdateConfig` (config_local.go:20), served from
+        // `config_writes` since 2026-09-15; it shares this method router because axum allows
+        // one registration per path.
+        .route(
+            "/api/v4/config",
+            partially_migrated(
+                get(local_get_config).put(crate::config_writes::local_update_config),
+            ),
+        )
         .route(
             "/api/v4/config/client",
             partially_migrated(get(local_get_client_config)),
@@ -578,6 +591,34 @@ async fn local_get_upload(state: State<AppState>, path: Path<String>) -> Respons
     uploads::get_upload(state, path, local_session()).await
 }
 
+/// `createUpload` through `APILocal` (upload_local.go:9).
+///
+/// The handler stamps `us.UserId = session.UserId`, which on the socket is the empty string, and
+/// `UploadSession.IsValid` then refuses it — `!IsValidId("") && "" != "nouser"` — with the 400
+/// `model.upload_session.is_valid.user_id.app_error`, for an attachment and an import alike.
+/// Everything before that (the type branches, the `manage_system` and channel permission checks
+/// the local session passes) runs first, so a malformed body or a disabled attachment setting
+/// still answers its own refusal. Measured against Go's socket: no upload session can be created
+/// this way.
+async fn local_create_upload(state: State<AppState>, request: Request) -> Response {
+    upload_write::create_upload(state, local_session(), request).await
+}
+
+/// `uploadData` through `APILocal` (upload_local.go:11).
+///
+/// An attachment session is refused: its `UserId` is a real user's and the socket's is empty, so
+/// `us.UserId != session.UserId` is the 403 `upload_file` permission error for every attachment.
+/// An **import** session takes the other branch — `manage_system`, which the local session
+/// holds, and not Cloud — so the socket can feed an import upload its bytes, which is what
+/// `mmctl import upload` does over it. That is the served pair.
+async fn local_upload_data(
+    state: State<AppState>,
+    path: Path<String>,
+    request: Request,
+) -> Response {
+    upload_write::upload_data(state, path, local_session(), request).await
+}
+
 /// `generateSupportPacket` through `APILocal` (system_local.go:20), up to the licence gate as on
 /// the HTTP router; a licensed server's packet is Go's, over the socket.
 async fn local_generate_support_packet(
@@ -712,6 +753,6 @@ mod tests {
             .lines()
             .filter(|line| line.trim_start().starts_with("async fn local_"))
             .count();
-        assert_eq!(wrappers, 31 + 1);
+        assert_eq!(wrappers, 33 + 1);
     }
 }

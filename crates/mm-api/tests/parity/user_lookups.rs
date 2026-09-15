@@ -35,6 +35,8 @@ const AUTH_DATA: &str = "mmrs-parity-auth-data-value";
 
 struct Fixture {
     subject_id: String,
+    /// The bot this fixture planted (`mmrsbot…`), empty when planting failed.
+    bot_id: String,
     /// A `system_user`, for the permission checks.
     plain_token: String,
     planted: bool,
@@ -50,14 +52,16 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
             let subject = create_plain_user(client, token, &team_id, "ulooksubject").await;
             let plain = create_plain_user(client, token, &team_id, "ulookplain").await;
 
-            let planted = set_auth_data(&subject.id, AUTH_DATA).await
-                && plant_bot("ulookbot", common::logged_in_user_id(), 0)
-                    .await
-                    .is_some()
-                && set_user_roles(&plain.id, "system_user").await;
+            let bot_id = if set_auth_data(&subject.id, AUTH_DATA).await {
+                plant_bot("ulookbot", common::logged_in_user_id(), 0).await
+            } else {
+                None
+            };
+            let planted = bot_id.is_some() && set_user_roles(&plain.id, "system_user").await;
 
             Fixture {
                 subject_id: subject.id,
+                bot_id: bot_id.unwrap_or_default(),
                 plain_token: plain.token,
                 planted,
             }
@@ -356,20 +360,36 @@ async fn with_the_open_server_off_the_route_serves_a_page() {
         return;
     };
 
-    let response = client
-        .get(format!("{}{INVALID_PATH}?per_page=200", server.base))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("the second server answers");
-    assert_eq!(
-        response.status(),
-        200,
-        "with the gate open the route serves — so the 400 above is the gate and not the handler"
-    );
-    let body = response.bytes().await.expect("a body").to_vec();
-    assert_eq!(body.last(), Some(&b'\n'), "the encoder's newline");
-    let users: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    // Every page, not page 0: a full run holds more than 200 active users at its peak, and the
+    // subject — created mid-run — fell onto page 1 (2026-09-15, see D-800). The route pages by
+    // `LIMIT per_page OFFSET page * per_page`, so an empty page is the end.
+    let mut all_users = Vec::new();
+    for page in 0.. {
+        let response = client
+            .get(format!(
+                "{}{INVALID_PATH}?page={page}&per_page=200",
+                server.base
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the second server answers");
+        assert_eq!(
+            response.status(),
+            200,
+            "with the gate open the route serves — so the 400 above is the gate and not the handler"
+        );
+        let body = response.bytes().await.expect("a body").to_vec();
+        assert_eq!(body.last(), Some(&b'\n'), "the encoder's newline");
+        let users: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        let users = users.as_array().expect("an array").clone();
+        if users.is_empty() {
+            break;
+        }
+        assert!(page < 50, "the route never returned an empty page");
+        all_users.extend(users);
+    }
+    let users = serde_json::Value::Array(all_users);
     let ids: Vec<&str> = users
         .as_array()
         .expect("an array")
@@ -381,8 +401,12 @@ async fn with_the_open_server_off_the_route_serves_a_page() {
         ids.contains(&f.subject_id.as_str()),
         "an ordinary active account with no auth service is reported"
     );
+    // This fixture's own bot, not any `mmrsbot` id: another suite's `plant_bot` writes the
+    // `Users` row before the `Bots` row, and a page read between the two lists that user as an
+    // ordinary account on both servers. The page walk made every page part of that window
+    // (a sharded run, 2026-09-15).
     assert!(
-        !ids.iter().any(|id| id.starts_with("mmrsbot")),
+        !ids.contains(&f.bot_id.as_str()),
         "the planted bot is not: {ids:?}"
     );
     for user in users.as_array().expect("an array") {

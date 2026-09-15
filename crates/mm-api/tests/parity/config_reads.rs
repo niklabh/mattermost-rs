@@ -179,6 +179,8 @@ async fn the_sanitized_config_matches_go_except_the_per_checkout_file_directory(
     if !stack_enabled() {
         return;
     }
+    // Shared: `parity::configlic` patches the document under the exclusive half.
+    let _document = common::CONFIG_DOCUMENT.read().await;
 
     let client = client();
     let token = go_minted_token(&client).await;
@@ -221,6 +223,8 @@ async fn no_secret_survives_into_the_config_response() {
     if !stack_enabled() {
         return;
     }
+    // Shared: `parity::configlic` patches the document under the exclusive half.
+    let _document = common::CONFIG_DOCUMENT.read().await;
 
     let client = client();
     let token = go_minted_token(&client).await;

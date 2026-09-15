@@ -46,16 +46,34 @@
 # `mutate.sh` did not, so every `api`-suite mutation ran against a server configured unlike the
 # one the tests were written against.
 #
+# **Launched from the Go server's run directory, since 2026-09-15.** `GET /api/v4/logs` and its
+# two siblings read `LogSettings.FileLocation`, which is `""` on a stock server and then means
+# "the `logs` directory found beside the working directory or the binary" (`fileutils.FindDir`),
+# validated against a logging root found the same way. Two servers resolve that to the same file
+# only when they run from the same place, so `mm-api` starts with the Go server's `$RUN` as its
+# working directory — the layout `go-server.sh` builds, whose `logs/mattermost.log` is the file
+# Go writes. Nothing else this process reads is relative to the working directory: the file
+# directory is absolute above, and the config document's `./plugins`-style defaults now resolve
+# to the same directories Go resolves them to.
+#
 # The three local-mode variables opened the unix-socket admin API, 2026-09-11. They are the same
 # names Go reads, and the socket paths are the per-stack ones from `stack-env.sh` —
 # `MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION` names the **Go** server's socket, which is mm-api's
 # forward target, and `MM_API_LOCAL_SOCKET` is mm-api's own. Pointing both at one path is refused
 # at startup. `scripts/go-server.sh` sets the matching pair on the other side.
+#
+# `MM_GO_PLUGIN_DIRECTORY` (2026-09-15) is, like `MM_GO_UPSTREAM`, a fact about the **Go peer**
+# rather than a Mattermost setting: the directory the stack Go server scans for plugin bundles
+# (its `PluginSettings.Directory`, `./plugins`, resolved against its own run directory). The
+# slash-command routes answer only while it holds no plugin, since a plugin may register
+# commands this server cannot see. It is not `MM_PLUGINSETTINGS_DIRECTORY`, which `GET /config`
+# would report. Unset, those routes forward.
 mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
   local log="${1:-/tmp/mmrs-mm-api$MMRS_STACK_SUFFIX.log}"
   (
+    cd "$root/reference/.build/mmroot$MMRS_RUN_SUFFIX" || exit 1
     DATABASE_URL="$DATABASE_URL" \
     MM_API_LISTEN="127.0.0.1:$MMRS_API_PORT" \
     MM_GO_UPSTREAM="$MMRS_GO_BASE" \
@@ -69,6 +87,7 @@ mmrs_launch_mm_api() {
     MM_SERVICESETTINGS_ENABLELOCALMODE=true \
     MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
     MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \
+    MM_GO_PLUGIN_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/plugins" \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

@@ -481,8 +481,8 @@ async fn the_per_user_routes_are_self_or_manage_system() {
     }
 }
 
-/// The two `/search` children must still be forwarded — they are not licence-gated and this
-/// server does not answer them.
+/// The two `/search` children are served here since 2026-09-15 (`parity::retention_search`
+/// compares them against Go); the other methods on these paths must still be forwarded.
 #[tokio::test]
 async fn the_searches_and_other_methods_are_forwarded() {
     // A read guard on the busy flag: this suite calls a `DisableWhenBusy` route.
@@ -514,8 +514,8 @@ async fn the_searches_and_other_methods_are_forwarded() {
             served_by(reqwest::Method::POST, path.clone())
                 .await
                 .as_deref(),
-            Some("go"),
-            "{path} is an ordinary search with no licence gate"
+            Some("rust"),
+            "{path} is served by `retention_search`"
         );
     }
 

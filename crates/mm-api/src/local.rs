@@ -275,6 +275,16 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         // ---- `team_local.go`, `webhook_local.go`, `command_local.go`: thirty pairs, in their
         // own module.
         .merge(crate::local_teams::routes(&state))
+        // ---- `config_local.go` (minus the `PUT /config` on `local_misc`'s method router) and
+        // `license_local.go`'s two writes (2026-09-15).
+        .merge(crate::config_writes::local_routes(&state))
+        .merge(crate::license_writes::local_routes(&state))
+        // `ldap_local.go` and `InitSamlLocal`: the seven certificate and enterprise-gate pairs.
+        .merge(crate::local_auth_certs::routes())
+        // `access_control_local.go` — fourteen pairs, in their own module.
+        .merge(crate::local_access_control::routes(&state))
+        // ---- `system_local.go`: the integrity check and the log page, 2026-09-15.
+        .merge(crate::local_sysops::routes())
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
         // process rather than 404'd by this one.

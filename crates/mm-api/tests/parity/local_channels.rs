@@ -1212,4 +1212,16 @@ async fn the_system_bot_is_created_here_when_absent() {
         "the archive notice, Go reusing our bot",
     );
     assert_eq!(go_archived["user_id"], bot_id);
+
+    // Hand the bot to the seeded admin before leaving. The owner asserted above is whichever
+    // administrator sorts first *now*, and in a full run that can be another suite's temporary
+    // admin — which that suite later deactivates, and Go disables every bot a deactivated user
+    // owns. On 2026-09-15 that left `system-bot` deactivated for the rest of the run, and the
+    // licensed Go's user-export job failed looking it up (`postrest`'s batch export, even alone).
+    sqlx::query("UPDATE bots SET ownerid = $1 WHERE userid = $2")
+        .bind(common::logged_in_user_id())
+        .bind(&bot_id)
+        .execute(&pool)
+        .await
+        .expect("the system bot is handed to the seeded admin");
 }

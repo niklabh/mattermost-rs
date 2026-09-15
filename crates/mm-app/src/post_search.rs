@@ -170,7 +170,7 @@ impl App {
     /// Each name is replaced in place by the id it resolves to. A name that resolves to nothing
     /// is **kept as the name** — Go logs and continues — and then matches no `Channels.Id`, so
     /// `in:nonexistent` is an empty page rather than an error.
-    async fn convert_channel_names_to_channel_ids(
+    pub(crate) async fn convert_channel_names_to_channel_ids(
         &self,
         mut channels: StringArray,
         user_id: &str,
@@ -201,7 +201,10 @@ impl App {
 
     /// Port of `convertUserNameToUserIds` (post.go:2153). Same contract as the channel version:
     /// a leading `@` is trimmed, an unknown username stays a username and matches no `Users.Id`.
-    async fn convert_user_name_to_user_ids(&self, mut usernames: StringArray) -> StringArray {
+    pub(crate) async fn convert_user_name_to_user_ids(
+        &self,
+        mut usernames: StringArray,
+    ) -> StringArray {
         for username in usernames.iter_mut() {
             match self
                 .get_user_by_username(username.trim_start_matches('@'))

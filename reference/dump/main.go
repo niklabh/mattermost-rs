@@ -599,6 +599,13 @@ var registry = map[string]any{
 
 	// team_member.go's batch-add wire type, needed by `POST /teams/{id}/members/batch`.
 	"team_member_with_error": &model.TeamMemberWithError{},
+	// `POST /reports/posts`: the body halves and the page (post.go:1458, :1524, :1529).
+	"report_post_options":        &model.ReportPostOptions{},
+	"report_post_options_cursor": &model.ReportPostOptionsCursor{},
+	"report_post_list_response":  &model.ReportPostListResponse{},
+	// `POST /posts/rewrite` (post.go:1480, :1488).
+	"rewrite_request":  &model.RewriteRequest{},
+	"rewrite_response": &model.RewriteResponse{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -1232,6 +1239,10 @@ func main() {
 
 	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	if err := writeNoticeConditionsBehaviourFixture(*out); err != nil {
+		fmt.Fprintln(os.Stderr, "notice conditions behaviour fixture:", err)
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_product_notices.json"))

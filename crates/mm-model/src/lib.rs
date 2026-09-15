@@ -136,9 +136,13 @@ pub mod post_info;
 mod post_interactive_blocks;
 pub mod post_list;
 pub mod post_metadata;
+/// The reporting and rewrite tails of `model/post.go`, served by `api4/post.go`'s post family.
+pub mod post_rest;
 pub mod post_search_results;
 pub mod preference;
 pub mod product_notices;
+// Appended 2026-09-15: the notice condition grammars.
+pub mod notice_conditions;
 pub mod property_access;
 pub mod property_access_control;
 pub mod property_field;

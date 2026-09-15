@@ -40,6 +40,7 @@ pub mod product_notices_store;
 /// The five CPA reads across `PropertyGroups`, `PropertyFields` and `PropertyValues`.
 pub mod property_store;
 pub mod reaction_store;
+pub mod read_receipt_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
@@ -48,6 +49,7 @@ pub mod sidebar_category_store;
 pub mod status_store;
 pub mod system_store;
 pub mod team_store;
+pub mod temporary_post_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
 pub mod token_store;
@@ -85,6 +87,7 @@ pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
+pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
@@ -94,6 +97,7 @@ pub use sidebar_category_store::{
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
+pub use temporary_post_store::{SqlTemporaryPostStore, TemporaryPostStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use token_store::{SqlTokenStore, TokenStore};
@@ -104,9 +108,11 @@ pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfSer
 pub use view_store::{SqlViewStore, ViewStore};
 pub use webhook_store::{SqlWebhookStore, WebhookStore};
 
+use mm_model::integrity::{IntegrityCheckResult, OrphanedRecord, RelationalIntegrityCheckData};
 use mm_model::system::AppliedMigration;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{Connection, Row};
 
 /// The set of stores, sharing one connection pool.
 ///
@@ -126,6 +132,8 @@ pub struct SqlStore {
     file_info: SqlFileInfoStore,
     notify_admin: SqlNotifyAdminStore,
     desktop_tokens: SqlDesktopTokensStore,
+    read_receipt: SqlReadReceiptStore,
+    temporary_post: SqlTemporaryPostStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -194,6 +202,8 @@ impl SqlStore {
             file_info: SqlFileInfoStore::new(pool.clone()),
             notify_admin: SqlNotifyAdminStore::new(pool.clone()),
             desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
+            read_receipt: SqlReadReceiptStore::new(pool.clone()),
+            temporary_post: SqlTemporaryPostStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -249,6 +259,175 @@ impl SqlStore {
 
         tracing::Span::current().record("found", rows.len());
         Ok(rows)
+    }
+
+    /// Port of `SqlStore.GetDbVersion` (sqlstore/store.go:422): `SHOW server_version_num` or
+    /// `SHOW server_version`, verbatim — `16.4 (Debian 16.4-1.pgdg120+1)` for the latter, which
+    /// the one caller trims at its first space.
+    #[tracing::instrument(skip(self), fields(version))]
+    pub async fn get_db_version(&self, numerical: bool) -> Result<String, StoreError> {
+        let statement = if numerical {
+            "SHOW server_version_num"
+        } else {
+            "SHOW server_version"
+        };
+        let version: String = sqlx::query_scalar(statement)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to read the database version".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("version", &version);
+        Ok(version)
+    }
+
+    /// Port of `SqlStore.TotalMasterDbConnections` (sqlstore/store.go:555) —
+    /// `sql.DBStats.OpenConnections`, which is every connection the pool holds, idle or in use.
+    /// sqlx's `size()` is the same figure for this pool.
+    ///
+    /// **A per-process number, never a shared one.** Each server counts its own pool, so the
+    /// two disagree by design and `GET /api/v4/analytics/old` cannot be compared on this row.
+    pub fn total_master_db_connections(&self) -> i64 {
+        i64::from(self.pool.size())
+    }
+
+    /// Port of `SqlStore.TotalReadDbConnections` (sqlstore/store.go:601): the sum over the
+    /// read replicas, and **0 when `SqlSettings.DataSourceReplicas` is empty** — which is the
+    /// only configuration this store has; it opens one pool against one data source and reads
+    /// no replica list. The constant is Go's own answer for that configuration.
+    pub fn total_read_db_connections(&self) -> i64 {
+        0
+    }
+
+    /// Port of `SqlStore.RecycleDBConnections` (sqlstore/store.go), as far as sqlx allows.
+    ///
+    /// Go sets `SetConnMaxLifetime(10s)` on the live pool — permanently, since nothing ever
+    /// restores it — so every connection is closed within ten seconds of being returned and a
+    /// fresh one dialled in its place. sqlx fixes a pool's lifetime at construction, so the
+    /// nearest honest equivalent is to close what is idle **now**: each idle connection is taken
+    /// with `try_acquire` (never waiting, never dialling), detached from the pool and closed,
+    /// and the pool dials a replacement on demand. A connection checked out by a request in
+    /// flight is not touched; Go's would be closed when that request returns it. Nothing about
+    /// the pool's configuration changes.
+    #[tracing::instrument(skip_all, fields(idle, closed))]
+    pub async fn recycle_db_connections(&self) {
+        let idle = self.pool.num_idle();
+        tracing::Span::current().record("idle", idle);
+        let mut closed = 0usize;
+        for _ in 0..idle {
+            let Some(connection) = self.pool.try_acquire() else {
+                break;
+            };
+            match connection.detach().close().await {
+                Ok(()) => closed += 1,
+                Err(err) => tracing::warn!(error = %err, "closing a recycled connection failed"),
+            }
+        }
+        tracing::Span::current().record("closed", closed);
+    }
+
+    /// Port of `SqlStore.CheckIntegrity` (sqlstore/store.go:1009) and the whole of
+    /// `sqlstore/integrity.go`: the forty-one relational checks, in Go's order, each answered
+    /// as one [`IntegrityCheckResult`].
+    ///
+    /// Go streams them over a channel from one goroutine, so the order is the order of the
+    /// calls in `CheckRelationalIntegrity` and this returns them the same way. Each check is
+    /// `getOrphanedRecords`'s statement built from a [`RelationalCheck`] — the child rows whose
+    /// parent id names no parent, `ORDER BY` the parent id and nothing else, so two orphans of
+    /// one parent come back in whatever order the planner chose; a comparison across servers
+    /// sorts within a parent before it compares. A statement that fails is a result with no
+    /// data and the error, logged as Go logs it, and the run continues.
+    ///
+    /// `checkTeamsChannelsIntegrity` is the one composite: two statements (message channels
+    /// with a team id, then direct and group channels whose team id is non-empty) whose records
+    /// are concatenated under the first's header. Go reads the second's `Data` with an unchecked
+    /// type assertion, so its failing would panic the server; here it is the failure result,
+    /// which is the one thing about this function that cannot be compared.
+    #[tracing::instrument(skip_all, fields(checks, failed))]
+    pub async fn check_integrity(&self) -> Vec<IntegrityCheckResult> {
+        let mut results = Vec::with_capacity(RELATIONAL_CHECKS.len());
+        for check in RELATIONAL_CHECKS {
+            let result = match check {
+                Check::One(config) => self.check_parent_child_integrity(config).await,
+                Check::TeamsChannels(first, second) => {
+                    let mut first = self.check_parent_child_integrity(first).await;
+                    let second = self.check_parent_child_integrity(second).await;
+                    match (first.data.as_mut(), second.data) {
+                        (Some(data), Some(more)) => data.records.extend(more.records),
+                        (Some(_), None) => {
+                            first = IntegrityCheckResult {
+                                data: None,
+                                err: second.err,
+                            }
+                        }
+                        (None, _) => {}
+                    }
+                    first
+                }
+            };
+            results.push(result);
+        }
+        tracing::Span::current().record("checks", results.len());
+        tracing::Span::current()
+            .record("failed", results.iter().filter(|r| r.err.is_some()).count());
+        results
+    }
+
+    /// Port of `checkParentChildIntegrity` (sqlstore/integrity.go:66): the statement, run on
+    /// the master as Go does, and its two outcomes.
+    async fn check_parent_child_integrity(&self, config: &RelationalCheck) -> IntegrityCheckResult {
+        let sql = config.orphaned_records_sql();
+        let rows = match sqlx::query(&sql).fetch_all(&self.pool).await {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::error!(error = %err, statement = %sql, "Error while getting orphaned records");
+                return IntegrityCheckResult {
+                    data: None,
+                    err: Some(err.to_string()),
+                };
+            }
+        };
+        let has_child = !config.child_id_attr.is_empty();
+        let mut records = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let parent_id = match row.try_get::<Option<String>, _>(0) {
+                Ok(id) => id,
+                Err(err) => {
+                    return IntegrityCheckResult {
+                        data: None,
+                        err: Some(err.to_string()),
+                    };
+                }
+            };
+            let child_id = if has_child {
+                match row.try_get::<Option<String>, _>(1) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        return IntegrityCheckResult {
+                            data: None,
+                            err: Some(err.to_string()),
+                        };
+                    }
+                }
+            } else {
+                None
+            };
+            records.push(OrphanedRecord {
+                parent_id,
+                child_id,
+            });
+        }
+        IntegrityCheckResult {
+            data: Some(RelationalIntegrityCheckData {
+                parent_name: config.parent_name.to_owned(),
+                child_name: config.child_name.to_owned(),
+                parent_id_attr: config.parent_id_attr.to_owned(),
+                child_id_attr: config.child_id_attr.to_owned(),
+                records,
+            }),
+            err: None,
+        }
     }
 
     /// Port of `store.Store.Audit()`.
@@ -318,6 +497,16 @@ impl SqlStore {
     /// Port of `store.Store.DesktopTokens()`.
     pub fn desktop_tokens(&self) -> &SqlDesktopTokensStore {
         &self.desktop_tokens
+    }
+
+    /// Port of `store.Store.ReadReceipt()`.
+    pub fn read_receipt(&self) -> &SqlReadReceiptStore {
+        &self.read_receipt
+    }
+
+    /// Port of `store.Store.TemporaryPost()`.
+    pub fn temporary_post(&self) -> &SqlTemporaryPostStore {
+        &self.temporary_post
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {
@@ -449,5 +638,226 @@ impl SqlStore {
     /// Port of `store.Store.ChannelJoinRequest()`.
     pub fn channel_join_request(&self) -> &SqlChannelJoinRequestStore {
         &self.channel_join_request
+    }
+}
+
+/// One row of `integrity.go`'s `relationalCheckConfig` — the parent table, the child table, the
+/// child's column that names the parent, and the child's own id column (`""` for a table with
+/// no single-column id, whose records then carry `child_id: null`).
+#[derive(Debug)]
+pub struct RelationalCheck {
+    parent_name: &'static str,
+    parent_id_attr: &'static str,
+    child_name: &'static str,
+    child_id_attr: &'static str,
+    /// `canParentIdBeEmpty`: an empty parent id is "no parent", not an orphan, so the
+    /// statement excludes it.
+    can_parent_id_be_empty: bool,
+    /// `filter`, already rendered — Go's two are `sq.Eq`/`sq.NotEq` over the channel type.
+    filter: Option<&'static str>,
+}
+
+impl RelationalCheck {
+    /// Port of `getOrphanedRecords`'s statement (sqlstore/integrity.go:23), column for column
+    /// and clause for clause in squirrel's order. The identifiers are these constants and never
+    /// a caller's, which is what makes the formatting safe.
+    fn orphaned_records_sql(&self) -> String {
+        let RelationalCheck {
+            parent_name,
+            parent_id_attr,
+            child_name,
+            child_id_attr,
+            can_parent_id_be_empty,
+            filter,
+        } = self;
+        let mut sql = format!("SELECT CT.{parent_id_attr} AS ParentId");
+        if !child_id_attr.is_empty() {
+            sql.push_str(&format!(", CT.{child_id_attr} AS ChildId"));
+        }
+        sql.push_str(&format!(
+            " FROM {child_name} AS CT WHERE NOT EXISTS (SELECT TRUE FROM {parent_name} AS PT WHERE PT.id = CT.{parent_id_attr})"
+        ));
+        if *can_parent_id_be_empty {
+            sql.push_str(&format!(" AND CT.{parent_id_attr} <> ''"));
+        }
+        if let Some(filter) = filter {
+            sql.push_str(&format!(" AND {filter}"));
+        }
+        sql.push_str(&format!(" ORDER BY CT.{parent_id_attr}"));
+        sql
+    }
+}
+
+/// A check as `CheckRelationalIntegrity` runs it: one statement, or the teams-channels pair.
+#[derive(Debug)]
+enum Check {
+    One(RelationalCheck),
+    TeamsChannels(RelationalCheck, RelationalCheck),
+}
+
+const fn check(
+    parent_name: &'static str,
+    parent_id_attr: &'static str,
+    child_name: &'static str,
+    child_id_attr: &'static str,
+    can_parent_id_be_empty: bool,
+) -> RelationalCheck {
+    RelationalCheck {
+        parent_name,
+        parent_id_attr,
+        child_name,
+        child_id_attr,
+        can_parent_id_be_empty,
+        filter: None,
+    }
+}
+
+/// `sq.NotEq{"CT.Type": []model.ChannelType{Direct, Group}}`.
+const NOT_DIRECT_OR_GROUP: &str = "CT.Type NOT IN ('D','G')";
+/// `sq.Eq{"CT.Type": []model.ChannelType{Direct, Group}}`.
+const DIRECT_OR_GROUP: &str = "CT.Type IN ('D','G')";
+
+/// The forty-one checks of `CheckRelationalIntegrity` (sqlstore/integrity.go:518), in the order
+/// its seven groups send them: channels, commands, posts, schemes, sessions, teams, users.
+const RELATIONAL_CHECKS: &[Check] = &[
+    // checkChannelsIntegrity
+    Check::One(check(
+        "Channels",
+        "ChannelId",
+        "CommandWebhooks",
+        "Id",
+        false,
+    )),
+    Check::One(check(
+        "Channels",
+        "ChannelId",
+        "ChannelMemberHistory",
+        "",
+        false,
+    )),
+    Check::One(check("Channels", "ChannelId", "ChannelMembers", "", false)),
+    Check::One(check(
+        "Channels",
+        "ChannelId",
+        "IncomingWebhooks",
+        "Id",
+        false,
+    )),
+    Check::One(check(
+        "Channels",
+        "ChannelId",
+        "OutgoingWebhooks",
+        "Id",
+        false,
+    )),
+    Check::One(check("Channels", "ChannelId", "Posts", "Id", false)),
+    Check::One(check("Channels", "ChannelId", "FileInfo", "Id", false)),
+    // checkCommandsIntegrity
+    Check::One(check(
+        "Commands",
+        "CommandId",
+        "CommandWebhooks",
+        "Id",
+        false,
+    )),
+    // checkPostsIntegrity
+    Check::One(check("Posts", "PostId", "FileInfo", "Id", false)),
+    Check::One(check("Posts", "RootId", "Posts", "Id", true)),
+    Check::One(check("Posts", "PostId", "Reactions", "", false)),
+    Check::One(check("Teams", "ThreadTeamId", "Threads", "PostId", false)),
+    // checkSchemesIntegrity
+    Check::One(check("Schemes", "SchemeId", "Channels", "Id", true)),
+    Check::One(check("Schemes", "SchemeId", "Teams", "Id", true)),
+    // checkSessionsIntegrity
+    Check::One(check("Sessions", "SessionId", "Audits", "Id", true)),
+    // checkTeamsIntegrity
+    Check::TeamsChannels(
+        RelationalCheck {
+            filter: Some(NOT_DIRECT_OR_GROUP),
+            ..check("Teams", "TeamId", "Channels", "Id", false)
+        },
+        RelationalCheck {
+            filter: Some(DIRECT_OR_GROUP),
+            ..check("Teams", "TeamId", "Channels", "Id", true)
+        },
+    ),
+    Check::One(check("Teams", "TeamId", "Commands", "Id", false)),
+    Check::One(check("Teams", "TeamId", "IncomingWebhooks", "Id", false)),
+    Check::One(check("Teams", "TeamId", "OutgoingWebhooks", "Id", false)),
+    Check::One(check("Teams", "TeamId", "TeamMembers", "", false)),
+    // checkUsersIntegrity
+    Check::One(check("Users", "UserId", "Audits", "Id", true)),
+    Check::One(check("Users", "UserId", "CommandWebhooks", "Id", false)),
+    Check::One(check("Users", "UserId", "ChannelMemberHistory", "", false)),
+    Check::One(check("Users", "UserId", "ChannelMembers", "", false)),
+    Check::One(check("Users", "CreatorId", "Channels", "Id", true)),
+    Check::One(check("Users", "CreatorId", "Commands", "Id", false)),
+    Check::One(check("Users", "UserId", "Compliances", "Id", false)),
+    Check::One(check("Users", "CreatorId", "Emoji", "Id", false)),
+    Check::One(check("Users", "CreatorId", "FileInfo", "Id", false)),
+    Check::One(check("Users", "UserId", "IncomingWebhooks", "Id", false)),
+    Check::One(check("Users", "UserId", "OAuthAccessData", "Token", false)),
+    Check::One(check("Users", "CreatorId", "OAuthApps", "Id", false)),
+    Check::One(check("Users", "UserId", "OAuthAuthData", "Code", false)),
+    Check::One(check("Users", "CreatorId", "OutgoingWebhooks", "Id", false)),
+    Check::One(check("Users", "UserId", "Posts", "Id", false)),
+    Check::One(check("Users", "UserId", "Preferences", "", false)),
+    Check::One(check("Users", "UserId", "Reactions", "", false)),
+    Check::One(check("Users", "UserId", "Sessions", "Id", false)),
+    Check::One(check("Users", "UserId", "Status", "", false)),
+    Check::One(check("Users", "UserId", "TeamMembers", "", false)),
+    Check::One(check("Users", "UserId", "UserAccessTokens", "Id", false)),
+];
+
+#[cfg(test)]
+mod integrity_tests {
+    use super::*;
+
+    /// The statement squirrel renders for `checkChannelsCommandWebhooksIntegrity`, and the
+    /// three optional clauses in the positions Go adds them.
+    #[test]
+    fn the_orphan_statement_is_squirrels() {
+        let plain = check("Channels", "ChannelId", "CommandWebhooks", "Id", false);
+        assert_eq!(
+            plain.orphaned_records_sql(),
+            "SELECT CT.ChannelId AS ParentId, CT.Id AS ChildId FROM CommandWebhooks AS CT \
+             WHERE NOT EXISTS (SELECT TRUE FROM Channels AS PT WHERE PT.id = CT.ChannelId) \
+             ORDER BY CT.ChannelId"
+        );
+        let no_child = check("Channels", "ChannelId", "ChannelMembers", "", false);
+        assert_eq!(
+            no_child.orphaned_records_sql(),
+            "SELECT CT.ChannelId AS ParentId FROM ChannelMembers AS CT \
+             WHERE NOT EXISTS (SELECT TRUE FROM Channels AS PT WHERE PT.id = CT.ChannelId) \
+             ORDER BY CT.ChannelId"
+        );
+        let optional = RelationalCheck {
+            filter: Some(DIRECT_OR_GROUP),
+            ..check("Teams", "TeamId", "Channels", "Id", true)
+        };
+        assert_eq!(
+            optional.orphaned_records_sql(),
+            "SELECT CT.TeamId AS ParentId, CT.Id AS ChildId FROM Channels AS CT \
+             WHERE NOT EXISTS (SELECT TRUE FROM Teams AS PT WHERE PT.id = CT.TeamId) \
+             AND CT.TeamId <> '' AND CT.Type IN ('D','G') ORDER BY CT.TeamId"
+        );
+    }
+
+    /// Forty-one results, in Go's order: the seven groups' first and last members, and the
+    /// composite in the teams group.
+    #[test]
+    fn the_checks_are_the_forty_one_of_integrity_go() {
+        assert_eq!(RELATIONAL_CHECKS.len(), 41);
+        let name = |i: usize| match &RELATIONAL_CHECKS[i] {
+            Check::One(c) => (c.parent_name, c.child_name, c.parent_id_attr),
+            Check::TeamsChannels(c, _) => (c.parent_name, c.child_name, c.parent_id_attr),
+        };
+        assert_eq!(name(0), ("Channels", "CommandWebhooks", "ChannelId"));
+        assert_eq!(name(7), ("Commands", "CommandWebhooks", "CommandId"));
+        assert_eq!(name(11), ("Teams", "Threads", "ThreadTeamId"));
+        assert_eq!(name(15), ("Teams", "Channels", "TeamId"));
+        assert!(matches!(RELATIONAL_CHECKS[15], Check::TeamsChannels(..)));
+        assert_eq!(name(20), ("Users", "Audits", "UserId"));
+        assert_eq!(name(40), ("Users", "UserAccessTokens", "UserId"));
     }
 }

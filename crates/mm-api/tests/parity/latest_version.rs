@@ -60,11 +60,34 @@ async fn the_release_matches_byte_for_byte() {
         "ours: {}",
         String::from_utf8_lossy(&rs_body)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&go_body),
-        String::from_utf8_lossy(&rs_body),
-        "the release differs"
-    );
+    if go_body != rs_body {
+        // **Go keeps the release for 24 hours and nothing clears it** — `latestVersionCache` has
+        // one writer and `clearLatestVersionCache` has no caller at the pinned SHA, so neither
+        // `POST /caches/invalidate` nor anything else refreshes it short of a restart. Every run
+        // starts a fresh mm-api, so when GitHub moves its "latest" flag inside Go's day the two
+        // servers disagree while both are correct for when they asked. Measured 2026-09-15: Go
+        // held v11.10.1 from its boot, GitHub had since marked v11.9.2 latest, and we served that.
+        //
+        // So a difference is accepted only when GitHub, asked now, agrees with **us**. A port that
+        // fetched the wrong thing still fails, since GitHub will not name its release.
+        let ours: serde_json::Value = serde_json::from_slice(&rs_body).expect("JSON");
+        let github: serde_json::Value = client
+            .get(mm_api::latest_version::LATEST_VERSION_URL)
+            .header("User-Agent", "mmrs-parity")
+            .send()
+            .await
+            .expect("GitHub answers")
+            .json()
+            .await
+            .expect("GitHub's release decodes");
+        assert_eq!(
+            (github["id"].as_i64(), github["tag_name"].as_str()),
+            (ours["id"].as_i64(), ours["tag_name"].as_str()),
+            "the release differs, and GitHub's current one is not ours either — Go: {} ours: {}",
+            String::from_utf8_lossy(&go_body),
+            String::from_utf8_lossy(&rs_body)
+        );
+    }
 
     // It is a real release — otherwise both servers agreeing proves little.
     let release: serde_json::Value = serde_json::from_slice(&rs_body).expect("JSON");

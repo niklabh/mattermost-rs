@@ -27,6 +27,7 @@
 mod common;
 
 mod parity {
+    pub mod access_control_policies;
     pub mod access_control_reads;
     pub mod auth_migrations;
     pub mod auth_writes;
@@ -240,4 +241,29 @@ mod parity {
     pub mod local_misc;
     // Appended 2026-09-14: the team, webhook and command families on the socket.
     pub mod local_teams;
+    // Appended 2026-09-15: the config and licence writes, HTTP and socket.
+    pub mod configlic;
+    // Appended 2026-09-15: no two SecondServers share a port (needs no stack).
+    pub mod second_server_ports;
+    // Appended 2026-09-15: the SAML/LDAP/audit certificate and enterprise-gate routes.
+    pub mod auth_certs;
+    pub mod local_auth_certs;
+    // Appended 2026-09-15: the rest of api4/post.go, report.go's writes and
+    // integration_action.go.
+    pub mod postrest;
+    // Appended 2026-09-15: the searchmisc family.
+    pub mod agents;
+    pub mod file_search;
+    pub mod outgoing_oauth_writes;
+    pub mod properties_writes;
+    pub mod retention_search;
+    // Appended 2026-09-15: the cmdremote family (commands, remote cluster, boards, uploads on
+    // the socket, first_admin_visit).
+    pub mod boards;
+    pub mod command_dispatch;
+    pub mod local_uploads;
+    pub mod marketplace_visit;
+    pub mod remote_cluster;
+    // Appended 2026-09-15: the system-operations family.
+    pub mod sysops;
 }

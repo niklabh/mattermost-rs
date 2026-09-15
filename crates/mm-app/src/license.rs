@@ -555,6 +555,52 @@ impl App {
             *guard = Some((id.to_owned(), Arc::clone(license)));
         }
     }
+
+    /// Port of `LicenseValidator.LicenseFromBytes` (utils/license.go:54): verify the signature
+    /// against this process's keys and decode the plaintext — **without** `Features.SetDefaults`
+    /// and without the `Features == nil` refusal, which are `SetLicense`'s and `SaveLicense`'s
+    /// respectively. `addLicense` and `previewLicense` call this before anything is saved, and
+    /// `previewLicense` writes exactly what it returns, so a sparse `features` object must come
+    /// back sparse. [`load_license`] is the loaded-and-defaulted form for a licence in force.
+    pub fn license_from_bytes(&self, signed: &[u8]) -> Result<License, LicenseValidationError> {
+        let plaintext = validate_license(signed, &self.license_keys)?;
+        serde_json::from_slice(&plaintext)
+            .map_err(|err| LicenseValidationError::Json(err.to_string()))
+    }
+
+    /// Port of `LicenseValidator.ValidateLicense` alone — the signature check that
+    /// `SaveLicense` (platform/license.go:133) makes first, before it decodes anything.
+    pub fn validate_license_bytes(&self, signed: &[u8]) -> Result<Vec<u8>, LicenseValidationError> {
+        validate_license(signed, &self.license_keys)
+    }
+}
+
+/// Port of `utils.NewLicenseValidationAppError` (utils/license.go:164), plus the one outcome
+/// `LicenseFromBytes` adds after it (license.go:61): the plaintext verified but is not JSON a
+/// `model.License` decodes from, which is `api.unmarshal_error` at **500**, not a 400.
+///
+/// Every other failure — a base64 that will not decode, a body too short to carry a signature, a
+/// signature neither key verifies, unusable key material — is `model.InvalidLicenseError` at 400;
+/// only the two wrong-environment errors get their own ids.
+pub fn license_validation_app_error(where_: &str, err: &LicenseValidationError) -> AppError {
+    use mm_model::license::{
+        INVALID_LICENSE_ERROR, WRONG_ENVIRONMENT_PRODUCTION_LICENSE_ERROR,
+        WRONG_ENVIRONMENT_TEST_LICENSE_ERROR,
+    };
+    let (id, status) = match err {
+        LicenseValidationError::ProductionInTestEnvironment => {
+            (WRONG_ENVIRONMENT_PRODUCTION_LICENSE_ERROR, 400)
+        }
+        LicenseValidationError::TestInProductionEnvironment => {
+            (WRONG_ENVIRONMENT_TEST_LICENSE_ERROR, 400)
+        }
+        LicenseValidationError::Json(_) => ("api.unmarshal_error", 500),
+        LicenseValidationError::Decode(_)
+        | LicenseValidationError::TooShort
+        | LicenseValidationError::InvalidSignature
+        | LicenseValidationError::Key(_) => (INVALID_LICENSE_ERROR, 400),
+    };
+    AppError::new(where_, id, None, err.to_string(), status)
 }
 
 /// A store failure here is a 500 and not "unlicensed".
@@ -694,13 +740,94 @@ pub(crate) mod test_signing {
     use super::*;
     use rsa::pkcs8::EncodePublicKey;
 
-    pub(crate) fn keypair() -> (rsa::RsaPrivateKey, String) {
-        let private = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng, 2048).expect("keygen");
+    /// **Fixed keys, not generated ones.** A generated key made every signature random, and
+    /// `validate_license` strips a signature's trailing zero bytes before the length check (Go's
+    /// behaviour, kept — see `validate_license`), so one run in 256 signed a licence that could
+    /// not verify and a test expecting a JSON error got `TooShort` instead. Seen in a full run on
+    /// 2026-09-15 (`a_verified_licence_without_features_is_refused_rather_than_defaulted`, passing
+    /// alone every time). With fixed keys each signature is the same every run: a plaintext whose
+    /// signature ends in zero fails on the first run and is changed, rather than one run in 256.
+    /// Test-only keys, generated for this suite; nothing verifies against them outside it.
+    const TEST_PRIVATE_KEY: &str = "\
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDDErvcjh/xKVZr
+lWWMEBBEGBr7sMORvFbzxF7rz9Vu+zgZ+R9w/WPycddlpPwQpXo3YH3C4QN3VdDX
+aVZGTK/VtOSwVF68zg//Te2BXksoLmYTCWOpT2Ei2oEKiQD8cAEAg8kqnw9TWEii
+14+G9XcyTxXhIcwtIvwmQUC7gCm6VpLvdwR7t7JvufXVXPTs25p/4DhO5rpU0YB3
+jJUdQ6M1Cu5JrVjOywTwXyaFr9wz+gXRkLKSjo7ub/SXoMj30qBo6sCgUiyjfTBf
+ONk7JMCfWYIr0GHlzCRhh61LOwlm3FGrgvIGyjv+9k+bu0gTUym3oALbJ3JhzVYv
+RAkVrPcVAgMBAAECggEAJM2phNSJoTmv1M9UX8b+EqLLoHW6iAnVC9ueHvZQqcYa
+0Qenz2z3CNxCi6pDZi6aLs11HKnQOhkGNEXq4YuBVxvwU3Yvg4aLDRtaNmCgZF3Q
+o0HPvDc+N9Gqq96qQXYuMjcq4nAs94f9+D8cFJXGHcc+9QEn4NIraVpBSL7G4KE1
+P8C6TyBeLMGdX002ATpseGnHa/6DyUkIz/pRMp7K5vD3hQZwNTg25mykdoHluFx1
++uKv035Eqqn7E/CxeNWacqKLnqvzCdzOEzNzdGIF+xBqN30Rt/4jRMRSA1tdg5kI
+r4STgz4YQAZWnY83ZdAqQGVLE6jZO5b6IjiAcCT8BwKBgQDwL6pCDjHUOWtF4lK3
+nsvIrdWwUnc+5CIElPJV/hyw0MqJMPhNOg42iSPtLzz+cd2SO86FRsmlbSy05sv7
+ib1eb3zVIhSFvWp5muedEcW8KP9Ba7hHUToIlGgsQ2S2M/wyHivzO+ewlT3OiSpf
+R/OwQ9r614IoGzKWFW85lcxCbwKBgQDP6rCHF4ii3DyxRrR0Y+1aW/gLqR9EdA29
+JTIW2lSutt1tswn4UpalQBQQWaPby9vzOyRfqogMUiLnSNEhFfFUZXcbfeshTAEY
+gyuXU6EegbYKTLkeMSaoUwGnHN112S7QoC+QJDOfkPbSVuzbz+fqUjpAAqdFB0vc
+o0ur4oaQuwKBgQDiEptY7W9taFZWQv7Eoo0BaM331scyxRxX37JxymtK6luY4iT0
+265BGrhcKdhpTtfVKsHqpIRsVuR7qblaG33JA3smSZuzfmRX7bwQFYhe4N/RvgiH
+6CaNqNKcxxpmfWvl6IxJt5sOlIrGekkNwfXXdScKcAqsoVzt82Lretn1tQKBgHqm
+MyQ92bhYuuTIlMLj/6wB/LzEM1GqNECTpIyelr3J2a1QpFz8OymYNz29409RXpqJ
+FNfqPP8npLdS2SrvSsFCaZSqHv4xW6QeHKTUDIN2ePByefE5hVhePudZu7o9N8SR
++fzJnjpOxYsnA+pXJrOvdfU0m3+44iNxoL3wjvjpAoGANnGKWV/WQyzJ8QVWbNQt
+rxYekpXqn0ffibK6rSOv4foSyDBmri3z3eSBYXGDCXeGwYFqEELvgyLLn3zU0APi
+zYx75Al29vHJWWqlJqeoozq98vgeyhPWSVS6DJUtGcKdJdJFYP2QzTpw/vSdF1Dl
+hdQKXSX/Q7AtQnQrM0irjL4=
+-----END PRIVATE KEY-----
+";
+
+    /// A second key, for the tests that need a signature from someone else.
+    const FOREIGN_PRIVATE_KEY: &str = "\
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCi9LOmUvl8656n
+7owRa+ijZbho+nhYvY6GSUzFayjIzGDexs3EZp6bBeW/ReEpmJJq4keV0MSR9pru
+7ImfBpBaq63dmVks4WZiqYd8j/4GXS5G1RcoZ3COTFqmTeurQ/EAXYSl5FeCRqsL
+7F24NDTWN2IESOrqwyNwHOPhPC3pQukJFWBzddjdh2ml6ulQ1rkzxRLbdhEhdbM5
+jjJtGAtXzZyxuL/CeHYEGIVzkFFk9mGQHFZQGGg6SOdNf9hLbXxXXjLz8HE+Os0z
+tAq6XuTxUcvq8IpZUOvIWm3Y62NbX0TPVpXCa4fyUQMSTDXquSiQemSuSbL9cwZl
+Zgu4ijYJAgMBAAECggEACPRT29+i3IGxC+7QjROGKtZn2gLrcormBkyIVq/TA6ex
+agR4IaL287NRAt/y5b9/yjZJczrP1mp77IWccVvhuk3FRdBLpWr0XpcMviRGc/CS
+XquOdHasqXEaKRnOibB30YqSA7Cmu16pPwQ7ySe7QIs2DGC6YfCbpak8v294YWEo
+rQbdciiXXQ18eH++RtaYZdqDwZIrteNbQAogogxziEU12UnOzVoP17L+LJWpvukW
+p85+gjZjaoKoBwatiM0cW7rsHIEb4nBeLRQx7iO7Ev3cUOpvXWakKZrBTgvg/4I3
+BNorgiuqh9tk+rVLpgx0wQ5QyMO8Q2JM1CUUceYe1QKBgQDNVlKznDJyOInxC1fa
+8gNVWBAKnDu40osaWZb7pJkHIMbdsZFsQPyv7k/xvLRP+u1ZNpO7wr+YUvgTkO/O
+tFn50qIkws1B3xf18Mq4On6mi5YGHXVFWMGyksFwWSgIhikYOmF7KV/u8fOTk4tb
+jvj0Hd2IbyuR7NPGscZGmHwBTQKBgQDLKXRAQTJ7FuGag1l5a7ghISWkoYuu8M+c
+K4V/varRVjvbYceaFVFAEZDIfY66ltBRmA+uWlBuvFIxXLk6TbjzwLGd86HMQYdH
+HqGGOgWn0g5abLuZv7XfSQutRj26GL8RHrWiNN9CzrdoM5PiGaIK7rBro9P3XT+t
+AD52zqgprQKBgQC/yH+H6DypuCsGavzMrzvzy0N4VYHmVye7HbBKKusO4Es9purX
+fD9GpsQeWYzkIs7qg3IqbXP79opj4/xHSOW800HEKfoCKze66wK8XU4LidY+sebl
+NUf83Ns1buBYTc42JdkEapmCmJNS4/zGMFxPzVErbAH60oLeUw6Iw0UXBQKBgH/G
+89HR77ERJBWtVSIUCPv1QBq6bAM8fCcqDE3aecwt43nIluSnUbHtGlWu+o0Ke71F
+2V78eKgdE8juG6W66n+Mi2nfqLyx3iZx8n9ckOALMnHW/2rk87ua0phJnFsmY02e
+NfjuLhlzsFD+V52WJ5+eniElKhTjdkAV7jOFKKkFAoGBAJm+uhuRdefewo2A1tyl
+YZT6NgfhfpAMnrwgqf7pBdvbRPDtLw5c+trDk4sTsnxxiK5XpXgDwq1BqVfBD0if
+G2vs3J8aGgUpb/jHnbJgOOiJiSMjkigYb0fBZNK34KyF8Lb2cG7qeNcAYJlqANXj
+XBExwoDmBEaYXAST7a4nlXEB
+-----END PRIVATE KEY-----
+";
+
+    fn keypair_from(pem: &str) -> (rsa::RsaPrivateKey, String) {
+        use rsa::pkcs8::DecodePrivateKey;
+        let private = rsa::RsaPrivateKey::from_pkcs8_pem(pem).expect("the test key parses");
         let public = private
             .to_public_key()
             .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
             .expect("pem");
         (private, public)
+    }
+
+    pub(crate) fn keypair() -> (rsa::RsaPrivateKey, String) {
+        keypair_from(TEST_PRIVATE_KEY)
+    }
+
+    /// A key that is not [`keypair`]'s.
+    pub(crate) fn foreign_keypair() -> (rsa::RsaPrivateKey, String) {
+        keypair_from(FOREIGN_PRIVATE_KEY)
     }
 
     /// Mattermost's format, as `scripts/go-licensed.sh` produces it with openssl.
@@ -738,7 +865,7 @@ pub(crate) mod test_signing {
 /// Signature verification end to end, with keys minted here.
 #[cfg(test)]
 mod signing {
-    use super::test_signing::{keypair, sign};
+    use super::test_signing::{foreign_keypair, keypair, sign};
     use super::*;
 
     const LICENSE: &str = r#"{"id":"mmrslicensedoracle00000001","issued_at":1,"starts_at":1,"expires_at":4102444800000,"customer":{"id":"c","name":"n","email":"e","company":"co"},"features":{"users":10},"sku_name":"Enterprise","sku_short_name":"enterprise"}"#;
@@ -783,7 +910,7 @@ mod signing {
     #[test]
     fn a_tampered_body_or_a_foreign_key_is_an_invalid_signature() {
         let (private, public) = keypair();
-        let (_, other_public) = keypair();
+        let (_, other_public) = foreign_keypair();
         let signed = sign(&private, LICENSE.as_bytes());
 
         let foreign = LicenseKeys::single(other_public, "dev");
@@ -809,7 +936,7 @@ mod signing {
     #[test]
     fn a_licence_from_the_other_environment_names_the_direction_of_the_mismatch() {
         let (private, public) = keypair();
-        let (_, other_public) = keypair();
+        let (_, other_public) = foreign_keypair();
         let signed = sign(&private, LICENSE.as_bytes());
 
         let running_production = LicenseKeys {

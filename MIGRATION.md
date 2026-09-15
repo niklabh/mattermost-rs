@@ -13500,3 +13500,357 @@ Found on the way: the two hook lists marshalled through `serde_json`, so a callb
 | api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
 | test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
 | mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+## The config and licence writes — `config.go`, `license.go` and their `_local` twins (2026-09-15)
+
+**+7 HTTP pairs / +6 local-mode pairs on base `f4f0a5a`** (612 of 764). `PUT /config`,
+`PUT /config/patch`, `POST /config/reload`, `POST /license`, `DELETE /license`,
+`POST /license/preview`, `POST /trial-license`; on the socket `PUT /config`, `PUT /config/patch`,
+`POST /config/reload`, `POST /config/migrate`, `POST /license`, `DELETE /license`. Each handler
+is a run of gates in front of a save, and the line is the same on all thirteen: **the gates are
+served, the save is forwarded** — because `SetDefaults`/`IsValid`/`Store.Set` are unported
+([D-700]) *and* because the Go process holds both the configuration and the licence in memory
+with nothing watching the tables, so the process that must observe a write is the one that must
+make it. How each server sees the other's write, measured by `parity::configlic`: Go sees a write
+because Go made it; this server sees it on the next request, since `getConfig`, `localGetConfig`
+and the write gates re-read the row per request — but `App::config()`, the projected ninety
+settings, is a start-up snapshot and does not ([D-701]). The same test patches `SiteURL`, an
+environment override on the stack, and proves it moves nothing: the answer, both reads and the
+persisted row keep the override's value (`removeEnvOverrides`). Two things a reader would
+otherwise get wrong: an omitted `SiteURL` on `PUT /config` is a cleared one — `{}` is the
+`clear_siteurl` 400 — *unless* the body sets `EnableDeveloper`, when `SetDefaults` fills
+`http://localhost:8065`; and a `null` section is a no-op decode in Go, not a 400, so nulls are
+dropped before the typed decode. On the licence side `previewLicense` is served whole (no
+`Features.SetDefaults`, a sparse `features` echoes sparse), `POST /license` reaches the trial
+gate — a **500** `upgrade_needed` where `/trial-license` gives a 403 for the same nil manager —
+and `localAddLicense` writes `http.Error` plain text for the two pre-part failures and forwards
+a failure inside the parse so the text stays Go's.
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/license.rs` — `license_from_bytes` (validate + decode, no defaults), `validate_license_bytes`, `license_validation_app_error` (the `NewLicenseValidationAppError` mapping plus the 500 `LicenseFromBytes` adds) | DONE |
+| api | `crates/mm-api/src/config_writes.rs` — the three HTTP handlers, the four socket ones, `decode_config`; 5 unit tests | DONE |
+| api | `crates/mm-api/src/license_writes.rs` — the four HTTP handlers, the two socket ones; 3 unit tests | DONE |
+| api | `lib.rs` — `.put` on the existing `/config` router, five new paths; `local.rs` — two merges; `local_misc.rs` — `.put` on the socket's `/config` | DONE |
+| test | `crates/mm-api/tests/parity/configlic.rs` — 5: 18 config refusals, the forwarded patch/PUT/reload with the document restored under the new `common::CONFIG_DOCUMENT` lock (taken shared by the two full-document reads), 20 licence refusals, the licensed pair past the signature (a trial licence signed with the oracle's key, never saved), 26 socket cases | DONE |
+| mutation | `scripts/mutations/configlic.plan` — 15 run, 15 caught, 2 controls survived | DONE |
+
+- **Forwarded:** every save (D-700, D-702), `RemoveLicense` with a licence in force,
+  `config.Migrate`, a migrate body that does not decode (Go salvages a partial map, D-026),
+  a socket licence upload that fails *inside* the multipart parse (Go's own error text).
+- **Not verified by parity:** the 413 for a licence upload past `MaxFileSize + 512`, the
+  wrong-environment licence ids (no test/dev key on the stack), `api.unmarshal_error` for a
+  validly signed non-JSON licence (needs the oracle's key and is reachable, not yet sent), and
+  the `PluginSettings.MarketplaceURL` refusal only while the stack's `EnableUploads` is off.
+## The SAML, LDAP and audit-log certificate and gate routes — `api4/saml.go`, `api4/ldap.go`, `api4/ldap_local.go`, `api4/audit_logging.go` (2026-09-15)
+
+**+22 HTTP pairs / +8 local-mode pairs on base `f4f0a5a`** (612 of 764 served at base): the ten
+of `InitSaml` bar `GET /saml/metadata`, the ten of `InitLdap` bar the three `/ldap/groups`
+routes, both of `InitAuditLogging`, and on the socket the seven of `InitLdapLocal` bar
+`GET /ldap/groups` plus `InitSamlLocal`'s `POST /saml/reset_auth_data`. `App.Saml()`,
+`App.Ldap()` and `App.LdapDiagnostic()` are nil on **both** oracles — the licensed server answers
+`/ldap/test` with `ent.ldap.disabled.app_error` and `/saml/reset_auth_data` with
+`api.admin.saml.not_available.app_error` — so every enterprise route is its gate in Go's order and
+then that constant, and the order is on the wire: `sync`/`test*` check the licence **before** the
+permission (a plain user unlicensed is the 501), `migrateid` reads `toAttribute` first (400), then
+the permission (403), then the licence. The twelve certificate adds and removes serve the
+permission and the multipart parse — three parsers, two ids: LDAP's non-multipart body is
+`parseform`, SAML's and audit's `no_file`, and audit alone refuses two parts — and **forward the
+write** ([D-660]): this server's `Config` is fixed at construction and the configuration-document
+write is the config family's. `GET /saml/certificate/status` is served whole and reads the three
+filenames from the **live** `Configurations` row (`load_model_config`) so it agrees with Go after
+a forwarded add; the suite compares it with the public certificate, the private key and the idp
+certificate each installed in turn.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/config_store.rs` — `ConfigStore::has_file` (`DatabaseStore.HasFile`, `COUNT(*) != 0`); `set_file`/`get_file`/`remove_file` not ported, every caller forwards first | DONE |
+| app | `crates/mm-app/src/auth_certs.rs` — `get_saml_certificate_status`, `sync_ldap` (the goroutine's log line), the six nil-interface constants, `license_has_ldap`; 2 unit tests | DONE |
+| api | `crates/mm-api/src/auth_certs.rs` — 22 handlers in their own `routes()` merged into `lib.rs`; `local_auth_certs.rs` — the 8 socket twins, merged into `local::router`; `multipart::parse_media_type` made `pub(crate)` for the idp add's `Content-Type` branch; 7 unit tests on the parsers and decoders | DONE |
+| test | `crates/mm-api/tests/parity/auth_certs.rs` — 7, `local_auth_certs.rs` — 2; the licensed pair for the branches past the licence gate | DONE |
+| mutation | `scripts/mutations/auth-certs.plan` — 17 run, 15 caught, 2 controls survived | DONE |
+
+Three things a reader would otherwise get wrong. `model.MapFromJSON` **discards the decode error
+and returns what `Unmarshal` filled**, so `{"saml_metadata_url":"x","n":5}` carries the URL past
+the empty check; the copies of it in other modules parse the whole body and would answer the
+other 400 — this module's decodes the first JSON value and keeps its string entries. The two
+body-decoding routes (`test_connection`/`test_diagnostics`'s `LdapSettings`, `reset_auth_data`'s
+params) fold keys the way `encoding/json` does ([D-040]'s `remap_object_keys`, two `GoFields`
+schemas) and refuse an array explicitly, since serde would read one into a struct positionally.
+And `addSamlIdpCertificate`'s `application/x-pem-file` arm on a body Go cannot decode is a nil
+dereference inside `pem.Decode`'s result that net/http answers by **dropping the connection** —
+no status, nothing to compare — so the suite's PEM row sends a real self-signed certificate.
+
+- **Forwarded:** the write of every certificate add and remove ([D-660]); the `x-pem-file` arm
+  whole; `addUserToGroupSyncables` past the auth-service check ([D-661], `CreateDefaultMemberships`).
+- **Not ported, unreachable:** `UserStore.ResetAuthDataToEmailForUsers` and the `num_affected`
+  body — behind `Saml() == nil` on every build of this tree. `SyncLdap`'s `EnableSync` log branch
+  is collapsed into the `Ldap()`-nil one (same nothing on the wire).
+- **Side effect measured, restored:** removing a SAML certificate or key sets
+  `SamlSettings.Encrypt = false` on the shared document (app/saml.go:127). The suite puts it back
+  through `PUT /config/patch`, because `licensed_sweep`'s config comparison failed on that key
+  in the full run: the licensed Go never reloads its configuration, and the licensed mm-api reads
+  the live row.
+## `api4/access_control.go` and its local twins on a nil service (2026-09-15)
+
+**+16 HTTP pairs / +14 local-mode pairs on base `f4f0a5a`** (612 of 764). `InitAccessControlPolicy`
+is registered unconditionally (api4/api.go:408), so every route answers on a build whose
+access-control service is nil ([D-571]); what each answers is the chain of gates in front of
+the service, ported in Go's order — decoding, the three feature flags (all `true` by default and
+environment-only, like every flag), the system / delegated-team / delegated-channel rungs, the
+parameter validations — and then the app function, which is the nil-service 501 named after it
+(`mm_app::access_control_policy`, one constant per Go function). The rungs read the store before
+the service does, and that is where the port has substance: `ValidateTeamAdminPolicyOwnership`
+is two `SearchPolicies` (explicit scope, then channel inference) and decides a team admin's 403
+against the service's 501 on the read, delete, batch-activate, assign and resource routes;
+`ReconcilePolicyTeamScope` — search, `Get`, `Save` with the history move and the revision bump —
+runs on every `assign`/`unassign` that names no resources, which is a **200** on both servers;
+and two routes never ask the service at all: the CEL field autocomplete (the `access_control`
+property group through the property hooks with the caller's *raw* user id, the four native
+descriptors on the first page, `after` compared on `CreateAt: 1` so it excludes nothing real) and
+the parent-filtered `SearchAllChannels`. Things a reader would otherwise get wrong: the delegated
+permission check is the `get_policy` **501, not a 404**, so its channel-permission fallback never
+runs and a channel admin is refused on their own channel; `PUT /activate` with no entries skips
+the permission loop and is the 501 for anyone; `team_ids` on assign/unassign is the
+feature-disabled 501 before any permission, licensed or not on this stack; `GET /{id}/activate`
+refuses a cookie session with a 401 before its permission, and checks the permission before
+`active`; a team admin's team policy with a non-empty rule expression is the **500**
+`validation_error` (the 501 wrapped); a parent policy without rules fails `IsValid`, so Go's
+reconcile only logs on such a row — the suite plants ruled parents.
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `feature_flag_permission_policies`, `feature_flag_channel_permission_policies`, `feature_flag_policy_simulation` and the two `Is*Enabled` conjunctions; environment-or-default, not in the fixture (92 keys, unchanged) | DONE |
+| store | `crates/mm-store/src/access_control_policy_store.rs` — `get`, `save`, `search_policies` (every filter, the count without the cursor, `include_children` stamping); `Data` marshalled in Go's field order so `Save`'s changed-revision comparison is between two outputs of one function; 2 unit tests; `.sqlx` carries the seven queries | DONE |
+| app | `crates/mm-app/src/access_control_policy.rs` — the fourteen nil-service constants, ownership, reconcile, the channel assignment and eligibility checks, the simulation users-in-scope check, the autocomplete; 1 unit test | DONE |
+| api | `crates/mm-api/src/access_control_policies.rs` — the sixteen handlers; `local_access_control.rs` — the fourteen local registrations (the HTTP handlers under `local_session()`, no `local*` variants exist); registered in `lib.rs` and merged in `local.rs`; 2 unit tests | DONE |
+| test | `crates/mm-api/tests/parity/access_control_policies.rs` — 11, over four callers and both sockets; three parents and a child planted by SQL for the ownership and reconcile rows; the licensed pair for `team_ids` and the planted-field autocomplete; a purge line in `common` | DONE |
+| mutation | `scripts/mutations/abac.plan` — 18 run, 16 caught, 2 controls survived | DONE |
+
+- **Not verified by parity:** the three feature-flag 501s (`permission_policies`,
+  `channel_permission_policies`, `policy_simulation`) — every flag is on for both servers and
+  cannot be turned off on the shared stack; the success tails past the service (`json.Marshal(np)`,
+  `PopulateAccessControlPolicyChildCounts`, the masking) are written to type but never reached.
+- **Left forwarded:** nothing in the family. `Channel.InvalidateChannel`, named as owned, is not
+  reached by any served branch — every `publish*` that would call it sits past the nil check.
+- **Store methods added:** `AccessControlPolicy.{Get,Save,SearchPolicies}`. `SetActiveStatus*`
+  and `GetAll` are only reached through the service and stay unported under [D-571].
+## The rest of `api4/post.go`, `report.go`'s writes and `integration_action.go` (2026-09-15)
+
+**+13 HTTP pairs / +0 local-mode pairs on base f4f0a5a.** `setPostReminder`, `restorePostVersion`,
+`moveThread`, `rewriteMessage`, `revealPost`, `burnPost`, `getPostsForReporting`,
+`startUsersBatchExport`, `doPostAction`, `openDialog`, `submitDialog`, `lookupDialog`,
+`executeDialogAction`. Every refusal is served; the branches left to Go are decided before any
+write and each has an OPEN entry: DM/GM reminder ([D-720], narrows [D-420]), the author's burn
+([D-721]), a cookie-carrying action ([D-722]), any integration call the outbound guard allows
+([D-723]), a licensed `moveThread` ([D-724]), the agents bridge ([D-725]). A restore that changes
+the file set forwards through the existing `update_post` refusal.
+
+Three things a reader would otherwise get wrong. `GetSinglePost` **reveals a burn-on-read post
+for the session's user** before any handler sees it (`App::reveal_single_burn_on_read_post`), so
+after a burn the post is a 404 and `RevealPost`'s own 403 `read_receipt_expired` is unreachable
+through the route. `getPostsForReporting` reads `s.postsQuery`, which has **no reply-count
+subquery** — every row is `reply_count: 0`, measured. And `openDialog` is `APIHandler`: no
+session, the user is the one inside the trigger id, verified with the stack's P-256 key.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/main.go` — `ReportPostOptions`, `ReportPostOptionsCursor`, `ReportPostListResponse`, `RewriteRequest`, `RewriteResponse` | DONE |
+| model | `crates/mm-model/src/post_rest.rs` — the reporting cursor codec and `Validate`; `integration_action.rs` — `validate_action_query`; 10 tests | DONE |
+| config | `burn_on_read_duration_seconds`, `outgoing_integration_requests_timeout`, `enable_permalink_previews`, `feature_flag_move_threads_enabled`, `feature_flag_mm_blocks_enabled`; fixture reprojected (99 keys) | DONE |
+| store | `read_receipt_store.rs` (`save`, `update`, `get`, `get_by_post`, `get_unread_count_for_post`), `temporary_post_store.rs` (`get`, `save`), `PostStore::get_posts_for_reporting` | DONE |
+| app | `crates/mm-app/src/post_rest.rs`; `post.rs` — the burn-on-read reveal in `get_post_if_authorized` and a lone-permalink embed (`sole_permalink_in`); `http_guard.rs` — `GuardedClient::permits` | DONE |
+| api | `crates/mm-api/src/postrest.rs`; 13 registrations in `lib.rs` (`/posts/rewrite` pinned like `/ephemeral`; `{action_id}` gets its `[A-Za-z0-9_-]+` class) | DONE |
+| test | `crates/mm-api/tests/parity/postrest.rs` — 10, bodies byte-identical on the served 200s, events compared on both sockets, reporting and export on the licensed pair | DONE |
+| mutation | `scripts/mutations/postrest.plan` — 15 run, 13 caught, 2 controls survived | DONE |
+
+New dependency: `p256` (workspace; mm-app, mm-api dev) for `DecodeAndVerifyTriggerId`'s ECDSA verify.
+## searchmisc: file search, retention searches, property writes, outgoing OAuth writes, agents (2026-09-15)
+
+**+15 HTTP pairs / +0 local-mode pairs on base f4f0a5a.** `POST /files/search` and
+`/teams/{team_id}/files/search`; `POST /data_retention/policies/{policy_id}/{teams,channels}/search`;
+`POST …/{object_type}/fields`, `PATCH …/fields/{field_id}`, `PATCH …/values/{target_id}` and
+`PATCH …/system/values` under `/properties/groups/{group_name}`; `POST /oauth/outgoing_connections`,
+`POST …/validate`, `PUT` and `DELETE …/{id}`; `GET /agents`, `/agents/status`, `/llmservices`.
+**Left forwarded:** `GET /teams/{team_id}/channels/managed_categories` — no oracle has its flag
+on, so Go's mux 404 is the only answer anywhere ([D-740]).
+
+Four things a reader would otherwise get wrong. The file search is **one** statement with every
+params element ANDed in (the post search runs one query per element), and its tsquery is its own
+text: every hyphen a space, no quoted phrases. `RequirePolicyId` is dead on both retention
+searches and its 400 is **appended after the 200 body** by Go's handler wrapper (`[]{"id":…}`),
+measured and reproduced; the channel store gained Go's first `else if`, where a `PolicyID`
+silences `ExcludePolicyConstrained`. The outgoing OAuth writes are the permission then a 501 on
+every build from this tree — the enterprise interface is nil licensed or not — so the setting only
+picks which id. The agents bridge is never available on a server that hosts no plugins:
+`plugin_not_active`, or `plugin_env_not_initialized` with `PluginSettings.Enable` off.
+
+| layer | file | status |
+|---|---|---|
+| config | `enable_file_search` (`ServiceSettings.EnableFileSearch`), `plugin_enable` (`PluginSettings.Enable`); fixture reprojected, 98 keys | DONE |
+| store | `file_info_store.rs` — `search`, `file_ts_query` (reusing `post_store`'s term helpers, now `pub(crate)`); `channel_store.rs` — the `PolicyID` predicate in `search_all_channels` and its count; `property_store.rs` — team- and channel-level `check_property_name_conflict` | DONE |
+| app | `file_search.rs` — `search_files_in_team_for_user`, `filter_files_by_channel_permissions`, `get_last_accessible_file_time`; `agents.rs`; `custom_profile_attributes.rs` — `upsert_property_values` for any object type, `resolve_value_broadcast_params` | DONE |
+| api | `file_search.rs`, `retention_search.rs`, `properties_writes.rs`, `outgoing_oauth_writes.rs`, `agents.rs`; `GET /files/search` pinned to `get_file`'s 400 | DONE |
+| test | `parity/{file_search,retention_search,properties_writes,outgoing_oauth_writes,agents}.rs` — 9, 3, 5, 3, 2; the OAuth pair also on the licensed oracle | DONE |
+| mutation | `scripts/mutations/searchmisc.plan` — 18 run, 17 caught, 2 controls survived; the survivor (`file-search-star-reaches-store`) is an equivalent mutation, see `App::search_files_in_team_for_user` | DONE |
+
+- **Not verified by parity:** the `EnableFileSearch = false` 501; the outgoing OAuth
+  `upgrade_needed` arm (setting on; a unit test pins it); a cloud licence's
+  `LastAccessibleFileTime`, which forwards; the ABAC file-download check, which is `true` because
+  `AccessControl` is nil on this build. Property write fields are compared **modulo** id,
+  timestamps and a per-server name, since both servers write one table.
+## The cmdremote family — slash commands, boards, first_admin_visit, the remote-cluster gate and socket uploads (2026-09-15)
+
+**+11 HTTP pairs / +2 local-mode pairs on base `f4f0a5a`** (612 of 764 served at base). Of the
+fourteen-pair family, thirteen are served; `GET /manualtest` forwards ([D-782]).
+
+- **`POST /boards`** (`api4/board.go`, `crates/mm-api/src/boards.rs`, `crates/mm-app/src/board.rs`).
+  Registered by Go only under `IntegratedBoards`, off at the pinned SHA — so the flag-off request
+  forwards and Go writes its own mux 404, exactly as `views` does; the flag-on shape is measured
+  against `scripts/go-boards.sh`. A board channel and its default kanban view (one column per
+  `status` property option) are one transaction (`ChannelStore::save_board_channel`, no
+  `PublicChannels` upsert), the creator becomes channel admin with a join-history row, and
+  `board_created` + `view_created` are broadcast. Go's own `GetChannel` filters to message
+  channel types, so a board is invisible to `GET /channels/{id}` on Go itself — the suite reads
+  the `views`/`channelmembers` rows for its oracle. New store methods:
+  `ChannelStore::save_board_channel` and `PropertyStore::get_field_by_name_for_object_type`;
+  `ViewStore::save`'s insert was factored into `save_view_t` so the board transaction can run it.
+- **`GET`/`POST /plugins/marketplace/first_admin_visit`** (`api4/plugin.go`,
+  `crates/mm-api/src/marketplace_visit.rs`, `crates/mm-app/src/marketplace_visit.rs`). The only
+  `/plugins` routes served: a `System`-table read that synthesises `"false"` for a missing row,
+  and a write that upserts `"true"` and broadcasts
+  `first_admin_visit_marketplace_status_received`. The `POST` is `APIHandler`, so an anonymous
+  caller is the 403 `manage_system` refusal, not a 401. The suite proves six `/plugins`
+  neighbours and the two other methods still forward.
+- **The five `RemoteClusterTokenRequired` routes** (`api4/remote_cluster.go`,
+  `crates/mm-api/src/remote_cluster.rs`): `ping`, `msg`, `confirm_invite`, `upload/{upload_id}`,
+  `{user_id}/image`. All reduce to the token gate, which needs a licence with the remote-cluster
+  service; this build has none, so every request is the 401 `session_expired` before any handler,
+  served and proven. A licensed request forwards ([D-780]).
+- **`POST /uploads` and `POST /uploads/{upload_id}` on the socket** (`api4/upload_local.go`,
+  `crates/mm-api/src/local_misc.rs` wrappers over `upload_write`). The local session's user id is
+  empty, so a create is a 400 on `user_id` and an attachment data upload a 403; an import session
+  takes the `manage_system` branch and the socket feeds it its bytes — the served pair.
+- **`POST /commands/execute`, `GET /teams/{team_id}/commands/autocomplete` and
+  `.../autocomplete_suggestions`** (`api4/command.go`, the end of `crates/mm-api/src/commands.rs`,
+  `crates/mm-app/src/command_provider.rs`, `crates/mm-app/src/command_suggestions.rs`). All 35
+  built-in `GetCommand`s are ported with their English strings (a table generated from and
+  unit-checked against `en.json`); no `DoCommand` is. Execute serves every refusal, the
+  `EnableCommands` 501, the team/user lookups Go makes *before* matching (so a DM naming no team is
+  the team 404 even for `/shrug`) and the not-found 404, and forwards anything that would run.
+  The two reads serve the list and the suggestions. All three forward while Go may have plugin
+  commands — decided by Go's plugin directory, named by `MM_GO_PLUGIN_DIRECTORY` in
+  `scripts/mm-api-env.sh`, empty on the stack — and the reads forward a request whose
+  `Accept-Language` does not resolve to `en` (Go's `T` comes from that header alone,
+  web/handlers.go:191). Two facts a reader would get wrong: Go's built-in list order is **random
+  per call** (map iteration; the suite compares it as a set), and the suggestions body has **no**
+  trailing newline where the list does. Config gained `PluginSettings.Enable`,
+  `PluginSettings.EnableMarketplace` and `EmailSettings.SendEmailNotifications` (the fixture now
+  has 99 keys). What still forwards is [D-781].
+- **Forwarded:** `GET /manualtest`, registered by Go only under `EnableTesting` (off on the stack,
+  where the path falls to the webapp's static root handler, a 500 naming Go's own client
+  directory) ([D-782]).
+
+| layer | file | status |
+|---|---|---|
+| config | `crates/mm-app/src/config.rs` — `plugin_enable`, `plugin_enable_marketplace`, `send_email_notifications`; `fixtures/config_active.json` reprojected (99 keys) | DONE |
+| store | `channel_store.rs` (`save_board_channel`), `property_store.rs` (`get_field_by_name_for_object_type`), `view_store.rs` (`save_view_t`) | DONE |
+| app | `board.rs`, `marketplace_visit.rs`, `command_provider.rs` (registry, `list_autocomplete_commands`, `command_dispatch`), `command_suggestions.rs` | DONE |
+| api | `boards.rs`, `marketplace_visit.rs`, `remote_cluster.rs`, `local_misc.rs` (two upload wrappers), `commands.rs` (three handlers) | DONE |
+| test | `parity/boards.rs` (4), `parity/marketplace_visit.rs` (3), `parity/remote_cluster.rs` (2), `parity/local_uploads.rs` (2), `parity/command_dispatch.rs` (5); `command_writes.rs`'s execute guard rewritten | DONE |
+| mutation | `scripts/mutations/cmdremote.plan` — 13 run, 11 caught, 2 controls survived; `scripts/mutations/cmddispatch.plan` — 16 run, 14 caught, 2 controls survived | DONE |
+
+**Parity risks:** the licensed remote-cluster session path is not exercised (no planted
+`RemoteClusters` row) and forwards. The plugin-present branch of the command gate is never taken
+on the stack (Go's plugin directory is empty), and the suggestions' admin/user role distinction is
+unobservable here — every command carries `system_user`. The restricted-DM branches of execute
+need `RestrictDirectMessage = team` and are untested.
+
+Found by the full run: serving the three remote-cluster literals broke `cloud_and_workspaces`'s
+"still forwarded" list (entries removed); the socket import uploads left files in the shared
+import directory, and with two of them `GET /imports` lists in filesystem order on Go and sorted
+here, failing `exports_and_uploads` and `local_misc` (the suite now deletes what it writes). That
+listing-order difference is real and pre-existing, and a bare directory of one file hides it.
+## The system-operations family — `api4/system.go`, `system_local.go`, `elasticsearch.go` (2026-09-15)
+
+**+13 HTTP pairs / +2 local-mode pairs on base f4f0a5a.** `GET /analytics/old`,
+`POST /caches/invalidate`, `POST /database/recycle`, `GET /logs`, `GET /logs/download`,
+`POST /logs/query`, `POST /restart`, the three `/upgrade_to_enterprise` routes,
+`GET /system/notices/{team_id}`, and the two `/elasticsearch` routes; on the socket,
+`POST /integrity` and `GET /logs`. Left forwarded: `POST /notifications/test` ([D-680]).
+
+Decisions a reader would otherwise have to rediscover (each is on its handler's doc comment):
+`POST /caches/invalidate` purges this process's three in-memory caches **and posts a copy of the
+request to Go**, because while the proxy is on the caches that actually go stale are Go's;
+`POST /restart` restarts only the process it reached, and on every stack is Go's one-second 200
+that execs nothing (`Server.Restart` returns a nil-wrapped error when no upgrade ran);
+`POST /database/recycle` closes this pool's idle connections, since sqlx cannot change a live
+pool's lifetime; the upgrade arm past the refusals forwards ([D-682]). Two Go behaviours are
+reproduced rather than fixed: `?name=extra_counts&team_id=…` is a 500 on both servers (squirrel's
+`Where("TeamId", id)` is a broken statement), and the log routes are a 403 on any checkout where
+`reference/.build` is a symlink (`ValidateLogFilePath` resolves the file's links, not the root's) —
+which needed `os.Getwd`'s `$PWD` rule ported and mm-api launched from the Go run directory.
+
+| layer | file | status |
+|---|---|---|
+| oracle | `reference/dump/behaviour_notice_conditions.go` — Masterminds semver parse and ~2,700 constraint checks, the reflog date grammar, `validateConfigEntry`'s dynamic-type equality | DONE |
+| model | `crates/mm-model/src/notice_conditions.rs` — both grammars from the library sources (the date grammar's broken hyphen range kept); 4 oracle tests | DONE |
+| config | `max_users_for_statistics`, `log_enable_file`, `log_file_location`, and five `AnnouncementSettings`; fixture reprojected, **104 keys** | DONE |
+| store | the nine `Analytics*` methods plus `FileInfo.CountAll`, `Session.AnalyticsSessionCount`, `Command.AnalyticsCommandCount`; `ProductNotices.get_views`/`clear_old_notices`; `SqlStore::check_integrity` (41 checks), `recycle_db_connections`, `get_db_version`, the two pool counts | DONE |
+| app | `analytics.rs`, `logs.rs`, `upgrader.rs`, `searchengine.rs`, `product_notices.rs` (cache, hourly refresh, matcher), `system.rs` (restart, cache invalidation, recycle, integrity) | DONE |
+| api | `crates/mm-api/src/sysops.rs`, `local_sysops.rs`; start-up notice fetch in `main.rs` | DONE |
+| test | `crates/mm-api/tests/parity/sysops.rs` — 9; the socket integrity comparison reads Go-us-Go, since the rest of the module moves orphan rows between reads | DONE |
+| mutation | `scripts/mutations/sysops.plan` — 19 run, 17 caught, 2 controls survived; `sysops-notices.plan` — 10 run, 8 caught, 2 controls survived (the semver operators and the config-entry type rule are caught by the library oracle under `unit`) | DONE |
+
+**Go writes into its running configuration** on `POST /elasticsearch/test` with a body that
+decodes to nothing (`cfg` is `c.App.Config()`, then patched), so after one such request Go's
+`GET /config` carries `BulkIndexingTimeWindowSeconds: 0` until it restarts. The suite once sent
+those bodies to Go and broke `config_reads` for every run after it; it now asserts them against
+ours alone, with Go's answers measured once.
+
+**Not comparable, by design:** three `standard` analytics rows (websocket count, the two pool
+counts) are each process's own and compared by name and position only. **Not verified by
+parity:** the upgrade permission branches (every stack is arm64, so both servers stop at the
+architecture) and the Elasticsearch engine itself (nil on both). [D-683]: a user created here is
+not marked as having viewed the current notices; that call site belongs to the user family.
+
+## The 2026-09-15 round: seven families in parallel, and the harness that verifies them
+
+**612 → 739 of 764 pairs.** Seven worktree agents on stacks 1–7, merged serially on stack 0.
+Each family's own section above holds its findings; this is the index and the tallies.
+
+| family | pairs on base `f4f0a5a` | mutation tally | merge |
+|---|---|---|---|
+| config and licence writes | +7 HTTP, +6 local | 17 run, 15 caught, 2 controls survived | `0d0807d` |
+| SAML, LDAP, audit-log certificates | +22 HTTP, +8 local | 17 run, 15 caught, 2 controls survived | `08ce20a` |
+| access-control policies | +16 HTTP, +14 local | 18 run, 16 caught, 2 controls survived | `6a25894` |
+| post remainder, reports, integration actions | +13 HTTP | 15 run, 13 caught, 2 controls survived | `7a58e56` |
+| file search, retention searches, property and OAuth writes, agents | +15 HTTP | 20 run, 17 caught, 2 controls and 1 equivalent mutation survived | `728a7a0` |
+| command execute, remote cluster, boards, socket uploads | +11 HTTP, +2 local | 29 run, 25 caught, 4 controls survived (two plans) | `523c573`, `09dd546` |
+| system operations, notices, elasticsearch (all but `POST /notifications/test`, [D-680]) | +13 HTTP, +2 local | 29 run, 25 caught, 4 controls survived (two plans) | `2034a85` |
+
+**The harness changes, which every later full run depends on:**
+
+- `scripts/parity.sh` runs the parity binary in two shards (`6e2d5f7`): one run peaked at 252 active
+  users against Go's unlicensed limit of 250; sharded, about 150. Per-test retirement is still owed —
+  [D-800].
+- `a_team_and_channel_the_user_is_in` returns the seeded `slice-team` and its `town-square`, by name
+  (`8b8b756`): "the first team" had become another suite's fixture team, which its own purge deleted
+  mid-run.
+- `parity::second_server_ports` fails on two `SecondServer`s sharing a port (`a1260dc`); the uploads
+  suites had been killing the licensed pair.
+- Races closed by lock, bracket or scope: the SAML config flip and every certificate write, and
+  their readers (`de67a97`, `4ac00de`, `fe9477f`), the post-info open-invite flip (`1f5276b`), the shared admin's row and the seeded team's user lists (`d77a1ec`, `f951866`), the
+  token page (`4caec75`), a module-wide per-fixture purge (`f89a299`), a fixed websocket window
+  (`19a0237`), a bot mid-plant (`9a07878`), two servers' session clocks (`e152820`), and one in 256
+  licence signatures ending in a zero byte (`33e6efd`).
+- The recreated `system-bot` is handed to the seeded admin (`d87d983`): owned by another suite's
+  temporary admin, it was disabled with that admin, and every export job the licensed Go ran
+  failed looking it up.
+- `scripts/routes.py` follows `.merge(...)` registrations on both routers (`be9e0b6`, `bb9ddf2`);
+  families registered that way had been counted as unserved.
+
+**Merge hazards met three times, for the next round:** git silently keeps an item two branches
+invented at different offsets (a config field, a `let` binding, a test document's JSON key), and a
+keep-both block whose two sides both end inside a call shares one closing tail. Resolving in a
+scratch copy of `git merge-tree`'s output and parsing it with `rustfmt --check` before touching the
+tree caught both kinds.

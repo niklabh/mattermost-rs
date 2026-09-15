@@ -530,7 +530,7 @@ async fn serve_patch(
 
 /// Port of `postPatchChecks` (api4/post.go:1255). Returns nothing: Go's `isMember` return feeds
 /// the audit record only ([D-028]).
-async fn post_patch_checks(
+pub(crate) async fn post_patch_checks(
     state: &AppState,
     post_id: &str,
     session: &AuthenticatedSession,
@@ -777,7 +777,7 @@ fn time_limit_error(where_: &'static str, limit: i64) -> PrepareError {
 
 /// `rpost.EncodeJSON(w)` — strips the private action integrations **in place** and appends the
 /// newline `json.Encoder` writes and `json.Marshal` does not.
-fn encoded_post(mut post: Post) -> Result<Response, PrepareError> {
+pub(crate) fn encoded_post(mut post: Post) -> Result<Response, PrepareError> {
     let mut body = Vec::new();
     if let Err(err) = post.encode_json(&mut body) {
         tracing::error!(error = %err, "failed to serialise Post");
@@ -1619,6 +1619,32 @@ mod tests {
             ("POST", format!("/api/v4/posts/{AN_ID}/pin"), 401),
             ("POST", format!("/api/v4/posts/{AN_ID}/unpin"), 401),
             ("GET", format!("/api/v4/posts/{AN_ID}/files/info"), 401),
+            // The postrest family, served since 2026-09-15 — each of these was the control
+            // below until then.
+            (
+                "POST",
+                format!("/api/v4/users/{AN_ID}/posts/{AN_ID}/reminder"),
+                401,
+            ),
+            ("POST", format!("/api/v4/posts/{AN_ID}/move"), 401),
+            (
+                "POST",
+                format!("/api/v4/posts/{AN_ID}/restore/{AN_ID}"),
+                401,
+            ),
+            ("GET", format!("/api/v4/posts/{AN_ID}/reveal"), 401),
+            ("DELETE", format!("/api/v4/posts/{AN_ID}/burn"), 401),
+            (
+                "POST",
+                format!("/api/v4/posts/{AN_ID}/actions/an_action-1"),
+                401,
+            ),
+            ("POST", "/api/v4/posts/rewrite".to_owned(), 401),
+            // `rewrite` is a literal beside `{post_id}`: the other three methods keep
+            // `RequirePostId`'s 400, as `ephemeral` does.
+            ("GET", "/api/v4/posts/rewrite".to_owned(), 400),
+            ("PUT", "/api/v4/posts/rewrite".to_owned(), 400),
+            ("DELETE", "/api/v4/posts/rewrite".to_owned(), 400),
         ] {
             assert_eq!(
                 status_of(method, &path).await,
@@ -1632,22 +1658,20 @@ mod tests {
     /// **502**, because nothing matched and the fallback tried the dead upstream.
     ///
     /// Without this, a bug that un-registered every route at once would leave the list above
-    /// full of 401s from some other cause and pass. Checked by hand the other way round too —
-    /// adding `POST /api/v4/posts/{post_id}/move` to the list above with an expectation of 401
-    /// fails with `502`, which is the vacuity check the list needs.
+    /// full of 401s from some other cause and pass.
+    ///
+    /// **Every `api4/post.go` route is served as of 2026-09-15**, so the controls are paths
+    /// under `/posts/` that Go registers nothing at: they reach the same fallback a forwarded
+    /// route does. The four that were here until then (`/reminder`, `/move`, `/restore`,
+    /// `/rewrite`) moved to the list above.
     #[tokio::test]
     async fn a_forwarded_route_is_a_502_here_which_is_what_makes_the_list_above_mean_something() {
         for (method, path) in [
-            // `setPostReminder`, the one sibling of `/ack` and `/set_unread` that is *not*
-            // registered — it forwards whole, see [D-420]. Here rather than merely absent, so
-            // that registering it by accident fails a test.
+            ("POST", format!("/api/v4/posts/{AN_ID}/mmrs-unregistered")),
             (
                 "POST",
-                format!("/api/v4/users/{AN_ID}/posts/{AN_ID}/reminder"),
+                format!("/api/v4/users/{AN_ID}/posts/{AN_ID}/mmrs-unregistered"),
             ),
-            ("POST", format!("/api/v4/posts/{AN_ID}/move")),
-            ("POST", format!("/api/v4/posts/{AN_ID}/restore/{AN_ID}")),
-            ("POST", "/api/v4/posts/rewrite".to_owned()),
         ] {
             assert_eq!(
                 status_of(method, &path).await,

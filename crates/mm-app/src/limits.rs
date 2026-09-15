@@ -129,7 +129,7 @@ impl App {
 
     /// Port of `App.shouldTrackSingleChannelGuests` (limits.go:88): a licence that is not
     /// Mattermost Entry, and `GuestAccountsSettings.Enable`.
-    fn should_track_single_channel_guests(
+    pub(crate) fn should_track_single_channel_guests(
         &self,
         license: Option<&mm_model::license::License>,
     ) -> bool {

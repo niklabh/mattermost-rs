@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO roles\n                    (id, name, displayname, description, permissions, createat, updateat,\n                     deleteat, schememanaged, builtin, schemeid)\n                VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9, $10)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0e68ff6b0bdb209279c1d8fee35dd21ff94c11e032876d6d9d820e912da108fb"
+}

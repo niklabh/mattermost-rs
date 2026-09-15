@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO fileinfo\n                (id, creatorid, postid, channelid, createat, updateat, deleteat, path,\n                 thumbnailpath, previewpath, name, extension, size, mimetype, width, height,\n                 haspreviewimage, minipreview, content, remoteid)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,\n                    $18, $19, $20)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Bytea",
+        "Text",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4d6ad45e2564aa7b3c1223a477e01df45970d4d410e2a400afe47e26a7913ac"
+}

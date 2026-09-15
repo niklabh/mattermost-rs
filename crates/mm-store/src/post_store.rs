@@ -50,6 +50,10 @@ use mm_model::post::Post;
 use mm_model::post_acknowledgement::PostAcknowledgement;
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostPriority;
+use mm_model::post_rest::{
+    REPORTING_SORT_DIRECTION_DESC, REPORTING_TIME_FIELD_UPDATE_AT, ReportPostListResponse,
+    ReportPostOptionsCursor, ReportPostQueryParams, encode_report_post_cursor,
+};
 use mm_model::post_search_results::PostSearchResults;
 use mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST;
 use mm_model::search_params::{SearchParams, is_search_params_list_valid};
@@ -246,6 +250,56 @@ pub trait PostStore {
     fn analytics_posts_usage_count(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCount` (post_store.go:2401) under the zero
+    /// `PostCountOptions` — the notice cache's `cachedPostCount`: `COUNT(*) FROM Posts`, deleted
+    /// and system posts included, every team. The other option combinations arrive with the
+    /// routes that need them.
+    fn analytics_post_count_total(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCountByTeam` (post_store.go:2455), which is
+    /// `countByTeam`: `COALESCE(SUM(num), 0)` over the **`posts_by_team_day` materialized
+    /// view**, not a count over `Posts`. The view is refreshed by a job, so the figure lags the
+    /// table on both servers by the same amount — that is what makes it comparable.
+    fn analytics_post_count_by_team(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCountsByDay` (post_store.go:2469) after its date
+    /// arithmetic: `countPostsByDay` / `countBotPostsByDay` over the `posts_by_team_day` /
+    /// `bot_posts_by_team_day` views, `day` between the two bounds inclusive, newest first,
+    /// **30 rows**. With a team the row is the view's own `num`; without one the days are
+    /// summed across teams.
+    ///
+    /// The bounds are dates here where Go binds `YYYY-MM-DD` strings against the `date`
+    /// column: Postgres casts the string, and binding the date directly is the same comparison
+    /// with the cast done on this side of the wire.
+    fn analytics_post_counts_by_day(
+        &self,
+        team_id: &str,
+        bots_only: bool,
+        start_day: chrono::NaiveDate,
+        end_day: chrono::NaiveDate,
+    ) -> impl std::future::Future<
+        Output = Result<mm_model::analytics_row::AnalyticsRows, StoreError>,
+    > + Send;
+
+    /// Port of `SqlPostStore.AnalyticsUserCountsWithPostsByDay` (post_store.go:2482): distinct
+    /// authors per calendar day of `CreateAt` (the **database's** zone, since
+    /// `TO_TIMESTAMP` is evaluated there), between the two millisecond bounds inclusive, newest
+    /// first, 30 rows. This one reads `Posts` itself, deleted rows and all — there is no
+    /// `DeleteAt` predicate and no type filter.
+    fn analytics_user_counts_with_posts_by_day(
+        &self,
+        team_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> impl std::future::Future<
+        Output = Result<mm_model::analytics_row::AnalyticsRows, StoreError>,
+    > + Send;
 
     /// Port of `SqlPostStore.GetMaxPostSize` (post_store.go:2747) and the `determineMaxPostSize`
     /// (:2721) it memoises.
@@ -538,6 +592,21 @@ pub trait PostStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<PostReminderMetadata, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetPostsForReporting` (post_store.go:1586): one channel's posts
+    /// in `(time_field, id)` order, keyset-paginated from `(cursor_time, cursor_id)` with a
+    /// **row-value** comparison — strict in the sort direction, so the cursor row itself is
+    /// never returned twice. `per_page + 1` rows are fetched and the extra one only decides
+    /// whether a `next_cursor` is built, from the **last row returned** (not the extra one).
+    ///
+    /// `include_deleted` false adds `DeleteAt = 0`; `exclude_system_posts` adds
+    /// `Type NOT LIKE 'system_%'`. An empty `channel_id` is `ErrInvalidInput` before any query,
+    /// which the app layer maps to a 400 — unreachable through the handler, whose `Validate`
+    /// runs first, but the store is Go's and so is the guard.
+    fn get_posts_for_reporting(
+        &self,
+        params: &ReportPostQueryParams,
+    ) -> impl std::future::Future<Output = Result<ReportPostListResponse, StoreError>> + Send;
 
     /// Port of `SqlPostStore.SearchPostsForUser` (post_store.go:2909) — the database branch
     /// only. The query and its reshaping are on [`search`].
@@ -1650,6 +1719,180 @@ impl PostStore for SqlPostStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_post_count_total(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "value!" FROM posts p"#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to count Posts".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, count))]
+    async fn analytics_post_count_by_team(&self, team_id: &str) -> Result<i64, StoreError> {
+        // `SUM(num)` is `numeric`; Go scans it into an `int64` and the cast is that scan.
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COALESCE(SUM(num), 0)::bigint AS "total!"
+              FROM posts_by_team_day
+             WHERE ($1 = '' OR teamid = $1)
+            "#,
+            team_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count Posts by team: teamID: {team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, bots_only, rows))]
+    async fn analytics_post_counts_by_day(
+        &self,
+        team_id: &str,
+        bots_only: bool,
+        start_day: chrono::NaiveDate,
+        end_day: chrono::NaiveDate,
+    ) -> Result<mm_model::analytics_row::AnalyticsRows, StoreError> {
+        use mm_model::analytics_row::AnalyticsRow;
+
+        // Four statements rather than one with a `CASE` on the view name — a view is not a
+        // parameter. `Value` is Go's `float64` scan of `num` / `SUM(num)`; the casts are that
+        // scan.
+        let rows = match (team_id.is_empty(), bots_only) {
+            (false, false) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!", num::float8 AS "value!"
+                      FROM posts_by_team_day
+                     WHERE teamid = $1 AND day >= $2 AND day <= $3
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    team_id,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (true, false) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!",
+                           COALESCE(SUM(num), 0)::float8 AS "value!"
+                      FROM posts_by_team_day
+                     WHERE day >= $1 AND day <= $2
+                     GROUP BY 1
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (false, true) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!", num::float8 AS "value!"
+                      FROM bot_posts_by_team_day
+                     WHERE teamid = $1 AND day >= $2 AND day <= $3
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    team_id,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            (true, true) => {
+                sqlx::query_as!(
+                    AnalyticsRow,
+                    r#"
+                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS "name!",
+                           COALESCE(SUM(num), 0)::float8 AS "value!"
+                      FROM bot_posts_by_team_day
+                     WHERE day >= $1 AND day <= $2
+                     GROUP BY 1
+                     ORDER BY 1 DESC
+                     LIMIT 30
+                    "#,
+                    start_day,
+                    end_day,
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+        }
+        .map_err(|source| StoreError::Db {
+            context: if bots_only {
+                format!("failed to find bot posts with teamId={team_id}")
+            } else {
+                format!("failed to find posts with teamId={team_id}")
+            },
+            source,
+        })?;
+
+        tracing::Span::current().record("rows", rows.len());
+        Ok(mm_model::analytics_row::AnalyticsRows(rows))
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, rows))]
+    async fn analytics_user_counts_with_posts_by_day(
+        &self,
+        team_id: &str,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<mm_model::analytics_row::AnalyticsRows, StoreError> {
+        use mm_model::analytics_row::AnalyticsRow;
+
+        // Go writes the team filter into an `INNER JOIN Channels … AND Channels.TeamId = ?` and
+        // no join at all without a team. A `LEFT JOIN` with the team in the `WHERE` is the same
+        // set both ways: with a team, a post whose channel is missing fails the comparison; with
+        // none, the join contributes nothing.
+        let rows = sqlx::query_as!(
+            AnalyticsRow,
+            r#"
+            SELECT TO_CHAR(DATE(TO_TIMESTAMP(p.createat / 1000)), 'YYYY-MM-DD') AS "name!",
+                   COUNT(DISTINCT p.userid)::float8 AS "value!"
+              FROM posts p
+              LEFT JOIN channels c ON p.channelid = c.id
+             WHERE ($1 = '' OR c.teamid = $1)
+               AND p.createat >= $2 AND p.createat <= $3
+             GROUP BY DATE(TO_TIMESTAMP(p.createat / 1000))
+             ORDER BY 1 DESC
+             LIMIT 30
+            "#,
+            team_id,
+            start_ms,
+            end_ms,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Posts with teamId={team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("rows", rows.len());
+        Ok(mm_model::analytics_row::AnalyticsRows(rows))
     }
 
     /// Port of `SqlPostStore.getFlaggedPosts` (post_store.go:535).
@@ -3423,6 +3666,120 @@ impl PostStore for SqlPostStore {
         })
     }
 
+    #[tracing::instrument(skip(self, params), fields(channel_id = %params.channel_id, per_page = params.per_page))]
+    async fn get_posts_for_reporting(
+        &self,
+        params: &ReportPostQueryParams,
+    ) -> Result<ReportPostListResponse, StoreError> {
+        if params.channel_id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "Post",
+                field: "ChannelId",
+                value: String::new(),
+            });
+        }
+
+        // `s.postsQuery` is `postSliceColumnsWithName("Posts")` and nothing more — **no
+        // `ReplyCount` subquery**, unlike `GetSingle`'s `postsQuery` sibling — so every row
+        // comes back with `reply_count: 0`, a root with replies included. Measured on the
+        // licensed pair before this column was made a literal.
+        //
+        // Go builds the column name and the direction into the SQL text. A compile-checked
+        // macro needs one statement, so both choices are parameters: `$4` picks `UpdateAt` over
+        // `CreateAt` (`time_field == "update_at"`; anything else is `CreateAt`), and `$5` picks
+        // ascending (`sort_direction != "desc"`). The row-value comparison is `>` when ascending
+        // and `<` when descending, and the `ORDER BY` follows the same flag on both keys.
+        let by_update_at = params.time_field == REPORTING_TIME_FIELD_UPDATE_AT;
+        let ascending = params.sort_direction != REPORTING_SORT_DIRECTION_DESC;
+        let limit = params.per_page + 1;
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT posts.id,
+                   posts.createat   AS "create_at!",
+                   posts.updateat   AS "update_at!",
+                   posts.editat     AS "edit_at!",
+                   posts.deleteat   AS "delete_at!",
+                   posts.ispinned   AS "is_pinned!",
+                   posts.userid     AS "user_id!",
+                   posts.channelid  AS "channel_id!",
+                   posts.rootid     AS "root_id!",
+                   posts.originalid AS "original_id!",
+                   posts.message    AS "message!",
+                   posts.type       AS "post_type!",
+                   posts.props      AS "props?",
+                   posts.hashtags   AS "hashtags!",
+                   posts.filenames  AS "filenames?",
+                   posts.fileids    AS "file_ids?",
+                   posts.hasreactions AS "has_reactions!",
+                   posts.remoteid   AS "remote_id?",
+                   0::bigint        AS "reply_count!"
+              FROM posts
+             WHERE posts.channelid = $1
+               AND (($5::bool AND (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END, posts.id) > ($2, $3))
+                 OR (NOT $5::bool AND (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END, posts.id) < ($2, $3)))
+               AND ($6::bool OR posts.deleteat = 0)
+               AND (NOT $7::bool OR posts.type NOT LIKE 'system_%')
+             ORDER BY CASE WHEN $5::bool THEN (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END) END ASC,
+                      CASE WHEN NOT $5::bool THEN (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END) END DESC,
+                      CASE WHEN $5::bool THEN posts.id END ASC,
+                      CASE WHEN NOT $5::bool THEN posts.id END DESC
+             LIMIT $8
+            "#,
+            params.channel_id,
+            params.cursor_time,
+            params.cursor_id,
+            by_update_at,
+            ascending,
+            params.include_deleted,
+            params.exclude_system_posts,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get posts for reporting".to_owned(),
+            source,
+        })?;
+
+        let mut posts = rows
+            .into_iter()
+            .map(post_from_row)
+            .collect::<Result<Vec<Post>, StoreError>>()?;
+
+        // Exactly `per_page + 1` rows means another page exists. The cursor names the last row
+        // *returned* — `posts[per_page - 1]` — and the extra row is dropped unread.
+        let mut next_cursor = None;
+        if posts.len() as i64 == params.per_page + 1 {
+            if let Some(last_returned) = params
+                .per_page
+                .checked_sub(1)
+                .and_then(|i| usize::try_from(i).ok())
+                .and_then(|i| posts.get(i))
+            {
+                let next_cursor_time = if by_update_at {
+                    last_returned.update_at
+                } else {
+                    last_returned.create_at
+                };
+                next_cursor = Some(ReportPostOptionsCursor {
+                    cursor: encode_report_post_cursor(
+                        &params.channel_id,
+                        &params.time_field,
+                        params.include_deleted,
+                        params.exclude_system_posts,
+                        &params.sort_direction,
+                        next_cursor_time,
+                        &last_returned.id,
+                    ),
+                });
+            }
+            posts.truncate(usize::try_from(params.per_page).unwrap_or(0));
+        }
+
+        Ok(ReportPostListResponse { posts, next_cursor })
+    }
+
     #[tracing::instrument(skip(self, post), fields(post_id, channel_id = %post.channel_id, post_type = %post.post_type))]
     async fn save(&self, post: &Post) -> Result<Post, StoreError> {
         // Owned, because `PreSave` mutates the post Go was handed and the caller reads the id
@@ -3898,7 +4255,7 @@ fn shave_extra_row(posts: &mut Vec<Post>, per_page: i64) -> bool {
 
 /// `specialSearchChars` (sqlstore/store.go:394) — "have special meaning and can be treated as
 /// spaces". Replaced in `Terms` unless the search is a hashtag one, and in `ExcludedTerms` always.
-const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~', ':'];
+pub(crate) const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~', ':'];
 
 /// Port of `SqlPostStore.search` (post_store.go:2235) with `channelsByName` and `userByUsername`
 /// both false — the only shape `SearchPostsForUser` calls it in. The by-name shape is `Search`,
@@ -4230,7 +4587,7 @@ fn join_quoted_phrases(input: &str) -> String {
 /// `\*($| )`, so a `*` is a prefix marker only at the end of a word, and the space it consumes
 /// is put back by the replacement. `a**` is `a*:* `: the first star is not followed by a
 /// boundary and survives as a character.
-fn mark_wildcards(input: &str) -> String {
+pub(crate) fn mark_wildcards(input: &str) -> String {
     let mut out = String::with_capacity(input.len() + 4);
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -4282,7 +4639,7 @@ fn is_word_rune(r: char) -> bool {
 /// Port of `removeNonAlphaNumericUnquotedTerms` (sqlstore/utils.go:105): split on the
 /// separator, keep a word if it is quoted or holds at least one letter or digit, trim each
 /// survivor, join again. `abcd "**" && abc` becomes `abcd "**" abc`.
-fn remove_non_alpha_numeric_unquoted_terms(line: &str, separator: &str) -> String {
+pub(crate) fn remove_non_alpha_numeric_unquoted_terms(line: &str, separator: &str) -> String {
     line.split(separator)
         .filter(|word| is_quoted_word(word) || contains_alpha_numeric_char(word))
         .map(str::trim)

@@ -1,0 +1,31 @@
+# Mutation plan for the searchmisc family (2026-09-15): the two file searches, the two
+# retention-policy searches, the outgoing OAuth write gate, the four property writes and the
+# agents status.
+#
+#   scripts/mutate-batch.sh scripts/mutations/searchmisc.plan
+#
+# Each line is a decision the suites have a discriminating row for: the orphan upload (PostId),
+# the TemporaryPosts row, the archived channel, the direct channel (TeamId = ''), the public
+# channel the plain user is not in, the file on the first ms of a day, the planted retention
+# policy, a short policy id, a 51-item batch, a plain user's pinned permission level.
+
+file-search-orphan-uploads-kept	crates/mm-store/src/file_info_store.rs	AND (fileinfo.creatorid = 'bookmark' OR fileinfo.postid <> '')	AND (fileinfo.creatorid = 'bookmark' OR TRUE)	api	file_search
+file-search-temporary-posts-kept	crates/mm-store/src/file_info_store.rs	WHERE temporaryposts.postid = fileinfo.postid)	WHERE FALSE)	api	file_search
+file-search-teamless-channels-dropped	crates/mm-store/src/file_info_store.rs	AND ($1::text = '' OR c.teamid = $1 OR c.teamid = '')	AND ($1::text = '' OR c.teamid = $1)	api	file_search
+file-search-deleted-flag-inverted	crates/mm-store/src/file_info_store.rs	AND ($2::bool OR c.deleteat = 0)	AND (NOT $2::bool OR c.deleteat = 0)	api	file_search
+file-search-membership-not-required	crates/mm-store/src/file_info_store.rs	AND cm.userid = $3	AND (cm.userid = $3 OR TRUE)	api	file_search
+file-search-after-is-strict	crates/mm-store/src/file_info_store.rs	fileinfo.createat >= $14)	fileinfo.createat > $14)	api	file_search
+file-search-or-join-is-and	crates/mm-store/src/file_info_store.rs	let joiner = if or_terms { " | " } else { " & " };	let joiner = if or_terms { " & " } else { " & " };	api	file_search
+file-search-excluded-not-negated	crates/mm-store/src/file_info_store.rs	" & !({})",	" & ({})",	api	file_search
+file-search-star-reaches-store	crates/mm-app/src/file_search.rs	if params.terms != "*" {	if true {	api	file_search
+retention-teams-policy-id-not-projected	crates/mm-api/src/retention_search.rs	props.include_policy_id = Some(true);	props.include_policy_id = Some(false);	api	retention_search
+retention-channels-policy-filter-dropped	crates/mm-store/src/channel_store.rs	AND ($24::text = '' OR EXISTS (	AND ($24::text <> '' OR EXISTS (	api	retention_search
+retention-dead-id-error-not-appended	crates/mm-api/src/retention_search.rs	body.extend_from_slice(&error_body);	let _ = &error_body;	api	retention_search
+oauth-writes-setting-arms-swapped	crates/mm-api/src/outgoing_oauth_writes.rs	let id = if enable_outgoing_oauth_connections {	let id = if !enable_outgoing_oauth_connections {	unit	outgoing_oauth_writes
+property-create-non-admin-levels-not-pinned	crates/mm-api/src/properties_writes.rs	    if !is_admin {\n        field.permission_field = Some(default_level.clone());	    if is_admin {\n        field.permission_field = Some(default_level.clone());	api	properties_writes
+property-create-is-a-200	crates/mm-api/src/properties_writes.rs	*response.status_mut() = StatusCode::CREATED;	*response.status_mut() = StatusCode::OK;	api	properties_writes
+property-values-limit-off-by-one	crates/mm-api/src/properties_writes.rs	if items.len() > MAX_PROPERTY_VALUE_PATCH_ITEMS {	if items.len() > MAX_PROPERTY_VALUE_PATCH_ITEMS + 1 {	api	properties_writes
+property-values-object-type-check-dropped	crates/mm-api/src/properties_writes.rs	        if field.object_type != object_type {	        if false && field.object_type != object_type {	api	properties_writes
+agents-plugin-setting-inverted	crates/mm-app/src/agents.rs	if !self.config().plugin_enable {	if self.config().plugin_enable {	api	agents
+control-rename-per-page	crates/mm-api/src/file_search.rs	let _per_page = params.per_page.unwrap_or(DEFAULT_PER_PAGE);	let _page_size = params.per_page.unwrap_or(DEFAULT_PER_PAGE);	api	file_search
+control-reorder-two-columns	crates/mm-store/src/file_info_store.rs	COALESCE(fileinfo.content, '')         AS "content!",\n                   COALESCE(fileinfo.remoteid, '')        AS "remote_id!"\n              FROM fileinfo	COALESCE(fileinfo.remoteid, '')        AS "remote_id!",\n                   COALESCE(fileinfo.content, '')         AS "content!"\n              FROM fileinfo	api	file_search
