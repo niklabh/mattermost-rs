@@ -13500,3 +13500,52 @@ Found on the way: the two hook lists marshalled through `serde_json`, so a callb
 | api | `crates/mm-api/src/local_teams.rs`, merged into `local::router`; `teams::serve_team_by_name` lifted; `commands::encoded`, `webhooks::created_json` shared | DONE |
 | test | `crates/mm-api/tests/parity/local_teams.rs` — 8, each server writing its own rows; 5 unit tests on the invite gates and the decoder | DONE |
 | mutation | `scripts/mutations/local-teams.plan` — 13 run, 11 caught, 2 controls survived | DONE |
+## The SAML, LDAP and audit-log certificate and gate routes — `api4/saml.go`, `api4/ldap.go`, `api4/ldap_local.go`, `api4/audit_logging.go` (2026-09-15)
+
+**+22 HTTP pairs / +8 local-mode pairs on base `f4f0a5a`** (612 of 764 served at base): the ten
+of `InitSaml` bar `GET /saml/metadata`, the ten of `InitLdap` bar the three `/ldap/groups`
+routes, both of `InitAuditLogging`, and on the socket the seven of `InitLdapLocal` bar
+`GET /ldap/groups` plus `InitSamlLocal`'s `POST /saml/reset_auth_data`. `App.Saml()`,
+`App.Ldap()` and `App.LdapDiagnostic()` are nil on **both** oracles — the licensed server answers
+`/ldap/test` with `ent.ldap.disabled.app_error` and `/saml/reset_auth_data` with
+`api.admin.saml.not_available.app_error` — so every enterprise route is its gate in Go's order and
+then that constant, and the order is on the wire: `sync`/`test*` check the licence **before** the
+permission (a plain user unlicensed is the 501), `migrateid` reads `toAttribute` first (400), then
+the permission (403), then the licence. The twelve certificate adds and removes serve the
+permission and the multipart parse — three parsers, two ids: LDAP's non-multipart body is
+`parseform`, SAML's and audit's `no_file`, and audit alone refuses two parts — and **forward the
+write** ([D-660]): this server's `Config` is fixed at construction and the configuration-document
+write is the config family's. `GET /saml/certificate/status` is served whole and reads the three
+filenames from the **live** `Configurations` row (`load_model_config`) so it agrees with Go after
+a forwarded add; the suite compares it with the public certificate, the private key and the idp
+certificate each installed in turn.
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/config_store.rs` — `ConfigStore::has_file` (`DatabaseStore.HasFile`, `COUNT(*) != 0`); `set_file`/`get_file`/`remove_file` not ported, every caller forwards first | DONE |
+| app | `crates/mm-app/src/auth_certs.rs` — `get_saml_certificate_status`, `sync_ldap` (the goroutine's log line), the six nil-interface constants, `license_has_ldap`; 2 unit tests | DONE |
+| api | `crates/mm-api/src/auth_certs.rs` — 22 handlers in their own `routes()` merged into `lib.rs`; `local_auth_certs.rs` — the 8 socket twins, merged into `local::router`; `multipart::parse_media_type` made `pub(crate)` for the idp add's `Content-Type` branch; 7 unit tests on the parsers and decoders | DONE |
+| test | `crates/mm-api/tests/parity/auth_certs.rs` — 7, `local_auth_certs.rs` — 2; the licensed pair for the branches past the licence gate | DONE |
+| mutation | `scripts/mutations/auth-certs.plan` — 17 run, 15 caught, 2 controls survived | DONE |
+
+Three things a reader would otherwise get wrong. `model.MapFromJSON` **discards the decode error
+and returns what `Unmarshal` filled**, so `{"saml_metadata_url":"x","n":5}` carries the URL past
+the empty check; the copies of it in other modules parse the whole body and would answer the
+other 400 — this module's decodes the first JSON value and keeps its string entries. The two
+body-decoding routes (`test_connection`/`test_diagnostics`'s `LdapSettings`, `reset_auth_data`'s
+params) fold keys the way `encoding/json` does ([D-040]'s `remap_object_keys`, two `GoFields`
+schemas) and refuse an array explicitly, since serde would read one into a struct positionally.
+And `addSamlIdpCertificate`'s `application/x-pem-file` arm on a body Go cannot decode is a nil
+dereference inside `pem.Decode`'s result that net/http answers by **dropping the connection** —
+no status, nothing to compare — so the suite's PEM row sends a real self-signed certificate.
+
+- **Forwarded:** the write of every certificate add and remove ([D-660]); the `x-pem-file` arm
+  whole; `addUserToGroupSyncables` past the auth-service check ([D-661], `CreateDefaultMemberships`).
+- **Not ported, unreachable:** `UserStore.ResetAuthDataToEmailForUsers` and the `num_affected`
+  body — behind `Saml() == nil` on every build of this tree. `SyncLdap`'s `EnableSync` log branch
+  is collapsed into the `Ldap()`-nil one (same nothing on the wire).
+- **Side effect measured, restored:** removing a SAML certificate or key sets
+  `SamlSettings.Encrypt = false` on the shared document (app/saml.go:127). The suite puts it back
+  through `PUT /config/patch`, because `licensed_sweep`'s config comparison failed on that key
+  in the full run: the licensed Go never reloads its configuration, and the licensed mm-api reads
+  the live row.

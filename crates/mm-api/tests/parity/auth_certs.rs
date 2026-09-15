@@ -23,12 +23,14 @@
 //! - **The audit parser's extra refusal.** Two `certificate` parts are the `multiple_files`
 //!   400 there and the first part everywhere else.
 //!
-//! # What it changes on the shared server, and why that is acceptable
+//! # What it changes on the shared server, and what it puts back
 //!
 //! Each forwarded add writes a `ConfigurationFiles` row and a new `Configurations` revision, and
-//! each remove sets the setting back to `""` — and `SamlSettings.Encrypt` to `false`, which is
-//! Go's own side effect of removing a SAML key (app/saml.go:127). None of those keys is in the
-//! projection `fixtures/config_active.json` asserts, and no other suite reads them.
+//! each remove deletes the row and sets the setting back to `""`. Removing a SAML certificate or
+//! key also sets `SamlSettings.Encrypt` to `false` (app/saml.go:127), and **that one is restored**
+//! at the end through `PUT /config/patch`: `licensed_sweep` compares the licensed Go's in-memory
+//! configuration, which never reloads and still says the stock `true`, against the licensed
+//! mm-api's read of the live row — measured, it failed on exactly this key until the restore.
 
 use crate::common;
 
@@ -234,6 +236,43 @@ async fn both_forwarded(
     };
     assert_eq!(strip(&go_body), strip(&rs_body), "{context}: bodies differ");
     go_status
+}
+
+/// `SamlSettings.Encrypt` as the stack's Go holds it.
+async fn saml_encrypt(client: &reqwest::Client, admin: &str) -> bool {
+    let config: serde_json::Value = client
+        .get(format!("{GO}/api/v4/config"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the configuration is JSON");
+    config["SamlSettings"]["Encrypt"]
+        .as_bool()
+        .expect("SamlSettings.Encrypt is a boolean")
+}
+
+/// Put `SamlSettings.Encrypt` back after the SAML removes flipped it — see the module doc.
+async fn restore_saml_encrypt(client: &reqwest::Client, admin: &str, value: bool) {
+    let response = client
+        .put(format!("{GO}/api/v4/config/patch"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({ "SamlSettings": { "Encrypt": value } }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(
+        response.status(),
+        200,
+        "the configuration patch is accepted"
+    );
+    assert_eq!(
+        saml_encrypt(client, admin).await,
+        value,
+        "Encrypt is restored"
+    );
 }
 
 fn json(text: &str) -> Vec<u8> {
@@ -771,6 +810,7 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     let post = reqwest::Method::POST;
     let delete = reqwest::Method::DELETE;
     let status_path = "/api/v4/saml/certificate/status";
+    let saml_encrypt_before = saml_encrypt(&client, &admin).await;
 
     let (form_type, no_part) = multipart(&[("other", "x")]);
     let (_, one_part) = multipart(&[(
@@ -933,6 +973,7 @@ async fn certificate_adds_serve_the_gate_and_the_parse_and_forward_the_write() {
     let (go, rs) = fetch_both(&client, &admin, status_path).await;
     assert_eq!(go, rs);
     assert_eq!(go, b"{\"idp_certificate_file\":false,\"private_key_file\":false,\"public_certificate_file\":false}\n");
+    restore_saml_encrypt(&client, &admin, saml_encrypt_before).await;
 
     // `addSamlIdpCertificate` branches on `Content-Type` before it parses anything.
     let idp = "/api/v4/saml/certificate/idp";

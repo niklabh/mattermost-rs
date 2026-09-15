@@ -8880,3 +8880,41 @@ function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` br
 serves the HTTP twin's branch as well. The parity test that will cover it already sends the
 request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
 forward today and would assert the served answer then.
+## D-660 · The certificate writes of `saml.go`, `ldap.go` and `audit_logging.go` are Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (the certificate and gate routes)
+
+`POST`/`DELETE /api/v4/saml/certificate/{public,private,idp}`, `/api/v4/ldap/certificate/{public,
+private}` and `/api/v4/audit_logs/certificate` (and the four LDAP pairs on the local socket) serve
+the permission and the multipart parse — every 403 and 400 — and forward the request that would
+write. `App.AddSamlPublicCertificate` and its eleven siblings are `platform.SetConfigFile` /
+`RemoveConfigFile` (a `ConfigurationFiles` row) followed by `UpdateConfig`, which validates the
+whole `model.Config` and persists a new `Configurations` revision; `RemoveSamlPublicCertificate`
+also flips `SamlSettings.Encrypt` and `RemoveSamlIdpCertificate` flips `SamlSettings.Enable`.
+`mm_app::App::config()` is a value fixed at construction, and the configuration-document write
+belongs to the config family (worktree `configlic`), so a write made here would not be seen by the
+process that made it. `ConfigStore::has_file` is ported; `set_file` and `remove_file` are not,
+because no served branch reaches them.
+
+**What is owed:** `ConfigStore::set_file`/`remove_file` (database.go:261, 308 — an `UPDATE` then
+an `INSERT`, and a `DELETE`), the twelve `App` writers, and behind them the config family's
+`UpdateConfig` (`Config.IsValid` and `SaveConfig`), after which `mm_api::auth_certs::add_certificate`
+and `remove_certificate` write instead of forwarding. `parity::auth_certs::certificate_adds_serve_
+the_gate_and_the_parse_and_forward_the_write` already sends every write and asserts the forward;
+it would assert the served answer then, with the status comparisons unchanged.
+
+---
+
+## D-661 · `CreateDefaultMemberships` is unported; `group_sync_memberships` forwards past its gate
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (the certificate and gate routes)
+
+`POST /api/v4/ldap/users/{user_id}/group_sync_memberships` serves the permission, the user lookup
+(404, no `RequireUserId` — `me` is a two-byte id) and the auth-service rule (400 for anyone but an
+LDAP user or a SAML user with `EnableSyncWithLdap`), then forwards. `App.CreateDefaultMemberships`
+(app/syncables.go:128) is `createDefaultTeamMemberships` then `createDefaultChannelMemberships`
+scoped to the user, over `GroupStore.TeamMembersToAdd`/`ChannelMembersToAdd` and the team and
+channel join paths with `ReAddRemovedMembers`. **What is owed:** those two store queries and the
+app function; the parity row that sends an LDAP user through the route asserts the forward today.
+
+---
