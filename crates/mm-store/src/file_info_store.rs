@@ -74,6 +74,11 @@ pub trait FileInfoStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlFileInfoStore.CountAll` (file_info_store.go:604): `num` off the `file_stats`
+    /// view — the same one-row view [`get_storage_usage`] reads `usage` from, with the same
+    /// consequence that an empty view is an error and not a zero.
+    fn count_all(&self) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlFileInfoStore.GetForPost` (file_info_store.go:354) — the rows whose `PostId`
     /// **is** `post_id`, oldest first, which is not the same set as `get_by_ids(post.file_ids)`:
     /// a file re-parented by `attach_to_post` is in both, a file id a client listed but never
@@ -238,6 +243,21 @@ impl FileInfoStore for SqlFileInfoStore {
 
         tracing::Span::current().record("bytes", bytes);
         Ok(bytes)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count_all(&self) -> Result<i64, StoreError> {
+        let count =
+            sqlx::query_scalar!(r#"SELECT COALESCE(num, 0)::bigint AS "num!" FROM file_stats"#)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: "failed to count Files".to_owned(),
+                    source,
+                })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
     }
 
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]

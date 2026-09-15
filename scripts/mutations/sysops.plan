@@ -1,0 +1,34 @@
+# Mutation plan for the system-operations family: `GET /api/v4/analytics/old`, the cache and
+# pool resets, the three log routes, `POST /restart`, the three enterprise-upgrade routes, the two
+# Elasticsearch routes, and `POST /api/v4/integrity` on the socket.
+#
+#   scripts/mutate-batch.sh scripts/mutations/sysops.plan
+#
+# Every line is a decision `parity::sysops` has a row for: the default report name, the team
+# form's literal -1, the archived team the suite plants for `team_count`, the two active-user
+# windows (monthly is 4 on this stack, daily 0), the 30-row window and the DISTINCT of the daily
+# reports, the no-store header, the order and status of the Elasticsearch body check and the
+# username half of the re-enter check, the 500 of a bad log filter and the empty map for other
+# nodes, the one-second sleep, the enterprise-build flag and the upgrader's zero, and the two
+# clauses of the orphan statement the six orphaned sessions on this stack make visible. Two
+# no-op controls close the plan.
+
+analytics-default-name-is-standard	crates/mm-api/src/sysops.rs	name = "standard".to_owned();	name = "extra_counts".to_owned();	api	sysops
+analytics-team-inactive-is-minus-one	crates/mm-app/src/analytics.rs	(users_count as f64, -1.0)	(users_count as f64, 0.0)	api	sysops
+analytics-team-count-excludes-deleted	crates/mm-app/src/analytics.rs	include_deleted: Some(false),	include_deleted: Some(true),	api	sysops
+analytics-monthly-window-is-a-month	crates/mm-app/src/analytics.rs	.analytics_active_count(MONTH_MILLISECONDS, &active_options)	.analytics_active_count(DAY_MILLISECONDS, &active_options)	api	sysops
+post-counts-window-is-thirty	crates/mm-store/src/post_store.rs	                      FROM posts_by_team_day\n                     WHERE teamid = $1 AND day >= $2 AND day <= $3\n                     ORDER BY 1 DESC\n                     LIMIT 30	                      FROM posts_by_team_day\n                     WHERE teamid = $1 AND day >= $2 AND day <= $3\n                     ORDER BY 1 DESC\n                     LIMIT 3	api	sysops
+user-counts-are-distinct-authors	crates/mm-store/src/post_store.rs	COUNT(DISTINCT p.userid)::float8 AS "value!"	COUNT(p.userid)::float8 AS "value!"	api	sysops
+caches-answer-no-store	crates/mm-api/src/sysops.rs	.insert("cache-control", HeaderValue::from_static(NO_STORE));	.insert("cache-control", HeaderValue::from_static("no-cache"));	api	sysops
+es-nil-fields-are-a-400	crates/mm-api/src/sysops.rs	"api.elasticsearch.test_elasticsearch_settings_nil.app_error",\n                None,\n                String::new(),\n                400,	"api.elasticsearch.test_elasticsearch_settings_nil.app_error",\n                None,\n                String::new(),\n                403,	api	sysops
+es-reenter-compares-the-username	crates/mm-app/src/searchengine.rs	if cfg.connection_url == running.connection_url && cfg.username == running.username {	if cfg.connection_url == running.connection_url {	api	sysops
+es-sniff-is-a-checked-field	crates/mm-api/src/sysops.rs	    "Sniff",\n	    "Backend",\n	api	sysops
+logs-query-bad-filter-is-a-500	crates/mm-api/src/sysops.rs	"api.system.logs.invalidFilter",\n                None,\n                String::new(),\n                500,	"api.system.logs.invalidFilter",\n                None,\n                String::new(),\n                400,	api	sysops
+logs-query-other-nodes-read-nothing	crates/mm-app/src/logs.rs	if node_name == DEFAULT_NODE {	if node_name != DEFAULT_NODE {	api	sysops
+restart-sleeps-a-second	crates/mm-api/src/sysops.rs	tokio::time::sleep(std::time::Duration::from_secs(1)).await;	tokio::time::sleep(std::time::Duration::from_millis(1)).await;	api	sysops
+upgrade-refuses-an-enterprise-build	crates/mm-api/src/sysops.rs	if BUILD_ENTERPRISE_READY == "true" {	if BUILD_ENTERPRISE_READY != "true" {	api	sysops
+upgrade-status-is-the-upgraders	crates/mm-api/src/sysops.rs	let (percentage, error) = upgrade_to_e0_status();	let (percentage, error) = (1, None);	api	sysops
+integrity-child-id-column-is-selected	crates/mm-store/src/lib.rs	if !child_id_attr.is_empty() {	if child_id_attr.is_empty() {	api	sysops
+integrity-empty-parent-is-not-an-orphan	crates/mm-store/src/lib.rs	if *can_parent_id_be_empty {	if false {	api	sysops
+control-rename-rows	crates/mm-api/src/sysops.rs	let rows = state.app.get_analytics(&name, &team_id).await?;\n    let Some(rows) = rows else {	let report = state.app.get_analytics(&name, &team_id).await?;\n    let Some(rows) = report else {	api	sysops
+control-reorder-two-columns	crates/mm-store/src/channel_store.rs	SELECT type::text AS "channel_type!", COUNT(*) AS "count!"	SELECT COUNT(*) AS "count!", type::text AS "channel_type!"	api	sysops

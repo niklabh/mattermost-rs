@@ -592,6 +592,15 @@ impl Hub {
             .cloned()
     }
 
+    /// Port of `hubConnectionIndex.InvalidateAll` as `PlatformService.InvalidateAllCaches`
+    /// reaches it (platform/cluster_handlers.go:130): every live connection drops its
+    /// channel-membership cache and rebuilds it on its next event.
+    pub fn invalidate_all(&self) {
+        for conn in self.all() {
+            conn.invalidate_channel_members();
+        }
+    }
+
     fn all(&self) -> Vec<Arc<WebConn>> {
         self.index
             .read()

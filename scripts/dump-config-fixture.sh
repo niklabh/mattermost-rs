@@ -155,6 +155,10 @@ MODELLED = {
     "Office365Settings": ["Enable"],
     "MessageExportSettings": ["DownloadExportResults"],
     "CloudSettings": ["PreviewModalBucketURL"],
+    # The intensive-query cap on GET /api/v4/analytics/old.
+    "AnalyticsSettings": ["MaxUsersForStatistics"],
+    # The file switch and directory the three log routes read.
+    "LogSettings": ["EnableFile", "FileLocation"],
 }
 
 full = json.load(sys.stdin)

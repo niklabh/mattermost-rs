@@ -145,6 +145,13 @@ pub trait SessionStore {
         user_id: &str,
         roles: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.AnalyticsSessionCount` (session_store.go:470): rows whose
+    /// `ExpiresAt` is still ahead of now. A session with `ExpiresAt = 0` — the never-expiring
+    /// kind a personal access token mints — is **not** counted, since `0 > now` is false.
+    fn analytics_session_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// One row of `me.sessionSelectQuery`, named so both queries share a mapping.
@@ -595,6 +602,23 @@ impl SessionStore for SqlSessionStore {
         })?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_session_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "count!" FROM sessions WHERE expiresat > $1"#,
+            mm_model::utils::get_millis(),
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Sessions".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
     }
 }
 

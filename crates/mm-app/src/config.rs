@@ -1114,6 +1114,27 @@ pub struct Config {
     /// with a stack-local key is honoured by both sides of a comparison — and it is the only way a
     /// licence not signed by Mattermost is ever honoured here. Read by
     /// [`crate::license::LicenseKeys::from_config`].
+    /// `AnalyticsSettings.MaxUsersForStatistics` (config.go:1309), default 2500.
+    ///
+    /// Read by `getAnalytics`: a system user count above it skips the "intensive" query, so
+    /// `?name=user_counts_with_posts_day` answers the one-row `[{"name":"","value":-1}]`
+    /// sentinel instead of the daily series. The other four reports ignore it.
+    pub max_users_for_statistics: i64,
+
+    /// `LogSettings.EnableFile` (config.go:1614), default `true`.
+    ///
+    /// Read by the three log routes. Off, `GET /api/v4/logs` and `POST /api/v4/logs/query`
+    /// answer a single empty line rather than reading a file, and `GET /api/v4/logs/download`
+    /// is a 500 — none of them touches the filesystem.
+    pub log_enable_file: bool,
+
+    /// `LogSettings.FileLocation` (config.go:1617), default `""`.
+    ///
+    /// The directory the log file lives in; `""` means "the `logs` directory found beside the
+    /// working directory or the binary" (`fileutils.FindDir`). Read by the same three routes,
+    /// through `crate::logs::get_log_file_location`.
+    pub log_file_location: String,
+
     pub license_public_key: Option<String>,
 }
 
@@ -1419,6 +1440,9 @@ impl Default for Config {
             feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
             license_public_key: None,
+            max_users_for_statistics: 2500,
+            log_enable_file: true,
+            log_file_location: String::new(),
         }
     }
 }
@@ -2056,6 +2080,18 @@ impl Config {
                 },
                 None => default.license_public_key,
             },
+            max_users_for_statistics: lookup_int(
+                lookup,
+                "MM_ANALYTICSSETTINGS_MAXUSERSFORSTATISTICS",
+                default.max_users_for_statistics,
+            ),
+            log_enable_file: lookup_bool(
+                lookup,
+                "MM_LOGSETTINGS_ENABLEFILE",
+                default.log_enable_file,
+            ),
+            log_file_location: lookup("MM_LOGSETTINGS_FILELOCATION")
+                .unwrap_or(default.log_file_location),
         }
     }
 
@@ -2545,6 +2581,20 @@ impl Config {
             // `apply_env`.
             license: default.license,
             license_public_key: default.license_public_key,
+            max_users_for_statistics: parsed
+                .analytics_settings
+                .as_ref()
+                .and_then(|a| a.max_users_for_statistics)
+                .unwrap_or(default.max_users_for_statistics),
+            log_enable_file: parsed
+                .log_settings
+                .as_ref()
+                .and_then(|l| l.enable_file)
+                .unwrap_or(default.log_enable_file),
+            log_file_location: parsed
+                .log_settings
+                .and_then(|l| l.file_location)
+                .unwrap_or(default.log_file_location),
         })
     }
 
@@ -2666,6 +2716,26 @@ struct Document {
     openid_settings: Option<EnableOnlySsoDocument>,
     #[serde(rename = "Office365Settings")]
     office365_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "AnalyticsSettings")]
+    analytics_settings: Option<AnalyticsSettingsDocument>,
+    #[serde(rename = "LogSettings")]
+    log_settings: Option<LogSettingsDocument>,
+}
+
+/// The one field of `AnalyticsSettings` a migrated route reads (`getAnalytics`).
+#[derive(Debug, Default, serde::Deserialize)]
+struct AnalyticsSettingsDocument {
+    #[serde(rename = "MaxUsersForStatistics")]
+    max_users_for_statistics: Option<i64>,
+}
+
+/// The two fields of `LogSettings` the log routes read.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LogSettingsDocument {
+    #[serde(rename = "EnableFile")]
+    enable_file: Option<bool>,
+    #[serde(rename = "FileLocation")]
+    file_location: Option<String>,
 }
 
 /// The two fields of `LdapSettings` a migrated route reads — `setProfileImage`'s 409, and the
@@ -3816,8 +3886,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 96,
-            "the fixture covers {keys} settings and Config reads 96 from the document. \
+            keys, 99,
+            "the fixture covers {keys} settings and Config reads 99 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3870,9 +3940,14 @@ mod go_parity {
                 "EnableSignInWithUsername": false,
                 "SendPushNotifications": false
             },
-            "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
+            "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false },
+            "AnalyticsSettings": { "MaxUsersForStatistics": 7 },
+            "LogSettings": { "EnableFile": false, "FileLocation": "/var/log/mm" }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
+        assert_eq!(config.max_users_for_statistics, 7);
+        assert!(!config.log_enable_file);
+        assert_eq!(config.log_file_location, "/var/log/mm");
 
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);

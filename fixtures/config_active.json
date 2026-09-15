@@ -6,6 +6,9 @@
     "EnableAttributeBasedAccessControl": false,
     "EnableChannelPolicyIndicators": true
   },
+  "AnalyticsSettings": {
+    "MaxUsersForStatistics": 2500
+  },
   "ClientRequirements": {
     "AndroidLatestVersion": "",
     "AndroidMinVersion": "",
@@ -64,6 +67,10 @@
   },
   "LocalizationSettings": {
     "DefaultClientLocale": "en"
+  },
+  "LogSettings": {
+    "EnableFile": true,
+    "FileLocation": ""
   },
   "MessageExportSettings": {
     "DownloadExportResults": false

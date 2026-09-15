@@ -859,6 +859,18 @@ pub trait ChannelStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.AnalyticsCountAll` (channel_store.go:2812) — channels per
+    /// `Type`, for one team or (`""`) all of them.
+    ///
+    /// **Every row counts, archived ones included**: there is no `DeleteAt` predicate. The only
+    /// exclusion is `nonMessageBackingChannelTypes`, which today is the space type alone. Keys
+    /// are the type letters; a type with no rows is absent, and the caller reads `0` for it,
+    /// which is what indexing Go's `map[ChannelType]int64` does.
+    fn analytics_count_all(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<HashMap<String, i64>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1740,6 +1752,33 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip(self), fields(team_id = %team_id))]
     async fn count_team_channels(&self, team_id: &str) -> Result<i64, StoreError> {
         count_team_channels(&self.pool, team_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, types))]
+    async fn analytics_count_all(&self, team_id: &str) -> Result<HashMap<String, i64>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT type::text AS "channel_type!", COUNT(*) AS "count!"
+              FROM channels
+             WHERE ($1 = '' OR teamid = $1)
+               AND type::text <> $2
+             GROUP BY type
+            "#,
+            team_id,
+            CHANNEL_TYPE_SPACE,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Channels by type".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("types", rows.len());
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.channel_type, row.count))
+            .collect())
     }
 }
 

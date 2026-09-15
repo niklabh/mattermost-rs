@@ -8880,3 +8880,53 @@ function, behind `mm_api::local_channels::local_delete_channel`'s `permanent` br
 serves the HTTP twin's branch as well. The parity test that will cover it already sends the
 request: `parity::local_channels::the_local_channel_writes_match_over_the_socket` asserts the
 forward today and would assert the served answer then.
+
+## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+
+`testNotifications` (api4/system.go:233) is `App.SendTestMessage` (app/post.go:3422) and nothing
+else: the system bot, `GetOrCreateDirectChannel(user, bot)`, the user's locale for the one
+message string, then `CreatePost(…, CreatePostFlags{ForceNotification: true})` and `ReturnStatusOK`.
+Every piece but the flag is ported; `mm_app::post_create::CreatePostFlags` carries `set_online`
+and `silent_notification` only, and the flag is the post family's to add (it sets the
+`force_notification` prop after `SanitizeProps` and drives the push through the user's
+do-not-disturb). **What is owed:** the flag on `CreatePostFlags`, then `App::send_test_message`
+and the two-line handler in `mm_api::sysops`. The route forwards whole today; the parity suite
+pins that in `the_two_forwarded_routes_are_still_gos`.
+
+## D-681 · `GET /api/v4/system/notices/{team_id}` forwards: the notice cache and its matcher
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+
+`getProductNotices` (api4/system.go:1000) answers from `a.ch.cachedNotices`, which
+`UpdateProductNotices` fills at start-up and hourly from `AnnouncementSettings.NoticesURL`
+(https://notices.mattermost.com/, fifteen notices on 2026-09-15), and filters each against
+`noticeMatchesConditions`: the viewed state (`ProductNotices().GetViews`, with the repeat rules),
+the client type, a **Masterminds semver constraint** over the client and server versions, a
+`dateconstraints` range, the SKU, the audience, the user and post counts, a config path looked
+up by `config.GetValueByPath`, a preference, the instance type and the deprecating-dependency
+version. The model types and their matchers are ported (`mm_model::product_notices`); the two
+constraint grammars, the fetch-and-cache and the config path lookup are not, and a served answer
+without them would be `[]` for reasons of omission. On this stack every fixture user has viewed
+all fifteen (`UpdateViewedProductNoticesForNewUser` marks them at creation), so the live answer
+is `[]` for every request — a user without view rows would be shown `crt-user-always-on`.
+**What is owed:** `ProductNoticesStore::get_views`/`clear_old_notices`, a semver-constraint
+evaluator and a date-constraint evaluator with `reference/dump` oracles (both packages are
+already in the dump's module graph), the hourly fetch, and `App::get_product_notices`.
+
+## D-682 · `POST /api/v4/upgrade_to_enterprise`'s upgrade arm forwards: the procedure is the Go binary's
+
+**Status** OPEN · **Severity** decision · **Raised** 2026-09-15 (system.go)
+
+Past the five refusals (`mm_api::sysops::upgrade_to_enterprise`) Go spawns `upgrader.UpgradeToE0`:
+download `mattermost-<version>-linux-amd64.tar.gz`, verify the detached signature against the
+embedded key, swap `mattermost/bin/mattermost` over the running executable, then report 100% and
+let `POST /restart` exec it. There is no enterprise build of this server to fetch, so the arm
+forwards to Go — whose own binary is what the procedure replaces — and the status and restart
+routes then report this process, which has not been upgraded. Reachable only on a Linux amd64
+host whose executable directory the process may write; every stack in this project is arm64 and
+both servers answer `system_not_supported` before the arm. **What is owed:** a decision when the
+Go server is gone — most likely that the route answers `already-enterprise` (429), since a
+server with no Team Edition to upgrade *from* is the enterprise-ready case — recorded here so it
+is decided rather than inherited.
