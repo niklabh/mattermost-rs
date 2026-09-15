@@ -253,6 +253,27 @@ impl SqlStore {
         Ok(rows)
     }
 
+    /// Port of `SqlStore.GetDbVersion` (sqlstore/store.go:422): `SHOW server_version_num` or
+    /// `SHOW server_version`, verbatim — `16.4 (Debian 16.4-1.pgdg120+1)` for the latter, which
+    /// the one caller trims at its first space.
+    #[tracing::instrument(skip(self), fields(version))]
+    pub async fn get_db_version(&self, numerical: bool) -> Result<String, StoreError> {
+        let statement = if numerical {
+            "SHOW server_version_num"
+        } else {
+            "SHOW server_version"
+        };
+        let version: String = sqlx::query_scalar(statement)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to read the database version".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("version", &version);
+        Ok(version)
+    }
+
     /// Port of `SqlStore.TotalMasterDbConnections` (sqlstore/store.go:555) —
     /// `sql.DBStats.OpenConnections`, which is every connection the pool holds, idle or in use.
     /// sqlx's `size()` is the same figure for this pool.

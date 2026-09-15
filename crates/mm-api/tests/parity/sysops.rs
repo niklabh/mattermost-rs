@@ -775,7 +775,7 @@ async fn the_elasticsearch_routes_check_the_body_before_the_gate() {
 }
 
 #[tokio::test]
-async fn the_two_forwarded_routes_are_still_gos() {
+async fn the_forwarded_route_is_still_gos() {
     if !stack_enabled() {
         return;
     }
@@ -783,21 +783,7 @@ async fn the_two_forwarded_routes_are_still_gos() {
     let admin = go_minted_token(&client).await;
     let team = a_team(&client, &admin).await;
 
-    let (status, body, served) = request_raw(
-        &client,
-        RUST,
-        Method::GET,
-        Some(&admin),
-        &format!("/api/v4/system/notices/{team}?client=web&clientVersion=11.0.0"),
-        None,
-    )
-    .await;
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(
-        served.as_deref(),
-        Some("go"),
-        "the notices read forwards on its cache ([D-681])"
-    );
+    let _ = &team;
 
     let (status, _, served) = request_raw(
         &client,
@@ -925,4 +911,169 @@ async fn the_local_pairs_match_over_the_socket() {
         assert_eq!(go["id"], "api.admin.file_read_error");
     }
     let _ = both_with_body;
+}
+
+/// Sweep a user's notice view rows, so the matcher runs for them on both servers.
+async fn clear_notice_views(user_id: &str) {
+    let Some(pool) = common::fixture_pool().await else {
+        panic!("DATABASE_URL is needed to plant notice views");
+    };
+    sqlx::query("DELETE FROM productnoticeviewstate WHERE userid = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("the view rows delete");
+}
+
+#[tokio::test]
+async fn the_product_notices_match_for_a_viewer_and_a_fresh_user() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team = a_team(&client, &admin).await;
+    let plain = create_plain_user(&client, &admin, &team, "sysopsnt").await;
+    let path = |q: &str| format!("/api/v4/system/notices/{team}?{q}");
+
+    // The two parameter refusals, before any notice is looked at.
+    assert_same_error(
+        &client,
+        Method::GET,
+        Some(&admin),
+        "/api/v4/system/notices/xyz?client=web&clientVersion=11.0.0",
+        None,
+        400,
+        "api.context.invalid_url_param.app_error",
+    )
+    .await;
+    for bad in [
+        "client=bogus&clientVersion=11.0.0",
+        "client=all&clientVersion=11.0.0",
+        "client=mobile&clientVersion=1.0.0",
+        "clientVersion=11.0.0",
+    ] {
+        assert_same_error(
+            &client,
+            Method::GET,
+            Some(&admin),
+            &path(bad),
+            None,
+            400,
+            "api.context.invalid_body_param.app_error",
+        )
+        .await;
+    }
+
+    // A user Go created has viewed everything: `[]` whatever the version says, byte for byte.
+    for q in [
+        "client=web&clientVersion=11.0.0",
+        "client=web",
+        "client=web&clientVersion=notsemver",
+        "client=mobile-ios&clientVersion=2.0.0&locale=fr",
+    ] {
+        let ((go_status, go_body), (rs_status, rs_body)) =
+            pair(&client, Method::GET, Some(&plain.token), &path(q), None).await;
+        assert_eq!((go_status, rs_status), (200, 200), "{q}");
+        assert_eq!(go_body, rs_body, "{q}");
+        assert_eq!(rs_body, b"[]", "{q}");
+    }
+
+    // With the views swept, every cached notice reaches the matcher for this member: the
+    // version is parsed whether or not a range needs it, so an unparsable one is the 400 —
+    // and a parsable one yields whatever the feed matches today, the same on both sides.
+    clear_notice_views(&plain.id).await;
+    for q in ["client=web", "client=web&clientVersion=notsemver"] {
+        assert_same_error(
+            &client,
+            Method::GET,
+            Some(&plain.token),
+            &path(q),
+            None,
+            400,
+            "api.system.update_notices.validating_failed",
+        )
+        .await;
+    }
+    let mut matched_ids = Vec::new();
+    for q in [
+        "client=web&clientVersion=11.0.0",
+        "client=desktop&clientVersion=5.0.0",
+        "client=mobile-android&clientVersion=2.0.0",
+        "client=web&clientVersion=0.0.1&locale=de",
+    ] {
+        let ((go_status, go_body), (rs_status, rs_body)) =
+            pair(&client, Method::GET, Some(&plain.token), &path(q), None).await;
+        assert_eq!(
+            (go_status, rs_status),
+            (200, 200),
+            "{q}: Go {} / us {}",
+            String::from_utf8_lossy(&go_body),
+            String::from_utf8_lossy(&rs_body)
+        );
+        assert_eq!(go_body, rs_body, "{q}");
+        assert!(!rs_body.ends_with(b"\n"));
+        let list = json(&rs_body);
+        for notice in list.as_array().unwrap() {
+            if let Some(id) = notice["id"].as_str() {
+                if !matched_ids.iter().any(|m| m == id) {
+                    matched_ids.push(id.to_owned());
+                }
+            }
+        }
+    }
+    // The administrator sees the sysadmin audience as well; swept the same way.
+    let admin_id = common::logged_in_user_id();
+    clear_notice_views(admin_id).await;
+    let ((go_status, go_body), (rs_status, rs_body)) = pair(
+        &client,
+        Method::GET,
+        Some(&admin),
+        &path("client=web&clientVersion=11.0.0"),
+        None,
+    )
+    .await;
+    assert_eq!((go_status, rs_status), (200, 200));
+    assert_eq!(go_body, rs_body, "admin");
+    for notice in json(&rs_body).as_array().unwrap() {
+        if let Some(id) = notice["id"].as_str() {
+            if !matched_ids.iter().any(|m| m == id) {
+                matched_ids.push(id.to_owned());
+            }
+        }
+    }
+
+    // Viewing them through the served PUT hides them again on both sides.
+    if !matched_ids.is_empty() {
+        for token in [&plain.token, &admin] {
+            let body = serde_json::to_vec(&matched_ids).unwrap();
+            let (status, _, _) = request_raw(
+                &client,
+                RUST,
+                Method::PUT,
+                Some(token),
+                "/api/v4/system/notices/view",
+                Some(&body),
+            )
+            .await;
+            assert_eq!(status, 200);
+            let ((go_status, go_body), (rs_status, rs_body)) = pair(
+                &client,
+                Method::GET,
+                Some(token),
+                &path("client=web&clientVersion=11.0.0"),
+                None,
+            )
+            .await;
+            assert_eq!((go_status, rs_status), (200, 200));
+            assert_eq!(go_body, rs_body);
+            assert_eq!(rs_body, b"[]");
+        }
+    } else {
+        eprintln!(
+            "the feed matched nothing for either user; the viewed round-trip was not exercised"
+        );
+    }
+
+    delete_plain_user(&client, &admin, &plain.id).await;
 }

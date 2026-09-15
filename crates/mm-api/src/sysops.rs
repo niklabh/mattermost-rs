@@ -10,8 +10,8 @@
 //!
 //! Two routes of the family are not here. `POST /api/v4/notifications/test` is `CreatePost` with
 //! `ForceNotification` — a flag the post family's `CreatePostFlags` does not yet carry — and
-//! forwards whole ([D-680]); `GET /api/v4/system/notices/{team_id}` forwards on the notice cache
-//! and its condition matcher ([D-681]).
+//! forwards whole ([D-680]). `GET /api/v4/system/notices/{team_id}` is served from this
+//! process's own copy of the notice feed ([`get_product_notices`]).
 
 use std::collections::BTreeMap;
 
@@ -883,6 +883,62 @@ pub async fn purge_elasticsearch_indexes(
     tracing::Span::current().record("indexes", indexes.len());
     state.app.purge_elasticsearch_indexes(&indexes)?;
     Ok(status_ok())
+}
+
+// ------------------------------------------------------------------------------------------
+// GET /api/v4/system/notices/{team_id}
+// ------------------------------------------------------------------------------------------
+
+/// Port of `getProductNotices` (api4/system.go:1000) — `GET /api/v4/system/notices/{team_id}`.
+///
+/// `RequireTeamId` first (a 400 naming the URL parameter; the mux class is checked before the
+/// handler by `mux_segments_or_forward`), then `?client=` through
+/// `NoticeClientTypeFromString` — `web`, `desktop`, `mobile-ios`, `mobile-android` and nothing
+/// else, `mobile` and `all` included, a 400 naming `client` — then `clientVersion` and `locale`
+/// as they arrive, both possibly empty, to `App::get_product_notices`, whose answer is
+/// `json.Marshal`ed with no trailing newline. No permission check: any session may ask, and the
+/// team id is used only to decide whether the caller administers that team.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, client))]
+pub async fn get_product_notices(
+    State(state): State<AppState>,
+    axum::extract::Path(team_id): axum::extract::Path<String>,
+    RawQuery(query): RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !mm_model::utils::is_valid_id(&team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+    let client = query_get(query.as_deref(), "client");
+    tracing::Span::current().record("client", &client);
+    let client = match mm_model::product_notices::notice_client_type_from_string(&client) {
+        Ok(client) => client,
+        Err(_) => return Err(ApiError::invalid_param("client")),
+    };
+    let client_version = query_get(query.as_deref(), "clientVersion");
+    let locale = query_get(query.as_deref(), "locale");
+
+    let notices = state
+        .app
+        .get_product_notices(
+            &session.0,
+            &session.0.user_id,
+            &team_id,
+            &client,
+            &client_version,
+            &locale,
+        )
+        .await?;
+    let body = go_json_marshal(&notices).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the notices");
+        ApiError::from(AppError::new(
+            "getProductNotices",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    Ok(json_response(StatusCode::OK, body.into_bytes()))
 }
 
 // ------------------------------------------------------------------------------------------

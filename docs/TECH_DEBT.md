@@ -8895,26 +8895,6 @@ do-not-disturb). **What is owed:** the flag on `CreatePostFlags`, then `App::sen
 and the two-line handler in `mm_api::sysops`. The route forwards whole today; the parity suite
 pins that in `the_two_forwarded_routes_are_still_gos`.
 
-## D-681 · `GET /api/v4/system/notices/{team_id}` forwards: the notice cache and its matcher
-
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
-
-`getProductNotices` (api4/system.go:1000) answers from `a.ch.cachedNotices`, which
-`UpdateProductNotices` fills at start-up and hourly from `AnnouncementSettings.NoticesURL`
-(https://notices.mattermost.com/, fifteen notices on 2026-09-15), and filters each against
-`noticeMatchesConditions`: the viewed state (`ProductNotices().GetViews`, with the repeat rules),
-the client type, a **Masterminds semver constraint** over the client and server versions, a
-`dateconstraints` range, the SKU, the audience, the user and post counts, a config path looked
-up by `config.GetValueByPath`, a preference, the instance type and the deprecating-dependency
-version. The model types and their matchers are ported (`mm_model::product_notices`); the two
-constraint grammars, the fetch-and-cache and the config path lookup are not, and a served answer
-without them would be `[]` for reasons of omission. On this stack every fixture user has viewed
-all fifteen (`UpdateViewedProductNoticesForNewUser` marks them at creation), so the live answer
-is `[]` for every request — a user without view rows would be shown `crt-user-always-on`.
-**What is owed:** `ProductNoticesStore::get_views`/`clear_old_notices`, a semver-constraint
-evaluator and a date-constraint evaluator with `reference/dump` oracles (both packages are
-already in the dump's module graph), the hourly fetch, and `App::get_product_notices`.
-
 ## D-682 · `POST /api/v4/upgrade_to_enterprise`'s upgrade arm forwards: the procedure is the Go binary's
 
 **Status** OPEN · **Severity** decision · **Raised** 2026-09-15 (system.go)
@@ -8930,3 +8910,19 @@ both servers answer `system_not_supported` before the arm. **What is owed:** a d
 Go server is gone — most likely that the route answers `already-enterprise` (429), since a
 server with no Team Edition to upgrade *from* is the enterprise-ready case — recorded here so it
 is decided rather than inherited.
+
+## D-683 · A user created here is not marked as having viewed the current product notices
+
+**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+
+`App.CreateUser` ends with `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` (app/user.go:413),
+which writes a `ProductNoticeViewState` row with `Viewed = 1` for every notice in the cache, so a
+brand-new user is not shown the notices already current on the day they joined. The Rust
+`App::create_user` (`mm_app::user_create`) does not, so a user created through this server's
+`POST /api/v4/users` is shown notices from their first request that a Go-created user never sees —
+`GET /api/v4/system/notices/{team_id}` then differs between the two for that user, on both servers,
+because both read the same view rows. **What is owed:** after the user row is written, the call
+`self.store().product_notices().view(&user.id, &ids)` over the ids in
+`App::notices_cache()` — logged on failure, never returned, as Go's goroutine does. Both pieces
+exist since 2026-09-15; the call site is the user family's.
+

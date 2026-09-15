@@ -66,6 +66,8 @@ pub mod post_search;
 pub mod post_unread;
 pub mod post_write;
 pub mod preference;
+// Appended 2026-09-15: the notice cache and `GetProductNotices`.
+pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
 pub mod reaction;
@@ -166,6 +168,9 @@ pub struct App {
     /// The verified licence for the current `Licenses.Id`, shared across clones so the RSA work
     /// happens once per licence rather than once per request.
     license_cache: std::sync::Arc<crate::license::LicenseCache>,
+    /// Go's `Channels.cachedNotices` and the three counts beside it — see
+    /// `crate::product_notices`. Shared across clones for the same reason as the hub.
+    notices_cache: crate::product_notices::SharedNoticesCache,
 }
 
 impl App {
@@ -210,6 +215,9 @@ impl App {
             license_keys,
             env_license,
             license_cache: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            notices_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                crate::product_notices::NoticesCache::default(),
+            )),
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
@@ -221,6 +229,11 @@ impl App {
                 std::collections::HashSet::new(),
             )),
         }
+    }
+
+    /// The notice cache — `a.ch.cachedNotices` and its counts.
+    pub fn notices_cache(&self) -> &crate::product_notices::SharedNoticesCache {
+        &self.notices_cache
     }
 
     /// Port of `app.App.Srv().Store()`.

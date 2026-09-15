@@ -2604,10 +2604,15 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(sysops::get_logs).post(client_log::post_log)),
         )
         // `BaseRoutes.System.Handle("/notices/view")` (api4/system.go:76) — a literal beside
-        // `/notices/{team_id}`, which stays forwarded on the notice cache it needs.
+        // `/notices/{team_id}` (system.go:75), served since 2026-09-15 from this process's copy
+        // of the notice feed. The literal wins over the parameter on both routers.
         .route(
             "/api/v4/system/notices/view",
             partially_migrated(put(product_notices::update_viewed_product_notices)),
+        )
+        .route(
+            "/api/v4/system/notices/{team_id}",
+            partially_migrated_with_ids(&state, get(sysops::get_product_notices)),
         )
         // ---- the system-operations family (api4/system.go, api4/elasticsearch.go), 2026-09-15.
         // Every path here is literal, so `mux_segments_or_forward` is not involved.

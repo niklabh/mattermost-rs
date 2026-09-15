@@ -247,6 +247,14 @@ pub trait PostStore {
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.AnalyticsPostCount` (post_store.go:2401) under the zero
+    /// `PostCountOptions` — the notice cache's `cachedPostCount`: `COUNT(*) FROM Posts`, deleted
+    /// and system posts included, every team. The other option combinations arrive with the
+    /// routes that need them.
+    fn analytics_post_count_total(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlPostStore.AnalyticsPostCountByTeam` (post_store.go:2455), which is
     /// `countByTeam`: `COALESCE(SUM(num), 0)` over the **`posts_by_team_day` materialized
     /// view**, not a count over `Posts`. The view is refreshed by a job, so the figure lags the
@@ -1690,6 +1698,19 @@ impl PostStore for SqlPostStore {
             source,
         })?;
 
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_post_count_total(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "value!" FROM posts p"#)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to count Posts".to_owned(),
+                source,
+            })?;
         tracing::Span::current().record("count", count);
         Ok(count)
     }

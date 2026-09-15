@@ -1135,6 +1135,22 @@ pub struct Config {
     /// through `crate::logs::get_log_file_location`.
     pub log_file_location: String,
 
+    /// `AnnouncementSettings.AdminNoticesEnabled` (config.go:2470), default `true`: with it off,
+    /// `GetProductNotices` answers `[]` to any team or system admin.
+    pub admin_notices_enabled: bool,
+    /// `AnnouncementSettings.UserNoticesEnabled` (config.go:2471), default `true`: with it off,
+    /// `GetProductNotices` answers `[]` to anyone but a system admin.
+    pub user_notices_enabled: bool,
+    /// `AnnouncementSettings.NoticesURL` (config.go:2472), default
+    /// `https://notices.mattermost.com/` — the feed `UpdateProductNotices` fetches.
+    pub notices_url: String,
+    /// `AnnouncementSettings.NoticesFetchFrequency` (config.go:2473), default 3600 seconds —
+    /// the refresh period of the notice cache.
+    pub notices_fetch_frequency: i64,
+    /// `AnnouncementSettings.NoticesSkipCache` (config.go:2474), default `false`: fetch without
+    /// the `ETag`/`Date` revalidation headers.
+    pub notices_skip_cache: bool,
+
     pub license_public_key: Option<String>,
 }
 
@@ -1443,6 +1459,11 @@ impl Default for Config {
             max_users_for_statistics: 2500,
             log_enable_file: true,
             log_file_location: String::new(),
+            admin_notices_enabled: true,
+            user_notices_enabled: true,
+            notices_url: "https://notices.mattermost.com/".to_owned(),
+            notices_fetch_frequency: 3600,
+            notices_skip_cache: false,
         }
     }
 }
@@ -2092,6 +2113,28 @@ impl Config {
             ),
             log_file_location: lookup("MM_LOGSETTINGS_FILELOCATION")
                 .unwrap_or(default.log_file_location),
+            admin_notices_enabled: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_ADMINNOTICESENABLED",
+                default.admin_notices_enabled,
+            ),
+            user_notices_enabled: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_USERNOTICESENABLED",
+                default.user_notices_enabled,
+            ),
+            notices_url: lookup("MM_ANNOUNCEMENTSETTINGS_NOTICESURL")
+                .unwrap_or(default.notices_url),
+            notices_fetch_frequency: lookup_int(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_NOTICESFETCHFREQUENCY",
+                default.notices_fetch_frequency,
+            ),
+            notices_skip_cache: lookup_bool(
+                lookup,
+                "MM_ANNOUNCEMENTSETTINGS_NOTICESSKIPCACHE",
+                default.notices_skip_cache,
+            ),
         }
     }
 
@@ -2129,6 +2172,7 @@ impl Config {
         let email_settings = parsed.email_settings.unwrap_or_default();
         let localization_settings = parsed.localization_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
+        let announcement = parsed.announcement_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
         let ldap_settings = parsed.ldap_settings.unwrap_or_default();
@@ -2595,6 +2639,19 @@ impl Config {
                 .log_settings
                 .and_then(|l| l.file_location)
                 .unwrap_or(default.log_file_location),
+            admin_notices_enabled: announcement
+                .admin_notices_enabled
+                .unwrap_or(default.admin_notices_enabled),
+            user_notices_enabled: announcement
+                .user_notices_enabled
+                .unwrap_or(default.user_notices_enabled),
+            notices_url: announcement.notices_url.unwrap_or(default.notices_url),
+            notices_fetch_frequency: announcement
+                .notices_fetch_frequency
+                .unwrap_or(default.notices_fetch_frequency),
+            notices_skip_cache: announcement
+                .notices_skip_cache
+                .unwrap_or(default.notices_skip_cache),
         })
     }
 
@@ -2720,6 +2777,23 @@ struct Document {
     analytics_settings: Option<AnalyticsSettingsDocument>,
     #[serde(rename = "LogSettings")]
     log_settings: Option<LogSettingsDocument>,
+    #[serde(rename = "AnnouncementSettings")]
+    announcement_settings: Option<AnnouncementSettingsDocument>,
+}
+
+/// The five fields of `AnnouncementSettings` the notice cache and `GetProductNotices` read.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AnnouncementSettingsDocument {
+    #[serde(rename = "AdminNoticesEnabled")]
+    admin_notices_enabled: Option<bool>,
+    #[serde(rename = "UserNoticesEnabled")]
+    user_notices_enabled: Option<bool>,
+    #[serde(rename = "NoticesURL")]
+    notices_url: Option<String>,
+    #[serde(rename = "NoticesFetchFrequency")]
+    notices_fetch_frequency: Option<i64>,
+    #[serde(rename = "NoticesSkipCache")]
+    notices_skip_cache: Option<bool>,
 }
 
 /// The one field of `AnalyticsSettings` a migrated route reads (`getAnalytics`).
@@ -3886,8 +3960,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 99,
-            "the fixture covers {keys} settings and Config reads 99 from the document. \
+            keys, 104,
+            "the fixture covers {keys} settings and Config reads 104 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -3942,9 +4016,19 @@ mod go_parity {
             },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false },
             "AnalyticsSettings": { "MaxUsersForStatistics": 7 },
-            "LogSettings": { "EnableFile": false, "FileLocation": "/var/log/mm" }
+            "LogSettings": { "EnableFile": false, "FileLocation": "/var/log/mm" },
+            "AnnouncementSettings": {
+                "AdminNoticesEnabled": false, "UserNoticesEnabled": false,
+                "NoticesURL": "http://feed.invalid/", "NoticesFetchFrequency": 11,
+                "NoticesSkipCache": true
+            }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
+        assert!(!config.admin_notices_enabled);
+        assert!(!config.user_notices_enabled);
+        assert_eq!(config.notices_url, "http://feed.invalid/");
+        assert_eq!(config.notices_fetch_frequency, 11);
+        assert!(config.notices_skip_cache);
         assert_eq!(config.max_users_for_statistics, 7);
         assert!(!config.log_enable_file);
         assert_eq!(config.log_file_location, "/var/log/mm");

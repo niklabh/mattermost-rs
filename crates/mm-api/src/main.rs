@@ -110,6 +110,28 @@ async fn main() -> anyhow::Result<()> {
         "markdown limits set"
     );
 
+    // Port of the initial product-notices fetch (app/server.go:544) and of the
+    // `product_notices` job's schedule (jobs/product_notices/scheduler.go): one fetch now, in
+    // the background as Go's `s.platform.Go`, then one every `NoticesFetchFrequency` seconds
+    // while either notice gate is on. Both are this process's own cache; see
+    // `mm_app::product_notices`.
+    {
+        let app = app.clone();
+        tokio::spawn(async move {
+            loop {
+                let enabled =
+                    app.config().admin_notices_enabled || app.config().user_notices_enabled;
+                if enabled {
+                    if let Err(err) = app.update_product_notices().await {
+                        tracing::warn!(error = %err, "Failed to perform initial product notices fetch");
+                    }
+                }
+                let period = u64::try_from(app.config().notices_fetch_frequency).unwrap_or(3600);
+                tokio::time::sleep(std::time::Duration::from_secs(period.max(1))).await;
+            }
+        });
+    }
+
     let state = AppState::new(app, go_upstream.clone());
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
