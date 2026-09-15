@@ -38,6 +38,15 @@ struct Fixture {
 
 static FIXTURE: tokio::sync::OnceCell<Fixture> = tokio::sync::OnceCell::const_new();
 
+/// **The fixture team's `AllowOpenInvite` is shared state, and `team_type` reads it.**
+/// `GetPostInfo` (app/post.go:2987) derives `team_type` from `AllowOpenInvite`, not from
+/// `Team.Type`: `I` while it is off, `O` while it is on. The stranger test flips it on and back
+/// off on the one fixture team, so a concurrent reader that asks Go before the flip and us after
+/// it gets `I` from Go and `O` from us — both servers right, the comparison wrong. Measured in two
+/// full runs on 2026-09-15. The flip holds this exclusively; every test that reads the team's
+/// `team_type` holds it shared.
+static TEAM_OPEN_INVITE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 async fn patch_team(
     client: &reqwest::Client,
     token: &str,
@@ -154,6 +163,7 @@ async fn a_channel_member_gets_the_full_description() {
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
+    let _open_invite = TEAM_OPEN_INVITE.read().await;
 
     let body = both(&client, &f.member.token, &f.open_post, 200).await;
     assert!(!body.ends_with(b"\n"), "json.Marshal writes no newline");
@@ -175,6 +185,7 @@ async fn a_teammate_outside_the_channel_sees_an_open_one_and_not_a_private_one()
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
+    let _open_invite = TEAM_OPEN_INVITE.read().await;
 
     let body = both(&client, &f.teammate.token, &f.open_post, 200).await;
     let parsed: serde_json::Value = serde_json::from_slice(&body).expect("a PostInfo");
@@ -218,6 +229,7 @@ async fn a_stranger_is_refused_by_an_invite_team_and_described_by_an_open_one() 
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
+    let _open_invite = TEAM_OPEN_INVITE.write().await;
 
     both(&client, &f.stranger.token, &f.open_post, 404).await;
     both(&client, &f.leaver.token, &f.open_post, 404).await;
