@@ -6,6 +6,10 @@
 pub mod analytics;
 pub mod audit;
 pub mod auth;
+/// The nil-interface halves of `app/saml.go`, `app/ldap.go` and `app/audit.go` — what the
+/// certificate and enterprise-gate routes reach on a build with no SAML or LDAP implementation.
+/// Appended rather than filed alphabetically: this list is shared by every worktree.
+pub mod auth_certs;
 pub mod authorization;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
