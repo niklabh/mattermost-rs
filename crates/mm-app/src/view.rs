@@ -447,7 +447,12 @@ impl App {
     /// member of the channel is told and nobody else is. `connection_id` becomes
     /// `omit_connection_id`, which is how the client that made the change avoids being told about
     /// its own write twice.
-    async fn publish_view_event(&self, event_type: &str, view: &View, connection_id: &str) {
+    pub(crate) async fn publish_view_event(
+        &self,
+        event_type: &str,
+        view: &View,
+        connection_id: &str,
+    ) {
         let Ok(view_json) = serde_json::to_string(view).inspect_err(|err| {
             tracing::warn!(error = %err, "Failed to encode view to JSON");
         }) else {

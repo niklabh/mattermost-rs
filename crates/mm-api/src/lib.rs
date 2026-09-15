@@ -116,6 +116,8 @@ pub mod websocket;
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
 pub mod config;
 
+/// Port of `api4/board.go` — `POST /boards`, served only with `IntegratedBoards` on.
+pub mod boards;
 /// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
@@ -3122,6 +3124,14 @@ pub fn router(state: AppState) -> Router {
                 get(marketplace_visit::get_first_admin_visit_marketplace_status)
                     .post(marketplace_visit::set_first_admin_visit_marketplace_status),
             ),
+        )
+        // ---- `api4/board.go` (2026-09-15) ----
+        //
+        // Registered by Go only when `IntegratedBoards` is on; the handler forwards when it is
+        // off so Go writes its own mux 404, as the `views` routes do.
+        .route(
+            "/api/v4/boards",
+            partially_migrated(post(boards::create_board)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,

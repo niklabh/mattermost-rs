@@ -242,6 +242,7 @@ mod parity {
     pub mod local_teams;
     // Appended 2026-09-15: the cmdremote family (commands, remote cluster, boards, uploads on
     // the socket, first_admin_visit).
+    pub mod boards;
     pub mod local_uploads;
     pub mod marketplace_visit;
 }

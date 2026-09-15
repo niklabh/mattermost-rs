@@ -7,6 +7,8 @@ pub mod analytics;
 pub mod audit;
 pub mod auth;
 pub mod authorization;
+/// Port of `app/board.go` — `CreateBoardChannel`.
+pub mod board;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
