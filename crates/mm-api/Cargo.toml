@@ -44,6 +44,9 @@ base64.workspace = true
 # The parity test reads the users row directly, to prove our value is the row's and not merely
 # different from Go's cached one.
 sqlx.workspace = true
+# `parity::postrest` mints a real interactive-dialog trigger id with the installation's own
+# P-256 key (read from `Systems`), so `openDialog`'s verification is exercised on both servers.
+p256.workspace = true
 # `json` is a test-only need: the proxy must forward bodies untouched, so the crate itself never
 # asks reqwest to serialise anything.
 reqwest = { workspace = true, features = ["json"] }

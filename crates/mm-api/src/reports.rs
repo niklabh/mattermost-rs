@@ -127,7 +127,7 @@ pub async fn get_user_count_for_reporting(
 ///
 /// `PopulateDateRange(time.Now())` runs here rather than in the store, so the window is pinned to
 /// the instant the request arrived.
-fn fill_reporting_base_options(query: Option<&str>) -> ReportingBaseOptions {
+pub(crate) fn fill_reporting_base_options(query: Option<&str>) -> ReportingBaseOptions {
     let get = |key: &str| query_first(query, key).unwrap_or_default();
 
     let sort_column = match get("sort_column") {
@@ -161,7 +161,7 @@ fn fill_reporting_base_options(query: Option<&str>) -> ReportingBaseOptions {
 ///
 /// Both errors name **`getUsersForReporting`** as the caller even when the count route raised
 /// them; that is Go's copy-paste and it is on the wire, so it is reproduced.
-fn fill_user_report_options(query: Option<&str>) -> Result<UserReportOptions, ApiError> {
+pub(crate) fn fill_user_report_options(query: Option<&str>) -> Result<UserReportOptions, ApiError> {
     let get = |key: &str| query_first(query, key).unwrap_or_default();
 
     let team_filter = get("team_filter");

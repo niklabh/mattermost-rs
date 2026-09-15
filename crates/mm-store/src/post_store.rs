@@ -50,6 +50,10 @@ use mm_model::post::Post;
 use mm_model::post_acknowledgement::PostAcknowledgement;
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostPriority;
+use mm_model::post_rest::{
+    REPORTING_SORT_DIRECTION_DESC, REPORTING_TIME_FIELD_UPDATE_AT, ReportPostListResponse,
+    ReportPostOptionsCursor, ReportPostQueryParams, encode_report_post_cursor,
+};
 use mm_model::post_search_results::PostSearchResults;
 use mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST;
 use mm_model::search_params::{SearchParams, is_search_params_list_valid};
@@ -538,6 +542,21 @@ pub trait PostStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<PostReminderMetadata, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetPostsForReporting` (post_store.go:1586): one channel's posts
+    /// in `(time_field, id)` order, keyset-paginated from `(cursor_time, cursor_id)` with a
+    /// **row-value** comparison — strict in the sort direction, so the cursor row itself is
+    /// never returned twice. `per_page + 1` rows are fetched and the extra one only decides
+    /// whether a `next_cursor` is built, from the **last row returned** (not the extra one).
+    ///
+    /// `include_deleted` false adds `DeleteAt = 0`; `exclude_system_posts` adds
+    /// `Type NOT LIKE 'system_%'`. An empty `channel_id` is `ErrInvalidInput` before any query,
+    /// which the app layer maps to a 400 — unreachable through the handler, whose `Validate`
+    /// runs first, but the store is Go's and so is the guard.
+    fn get_posts_for_reporting(
+        &self,
+        params: &ReportPostQueryParams,
+    ) -> impl std::future::Future<Output = Result<ReportPostListResponse, StoreError>> + Send;
 
     /// Port of `SqlPostStore.SearchPostsForUser` (post_store.go:2909) — the database branch
     /// only. The query and its reshaping are on [`search`].
@@ -3421,6 +3440,120 @@ impl PostStore for SqlPostStore {
             user_locale: row.user_locale,
             username: row.username,
         })
+    }
+
+    #[tracing::instrument(skip(self, params), fields(channel_id = %params.channel_id, per_page = params.per_page))]
+    async fn get_posts_for_reporting(
+        &self,
+        params: &ReportPostQueryParams,
+    ) -> Result<ReportPostListResponse, StoreError> {
+        if params.channel_id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "Post",
+                field: "ChannelId",
+                value: String::new(),
+            });
+        }
+
+        // `s.postsQuery` is `postSliceColumnsWithName("Posts")` and nothing more — **no
+        // `ReplyCount` subquery**, unlike `GetSingle`'s `postsQuery` sibling — so every row
+        // comes back with `reply_count: 0`, a root with replies included. Measured on the
+        // licensed pair before this column was made a literal.
+        //
+        // Go builds the column name and the direction into the SQL text. A compile-checked
+        // macro needs one statement, so both choices are parameters: `$4` picks `UpdateAt` over
+        // `CreateAt` (`time_field == "update_at"`; anything else is `CreateAt`), and `$5` picks
+        // ascending (`sort_direction != "desc"`). The row-value comparison is `>` when ascending
+        // and `<` when descending, and the `ORDER BY` follows the same flag on both keys.
+        let by_update_at = params.time_field == REPORTING_TIME_FIELD_UPDATE_AT;
+        let ascending = params.sort_direction != REPORTING_SORT_DIRECTION_DESC;
+        let limit = params.per_page + 1;
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT posts.id,
+                   posts.createat   AS "create_at!",
+                   posts.updateat   AS "update_at!",
+                   posts.editat     AS "edit_at!",
+                   posts.deleteat   AS "delete_at!",
+                   posts.ispinned   AS "is_pinned!",
+                   posts.userid     AS "user_id!",
+                   posts.channelid  AS "channel_id!",
+                   posts.rootid     AS "root_id!",
+                   posts.originalid AS "original_id!",
+                   posts.message    AS "message!",
+                   posts.type       AS "post_type!",
+                   posts.props      AS "props?",
+                   posts.hashtags   AS "hashtags!",
+                   posts.filenames  AS "filenames?",
+                   posts.fileids    AS "file_ids?",
+                   posts.hasreactions AS "has_reactions!",
+                   posts.remoteid   AS "remote_id?",
+                   0::bigint        AS "reply_count!"
+              FROM posts
+             WHERE posts.channelid = $1
+               AND (($5::bool AND (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END, posts.id) > ($2, $3))
+                 OR (NOT $5::bool AND (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END, posts.id) < ($2, $3)))
+               AND ($6::bool OR posts.deleteat = 0)
+               AND (NOT $7::bool OR posts.type NOT LIKE 'system_%')
+             ORDER BY CASE WHEN $5::bool THEN (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END) END ASC,
+                      CASE WHEN NOT $5::bool THEN (CASE WHEN $4::bool THEN posts.updateat ELSE posts.createat END) END DESC,
+                      CASE WHEN $5::bool THEN posts.id END ASC,
+                      CASE WHEN NOT $5::bool THEN posts.id END DESC
+             LIMIT $8
+            "#,
+            params.channel_id,
+            params.cursor_time,
+            params.cursor_id,
+            by_update_at,
+            ascending,
+            params.include_deleted,
+            params.exclude_system_posts,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get posts for reporting".to_owned(),
+            source,
+        })?;
+
+        let mut posts = rows
+            .into_iter()
+            .map(post_from_row)
+            .collect::<Result<Vec<Post>, StoreError>>()?;
+
+        // Exactly `per_page + 1` rows means another page exists. The cursor names the last row
+        // *returned* — `posts[per_page - 1]` — and the extra row is dropped unread.
+        let mut next_cursor = None;
+        if posts.len() as i64 == params.per_page + 1 {
+            if let Some(last_returned) = params
+                .per_page
+                .checked_sub(1)
+                .and_then(|i| usize::try_from(i).ok())
+                .and_then(|i| posts.get(i))
+            {
+                let next_cursor_time = if by_update_at {
+                    last_returned.update_at
+                } else {
+                    last_returned.create_at
+                };
+                next_cursor = Some(ReportPostOptionsCursor {
+                    cursor: encode_report_post_cursor(
+                        &params.channel_id,
+                        &params.time_field,
+                        params.include_deleted,
+                        params.exclude_system_posts,
+                        &params.sort_direction,
+                        next_cursor_time,
+                        &last_returned.id,
+                    ),
+                });
+            }
+            posts.truncate(usize::try_from(params.per_page).unwrap_or(0));
+        }
+
+        Ok(ReportPostListResponse { posts, next_cursor })
     }
 
     #[tracing::instrument(skip(self, post), fields(post_id, channel_id = %post.channel_id, post_type = %post.post_type))]

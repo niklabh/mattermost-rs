@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO uploadsessions\n                (id, type, createat, userid, channelid, filename, path, filesize, fileoffset,\n                 remoteid, reqfileid)\n            VALUES ($1, $2::text::upload_session_type, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "555bd142953d5e6328843a9f3dd5e410aa410128a8797e4be08ddcc784a66336"
+}

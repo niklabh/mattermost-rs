@@ -92,6 +92,11 @@ MODELLED = {
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
         # The 501 gate on the two post-search routes.
         "EnablePostSearch",
+        # The reader window of a burn-on-read reveal and the outbound budget (also the
+        # trigger-id age limit) of the integration-action routes.
+        "BurnOnReadDurationSeconds", "OutgoingIntegrationRequestsTimeout",
+        # Whether a permalink is previewed from its post or fetched like any other link.
+        "EnablePermalinkPreviews",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is

@@ -68,6 +68,8 @@ pub mod permissions;
 pub mod post_acks;
 pub mod post_search;
 pub mod post_writes;
+/// The rest of `api4/post.go`, `api4/report.go`'s writes and `api4/integration_action.go`.
+pub mod postrest;
 pub mod posts;
 pub mod preferences;
 pub mod product_notices;
@@ -235,6 +237,14 @@ fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
                 && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         }
         "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),
+        // `{action_id:[A-Za-z0-9_-]+}` (api4/integration_action.go:17) — the one `_id`
+        // parameter besides `plugin_id` with a wider class: `_` and `-` are in it.
+        "action_id" => {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        }
         _ if parameter_is_id_shaped(name) => segment_matches_go_mux(value),
         _ => true,
     }
@@ -2627,6 +2637,80 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/reports/users/count",
             partially_migrated(get(reports::get_user_count_for_reporting)),
+        )
+        // `api4/report.go`'s two writes (report.go:22-23), appended 2026-09-15 beside the reads
+        // they share a prefix with. `/reports/users/export` is a literal under `/reports/users`
+        // exactly as `/count` is.
+        .route(
+            "/api/v4/reports/users/export",
+            partially_migrated(post(postrest::start_users_batch_export)),
+        )
+        .route(
+            "/api/v4/reports/posts",
+            partially_migrated(post(postrest::get_posts_for_reporting)),
+        )
+        // The rest of `BaseRoutes.Post` (api4/post.go:43-57): `/restore/{restore_version_id}`,
+        // `/move`, `/reveal` and `/burn` are siblings of `/thread` one or two segments under
+        // `{post_id}`, so they shadow nothing; `/actions/{action_id}` (integration_action.go:17)
+        // likewise. `{action_id}`'s class is `[A-Za-z0-9_-]+`, handled in
+        // `segment_matches_go_mux_for`.
+        .route(
+            "/api/v4/posts/{post_id}/restore/{restore_version_id}",
+            partially_migrated_with_ids(&state, post(postrest::restore_post_version)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/move",
+            partially_migrated_with_ids(&state, post(postrest::move_thread)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/reveal",
+            partially_migrated_with_ids(&state, get(postrest::reveal_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/burn",
+            partially_migrated_with_ids(&state, axum::routing::delete(postrest::burn_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/actions/{action_id}",
+            partially_migrated_with_ids(&state, post(postrest::do_post_action)),
+        )
+        // `BaseRoutes.Posts.Handle("/rewrite")` (api4/post.go:55) — a literal sibling of
+        // `{post_id}` like `/ids` and `/ephemeral`, and `rewrite` is inside the id class, so it
+        // needs the same three pins those carry: registering the literal shadows the
+        // parameterised route for every method, and the other two must still answer as Go's
+        // `{post_id}` handlers would for the segment `rewrite`.
+        .route(
+            "/api/v4/posts/rewrite",
+            partially_migrated(
+                post(postrest::rewrite_message)
+                    .get(invalid_post_id_param)
+                    .put(invalid_post_id_param)
+                    .delete(invalid_post_id_param),
+            ),
+        )
+        // `BaseRoutes.PostForUser.Handle("/reminder")` (api4/post.go:45), beside `/set_unread`
+        // and `/ack`.
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/reminder",
+            partially_migrated_with_ids(&state, post(postrest::set_post_reminder)),
+        )
+        // `InitAction`'s four dialog routes (api4/integration_action.go:18-21) under
+        // `BaseRoutes.APIRoot`. `/open` is `APIHandler`, the other three `APISessionRequired`.
+        .route(
+            "/api/v4/actions/dialogs/open",
+            partially_migrated(post(postrest::open_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/submit",
+            partially_migrated(post(postrest::submit_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/lookup",
+            partially_migrated(post(postrest::lookup_dialog)),
+        )
+        .route(
+            "/api/v4/actions/dialogs/execute",
+            partially_migrated(post(postrest::execute_dialog_action)),
         )
         // `api4/group.go`'s eight remaining reads, every one of which opens with
         // `requireLicense`. `{syncable_type}` is gorilla's `teams|channels` alternation and is not

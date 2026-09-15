@@ -238,6 +238,11 @@ pub struct Config {
     /// store — read by [`crate::App::search_posts_for_user`].
     pub enable_post_search: bool,
 
+    /// `ServiceSettings.EnablePermalinkPreviews` (config.go:397). Go default **`true`**. Off,
+    /// a permalink in a message is fetched like any other URL instead of previewed from the
+    /// referenced post (`getLinkMetadata`, post_metadata.go:882).
+    pub enable_permalink_previews: bool,
+
     /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
@@ -410,6 +415,17 @@ pub struct Config {
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
+    /// `ServiceSettings.BurnOnReadDurationSeconds` (config.go:473). Go default **600** — ten
+    /// minutes, the reader's window: `revealPost` gives a first-time reader a receipt expiring
+    /// at `min(post expire_at, now + this * 1000)`.
+    pub burn_on_read_duration_seconds: i64,
+
+    /// `ServiceSettings.OutgoingIntegrationRequestsTimeout` (config.go:392), in **seconds**;
+    /// Go default **30** (`OutgoingIntegrationRequestsDefaultTimeout`, config.go:266). Both the
+    /// budget of an integration action's outbound `POST` and the age past which a dialog's
+    /// `trigger_id` is refused (`DecodeAndVerifyTriggerId`). `IsValid` refuses `<= 0`.
+    pub outgoing_integration_requests_timeout: i64,
+
     /// `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` (config.go:450). Go
     /// default **`true`** (config.go:873), which is the trap: the word "Experimental" reads like
     /// an opt-in and it is on out of the box.
@@ -449,6 +465,17 @@ pub struct Config {
     /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
     /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
     pub feature_flag_mobile_sso_code_exchange: bool,
+
+    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169
+    /// and environment-only like [`Config::feature_flag_burn_on_read`]. Off, `moveThread` is
+    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
+    /// and so is a licence-less server with the flag on.
+    pub feature_flag_move_threads_enabled: bool,
+
+    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214,
+    /// environment-only. Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
+    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
+    pub feature_flag_mm_blocks_enabled: bool,
 
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
@@ -1261,6 +1288,8 @@ impl Default for Config {
             enable_email_invitations: false,
             enable_link_previews: true,
             enable_post_search: true,
+            // config.go:536 — `new(true)`.
+            enable_permalink_previews: true,
             allowed_untrusted_internal_connections: String::new(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
@@ -1289,6 +1318,10 @@ impl Default for Config {
             // config.go:2653 — `[]string{}`.
             experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
+            // config.go:1038 — `new(600)`.
+            burn_on_read_duration_seconds: 600,
+            // config.go:620 — `OutgoingIntegrationRequestsDefaultTimeout`.
+            outgoing_integration_requests_timeout: 30,
             // config.go:873 — `new(true)`.
             experimental_enable_default_channel_leave_join_messages: true,
             // config.go:870 — `new(-1)`.
@@ -1297,6 +1330,8 @@ impl Default for Config {
             experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
             feature_flag_mobile_sso_code_exchange: false,
+            feature_flag_move_threads_enabled: false,
+            feature_flag_mm_blocks_enabled: true,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1567,6 +1602,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEPOSTSEARCH",
                 default.enable_post_search,
             ),
+            enable_permalink_previews: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEPERMALINKPREVIEWS",
+                default.enable_permalink_previews,
+            ),
             allowed_untrusted_internal_connections: lookup(
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
@@ -1672,6 +1712,16 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
             ),
+            burn_on_read_duration_seconds: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_BURNONREADDURATIONSECONDS",
+                default.burn_on_read_duration_seconds,
+            ),
+            outgoing_integration_requests_timeout: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_OUTGOINGINTEGRATIONREQUESTSTIMEOUT",
+                default.outgoing_integration_requests_timeout,
+            ),
             experimental_enable_default_channel_leave_join_messages: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_EXPERIMENTALENABLEDEFAULTCHANNELLEAVEJOINMESSAGES",
@@ -1696,6 +1746,16 @@ impl Config {
                 lookup,
                 "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
                 default.feature_flag_mobile_sso_code_exchange,
+            ),
+            feature_flag_move_threads_enabled: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MOVETHREADSENABLED",
+                default.feature_flag_move_threads_enabled,
+            ),
+            feature_flag_mm_blocks_enabled: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MMBLOCKSENABLED",
+                default.feature_flag_mm_blocks_enabled,
             ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
@@ -2226,6 +2286,9 @@ impl Config {
             enable_post_search: service
                 .enable_post_search
                 .unwrap_or(default.enable_post_search),
+            enable_permalink_previews: service
+                .enable_permalink_previews
+                .unwrap_or(default.enable_permalink_previews),
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
@@ -2308,6 +2371,12 @@ impl Config {
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            burn_on_read_duration_seconds: service
+                .burn_on_read_duration_seconds
+                .unwrap_or(default.burn_on_read_duration_seconds),
+            outgoing_integration_requests_timeout: service
+                .outgoing_integration_requests_timeout
+                .unwrap_or(default.outgoing_integration_requests_timeout),
             experimental_enable_default_channel_leave_join_messages: service
                 .experimental_enable_default_channel_leave_join_messages
                 .unwrap_or(default.experimental_enable_default_channel_leave_join_messages),
@@ -2322,6 +2391,8 @@ impl Config {
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
             feature_flag_burn_on_read: default.feature_flag_burn_on_read,
             feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
+            feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
+            feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2888,6 +2959,8 @@ struct ServiceSettingsDocument {
     enable_link_previews: Option<bool>,
     #[serde(rename = "EnablePostSearch")]
     enable_post_search: Option<bool>,
+    #[serde(rename = "EnablePermalinkPreviews")]
+    enable_permalink_previews: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -2957,6 +3030,10 @@ struct ServiceSettingsDocument {
     enable_api_team_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "BurnOnReadDurationSeconds")]
+    burn_on_read_duration_seconds: Option<i64>,
+    #[serde(rename = "OutgoingIntegrationRequestsTimeout")]
+    outgoing_integration_requests_timeout: Option<i64>,
     #[serde(rename = "ExperimentalEnableDefaultChannelLeaveJoinMessages")]
     experimental_enable_default_channel_leave_join_messages: Option<bool>,
     #[serde(rename = "PostEditTimeLimit")]
@@ -3418,6 +3495,63 @@ mod tests {
             "with nothing set, the document survives"
         );
     }
+
+    /// The two integers the post family reads, and the two flags. Defaults from Go, then the
+    /// document and the environment each moving them.
+    #[test]
+    fn the_burn_on_read_window_and_the_integration_timeout_are_read() {
+        let default = Config::default();
+        assert_eq!(default.burn_on_read_duration_seconds, 600, "config.go:1038");
+        assert_eq!(
+            default.outgoing_integration_requests_timeout, 30,
+            "config.go:266"
+        );
+        assert!(
+            !default.feature_flag_move_threads_enabled,
+            "feature_flags.go:169"
+        );
+        assert!(
+            default.feature_flag_mm_blocks_enabled,
+            "feature_flags.go:214"
+        );
+
+        let from_go = Config::from_document(include_str!("../../../fixtures/config_active.json"))
+            .expect("the fixture is a config document");
+        assert_eq!(from_go.burn_on_read_duration_seconds, 600);
+        assert_eq!(from_go.outgoing_integration_requests_timeout, 30);
+        assert!(from_go.enable_permalink_previews, "config.go:536");
+        assert!(
+            !Config::from_document(r#"{"ServiceSettings":{"EnablePermalinkPreviews":false}}"#)
+                .expect("valid document")
+                .enable_permalink_previews
+        );
+
+        let moved = Config::from_document(
+            r#"{"ServiceSettings":{"BurnOnReadDurationSeconds":7,"OutgoingIntegrationRequestsTimeout":9},"FeatureFlags":{"MoveThreadsEnabled":true}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(moved.burn_on_read_duration_seconds, 7);
+        assert_eq!(moved.outgoing_integration_requests_timeout, 9);
+        assert!(
+            !moved.feature_flag_move_threads_enabled,
+            "FeatureFlags is never read from the document"
+        );
+
+        let env = |key: &str| -> Option<String> {
+            match key {
+                "MM_SERVICESETTINGS_BURNONREADDURATIONSECONDS" => Some("11".to_owned()),
+                "MM_SERVICESETTINGS_OUTGOINGINTEGRATIONREQUESTSTIMEOUT" => Some("13".to_owned()),
+                "MM_FEATUREFLAGS_MOVETHREADSENABLED" => Some("true".to_owned()),
+                "MM_FEATUREFLAGS_MMBLOCKSENABLED" => Some("false".to_owned()),
+                _ => None,
+            }
+        };
+        let overridden = Config::default().apply_env_from(&env);
+        assert_eq!(overridden.burn_on_read_duration_seconds, 11);
+        assert_eq!(overridden.outgoing_integration_requests_timeout, 13);
+        assert!(overridden.feature_flag_move_threads_enabled);
+        assert!(!overridden.feature_flag_mm_blocks_enabled);
+    }
 }
 
 /// Parity tests against `fixtures/config_active.json` — the configuration a real Go server booted
@@ -3816,8 +3950,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 96,
-            "the fixture covers {keys} settings and Config reads 96 from the document. \
+            keys, 99,
+            "the fixture covers {keys} settings and Config reads 99 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -6064,7 +6198,7 @@ fn join_commas(values: Option<&[String]>) -> String {
 }
 
 /// `model.SystemAsymmetricSigningKeyKey` (system.go:16).
-const SYSTEM_ASYMMETRIC_SIGNING_KEY: &str = "AsymmetricSigningKey";
+pub(crate) const SYSTEM_ASYMMETRIC_SIGNING_KEY: &str = "AsymmetricSigningKey";
 /// `model.SystemDiagnosticId` (system.go).
 const SYSTEM_DIAGNOSTIC_ID: &str = "DiagnosticId";
 /// `model.SystemInstallationDateKey` (system.go:18).
@@ -6102,6 +6236,25 @@ struct EcdsaKeyRow {
 /// `None` — the key row missing, a curve other than P-256, a coordinate that will not fit in 32
 /// bytes — means Go's `if key := ps.AsymmetricSigningKey(); key != nil` did not fire and the
 /// property is **absent** from the map rather than empty.
+/// The same row as a P-256 verifying key, for `DecodeAndVerifyTriggerId`'s `ecdsa.Verify`.
+/// `None` under the same conditions as [`asymmetric_signing_public_key`], plus a point that
+/// is not on the curve.
+pub(crate) fn asymmetric_signing_verifying_key(row: &str) -> Option<p256::ecdsa::VerifyingKey> {
+    let parsed: AsymmetricSigningKeyRow = serde_json::from_str(row).ok()?;
+    let key = parsed.ecdsa_key?;
+    if key.curve != "P-256" {
+        return None;
+    }
+    let x = decimal_to_fixed_bytes(key.x.get(), 32)?;
+    let y = decimal_to_fixed_bytes(key.y.get(), 32)?;
+    let point = p256::EncodedPoint::from_affine_coordinates(
+        p256::FieldBytes::from_slice(&x),
+        p256::FieldBytes::from_slice(&y),
+        false,
+    );
+    p256::ecdsa::VerifyingKey::from_encoded_point(&point).ok()
+}
+
 fn asymmetric_signing_public_key(row: &str) -> Option<String> {
     use base64::Engine as _;
 
@@ -6248,7 +6401,7 @@ impl crate::App {
 
     /// One `Systems` row, with a read failure treated as absence — which is what every caller
     /// here does with it.
-    async fn system_value(&self, name: &str) -> Option<String> {
+    pub(crate) async fn system_value(&self, name: &str) -> Option<String> {
         use mm_store::SystemStore as _;
         match self.store().system().get_by_name(name).await {
             Ok(value) => value,

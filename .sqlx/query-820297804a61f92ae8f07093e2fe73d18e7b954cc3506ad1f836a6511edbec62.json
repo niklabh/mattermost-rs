@@ -1,0 +1,150 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT q2.id           AS \"id!\",\n               q2.createat     AS \"create_at!\",\n               q2.updateat     AS \"update_at!\",\n               q2.editat       AS \"edit_at!\",\n               q2.deleteat     AS \"delete_at!\",\n               q2.ispinned     AS \"is_pinned!\",\n               q2.userid       AS \"user_id!\",\n               q2.channelid    AS \"channel_id!\",\n               q2.rootid       AS \"root_id!\",\n               q2.originalid   AS \"original_id!\",\n               q2.message      AS \"message!\",\n               q2.type         AS \"post_type!\",\n               q2.props        AS \"props?\",\n               q2.hashtags     AS \"hashtags!\",\n               q2.filenames    AS \"filenames?\",\n               q2.fileids      AS \"file_ids?\",\n               q2.hasreactions AS \"has_reactions!\",\n               q2.remoteid     AS \"remote_id?\",\n               (SELECT count(*)\n                  FROM posts\n                 WHERE posts.rootid = (CASE WHEN q2.rootid = '' THEN q2.id ELSE q2.rootid END)\n                   AND posts.deleteat = 0) AS \"reply_count!\"\n          FROM posts q2\n         WHERE q2.deleteat = 0\n           AND q2.type NOT LIKE 'system_%'\n           AND q2.type <> 'card'\n           AND (($2::text[] IS NULL AND $3::text[] IS NULL)\n                OR q2.userid IN (SELECT u.id\n                                   FROM users u\n                                  WHERE ($1::text = ''\n                                         OR EXISTS (SELECT 1\n                                                      FROM teammembers tm\n                                                     WHERE tm.teamid = $1\n                                                       AND tm.userid = u.id))\n                                    AND ($2::text[] IS NULL OR u.id = ANY($2))\n                                    AND ($3::text[] IS NULL OR u.id <> ALL($3))))\n           AND ($4::bigint IS NULL OR q2.createat BETWEEN $4 AND $5::bigint)\n           AND ($6::bigint IS NULL OR q2.createat NOT BETWEEN $6 AND $7::bigint)\n           AND ($8::bigint IS NULL OR q2.createat >= $8)\n           AND ($9::bigint IS NULL OR q2.createat <= $9)\n           AND ($10::bigint IS NULL OR q2.createat < $10)\n           AND ($11::bigint IS NULL OR q2.createat > $11)\n           AND ($12::text IS NULL\n                OR to_tsvector($13::text::regconfig,\n                               CASE WHEN $14::bool THEN q2.hashtags ELSE q2.message END)\n                   @@ to_tsquery($13::text::regconfig, $12))\n           AND ($15::text[] IS NULL\n                OR ($16::bool\n                    AND (CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ANY($15))\n                OR (NOT $16\n                    AND (CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ALL($15)))\n           AND ($17::text[] IS NULL\n                OR NOT ((CASE WHEN $14 THEN q2.hashtags ELSE q2.message END) LIKE ANY($17)))\n           AND q2.channelid IN (SELECT c.id\n                                  FROM channels c, channelmembers cm\n                                 WHERE c.id = cm.channelid\n                                   AND ($18::bool OR c.deleteat = 0)\n                                   AND cm.userid = $19\n                                   AND ($1 = '' OR c.teamid = $1 OR c.teamid = '')\n                                   AND ($20::text[] IS NULL OR c.id = ANY($20))\n                                   AND ($21::text[] IS NULL OR c.id <> ALL($21)))\n         ORDER BY q2.createat DESC\n         LIMIT 100\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "edit_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "original_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "post_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "props?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "hashtags!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "filenames?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_reactions!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
+        "Bool",
+        "TextArray",
+        "Bool",
+        "Text",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "820297804a61f92ae8f07093e2fe73d18e7b954cc3506ad1f836a6511edbec62"
+}

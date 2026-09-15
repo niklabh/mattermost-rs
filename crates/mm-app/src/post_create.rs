@@ -524,7 +524,7 @@ impl App {
     /// the saved id on success. Unrolling it is what makes a **forward** safe: the forward is a
     /// failure as far as this function is concerned, so the entry is removed and the retry Go
     /// serves is deduplicated by Go's own cache instead.
-    async fn create_post(
+    pub(crate) async fn create_post(
         &self,
         mut post: Post,
         channel: &Channel,
