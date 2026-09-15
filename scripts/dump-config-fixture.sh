@@ -97,6 +97,8 @@ MODELLED = {
         "BurnOnReadDurationSeconds", "OutgoingIntegrationRequestsTimeout",
         # Whether a permalink is previewed from its post or fetched like any other link.
         "EnablePermalinkPreviews",
+        # The 501 gate on the two file-search routes.
+        "EnableFileSearch",
         "EnableInsecureOutgoingConnections",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
@@ -117,7 +119,7 @@ MODELLED = {
         "EnableFileAttachments", "MaxImageResolution",
     ],
     # Read by createUpload for an import upload: the directory-conflict check.
-    "PluginSettings": ["Directory"],
+    "PluginSettings": ["Directory", "Enable"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",

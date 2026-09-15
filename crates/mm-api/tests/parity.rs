@@ -251,4 +251,10 @@ mod parity {
     // Appended 2026-09-15: the rest of api4/post.go, report.go's writes and
     // integration_action.go.
     pub mod postrest;
+    // Appended 2026-09-15: the searchmisc family.
+    pub mod agents;
+    pub mod file_search;
+    pub mod outgoing_oauth_writes;
+    pub mod properties_writes;
+    pub mod retention_search;
 }

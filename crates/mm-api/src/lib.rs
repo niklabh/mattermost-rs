@@ -40,8 +40,10 @@ pub mod file_store_test;
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
 
+pub mod agents;
 /// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod channel_join_requests;
+pub mod file_search;
 /// `uploadFileStream` — the classic `POST /api/v4/files` upload.
 pub mod file_upload;
 pub mod files;
@@ -66,6 +68,7 @@ pub mod migrate_auth;
 pub mod multipart;
 pub mod notify_admin;
 pub mod oauth;
+pub mod outgoing_oauth_writes;
 pub mod permissions;
 pub mod post_acks;
 pub mod post_search;
@@ -76,12 +79,14 @@ pub mod posts;
 pub mod preferences;
 pub mod product_notices;
 pub mod properties;
+pub mod properties_writes;
 pub mod proxy;
 pub mod push_ack;
 pub mod reactions;
 pub mod recaps;
 pub mod redirect_location;
 pub mod reports;
+pub mod retention_search;
 pub mod roles;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
@@ -1739,6 +1744,36 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/posts/search",
             partially_migrated_with_ids(&state, post(post_search::search_posts_in_team)),
         )
+        // `BaseRoutes.Team.Handle("/files/search")` (api4/file.go:41) — the file twin of the
+        // route above, two literal segments under `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/files/search",
+            partially_migrated_with_ids(&state, post(file_search::search_files_in_team)),
+        )
+        // `BaseRoutes.Files.Handle("/search")` (api4/file.go:42) — a literal sibling of
+        // `/files/{file_id}` below, whose `GET` is pinned so `files::get_file`'s 400 for the
+        // seven-character segment is not lost to axum's method router (see
+        // `file_search::invalid_file_id_param`).
+        .route(
+            "/api/v4/files/search",
+            partially_migrated(
+                post(file_search::search_files_in_all_teams)
+                    .get(file_search::invalid_file_id_param),
+            ),
+        )
+        // `api4/agents.go` (api.go:340-341): three reads under two prefixes, no parameters.
+        .route(
+            "/api/v4/agents",
+            partially_migrated(get(agents::get_agents)),
+        )
+        .route(
+            "/api/v4/agents/status",
+            partially_migrated(get(agents::get_agents_status)),
+        )
+        .route(
+            "/api/v4/llmservices",
+            partially_migrated(get(agents::get_llm_services)),
+        )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
         // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not
@@ -2478,6 +2513,16 @@ pub fn router(state: AppState) -> Router {
                     .delete(data_retention::remove_teams_from_policy),
             ),
         )
+        // `searchTeamsInPolicy` and `searchChannelsInPolicy` (data_retention.go:25, :29) —
+        // one literal deeper than the two list routes, no parameter sibling at that depth.
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/teams/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_teams_in_policy)),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/channels/search",
+            partially_migrated_with_ids(&state, post(retention_search::search_channels_in_policy)),
+        )
         .route(
             "/api/v4/data_retention/policies/{policy_id}/channels",
             partially_migrated_with_ids(
@@ -2883,7 +2928,10 @@ pub fn router(state: AppState) -> Router {
         // reach Go for its 404 rather than our handler for a 400. See `segment_matches_go_mux_for`.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields",
-            partially_migrated_with_ids(&state, get(properties::get_property_fields)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_fields).post(properties_writes::create_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/fields/search",
@@ -2895,15 +2943,27 @@ pub fn router(state: AppState) -> Router {
         // there is no precedence question with it.
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}",
-            partially_migrated_with_ids(&state, delete(properties::delete_property_field)),
+            partially_migrated_with_ids(
+                &state,
+                delete(properties::delete_property_field)
+                    .patch(properties_writes::patch_property_field),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/values/{target_id}",
-            partially_migrated_with_ids(&state, get(properties::get_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_property_values)
+                    .patch(properties_writes::patch_property_values),
+            ),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/system/values",
-            partially_migrated_with_ids(&state, get(properties::get_system_property_values)),
+            partially_migrated_with_ids(
+                &state,
+                get(properties::get_system_property_values)
+                    .patch(properties_writes::patch_system_property_values),
+            ),
         )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.
@@ -2913,11 +2973,29 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/oauth/outgoing_connections",
-            partially_migrated(get(gated_reads::list_outgoing_oauth_connections)),
+            partially_migrated(
+                get(gated_reads::list_outgoing_oauth_connections)
+                    .post(outgoing_oauth_writes::create_outgoing_oauth_connection),
+            ),
+        )
+        // `BaseRoutes.OutgoingOAuthConnections.Handle("/validate")` — a literal sibling of the
+        // `{outgoing_oauth_connection_id}` route below; `validate` is eight characters, so it
+        // would have been the `GET` read's `RequireOutgoingOAuthConnectionId`-after-the-gate
+        // 501 anyway. Only the `POST` is registered by Go.
+        .route(
+            "/api/v4/oauth/outgoing_connections/validate",
+            partially_migrated(post(
+                outgoing_oauth_writes::validate_outgoing_oauth_connection_credentials,
+            )),
         )
         .route(
             "/api/v4/oauth/outgoing_connections/{outgoing_oauth_connection_id}",
-            partially_migrated_with_ids(&state, get(gated_reads::get_outgoing_oauth_connection)),
+            partially_migrated_with_ids(
+                &state,
+                get(gated_reads::get_outgoing_oauth_connection)
+                    .put(outgoing_oauth_writes::update_outgoing_oauth_connection)
+                    .delete(outgoing_oauth_writes::delete_outgoing_oauth_connection),
+            ),
         )
         .route(
             "/api/v4/jobs/{job_id}/download",
@@ -3834,6 +3912,51 @@ mod tests {
             (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
             (Method::POST, "/api/v4/posts/search".to_owned()),
             (Method::POST, format!("/api/v4/teams/{USER}/posts/search")),
+            (Method::POST, "/api/v4/files/search".to_owned()),
+            (Method::POST, format!("/api/v4/teams/{USER}/files/search")),
+            (Method::GET, "/api/v4/agents".to_owned()),
+            (Method::GET, "/api/v4/agents/status".to_owned()),
+            (Method::GET, "/api/v4/llmservices".to_owned()),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections".to_owned(),
+            ),
+            (
+                Method::POST,
+                "/api/v4/oauth/outgoing_connections/validate".to_owned(),
+            ),
+            (
+                Method::PUT,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/oauth/outgoing_connections/{USER}"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/teams/search"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/data_retention/policies/{USER}/channels/search"),
+            ),
+            (
+                Method::POST,
+                "/api/v4/properties/groups/boards/channel/fields".to_owned(),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/fields/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                format!("/api/v4/properties/groups/boards/channel/values/{USER}"),
+            ),
+            (
+                Method::PATCH,
+                "/api/v4/properties/groups/boards/system/values".to_owned(),
+            ),
         ];
 
         for (method, path) in served {

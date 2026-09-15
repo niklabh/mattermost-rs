@@ -802,12 +802,38 @@ impl App {
         &self,
         group: &PropertyGroup,
         caller: &PropertyCaller,
+        values: Vec<PropertyValue>,
+        target_id: &str,
+        connection_id: &str,
+    ) -> AppResult<Vec<PropertyValue>> {
+        self.upsert_property_values(
+            group,
+            caller,
+            values,
+            PROPERTY_FIELD_OBJECT_TYPE_USER,
+            target_id,
+            connection_id,
+        )
+        .await
+    }
+
+    /// Port of `App.UpsertPropertyValues` (app/property_value.go:169) for any object type —
+    /// the generic `patchPropertyValues` routes call it with the URL's object type, the CPA
+    /// route with `user`. `objectType` is never empty over REST, so the mismatch check and the
+    /// broadcast always run; the broadcast's scope is `resolveValueBroadcastParams`'s
+    /// ([`App::resolve_value_broadcast_params`]), and a failure there is logged and the event
+    /// skipped, as Go does.
+    #[tracing::instrument(skip_all, fields(group_id = %group.id, object_type = %object_type, target_id = %target_id, values = values.len()))]
+    pub async fn upsert_property_values(
+        &self,
+        group: &PropertyGroup,
+        caller: &PropertyCaller,
         mut values: Vec<PropertyValue>,
+        object_type: &str,
         target_id: &str,
         connection_id: &str,
     ) -> AppResult<Vec<PropertyValue>> {
         const WHERE: &str = "UpsertPropertyValues";
-        let object_type = PROPERTY_FIELD_OBJECT_TYPE_USER;
         if values.is_empty() {
             return Err(AppError::boxed(
                 WHERE,
@@ -894,13 +920,22 @@ impl App {
             .await
             .map_err(|err| err.into_app_error(WHERE, "app.property_value.upsert_many.app_error"))?;
 
-        // resolveValueBroadcastParams: a `user` object type is system-wide.
+        let (team_id, channel_id) = match self
+            .resolve_value_broadcast_params(object_type, target_id)
+            .await
+        {
+            Ok(scope) => scope,
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to resolve broadcast params for property values");
+                return Ok(result);
+            }
+        };
         match mm_model::utils::go_json_marshal(&result) {
             Ok(values_json) => {
                 let mut message = WebSocketEvent::new(
                     WEBSOCKET_EVENT_PROPERTY_VALUES_UPDATED,
-                    "",
-                    "",
+                    &team_id,
+                    &channel_id,
                     "",
                     None,
                     connection_id,
@@ -920,6 +955,42 @@ impl App {
 
     /// `PropertyService.UpsertPropertyValues` (property_value.go:1030): the pre-upsert hooks,
     /// the template refusal, the store, the post-upsert audit.
+    /// Port of `resolveValueBroadcastParams` (app/property_value.go:15): `(teamID, channelID)`
+    /// for the `property_values_updated` event — a post's channel, a channel itself, and
+    /// system-wide for `user` and `system`; any other object type is the 400.
+    async fn resolve_value_broadcast_params(
+        &self,
+        object_type: &str,
+        target_id: &str,
+    ) -> AppResult<(String, String)> {
+        match object_type {
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
+                let post = self.get_single_post(target_id, false).await?;
+                Ok((String::new(), post.channel_id))
+            }
+            mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {
+                Ok((String::new(), target_id.to_owned()))
+            }
+            PROPERTY_FIELD_OBJECT_TYPE_USER | PROPERTY_FIELD_OBJECT_TYPE_SYSTEM => {
+                Ok((String::new(), String::new()))
+            }
+            other => {
+                let mut params = HashMap::new();
+                params.insert(
+                    "ObjectType".to_owned(),
+                    serde_json::Value::String(other.to_owned()),
+                );
+                Err(AppError::boxed(
+                    "resolveValueBroadcastParams",
+                    "app.property_value.resolve_broadcast_params.unknown_object_type.app_error",
+                    Some(params),
+                    "unrecognized object type",
+                    400,
+                ))
+            }
+        }
+    }
+
     async fn cpa_upsert_values_service(
         &self,
         group: &PropertyGroup,
@@ -1073,7 +1144,7 @@ fn prefix_field(field_id: &str, err: PropertyServiceError) -> PropertyServiceErr
 /// Port of `CanonicalizeSystemObjectField` (app/property_field_helpers.go:33): a **system**
 /// object field is pinned to the system target and to sysadmin on all three levels. A no-op for
 /// every other object type, the CPA `user` fields included.
-fn canonicalize_system_object_field(field: &mut PropertyField) {
+pub fn canonicalize_system_object_field(field: &mut PropertyField) {
     if field.object_type != PROPERTY_FIELD_OBJECT_TYPE_SYSTEM {
         return;
     }

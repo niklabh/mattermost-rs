@@ -75,7 +75,8 @@
     "Enable": false
   },
   "PluginSettings": {
-    "Directory": "./plugins"
+    "Directory": "./plugins",
+    "Enable": true
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
@@ -102,6 +103,7 @@
     "EnableDeveloper": false,
     "EnableDynamicClientRegistration": false,
     "EnableEmailInvitations": true,
+    "EnableFileSearch": true,
     "EnableIncomingWebhooks": true,
     "EnableInsecureOutgoingConnections": false,
     "EnableLinkPreviews": true,

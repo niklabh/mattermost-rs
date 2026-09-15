@@ -7166,13 +7166,16 @@ const CHANNEL_SEARCH_QUERY_DEFAULT_LIMIT: i64 = 100;
 /// `private && !public` is `c.Type = 'P'`; **everything else**, including both set and neither
 /// set, is `c.Type IN ('O','P')`. Setting both is therefore the same request as setting neither.
 ///
-/// # `policy_id` filtering is not reached from the REST API
+/// # `policy_id` is Go's first `else if`, and it silences `exclude_policy_constrained`
 ///
-/// `channelSearchQuery`'s first branch — `PolicyID != ""`, an inner join that narrows to one
-/// retention policy — has no caller in api4: `searchAllChannels` never sets the field, and
-/// `ChannelSearch` has no json tag for it. Only the `exclude_policy_constrained` and
-/// `include_policy_id` branches below are reachable, so only those are ported; a future data
-/// retention route wanting the first must add it and a test that sends it.
+/// `channelSearchQuery` (channel_store.go:3690) is a three-way `if / else if / else if`: a
+/// non-empty `PolicyID` inner-joins `RetentionPoliciesChannels` on that policy, **and then the
+/// `ExcludePolicyConstrained` branch never runs**; only with no policy does the exclusion apply.
+/// `ChannelSearch` has no json tag for the field, so the only caller that sets it is
+/// `searchChannelsInPolicy` (data_retention.go:374), which pins it from the URL. The inner join
+/// is an `EXISTS` here — `ChannelId` is the table's primary key, so the join cannot multiply
+/// rows — and the exclusion predicate is guarded on the policy being empty, which is the
+/// `else if`.
 #[tracing::instrument(skip(pool, opts), fields(term_len = term.len(), found, total))]
 pub async fn search_all_channels(
     pool: &PgPool,
@@ -7248,7 +7251,10 @@ pub async fn search_all_channels(
           FROM channels c
           JOIN teams t ON t.id = c.teamid
          WHERE (($5 AND c.deleteat <> 0) OR (NOT $5 AND ($6 OR c.deleteat = 0)))
-           AND (NOT $4 OR NOT EXISTS (
+           AND ($24::text = '' OR EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id AND rpc.policyid = $24))
+           AND ($24::text <> '' OR NOT $4 OR NOT EXISTS (
                    SELECT 1 FROM retentionpolicieschannels rpc
                     WHERE rpc.channelid = c.id))
            AND (NOT $7
@@ -7312,6 +7318,7 @@ pub async fn search_all_channels(
         opts.parent_access_control_policy_id,
         &parent_policy_json,
         opts.access_control_policy_enforced,
+        opts.policy_id,
     )
     .fetch_all(pool)
     .await
@@ -7343,7 +7350,10 @@ pub async fn search_all_channels(
           FROM channels c
           JOIN teams t ON t.id = c.teamid
          WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)))
-           AND (NOT $3 OR NOT EXISTS (
+           AND ($21::text = '' OR EXISTS (
+                   SELECT 1 FROM retentionpolicieschannels rpc
+                    WHERE rpc.channelid = c.id AND rpc.policyid = $21))
+           AND ($21::text <> '' OR NOT $3 OR NOT EXISTS (
                    SELECT 1 FROM retentionpolicieschannels rpc
                     WHERE rpc.channelid = c.id))
            AND (NOT $4
@@ -7402,6 +7412,7 @@ pub async fn search_all_channels(
         opts.parent_access_control_policy_id,
         &parent_policy_json,
         opts.access_control_policy_enforced,
+        opts.policy_id,
     )
     .fetch_one(pool)
     .await

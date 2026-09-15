@@ -9068,3 +9068,21 @@ the completion is a request into the AI plugin (`mattermost-plugin-ai` bridge cl
 the plugin Go answers the 500 `app.post.rewrite.agent_call_failed`. **What is owed:** the plugin
 host's inter-plugin request path, then the prompt builders (`getRewritePromptForAction`,
 `buildThreadContextForRewrite`, `buildRewriteSystemPrompt`).
+## D-740 · `GET /teams/{team_id}/channels/managed_categories` is forwarded: no oracle registers it
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+
+`getManagedCategories` (api4/channel.go:3302) is registered only when
+`FeatureFlags.ManagedChannelCategories` is on (channel.go:71), and the flag is off on the stack's
+Go **and** on the licensed oracle (measured: both answer gorilla's mux 404, and
+`FeatureFlagManagedChannelCategories` reads `false` in their client config). So the only answer
+any oracle gives is Go's own 404, which the fallback forward already reproduces and
+`parity::channel_search_all::the_managed_categories_route_is_a_404_on_both` pins. Behind the flag
+the handler is `RequireTeamId`, a `MinimumEnterpriseLicense` 501 `api.license_error`, then
+`App.GetVisibleManagedCategoryMappings` (app/channel_category.go:342): the caller's channels on
+the team, then `SearchPropertyValues` on the `managed_channel_categories` group (version 3) for
+the `category_name` field cached at startup by `cacheManagedCategoryIDs` (migrations.go:1152),
+answered as a `channel_id → name` map. **What is owed:** a Go process with the flag on (a
+`go-licensed.sh` variant with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true`, as the guest
+variant does for its setting), then the handler with the flag, licence and team-id gates, the
+group/field-id lookup by name, and a parity suite against that process.

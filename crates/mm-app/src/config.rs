@@ -242,6 +242,10 @@ pub struct Config {
     /// a permalink in a message is fetched like any other URL instead of previewed from the
     /// referenced post (`getLinkMetadata`, post_metadata.go:882).
     pub enable_permalink_previews: bool,
+    /// `ServiceSettings.EnableFileSearch` (config.go:441, defaulted **`true`** at :696). Off,
+    /// `SearchFilesInTeamForUser` answers 501 `store.sql_file_info.search.disabled` before
+    /// touching the store — read by [`crate::App::search_files_in_team_for_user`].
+    pub enable_file_search: bool,
 
     /// `ServiceSettings.AllowedUntrustedInternalConnections` (config.go). Go default `""`. The
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
@@ -529,6 +533,12 @@ pub struct Config {
     /// Read by `createUpload` for an `import` upload only: the import directory may not sit
     /// inside the plugin directory or vice versa (`fileutils.CheckDirectoryConflict`).
     pub plugin_directory: String,
+
+    /// `PluginSettings.Enable` (config.go:3621, defaulted **`true`**). Off, `GetPluginsEnvironment`
+    /// is nil and the agents bridge reports `plugin_env_not_initialized`; on, it reports
+    /// `plugin_not_active`, since this server hosts no plugins — read by
+    /// [`crate::App::ai_plugin_bridge_status`].
+    pub plugin_enable: bool,
 
     /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
     ///
@@ -1318,6 +1328,7 @@ impl Default for Config {
             enable_post_search: true,
             // config.go:536 — `new(true)`.
             enable_permalink_previews: true,
+            enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
@@ -1370,6 +1381,7 @@ impl Default for Config {
             file_max_image_resolution: 7680 * 4320,
             // config.go:268 — `PluginSettingsDefaultDirectory`.
             plugin_directory: "./plugins".to_owned(),
+            plugin_enable: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
             saml_enable_sync_with_ldap: false,
@@ -1639,6 +1651,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEPERMALINKPREVIEWS",
                 default.enable_permalink_previews,
             ),
+            enable_file_search: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEFILESEARCH",
+                default.enable_file_search,
+            ),
             allowed_untrusted_internal_connections: lookup(
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
@@ -1811,6 +1828,7 @@ impl Config {
             ),
             plugin_directory: lookup("MM_PLUGINSETTINGS_DIRECTORY")
                 .unwrap_or(default.plugin_directory),
+            plugin_enable: lookup_bool(lookup, "MM_PLUGINSETTINGS_ENABLE", default.plugin_enable),
             ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
                 .unwrap_or(default.ldap_picture_attribute),
             saml_enable_sync_with_ldap: lookup_bool(
@@ -2201,6 +2219,7 @@ impl Config {
         let localization_settings = parsed.localization_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
+        let plugin_settings = parsed.plugin_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
         let ldap_settings = parsed.ldap_settings.unwrap_or_default();
         let saml_settings = parsed.saml_settings.unwrap_or_default();
@@ -2340,6 +2359,9 @@ impl Config {
             enable_permalink_previews: service
                 .enable_permalink_previews
                 .unwrap_or(default.enable_permalink_previews),
+            enable_file_search: service
+                .enable_file_search
+                .unwrap_or(default.enable_file_search),
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
@@ -2460,10 +2482,8 @@ impl Config {
             file_max_image_resolution: file_settings
                 .max_image_resolution
                 .unwrap_or(default.file_max_image_resolution),
-            plugin_directory: non_empty_or(
-                parsed.plugin_settings.unwrap_or_default().directory,
-                default.plugin_directory,
-            ),
+            plugin_directory: non_empty_or(plugin_settings.directory, default.plugin_directory),
+            plugin_enable: plugin_settings.enable.unwrap_or(default.plugin_enable),
             ldap_picture_attribute: ldap_settings
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
@@ -3012,6 +3032,8 @@ struct ServiceSettingsDocument {
     enable_post_search: Option<bool>,
     #[serde(rename = "EnablePermalinkPreviews")]
     enable_permalink_previews: Option<bool>,
+    #[serde(rename = "EnableFileSearch")]
+    enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -3166,6 +3188,8 @@ struct ImportSettingsDocument {
 struct PluginSettingsDocument {
     #[serde(rename = "Directory")]
     directory: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3290,6 +3314,8 @@ mod tests {
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
         assert!(config.enable_post_search, "config.go:692 — new(true)");
+        assert!(config.enable_file_search, "config.go:696 — new(true)");
+        assert!(config.plugin_enable, "config.go:3621 — new(true)");
         assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
         // `getUsersWithInvalidEmails` answers 400 when this is **on**, so a wrong default turns
         // a working route into an unconditional refusal on any server that has not set it. The
@@ -4001,8 +4027,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 99,
-            "the fixture covers {keys} settings and Config reads 99 from the document. \
+            keys, 101,
+            "the fixture covers {keys} settings and Config reads 101 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4032,6 +4058,7 @@ mod go_parity {
                 "EnableEmailInvitations": true,
                 "EnableLinkPreviews": false,
                 "EnablePostSearch": false,
+                "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true
@@ -4040,6 +4067,7 @@ mod go_parity {
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
             "ImageProxySettings": { "Enable": true },
             "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
+            "PluginSettings": { "Enable": false },
             "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
             "LdapSettings": { "PictureAttribute": "thumbnailPhoto", "Enable": true },
             "SamlSettings": { "EnableSyncWithLdap": true, "Enable": true },
@@ -4065,6 +4093,8 @@ mod go_parity {
         assert!(config.enable_email_invitations);
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);
+        assert!(!config.enable_file_search);
+        assert!(!config.plugin_enable);
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"

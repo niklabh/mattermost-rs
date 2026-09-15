@@ -411,7 +411,9 @@ async fn a_planted_id_without_a_row_moves_nothing() {
     }
 }
 
-/// Registering these `GET`s must not turn their `POST`/`PUT`/`DELETE` siblings into our 405.
+/// Registering these routes must not turn an unregistered method into our 405. `POST`, `PUT` and
+/// `DELETE` are served since 2026-09-15 (`parity::outgoing_oauth_writes`), so `PATCH` — which
+/// Go does not register either — is what must still reach Go.
 #[tokio::test]
 async fn other_methods_on_the_same_paths_are_forwarded() {
     if !stack_enabled() {
@@ -422,9 +424,9 @@ async fn other_methods_on_the_same_paths_are_forwarded() {
     let token = go_minted_token(&client).await;
 
     for (method, path) in [
-        (reqwest::Method::POST, "/api/v4/oauth/outgoing_connections"),
+        (reqwest::Method::PATCH, "/api/v4/oauth/outgoing_connections"),
         (
-            reqwest::Method::DELETE,
+            reqwest::Method::PATCH,
             "/api/v4/oauth/outgoing_connections/zzzzzzzzzzzzzzzzzzzzzzzzzz",
         ),
     ] {

@@ -4031,7 +4031,7 @@ fn shave_extra_row(posts: &mut Vec<Post>, per_page: i64) -> bool {
 
 /// `specialSearchChars` (sqlstore/store.go:394) — "have special meaning and can be treated as
 /// spaces". Replaced in `Terms` unless the search is a hashtag one, and in `ExcludedTerms` always.
-const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~', ':'];
+pub(crate) const SPECIAL_SEARCH_CHARS: [char; 7] = ['<', '>', '+', '(', ')', '~', ':'];
 
 /// Port of `SqlPostStore.search` (post_store.go:2235) with `channelsByName` and `userByUsername`
 /// both false — the only shape `SearchPostsForUser` calls it in. The by-name shape is `Search`,
@@ -4363,7 +4363,7 @@ fn join_quoted_phrases(input: &str) -> String {
 /// `\*($| )`, so a `*` is a prefix marker only at the end of a word, and the space it consumes
 /// is put back by the replacement. `a**` is `a*:* `: the first star is not followed by a
 /// boundary and survives as a character.
-fn mark_wildcards(input: &str) -> String {
+pub(crate) fn mark_wildcards(input: &str) -> String {
     let mut out = String::with_capacity(input.len() + 4);
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -4415,7 +4415,7 @@ fn is_word_rune(r: char) -> bool {
 /// Port of `removeNonAlphaNumericUnquotedTerms` (sqlstore/utils.go:105): split on the
 /// separator, keep a word if it is quoted or holds at least one letter or digit, trim each
 /// survivor, join again. `abcd "**" && abc` becomes `abcd "**" abc`.
-fn remove_non_alpha_numeric_unquoted_terms(line: &str, separator: &str) -> String {
+pub(crate) fn remove_non_alpha_numeric_unquoted_terms(line: &str, separator: &str) -> String {
     line.split(separator)
         .filter(|word| is_quoted_word(word) || contains_alpha_numeric_char(word))
         .map(str::trim)

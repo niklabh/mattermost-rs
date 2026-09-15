@@ -13664,3 +13664,37 @@ session, the user is the one inside the trigger id, verified with the stack's P-
 | mutation | `scripts/mutations/postrest.plan` — 15 run, 13 caught, 2 controls survived | DONE |
 
 New dependency: `p256` (workspace; mm-app, mm-api dev) for `DecodeAndVerifyTriggerId`'s ECDSA verify.
+## searchmisc: file search, retention searches, property writes, outgoing OAuth writes, agents (2026-09-15)
+
+**+15 HTTP pairs / +0 local-mode pairs on base f4f0a5a.** `POST /files/search` and
+`/teams/{team_id}/files/search`; `POST /data_retention/policies/{policy_id}/{teams,channels}/search`;
+`POST …/{object_type}/fields`, `PATCH …/fields/{field_id}`, `PATCH …/values/{target_id}` and
+`PATCH …/system/values` under `/properties/groups/{group_name}`; `POST /oauth/outgoing_connections`,
+`POST …/validate`, `PUT` and `DELETE …/{id}`; `GET /agents`, `/agents/status`, `/llmservices`.
+**Left forwarded:** `GET /teams/{team_id}/channels/managed_categories` — no oracle has its flag
+on, so Go's mux 404 is the only answer anywhere ([D-740]).
+
+Four things a reader would otherwise get wrong. The file search is **one** statement with every
+params element ANDed in (the post search runs one query per element), and its tsquery is its own
+text: every hyphen a space, no quoted phrases. `RequirePolicyId` is dead on both retention
+searches and its 400 is **appended after the 200 body** by Go's handler wrapper (`[]{"id":…}`),
+measured and reproduced; the channel store gained Go's first `else if`, where a `PolicyID`
+silences `ExcludePolicyConstrained`. The outgoing OAuth writes are the permission then a 501 on
+every build from this tree — the enterprise interface is nil licensed or not — so the setting only
+picks which id. The agents bridge is never available on a server that hosts no plugins:
+`plugin_not_active`, or `plugin_env_not_initialized` with `PluginSettings.Enable` off.
+
+| layer | file | status |
+|---|---|---|
+| config | `enable_file_search` (`ServiceSettings.EnableFileSearch`), `plugin_enable` (`PluginSettings.Enable`); fixture reprojected, 98 keys | DONE |
+| store | `file_info_store.rs` — `search`, `file_ts_query` (reusing `post_store`'s term helpers, now `pub(crate)`); `channel_store.rs` — the `PolicyID` predicate in `search_all_channels` and its count; `property_store.rs` — team- and channel-level `check_property_name_conflict` | DONE |
+| app | `file_search.rs` — `search_files_in_team_for_user`, `filter_files_by_channel_permissions`, `get_last_accessible_file_time`; `agents.rs`; `custom_profile_attributes.rs` — `upsert_property_values` for any object type, `resolve_value_broadcast_params` | DONE |
+| api | `file_search.rs`, `retention_search.rs`, `properties_writes.rs`, `outgoing_oauth_writes.rs`, `agents.rs`; `GET /files/search` pinned to `get_file`'s 400 | DONE |
+| test | `parity/{file_search,retention_search,properties_writes,outgoing_oauth_writes,agents}.rs` — 9, 3, 5, 3, 2; the OAuth pair also on the licensed oracle | DONE |
+| mutation | `scripts/mutations/searchmisc.plan` — 18 run, 17 caught, 2 controls survived; the survivor (`file-search-star-reaches-store`) is an equivalent mutation, see `App::search_files_in_team_for_user` | DONE |
+
+- **Not verified by parity:** the `EnableFileSearch = false` 501; the outgoing OAuth
+  `upgrade_needed` arm (setting on; a unit test pins it); a cloud licence's
+  `LastAccessibleFileTime`, which forwards; the ABAC file-download check, which is `true` because
+  `AccessControl` is nil on this build. Property write fields are compared **modulo** id,
+  timestamps and a per-server name, since both servers write one table.
