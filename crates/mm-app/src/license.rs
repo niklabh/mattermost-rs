@@ -555,6 +555,52 @@ impl App {
             *guard = Some((id.to_owned(), Arc::clone(license)));
         }
     }
+
+    /// Port of `LicenseValidator.LicenseFromBytes` (utils/license.go:54): verify the signature
+    /// against this process's keys and decode the plaintext — **without** `Features.SetDefaults`
+    /// and without the `Features == nil` refusal, which are `SetLicense`'s and `SaveLicense`'s
+    /// respectively. `addLicense` and `previewLicense` call this before anything is saved, and
+    /// `previewLicense` writes exactly what it returns, so a sparse `features` object must come
+    /// back sparse. [`load_license`] is the loaded-and-defaulted form for a licence in force.
+    pub fn license_from_bytes(&self, signed: &[u8]) -> Result<License, LicenseValidationError> {
+        let plaintext = validate_license(signed, &self.license_keys)?;
+        serde_json::from_slice(&plaintext)
+            .map_err(|err| LicenseValidationError::Json(err.to_string()))
+    }
+
+    /// Port of `LicenseValidator.ValidateLicense` alone — the signature check that
+    /// `SaveLicense` (platform/license.go:133) makes first, before it decodes anything.
+    pub fn validate_license_bytes(&self, signed: &[u8]) -> Result<Vec<u8>, LicenseValidationError> {
+        validate_license(signed, &self.license_keys)
+    }
+}
+
+/// Port of `utils.NewLicenseValidationAppError` (utils/license.go:164), plus the one outcome
+/// `LicenseFromBytes` adds after it (license.go:61): the plaintext verified but is not JSON a
+/// `model.License` decodes from, which is `api.unmarshal_error` at **500**, not a 400.
+///
+/// Every other failure — a base64 that will not decode, a body too short to carry a signature, a
+/// signature neither key verifies, unusable key material — is `model.InvalidLicenseError` at 400;
+/// only the two wrong-environment errors get their own ids.
+pub fn license_validation_app_error(where_: &str, err: &LicenseValidationError) -> AppError {
+    use mm_model::license::{
+        INVALID_LICENSE_ERROR, WRONG_ENVIRONMENT_PRODUCTION_LICENSE_ERROR,
+        WRONG_ENVIRONMENT_TEST_LICENSE_ERROR,
+    };
+    let (id, status) = match err {
+        LicenseValidationError::ProductionInTestEnvironment => {
+            (WRONG_ENVIRONMENT_PRODUCTION_LICENSE_ERROR, 400)
+        }
+        LicenseValidationError::TestInProductionEnvironment => {
+            (WRONG_ENVIRONMENT_TEST_LICENSE_ERROR, 400)
+        }
+        LicenseValidationError::Json(_) => ("api.unmarshal_error", 500),
+        LicenseValidationError::Decode(_)
+        | LicenseValidationError::TooShort
+        | LicenseValidationError::InvalidSignature
+        | LicenseValidationError::Key(_) => (INVALID_LICENSE_ERROR, 400),
+    };
+    AppError::new(where_, id, None, err.to_string(), status)
 }
 
 /// A store failure here is a 500 and not "unlicensed".

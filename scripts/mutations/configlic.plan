@@ -1,0 +1,35 @@
+# Mutation plan for the config and licence writes: crates/mm-api/src/config_writes.rs,
+# crates/mm-api/src/license_writes.rs and the validation-error mapping in mm-app.
+#
+#   scripts/mutate-batch.sh scripts/mutations/configlic.plan
+#
+# Every served branch on these routes is a gate in front of a forward, so the mutation of
+# interest is the one that makes a gate fail open: the request then reaches Go, which refuses it
+# itself with the same status and id, and the only thing that distinguishes the two is
+# x-mmrs-served-by, which every comparison in parity::configlic asserts. Two decisions a reader
+# could plausibly get wrong are on the gates' inputs rather than their polarity: an omitted
+# SiteURL defaults to "" unless the same body enables developer mode (config.go:512), and a
+# non-object body is a decode error in Go where serde would build a struct from an empty array.
+# The parameter names in the 403s live only in Go's translated message and are not planned.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+update-permission-gate-never-refuses	crates/mm-api/src/config_writes.rs	        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            session,\n            SYSCONSOLE_WRITE_PERMISSIONS,\n        )));\n    }\n\n    let live = live_gates(state, "updateConfig").await?;	        .await\n        && false\n    {\n        return Err(ApiError::from(make_permission_error(\n            session,\n            SYSCONSOLE_WRITE_PERMISSIONS,\n        )));\n    }\n\n    let live = live_gates(state, "updateConfig").await?;	api	configlic
+update-cleared-siteurl-inverted	crates/mm-api/src/config_writes.rs	    if !live.site_url.is_empty() && site_url_after_defaults(&cfg).is_empty() {	    if !live.site_url.is_empty() && !site_url_after_defaults(&cfg).is_empty() {	api	configlic
+update-developer-default-inverted	crates/mm-api/src/config_writes.rs	        None if cfg.service_settings.enable_developer == Some(true) => DEFAULT_SITE_URL,	        None if cfg.service_settings.enable_developer != Some(true) => DEFAULT_SITE_URL,	api	configlic
+patch-cleared-siteurl-dropped	crates/mm-api/src/config_writes.rs	    if !live.site_url.is_empty() && cfg.service_settings.site_url.as_deref() == Some("") {	    if !live.site_url.is_empty() && cfg.service_settings.site_url.as_deref() == Some(" ") {	api	configlic
+patch-enable-uploads-comparison-inverted	crates/mm-api/src/config_writes.rs	    if enable_uploads.is_some_and(|sent| sent != live.enable_uploads) {	    if enable_uploads.is_some_and(|sent| sent == live.enable_uploads) {	api	configlic
+patch-import-directory-comparison-inverted	crates/mm-api/src/config_writes.rs	        .is_some_and(|sent| sent != live.import_directory)	        .is_some_and(|sent| sent == live.import_directory)	api	configlic
+patch-marketplace-uploads-polarity	crates/mm-api/src/config_writes.rs	        && !enable_uploads\n    {\n        return Err(not_allowed_security_error("PluginSettings.MarketplaceURL"));	        && enable_uploads\n    {\n        return Err(not_allowed_security_error("PluginSettings.MarketplaceURL"));	api	configlic
+reload-permission-gate-never-refuses	crates/mm-api/src/config_writes.rs	        .session_has_permission_to_and_not_restricted_admin(session, &PERMISSION_RELOAD_CONFIG)\n        .await\n    {	        .session_has_permission_to_and_not_restricted_admin(session, &PERMISSION_RELOAD_CONFIG)\n        .await\n        && false\n    {	api	configlic
+migrate-to-check-dropped	crates/mm-api/src/config_writes.rs	    for name in ["from", "to"] {	    for name in ["from"] {	api	configlic
+license-trial-gate-inverted	crates/mm-api/src/license_writes.rs	    if !license.is_sanctioned_trial() && license.is_trial_license() {	    if license.is_sanctioned_trial() && license.is_trial_license() {	api	configlic
+license-invalid-signature-status-wrong	crates/mm-app/src/license.rs	        | LicenseValidationError::Key(_) => (INVALID_LICENSE_ERROR, 400),	        | LicenseValidationError::Key(_) => (INVALID_LICENSE_ERROR, 500),	api	configlic
+local-license-signature-never-refuses	crates/mm-api/src/license_writes.rs	    if let Err(err) = state.app.validate_license_bytes(&signed) {	    if let Err(err) = state.app.validate_license_bytes(&signed)\n        && false\n    {	api	configlic
+remove-license-unlicensed-forwards	crates/mm-api/src/license_writes.rs	        Ok(None) => {\n            tracing::Span::current().record("forwarded", false);\n            status_ok()\n        }	        Ok(None) => {\n            tracing::Span::current().record("forwarded", true);\n            proxy::forward_to_go(State(state), request).await\n        }	api	configlic
+trial-license-status-wrong	crates/mm-api/src/license_writes.rs	    upgrade_needed_error("requestTrialLicense", 403).into_response()	    upgrade_needed_error("requestTrialLicense", 500).into_response()	api	configlic
+local-not-multipart-text-swapped	crates/mm-api/src/license_writes.rs	        Err(PartFailure::Unparseable(MultipartError::NotMultipart)) => {\n            return plain_text_400(ERR_NOT_MULTIPART);\n        }	        Err(PartFailure::Unparseable(MultipartError::NotMultipart)) => {\n            return plain_text_400(ERR_MISSING_BOUNDARY);\n        }	api	configlic
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/config_writes.rs	    let enable_uploads = cfg.plugin_settings.enable_uploads;\n    if enable_uploads.is_some_and(|sent| sent != live.enable_uploads) {	    let uploads_sent = cfg.plugin_settings.enable_uploads;\n    let enable_uploads = uploads_sent;\n    if enable_uploads.is_some_and(|sent| sent != live.enable_uploads) {	api	configlic
+control-reorder-independent-imports	crates/mm-api/src/config_writes.rs	use mm_model::session::Session;\nuse mm_model::utils::AppError;	use mm_model::utils::AppError;\nuse mm_model::session::Session;	api	configlic

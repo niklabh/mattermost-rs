@@ -116,6 +116,11 @@ pub mod websocket;
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
 pub mod config;
 
+/// The `/api/v4/config` writes and `config_local.go` (2026-09-15) — the gates served, the save
+/// forwarded; see the module docs. Appended for the same reason as `config`.
+pub mod config_writes;
+/// The licence writes of `license.go` and `license_local.go` (2026-09-15).
+pub mod license_writes;
 /// The local-mode registrations of `team_local.go`, `webhook_local.go` and `command_local.go`
 /// (thirty pairs on the socket). Appended for the same reason as `config`.
 pub mod local_teams;
@@ -3092,11 +3097,11 @@ pub fn router(state: AppState) -> Router {
         )
         // ---- the config reads (2026-09-11) ----
         //
-        // `/config` shares its path with `PUT /config`, which is still Go's, so it must go
-        // through `partially_migrated` or the PUT becomes a 405 — see that function's comment.
+        // `PUT /config` joined the `GET` on 2026-09-15 — `config_writes::update_config`, whose
+        // gates are served and whose save is forwarded.
         .route(
             "/api/v4/config",
-            partially_migrated(get(config::get_config)),
+            partially_migrated(get(config::get_config).put(config_writes::update_config)),
         )
         // `APIHandler`, not `APISessionRequired`: an anonymous caller gets the limited map rather
         // than a 401, which is what every client reads before it can log in.
@@ -3107,6 +3112,32 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/config/environment",
             partially_migrated(get(config::get_environment_config)),
+        )
+        // ---- the config and licence writes (2026-09-15) ----
+        //
+        // `config.go:36-37`, `license.go:22-28`. Every handler serves its gates and forwards the
+        // save — see `config_writes` and `license_writes` for where the line is and why.
+        .route(
+            "/api/v4/config/patch",
+            partially_migrated(put(config_writes::patch_config)),
+        )
+        .route(
+            "/api/v4/config/reload",
+            partially_migrated(post(config_writes::reload_config)),
+        )
+        .route(
+            "/api/v4/license",
+            partially_migrated(
+                post(license_writes::add_license).delete(license_writes::remove_license),
+            ),
+        )
+        .route(
+            "/api/v4/license/preview",
+            partially_migrated(post(license_writes::preview_license)),
+        )
+        .route(
+            "/api/v4/trial-license",
+            partially_migrated(post(license_writes::request_trial_license)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
