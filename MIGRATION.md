@@ -13928,3 +13928,18 @@ Mutation tally (`websocket-guests.plan`): 9 run, 5 caught, 2 controls survived, 
 `team-arm-skipped` and `team-count-inverts-the-list` cannot be observed because the stock
 `team_guest` role has no `view_members`, so a guest's permitted-team list is always empty; the
 paired `team-permission-not-checked` was caught, which is how that is known.
+
+## The MFA half of a websocket connection's authentication (2026-09-15)
+
+New: `crates/mm-app/src/mfa.rs`, `crates/mm-api/tests/parity/websocket_mfa.rs`,
+`scripts/mutations/websocket-mfa.plan`, the `mfa` variant of `scripts/go-licensed.sh` with
+`common::licensed_mfa` on :8092. Closes [D-184]; the REST half was opened as [D-801].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app/authentication.go` `MFARequired` | `mm-app/src/mfa.rs` | DONE | 4 unit + parity | Three gates (licence feature, enable, enforce) before any lookup; the per-user exemptions are pure and tested per branch. |
+| `web_conn.go` `IsAuthenticated` / `IsMFAAuthenticated` | `mm-app/src/hub.rs` | DONE | parity | Registration and the pong handler ask only the basic half, so a user who owes MFA still gets `hello` — and nothing else. |
+| `ServiceSettings.EnforceMultifactorAuthentication`, `GuestAccountsSettings.EnforceMultifactorAuthentication` | `mm-app/src/config.rs` | DONE | config tests | Both keys added to the fixture script; `fixtures/config_active.json` gained exactly those two keys, both `false`. |
+
+Mutation tally (`websocket-mfa.plan`): 10 run, 8 caught, 2 controls survived. The first parity run
+failed on the test itself — it compared two `ping` answers whole, `server_time` included.
