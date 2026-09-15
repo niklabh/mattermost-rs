@@ -33,6 +33,15 @@ impl App {
         session: Option<&Session>,
         is_users_me_path: bool,
     ) -> AppResult<()> {
+        let config = self.config();
+        // Go's first `if` is four in-memory tests, in any order. Here the licence is a store read
+        // on an unlicensed server, and this runs for every authenticated REST request and for
+        // every event on every socket — so the two settings, which cost nothing, are asked
+        // before the licence is. The conjunction, and so the answer, is the same.
+        if !(config.enable_multifactor_authentication && config.enforce_multifactor_authentication)
+        {
+            return Ok(());
+        }
         let licensed_mfa = match self.license().await {
             Ok(Some(license)) => license_has_mfa(&license),
             Ok(None) => false,
@@ -41,7 +50,6 @@ impl App {
                 false
             }
         };
-        let config = self.config();
         if !mfa_gate_open(
             licensed_mfa,
             config.enable_multifactor_authentication,
