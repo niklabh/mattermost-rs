@@ -1,0 +1,17 @@
+# Mutation plan for the reloadable configuration projection — D-701 (2026-09-16).
+#
+#   scripts/mutate-batch.sh scripts/mutations/config-reload.plan
+#
+# The decisions: which methods trigger the post-response check, on which listener; the id
+# comparison; that the swap stores the new document; that the timer runs. Not planned: the
+# id-before-document order (a race no fixture can make deterministic) and the load-failure arm
+# (no REST write leaves a row this server cannot parse but Go accepted). The last two lines are
+# no-op controls and must SURVIVE.
+middleware-never-checks	crates/mm-api/src/lib.rs	    if may_write {\n        if let Err(err) = state.app.refresh_config().await {	    if false && may_write {\n        if let Err(err) = state.app.refresh_config().await {	api	config_reload
+middleware-checks-only-reads	crates/mm-api/src/lib.rs	    let may_write = !matches!(	    let may_write = matches!(	api	config_reload
+socket-router-has-no-reload	crates/mm-api/src/local.rs	        .layer(axum::middleware::from_fn_with_state(\n            state.clone(),\n            crate::refresh_config_after_write,\n        ))\n        .layer(Extension(GoLocalSocket(Arc::new(go_socket))))	        .layer(Extension(GoLocalSocket(Arc::new(go_socket))))	api	config_reload
+same-id-reloads-changed-id-does-not	crates/mm-app/src/lib.rs	            if loaded.id == id {	            if loaded.id != id {	api	config_reload
+swap-keeps-the-old-document	crates/mm-app/src/lib.rs	            config: std::sync::Arc::new(config),\n        };	            config: std::sync::Arc::clone(&loaded.config),\n        };	api	config_reload
+timer-never-runs	crates/mm-api/src/main.rs	    (ms != 0).then(|| std::time::Duration::from_millis(ms))	    (ms == 0).then(|| std::time::Duration::from_millis(ms))	api	config_reload
+control-rename-binding	crates/mm-api/src/lib.rs	    let response = next.run(request).await;\n    if may_write {	    let answered = next.run(request).await;\n    let response = answered;\n    if may_write {	api	config_reload
+control-hoist-a-constant	crates/mm-app/src/lib.rs	        tracing::Span::current().record("reloaded", true);\n        Ok(true)	        let reloaded = true;\n        tracing::Span::current().record("reloaded", reloaded);\n        Ok(reloaded)	api	config_reload

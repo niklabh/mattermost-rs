@@ -316,6 +316,39 @@ fn partially_migrated_with_ids(
     ))
 }
 
+/// Reload [`mm_app::App::config`] after any request that could have written the configuration.
+///
+/// This is the delivery half of [`mm_app::App::refresh_config`]: the stand-in for the
+/// `ConfigChanged` cluster message a Go peer would receive after `SaveConfig`. Every
+/// configuration save is Go's — the `/config` writes forward their save, and so do the plugin,
+/// certificate and licence routes that write the document as a side effect — so a server that
+/// only reloaded on the three `/config` paths would miss most of them. Any method other than
+/// `GET`, `HEAD` or `OPTIONS` is a candidate, served or forwarded, on either listener.
+///
+/// **After the response, and awaited.** Go's `SaveConfig` has swapped its copy before the
+/// handler writes a byte, so a client that reads right after its own write sees the new value
+/// from Go; awaiting the id check here gives it the same from this server. The cost is one
+/// indexed single-row read per write request. A failure is logged and the response is still
+/// sent: the old configuration stays in force, which is what Go does when `Load` fails, and the
+/// periodic check in `main.rs` retries.
+pub(crate) async fn refresh_config_after_write(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let may_write = !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    let response = next.run(request).await;
+    if may_write {
+        if let Err(err) = state.app.refresh_config().await {
+            tracing::warn!(error = %err, "could not check the active configuration after a write");
+        }
+    }
+    response
+}
+
 /// Port of the security headers `web.Handler.ServeHTTP` sets on **every** API response
 /// (web/handlers.go:242) and of the `Vary` that `gzhttp.GzipHandler` adds around it.
 ///
@@ -3537,6 +3570,11 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             go_global_headers,
+        ))
+        // Outside the headers layer, so the reload waits on nothing but the response itself.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            refresh_config_after_write,
         ))
         .with_state(state)
 }

@@ -14021,3 +14021,9 @@ Findings:
 Mutation tally (`job-workers.plan`): 29 run, 27 caught, 2 controls survived. One line was a
 harness fault on its first run — `status = $2` left a bind unused and `sqlx::query_as!` refused to
 compile — re-pointed at the bind list and re-run: caught.
+
+## The configuration projection follows a write — D-701 (2026-09-16)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Store.Load` on `ReloadConfig` / `ConfigChanged` | `mm-app/src/lib.rs` `App::refresh_config`, `mm-api` `refresh_config_after_write`, the `main.rs` timer | DONE | 3 parity | Keyed on the active row's id, because `DatabaseStore.persist` writes each change as a new row. The file backends stay built once, as Go's do. |

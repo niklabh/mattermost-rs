@@ -497,7 +497,7 @@ fn session_cookies(
 /// eligibility rules — is therefore unreachable here and is not ported.
 #[tracing::instrument(skip_all, fields(forwarded = false))]
 pub async fn get_login_type(State(state): State<AppState>, request: Request) -> Response {
-    if login_type_is_forwarded(state.app.config()) {
+    if login_type_is_forwarded(&state.app.config()) {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }

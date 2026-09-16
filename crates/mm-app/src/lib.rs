@@ -131,6 +131,15 @@ use mm_store::SqlStore;
 
 use crate::config::Config;
 
+/// The projection [`App::config`] answers with, and the `Configurations.Id` it was loaded from —
+/// `None` until the first [`App::refresh_config`], which therefore reloads once unless no row is
+/// active at all.
+#[derive(Debug)]
+struct LoadedConfig {
+    id: Option<String>,
+    config: std::sync::Arc<Config>,
+}
+
 /// Port of `app.App`, as far as the migrated surface needs it.
 ///
 /// Go's `App` is a facade over `Server`/`Platform` holding config, cluster, plugins and the store.
@@ -140,7 +149,9 @@ use crate::config::Config;
 #[derive(Debug, Clone)]
 pub struct App {
     store: SqlStore,
-    config: Config,
+    /// Go's `configStore` copy — see [`App::config`] and [`App::refresh_config`]. Shared across
+    /// clones, so a reload seen by one request is the configuration every later request reads.
+    config: std::sync::Arc<std::sync::RwLock<LoadedConfig>>,
     /// Shared, because every clone of `App` must publish into the *same* registry of live
     /// connections. `App` is cloned per request by axum's state extractor, and a hub per clone
     /// would mean an event raised by one request reaching none of the sockets.
@@ -229,7 +240,10 @@ impl App {
 
         Self {
             store,
-            config,
+            config: std::sync::Arc::new(std::sync::RwLock::new(LoadedConfig {
+                id: None,
+                config: std::sync::Arc::new(config),
+            })),
             filestore,
             export_filestore,
             license_keys,
@@ -262,8 +276,79 @@ impl App {
     }
 
     /// Port of `app.App.Config()`, narrowed to the settings something ported actually reads.
-    pub fn config(&self) -> &Config {
-        &self.config
+    ///
+    /// A snapshot, as Go's is: `Store.Get` hands out the pointer it holds and `Load` swaps in a
+    /// new one rather than mutating it, so a request that reads the configuration twice sees one
+    /// document or the other, never a mixture. Holding the `Arc` across an `.await` keeps that
+    /// request on the document it started with, which is also Go's behaviour.
+    pub fn config(&self) -> std::sync::Arc<Config> {
+        let loaded = self
+            .config
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::sync::Arc::clone(&loaded.config)
+    }
+
+    /// Reload the projection when the active `Configurations` row is no longer the one it was
+    /// loaded from. Answers whether it reloaded.
+    ///
+    /// # Why this exists, and what in Go it stands for
+    ///
+    /// Go's `DatabaseStore` has **no watcher** (config/database.go): a Go server swaps its copy
+    /// on its own `SaveConfig`, on `POST /config/reload` (`ReloadConfig` → `configStore.Load`),
+    /// and — in a cluster — on the `ConfigChanged` message a peer's `SaveConfig` sends
+    /// (platform/config.go:120). This process is that peer, but the cluster bus is private
+    /// enterprise code, so the message cannot reach it. The row is what the message would have
+    /// announced, and a new row is exactly a changed document: `persist` inserts every change
+    /// under a fresh id and writes nothing when the SHA is unchanged. So comparing ids is the
+    /// cluster message's analogue, and it is called on the two paths that stand in for its
+    /// delivery — after every write request this server answers or forwards, and on a timer
+    /// for the writes Go makes that never pass through here.
+    ///
+    /// # The id is read before the document, and that order is the correctness argument
+    ///
+    /// A write that lands between the two reads leaves the *older* id beside the *newer*
+    /// document, and the next call reloads once more for nothing. The other order would store
+    /// the newer id beside the older document, and no later call would ever notice.
+    ///
+    /// # A document that does not load leaves the old one in force
+    ///
+    /// As Go's `Store.Load` does: it returns the error before swapping (store.go:260-298). The
+    /// error is returned so the caller can log it; the id is not recorded, so the next call
+    /// tries again.
+    ///
+    /// # What is not rebuilt
+    ///
+    /// The file backends, the licence keys and `MM_LICENSE` are built once in
+    /// [`App::with_config`] and stay built. Go's `filestore` and `exportFilestore` are likewise
+    /// initialised once (`if ps.filestore == nil`, platform/service.go:385) with no config
+    /// listener, and the other two are environment-only.
+    #[tracing::instrument(skip_all, fields(reloaded))]
+    pub async fn refresh_config(&self) -> Result<bool, crate::config::ConfigError> {
+        use mm_store::ConfigStore as _;
+
+        let id = self.store.config().active_id().await?;
+        {
+            let loaded = self
+                .config
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if loaded.id == id {
+                tracing::Span::current().record("reloaded", false);
+                return Ok(false);
+            }
+        }
+        let config = Config::load(self.store.config()).await?;
+        let mut loaded = self
+            .config
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *loaded = LoadedConfig {
+            id,
+            config: std::sync::Arc::new(config),
+        };
+        tracing::Span::current().record("reloaded", true);
+        Ok(true)
     }
 
     /// Port of `app.App.FileBackend()` (app/file.go:53).

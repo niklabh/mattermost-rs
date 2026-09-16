@@ -4675,6 +4675,10 @@ mod go_parity {
             Ok(self.0.clone())
         }
 
+        async fn active_id(&self) -> Result<Option<String>, mm_store::StoreError> {
+            Ok(None)
+        }
+
         async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
             Ok(false)
         }

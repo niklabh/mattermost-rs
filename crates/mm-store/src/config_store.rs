@@ -57,6 +57,17 @@ pub trait ConfigStore {
         &self,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
 
+    /// The `Id` of the active configuration row, or `None` when no row is active.
+    ///
+    /// Not a Go function: it is how this process notices that the document changed without
+    /// reading and parsing the document. `DatabaseStore.persist` (config/database.go:161) writes
+    /// every change as a **new row with a fresh `model.NewId()`** and skips the write altogether
+    /// when the SHA is unchanged, so a different id is exactly "a different document" and an
+    /// equal id is exactly "the same one". See `mm_app::App::refresh_config`.
+    fn active_id(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
+
     /// Port of `DatabaseStore.HasFile` (config/database.go:290): whether a configuration file of
     /// that name was persisted — `SELECT COUNT(*) FROM ConfigurationFiles WHERE Name = ?`, then
     /// `count != 0`.
@@ -106,6 +117,20 @@ impl ConfigStore for SqlConfigStore {
         tracing::Span::current().record("found", value.is_some());
         tracing::Span::current().record("bytes", value.as_deref().map_or(0, str::len));
         Ok(value)
+    }
+
+    /// The same `WHERE active` as [`ConfigStore::load_active`], for the same reason.
+    #[tracing::instrument(skip_all, fields(found))]
+    async fn active_id(&self) -> Result<Option<String>, StoreError> {
+        let id = sqlx::query_scalar!("SELECT id FROM configurations WHERE active")
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to query the active configuration id".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("found", id.is_some());
+        Ok(id)
     }
 
     /// `COUNT(*)` scanned into an `int64`, compared with zero (database.go:302). `query_scalar!`
