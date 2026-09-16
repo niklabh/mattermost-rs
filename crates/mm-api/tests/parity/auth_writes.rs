@@ -434,6 +434,85 @@ async fn a_self_service_password_change_takes_effect_on_both_servers() {
     delete_plain_user(&http, &admin, &user.id).await;
 }
 
+/// A **pre-hashed** password written through mm-api (`already_hashed=true`, the admin import path)
+/// is what Go's next login checks — Go's cached copy of the user does not survive the write.
+///
+/// `UpdateHashedPassword` ends in `InvalidateCacheForUser`, as the plain change does. The hash is
+/// this user's own earlier one, read from the row: the account is moved to a second password
+/// through Go, Go's cache is warmed with that row, and mm-api then puts the first hash back. A
+/// stale Go keeps accepting the second password.
+#[tokio::test]
+async fn a_pre_hashed_password_set_here_takes_effect_on_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = create_plain_user(&http, &admin, &team, "pwhashed").await;
+    let username = plain_username("pwhashed");
+    let second_password = "Mmrs-Second-5678";
+    // Excludes the hand invalidations elsewhere; see `common::GO_CACHE`.
+    let _go_cache = common::GO_CACHE.lock().await;
+
+    let pool = pool().await.expect("the stack database");
+    let password_hash = async || {
+        sqlx::query_scalar::<_, String>("SELECT password FROM users WHERE id = $1")
+            .bind(&user.id)
+            .fetch_one(&pool)
+            .await
+            .expect("the user exists")
+    };
+    let first_hash = password_hash().await;
+
+    let set_password = async |base: &str, body: String| {
+        http.put(format!("{base}/api/v4/users/{}/password", user.id))
+            .header("Authorization", format!("Bearer {admin}"))
+            .body(body)
+            .send()
+            .await
+            .expect("answers")
+            .status()
+            .as_u16()
+    };
+    assert_eq!(
+        set_password(GO, format!(r#"{{"new_password":"{second_password}"}}"#)).await,
+        200,
+        "Go moves the account to the second password"
+    );
+    assert_ne!(password_hash().await, first_hash);
+
+    // Warm Go's profile cache with the second-password row.
+    let warm = http
+        .get(format!("{GO}/api/v4/users/{}", user.id))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(warm.status(), 200);
+
+    let body = serde_json::json!({ "already_hashed": "true", "new_password": first_hash });
+    assert_eq!(
+        set_password(RUST, body.to_string()).await,
+        200,
+        "mm-api writes the first hash back"
+    );
+    assert_eq!(password_hash().await, first_hash);
+
+    assert_eq!(
+        login(&http, GO, &username, PLAIN_USER_PASSWORD).await.0,
+        200,
+        "Go does not accept the password whose hash mm-api wrote"
+    );
+    assert_eq!(
+        login(&http, GO, &username, second_password).await.0,
+        401,
+        "Go still accepts the password mm-api replaced"
+    );
+
+    delete_plain_user(&http, &admin, &user.id).await;
+}
+
 /// The failed-attempt counter is the lockout, and its arithmetic is observable only here.
 ///
 /// A wrong current password **consumes** a slot. A too-short *new* password does not — the current

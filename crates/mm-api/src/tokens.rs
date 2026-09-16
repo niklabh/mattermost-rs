@@ -577,7 +577,7 @@ pub async fn revoke_user_access_token(
         Err(err) => return err.into_response(),
     };
 
-    match state.app.revoke_user_access_token(&token.id).await {
+    match state.app.revoke_user_access_token(&token).await {
         Ok(()) => status_ok(),
         Err(err) => ApiError::from(err).into_response(),
     }
@@ -606,7 +606,7 @@ pub async fn disable_user_access_token(
         Err(err) => return err.into_response(),
     };
 
-    match state.app.disable_user_access_token(&token.id).await {
+    match state.app.disable_user_access_token(&token).await {
         Ok(()) => status_ok(),
         Err(err) => ApiError::from(err).into_response(),
     }

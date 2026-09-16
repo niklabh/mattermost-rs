@@ -91,27 +91,28 @@ async fn main() -> anyhow::Result<()> {
 
     let mut app = App::with_config(store, config);
 
-    // The Go server's session cache (`mm_app::peer_cache`, D-350). Without it a session revoked
-    // here keeps authenticating against Go until its cache entry ages out, so the absence is
-    // logged at warn rather than info.
-    match std::env::var("MM_API_GO_CACHE_USER") {
-        Ok(username) if !username.is_empty() => {
-            tracing::info!(
-                username,
-                "purging the Go server's session cache on session changes"
-            );
-            let invalidator = mm_api::go_cache::GoCacheInvalidator::new(
-                app.store().clone(),
-                &go_upstream,
-                username,
-            );
-            app = app.with_peer_cache(std::sync::Arc::new(invalidator));
-        }
-        _ => tracing::warn!(
-            "MM_API_GO_CACHE_USER is unset: a session revoked here stays valid on the Go server \
-             until its session cache expires"
-        ),
-    }
+    // The Go server's caches (`mm_app::peer_cache`, `mm_api::go_cache`). **Required**: the Go
+    // server is permanent beside this one, and without the purge a session revoked or a password
+    // changed here keeps working against Go until its cache entry expires. Checked now, so a typo
+    // is one fatal line at startup rather than a warning on every logout.
+    let go_cache_user = std::env::var("MM_API_GO_CACHE_USER")
+        .ok()
+        .filter(|username| !username.is_empty())
+        .context(
+            "MM_API_GO_CACHE_USER must name a system administrator: this server uses that account \
+             to make the Go server forget sessions and passwords changed here (see mm_api::go_cache)",
+        )?;
+    tracing::info!(
+        username = go_cache_user,
+        "purging the Go server's caches on session and password changes"
+    );
+    let invalidator = mm_api::go_cache::GoCacheInvalidator::new(
+        app.store().clone(),
+        &go_upstream,
+        go_cache_user,
+    )?;
+    invalidator.verify().await?;
+    app = app.with_peer_cache(std::sync::Arc::new(invalidator));
 
     // The periodic half of `App::refresh_config` — the writes Go makes that never pass through
     // this server (its own `Load` write-back at startup, a plugin's `SaveConfig`, a client talking

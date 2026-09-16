@@ -14024,11 +14024,12 @@ compile — re-pointed at the bind list and re-run: caught.
 
 ## Tech-debt: user map columns and new-user notice views (2026-09-16)
 
-- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed).
-  Go writes a nil map as JSON `null`, and a nil `Props` as `{}`, so an omitted `props` on
-  `PUT /users/{id}` is *cleared*; see `json_column`/`props_column` in `mm_store::user_store`.
-  Go's msgp user cache then renders a stored `null` timezone as `{}` on cached reads only.
+- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed):
+  Go writes a nil map as JSON `null` and a nil `Props` as `{}`, so an omitted `props` on
+  `PUT /users/{id}` is *cleared*. See `json_column`/`props_column` in `mm_store::user_store`;
   `parity::user_updates`, 16 tests.
+- **Go's msgp user cache renders a stored `null` timezone as `{}`**, on cached reads only; this
+  server always reads the row. Noted in `parity::local_users`.
 - **`create_user` marks the cached product notices viewed** (D-683 closed);
   `mm-app/tests/db_new_user_notices.rs`, 1 test.
 
@@ -14047,6 +14048,11 @@ learned to read the stored `props` column.
 Mutation tally (`go-session-cache.plan`): 9 run, 7 caught, 2 controls survived. The two retry
 lines survived first — the test deleted the minted session by hand, which Go's cache never saw —
 and were caught once it revoked that session through Go.
+
+- **Review follow-ups (PR #29):** the token revoke, disable and rotate paths and the pre-hashed
+  password now clear Go's caches as Go's own functions do, `MM_API_GO_CACHE_USER` is required at
+  startup, and `refresh_config` is serialised. `parity::token_writes` and `parity::auth_writes`
+  gained a Go-side test each; plan re-run: 14 run, 12 caught, 2 controls survived.
 
 ## `checkCSRFToken` on every served route (2026-09-16)
 

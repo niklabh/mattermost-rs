@@ -21,6 +21,8 @@
 //! (the main one holds a start-up snapshot of the configuration, D-701), and patches it back off
 //! before asserting anything.
 
+use futures_util::FutureExt;
+
 use crate::common;
 
 use common::{
@@ -398,50 +400,58 @@ async fn a_cookie_write_must_carry_the_sessions_csrf_token() {
         )],
     )
     .await;
-    let outcome = match &strict {
-        Some(server) => {
-            let request = async |headers: &[(&str, &str)], context: &str| {
-                let send = async |base: &str| {
-                    let mut request = http
-                        .post(format!("{base}/api/v4/users/ids"))
-                        .header("Content-Type", "application/json")
-                        .body(ids.clone());
-                    for (name, value) in headers {
-                        request = request.header(*name, *value);
-                    }
-                    request.send().await.expect("the server answers")
+    // Everything between the two patches runs under `catch_unwind`: the setting is persisted in
+    // the shared configuration, and a panic that skipped the reset would leave every later run
+    // strict — failing the lenient legacy-header case above for a reason nowhere near it.
+    let outcome = std::panic::AssertUnwindSafe(async {
+        match &strict {
+            Some(server) => {
+                let request = async |headers: &[(&str, &str)], context: &str| {
+                    let send = async |base: &str| {
+                        let mut request = http
+                            .post(format!("{base}/api/v4/users/ids"))
+                            .header("Content-Type", "application/json")
+                            .body(ids.clone());
+                        for (name, value) in headers {
+                            request = request.header(*name, *value);
+                        }
+                        request.send().await.expect("the server answers")
+                    };
+                    let go = answer(send(GO).await).await;
+                    let rs_response = send(&server.base).await;
+                    let served = rs_response
+                        .headers()
+                        .get("x-mmrs-served-by")
+                        .is_some_and(|v| v == "rust");
+                    (context.to_owned(), go, answer(rs_response).await, served)
                 };
-                let go = answer(send(GO).await).await;
-                let rs_response = send(&server.base).await;
-                let served = rs_response
-                    .headers()
-                    .get("x-mmrs-served-by")
-                    .is_some_and(|v| v == "rust");
-                (context.to_owned(), go, answer(rs_response).await, served)
-            };
-            Some((
-                request(
-                    &[
-                        ("Cookie", &cookie),
-                        ("X-CSRF-Token", "notthetoken"),
-                        ("X-Requested-With", "XMLHttpRequest"),
-                    ],
-                    "strict, legacy header",
-                )
-                .await,
-                request(
-                    &[("Cookie", &cookie), ("X-CSRF-Token", &session.csrf)],
-                    "strict, right token",
-                )
-                .await,
-            ))
+                Some((
+                    request(
+                        &[
+                            ("Cookie", &cookie),
+                            ("X-CSRF-Token", "notthetoken"),
+                            ("X-Requested-With", "XMLHttpRequest"),
+                        ],
+                        "strict, legacy header",
+                    )
+                    .await,
+                    request(
+                        &[("Cookie", &cookie), ("X-CSRF-Token", &session.csrf)],
+                        "strict, right token",
+                    )
+                    .await,
+                ))
+            }
+            None => None,
         }
-        None => None,
-    };
+    })
+    .catch_unwind()
+    .await;
     drop(strict);
     set_go_strict(&http, &admin, false).await;
     delete_plain_user(&http, &admin, &user.id).await;
 
+    let outcome = outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     let (legacy, right) = outcome.expect("the strict mm-api starts");
     let mut compared = Vec::new();
     for (context, go, rs, served) in [legacy, right] {

@@ -273,23 +273,25 @@ impl App {
 
     /// Port of `App.RevokeUserAccessToken` (session.go:687).
     ///
-    /// # The session the token minted dies in the store, not here
+    /// # The session the token minted dies in the store; Go's cache of it dies here
     ///
     /// Go reads the session by the token's **secret**, deletes the token, then calls
     /// `RevokeSession` on what it read. The row deletion is already done by then: the store's
     /// transaction joins `Sessions.Token = UserAccessTokens.Token` and deletes both. What
-    /// `RevokeSession` adds is cache eviction and a mobile wipe push, neither of which exists in
-    /// this port (D-087 for the cache), so the lookup is not reproduced — reproducing it would
-    /// read a session in order to delete a row that is already gone.
+    /// `RevokeSession` adds is `ClearUserSessionCache` — which on this deployment is the *Go*
+    /// server's cache, still honouring the secret — and a mobile wipe push, which does not exist
+    /// here. So the lookup is reproduced for its one remaining purpose: deciding whether there is a
+    /// session whose cache entry to clear.
     ///
-    /// This is also why the token must be fetched **unsanitised** before calling this: Go needs
-    /// the secret for the session lookup, and the store needs it for the join. `getUserAccessToken`
-    /// passes `sanitize: true` and the revoke paths pass `false` for exactly that reason.
-    #[tracing::instrument(skip_all, fields(token_id = %token_id))]
-    pub async fn revoke_user_access_token(&self, token_id: &str) -> AppResult {
+    /// This is also why the token must be fetched **unsanitised** before calling this: the lookup
+    /// and the store's join both need the secret. `getUserAccessToken` passes `sanitize: true` and
+    /// the revoke paths pass `false` for exactly that reason.
+    #[tracing::instrument(skip_all, fields(token_id = %token.id))]
+    pub async fn revoke_user_access_token(&self, token: &UserAccessToken) -> AppResult {
+        let had_session = self.token_has_session(token).await;
         self.store()
             .user_access_token()
-            .delete(token_id)
+            .delete(&token.id)
             .await
             .map_err(|err| {
                 token_error(
@@ -297,18 +299,23 @@ impl App {
                     "app.user_access_token.delete.app_error",
                     err,
                 )
-            })
+            })?;
+        if had_session {
+            self.clear_session_cache_for_user(&token.user_id).await;
+        }
+        Ok(())
     }
 
     /// Port of `App.DisableUserAccessToken` (session.go:798).
     ///
-    /// The same session sweep as a revoke, but the row survives with `IsActive = false` — which
-    /// is what makes `enable` possible and a revoke final.
-    #[tracing::instrument(skip_all, fields(token_id = %token_id))]
-    pub async fn disable_user_access_token(&self, token_id: &str) -> AppResult {
+    /// The same session sweep as a revoke, cache clear included, but the row survives with
+    /// `IsActive = false` — which is what makes `enable` possible and a revoke final.
+    #[tracing::instrument(skip_all, fields(token_id = %token.id))]
+    pub async fn disable_user_access_token(&self, token: &UserAccessToken) -> AppResult {
+        let had_session = self.token_has_session(token).await;
         self.store()
             .user_access_token()
-            .update_token_disable(token_id)
+            .update_token_disable(&token.id)
             .await
             .map_err(|err| {
                 token_error(
@@ -316,7 +323,19 @@ impl App {
                     "app.user_access_token.update_token_disable.app_error",
                     err,
                 )
-            })
+            })?;
+        if had_session {
+            self.clear_session_cache_for_user(&token.user_id).await;
+        }
+        Ok(())
+    }
+
+    /// `session, _ = GetSessionContext(rctx, token.Token)` followed by `session != nil`: whether
+    /// the secret currently authenticates a session. A read failure is Go's discarded error — no
+    /// session, so no cache clear.
+    async fn token_has_session(&self, token: &UserAccessToken) -> bool {
+        use mm_store::SessionStore as _;
+        self.store().session().get(&token.token).await.is_ok()
     }
 
     /// Port of `App.EnableUserAccessToken` (session.go:813).
@@ -380,6 +399,10 @@ impl App {
             self.validate_user_access_token_expiry_at(expires_at, mm_model::utils::get_millis())?;
         }
 
+        // "Capture the old session before the store update so we can evict it from the cache
+        // after the secret changes."
+        let had_session = self.token_has_session(&token).await;
+
         let new_secret = mm_model::utils::new_id();
         self.store()
             .user_access_token()
@@ -392,6 +415,12 @@ impl App {
                     err,
                 )
             })?;
+
+        // `RevokeSession(oldSession)`: the store already deleted the row, so what is left is the
+        // cache clear. Go logs a failure and carries on; the purge cannot fail here.
+        if had_session {
+            self.clear_session_cache_for_user(&token.user_id).await;
+        }
 
         // Go mutates the caller's token *after* the store call and returns it, so the response
         // carries the pre-rotation `description` and `is_active` beside the new secret and expiry.

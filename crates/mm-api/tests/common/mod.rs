@@ -2499,6 +2499,8 @@ impl SecondServer {
             .env("DATABASE_URL", database_url)
             .env("MM_API_LISTEN", format!("127.0.0.1:{port}"))
             .env("MM_GO_UPSTREAM", GO)
+            // Required at startup; the stack's first account, as `scripts/mm-api-env.sh` sets it.
+            .env("MM_API_GO_CACHE_USER", "sliceuser")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         for (key, value) in env {

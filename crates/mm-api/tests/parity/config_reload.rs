@@ -30,6 +30,8 @@
 
 use std::time::Duration;
 
+use futures_util::FutureExt;
+
 use crate::common;
 
 use common::{FILE_SEARCH_SETTING, GO, RUST, client, go_minted_token, stack_enabled};
@@ -74,6 +76,25 @@ async fn search(client: &reqwest::Client, token: &str, base: &str) -> (u16, Stri
     (status, id)
 }
 
+/// Run `body` with `EnableFileSearch` restored to `true` afterwards, **panic or not**, while the
+/// caller still holds [`FILE_SEARCH_SETTING`].
+///
+/// The setting is persisted in the shared configuration; the lock only serialises. A panic after a
+/// `false` write would otherwise release the lock with file search off, and every `file_search`
+/// test after it would fail its 200. Restored through this server, so its own projection reloads
+/// before the lock goes.
+async fn restoring_file_search(
+    client: &reqwest::Client,
+    token: &str,
+    body: impl std::future::Future<Output = ()>,
+) {
+    let outcome = std::panic::AssertUnwindSafe(body).catch_unwind().await;
+    set_file_search(client, token, RUST, true).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// Both servers, Go first, asserting each answers `enabled` — a 200, or the disabled 501.
 async fn assert_both(client: &reqwest::Client, token: &str, enabled: bool, context: &str) {
     let expected = if enabled {
@@ -99,17 +120,20 @@ async fn a_configuration_write_through_this_server_gates_the_next_request() {
     let _setting = FILE_SEARCH_SETTING.write().await;
     set_file_search(&client, &admin, GO, true).await;
 
-    set_file_search(&client, &admin, RUST, false).await;
-    assert_both(
-        &client,
-        &admin,
-        false,
-        "right after turning file search off here",
-    )
-    .await;
+    restoring_file_search(&client, &admin, async {
+        set_file_search(&client, &admin, RUST, false).await;
+        assert_both(
+            &client,
+            &admin,
+            false,
+            "right after turning file search off here",
+        )
+        .await;
 
-    set_file_search(&client, &admin, RUST, true).await;
-    assert_both(&client, &admin, true, "right after turning it back on here").await;
+        set_file_search(&client, &admin, RUST, true).await;
+        assert_both(&client, &admin, true, "right after turning it back on here").await;
+    })
+    .await;
 }
 
 /// `localPatchConfig` over this server's socket forwards over Go's, so the socket router needs the
@@ -125,31 +149,34 @@ async fn a_configuration_write_over_the_local_socket_gates_the_next_request() {
     let _setting = FILE_SEARCH_SETTING.write().await;
     set_file_search(&client, &admin, GO, true).await;
 
-    for enabled in [false, true] {
-        let body = format!(r#"{{"ServiceSettings":{{"EnableFileSearch":{enabled}}}}}"#);
-        let request = axum::http::Request::builder()
-            .method("PUT")
-            .uri("/api/v4/config/patch")
-            .header("Host", "localhost")
-            .header("Content-Type", "application/json")
-            .header("Content-Length", body.len().to_string())
-            .body(axum::body::Body::from(body))
-            .expect("request builds");
-        let response = mm_api::local::send_over_unix(&socket, request)
-            .await
-            .expect("the patch reaches this server's socket");
-        assert_eq!(
-            response.status().as_u16(),
-            200,
-            "patching EnableFileSearch={enabled} over the socket"
-        );
-        let expected = if enabled { 200 } else { 501 };
-        assert_eq!(
-            search(&client, &admin, RUST).await.0,
-            expected,
-            "the first request after a socket patch to EnableFileSearch={enabled}"
-        );
-    }
+    restoring_file_search(&client, &admin, async {
+        for enabled in [false, true] {
+            let body = format!(r#"{{"ServiceSettings":{{"EnableFileSearch":{enabled}}}}}"#);
+            let request = axum::http::Request::builder()
+                .method("PUT")
+                .uri("/api/v4/config/patch")
+                .header("Host", "localhost")
+                .header("Content-Type", "application/json")
+                .header("Content-Length", body.len().to_string())
+                .body(axum::body::Body::from(body))
+                .expect("request builds");
+            let response = mm_api::local::send_over_unix(&socket, request)
+                .await
+                .expect("the patch reaches this server's socket");
+            assert_eq!(
+                response.status().as_u16(),
+                200,
+                "patching EnableFileSearch={enabled} over the socket"
+            );
+            let expected = if enabled { 200 } else { 501 };
+            assert_eq!(
+                search(&client, &admin, RUST).await.0,
+                expected,
+                "the first request after a socket patch to EnableFileSearch={enabled}"
+            );
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -168,24 +195,27 @@ async fn a_configuration_write_made_to_go_directly_is_picked_up_without_a_reques
         "before the write"
     );
 
-    set_file_search(&client, &admin, GO, false).await;
-    assert_eq!(
-        search(&client, &admin, GO).await,
-        (501, DISABLED.to_owned()),
-        "Go swaps its own copy on its own save"
-    );
-    assert_eq!(
-        rust_after_the_timer(&client, &admin).await,
-        501,
-        "a write made to Go reaches this server with no request through it"
-    );
+    restoring_file_search(&client, &admin, async {
+        set_file_search(&client, &admin, GO, false).await;
+        assert_eq!(
+            search(&client, &admin, GO).await,
+            (501, DISABLED.to_owned()),
+            "Go swaps its own copy on its own save"
+        );
+        assert_eq!(
+            rust_after_the_timer(&client, &admin).await,
+            501,
+            "a write made to Go reaches this server with no request through it"
+        );
 
-    set_file_search(&client, &admin, GO, true).await;
-    assert_eq!(
-        rust_after_the_timer(&client, &admin).await,
-        200,
-        "and so does its restore"
-    );
+        set_file_search(&client, &admin, GO, true).await;
+        assert_eq!(
+            rust_after_the_timer(&client, &admin).await,
+            200,
+            "and so does its restore"
+        );
+    })
+    .await;
 }
 
 /// This server's search status, asked **once**, after long enough for the periodic check to

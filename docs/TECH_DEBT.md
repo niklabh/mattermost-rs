@@ -8782,10 +8782,9 @@ server's `updateUser` wrote** (the forwarded `DELETE ?permanent=true` does a `Ge
 `mm_store` (`user_store.rs`, `json_or_null`) writes `None` as **SQL NULL** — discarding the `{}` /
 default-timezone the create stored. Go's `User` scanner then fails on that row with
 `failed to unmarshal user props: unexpected end of JSON input` and the read 500s; Go's own
-`updateUser` keeps the existing `{}` and never writes NULL. The HTTP parity suite misses it
-because each server only reads its own rows. **What is owed:** `updateUser` (and the store's
-`Update`) must preserve the target's `props`/`timezone` when the body omits them, as Go does,
-rather than writing NULL. `parity::local_users` sends both fields explicitly to route around it.
+`updateUser` never writes NULL. The HTTP parity suite misses it
+because each server only reads its own rows. The fix first proposed here — keep the stored maps —
+was a misreading of Go; the closure above records what Go does.
 
 ## D-610 · `DELETE /channels/{id}?permanent=true` over the socket is forwarded: `PermanentDeleteChannel` is unported
 

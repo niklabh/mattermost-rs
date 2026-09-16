@@ -153,6 +153,9 @@ pub struct App {
     /// Go's `configStore` copy — see [`App::config`] and [`App::refresh_config`]. Shared across
     /// clones, so a reload seen by one request is the configuration every later request reads.
     config: std::sync::Arc<std::sync::RwLock<LoadedConfig>>,
+    /// Serialises [`App::refresh_config`] end to end, so a slow reload of an older row cannot
+    /// install its document over a newer one a faster call already swapped in.
+    config_refresh: std::sync::Arc<tokio::sync::Mutex<()>>,
     /// Shared, because every clone of `App` must publish into the *same* registry of live
     /// connections. `App` is cloned per request by axum's state extractor, and a hub per clone
     /// would mean an event raised by one request reaching none of the sockets.
@@ -248,6 +251,7 @@ impl App {
                 id: None,
                 config: std::sync::Arc::new(config),
             })),
+            config_refresh: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             filestore,
             export_filestore,
             license_keys,
@@ -331,6 +335,14 @@ impl App {
     /// document, and the next call reloads once more for nothing. The other order would store
     /// the newer id beside the older document, and no later call would ever notice.
     ///
+    /// # One refresh at a time
+    ///
+    /// The after-write hook and the timer can overlap. Unserialised, a call that read the older id
+    /// and loaded slowly would swap its document in *after* a faster call installed the newer one,
+    /// and this process would run on the older document until the next refresh noticed. The whole
+    /// check-load-swap runs under `config_refresh`; a waiter then usually finds the id current and
+    /// returns without loading.
+    ///
     /// # A document that does not load leaves the old one in force
     ///
     /// As Go's `Store.Load` does: it returns the error before swapping (store.go:260-298). The
@@ -347,6 +359,7 @@ impl App {
     pub async fn refresh_config(&self) -> Result<bool, crate::config::ConfigError> {
         use mm_store::ConfigStore as _;
 
+        let _refresh = self.config_refresh.lock().await;
         let id = self.store.config().active_id().await?;
         {
             let loaded = self
