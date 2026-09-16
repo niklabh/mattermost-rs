@@ -535,10 +535,6 @@ impl App {
     ///
     /// # What this port does not do
     ///
-    /// - **`Users.UpdateAt` is not bumped.** Go's `UpdateUpdateAt` sits between the membership
-    ///   write and the sidebar categories, and `update_update_at` does not exist on this port's
-    ///   `UserStore`. The consequence is on the wire: `GET /users/{id}` reports the old
-    ///   `update_at` after a join this server served. Recorded as **D-242**.
     /// - **The join system post.** `ExperimentalEnableDefaultChannelLeaveJoinMessages` defaults
     ///   to **`true`** (config.go:874), so a stock Go server *does* post "user joined the team"
     ///   in `town-square`. This port writes no `Posts` rows — **D-243**.
@@ -643,7 +639,16 @@ impl App {
             return Ok(member);
         }
 
-        // `UpdateUpdateAt` would go here — see the note above (D-242).
+        // `UpdateUpdateAt` (team.go:845), a **hard** error — the membership is already written, and
+        // Go still answers 500 without the sidebar categories or the default channels.
+        self.store()
+            .user()
+            .update_update_at(&user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "user update_at bump failed");
+                join_error("app.user.update_update.app_error", String::new(), 500)
+            })?;
 
         if let Err(err) = self
             .create_initial_sidebar_categories(&user.id, &team.id)
