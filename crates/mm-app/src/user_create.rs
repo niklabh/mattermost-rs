@@ -344,9 +344,11 @@ impl App {
             tracing::warn!(error = %err, "Encountered error saving user preferences");
         }
 
-        // `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` is not ported: the product-notice
-        // machinery is not in this tree, it runs in a goroutine whose result never reaches the
-        // response, and it writes only to `ProductNoticeViewState`.
+        // `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)`. Awaited rather than spawned: its
+        // result never reaches the response either way, and awaiting means a client's first
+        // `GET /system/notices` cannot race the write.
+        self.update_viewed_product_notices_for_new_user(&ruser.id)
+            .await;
 
         // "This message goes to everyone, so the teamID, channelID and userID are irrelevant" —
         // an unaddressed broadcast carrying only `user_id`, *not* the user object. A client

@@ -61,6 +61,33 @@ pub struct NoticesCache {
 pub type SharedNoticesCache = Arc<RwLock<NoticesCache>>;
 
 impl App {
+    /// Port of `App.UpdateViewedProductNoticesForNewUser` (product_notices.go:311).
+    ///
+    /// Marks every notice **in this process's cache** as viewed once, so a new account is not
+    /// shown notices that were already current the day it joined. The ids come from the cache, not
+    /// the feed: a notice the cache has not fetched yet is shown to the new user as to anyone.
+    /// Failure is logged and swallowed — Go runs it in a goroutine and logs at error.
+    #[tracing::instrument(skip(self))]
+    pub async fn update_viewed_product_notices_for_new_user(&self, user_id: &str) {
+        let notice_ids: Vec<String> = self
+            .notices_cache()
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .notices
+            .0
+            .iter()
+            .map(|notice| notice.id.clone())
+            .collect();
+        if let Err(err) = self
+            .store()
+            .product_notices()
+            .view(user_id, &notice_ids)
+            .await
+        {
+            tracing::error!(error = %err, user_id, "Cannot update product notices viewed state for user");
+        }
+    }
+
     /// Port of `App.UpdateProductNotices` (product_notices.go:322): the three counts (each
     /// failure logged and the old value kept), the fetch, the parse, and `ClearOldNotices`.
     ///

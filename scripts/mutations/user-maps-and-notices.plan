@@ -1,0 +1,12 @@
+# Mutation plan for D-601 (user map columns never SQL NULL) and D-683 (new-user notice views), 2026-09-16.
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-maps-and-notices.plan
+#
+# The last two lines are no-op controls and must SURVIVE.
+omitted-props-stored-as-json-null	crates/mm-store/src/user_store.rs	        None => Ok(serde_json::Value::Object(serde_json::Map::new())),	        None => Ok(serde_json::Value::Null),	api	user_updates::an_omitted_map
+omitted-map-stored-as-empty-object	crates/mm-store/src/user_store.rs	        None => Ok(serde_json::Value::Null),\n        Some(value) => serde_json::to_value	        None => Ok(serde_json::Value::Object(serde_json::Map::new())),\n        Some(value) => serde_json::to_value	api	user_updates::an_omitted_map
+present-props-ignored	crates/mm-store/src/user_store.rs	        Some(value) => json_column(Some(value), "props"),	        Some(_) => Ok(serde_json::Value::Object(serde_json::Map::new())),	api	user_updates
+new-user-notices-not-viewed	crates/mm-app/src/user_create.rs	        self.update_viewed_product_notices_for_new_user(&ruser.id)\n            .await;	        let _ = &ruser.id;	app	new_user_notices
+new-user-views-only-the-first-notice	crates/mm-app/src/product_notices.rs	            .iter()\n            .map(|notice| notice.id.clone())	            .iter()\n            .take(1)\n            .map(|notice| notice.id.clone())	app	new_user_notices
+control-props-empty-object-via-macro	crates/mm-store/src/user_store.rs	        None => Ok(serde_json::Value::Object(serde_json::Map::new())),	        None => Ok(serde_json::json!({})),	api	user_updates::an_omitted_map
+control-notice-closure-renamed	crates/mm-app/src/product_notices.rs	            .map(|notice| notice.id.clone())	            .map(|n| n.id.clone())	app	new_user_notices

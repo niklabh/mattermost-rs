@@ -14021,3 +14021,17 @@ Findings:
 Mutation tally (`job-workers.plan`): 29 run, 27 caught, 2 controls survived. One line was a
 harness fault on its first run — `status = $2` left a bind unused and `sqlx::query_as!` refused to
 compile — re-pointed at the bind list and re-run: caught.
+
+## Tech-debt: user map columns and new-user notice views (2026-09-16)
+
+- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed).
+  Go writes a nil map as JSON `null`, and a nil `Props` as `{}`, so an omitted `props` on
+  `PUT /users/{id}` is *cleared*; see `json_column`/`props_column` in `mm_store::user_store`.
+  Go's msgp user cache then renders a stored `null` timezone as `{}` on cached reads only.
+  `parity::user_updates`, 16 tests.
+- **`create_user` marks the cached product notices viewed** (D-683 closed);
+  `mm-app/tests/db_new_user_notices.rs`, 1 test.
+
+Mutation tally (`user-maps-and-notices.plan`): 7 run, 5 caught, 2 controls survived. The fifth
+(`present-props-ignored`) survived at first and was caught after `an_update_agrees_field_for_field`
+learned to read the stored `props` column.

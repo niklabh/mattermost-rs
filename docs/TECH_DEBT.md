@@ -8768,7 +8768,12 @@ database (a fresh compose volume, or a transaction rolled back), not the shared 
 
 ## D-601 · `updateUser` writes an omitted `props`/`timezone` as SQL NULL, which Go's scanner cannot read
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
+**Closed** 2026-09-16 — the premise was wrong: Go does **not** keep the stored maps. Its
+`driver.Valuer`s write a nil map as the JSON text `null`, and `wrapBinaryParamStringMap` turns a
+nil `Props` into `{}` — so an omitted `props` is cleared. `mm_store::user_store::json_column` and
+`props_column` now write exactly that on `save` and `update`, `mfausedtimestamps` included;
+measured by `parity::user_updates::an_omitted_map_is_stored_as_go_stores_it`.
 
 Found by the local-socket user suite, which is the first test to have **Go read a row this
 server's `updateUser` wrote** (the forwarded `DELETE ?permanent=true` does a `GetUser` in Go).
@@ -9073,7 +9078,10 @@ is decided rather than inherited.
 
 ## D-683 · A user created here is not marked as having viewed the current product notices
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+**Closed** 2026-09-16 — `App::update_viewed_product_notices_for_new_user`, awaited at the end of
+`create_user`; `mm-app/tests/db_new_user_notices.rs` plants the cache, since neither stack server
+can reach a feed.
 
 `App.CreateUser` ends with `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` (app/user.go:413),
 which writes a `ProductNoticeViewState` row with `Viewed = 1` for every notice in the cache, so a
