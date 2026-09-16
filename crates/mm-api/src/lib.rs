@@ -120,6 +120,7 @@ pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
+pub mod wsapi;
 
 /// The three `/api/v4/config` reads. Appended rather than filed alphabetically, because this
 /// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
@@ -476,9 +477,8 @@ pub fn router(state: AppState) -> Router {
         // `tests/parity.rs` covers the whole `/users/{id}/…` neighbourhood.
         //
         // `PUT /mfa` and `POST /mfa/generate` are `APISessionRequiredMfa` in Go, which differs
-        // from `APISessionRequired` in exactly one field — `RequireMfa: false` — and that field
-        // gates a check this server does not make at all. So the two wrappers are the same thing
-        // here, and will stop being the same thing the day `MfaRequired` is ported.
+        // from `APISessionRequired` in exactly one field — `RequireMfa: false`. Their handlers take
+        // `auth::MfaSetupSession`, the extractor that skips `MfaRequired`.
         .route(
             "/api/v4/users/{user_id}/auth",
             partially_migrated_with_ids(&state, put(user_auth::update_user_auth)),

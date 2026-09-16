@@ -752,7 +752,6 @@ async fn values_core(
     match has_target_access(&state, &session, object_type, target_id).await {
         TargetAccess::Allowed => {}
         TargetAccess::Denied(err) => return err.into_response(),
-        TargetAccess::Forward => return proxy::forward_to_go(State(state), request).await,
     }
 
     let query = request.uri().query();
@@ -874,14 +873,7 @@ async fn has_target_access(
                         &PERMISSION_VIEW_MEMBERS,
                     ));
                 }
-                // The caller's account carries view restrictions, which needs team and channel
-                // membership lookups this port does not have. Forward rather than guess; see
-                // [`mm_app::App::user_can_see_other_user`].
-                Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-                    tracing::debug!(reason, "forwarding to Go");
-                    return TargetAccess::Forward;
-                }
-                Err(mm_app::post::PrepareError::App(err)) => {
+                Err(err) => {
                     return TargetAccess::Denied(ApiError::from(err));
                 }
             }
@@ -911,7 +903,6 @@ async fn has_target_access(
 enum TargetAccess {
     Allowed,
     Denied(ApiError),
-    Forward,
 }
 
 /// `strconv.ParseInt(query.Get(key), 10, 64)` guarded by `if s != ""`.

@@ -125,15 +125,16 @@ impl App {
     /// error, deliberately, so no caller can be tempted to turn a failed activity write into a
     /// failed request.
     ///
-    /// Go's `UpdateWebConnUserActivity` call, first in the function, is skipped: it touches the
-    /// websocket hub, which is phase 5. `PHASE5: update WebConn activity`. Go's own
+    /// First, unthrottled, Go records the activity on every websocket connection of this session
+    /// (`UpdateWebConnUserActivity`) — what the hub's reaper and its away test read. Go's own
     /// `session.LastActivityAt = now` afterwards mutates a **by-value copy** on its way into the
     /// session cache, so with no cache there is nothing for it to do here.
     #[tracing::instrument(skip_all, fields(session_id = %session.id, wrote))]
     pub async fn update_last_activity_at_if_needed(&self, session: &Session) {
         let now = get_millis();
 
-        // PHASE5: update WebConn activity (`ps.UpdateWebConnUserActivity(session, now)`).
+        self.hub()
+            .update_activity(&session.user_id, &session.token, now);
 
         if !activity_write_is_due(now, session.last_activity_at) {
             tracing::Span::current().record("wrote", false);
@@ -313,6 +314,8 @@ impl App {
                 })?;
         }
 
+        // `ps.ClearUserSessionCache(userID)` (platform/session.go:342).
+        self.clear_session_cache_for_user(user_id);
         Ok(())
     }
 
@@ -372,6 +375,9 @@ impl App {
                     500,
                 )
             })?;
+
+        // `ClearAllUsersSessionCache` (platform/session.go:178) — its hub leg is `Hub.InvalidateAll`.
+        self.hub().invalidate_all();
 
         Ok(())
     }

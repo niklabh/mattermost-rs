@@ -322,12 +322,13 @@ pub async fn revoke_all_sessions_all_users(
 /// `c.Err != nil` short-circuits before the props write, which is why the early return below sits
 /// between the two rather than at the top.
 ///
-/// # What this port does not do: the cookie is emitted, the cache is not cleared
+/// # The session cache, twice
 ///
-/// Go calls `ClearSessionCacheForUser` twice on this path. There is no session cache here
-/// ([D-087]) so both are no-ops locally — but the **Go server beside us** has one, and this
-/// handler both deletes session rows and moves `ExpiresAt`, so its cache can serve a revoked
-/// session until entry expiry. See [D-350]; it is the strangler's problem, not a wire difference.
+/// Go calls `ClearSessionCacheForUser` twice on this path; both are
+/// [`mm_app::App::clear_session_cache_for_user`] here. The **Go server beside us** keeps its own
+/// cache, and this handler both deletes session rows and moves `ExpiresAt`, so that cache can serve
+/// a revoked session until entry expiry. See [D-350]; it is the strangler's problem, not a wire
+/// difference.
 #[tracing::instrument(skip_all, fields(session_id = %session.0.id, attached))]
 pub async fn handle_device_props(
     State(state): State<AppState>,
@@ -358,7 +359,8 @@ pub async fn handle_device_props(
         .set_extra_session_props(&mut session, &new_props)
         .await?;
 
-    // `ClearSessionCacheForUser` — a no-op here; see the note above and [D-350].
+    // `c.App.ClearSessionCacheForUser(...)` (user.go:2746).
+    state.app.clear_session_cache_for_user(&session.user_id);
 
     let mut response = status_ok();
     if let Some(cookie) = cookie {
@@ -508,6 +510,9 @@ async fn attach_device_ids(
             )
             .await?;
     }
+
+    // `c.App.ClearSessionCacheForUser(...)` (user.go:2779).
+    state.app.clear_session_cache_for_user(&session.user_id);
 
     let hours = state.app.config().session_length_mobile_in_hours;
     state.app.set_session_expire_in_hours(session, hours);

@@ -31,6 +31,9 @@
 # asking an agent to run anything.
 set -e
 cd "$(dirname "$0")/.."
+# zsh aborts on a glob that matches nothing (NOMATCH); the stack-claim loop below globs the worktree
+# directory, which is empty the first time `add` runs. bash already leaves such a glob literal.
+[ -n "${ZSH_VERSION:-}" ] && setopt NULL_GLOB
 ROOT=$(pwd)
 TREES="${MMRS_WORKTREES:-$(dirname "$ROOT")/mmrs-worktrees}"
 

@@ -147,6 +147,22 @@ pub trait TeamStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetUserTeamIds` (team_store.go:1560): the teams a user is a current
+    /// member of, **deleted teams excluded**. Go reads the replica with no ordering.
+    fn get_user_team_ids(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.UserBelongsToTeams` (team_store.go:1667): whether the user is a
+    /// current member of **any** of `team_ids`. Unlike [`TeamStore::get_user_team_ids`] there is
+    /// no `Teams` join, so a membership of a deleted team counts.
+    fn user_belongs_to_teams(
+        &self,
+        user_id: &str,
+        team_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.Get` (team_store.go:354).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
 
@@ -440,6 +456,20 @@ impl TeamStore for SqlTeamStore {
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, found))]
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    async fn get_user_team_ids(&self, user_id: &str) -> Result<Vec<String>, StoreError> {
+        get_user_team_ids(&self.pool, user_id).await
+    }
+
+    #[tracing::instrument(skip(self, team_ids), fields(user_id = %user_id, teams = team_ids.len()))]
+    async fn user_belongs_to_teams(
+        &self,
+        user_id: &str,
+        team_ids: &[String],
+    ) -> Result<bool, StoreError> {
+        user_belongs_to_teams(&self.pool, user_id, team_ids).await
+    }
+
     async fn get_teams_by_user_id(&self, user_id: &str) -> Result<Vec<Team>, StoreError> {
         get_teams_by_user_id(&self.pool, user_id).await
     }
@@ -1128,6 +1158,57 @@ pub async fn get_by_name(pool: &PgPool, name: &str) -> Result<Team, StoreError> 
     tracing::Span::current().record("found", true);
 
     Ok(team_from_row(row))
+}
+
+/// See [`TeamStore::get_user_team_ids`].
+pub async fn get_user_team_ids(pool: &PgPool, user_id: &str) -> Result<Vec<String>, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT teammembers.teamid AS "team_id!"
+          FROM teammembers
+          JOIN teams ON teammembers.teamid = teams.id
+         WHERE teammembers.userid = $1
+           AND teammembers.deleteat = 0
+           AND teams.deleteat = 0
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with userId={user_id}"),
+        source,
+    })
+}
+
+/// See [`TeamStore::user_belongs_to_teams`]. squirrel renders `TeamId IN ()` for an empty list
+/// as the false predicate `(1=0)`, so an empty list is `false` without a query.
+pub async fn user_belongs_to_teams(
+    pool: &PgPool,
+    user_id: &str,
+    team_ids: &[String],
+) -> Result<bool, StoreError> {
+    if team_ids.is_empty() {
+        return Ok(false);
+    }
+    let count = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM teammembers
+         WHERE userid = $1
+           AND teamid = ANY($2)
+           AND deleteat = 0
+        "#,
+        user_id,
+        team_ids
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count TeamMembers".to_owned(),
+        source,
+    })?;
+    Ok(count > 0)
 }
 
 /// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705).

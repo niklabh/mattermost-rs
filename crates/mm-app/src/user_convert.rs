@@ -333,6 +333,8 @@ impl App {
             }
         }
 
+        // `a.ClearSessionCacheForUser(user.Id)` (user.go:2844).
+        self.clear_session_cache_for_user(&user.id);
         Ok(())
     }
 
@@ -352,10 +354,10 @@ impl App {
     /// one hard error past the write is the `json.Marshal` of a channel member, which a
     /// `ChannelMember` cannot produce; it is a log line here.
     ///
-    /// Not ported: `InvalidateCacheForUser`, `invalidateCacheForChannelMembers` and
-    /// `ClearSessionCacheForUser` — this process keeps none of those caches, so there is nothing
-    /// to clear. The Go server beside it does, which is what
-    /// `common::invalidate_go_caches` is for in the parity suite.
+    /// Not ported: `InvalidateCacheForUser` and `invalidateCacheForChannelMembers` — this process
+    /// keeps neither cache. `ClearSessionCacheForUser` is [`App::clear_session_cache_for_user`].
+    /// The Go server beside it keeps all three, which is what `common::invalidate_go_caches` is
+    /// for in the parity suite.
     #[tracing::instrument(skip_all, fields(user_id = %user.id, teams))]
     pub async fn demote_user_to_guest(&self, user: &User) -> AppResult<()> {
         if user.is_bot {
@@ -444,6 +446,8 @@ impl App {
             }
         }
 
+        // `a.ClearSessionCacheForUser(user.Id)` (user.go:2895).
+        self.clear_session_cache_for_user(&user.id);
         Ok(())
     }
 

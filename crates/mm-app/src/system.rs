@@ -285,12 +285,16 @@ impl App {
     ///
     /// # What there is to invalidate here
     ///
-    /// Go purges the session cache (and, with it, every websocket connection's cached
-    /// membership), the status cache, six store-level caches, the link-metadata cache, and then
-    /// reloads the licence. This port keeps only three of those in memory — the status cache,
-    /// the hub's per-connection membership caches and the verified licence — and those three
-    /// are what is dropped; sessions and every store read go to the table on each request
-    /// ([D-087]), so there is nothing else to purge and nothing this call can make stale.
+    /// Go purges the session cache, the status cache, six store-level caches and the
+    /// link-metadata cache, and then reloads the licence. This port keeps two of those in memory —
+    /// the status cache and the verified licence — and those two are what is dropped; sessions
+    /// and every store read go to the table on each request ([D-087]).
+    ///
+    /// **The hub is not touched**, and until 2026-09-15 it was. `InvalidateAllCachesSkipSend`
+    /// calls `ClearAllUsersSessionCacheLocal`, the cache purge alone — not
+    /// `ClearSessionCacheForAllUsersSkipClusterSend`, which is the one that also reaches every
+    /// connection (cluster_handlers.go:85). So a websocket connection's membership cache and
+    /// session survive this call on Go, and now here.
     ///
     /// # It does not reach the Go server's caches
     ///
@@ -301,7 +305,6 @@ impl App {
     #[tracing::instrument(skip(self))]
     pub fn invalidate_all_caches(&self) -> AppResult {
         tracing::info!("Purging all caches");
-        self.hub().invalidate_all();
         self.status_cache
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

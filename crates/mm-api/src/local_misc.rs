@@ -437,15 +437,10 @@ async fn local_delete_cpa_field(
 
 /// `listCPAValues` through `APILocal` (:14).
 ///
-/// The handler's one forward — `hasTargetAccess`'s `UserCanSeeOtherUser` arm — is unreachable
-/// here: an unrestricted session passes the target check before that lookup, in Go and in the
-/// port alike. `me` is a 400.
-async fn local_list_cpa_values(
-    state: State<AppState>,
-    path: Path<String>,
-    request: Request,
-) -> Response {
-    cpa::list_cpa_values(state, path, local_session(), request).await
+/// An unrestricted session passes `hasTargetAccess` before `UserCanSeeOtherUser` is asked, in Go
+/// and in the port alike. `me` is a 400.
+async fn local_list_cpa_values(state: State<AppState>, path: Path<String>) -> Response {
+    cpa::list_cpa_values(state, path, local_session()).await
 }
 
 /// `patchCPAValues` through `APILocal` (:15) — the session's user, which is **nobody**; see the

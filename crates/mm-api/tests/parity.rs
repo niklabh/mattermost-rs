@@ -148,6 +148,7 @@ mod parity {
     pub mod recaps;
     pub mod recommended_channels;
     pub mod redirect_location;
+    pub mod rest_mfa;
     pub mod role_patch;
     pub mod roles;
     pub mod schemes;
@@ -219,7 +220,11 @@ mod parity {
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
+    pub mod websocket_actions;
+    pub mod websocket_guests;
     pub mod websocket_hooks;
+    pub mod websocket_mfa;
+    pub mod websocket_reconnect;
 
     // Appended 2026-09-11: the local-mode (unix socket) API. Out of alphabetical order on
     // purpose — four agents were editing this file in parallel and an append conflicts with

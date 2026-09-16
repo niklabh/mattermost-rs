@@ -484,10 +484,13 @@ impl App {
 
             total_revoked += user_ids.len() as i64;
 
-            // Go clears the session cache once per distinct user id here. There is no session
-            // cache in this port (D-087), so the de-duplication has nothing to drive and is not
-            // reproduced — the sessions themselves are already gone, deleted inside the store's
-            // statement.
+            // `a.ClearSessionCacheForUser(userID)` once per distinct id (session.go:781).
+            let mut seen = std::collections::HashSet::with_capacity(user_ids.len());
+            for user_id in &user_ids {
+                if seen.insert(user_id.as_str()) {
+                    self.clear_session_cache_for_user(user_id);
+                }
+            }
 
             if (user_ids.len() as i64) < REVOKE_NON_COMPLIANT_BATCH_LIMIT {
                 all_revoked = true;

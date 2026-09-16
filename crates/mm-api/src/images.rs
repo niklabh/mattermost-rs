@@ -152,11 +152,7 @@ async fn serve_profile_image(
         .await
     {
         Ok(can_see) => can_see,
-        Err(PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, user_id, "forwarding to Go");
-            return Ok(None);
-        }
-        Err(PrepareError::App(err)) => return Err(ApiError::from(*err)),
+        Err(err) => return Err(ApiError::from(*err)),
     };
     if !can_see {
         return Err(ApiError::from(make_permission_error(
@@ -844,11 +840,7 @@ async fn refuse_default_image_read(
         .await
     {
         Ok(can_see) => can_see,
-        Err(PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, user_id, "forwarding to Go");
-            return Ok(());
-        }
-        Err(PrepareError::App(err)) => return Err(ApiError::from(*err)),
+        Err(err) => return Err(ApiError::from(*err)),
     };
     if !can_see {
         return Err(ApiError::from(make_permission_error(

@@ -46,6 +46,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use mm_model::utils::is_valid_id;
 
+use crate::auth::MfaSetupSession;
 use crate::auth_writes::OptionalSession;
 use crate::channels::{ME, query_first};
 use crate::error::ApiError;
@@ -572,7 +573,7 @@ async fn local_update_user_mfa(
     path: UrlPath<String>,
     request: Request,
 ) -> Response {
-    user_auth::update_user_mfa(state, path, local_session(), request).await
+    user_auth::update_user_mfa(state, path, MfaSetupSession(local_session().0), request).await
 }
 
 /// `updateUserActive` through `APILocal` (user_local.go:31). `isSelfDeactivate` compares the

@@ -2584,6 +2584,8 @@ static LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
     tokio::sync::OnceCell::const_new();
 static LICENSED_GUEST: tokio::sync::OnceCell<(SecondServer, String, String)> =
     tokio::sync::OnceCell::const_new();
+static LICENSED_MFA: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
 
 /// The signed licence and the key file `scripts/go-licensed.sh` left, or a panic naming the
 /// script — a suite whose oracle is absent must not pass quietly.
@@ -2732,6 +2734,49 @@ pub async fn licensed_guest() -> LicensedPair {
         .await;
     LicensedPair {
         go: licensed_guest_go(),
+        rust: server.base.clone(),
+        signed: signed.clone(),
+        key_file: key_file.clone(),
+    }
+}
+
+/// The licensed **MFA** oracle's base URL — `MMRS_LICENSED_VARIANT=mfa scripts/go-licensed.sh
+/// port`: the same licence, MFA enabled and enforced as environment overrides.
+pub fn licensed_mfa_go() -> String {
+    format!("http://localhost:{}", go_port() + 34)
+}
+
+/// The mm-api port for the MFA pair: 8092 on stack 0.
+const LICENSED_MFA_RUST_PORT: u16 = 8092;
+
+/// The licensed pair with `ServiceSettings.EnableMultifactorAuthentication` and
+/// `EnforceMultifactorAuthentication` on, for `MFARequired`. Same rules as [`licensed`].
+pub async fn licensed_mfa() -> LicensedPair {
+    let (server, signed, key_file) = LICENSED_MFA
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            let go = licensed_mfa_go();
+            require_licensed_go(&go, "licensed mfa").await;
+            let server = start_licensed_rust(
+                LICENSED_MFA_RUST_PORT,
+                &go,
+                go_port() + 34,
+                &signed,
+                &key_file,
+                &[
+                    ("MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION", "true"),
+                    (
+                        "MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION",
+                        "true",
+                    ),
+                ],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    LicensedPair {
+        go: licensed_mfa_go(),
         rust: server.base.clone(),
         signed: signed.clone(),
         key_file: key_file.clone(),
@@ -2891,6 +2936,98 @@ impl SocketProbe {
         );
         probe.raw.clear();
         probe
+    }
+
+    /// Connect with **no token** — the connection both servers upgrade and do not register. No
+    /// `hello` is expected, and nothing addressed to a user will arrive until it authenticates
+    /// over the socket.
+    pub async fn connect_anonymous(base: &str) -> SocketProbe {
+        let url = format!("{}/api/v4/websocket", base.replace("http://", "ws://"));
+        let (socket, _) = tokio_tungstenite::connect_async(url.as_str())
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// Send one text frame verbatim — for frames that are not a well-formed `WebSocketRequest`.
+    pub async fn send_text(&mut self, text: &str) {
+        self.socket
+            .send(Message::Text(text.to_owned().into()))
+            .await
+            .expect("the socket accepts a frame");
+    }
+
+    /// Read until the server closes the connection or `window` expires; true if it closed.
+    ///
+    /// A close handshake, a reset without one and end-of-stream all count — Go closes some
+    /// connections with a close frame (`writePump` on a closed queue) and others by dropping the
+    /// TCP connection (`readPump`'s deferred `Close`). Text frames that arrive first are kept.
+    pub async fn closed_within(&mut self, window: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match tokio::time::timeout(remaining, self.socket.next()).await {
+                Ok(Some(Ok(Message::Text(text)))) => self.raw.push(text.to_string()),
+                Ok(Some(Ok(Message::Close(_)))) => return true,
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(_))) | Ok(None) => return true,
+                Err(_) => return false,
+            }
+        }
+    }
+
+    /// Connect with a token and a query string and **read nothing**: no `hello` is expected,
+    /// because a resumed connection is not sent one and a malformed resumption closes the socket
+    /// instead. The caller collects what it expects.
+    pub async fn connect_raw_with_query(base: &str, token: &str, query: &str) -> SocketProbe {
+        let separator = if query.is_empty() { "" } else { "?" };
+        let url = format!(
+            "{}/api/v4/websocket{separator}{query}",
+            base.replace("http://", "ws://")
+        );
+        let mut request =
+            tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                url.as_str(),
+            )
+            .expect("a websocket request");
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {token}").parse().expect("a header value"),
+        );
+        let (socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// [`SocketProbe::connect_anonymous`] with a query string.
+    pub async fn connect_anonymous_with_query(base: &str, query: &str) -> SocketProbe {
+        let separator = if query.is_empty() { "" } else { "?" };
+        let url = format!(
+            "{}/api/v4/websocket{separator}{query}",
+            base.replace("http://", "ws://")
+        );
+        let (socket, _) = tokio_tungstenite::connect_async(url.as_str())
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        SocketProbe {
+            socket,
+            raw: Vec::new(),
+        }
+    }
+
+    /// Close from the client side with a close frame, the way a browser tab going away does.
+    pub async fn close(mut self) {
+        let _ = self.socket.close(None).await;
     }
 
     /// Send one `WebSocketRequest`.

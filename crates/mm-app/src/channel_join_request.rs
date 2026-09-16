@@ -657,7 +657,7 @@ impl App {
     /// `adminsOnly` is `true` at both call sites, so it is not a parameter here. A failure to
     /// compute the admin set **drops the event entirely** rather than broadcasting it unfiltered —
     /// Go returns before `Publish`, and that is the fail-closed half of a check whose filtering
-    /// half [D-340] records as missing.
+    /// half is `broadcast_hooks::OnlyChannelAdminsBroadcastHook`.
     async fn publish_channel_join_request_event(
         &self,
         channel: &Channel,

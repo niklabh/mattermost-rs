@@ -1,0 +1,14 @@
+# Mutation plan for MFA on REST routes — D-801 (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/rest-mfa.plan
+#
+# The decision itself is `App::mfa_required`, already planned in websocket-mfa.plan; this plan is
+# the REST wiring — that the extractor asks, which path is exempt, and that only the two setup
+# routes skip it. Not planned: the refusal clearing no cookie, whose text is shared with other
+# constructors and which no parity assertion reads. The last two lines are no-op controls.
+extractor-ignores-the-refusal	crates/mm-api/src/auth.rs	            .map_err(SessionRejection::mfa_required)?;	            .ok();	api	rest_mfa
+users-me-never-exempt	crates/mm-api/src/auth.rs	    path == mm_model::go_path::join(&[subpath, "/api/v4/users/me"])	    path == mm_model::go_path::join(&[subpath, "/api/v4/users/me/never"])	api	rest_mfa
+users-me-exempts-everything-beneath-it	crates/mm-api/src/auth.rs	    path == mm_model::go_path::join(&[subpath, "/api/v4/users/me"])	    path.starts_with(&mm_model::go_path::join(&[subpath, "/api/v4/users/me"]))	api	rest_mfa
+setup-routes-also-checked	crates/mm-api/src/auth.rs	        Ok(MfaSetupSession(\n            resolve_required_session(parts, state).await?,\n        ))	        let session = resolve_required_session(parts, state).await?;\n        state\n            .app\n            .mfa_required(Some(&session), false)\n            .await\n            .map_err(SessionRejection::mfa_required)?;\n        Ok(MfaSetupSession(session))	api	rest_mfa
+control-swap-the-path-comparison	crates/mm-api/src/auth.rs	    path == mm_model::go_path::join(&[subpath, "/api/v4/users/me"])	    mm_model::go_path::join(&[subpath, "/api/v4/users/me"]) == path	api	rest_mfa
+control-compute-the-path-before-the-session	crates/mm-api/src/auth.rs	        let session = resolve_required_session(parts, state).await?;\n        let is_users_me = is_users_me_path(parts.uri.path(), &state.app.config().subpath());	        let is_users_me = is_users_me_path(parts.uri.path(), &state.app.config().subpath());\n        let session = resolve_required_session(parts, state).await?;	api	rest_mfa

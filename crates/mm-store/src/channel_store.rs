@@ -207,6 +207,15 @@ pub trait ChannelStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<HashMap<String, String>, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.UserBelongsToChannels` (channel_store.go:4444): whether the user
+    /// is a member of **any** of `channel_ids`. No `Channels` join, so an archived channel's
+    /// membership counts.
+    fn user_belongs_to_channels(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetAllChannelMembersNotifyPropsForChannel`
     /// (channel_store.go:2619): every member's `NotifyProps`, keyed by user id.
     ///
@@ -1143,6 +1152,15 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<ChannelMember, StoreError> {
         get_member(&self.pool, channel_id, user_id).await
+    }
+
+    #[tracing::instrument(skip(self, channel_ids), fields(user_id = %user_id, channels = channel_ids.len()))]
+    async fn user_belongs_to_channels(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> Result<bool, StoreError> {
+        user_belongs_to_channels(&self.pool, user_id, channel_ids).await
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, channels))]
@@ -4626,6 +4644,35 @@ pub fn process_all_channel_member_roles(
     }
 
     result.join(" ")
+}
+
+/// See [`ChannelStore::user_belongs_to_channels`]. An empty list is `false`, as squirrel's
+/// `(1=0)` makes it.
+pub async fn user_belongs_to_channels(
+    pool: &PgPool,
+    user_id: &str,
+    channel_ids: &[String],
+) -> Result<bool, StoreError> {
+    if channel_ids.is_empty() {
+        return Ok(false);
+    }
+    let count = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM channelmembers
+         WHERE userid = $1
+           AND channelid = ANY($2)
+        "#,
+        user_id,
+        channel_ids
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count ChannelMembers".to_owned(),
+        source,
+    })?;
+    Ok(count > 0)
 }
 
 /// Port of `SqlChannelStore.GetAllChannelMembersForUser` (channel_store.go:2527).

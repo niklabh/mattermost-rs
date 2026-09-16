@@ -33,9 +33,11 @@
 //! the fixture cannot come from `common::create_channel`, and every setup call here goes to the
 //! oracle.
 
+use std::time::Duration;
+
 use crate::common::{
-    self, GO, RUST, SecondServer, client, create_plain_user, delete_channel, delete_plain_user,
-    go_minted_token, stack_enabled,
+    self, GO, RUST, SecondServer, SocketProbe, client, create_plain_user, delete_channel,
+    delete_plain_user, go_minted_token, stack_enabled,
 };
 
 fn method(raw: &str) -> reqwest::Method {
@@ -948,6 +950,100 @@ async fn a_segment_outside_gos_charset_is_the_mux_404() {
             json(&go.1)["detailed_error"],
             json(&rs.1)["detailed_error"],
             "{path}: the interpolated URL is Go's own"
+        );
+    }
+}
+
+/// `only_channel_admins` (app/web_broadcast_hooks.go:517), on each server of the lit pair: a join
+/// request is announced on the channel, then filtered to the channel's scheme admins.
+///
+/// Only the two **deterministic** halves are asserted. Go rejects the broadcast's shared event, so
+/// once a non-admin member's connection has been processed the admin's frame is rejected too unless
+/// its write pump already sent it — a race in Go, reproduced rather than fixed, and so not asserted.
+#[tokio::test]
+async fn a_join_request_reaches_a_lone_admin_and_never_a_plain_member() {
+    let Some(lit) = lit().await else { return };
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = lit.team().await;
+
+    let heard = |channel: String| {
+        move |frames: &[serde_json::Value]| {
+            frames.iter().any(|f| {
+                f["event"] == "channel_join_request_created"
+                    && f["broadcast"]["channel_id"] == channel
+            })
+        }
+    };
+
+    let mut outcomes = Vec::new();
+    for (round, base) in [lit.go.clone(), lit.rust.clone()].into_iter().enumerate() {
+        let channel = lit.discoverable_channel(&format!("jradm{round}")).await;
+        let member = create_plain_user(&http, &admin, &team, &format!("jradmm{round}")).await;
+        let first = create_plain_user(&http, &admin, &team, &format!("jradmf{round}")).await;
+        let second = create_plain_user(&http, &admin, &team, &format!("jradms{round}")).await;
+        let (status, body) = lit
+            .send(
+                &lit.go.clone(),
+                "POST",
+                &format!("/api/v4/channels/{channel}/members"),
+                &lit.token,
+                Some(&serde_json::json!({"user_id": member.id})),
+            )
+            .await;
+        assert_eq!(
+            status,
+            201,
+            "adding the member: {}",
+            String::from_utf8_lossy(&body)
+        );
+
+        // Only the admin connected: nobody else can reject the shared event.
+        let mut admin_socket = SocketProbe::connect(&base, &lit.token).await;
+        let (status, _) = lit
+            .send(
+                &base,
+                "POST",
+                &format!("/api/v4/channels/{channel}/join_request"),
+                &first.token,
+                Some(&serde_json::json!({"message": "first"})),
+            )
+            .await;
+        assert_eq!(status, 201, "{base}: the first request");
+        let admin_heard = admin_socket
+            .collect_until(Duration::from_secs(3), heard(channel.clone()))
+            .await;
+
+        // A plain member connected: whatever the admin's race does, the member hears nothing.
+        let mut member_socket = SocketProbe::connect(&base, &member.token).await;
+        let (status, _) = lit
+            .send(
+                &base,
+                "POST",
+                &format!("/api/v4/channels/{channel}/join_request"),
+                &second.token,
+                Some(&serde_json::json!({"message": "second"})),
+            )
+            .await;
+        assert_eq!(status, 201, "{base}: the second request");
+        member_socket.collect_for(Duration::from_millis(900)).await;
+        let member_heard = heard(channel.clone())(&member_socket.frames());
+
+        outcomes.push((base.clone(), admin_heard, member_heard));
+        for user in [&member, &first, &second] {
+            delete_plain_user(&http, &admin, &user.id).await;
+        }
+        delete_channel(&http, &admin, &channel).await;
+    }
+
+    for (base, admin_heard, member_heard) in &outcomes {
+        assert!(
+            admin_heard,
+            "{base}: a lone admin was not told of the request"
+        );
+        assert!(
+            !member_heard,
+            "{base}: a plain member was told of a join request"
         );
     }
 }

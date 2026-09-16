@@ -1,0 +1,18 @@
+# Mutation plan for `only_channel_admins` and the shared-event Reject path — D-340 (2026-09-15).
+#
+#   scripts/mutate-batch.sh scripts/mutations/websocket-join-admins.plan
+#
+# The subtle decision is *where* a rejection lands: on a hook's copy (this connection only) or on
+# the broadcast's shared event (every frame not yet written). The unit tests pin both; the two api
+# lines prove the write pump honours the shared flag and that the hook is registered at all. Not
+# planned: the admin's own delivery when a member is also connected, a race in Go that no test
+# asserts. The last two lines are no-op controls and must SURVIVE.
+hook-admin-check-inverted	crates/mm-app/src/broadcast_hooks.rs	        if !admin_user_ids.contains(&conn.user_id()) {	        if admin_user_ids.contains(&conn.user_id()) {	unit	hub::
+shared-rejection-dropped	crates/mm-app/src/hub.rs	            None => self.original_rejected = true,	            None => {}	unit	hub::
+shared-flag-never-stored	crates/mm-app/src/hub.rs	            shared_rejected.store(true, Ordering::Release);	            let _ = shared_rejected;	unit	hub::
+copy-rejection-lands-on-the-shared-event	crates/mm-app/src/hub.rs	            Some(copy) => copy.reject(),	            Some(_) => self.original_rejected = true,	unit	hub::
+shared-frame-carries-no-flag	crates/mm-app/src/hub.rs	            rejected: shared_rejected.cloned(),	            rejected: None,	unit	hub::
+pump-ignores-the-shared-flag	crates/mm-api/src/websocket.rs	.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Acquire))	.is_some_and(|_| false)	api	channel_join_requests
+hook-left-unregistered	crates/mm-app/src/broadcast_hooks.rs	        BROADCAST_ONLY_CHANNEL_ADMINS,\n        Box::new(OnlyChannelAdminsBroadcastHook),	        "only_channel_admins_unregistered",\n        Box::new(OnlyChannelAdminsBroadcastHook),	api	channel_join_requests
+control-membership-by-iteration	crates/mm-app/src/broadcast_hooks.rs	        if !admin_user_ids.contains(&conn.user_id()) {	        if !admin_user_ids.iter().any(|id| *id == conn.user_id()) {	unit	hub::
+control-reorder-the-copy-frame-fields	crates/mm-app/src/hub.rs	            event: Box::new(modified),\n            precomputed: false,\n            rejected: None,	            event: Box::new(modified),\n            rejected: None,\n            precomputed: false,	unit	hub::

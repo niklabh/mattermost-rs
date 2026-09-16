@@ -414,6 +414,9 @@ impl App {
             tracing::warn!(error = %err, user_id = %user.id, "Failed during updating user roles");
         }
 
+        // `a.ClearSessionCacheForUser(user.Id)` (user.go:2122).
+        self.clear_session_cache_for_user(&user.id);
+
         if send_websocket_event {
             let mut message = mm_model::websocket_message::WebSocketEvent::new(
                 mm_model::websocket_message::WEBSOCKET_EVENT_USER_ROLE_UPDATED,

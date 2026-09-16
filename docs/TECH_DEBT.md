@@ -5873,28 +5873,11 @@ branch.
 
 ---
 
-## D-181 · Websocket reconnect replay is not ported
+## D-181 · Websocket reconnect replay is not ported — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub, phase 0 of the
-write routes)
-
-Go keeps a 128-slot **dead queue** of every frame it has written to a connection
-(`web_conn.go:665`). A client that drops and reconnects presents its `connection_id` and
-`sequence_number`; `PopulateWebConnConfig` finds the old connection, and `writePump` either drains
-the frames it missed (`drainDeadQueue`) or — when the sequence is too old to be in the queue —
-mints a *new* connection id, resets the sequence to 0 and re-sends `hello`.
-
-`mm_app::hub` implements none of it. Every connection is fresh: `connection_id` and
-`sequence_number` on the query string are read by nobody, so a reconnecting client silently
-**loses every event raised while it was disconnected** rather than being told to refetch.
-
-What makes this more than an efficiency gap is the third branch. Go's `hasMsgLoss` path is how a
-client *learns* it has a hole: a second `hello` with a new connection id is the signal to reload
-state. This server never sends one, so a client cannot distinguish "you missed nothing" from "you
-missed an hour".
-
-**Owed:** the dead queue, `PopulateWebConnConfig`'s three-way branch, and the `reuseCount == 0`
-gate on `hello` that currently has only one reachable value.
+The dead queue, `PopulateWebConnConfig` and the write pump's three-way resumption are ported:
+`mm_app::hub::DeadQueue`, `Hub::park`/`check_conn`, and `mm_api::websocket::resume_prelude`.
+`parity::websocket_reconnect` compares them.
 
 ## D-182 · A client on mm-api does not see events raised by Go-served routes
 
@@ -5921,7 +5904,7 @@ Two ways to close it, and the choice is not obvious:
 Recorded rather than solved because (2) is the plan and (1) would be scaffolding on scaffolding.
 It stops being a hole when the last publishing route is migrated.
 
-## D-183 · Broadcast hooks: the runner and four of nine hooks run; five are still skipped
+## D-183 · Broadcast hooks: the runner, `Reject` and five of nine hooks run; four are still skipped
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
 **Narrowed** 2026-09-14 — the runner, `add_mentions`, `add_followers`, `posted_ack` and
@@ -5936,10 +5919,9 @@ hooks `SendNotifications` attaches to `posted` are in `mm_app::broadcast_hooks`,
 per recipient through `hub::BroadcastHookSuite`; `posted_ack` reads `WebConn::posted_ack`, set
 from `?posted_ack=true` on connect.
 
-**Still owed — the five hooks `makeBroadcastHooks` registers that this server does not:**
-`permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`, `only_channel_admins`; plus
-the `Reject` path (`msg.Event().Reject()`, skipped by the write pump at web_conn.go:577) that
-`burn_on_read_reaction`, `abac_files` and `only_channel_admins` use. An event carrying one of
+**Still owed — the four hooks `makeBroadcastHooks` registers that this server does not:**
+`permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`. The `Reject` path two of
+them use is ported, with `only_channel_admins` (2026-09-15). An event carrying one of
 their ids is logged (`Unable to find broadcast hook`) and leaves unmodified, precomputed. Their
 ids are declared in `broadcast_hooks` so a raiser can attach them now — `channel_join_request`
 attaches `only_channel_admins` already, and that one *widens an audience* when skipped
@@ -5952,35 +5934,15 @@ by `SendNotifications`, whose port (`post_create::publish_user_posted_event`) do
 `parity::websocket_hooks::a_desktop_all_member_is_acked_on_a_flagged_connection_the_same_way_on_both`
 is `#[ignore]`d until it does; the Go half of that exchange is pinned by the test before it.
 
-## D-184 · The MFA half of a websocket connection's authentication is not checked
+## D-184 · The MFA half of a websocket connection's authentication is not checked — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
+`App::conn_is_authenticated` is basic **and** `App::mfa_required`; `parity::websocket_mfa` compares
+it on the licensed MFA pair. The REST half is [D-801].
 
-`WebConn.IsAuthenticated` is `IsBasicAuthenticated() && IsMFAAuthenticated()` (`web_conn.go:824`).
-Only the first is ported: `MFARequired` does not exist in `mm-app`, so a connection whose user owes
-MFA is treated as fully authenticated and receives every event they would otherwise be held back
-from.
+## D-185 · Guests receive `user_updated` and `new_user` for users Go hides from them — CLOSED 2026-09-15
 
-Narrow in practice — the HTTP side of MFA is not ported either, so a deployment that enforces MFA
-is not one this server can serve at all — but it is a *fail-open* difference and belongs in the
-backlog rather than a code comment for that reason. Closing it means porting `MFARequired`, which
-is HTTP work that this route will then inherit for free.
-
-## D-185 · Guests receive `user_updated` and `new_user` for users Go hides from them
-
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
-
-`ShouldSendEventToGuest` (`web_conn.go:852`) special-cases exactly two event types and asks
-`UserCanSeeOtherUser` whether this guest may see the user the event is about. That function is not
-ported, so `mm_app::hub::guest_visibility` implements the *default* arm — every other event passes
-— and the two special cases are withheld unconditionally.
-
-That is the safe direction (a guest sees less, not more), and it is deliberately not approximated:
-guessing at the visibility rule would produce a confident wrong answer where a stated gap produces
-none. It becomes wrong in the other direction only if `UserCanSeeOtherUser` would have returned
-true, which for a guest is the minority case.
-
-**Owed:** `UserCanSeeOtherUser`, which several `/users` routes will need anyway.
+`ShouldSendEventToGuest` is ported (`mm_app::hub::guest_subject`, `App::should_send_event_to_guest`)
+over a full `UserCanSeeOtherUser`; `parity::websocket_guests` compares it on the licensed guest pair.
 
 ## D-187 · Binary (msgpack) websocket frames are refused
 
@@ -5994,31 +5956,11 @@ No stock Mattermost client sends msgpack over the socket today (the tags exist f
 path), so nothing reachable is affected. It is owed rather than accepted because the tags are on
 the wire type and a client is entitled to use them.
 
-## D-188 · The six `wsapi` actions are not served
+## D-188 · The six `wsapi` actions are not served — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
-
-`channels/wsapi` registers six actions on the websocket router, and this port serves none of them:
-
-| Action | What it needs |
-|---|---|
-| `ping` | nothing — four constants and `GetMillis` |
-| `user_typing` | a channel permission check and the server-busy gate; `App::publish_user_typing` and `mm_api::system::refuse_when_busy` exist since 2026-09-13 (the REST route is served) |
-| `user_update_active_status` | `SetStatusOnline` / `SetStatusAwayIfNeeded` — status **writes** |
-| `get_statuses` | `GetAllStatuses`, which reads Go's in-memory status cache, not a table |
-| `get_statuses_by_ids` | `mm_app::status::get_user_statuses_by_ids`, already ported |
-| `posted_notify_ack` | notification metrics, which do not exist here |
-
-All six currently answer `api.web_socket_router.bad_action.app_error` at 500 — Go's *unknown
-action* error — which is a wrong answer rather than a missing one, and that is why this is an
-entry and not a note.
-
-`get_statuses` is the one with a real question behind it: Go returns the contents of a cache this
-server does not have, so "every row in `Status`" is a different answer on a freshly started Go
-process. It needs measuring before it is ported, not translating.
-
-**Two of the six are nearly free** (`ping`, `get_statuses_by_ids`) and should go first, with the
-rest following the status-write routes that give them their app layer.
+All six are served by `crates/mm-api/src/wsapi.rs`; `parity::websocket_actions` compares them.
+`get_statuses` answers this process's status cache, as Go's answers Go's — see
+`App::get_all_statuses`.
 
 ## D-189 · The route inventory read a literal gorilla segment as a parameter — CLOSED 2026-09-08
 
@@ -7221,36 +7163,11 @@ asserts rather than something a reader has to trust.
 
 ---
 
-## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member
+## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member — CLOSED 2026-09-15
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (app/channel_join_request.go)
-
-`broadcastChannelJoinRequestCreated` and `broadcastChannelJoinRequestUpdated` publish to
-`Broadcast{ChannelId: …}` — the channel's whole membership — and then narrow the audience with
-`useOnlyChannelAdminsHook`, whose `Process` **rejects** the event for any connection whose user is
-not in the precomputed admin set (app/web_broadcast_hooks.go:519). The fan-out is the outer bound
-and the hook is the filter.
-
-[D-183] records that this server strips the hook fields and does not run the hooks. Until now that
-was a fidelity gap — the stock `posted` hook *adds* fields. This is the first ported event whose
-hook **removes recipients**, so dropping it does not degrade a payload, it widens an audience: a
-plain member of a discoverable private channel would be told that a named user has asked to join
-it, and with what status, where Go tells only the channel admins.
-
-**What is owed:** `platform.HookedWebSocketEvent`'s reject path in the hub, plus the
-`only_channel_admins` hook itself. Nothing smaller fixes it — the admin set is already computed
-correctly and attached to the event (`channel_admin_user_ids`), so the missing half is entirely in
-`mm-ws`.
-
-**Why it is not urgent, and why that is not a reason to close it.** The seven routes that raise
-these events are dark: `FeatureFlags.DiscoverableChannels` is false at the pinned SHA ([D-153]), so
-nothing on this deployment can publish either event. The moment that flag is turned on this becomes
-a disclosure bug, which is why it is recorded rather than left to the doc comment on
-`publish_channel_join_request_event`.
-
-**Where the finding lives in the code:** the module docs of
-`crates/mm-app/src/channel_join_request.rs` and the doc comment on
-`App::publish_channel_join_request_event`.
+`broadcast_hooks::OnlyChannelAdminsBroadcastHook` runs, with the shared-event `Reject` path
+(`HookedWebSocketEvent::reject`); see
+`parity::channel_join_requests::a_join_request_reaches_a_lone_admin_and_never_a_plain_member`.
 
 ---
 
@@ -9169,3 +9086,7 @@ because both read the same view rows. **What is owed:** after the user row is wr
 `App::notices_cache()` — logged on failure, never returned, as Go's goroutine does. Both pieces
 exist since 2026-09-15; the call site is the user family's.
 
+## D-801 · REST routes do not enforce MFA — CLOSED 2026-09-15
+
+`mm_api::auth::AuthenticatedSession` asks `App::mfa_required` last; `MfaSetupSession` exempts the two
+MFA-setup routes. `parity::rest_mfa` compares it on the licensed MFA pair.

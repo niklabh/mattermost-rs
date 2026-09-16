@@ -21,11 +21,11 @@
 //! 3. **The websocket event is `memberrole_updated`, addressed to the user**, and it carries the
 //!    member as a JSON *string* under `member` — not `channelMember`, and not a nested object.
 //!
-//! # `ClearSessionCacheForUser` is not reproduced
+//! # `ClearSessionCacheForUser`
 //!
-//! Both Go paths call it after the write. This server has no in-process session cache to clear
-//! (sessions are read from the shared `Sessions` table on each request), and the *Go* process's
-//! cache is unreachable from here — the standing consequence recorded as **D-190**.
+//! Called after every membership write Go clears it on — see
+//! [`App::clear_session_cache_for_user`]. The *Go* process's cache is unreachable from here —
+//! the standing consequence recorded as **D-190**.
 
 use mm_model::channel::CHANNEL_TYPE_OPEN;
 use mm_model::channel::DEFAULT_CHANNEL_NAME;
@@ -254,6 +254,9 @@ impl App {
                         )
                     }
                 })?;
+
+        // `a.ClearSessionCacheForUser(userID)` (team.go:470, :517).
+        self.clear_session_cache_for_user(&updated.user_id);
 
         self.send_updated_team_member_event(&updated).await;
 
@@ -668,6 +671,9 @@ impl App {
                 "Encountered an issue joining default channels."
             );
         }
+
+        // `a.ClearSessionCacheForUser(user.Id)` (team.go:872).
+        self.clear_session_cache_for_user(&user.id);
 
         self.publish_added_to_team(&team.id, &user.id).await;
 
@@ -1312,7 +1318,8 @@ impl App {
     /// stale sidebar and a stale "last channel viewed" — and neither has any other trigger, so
     /// dropping one is invisible until a rejoin.
     ///
-    /// The plugin hook and the three cache invalidations are [D-183] and [D-190].
+    /// The plugin hook is [D-183]; of the three cache calls, the session one is
+    /// [`App::clear_session_cache_for_user`] and the other two are [D-190].
     #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
     async fn post_process_team_member_leave(&self, member: &TeamMember) -> AppResult<()> {
         let user = self
@@ -1387,6 +1394,9 @@ impl App {
                     500,
                 )
             })?;
+
+        // `a.ClearSessionCacheForUser(user.Id)` (team.go:1324).
+        self.clear_session_cache_for_user(&user.id);
 
         Ok(())
     }

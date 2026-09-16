@@ -79,7 +79,6 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::resolve_me;
 use crate::error::ApiError;
-use crate::proxy;
 
 /// Port of `maxPropertyValuePatchItems` (api4/properties.go:20).
 const MAX_PROPERTY_VALUE_PATCH_ITEMS: usize = 50;
@@ -528,7 +527,6 @@ pub async fn list_cpa_values(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
     let user_id = resolve_me(&user_id, &session).to_owned();
     if !is_valid_id(&user_id) {
@@ -537,9 +535,6 @@ pub async fn list_cpa_values(
 
     match target_access_read(&state, &session, &user_id).await {
         TargetAccess::Denied(err) => return err.into_response(),
-        // The caller's account carries view restrictions, which needs two membership lookups
-        // this port does not have. Forward the request untouched.
-        TargetAccess::Forward => return proxy::forward_to_go(State(state), request).await,
         TargetAccess::Allowed => {}
     }
 
@@ -810,14 +805,10 @@ fn value_patch_error(
 /// (api4/properties.go:872), the read arm.
 ///
 /// Self-access and an unrestricted (local-mode) session pass without a query. Anyone else must be
-/// able to *see* the target, which is `UserCanSeeOtherUser` — and that needs the team and channel
-/// membership lookups this port does not have whenever the caller's account carries view
-/// restrictions. That case forwards rather than guesses; see
-/// [`mm_app::App::user_can_see_other_user`].
+/// able to *see* the target, which is [`mm_app::App::user_can_see_other_user`].
 enum TargetAccess {
     Allowed,
     Denied(ApiError),
-    Forward,
 }
 
 async fn target_access_read(
@@ -839,11 +830,7 @@ async fn target_access_read(
             &session.0,
             &[&PERMISSION_VIEW_MEMBERS],
         ))),
-        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
-            tracing::debug!(reason, "forwarding to Go");
-            TargetAccess::Forward
-        }
-        Err(mm_app::post::PrepareError::App(err)) => TargetAccess::Denied(ApiError::from(err)),
+        Err(err) => TargetAccess::Denied(ApiError::from(err)),
     }
 }
 

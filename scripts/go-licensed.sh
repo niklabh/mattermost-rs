@@ -8,6 +8,7 @@
 #   scripts/go-licensed.sh port      print the port it uses on this stack
 #   scripts/go-licensed.sh files     print the directory holding the key pair and the licence
 #   MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh start|stop|port   the guest variant, +33
+#   MMRS_LICENSED_VARIANT=mfa scripts/go-licensed.sh start|stop|port     MFA enforced, +34
 #
 # # Why the stack's own Go server cannot be licensed
 #
@@ -79,7 +80,13 @@ case "${MMRS_LICENSED_VARIANT:-}" in
     LOG="$BUILD/licensed-guest$MMRS_STACK_SUFFIX.log"
     API_PORT=$((MMRS_API_PORT + 25))
     ;;
-  *) echo "MMRS_LICENSED_VARIANT must be unset or 'guest'"; exit 2 ;;
+  mfa)
+    PORT=$((MMRS_GO_PORT + 34))
+    RUN="$BUILD/mmlicmfa$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/licensed-mfa$MMRS_STACK_SUFFIX.log"
+    API_PORT=$((MMRS_API_PORT + 26))
+    ;;
+  *) echo "MMRS_LICENSED_VARIANT must be unset, 'guest' or 'mfa'"; exit 2 ;;
 esac
 DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmode=disable&connect_timeout=10"
 BIN="$BUILD/mattermost-licensed"
@@ -162,6 +169,12 @@ case "${1:-start}" in
     export MMRS_LICENSE_PUBLIC_KEY_FILE="$LIC/public.pem"
     # The guest variant's one difference from the licensed server — see the header.
     [ "${MMRS_LICENSED_VARIANT:-}" = guest ] && export MM_GUESTACCOUNTSSETTINGS_ENABLE=true
+    # The MFA variant's: MFA enabled **and enforced**, so `MFARequired` refuses a user who has not
+    # set it up — on every `RequireMfa` route and in the websocket's `IsAuthenticated`.
+    if [ "${MMRS_LICENSED_VARIANT:-}" = mfa ]; then
+      export MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION=true
+      export MM_SERVICESETTINGS_ENFORCEMULTIFACTORAUTHENTICATION=true
+    fi
     mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1

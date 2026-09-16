@@ -8,9 +8,10 @@
 //!
 //! # Which hooks exist here
 //!
-//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Four are ported — the
-//! three `SendNotifications` attaches to every `posted` event, and the one
-//! `publishWebsocketEventForPost` attaches when the post mentions a channel:
+//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Five are ported — the
+//! three `SendNotifications` attaches to every `posted` event, the one
+//! `publishWebsocketEventForPost` attaches when the post mentions a channel, and the filter the
+//! channel-join-request events carry:
 //!
 //! | id | args (JSON types, as `add_hook` must supply them) | effect on a connection |
 //! |---|---|---|
@@ -18,17 +19,17 @@
 //! | [`BROADCAST_ADD_FOLLOWERS`] | `followers`: array of user ids | same, key `followers` |
 //! | [`BROADCAST_POSTED_ACK`] | `posted_user_id`: string, `channel_type`: string, `users`: array of user ids | `data.should_ack = true` for a `?posted_ack=true` connection that is not the poster's, when the frame already carries `mentions`/`followers`, or the channel is a DM, or the user is in `users` |
 //! | [`BROADCAST_CHANNEL_MENTIONS`] | `channel_mentions`: object, name → `{display_name, team_name, id}` | re-decodes `data.post`, puts back under `props.channel_mentions` only the entries whose `id` the recipient may resolve, and re-encodes |
+//! | [`BROADCAST_ONLY_CHANNEL_ADMINS`] | `channel_admin_user_ids`: array of user ids | user **not** in the list → the event is rejected, on the broadcast's shared event unless an earlier hook copied it (see `HookedWebSocketEvent::reject`) |
 //!
 //! `posted_ack` reads what `add_mentions` and `add_followers` wrote, so **attach it after them**
 //! — Go's own comment says this "works since we currently do have an order for broadcast hooks".
 //! `channel_mentions` re-encodes the post, so a hooked recipient's `post` string is a fresh
 //! marshal rather than the precomputed one — the same bytes, since both are `Post.ToJSON`.
 //!
-//! The other five — `permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files`,
-//! `only_channel_admins` — are not registered. An event carrying one of their ids reaches the
-//! runner, which logs Go's `Unable to find broadcast hook` warning and skips it, so the frame
-//! leaves unmodified and precomputed. Their ids are declared below so a raiser can attach them
-//! today; `channel_join_request` already attaches `only_channel_admins`. See [D-183].
+//! The other four — `permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files` — are not
+//! registered. An event carrying one of their ids reaches the runner, which logs Go's `Unable to
+//! find broadcast hook` warning and skips it, so the frame leaves unmodified and precomputed.
+//! Their ids are declared below so a raiser can attach them today. See [D-183].
 //!
 //! # `getTypedArg` in a single process
 //!
@@ -62,10 +63,10 @@ pub const BROADCAST_BURN_ON_READ: &str = "burn_on_read";
 pub const BROADCAST_BURN_ON_READ_REACTION: &str = "burn_on_read_reaction";
 /// `broadcastAbacFiles` (web_broadcast_hooks.go:27). Declared, not registered.
 pub const BROADCAST_ABAC_FILES: &str = "abac_files";
-/// `broadcastOnlyChannelAdmins` (web_broadcast_hooks.go:28). Declared, not registered.
+/// `broadcastOnlyChannelAdmins` (web_broadcast_hooks.go:28).
 pub const BROADCAST_ONLY_CHANNEL_ADMINS: &str = "only_channel_admins";
 
-/// Port of `Server.makeBroadcastHooks` (web_broadcast_hooks.go:31), reduced to the four hooks
+/// Port of `Server.makeBroadcastHooks` (web_broadcast_hooks.go:31), reduced to the five hooks
 /// that are ported. The map is what `hubStart` hands each hub (web_hub.go:124).
 pub fn make_broadcast_hooks() -> HashMap<&'static str, Box<dyn BroadcastHook>> {
     let mut hooks: HashMap<&'static str, Box<dyn BroadcastHook>> = HashMap::new();
@@ -76,7 +77,57 @@ pub fn make_broadcast_hooks() -> HashMap<&'static str, Box<dyn BroadcastHook>> {
         BROADCAST_CHANNEL_MENTIONS,
         Box::new(ChannelMentionsBroadcastHook),
     );
+    hooks.insert(
+        BROADCAST_ONLY_CHANNEL_ADMINS,
+        Box::new(OnlyChannelAdminsBroadcastHook),
+    );
     hooks
+}
+
+/// Port of `onlyChannelAdminsBroadcastHook` (web_broadcast_hooks.go:517): a connection whose user
+/// is not in the precomputed `channel_admin_user_ids` has the event **rejected**.
+///
+/// The channel-addressed broadcast is the outer bound and this is the filter, so a plain member of
+/// a discoverable private channel is not told who asked to join it. The rejection lands on the
+/// broadcast's shared event when no earlier hook copied it — see
+/// [`HookedWebSocketEvent::reject`] for what that does to admins. An argument that does not decode
+/// is an error, which rejects nobody: Go returns before `Reject`.
+struct OnlyChannelAdminsBroadcastHook;
+
+impl BroadcastHook for OnlyChannelAdminsBroadcastHook {
+    fn process<'a, 'e>(
+        &'a self,
+        msg: &'a mut HookedWebSocketEvent<'e>,
+        conn: &'a WebConn,
+        args: &'a StringInterface,
+        _suite: &'a dyn BroadcastHookSuite,
+    ) -> HookFuture<'a, Result<(), BroadcastHookError>>
+    where
+        'e: 'a,
+    {
+        Box::pin(std::future::ready(Self::process_sync(msg, conn, args)))
+    }
+}
+
+impl OnlyChannelAdminsBroadcastHook {
+    fn process_sync(
+        msg: &mut HookedWebSocketEvent<'_>,
+        conn: &WebConn,
+        args: &StringInterface,
+    ) -> Result<(), BroadcastHookError> {
+        let admin_user_ids =
+            string_array_arg(args, "channel_admin_user_ids").map_err(|source| {
+                BroadcastHookError::InvalidArg {
+                    hook: "onlyChannelAdminsBroadcastHook",
+                    key: "channel_admin_user_ids",
+                    source,
+                }
+            })?;
+        if !admin_user_ids.contains(&conn.user_id()) {
+            msg.reject();
+        }
+        Ok(())
+    }
 }
 
 /// What a hook returns to the runner, which logs it as Go does (`Error processing hook`) and
@@ -193,11 +244,13 @@ impl AddMentionsBroadcastHook {
             }
         })?;
 
-        if !mentions.is_empty() && mentions.contains(&conn.user_id) {
+        if !mentions.is_empty() && mentions.contains(&conn.user_id()) {
             // Note that the client expects this field to be stringified
             msg.add(
                 "mentions",
-                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(&conn.user_id)))),
+                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(
+                    &conn.user_id(),
+                )))),
             );
         }
 
@@ -238,11 +291,13 @@ impl AddFollowersBroadcastHook {
             }
         })?;
 
-        if !followers.is_empty() && followers.contains(&conn.user_id) {
+        if !followers.is_empty() && followers.contains(&conn.user_id()) {
             // Note that the client expects this field to be stringified
             msg.add(
                 "followers",
-                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(&conn.user_id)))),
+                serde_json::Value::String(array_to_json(Some(std::slice::from_ref(
+                    &conn.user_id(),
+                )))),
             );
         }
 
@@ -298,7 +353,7 @@ impl PostedAckBroadcastHook {
         })?;
 
         // Don't ACK your own posts
-        if posted_user_id == conn.user_id {
+        if posted_user_id == conn.user_id() {
             return Ok(());
         }
 
@@ -332,7 +387,7 @@ impl PostedAckBroadcastHook {
                 source,
             })?;
 
-        if !users.is_empty() && users.contains(&conn.user_id) {
+        if !users.is_empty() && users.contains(&conn.user_id()) {
             msg.add("should_ack", serde_json::Value::Bool(true));
             increment_websocket_counter(conn);
         }
@@ -395,7 +450,7 @@ impl BroadcastHook for ChannelMentionsBroadcastHook {
                     _ => continue,
                 };
                 if suite
-                    .has_permission_to_resolve_channel_mention(&conn.user_id, channel_id)
+                    .has_permission_to_resolve_channel_mention(&conn.user_id(), channel_id)
                     .await
                 {
                     filtered.insert(channel_name, channel_info);
@@ -852,7 +907,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_registry_holds_exactly_the_four_ported_hooks() {
+    async fn the_registry_holds_exactly_the_five_ported_hooks() {
         let hooks = make_broadcast_hooks();
         let mut ids: Vec<_> = hooks.keys().copied().collect();
         ids.sort_unstable();
@@ -862,6 +917,7 @@ mod tests {
                 BROADCAST_ADD_FOLLOWERS,
                 BROADCAST_ADD_MENTIONS,
                 BROADCAST_CHANNEL_MENTIONS,
+                BROADCAST_ONLY_CHANNEL_ADMINS,
                 BROADCAST_POSTED_ACK
             ]
         );

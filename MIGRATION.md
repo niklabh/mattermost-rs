@@ -13854,3 +13854,108 @@ invented at different offsets (a config field, a `let` binding, a test document'
 keep-both block whose two sides both end inside a call shares one closing tail. Resolving in a
 scratch copy of `git merge-tree`'s output and parsing it with `rustfmt --check` before touching the
 tree caught both kinds.
+
+## The websocket hub's six actions, and sockets that follow session changes (2026-09-15)
+
+New: `crates/mm-api/src/wsapi.rs`, `crates/mm-api/tests/parity/websocket_actions.rs`,
+`scripts/mutations/websocket-actions.plan`. Closes [D-188]. No api4 route+method pair is added —
+these are socket actions — so the headline count is unchanged; the hub item of the denominator
+advances.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `wsapi/{system,status,user}.go`, `websocket_handler.go` | `mm-api/src/wsapi.rs` | DONE | 5 unit + 13 parity | Every refusal of `user_typing` is a 400 naming `channel_id`, where the REST route answers 403 for the permission. A non-string `posted_notify_ack` status panics Go; the port closes the socket and that branch is unit-tested only. |
+| `websocket_router.go`, `web_conn.go` read/write pumps | `mm-api/src/websocket.rs` | DONE | parity | 5s auth window, one JSON value per frame, `custom_` actions unrouted, online on connect. See the module doc. |
+| `platform/status.go` `GetAllStatuses`, `GetStatusesByIds` | `mm-app/src/status.rs` | DONE | parity | Cache first, misses written back — observable through `get_statuses`. |
+| `ClearSessionCacheForUser` → `Hub.InvalidateUser` | `mm-app/src/hub.rs` + nine callers | DONE | parity (logout) | See `App::clear_session_cache_for_user`. |
+
+Findings, each written in the code it constrains:
+
+- **A socket that authenticated over the socket was filed under the user `""`** and received no
+  user-addressed event, `hello` included (`WebConn::user_id`).
+- **Revoking a session never reached a live socket.** The logout parity test failed on its first run
+  for exactly that; Go's `RevokeSession` ends in `Hub.InvalidateUser`.
+- **`invalidate_all_caches` reset every socket's membership cache, which Go's does not**
+  (`App::invalidate_all_caches`).
+- **REST status reads cannot tell the servers apart.** `GET /users/{id}/status` falls back to the
+  shared `Status` row, so a mutation removing the Rust connect-time online survived; the test now
+  asks each server's own cache through `get_statuses`.
+
+Mutation tally (`websocket-actions.plan`): 20 run, 17 caught, 2 controls survived, 1 survivor —
+the fixture above — fixed and re-run: caught. Full parity: 3,779 passed, 1 failed
+(`licensed_sweep::a_priority_post_passes_the_tier_gate_licensed`, which passes alone — a cross-suite
+race not yet found).
+
+## Websocket reconnect replay — the dead queue and `PopulateWebConnConfig` (2026-09-15)
+
+New: `crates/mm-api/tests/parity/websocket_reconnect.rs`, `scripts/mutations/websocket-reconnect.plan`.
+Closes [D-181]. No api4 pair is added; the hub item of the denominator advances.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web_conn.go` dead queue (665-772), `PopulateWebConnConfig`, `writePump` prelude | `mm-app/src/hub.rs` `DeadQueue`, `mm-api/src/websocket.rs` `resume_prelude` | DONE | 13 unit + 5 parity | Unit tests are transcribed from the Go source — the functions are unexported, so there is no generated corpus; the parity suite is the evidence. |
+| `web_hub.go` register/unregister/checkConn arms, `hubConnectionIndex` | `mm-app/src/hub.rs` `Hub::park`, `check_conn`, `close_and_remove`, `App::hub_unregister` | DONE | parity | A disconnected connection stays indexed and inactive; `total_websocket_connections` counts active only. The reaper runs lazily, not on a ticker (`Hub::reap_if_due`). |
+| `platform/status.go` `SetStatusLastActivityAt`, `UpdateWebConnUserActivity` | `mm-app/src/status.rs`, `session.rs` | DONE | — | Read only by the five-minute reaper and the away test; not reachable in a parity run. |
+
+Findings:
+
+- **A parked connection keeps receiving.** The first thing a resumed client is told is the
+  `offline` its own disconnect raised, numbered straight on from its count.
+- **A manual status blocks the disconnect's offline** (`QueueSetStatusOffline`'s guard) — the
+  fixture was caught by it twice: manual aways, then a REST write, which is always manual.
+- **A resumed socket is not isolated**: another suite's `new_user` can sit in the parked queue, so
+  the replay tests look for their own status changes rather than the next frame.
+- **Stack 1's Go had been launched from a removed worktree's directory** (`authcerts`); 14 of the
+  full run's failures were that, and all passed after restarting it from this worktree.
+
+Mutation tally (`websocket-reconnect.plan`): 19 run, 16 caught, 2 controls survived, 1 survivor —
+`hello-for-the-first-reuse-too`, a "no hello" assertion made before a late hello could arrive —
+fixed with a collection window and re-run: caught. Full parity on stack 1: 3,782 passed, 19 failed,
+every one re-run green by module after the fixes above.
+
+## A guest's websocket visibility — `ShouldSendEventToGuest` over a full `UserCanSeeOtherUser` (2026-09-15)
+
+New: `crates/mm-api/tests/parity/websocket_guests.rs`, `scripts/mutations/websocket-guests.plan`.
+Closes [D-185]. No api4 pair is added; seven served routes stop forwarding a view-restricted caller.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app/user.go` `UserCanSeeOtherUser`, `GetViewUsersRestrictions` | `mm-app/src/user.rs` | DONE | parity | The restricted branch — a guest, in practice — was forwarded by every caller; now answered. |
+| `SqlTeamStore.GetUserTeamIds`, `UserBelongsToTeams`; `SqlChannelStore.UserBelongsToChannels` | `mm-store` | DONE | parity | An empty id list is `false` without a query, as squirrel's `(1=0)` makes it. |
+| `web_conn.go` `ShouldSendEventToGuest` | `mm-app/src/hub.rs` `guest_subject` | DONE | 1 unit + parity | Guests were sent neither `user_updated` nor `new_user` before, whoever it was about. |
+
+Mutation tally (`websocket-guests.plan`): 9 run, 5 caught, 2 controls survived, 2 equivalent —
+`team-arm-skipped` and `team-count-inverts-the-list` cannot be observed because the stock
+`team_guest` role has no `view_members`, so a guest's permitted-team list is always empty; the
+paired `team-permission-not-checked` was caught, which is how that is known.
+
+## The MFA half of a websocket connection's authentication (2026-09-15)
+
+New: `crates/mm-app/src/mfa.rs`, `crates/mm-api/tests/parity/websocket_mfa.rs`,
+`scripts/mutations/websocket-mfa.plan`, the `mfa` variant of `scripts/go-licensed.sh` with
+`common::licensed_mfa` on :8092. Closes [D-184]; the REST half was opened as [D-801].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `app/authentication.go` `MFARequired` | `mm-app/src/mfa.rs` | DONE | 4 unit + parity | Three gates (licence feature, enable, enforce) before any lookup; the per-user exemptions are pure and tested per branch. |
+| `web_conn.go` `IsAuthenticated` / `IsMFAAuthenticated` | `mm-app/src/hub.rs` | DONE | parity | Registration and the pong handler ask only the basic half, so a user who owes MFA still gets `hello` — and nothing else. |
+| `ServiceSettings.EnforceMultifactorAuthentication`, `GuestAccountsSettings.EnforceMultifactorAuthentication` | `mm-app/src/config.rs` | DONE | config tests | Both keys added to the fixture script; `fixtures/config_active.json` gained exactly those two keys, both `false`. |
+
+Mutation tally (`websocket-mfa.plan`): 10 run, 8 caught, 2 controls survived. The first parity run
+failed on the test itself — it compared two `ping` answers whole, `server_time` included.
+
+## `only_channel_admins` and the shared-event `Reject` path (2026-09-15)
+
+New: `scripts/mutations/websocket-join-admins.plan`; the test
+`parity::channel_join_requests::a_join_request_reaches_a_lone_admin_and_never_a_plain_member`.
+Closes [D-340]; narrows [D-183] to four hooks.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web_broadcast_hooks.go` `onlyChannelAdminsBroadcastHook` | `mm-app/src/broadcast_hooks.rs` | DONE | 2 unit + parity | A join request was announced to every channel member; now only the channel's scheme admins. |
+| `HookedWebSocketEvent` via `msg.Event().Reject()`, `writePump`'s `IsRejected` skip | `mm-app/src/hub.rs`, `mm-api/src/websocket.rs` | DONE | 2 unit | `Event()` is the shared original unless a hook copied it, so one member's rejection reaches every frame of the broadcast not yet written — admins included. Reproduced with a per-broadcast flag; see `HookedWebSocketEvent::reject`. |
+
+Only the deterministic halves are asserted — a lone admin hears the request, a plain member never
+does. Whether an admin hears it while a member is also connected is a race in Go.
+
+Mutation tally (`websocket-join-admins.plan`): 9 run, 7 caught, 2 controls survived.

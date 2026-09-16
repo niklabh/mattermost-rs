@@ -379,7 +379,7 @@ impl App {
     /// syncable's `SchemeAdmin` groups its scheme admins and nobody else, and tell each changed
     /// member's clients through `member_role_updated` / `channel_member_updated`.
     ///
-    /// `ClearSessionCacheForUser` has no counterpart: sessions are not cached on this side.
+    /// Each changed member's `ClearSessionCacheForUser` is [`App::clear_session_cache_for_user`].
     #[tracing::instrument(skip(self), fields(permitted_admins, updated))]
     pub async fn sync_syncable_roles(
         &self,
@@ -409,6 +409,8 @@ impl App {
                     .map_err(|err| store_error("App.SyncSyncableRoles", "app.update_error", err))?;
                 tracing::Span::current().record("updated", updated.len());
                 for member in &updated {
+                    // syncables.go:244
+                    self.clear_session_cache_for_user(&member.user_id);
                     self.send_updated_team_member_event(member).await;
                 }
             }
@@ -421,6 +423,8 @@ impl App {
                     .map_err(|err| store_error("App.SyncSyncableRoles", "app.update_error", err))?;
                 tracing::Span::current().record("updated", updated.len());
                 for member in &updated {
+                    // syncables.go:258
+                    self.clear_session_cache_for_user(&member.user_id);
                     self.send_update_channel_member_event(member).await;
                 }
             }

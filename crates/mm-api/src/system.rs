@@ -661,6 +661,12 @@ impl ServerBusy {
 /// This process's busy flag. See [`ServerBusy`] for why it is a global.
 static SERVER_BUSY: ServerBusy = ServerBusy::new();
 
+/// `Platform().Busy.IsBusy()`, for a caller that answers busy in its own shape — the websocket
+/// `user_typing` action refuses with a `WebSocketResponse`, not the REST 503 below.
+pub(crate) fn server_is_busy() -> bool {
+    SERVER_BUSY.state(Utc::now()).busy
+}
+
 /// The `DisableWhenBusy` gate of `web.Handler.ServeHTTP` (web/handlers.go:349): a handler
 /// registered with `APISessionRequiredDisableWhenBusy` is refused with
 /// `api.context.server_busy.app_error` / 503 while [`SERVER_BUSY`] is set.
@@ -679,7 +685,7 @@ static SERVER_BUSY: ServerBusy = ServerBusy::new();
 /// `publishUserTyping`. The eight served here call this first thing; the two file searches must
 /// too when they land — the suite that checks the served ones is `parity::busy_gates`.
 pub(crate) fn refuse_when_busy() -> Result<(), ApiError> {
-    if SERVER_BUSY.state(Utc::now()).busy {
+    if server_is_busy() {
         return Err(ApiError::from(AppError::new(
             "Context",
             "api.context.server_busy.app_error",

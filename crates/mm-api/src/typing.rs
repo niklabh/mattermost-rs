@@ -1,9 +1,10 @@
 //! Port of `publishUserTyping` (api4/user.go:3599), registered at user.go:101 as
 //! `POST /api/v4/users/{user_id}/typing` with `APISessionRequiredDisableWhenBusy`.
 //!
-//! The REST half of "user is typing". The websocket action of the same name (`user_typing` on
-//! the socket router) is a separate, still-unported surface — see the hub entry in
-//! `docs/TECH_DEBT.md` — and shares only `App::publish_user_typing` with this one.
+//! The REST half of "user is typing". The websocket action of the same name is
+//! `crate::wsapi`'s `user_typing`, and it shares only `App::publish_user_typing` with this one:
+//! its refusals are all a 400 `invalid_param` naming `channel_id`, where this route's permission
+//! refusal is a 403.
 
 use axum::extract::{Path, Request, State};
 use axum::response::Response;
