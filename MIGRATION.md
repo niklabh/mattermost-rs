@@ -14078,3 +14078,13 @@ reported SURVIVED because its filter named `config::tests`, which matches no tes
   `api.context.token_provided.app_error` (D-810 closed), so `login`, `login/type` and the other
   sessionless handlers match `ServeHTTP`; `parity::csrf`, 2 tests. Mutation tally (appended to
   `csrf.plan`): 4 run, 2 caught, 2 controls survived.
+
+## Tech-debt: a team join bumps `Users.UpdateAt`; `PostEditTimeLimit` measured (2026-09-16)
+
+- **`join_user_to_team` bumps `Users.UpdateAt`** (D-242 closed) between the membership write and
+  the sidebar categories, a hard 500 on failure as in Go; `parity::team_member_writes` reads the row.
+- **The edit-limit 400 on patch, update and pin has a Go oracle** (D-222 closed):
+  `scripts/go-edit-limit.sh`, started by `stack.sh up`, runs Go with `PostEditTimeLimit=0`;
+  `parity::post_edit_time_limit`, 1 test over five cases.
+
+Mutation tally (`join-update-at-and-edit-limit.plan`): 7 run, 5 caught, 2 controls survived.

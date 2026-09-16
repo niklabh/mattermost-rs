@@ -274,4 +274,6 @@ mod parity {
     pub mod remote_cluster;
     // Appended 2026-09-15: the system-operations family.
     pub mod sysops;
+    // Appended 2026-09-16: PostEditTimeLimit against its own Go oracle (D-222).
+    pub mod post_edit_time_limit;
 }

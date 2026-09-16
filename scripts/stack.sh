@@ -166,6 +166,9 @@ up_stack() {
   # and `parity_channel_join_requests` panics rather than skipping when it is missing.
   MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" start >/dev/null
   echo "  discoverable oracle up"
+  # The PostEditTimeLimit=0 oracle, for the edit-limit branch nothing else can reach (D-222).
+  MMRS_STACK="$k" "$ROOT/scripts/go-edit-limit.sh" start >/dev/null
+  echo "  edit-limit oracle up"
   # The licensed oracle — the one that gives the licensed half of a route a Go answer at all.
   # `common::licensed` panics rather than skips when it is missing, for the reason above.
   MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" start >/dev/null
@@ -184,6 +187,7 @@ down_stack() {
   MMRS_STACK="$k" "$ROOT/scripts/go-server.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" "$ROOT/scripts/go-edit-limit.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=guest "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   pkill -f "MM_API_LISTEN=127.0.0.1:$MMRS_API_PORT" 2>/dev/null || true

@@ -6619,7 +6619,11 @@ The same engine is what forwards **deleting a reply**: `App.DeletePost` on a rep
 
 ## D-222 · The `PostEditTimeLimit` branch is ported and untested
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, post writes)
+**Status** CLOSED · **Severity** unverified · **Raised** 2026-09-10 (phase 2, post writes)
+**Closed** 2026-09-16 — measured against `scripts/go-edit-limit.sh`, a Go oracle started with
+`PostEditTimeLimit=0`, and an mm-api `SecondServer` with the same variable:
+`parity::post_edit_time_limit` pairs each refused edit with an accepted no-op twin. A config patch
+on the shared servers was rejected as the vehicle: two dozen suites edit posts.
 
 `ServiceSettings.PostEditTimeLimit` is `-1` on a default-configured server, and
 `postEditTimeLimitExpired` (api4/post.go:1052) returns `false` on that value before it looks at
@@ -6743,7 +6747,10 @@ Paying it off is two store methods and a fixture with a guest account; until the
 stack can distinguish the refusal from the forward, because nobody here is restricted.
 ## D-242 · A team join does not bump `Users.UpdateAt`
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+**Closed** 2026-09-16 — `join_user_to_team` calls `update_update_at` (the leave path had since
+added it to `UserStore`), a hard 500 as in Go, and not on an idempotent re-add;
+`parity::team_member_writes::adding_a_member_agrees_and_joins_the_default_channels` reads the row.
 
 `App.JoinUserToTeam` (app/team.go:851) calls `Store().User().UpdateUpdateAt(user.Id)` between the
 membership write and the sidebar categories, and treats its failure as a **hard** error —
