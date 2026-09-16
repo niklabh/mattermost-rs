@@ -9090,3 +9090,98 @@ exist since 2026-09-15; the call site is the user family's.
 
 `mm_api::auth::AuthenticatedSession` asks `App::mfa_required` last; `MfaSetupSession` exempts the two
 MFA-setup routes. `parity::rest_mfa` compares it on the licensed MFA pair.
+
+## D-802 · The job schedulers are ported but never started: two servers are two cluster leaders
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (jobs/schedulers.go) · **Owner** the jobs subsystem
+
+`mm_app::job_scheduler` has the `Scheduler` trait, `PeriodicScheduler`, `DailyScheduler`,
+`GenerateNextStartDateTime` and the two store reads a next-run time depends on. Nothing runs them:
+`main.rs` starts the **watcher** behind `MM_API_ENABLE_JOB_WORKERS` and starts no scheduler under
+any variable.
+
+The reason is not the port. Workers are safe to run beside the Go server because `ClaimJob` is one
+optimistic `UPDATE … WHERE Status = 'pending'` — the same mutual exclusion Mattermost relies on
+across a cluster. Schedulers have no such guard: Go's protection is `isLeader`, fed by the
+enterprise cluster interface, and `initSchedulers` sets it `true` outright (jobs/server.go:55)
+because a single-node server is trivially the leader. Two single-node servers on one database are
+therefore two leaders, and `PeriodicScheduler` and `DailyScheduler` both **ignore** the
+`pendingJobs` argument, so nothing downstream deduplicates either. Each period would queue two
+jobs.
+
+**What is owed:** the `Schedulers` loop — Go's one-minute timer over `nextRunTimes`, the config
+and leader channels — together with `setNextRunTime` and `scheduleJob`, which were deliberately
+*not* ported with the rest: they are two store reads and a `CreateJob` whose only caller is that
+loop, and shipping them untested would have been three functions nothing could exercise. Before
+it can be switched on, a decision about which process schedules.
+The natural one is that this becomes safe when the Go server no longer runs, which is where the
+migration is going anyway; until then it is a switch nobody should turn on.
+
+## D-803 · `DailyScheduler` has two time traps, both measured and neither yet reachable
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-16 (jobs/jobs.go:340) · **Owner** whoever ports a `DailyScheduler`
+
+`refresh_materialized_views` is the only `DailyScheduler` in the public tree and is not ported, so
+neither of these is reachable today. Both are recorded from `fixtures/behaviour_job_scheduler.json`
+rather than from reading, and both are asserted in `mm_app::job_scheduler`'s `go_parity` module so
+they cannot drift silently.
+
+1. **A wall-clock time the local zone skips.** `time.Date` normalises 02:30 on a spring-forward
+   day to **01:30 in the pre-transition offset** — an hour *before* what was asked for, not after.
+   `chrono` declines to name an instant for a time that does not exist, so
+   `generate_next_start_date_time` answers `None` and the scheduler treats that as "no next run".
+   One skipped day a year against Go running an hour early. Reproducing Go needs `time.Date`'s
+   transition fix-up, which needs the zone's transition boundaries — `chrono::Local` does not
+   expose them.
+
+2. **`chrono`'s `%H:%M` accepts a one-digit minute and Go's `"15:04"` does not.** Go rejects
+   `"03:0"`, which makes `startTimeFunc` return nil and switches the scheduler *off*; a port that
+   reached for `NaiveTime::parse_from_str(s, "%H:%M")` would schedule 03:00 instead. Ten other
+   inputs agree, including the two that surprise — `"3:00"` is accepted by both, `"0300"` by
+   neither.
+
+**What is owed:** a Go-faithful `"15:04"` parse (two digits for the minute, one or two for the
+hour) at the point a `DailyScheduler` is registered, and a decision on (1) — most likely to keep
+`None` and say so, since a job that skips a day is better than one that runs at an hour nobody
+configured.
+
+## D-804 · Twenty-eight of the twenty-nine registered job types have no worker here
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (app/server.go:1585) · **Owner** the jobs subsystem
+
+`mm_app::job::REGISTERED_JOB_TYPES` lists the twenty-nine types the Go server registers a worker
+for, and `App::create_job` validates against it — so this server can create a job of any of them.
+`mm_app::job_runtime::registered_workers` runs exactly one: `cleanup_desktop_tokens`. Every other
+type is created here and run by the Go server off the shared table.
+
+The runtime is not the gap; each worker's **body** is. They range from a single `DELETE`
+(`cleanup_expired_access_tokens`) to the import and export pipelines, and several need store
+methods that do not exist yet (`RefreshPostStats`, `RefreshFileStats`,
+`RefreshPostStatsForUsers` for `refresh_materialized_views`). Two also need shapes the runtime
+does not have: `BatchWorker`/`BatchMigrationWorker`/`BatchReportWorker` are not `SimpleWorker`,
+and they are the only users of `JobServer.CancellationWatcher`, `SetJobProgress` mid-run and
+`UpdateInProgressJobData` — none of which is ported.
+
+**What is owed:** one worker at a time, cheapest first (`cleanup_expired_access_tokens`,
+`expirynotify`, `last_accessible_post`), each with the store methods it needs; then the batch
+worker shape and the cancellation watcher with it.
+
+## D-805 · The committed `.sqlx` offline cache is thirty queries stale; `SQLX_OFFLINE=true` does not build
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (noticed while adding five queries)
+
+`.sqlx/` is checked in, which is the sqlx convention for building without a database. It does not
+work: `SQLX_OFFLINE=true cargo check -p mm-store` fails with 27 errors across eleven modules —
+`post_store` (9), `channel_store` (4), `property_store` (3), and `file_info_store`,
+`product_notices_store`, `team_store`, `command_store`, `session_store`, `user_store`,
+`view_store`, `webhook_store`. Three committed entries are also for queries that no longer exist.
+
+Every session since the cache was last prepared has added `query!` macros against the live
+database, where the macro checks the schema directly and the cache is never read, so nothing
+noticed. This session's five new queries *were* added to the cache, and `job_store.rs` and
+`desktop_tokens_store.rs` are clean offline; the rest was left alone rather than folded into an
+unrelated change.
+
+**What is owed:** one `cargo sqlx prepare --workspace` against the development database, as its own
+commit — it rewrites about 34 files and belongs on no other change. Then a decision about whether
+it stays fresh: nothing enforces it, and it has silently rotted for months.

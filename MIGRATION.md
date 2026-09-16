@@ -13959,3 +13959,65 @@ Only the deterministic halves are asserted — a lone admin hears the request, a
 does. Whether an admin hears it while a member is also connected is a race in Go.
 
 Mutation tally (`websocket-join-admins.plan`): 9 run, 7 caught, 2 controls survived.
+
+## The job workers: the watcher, `DoJob`, and the transitions a running job makes (2026-09-16)
+
+New: `crates/mm-app/src/job_runtime.rs`, `crates/mm-app/src/job_scheduler.rs`,
+`crates/mm-store/tests/db_job_store_runtime.rs`, `crates/mm-app/tests/db_job_worker.rs`,
+`reference/dump/behaviour_job_scheduler.go` → `fixtures/behaviour_job_scheduler.json`,
+`scripts/mutations/job-workers.plan`. No api4 pair is added; the **jobs** item of the denominator
+advances from "the three reads and the three writes" to "a job created here can also be run here".
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `jobs/jobs.go` `ClaimJob`, `SetJobProgress`, `SetJobSuccess`, `SetJobError`, `CheckForPendingJobsByType`, `GetLastSuccessfulJobByType` | `mm-app/src/job_runtime.rs` | DONE | 11 DB + 5 unit | `ClaimJob`'s optimistic `UPDATE` is the whole mutual exclusion between this server and the Go server on the same table; a lost race is `Ok(None)`, not an error. |
+| `jobs/base_workers.go` `SimpleWorker`, `DoJob`, `setJobSuccess` | `mm-app/src/job_runtime.rs` | DONE | DB | `setJobSuccess` has **no `return` between its two writes**: a job whose progress write fails is marked `error` and then driven to `success` anyway. Reproduced. |
+| `jobs/jobs_watcher.go` `Watcher`, `PollAndNotify` | `mm-app/src/job_runtime.rs`, `mm-api/src/main.rs` | DONE | DB | Off unless `MM_API_ENABLE_JOB_WORKERS`; see [D-804] for what it would run. |
+| `jobs/workers.go` `Workers` | `mm-app/src/job_runtime.rs` | DONE | 4 unit | Keyed by job **type**, not by the worker's log name. |
+| `jobs/base_schedulers.go`, `GenerateNextStartDateTime` | `mm-app/src/job_scheduler.rs` | DONE | 9 unit + 7 `go_parity` | Ported but **never started** — [D-802]. |
+| `jobs/schedulers.go` `Schedulers` loop | — | DEFERRED | — | [D-802]. |
+| `jobs/cleanup_desktop_tokens` | `mm-app/src/job_runtime.rs` | DONE | 1 DB | The only worker body ported; the other twenty-eight are [D-804]. |
+| `SqlJobStore` `GetAllByStatus`, `GetCountByStatusAndType`, `UpdateOptimistically`, `GetNewestJobByStatusesAndType`; `SqlDesktopTokensStore.DeleteOlderThan` | `mm-store` | DONE | 6 DB | See below. |
+
+Findings:
+
+- **`GetAllByStatus` is the store's one ascending read.** Every other job query is
+  `ORDER BY CreateAt DESC`; the watcher's is `ASC`, and that is what makes the queue a queue — a
+  backlog larger than one poll can hand off would otherwise starve its own head for ever.
+- **`UpdateOptimistically` is not `UpdateStatusOptimistically` with extra columns.** It carries
+  `Data` and `Progress` and **does not touch `StartAt`**, which the other one stamps. Sharing a
+  statement between them resets the start time on every progress tick.
+- **A busy worker's offer is dropped, not queued.** Go's `jobs chan model.Job` is *unbuffered* and
+  the watcher offers with a `default:` arm, so the send lands only when the goroutine is already
+  parked. A `tokio::mpsc` of capacity one is the obvious translation and the wrong one; the port
+  keeps the property with a `busy` flag set for exactly the span Go's goroutine is inside `DoJob`.
+- **`SetJobError` writes twice on purpose.** Optimistically against `in_progress`, then against
+  `cancel_requested` — a job cancelled while running is in the second state, and without the retry
+  its failure is lost and the row stays `cancel_requested` for ever. Both missing is the only
+  transition that fails without the store failing.
+- **`Data["error"]` is `message — detailed — wrapped`**, separated by U+2014 with a space either
+  side (verified against the Go bytes), added to the map the *claimed* job carried. On this server
+  the first segment is `app.job.error`, the id, because nothing translates it ([D-092]).
+- **The daylight-saving answers were measured, not reasoned.** `GenerateNextStartDateTime` on a
+  spring-forward day answers **an hour early**, not an hour late; on a fall-back day it takes the
+  **earlier** of the two instants. The first is a divergence here, the second is matched by
+  `.earliest()`. Both are [D-803], and the fixture generator reassigns `time.Local` to
+  `America/New_York` to ask Go at all.
+- **`chrono`'s `%H:%M` is more permissive than Go's `"15:04"`** on exactly one of eleven probed
+  inputs: `"03:0"`. Found by replaying the corpus, not by reading. [D-803].
+- **A panicking job body lands in `error` here and kills the process in Go.** `HandleJobPanic`
+  repanics out of `go w.Run()`, which has no recover above it. The row state is identical; the
+  process outcome is a deliberate, permanent divergence recorded on `do_job`.
+- **Three committed fixtures drift on this machine and were left alone.** `behaviour_filestore`,
+  `behaviour_scheduled_post` and `behaviour_scheduled_post_recurrence` differ after any generator
+  run here — `time.LoadLocation("america/new_york")` succeeds where the fixtures record a failure.
+  Confirmed pre-existing by running the generator with this session's file removed; reverted, not
+  committed.
+
+- **The committed `.sqlx` offline cache had already rotted.** The five queries added here are in
+  it and both touched store modules build offline; twenty-seven errors across eleven other modules
+  were there before this session and were left alone. [D-805].
+
+Mutation tally (`job-workers.plan`): 29 run, 27 caught, 2 controls survived. One line was a
+harness fault on its first run — `status = $2` left a bind unused and `sqlx::query_as!` refused to
+compile — re-pointed at the bind list and re-run: caught.
