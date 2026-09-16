@@ -68,6 +68,10 @@
 # slash-command routes answer only while it holds no plugin, since a plugin may register
 # commands this server cannot see. It is not `MM_PLUGINSETTINGS_DIRECTORY`, which `GET /config`
 # would report. Unset, those routes forward.
+# `MM_API_GO_CACHE_USER` (2026-09-16) names the system administrator mm-api mints a session for,
+# to call Go's `POST /caches/invalidate` whenever it clears a user's session cache — without it a
+# session revoked here keeps authenticating against Go (D-350). `sliceuser` is the stack's first
+# account, so always an administrator. See `mm_api::go_cache`.
 mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
@@ -88,6 +92,7 @@ mmrs_launch_mm_api() {
     MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
     MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \
     MM_GO_PLUGIN_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/plugins" \
+    MM_API_GO_CACHE_USER=sliceuser \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

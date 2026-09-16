@@ -357,6 +357,10 @@ impl App {
                 update_password_failed()
             })?;
 
+        // `a.InvalidateCacheForUser(user.Id)` (user.go:1782). Go's login reads the user through
+        // its profile cache, so without this the old password keeps working against Go.
+        self.invalidate_cache_for_user(&user.id).await;
+
         if !self.config().terminate_sessions_on_password_change {
             return Ok(());
         }
@@ -894,7 +898,7 @@ impl App {
             })?;
 
         // `ps.ClearUserSessionCache(session.UserId)` (platform/session.go:238).
-        self.clear_session_cache_for_user(&session.user_id);
+        self.clear_session_cache_for_user(&session.user_id).await;
         Ok(())
     }
 }

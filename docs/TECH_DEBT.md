@@ -6691,7 +6691,13 @@ a bearer token — so the fixture is the other half of the work.
 
 ## D-237 · A session revoked by mm-api is still accepted by Go until its cache is invalidated
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+**Closed** 2026-09-16 with [D-350]: the logout purges Go's session cache before it answers;
+`parity::auth_writes::a_session_revoked_here_is_refused_by_both_servers`. The password half too:
+`update_password` now calls `App::invalidate_cache_for_user`, which drives Go's
+`reset_failed_attempts` when the counter is already 0 (its local-cache layer purges the profile), and
+`a_self_service_password_change_takes_effect_on_both_servers` no longer invalidates by hand. Go's
+other ~24 `InvalidateCacheForUser` call sites are not wired and remain [D-190].
 
 [D-190] with a credential consequence, and measured rather than reasoned about:
 `POST /api/v4/users/logout` served by mm-api deletes the `Sessions` row, and the *Go* server keeps
@@ -7173,7 +7179,15 @@ asserts rather than something a reader has to trust.
 
 ## D-350 · a session this server revokes keeps authenticating against Go
 
-**Status** OPEN · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+**Status** CLOSED · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+**Closed** 2026-09-16 — `App::clear_session_cache_for_user` now awaits
+`mm_app::peer_cache::PeerCache::clear_user_sessions`, which `mm_api::go_cache` implements by
+inserting a throwaway session for the user and having Go revoke it — Go's `RevokeSession` runs
+`ClearUserSessionCache` for exactly that user. Authenticated by a session mm-api mints for
+`MM_API_GO_CACHE_USER`; unset, it warns at startup and the gap returns. A first version called
+`/caches/invalidate` instead and blanked Go's `get_statuses` on every logout; only the all-users
+revoke still does, untested, which is [D-351]'s gap. Pinned by
+`parity::session_writes::go_refuses_a_session_we_revoked`, re-mint path included.
 
 The Go server keeps sessions in an in-memory cache and invalidates it only from its own revocation
 paths — `ClearUserSessionCache` (app/platform/session.go:105), which also fans out over the cluster

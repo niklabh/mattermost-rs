@@ -89,7 +89,29 @@ async fn main() -> anyhow::Result<()> {
         "loaded configuration from the shared database"
     );
 
-    let app = App::with_config(store, config);
+    let mut app = App::with_config(store, config);
+
+    // The Go server's session cache (`mm_app::peer_cache`, D-350). Without it a session revoked
+    // here keeps authenticating against Go until its cache entry ages out, so the absence is
+    // logged at warn rather than info.
+    match std::env::var("MM_API_GO_CACHE_USER") {
+        Ok(username) if !username.is_empty() => {
+            tracing::info!(
+                username,
+                "purging the Go server's session cache on session changes"
+            );
+            let invalidator = mm_api::go_cache::GoCacheInvalidator::new(
+                app.store().clone(),
+                &go_upstream,
+                username,
+            );
+            app = app.with_peer_cache(std::sync::Arc::new(invalidator));
+        }
+        _ => tracing::warn!(
+            "MM_API_GO_CACHE_USER is unset: a session revoked here stays valid on the Go server \
+             until its session cache expires"
+        ),
+    }
 
     // `markdown.SetMaxPostRunes(ps.MaxPostSize())` (platform/service.go:338): the markdown
     // walker refuses inputs longer than four bytes per rune of the post limit, and the limit is

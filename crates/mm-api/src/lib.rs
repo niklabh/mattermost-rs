@@ -47,6 +47,7 @@ pub mod file_search;
 /// `uploadFileStream` — the classic `POST /api/v4/files` upload.
 pub mod file_upload;
 pub mod files;
+pub mod go_cache;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
 pub mod image_proxy;

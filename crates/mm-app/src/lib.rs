@@ -78,6 +78,7 @@ pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;
 pub mod password;
+pub mod peer_cache;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_create;
@@ -145,6 +146,9 @@ pub struct App {
     /// connections. `App` is cloned per request by axum's state extractor, and a hub per clone
     /// would mean an event raised by one request reaching none of the sockets.
     hub: std::sync::Arc<crate::hub::Hub>,
+    /// The Go server's caches, when something to purge them is installed; see
+    /// `crate::peer_cache`.
+    peer_cache: Option<std::sync::Arc<dyn crate::peer_cache::PeerCache>>,
     /// Go's `platform.statusCache`, and — like the hub — shared across every clone of `App` so
     /// that a status set by one request is the previous status the next request sees.
     ///
@@ -239,6 +243,7 @@ impl App {
                 crate::product_notices::NoticesCache::default(),
             )),
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
+            peer_cache: None,
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
@@ -249,6 +254,21 @@ impl App {
                 std::collections::HashSet::new(),
             )),
         }
+    }
+
+    /// Install the purge for the Go server's session cache. Call before the `App` is cloned: a
+    /// clone made earlier keeps whatever it had.
+    pub fn with_peer_cache(
+        mut self,
+        peer_cache: std::sync::Arc<dyn crate::peer_cache::PeerCache>,
+    ) -> Self {
+        self.peer_cache = Some(peer_cache);
+        self
+    }
+
+    /// The installed purge for the Go server's caches, if any. See `crate::peer_cache`.
+    pub fn peer_cache(&self) -> Option<&dyn crate::peer_cache::PeerCache> {
+        self.peer_cache.as_deref()
     }
 
     /// The notice cache — `a.ch.cachedNotices` and its counts.

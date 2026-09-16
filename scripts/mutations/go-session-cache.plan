@@ -1,0 +1,14 @@
+# Mutation plan for D-350/D-237: mm-api makes the Go server forget sessions and users (2026-09-16).
+#
+#   scripts/mutate-batch.sh scripts/mutations/go-session-cache.plan
+#
+# The last two lines are no-op controls and must SURVIVE.
+hub-clear-skips-the-peer	crates/mm-app/src/hub.rs	            peer.clear_user_sessions(user_id).await;	            let _ = (peer, user_id);	api	a_session_revoked_here_is_refused_by_both_servers
+probe-names-another-user	crates/mm-api/src/go_cache.rs	            user_id: user_id.to_owned(),\n            expires_at: mm_model::utils::get_millis() + PROBE_LIFETIME_MS,	            user_id: mm_model::utils::new_id(),\n            expires_at: mm_model::utils::get_millis() + PROBE_LIFETIME_MS,	api	go_refuses_a_session_we_revoked
+no-retry-on-401	crates/mm-api/src/go_cache.rs	            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {	            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 1 {	api	go_refuses_a_session_we_revoked
+retry-keeps-the-dead-token	crates/mm-api/src/go_cache.rs	                *token = None;\n                continue;	                continue;	api	go_refuses_a_session_we_revoked
+minted-session-has-no-roles	crates/mm-api/src/go_cache.rs	            roles: user.roles,	            roles: String::new(),	api	go_refuses_a_session_we_revoked
+password-change-skips-the-user-cache	crates/mm-app/src/auth.rs	        self.invalidate_cache_for_user(&user.id).await;	        let _ = &user.id;	api	a_self_service_password_change_takes_effect_on_both_servers
+user-purge-only-when-attempts-nonzero	crates/mm-api/src/go_cache.rs	        if user.failed_attempts != 0 ||	        if user.failed_attempts == 0 ||	api	a_self_service_password_change_takes_effect_on_both_servers
+control-timeout-six-seconds	crates/mm-api/src/go_cache.rs	std::time::Duration::from_secs(5);	std::time::Duration::from_secs(6);	api	go_refuses_a_session_we_revoked
+control-lifetime-literal	crates/mm-api/src/go_cache.rs	const SESSION_LIFETIME_MS: i64 = 24 * 60 * 60 * 1000;	const SESSION_LIFETIME_MS: i64 = 86_400_000;	api	a_self_service_password_change_takes_effect_on_both_servers

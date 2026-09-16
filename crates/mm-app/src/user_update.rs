@@ -415,7 +415,7 @@ impl App {
         }
 
         // `a.ClearSessionCacheForUser(user.Id)` (user.go:2122).
-        self.clear_session_cache_for_user(&user.id);
+        self.clear_session_cache_for_user(&user.id).await;
 
         if send_websocket_event {
             let mut message = mm_model::websocket_message::WebSocketEvent::new(

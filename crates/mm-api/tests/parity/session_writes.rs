@@ -218,12 +218,9 @@ async fn user_id_of(client: &reqwest::Client, token: &str) -> String {
 
 /// True when the token still authenticates — asked of **this** server, not of Go.
 ///
-/// Go must not be asked, and the reason is a measured divergence rather than a preference: the Go
-/// server caches sessions in memory and only invalidates that cache from its own revocation
-/// paths, so a session row this server deletes keeps authenticating against Go until the entry
-/// ages out. Measured 2026-09-12 — delete the row by hand and `GET {go}/users/me` still answers
-/// 200 while `GET {rust}/users/me` answers 401. See [D-350]; `go_cache_keeps_a_session_we_revoked`
-/// below pins it deliberately so it cannot be mistaken for a flake here.
+/// Go keeps sessions in an in-memory cache, and only this server's own purge
+/// (`mm_api::go_cache`) makes it forget one deleted here; `go_refuses_a_session_we_revoked` is the
+/// one test that asks Go, so every other assertion in this file stays about the row.
 async fn token_still_works(client: &reqwest::Client, token: &str) -> bool {
     client
         .get(format!("{RUST}/api/v4/users/me"))
@@ -970,55 +967,80 @@ async fn attaching_a_device_id_matches_go_on_the_cookie_and_the_revocation() {
 // The strangler's own divergence
 // ------------------------------------------------------------------------------------------
 
-/// A session **we** revoke keeps authenticating against the **Go** server.
+/// A session **we** revoke is refused by the **Go** server too — twice, the second time after the
+/// session mm-api purges Go's cache with has itself been revoked.
 ///
-/// This is not a wire-format difference and no single-server test can see it. Go keeps sessions in
-/// an in-memory cache (`platform.PlatformService`, `SessionCacheSize = 35000`) and invalidates it
-/// only from its own revocation paths — `ClearUserSessionCache`, which also fans out over the
-/// cluster bus. This server has no such cache ([D-087]) and no way to reach Go's, so every
-/// revocation in this family leaves Go serving the dead session until its entry ages out.
-///
-/// It is asserted rather than merely recorded because the failure mode is silent and the
-/// direction matters: a **security** control that appears to work from the client that issued it.
-/// If a future change makes Go agree — a shared cache, a cluster message, a shorter TTL — this
-/// test fails and [D-350] can be closed, which is exactly what should happen.
+/// Go keeps sessions in an in-memory cache (`platform.PlatformService`) and invalidates it only
+/// from its own revocation paths. Until 2026-09-16 every revocation served here left Go serving
+/// the dead session until its entry aged out (formerly D-350): a **security** control that
+/// appeared to work from the client that issued it. `ClearUserSessionCache` now purges Go's cache
+/// through `mm_api::go_cache`, authenticated by a session mm-api mints for the stack
+/// administrator. The second round deletes that minted row first — which is what the suite's own
+/// revoke-all tests do to it mid-run — so the 401-then-re-mint path is what answers.
 #[tokio::test]
-async fn go_cache_keeps_a_session_we_revoked() {
+async fn go_refuses_a_session_we_revoked() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
     }
     purge_api_fixtures().await;
+    let _go_cache = common::GO_CACHE.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
-    let user = create_plain_user(&client, &admin, &team_id, "gocache").await;
 
-    // Warm Go's cache for this token, so the entry definitely exists before the row goes.
-    assert!(token_still_works_against_go(&client, &user.token).await);
+    for round in ["gocache", "gocachere"] {
+        if round == "gocachere" {
+            // Revoked **through Go**, so Go's cache forgets it too and the next purge meets a 401.
+            // A row deleted by hand would stay cached in Go and never exercise the re-mint.
+            let pool = common::fixture_pool().await.expect("the stack database");
+            let minted: Vec<(String, String)> = sqlx::query_as(
+                "SELECT id, userid FROM sessions WHERE props->>'mmrs_peer_cache' = 'true'",
+            )
+            .fetch_all(&pool)
+            .await
+            .expect("reads the minted sessions");
+            assert!(!minted.is_empty(), "the first round minted a session");
+            for (session_id, user_id) in minted {
+                let revoked = post_one(
+                    &client,
+                    GO,
+                    &admin,
+                    &format!("/api/v4/users/{user_id}/sessions/revoke"),
+                    &serde_json::json!({ "session_id": session_id }),
+                )
+                .await;
+                assert_eq!(revoked.0, 200, "Go revokes the minted session");
+            }
+        }
+        let user = create_plain_user(&client, &admin, &team_id, round).await;
 
-    let revoked = post_one(
-        &client,
-        RUST,
-        &user.token,
-        &format!("/api/v4/users/{}/sessions/revoke/all", user.id),
-        &serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(revoked.0, 200);
+        // Warm Go's cache for this token, so the entry definitely exists before the row goes.
+        assert!(token_still_works_against_go(&client, &user.token).await);
 
-    // The row is gone — this is a store read, not a cache read.
-    assert_eq!(session_count(&client, &admin, &user.id).await, 0);
-    // We refuse it.
-    assert!(!token_still_works(&client, &user.token).await);
-    // Go does not. If this assertion starts failing, the gap has closed; see the doc above.
-    assert!(
-        token_still_works_against_go(&client, &user.token).await,
-        "D-350 appears to be fixed — Go now rejects a session we revoked. Close the entry and \
-         invert this assertion rather than deleting it."
-    );
+        let revoked = post_one(
+            &client,
+            RUST,
+            &user.token,
+            &format!("/api/v4/users/{}/sessions/revoke/all", user.id),
+            &serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(revoked.0, 200);
 
-    delete_plain_user(&client, &admin, &user.id).await;
+        // The row is gone — this is a store read, not a cache read.
+        assert_eq!(session_count(&client, &admin, &user.id).await, 0);
+        assert!(
+            !token_still_works(&client, &user.token).await,
+            "{round}: we refuse it"
+        );
+        assert!(
+            !token_still_works_against_go(&client, &user.token).await,
+            "{round}: Go still accepts a session we revoked — its cache was not purged"
+        );
+
+        delete_plain_user(&client, &admin, &user.id).await;
+    }
 }
 
 /// Updating **one** device column must not wipe the other.

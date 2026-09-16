@@ -256,7 +256,7 @@ impl App {
                 })?;
 
         // `a.ClearSessionCacheForUser(userID)` (team.go:470, :517).
-        self.clear_session_cache_for_user(&updated.user_id);
+        self.clear_session_cache_for_user(&updated.user_id).await;
 
         self.send_updated_team_member_event(&updated).await;
 
@@ -673,7 +673,7 @@ impl App {
         }
 
         // `a.ClearSessionCacheForUser(user.Id)` (team.go:872).
-        self.clear_session_cache_for_user(&user.id);
+        self.clear_session_cache_for_user(&user.id).await;
 
         self.publish_added_to_team(&team.id, &user.id).await;
 
@@ -1396,7 +1396,7 @@ impl App {
             })?;
 
         // `a.ClearSessionCacheForUser(user.Id)` (team.go:1324).
-        self.clear_session_cache_for_user(&user.id);
+        self.clear_session_cache_for_user(&user.id).await;
 
         Ok(())
     }

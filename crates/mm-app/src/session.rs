@@ -315,7 +315,7 @@ impl App {
         }
 
         // `ps.ClearUserSessionCache(userID)` (platform/session.go:342).
-        self.clear_session_cache_for_user(user_id);
+        self.clear_session_cache_for_user(user_id).await;
         Ok(())
     }
 
@@ -378,6 +378,9 @@ impl App {
 
         // `ClearAllUsersSessionCache` (platform/session.go:178) — its hub leg is `Hub.InvalidateAll`.
         self.hub().invalidate_all();
+        if let Some(peer) = self.peer_cache() {
+            peer.clear_all_sessions().await;
+        }
 
         Ok(())
     }

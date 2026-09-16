@@ -488,7 +488,7 @@ impl App {
             let mut seen = std::collections::HashSet::with_capacity(user_ids.len());
             for user_id in &user_ids {
                 if seen.insert(user_id.as_str()) {
-                    self.clear_session_cache_for_user(user_id);
+                    self.clear_session_cache_for_user(user_id).await;
                 }
             }
 

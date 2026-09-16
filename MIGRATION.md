@@ -14035,3 +14035,15 @@ compile — re-pointed at the bind list and re-run: caught.
 Mutation tally (`user-maps-and-notices.plan`): 7 run, 5 caught, 2 controls survived. The fifth
 (`present-props-ignored`) survived at first and was caught after `an_update_agrees_field_for_field`
 learned to read the stored `props` column.
+
+## Tech-debt: the Go server forgets a session this server revokes (2026-09-16)
+
+- **A session revoked here, or a password changed here, is forgotten by Go before the response**
+  (D-350, D-237 closed): `mm_app::peer_cache::PeerCache`, implemented in `mm_api::go_cache` by
+  driving the Go route whose handler runs the matching cache clear, as a session mm-api mints for
+  `MM_API_GO_CACHE_USER`. Never `/caches/invalidate` per user: it also wipes Go's status cache,
+  which `get_statuses` answers from alone.
+
+Mutation tally (`go-session-cache.plan`): 9 run, 7 caught, 2 controls survived. The two retry
+lines survived first — the test deleted the minted session by hand, which Go's cache never saw —
+and were caught once it revoked that session through Go.
