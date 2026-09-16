@@ -42,6 +42,10 @@ libc = "0.2"
 # Only to construct a `sqlx::Error` when testing the store-error-to-AppError mapping. The crate
 # itself never touches sqlx — that is mm-store's business.
 sqlx.workspace = true
+# `job_scheduler`'s oracle was generated in Asia/Kolkata and in America/New_York; replaying it
+# needs those two zones by name, not the machine's. Dev-only on purpose — the library is bound to
+# `chrono::Local`, as Go is bound to `time.Local`.
+chrono-tz.workspace = true
 tokio.workspace = true
 # `db_channel_authorization.rs` puts each permission case to the running Go server as well as
 # to this crate, and compares. Dev-only: nothing in the library speaks HTTP.

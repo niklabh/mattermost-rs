@@ -1231,6 +1231,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeJobSchedulerBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: job scheduler behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeLinkMetadataBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: link metadata behaviour fixture: %v\n", err)
 		os.Exit(1)

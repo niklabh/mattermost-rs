@@ -132,6 +132,35 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // The job workers: `Server.StartWorkers` (app/server.go), which is the `Watcher` polling
+    // `Jobs` for `pending` rows and handing each to the worker registered for its type.
+    //
+    // **Off unless `MM_API_ENABLE_JOB_WORKERS` says otherwise**, and that default is not caution
+    // about the port — it is what the deployment is. Running the workers is safe beside the Go
+    // server: `ClaimJob` is one optimistic `UPDATE … WHERE Status = 'pending'`, which is exactly
+    // how Mattermost runs this loop on every node of a cluster, so at most one of the two servers
+    // claims any given job. What it is not is *useful* by default — the Go server already runs a
+    // worker for all twenty-nine registered types and this one runs `cleanup_desktop_tokens`, so
+    // turning it on only decides which process does that delete. The switch exists so the loop
+    // can be exercised on a stack, and so the default cannot surprise anyone running the parity
+    // suite, where a job claimed here rather than there changes who answers.
+    //
+    // The **schedulers** are not started at all, under any variable; see
+    // `mm_app::job_scheduler`'s module note and [D-802]. They have no optimistic guard, both
+    // servers believe they are the cluster leader, and each period would queue its own job.
+    if job_workers_enabled() {
+        let app = app.clone();
+        let workers = std::sync::Arc::new(mm_app::job_runtime::registered_workers());
+        let watcher = mm_app::job_runtime::Watcher::new(
+            mm_app::job_runtime::DEFAULT_WATCHER_POLLING_INTERVAL_MS,
+        );
+        tracing::info!(
+            workers = workers.len(),
+            "job workers enabled; the watcher will poll Jobs for pending rows"
+        );
+        tokio::spawn(async move { app.run_watcher(workers, watcher).await });
+    }
+
     let state = AppState::new(app, go_upstream.clone());
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
@@ -193,6 +222,16 @@ async fn main() -> anyhow::Result<()> {
         .context("server error")?;
 
     Ok(())
+}
+
+/// Whether to run the job workers. Not a Mattermost setting — Go starts its workers
+/// unconditionally — so this is deliberately `MM_API_`-prefixed rather than `MM_SERVICESETTINGS_`,
+/// and parsed the same way Go parses a bool so a typo cannot read as true.
+fn job_workers_enabled() -> bool {
+    match std::env::var("MM_API_ENABLE_JOB_WORKERS") {
+        Ok(value) => matches!(value.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"),
+        Err(_) => false,
+    }
 }
 
 /// `*ServiceSettings.EnableLocalMode`, from the environment.

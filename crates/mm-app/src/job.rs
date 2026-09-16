@@ -434,7 +434,7 @@ impl App {
 
     /// `JobServer.SetJobPending` and `SetJobCanceled` (jobs/jobs.go:250, :236): an unconditional
     /// status write, then the event. A missing job is the same 500 as a failed write.
-    async fn set_job_status(
+    pub(crate) async fn set_job_status(
         &self,
         job_id: &str,
         status: &str,
@@ -456,7 +456,7 @@ impl App {
     /// Port of `JobServer.publishJobStatus` (jobs/jobs.go:129): `job_updated` to everyone, with
     /// the job — its `status` overwritten by the one being announced — as a JSON string, and
     /// `ContainsSensitiveData` set so the hub delivers it only to `manage_system` sessions.
-    async fn publish_job_status(&self, job: &Job, status: &str) {
+    pub(crate) async fn publish_job_status(&self, job: &Job, status: &str) {
         let mut announced = job.clone();
         announced.status = status.to_owned();
         let json = match serde_json::to_string(&announced) {

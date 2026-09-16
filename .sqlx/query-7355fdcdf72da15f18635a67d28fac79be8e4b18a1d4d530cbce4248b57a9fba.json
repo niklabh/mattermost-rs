@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM desktoptokens WHERE createat < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7355fdcdf72da15f18635a67d28fac79be8e4b18a1d4d530cbce4248b57a9fba"
+}

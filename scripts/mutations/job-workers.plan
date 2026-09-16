@@ -1,0 +1,39 @@
+# Mutation plan for the job workers — the JobServer transitions, SimpleWorker.DoJob, the
+# watcher and the schedulers.
+#
+#   MUTATE_STORE_TARGETS="--test db_job_store_runtime" scripts/mutate-batch.sh scripts/mutations/job-workers.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+# No `api` lines: not one of these functions is reachable from a route, which is the whole
+# reason the tests are `store` and `app` suites rather than parity ones.
+# The last two lines are the no-op controls and must SURVIVE.
+
+watcher-reads-newest-first	crates/mm-store/src/job_store.rs	             WHERE status = $1\n             ORDER BY createat ASC	             WHERE status = $1\n             ORDER BY createat DESC	store	job_runtime_
+pending-count-ignores-the-type	crates/mm-store/src/job_store.rs	FROM jobs WHERE status = $1 AND type = $2"#,	FROM jobs WHERE status = $1 AND ($2::text IS NOT NULL)"#,	store	job_runtime_
+pending-count-ignores-the-status	crates/mm-store/src/job_store.rs	FROM jobs WHERE status = $1 AND type = $2"#,	FROM jobs WHERE ($1::text IS NOT NULL) AND type = $2"#,	store	job_runtime_
+optimistic-update-also-stamps-start-at	crates/mm-store/src/job_store.rs	               SET lastactivityat = $3,\n                   status = $4,	               SET lastactivityat = $3,\n                   startat = $3,\n                   status = $4,	store	job_runtime_
+optimistic-update-drops-the-guard	crates/mm-store/src/job_store.rs	                   progress = $6\n             WHERE id = $1 AND status = $2	                   progress = $6\n             WHERE id = $1 AND ($2::text IS NOT NULL)	store	job_runtime_
+optimistic-update-keeps-the-old-status	crates/mm-store/src/job_store.rs	            mm_model::utils::get_millis(),\n            job.status,	            mm_model::utils::get_millis(),\n            current_status,	store	job_runtime_
+newest-by-statuses-is-oldest	crates/mm-store/src/job_store.rs	             WHERE status = ANY($1) AND type = $2\n             ORDER BY createat DESC	             WHERE status = ANY($1) AND type = $2\n             ORDER BY createat ASC	store	job_runtime_
+token-cleanup-is-inclusive	crates/mm-store/src/desktop_tokens_store.rs	"DELETE FROM desktoptokens WHERE createat < $1",	"DELETE FROM desktoptokens WHERE createat <= $1",	store	job_runtime_
+claim-guards-on-in-progress	crates/mm-app/src/job_runtime.rs	                job::JOB_STATUS_PENDING,\n                job::JOB_STATUS_IN_PROGRESS,	                job::JOB_STATUS_IN_PROGRESS,\n                job::JOB_STATUS_IN_PROGRESS,	app	job_worker_
+success-does-not-write-progress	crates/mm-app/src/job_runtime.rs	app.set_job_progress(job, 100).await	app.set_job_progress(job, 0).await	app	job_worker_
+a-failure-keeps-its-progress	crates/mm-app/src/job_runtime.rs	        job.progress = -1;	        job.progress = 0;	app	job_worker_
+the-wrapped-error-is-dropped	crates/mm-app/src/job_runtime.rs	        if let Some(wrapped) = std::error::Error::source(job_error) {\n            message.push_str(" — ");	        if let Some(wrapped) = std::error::Error::source(job_error) {\n            message.push_str("");	app	job_worker_
+the-separator-is-a-hyphen	crates/mm-app/src/job_runtime.rs	            message.push_str(" — ");\n            message.push_str(&wrapped.to_string());	            message.push_str(" - ");\n            message.push_str(&wrapped.to_string());	app	job_worker_
+the-retry-guards-on-pending	crates/mm-app/src/job_runtime.rs	.update_optimistically(job, job::JOB_STATUS_CANCEL_REQUESTED)	.update_optimistically(job, job::JOB_STATUS_PENDING)	app	job_worker_
+the-watcher-reads-running-jobs	crates/mm-app/src/job_runtime.rs	.get_all_by_status(job::JOB_STATUS_PENDING)	.get_all_by_status(job::JOB_STATUS_IN_PROGRESS)	app	job_worker_
+a-busy-worker-is-offered-anyway	crates/mm-app/src/job_runtime.rs	            if !slot.take() {	            if !slot.take() && false {	app	job_worker_
+a-disabled-worker-is-offered-anyway	crates/mm-app/src/job_runtime.rs	            if !slot.worker().is_enabled(self.config()) {	            if !slot.worker().is_enabled(self.config()) && false {	app	job_worker_
+the-token-cutoff-is-in-millis	crates/mm-app/src/job_runtime.rs	let cutoff = get_millis() / 1000 - MAX_AGE_SECONDS;	let cutoff = get_millis() - MAX_AGE_SECONDS;	app	job_worker_
+the-token-max-age-is-zero	crates/mm-app/src/job_runtime.rs	const MAX_AGE_SECONDS: i64 = 5 * 60;	const MAX_AGE_SECONDS: i64 = 0;	app	job_worker_
+equality-schedules-today	crates/mm-app/src/job_scheduler.rs	    if now < next {	    if now <= next {	unit	job_scheduler
+tomorrow-is-twenty-four-hours	crates/mm-app/src/job_scheduler.rs	    let tomorrow = next.date_naive().succ_opt()?.and_time(wall);	    let tomorrow = (next + chrono::Duration::days(1)).naive_local();	unit	job_scheduler
+a-repeated-wall-clock-takes-the-later-instant	crates/mm-app/src/job_scheduler.rs	        .earliest()?;	        .latest()?;	unit	job_scheduler
+the-start-minute-is-read-as-seconds	crates/mm-app/src/job_scheduler.rs	            wall.minute(),\n            0,	            0,\n            wall.minute(),	unit	job_scheduler
+the-jitter-fallback-is-zero	crates/mm-app/src/job_scheduler.rs	        return Duration::from_millis(1);	        return Duration::from_millis(0);	unit	job_scheduler
+the-period-is-not-added	crates/mm-app/src/job_scheduler.rs	            .checked_add_signed(period)	            .checked_add_signed(chrono::Duration::zero())	unit	job_scheduler
+message-export-does-not-count-warnings	crates/mm-app/src/job_runtime.rs	        &[job::JOB_STATUS_WARNING, job::JOB_STATUS_SUCCESS]	        &[job::JOB_STATUS_SUCCESS]	unit	job_runtime
+the-registry-is-keyed-by-name	crates/mm-app/src/job_runtime.rs	            worker.job_type,\n            Arc::new(WorkerSlot {	            worker.name,\n            Arc::new(WorkerSlot {	unit	job_runtime
+control-rename-the-claim-binding	crates/mm-app/src/job_runtime.rs	        if let Some(claimed) = &claimed {\n            self.publish_job_status(claimed, job::JOB_STATUS_IN_PROGRESS)	        if let Some(won) = &claimed {\n            self.publish_job_status(won, job::JOB_STATUS_IN_PROGRESS)	unit	job_runtime
+control-annotate-the-cutoff	crates/mm-app/src/job_runtime.rs	let cutoff = get_millis() / 1000 - MAX_AGE_SECONDS;	let cutoff: i64 = get_millis() / 1000 - MAX_AGE_SECONDS;	app	job_worker_
