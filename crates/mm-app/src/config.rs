@@ -223,6 +223,12 @@ pub struct Config {
     /// on, anyone may log at any level.
     pub enable_developer: bool,
 
+    /// `ServiceSettings.ExperimentalStrictCSRFEnforcement` (config.go:459). Go default
+    /// **`false`** (config.go:910). Read by `checkCSRFToken`: off, a cookie-authenticated write
+    /// whose `X-CSRF-Token` does not match is still let through when it carries
+    /// `X-Requested-With: XMLHttpRequest`; on, only the token passes.
+    pub experimental_strict_csrf_enforcement: bool,
+
     /// `ServiceSettings.EnableEmailInvitations` (config.go:460). Go default **`isUpdate`**: `false`
     /// on a document with no `SiteURL`, `true` on every persisted one (config.go:502). Off, the
     /// two invite-by-email routes (`inviteUsersToTeam` and its local twin) are the 501
@@ -1383,6 +1389,7 @@ impl Default for Config {
             enable_api_user_deletion: false,
             enable_api_trigger_admin_notifications: false,
             enable_developer: false,
+            experimental_strict_csrf_enforcement: false,
             enable_email_invitations: false,
             enable_link_previews: true,
             enable_post_search: true,
@@ -1702,6 +1709,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEDEVELOPER",
                 default.enable_developer,
+            ),
+            experimental_strict_csrf_enforcement: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALSTRICTCSRFENFORCEMENT",
+                default.experimental_strict_csrf_enforcement,
             ),
             enable_email_invitations: lookup_bool(
                 lookup,
@@ -2474,6 +2486,9 @@ impl Config {
                 .enable_api_trigger_admin_notifications
                 .unwrap_or(default.enable_api_trigger_admin_notifications),
             enable_developer: service.enable_developer.unwrap_or(default.enable_developer),
+            experimental_strict_csrf_enforcement: service
+                .experimental_strict_csrf_enforcement
+                .unwrap_or(default.experimental_strict_csrf_enforcement),
             // `new(isUpdate)` in effect (config.go:502): nil, and the document has a `SiteURL`,
             // is `true`. Resolved here for the same reason as `extend_session_length_with_activity`.
             enable_email_invitations: service.enable_email_invitations.unwrap_or(is_update),
@@ -3233,6 +3248,8 @@ struct ServiceSettingsDocument {
     enable_api_trigger_admin_notifications: Option<bool>,
     #[serde(rename = "EnableDeveloper")]
     enable_developer: Option<bool>,
+    #[serde(rename = "ExperimentalStrictCSRFEnforcement")]
+    experimental_strict_csrf_enforcement: Option<bool>,
     #[serde(rename = "EnableEmailInvitations")]
     enable_email_invitations: Option<bool>,
     #[serde(rename = "EnableLinkPreviews")]
@@ -4238,8 +4255,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 113,
-            "the fixture covers {keys} settings and Config reads 113 from the document. \
+            keys, 114,
+            "the fixture covers {keys} settings and Config reads 114 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4266,6 +4283,7 @@ mod go_parity {
                 "SessionLengthSSOInHours": 23,
                 "EnableAPITriggerAdminNotifications": true,
                 "EnableDeveloper": true,
+                "ExperimentalStrictCSRFEnforcement": true,
                 "EnableEmailInvitations": true,
                 "EnableLinkPreviews": false,
                 "EnablePostSearch": false,
@@ -4318,6 +4336,7 @@ mod go_parity {
         assert!(config.enable_post_icon_override);
         assert!(config.enable_api_trigger_admin_notifications);
         assert!(config.enable_developer);
+        assert!(config.experimental_strict_csrf_enforcement);
         assert!(config.enable_email_invitations);
         assert!(!config.enable_link_previews);
         assert!(!config.enable_post_search);

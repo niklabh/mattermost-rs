@@ -14021,3 +14021,11 @@ Findings:
 Mutation tally (`job-workers.plan`): 29 run, 27 caught, 2 controls survived. One line was a
 harness fault on its first run — `status = $2` left a bind unused and `sqlx::query_as!` refused to
 compile — re-pointed at the bind list and re-run: caught.
+
+## `checkCSRFToken` on every served route (2026-09-16)
+
+Cookie-authenticated non-`GET` requests are checked in the session extractors plus `CsrfGuard`
+for sessionless handlers, and `trust_requester` marks Go's `TrustRequester` routes; D-236 closed,
+`parity::csrf` (1 stack test, 6 unit tests in `auth.rs`). `GET`/`PUT`/`DELETE` on the literal
+`/posts/{ephemeral,search,rewrite}` now require a session first, which is Go's 401 where this
+server used to answer 400.

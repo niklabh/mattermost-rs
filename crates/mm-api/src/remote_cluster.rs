@@ -59,6 +59,7 @@ use crate::proxy;
 #[tracing::instrument(skip_all, fields(licensed_service, forwarded = false))]
 pub async fn remote_cluster_token_gate(
     State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
     // `c.App.Channels().License()` and `.HasRemoteClusterService()`.
