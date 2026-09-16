@@ -542,7 +542,7 @@ async fn local_create_user(state: State<AppState>, request: Request) -> Response
 
 /// `sendPasswordReset` through `APILocal` (user_local.go:23) — no session read anywhere in it.
 async fn local_send_password_reset(state: State<AppState>, request: Request) -> Response {
-    user_creates::send_password_reset(state, request).await
+    user_creates::send_password_reset(state, crate::auth::CsrfGuard, request).await
 }
 
 /// `updateUser` through `APILocal` (user_local.go:27). `me` is a 400; the e-mail-change

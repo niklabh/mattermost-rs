@@ -14047,3 +14047,15 @@ learned to read the stored `props` column.
 Mutation tally (`go-session-cache.plan`): 9 run, 7 caught, 2 controls survived. The two retry
 lines survived first — the test deleted the minted session by hand, which Go's cache never saw —
 and were caught once it revoked that session through Go.
+
+## `checkCSRFToken` on every served route (2026-09-16)
+
+Cookie-authenticated non-`GET` requests are checked in the session extractors plus `CsrfGuard`
+for sessionless handlers, and `trust_requester` marks Go's `TrustRequester` routes; D-236 closed,
+`parity::csrf` (1 stack test, 6 unit tests in `auth.rs`). `GET`/`PUT`/`DELETE` on the literal
+`/posts/{ephemeral,search,rewrite}` now require a session first, which is Go's 401 where this
+server used to answer 400.
+
+Mutation tally (`csrf.plan`): 15 run, 15 caught, 2 controls survived. The config-document line first
+reported SURVIVED because its filter named `config::tests`, which matches no test; the test is in
+`config::go_parity`. With the filter fixed and the line run again, it was caught.

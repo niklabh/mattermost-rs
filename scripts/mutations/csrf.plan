@@ -1,0 +1,26 @@
+# Mutation plan for `checkCSRFToken` (D-236) — `crates/mm-api/src/auth.rs`, `auth_writes.rs`, the
+# `trust_requester` markers in `lib.rs`, and the setting in `mm-app/src/config.rs`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/csrf.plan
+#
+# One line per decision: which location is checked, the two exemptions, the comparison, the legacy
+# header and its strict switch, the cookie on the refusal, and each of the three call sites. The
+# `api` lines all run `parity::csrf`; the document line runs the config unit tests. Controls: a
+# closure replaced by the equivalent method path, and two log fields swapped.
+check-bearer-instead-of-cookie	crates/mm-api/src/auth.rs	    location == TokenLocation::Cookie\n        && parts	    location != TokenLocation::Cookie\n        && parts	api	csrf::
+no-trust-requester-exemption	crates/mm-api/src/auth.rs	        && parts.extensions.get::<TrustRequester>().is_none()\n	        && parts.extensions.get::<TrustRequester>().is_none() | true\n	api	csrf::
+get-is-checked-too	crates/mm-api/src/auth.rs	        && parts.method != Method::GET\n	\n	api	csrf::
+token-comparison-inverted	crates/mm-api/src/auth.rs	    if header == session.get_csrf().as_bytes() {	    if header != session.get_csrf().as_bytes() {	api	csrf::
+no-legacy-header-rescue	crates/mm-api/src/auth.rs	    if requested_with == Some(HEADER_REQUESTED_WITH_XML) {	    if false {	api	csrf::
+strict-inverted	crates/mm-api/src/auth.rs	        if strict {\n            tracing::warn!(	        if !strict {\n            tracing::warn!(	api	csrf::
+strict-setting-ignored	crates/mm-api/src/auth.rs	        config.experimental_strict_csrf_enforcement,	        false,	api	csrf::
+refusal-keeps-the-cookie	crates/mm-api/src/auth.rs	            clear_session_cookie: Some(subpath),\n	            clear_session_cookie: Some(subpath).filter(|_| false),\n	api	csrf::
+required-session-skips-the-check	crates/mm-api/src/auth.rs	    enforce_csrf(parts, state, location, &session)?;\n	    let _ = enforce_csrf;\n	api	csrf::
+optional-session-skips-the-check	crates/mm-api/src/auth_writes.rs	                enforce_csrf(parts, state, location, &session)?;\n	                let _ = enforce_csrf;\n	api	csrf::
+guard-skips-the-check	crates/mm-api/src/auth.rs	            Ok(session) => enforce_csrf(parts, state, location, &session).map(|()| CsrfGuard),	            Ok(_session) => Ok(CsrfGuard),	api	csrf::
+guard-refuses-a-dead-cookie	crates/mm-api/src/auth.rs	            Err(_) => Ok(CsrfGuard),	            Err(_) => Err(ApiError::unauthenticated().into()),	api	csrf::
+client-perf-not-trusted	crates/mm-api/src/lib.rs	partially_migrated(trust_requester(post(\n                client_perf::submit_performance_report,\n            ))),	partially_migrated(post(client_perf::submit_performance_report)),	api	csrf::
+stand-in-takes-no-session	crates/mm-api/src/lib.rs	async fn invalid_post_id_param(_session: auth::AuthenticatedSession) ->	async fn invalid_post_id_param() ->	api	csrf::
+document-strict-ignored	crates/mm-app/src/config.rs	            experimental_strict_csrf_enforcement: service\n                .experimental_strict_csrf_enforcement\n                .unwrap_or(default.experimental_strict_csrf_enforcement),	            experimental_strict_csrf_enforcement: default.experimental_strict_csrf_enforcement,	unit	config::
+CONTROL-header-map-by-path	crates/mm-api/src/auth.rs	        .get(HEADER_CSRF_TOKEN)\n        .map(|value| value.as_bytes())	        .get(HEADER_CSRF_TOKEN)\n        .map(axum::http::HeaderValue::as_bytes)	api	csrf::
+CONTROL-log-field-order	crates/mm-api/src/auth.rs	        if strict {\n            tracing::warn!(\n                path = parts.uri.path(),\n                session_id = %session.id,\n                user_id = %session.user_id,	        if strict {\n            tracing::warn!(\n                path = parts.uri.path(),\n                user_id = %session.user_id,\n                session_id = %session.id,	api	csrf::

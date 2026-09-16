@@ -159,7 +159,11 @@ fn mask_login_error(state: &AppState, err: ApiError) -> ApiError {
 /// credential alongside a 500 is the worse of the two behaviours. Same shape as the
 /// `attachDeviceIds` cookie divergence in [`crate::sessions`].
 #[tracing::instrument(skip_all, fields(forwarded = false, outcome))]
-pub async fn login(State(state): State<AppState>, request: Request) -> Response {
+pub async fn login(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let headers = request.headers().clone();
     let (request, bytes) = match split_body(request).await {
         Ok(pair) => pair,
@@ -496,7 +500,11 @@ fn session_cookies(
 /// Everything past the gate — `GetUserForLogin`, the deactivated probe and the magic-link
 /// eligibility rules — is therefore unreachable here and is not ported.
 #[tracing::instrument(skip_all, fields(forwarded = false))]
-pub async fn get_login_type(State(state): State<AppState>, request: Request) -> Response {
+pub async fn get_login_type(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     if login_type_is_forwarded(state.app.config()) {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
@@ -621,7 +629,11 @@ pub async fn login_cws(
 /// from the account, which is its middle arm — `SessionLengthSSOInHours`, not the web length —
 /// unless a `device_id` makes it mobile. The cookies' `Max-Age` stays the web length, as always.
 #[tracing::instrument(skip_all, fields(outcome))]
-pub async fn login_with_desktop_token(State(state): State<AppState>, request: Request) -> Response {
+pub async fn login_with_desktop_token(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     match desktop_token_login(state, request).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -730,7 +742,11 @@ async fn desktop_token_login(state: AppState, request: Request) -> Result<Respon
 /// `login_code`, `code_verifier` and `state`, consumes the one-time token, checks its expiry,
 /// state and PKCE challenge, and logs the user in with the SAML flag — forwarded.
 #[tracing::instrument(skip_all, fields(enabled))]
-pub async fn login_sso_code_exchange(State(state): State<AppState>, request: Request) -> Response {
+pub async fn login_sso_code_exchange(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let enabled = state.app.config().feature_flag_mobile_sso_code_exchange;
     tracing::Span::current().record("enabled", enabled);
     if enabled {

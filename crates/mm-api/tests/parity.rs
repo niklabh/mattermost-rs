@@ -77,6 +77,7 @@ mod parity {
     pub mod config_source;
     pub mod constant_refusals;
     pub mod cpa_licensed;
+    pub mod csrf;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;

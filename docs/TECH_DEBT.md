@@ -6666,28 +6666,12 @@ decision at the head of this file says to forward rather than port.
 
 ---
 
-## D-236 · CSRF is not checked on any migrated route
+## D-236 · CSRF is not checked on any migrated route — CLOSED 2026-09-16
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
-
-`web.Handler.ServeHTTP` calls `checkCSRFToken` (handlers.go:295) for every request whose token came
-from the **cookie**: a non-GET request must then carry `X-CSRF-Token` matching the session's, or
-`X-Requested-With: XMLHttpRequest`, or it is answered 401 with the session cookie cleared. Nothing
-in `mm-api` implements it. `crate::auth::AuthenticatedSession` reads the cookie and asks no further
-questions, and neither does `auth_writes::OptionalSession`.
-
-This predates the auth vertical — every migrated write has had the gap since the first one — but
-it was never written down, and the auth routes are where it stops being abstract: a cross-origin
-form post can now change a password or log a user out through this server where it could not
-through Go.
-
-What is owed is the check itself in the two extractors, keyed on the token's `TokenLocation`
-(already modelled) and the session's `props.csrf` (already stored and already read by
-`Session::get_csrf`). The pieces are all present; the wiring is not. A parity test needs a
-cookie-authenticated request, which the suite does not currently make — `go_minted_token` returns
-a bearer token — so the fixture is the other half of the work.
-
----
+`mm_api::auth::check_csrf_token` runs in `AuthenticatedSession`, `MfaSetupSession`,
+`OptionalSession` and, for handlers that take no session, `CsrfGuard`; `lib.rs::trust_requester`
+marks the `TrustRequester` routes. `parity::csrf` compares it with Go on a browser login, strict
+enforcement included.
 
 ## D-237 · A session revoked by mm-api is still accepted by Go until its cache is invalidated
 
@@ -9207,3 +9191,17 @@ unrelated change.
 **What is owed:** one `cargo sqlx prepare --workspace` against the development database, as its own
 commit — it rewrites about 34 files and belongs on no other change. Then a decision about whether
 it stays fresh: nothing enforces it, and it has silently rotted for months.
+
+## D-810 · A sessionless `APIHandler` does not refuse a non-OAuth token in the query string
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-16 (CSRF, web/handlers.go:281)
+
+`ServeHTTP` resolves any token it finds, for every handler, and a valid non-OAuth session presented
+as `?access_token=` is the 401 `api.context.token_provided.app_error` before the handler runs.
+`OptionalSession` reproduces that; the handlers that take no session at all (`login`,
+`login/type`, `login/desktop_token`, the two e-mail sends, `email/verify`, the OAuth DCR register,
+the CWS webhook, the remote-cluster gate) do not. Measured on stack 2: `POST
+/users/login/type?access_token=<valid>` is Go's 401 and this server's 404. **What is owed:** the
+same check in `mm_api::auth::CsrfGuard`, which already sits on every one of those handlers — at
+the cost of a session lookup for any request that carries a query token — and a `parity::csrf`
+case for it.

@@ -26,13 +26,12 @@
 //! body. So a malformed body is never a 400 from the decoder; it is a 400 (or a 200) from
 //! whichever key check runs first. See [`map_from_json`].
 //!
-//! # CSRF is not modelled
+//! # CSRF
 //!
 //! Go's `checkCSRFToken` (handlers.go:295) rejects a **cookie**-authenticated non-GET request
-//! that carries neither `X-CSRF-Token` nor `X-Requested-With: XMLHttpRequest`. Nothing in this
-//! port implements it, on these routes or on any migrated write. Recorded as [D-236]; it is a
-//! pre-existing gap that these routes inherit rather than introduce, but they are the first where
-//! it is a *credential* change rather than a content one.
+//! whose `X-CSRF-Token` does not match the session. It runs for `APIHandler` routes too, so
+//! [`OptionalSession`] applies it and `verifyUserEmail`, which takes no session, names
+//! [`CsrfGuard`](crate::auth::CsrfGuard). See [`crate::auth::check_csrf_token`].
 
 use axum::extract::{FromRequestParts, Path, Request, State};
 use axum::http::StatusCode;
@@ -49,7 +48,9 @@ use mm_model::user::external::USER_AUTH_SERVICE_LDAP;
 use mm_model::utils::{AppError, StringMap};
 
 use crate::AppState;
-use crate::auth::{AuthenticatedSession, TokenLocation, parse_auth_token};
+use crate::auth::{
+    AuthenticatedSession, SessionRejection, TokenLocation, enforce_csrf, parse_auth_token,
+};
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
 use crate::proxy;
@@ -96,6 +97,9 @@ fn status_ok() -> Response {
 ///   (`api.context.token_provided.app_error`). Reproduced because it is the one place a *valid*
 ///   credential is refused, and a port that dropped it would accept a token in a URL that Go
 ///   rejects — which is the opposite direction from the usual porting risk.
+/// - **A resolved cookie session still has to pass the CSRF check** on anything but a `GET`,
+///   and failing it is the 401 with the cookie cleared even though no session was required
+///   (handlers.go:295-300). `c.Err` is set, so the handler never runs.
 #[derive(Debug, Clone)]
 pub struct OptionalSession(pub Option<Session>);
 
@@ -107,7 +111,7 @@ impl OptionalSession {
 }
 
 impl FromRequestParts<AppState> for OptionalSession {
-    type Rejection = ApiError;
+    type Rejection = SessionRejection;
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -128,11 +132,13 @@ impl FromRequestParts<AppState> for OptionalSession {
                         // reaches the client, so the value never leaves the process either way.
                         String::new(),
                         401,
-                    )));
+                    ))
+                    .into());
                 }
+                enforce_csrf(parts, state, location, &session)?;
                 Ok(OptionalSession(Some(session)))
             }
-            Err(err) if err.status_code == 500 => Err(ApiError::from(err)),
+            Err(err) if err.status_code == 500 => Err(ApiError::from(err).into()),
             Err(_) => Ok(OptionalSession(None)),
         }
     }
@@ -386,7 +392,11 @@ pub async fn reset_password(
 /// 63-byte one are distinguishable, which is Go's behaviour and not a leak: neither says whether
 /// any token exists.
 #[tracing::instrument(skip_all)]
-pub async fn verify_user_email(State(state): State<AppState>, request: Request) -> Response {
+pub async fn verify_user_email(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let props = body_props(request).await;
     let token = props.get("token").cloned().unwrap_or_default();
     if token.len() != TOKEN_SIZE {

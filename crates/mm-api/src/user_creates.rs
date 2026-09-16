@@ -298,7 +298,11 @@ pub async fn create_user(
 /// `SendEmailVerification` mints a `Tokens` row before it sends and this process has no mail
 /// service to send with.
 #[tracing::instrument(skip_all, fields(forwarded = false, outcome))]
-pub async fn send_verification_email(State(state): State<AppState>, request: Request) -> Response {
+pub async fn send_verification_email(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let (request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -355,7 +359,11 @@ pub async fn send_verification_email(State(state): State<AppState>, request: Req
 /// Anything that gets past the refusals forwards: `CreatePasswordRecoveryToken` deletes this
 /// user's existing recovery tokens and inserts a new one, and both of those are writes.
 #[tracing::instrument(skip_all, fields(forwarded = false, hardened, outcome))]
-pub async fn send_password_reset(State(state): State<AppState>, request: Request) -> Response {
+pub async fn send_password_reset(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let (request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
