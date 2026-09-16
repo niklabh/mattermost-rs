@@ -637,7 +637,7 @@ impl App {
             let Some(slot) = workers.get(&job.job_type) else {
                 continue;
             };
-            if !slot.worker().is_enabled(self.config()) {
+            if !slot.worker().is_enabled(&self.config()) {
                 continue;
             }
             if !slot.take() {

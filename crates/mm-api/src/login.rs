@@ -505,7 +505,7 @@ pub async fn get_login_type(
     _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
-    if login_type_is_forwarded(state.app.config()) {
+    if login_type_is_forwarded(&state.app.config()) {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }

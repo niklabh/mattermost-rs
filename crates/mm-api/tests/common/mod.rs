@@ -303,6 +303,12 @@ pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 /// waits for them all, so its 503 window never lands in a neighbour.
 pub static BUSY_STATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **`ServiceSettings.EnableFileSearch` is one setting for the whole installation**, and
+/// `config_reload` turns it off to prove this server notices a configuration write. A read guard
+/// for every file search that expects to be answered, the write guard for the tests that toggle
+/// it — the [`BUSY_STATE`] arrangement, for the same reason.
+pub static FILE_SEARCH_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
 ///
 /// `parity/custom_profile_attributes` plants rows in the `access_control` group and

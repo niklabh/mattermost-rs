@@ -24,21 +24,22 @@
 //!    *make* it. The converse direction needs nothing: `getConfig` and `localGetConfig` re-read
 //!    the row per request (`mm_app::config::load_model_config`), so a write Go made is visible
 //!    here on the next request — the parity suite patches through this server and reads the
-//!    value back from both. What is **not** refreshed is [`mm_app::App::config`], the
-//!    ninety-odd projected settings loaded once at startup: a write moves Go and the
-//!    full-document reads at once, and the ported gates that consult the projection only at
-//!    the next start. [D-701].
+//!    value back from both. [`mm_app::App::config`], the projection the ported gates consult,
+//!    follows the row too: `mm_api::refresh_config_after_write` reloads it after every write
+//!    request, forwarded or not, and a timer in `main.rs` catches the writes that reach Go by
+//!    another way (`App::refresh_config`, `parity::config_reload`).
 //!
-//! Both are owed work, tracked as [D-700]; neither is a reason to serve less than the gates.
+//! The first is owed work, tracked as [D-700]; it is not a reason to serve less than the gates.
 //!
-//! # The gates read the **live** configuration, not the startup projection
+//! # The gates read the **live** configuration, not the projection
 //!
 //! `appCfg := c.App.Config()` is the configuration Go runs on: the persisted document with the
 //! environment overlaid. `SiteURL`, `PluginSettings.EnableUploads`, `ImportSettings.Directory`
 //! and `PluginSettings.MarketplaceURL` are read here the same way, from the row plus this
 //! process's environment on every request (`load_model_config`), because the comparison is
-//! against what the last write left — and the startup projection would compare a patch against
-//! a value an earlier patch already changed.
+//! against what the last write left. The projection follows the row too, but a write made to
+//! Go directly reaches it only on the next periodic check, and a gate that compares a patch
+//! against the current value is exactly where that window would show.
 //!
 //! # The body is decoded the way `encoding/json` decodes a struct
 //!

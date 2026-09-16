@@ -296,6 +296,11 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             state.clone(),
             crate::go_global_headers,
         ))
+        // `config_local.go`'s saves go over the socket, so the socket needs the reload too.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::refresh_config_after_write,
+        ))
         .layer(Extension(GoLocalSocket(Arc::new(go_socket))))
         .with_state(state)
 }

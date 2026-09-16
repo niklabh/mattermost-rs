@@ -14059,3 +14059,9 @@ server used to answer 400.
 Mutation tally (`csrf.plan`): 15 run, 15 caught, 2 controls survived. The config-document line first
 reported SURVIVED because its filter named `config::tests`, which matches no test; the test is in
 `config::go_parity`. With the filter fixed and the line run again, it was caught.
+
+## The configuration projection follows a write — D-701 (2026-09-16)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Store.Load` on `ReloadConfig` / `ConfigChanged` | `mm-app/src/lib.rs` `App::refresh_config`, `mm-api` `refresh_config_after_write`, the `main.rs` timer | DONE | 3 parity | Keyed on the active row's id, because `DatabaseStore.persist` writes each change as a new row. The file backends stay built once, as Go's do. |

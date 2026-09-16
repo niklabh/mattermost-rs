@@ -829,7 +829,7 @@ impl App {
         }
 
         for trigger in BUILTIN_TRIGGERS {
-            match provider_command(config, trigger) {
+            match provider_command(&config, trigger) {
                 ProviderCommand::Command(command) => {
                     if command.auto_complete && seen.insert(command.trigger.clone()) {
                         commands.push(*command);
@@ -912,7 +912,7 @@ impl App {
             return Ok(CommandDispatch::Custom);
         }
 
-        match provider_command(config, trigger) {
+        match provider_command(&config, trigger) {
             ProviderCommand::Command(_) => {
                 tracing::Span::current().record("dispatch", "built_in");
                 Ok(CommandDispatch::BuiltIn)

@@ -8821,22 +8821,15 @@ function — *and*, for as long as the Go server runs beside this one, a way to 
 its `ReloadConfig` runs, which is `POST /config/reload` over the local socket. The parity suite
 that will cover it already sends the writes (`parity::configlic`) and asserts the forward.
 
-## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart
+## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart — CLOSED 2026-09-16
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (config.go)
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-15 (config.go)
 
-`mm_app::App::config()` returns the `Config` projection loaded once in `App::new`
-(`Config::load`, then never again), while `getConfig`, `localGetConfig` and the write gates
-re-read the `Configurations` row per request (`load_model_config`). So after any configuration
-write — Go's own, or one forwarded through this server — the full-document reads and the
-`config_writes` gates see the new value at once and every ported gate that consults the
-projection (`show_full_name`, `enable_open_server`, `restrict_system_admin`, the file settings,
-the ninety-odd others) keeps the old one until this process restarts. Go's config listeners have
-no counterpart. **What is owed:** a reloadable projection — `ArcSwap`/`RwLock` behind `config()`
-with a reload on `POST /config/reload` and after a forwarded save, or a per-request read with a
-short TTL — and a parity test that patches a projected setting and reads a gated route back.
-Not fixed in the session that found it because `config()` returns `&Config` to several hundred
-call sites across seven concurrent worktrees.
+Paid off: `App::config()` returns an `Arc<Config>` swapped by `App::refresh_config`, which
+reloads when the active `Configurations.Id` changes. That runs after every non-GET request on
+both listeners (`mm_api::refresh_config_after_write`) and on a timer (`MM_API_CONFIG_POLL_MS`,
+default 1s), in place of the private cluster `ConfigChanged` message. The reasoning is in those
+doc comments; `parity::config_reload` proves all three paths.
 
 ## D-702 · `SaveLicense`, `RemoveLicense` with a licence in force, and the trial request are forwarded
 

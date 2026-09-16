@@ -67,7 +67,7 @@ impl App {
     ///
     /// Everything is counted in **bytes**. `SYMBOLS` includes a space.
     pub fn is_password_valid(&self, password: &str) -> AppResult {
-        is_password_valid_with_settings(self.config(), password)
+        is_password_valid_with_settings(&self.config(), password)
     }
 }
 

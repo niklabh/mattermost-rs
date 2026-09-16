@@ -79,7 +79,7 @@ impl App {
             return Err(invalid_token("session is either nil or expired"));
         }
 
-        if session_is_idle_past_timeout(self.config(), &session, get_millis()) {
+        if session_is_idle_past_timeout(&self.config(), &session, get_millis()) {
             // Go: `a.Srv().Go(func() { RevokeSessionById(session.Id) })`, whose result it never
             // reads. `RevokeSessionById` re-fetches the row by id before deleting it; we already
             // hold the row, and the extra read exists in Go only because its goroutine captures
