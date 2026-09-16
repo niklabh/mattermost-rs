@@ -149,6 +149,63 @@ pub trait JobStore {
         data_key: &str,
         data_value: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Job>, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.GetAllByStatus` (job_store.go:389): every job in `status`, whatever
+    /// its type, **`ORDER BY CreateAt ASC`**.
+    ///
+    /// The ascending order is not a detail. This is the watcher's query — the one that decides
+    /// which pending jobs are offered to a worker on each poll — and Go's every *other* job read
+    /// is `DESC`. Oldest-first is what makes the queue a queue: with `DESC`, a backlog larger
+    /// than the number of jobs a poll can hand off would starve the oldest job indefinitely,
+    /// because each poll would re-offer the newest ones.
+    ///
+    /// **Unpaged.** Go reads the whole pending set into memory every fifteen seconds.
+    fn get_all_by_status(
+        &self,
+        status: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Job>, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.GetCountByStatusAndType` (job_store.go:446): a `COUNT(*)`, not a
+    /// fetch. The scheduler's `CheckForPendingJobsByType` reduces it to a bool, and a scheduler
+    /// that sees a pending job of its own type may decide not to queue another.
+    fn get_count_by_status_and_type(
+        &self,
+        status: &str,
+        job_type: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.UpdateOptimistically` (job_store.go:219): write `Status`, `Data`,
+    /// `Progress` and a fresh `LastActivityAt` **only if the row still holds `current_status`**.
+    /// No row matched is `Ok(None)`, as with [`JobStore::update_status_optimistically`].
+    ///
+    /// Two things separate it from that method, and both matter to a worker:
+    ///
+    /// - **It carries the job's `Data` and `Progress` with it**, so it is how a running job
+    ///   persists progress and how `SetJobError` gets its `error` key into the row.
+    /// - **It does not touch `StartAt`.** `UpdateStatusOptimistically` stamps `StartAt` on the
+    ///   way into `in_progress`; this one does not, even when `job.Status` is `in_progress`.
+    ///   A port that shared one statement between them would silently reset the start time on
+    ///   every progress tick.
+    ///
+    /// The status written is the one on `job`, *not* `current_status` — the argument is only the
+    /// guard.
+    fn update_optimistically(
+        &self,
+        job: &Job,
+        current_status: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Job>, StoreError>> + Send;
+
+    /// Port of `SqlJobStore.GetNewestJobByStatusesAndType` (job_store.go:427): the most recently
+    /// created job of `job_type` whose status is any of `statuses`, or [`StoreError::NotFound`].
+    ///
+    /// `GetNewestJobByStatusAndType` is a one-element call to this, in Go and here.
+    /// `GetLastSuccessfulJobByType` is the caller that needs the plural: for `message_export` it
+    /// counts a `warning` run as successful, and for every other type it does not.
+    fn get_newest_job_by_statuses_and_type(
+        &self,
+        statuses: &[String],
+        job_type: &str,
+    ) -> impl std::future::Future<Output = Result<Job, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -236,10 +293,23 @@ fn rows_into_jobs(rows: Vec<JobRow>) -> Result<Vec<Job>, StoreError> {
 }
 
 impl JobStore for SqlJobStore {
+    /// A one-element call to [`JobStore::get_newest_job_by_statuses_and_type`], which is the
+    /// whole of Go's body (job_store.go:423-425). The `NotFound` criteria it builds joins the
+    /// statuses with a comma, so for one status the two methods report the same string.
     #[tracing::instrument(skip(self), fields(found))]
     async fn get_newest_job_by_status_and_type(
         &self,
         status: &str,
+        job_type: &str,
+    ) -> Result<Job, StoreError> {
+        self.get_newest_job_by_statuses_and_type(&[status.to_owned()], job_type)
+            .await
+    }
+
+    #[tracing::instrument(skip(self), fields(statuses = statuses.len(), found))]
+    async fn get_newest_job_by_statuses_and_type(
+        &self,
+        statuses: &[String],
         job_type: &str,
     ) -> Result<Job, StoreError> {
         let row = sqlx::query_as!(
@@ -255,23 +325,26 @@ impl JobStore for SqlJobStore {
                    COALESCE(progress, 0)       AS "progress!",
                    data                        AS "data?"
               FROM jobs
-             WHERE status = $1 AND type = $2
+             WHERE status = ANY($1) AND type = $2
              ORDER BY createat DESC
              LIMIT 1
             "#,
-            status,
+            statuses,
             job_type
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(|source| StoreError::Db {
-            context: format!("failed to find Job with statuses={status} and type={job_type}"),
+            context: format!(
+                "failed to find Job with statuses={} and type={job_type}",
+                statuses.join(",")
+            ),
             source,
         })?;
         tracing::Span::current().record("found", row.is_some());
         row.ok_or_else(|| StoreError::NotFound {
             entity: "Job",
-            criteria: format!("<status, type>=<{status}, {job_type}>"),
+            criteria: format!("<status, type>=<{}, {job_type}>", statuses.join(",")),
         })?
         .into_job()
     }
@@ -628,6 +701,108 @@ impl JobStore for SqlJobStore {
 
         tracing::Span::current().record("found", rows.len());
         rows_into_jobs(rows)
+    }
+
+    /// `ORDER BY CreateAt ASC` — the one ascending job read in the store. See the trait note.
+    #[tracing::instrument(skip(self), fields(status = %status, found))]
+    async fn get_all_by_status(&self, status: &str) -> Result<Vec<Job>, StoreError> {
+        let rows = sqlx::query_as!(
+            JobRow,
+            r#"
+            SELECT                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+              FROM jobs
+             WHERE status = $1
+             ORDER BY createat ASC
+            "#,
+            status
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Jobs with status={status}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        rows_into_jobs(rows)
+    }
+
+    #[tracing::instrument(skip(self), fields(status = %status, job_type = %job_type, count))]
+    async fn get_count_by_status_and_type(
+        &self,
+        status: &str,
+        job_type: &str,
+    ) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "count!" FROM jobs WHERE status = $1 AND type = $2"#,
+            status,
+            job_type
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count Jobs with status={status} and type={job_type}"),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    /// **`StartAt` is deliberately absent from the `SET` list.** See the trait note: sharing a
+    /// statement with [`JobStore::update_status_optimistically`] would reset the start time on
+    /// every progress tick.
+    #[tracing::instrument(skip_all, fields(job_id = %job.id, current_status, moved))]
+    async fn update_optimistically(
+        &self,
+        job: &Job,
+        current_status: &str,
+    ) -> Result<Option<Job>, StoreError> {
+        let data = serde_json::to_value(&job.data).map_err(|source| StoreError::Decode {
+            entity: "Job",
+            column: "data",
+            source,
+        })?;
+        let row = sqlx::query_as!(
+            JobRow,
+            r#"
+            UPDATE jobs
+               SET lastactivityat = $3,
+                   status = $4,
+                   data = $5,
+                   progress = $6
+             WHERE id = $1 AND status = $2
+         RETURNING                    id                          AS "id!",
+                   COALESCE(type, '')          AS "job_type!",
+                   COALESCE(priority, 0)       AS "priority!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(startat, 0)        AS "startat!",
+                   COALESCE(lastactivityat, 0) AS "lastactivityat!",
+                   COALESCE(status, '')        AS "status!",
+                   COALESCE(progress, 0)       AS "progress!",
+                   data                        AS "data?"
+            "#,
+            job.id,
+            current_status,
+            mm_model::utils::get_millis(),
+            job.status,
+            data,
+            job.progress,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Job with id={}", job.id),
+            source,
+        })?;
+        tracing::Span::current().record("moved", row.is_some());
+        row.map(JobRow::into_job).transpose()
     }
 }
 

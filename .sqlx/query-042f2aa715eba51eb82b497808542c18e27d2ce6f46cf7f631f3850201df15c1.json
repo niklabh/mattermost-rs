@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT                    id                          AS \"id!\",\n                   COALESCE(type, '')          AS \"job_type!\",\n                   COALESCE(priority, 0)       AS \"priority!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(startat, 0)        AS \"startat!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(progress, 0)       AS \"progress!\",\n                   data                        AS \"data?\"\n              FROM jobs\n             WHERE status = $1 AND type = $2\n             ORDER BY createat DESC\n             LIMIT 1\n            ",
+  "query": "\n            UPDATE jobs\n               SET lastactivityat = $3,\n                   status = $4,\n                   data = $5,\n                   progress = $6\n             WHERE id = $1 AND status = $2\n         RETURNING                    id                          AS \"id!\",\n                   COALESCE(type, '')          AS \"job_type!\",\n                   COALESCE(priority, 0)       AS \"priority!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(startat, 0)        AS \"startat!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(progress, 0)       AS \"progress!\",\n                   data                        AS \"data?\"\n            ",
   "describe": {
     "columns": [
       {
@@ -52,7 +52,11 @@
     "parameters": {
       "Left": [
         "Text",
-        "Text"
+        "Text",
+        "Int8",
+        "Varchar",
+        "Jsonb",
+        "Int8"
       ]
     },
     "nullable": [
@@ -67,5 +71,5 @@
       true
     ]
   },
-  "hash": "f0d768d915f7848c5785f8219febdccf1b33b71adffd11b188d110c0298f46db"
+  "hash": "042f2aa715eba51eb82b497808542c18e27d2ce6f46cf7f631f3850201df15c1"
 }

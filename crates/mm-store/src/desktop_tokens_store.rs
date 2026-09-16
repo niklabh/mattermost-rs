@@ -13,8 +13,9 @@
 //! compares against `time.Now().Add(-DesktopTokenTTL).Unix()` (api4/user.go:2310). The second
 //! non-millisecond timestamp in the migrated surface, after `PostReminders.TargetTime`.
 //!
-//! `Insert` and `DeleteOlderThan` are not ported: the first is written only by the SSO completion
-//! pages, which are not served here, and the second by the expiry job.
+//! `Insert` is not ported: it is written only by the SSO completion pages, which are not served
+//! here. `DeleteOlderThan` is — it is the whole body of the `cleanup_desktop_tokens` worker
+//! (jobs/cleanup_desktop_tokens/worker.go:22), which this server now runs.
 
 use sqlx::PgPool;
 
@@ -46,6 +47,18 @@ pub trait DesktopTokensStore {
     fn delete_by_user_id(
         &self,
         user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlDesktopTokensStore.DeleteOlderThan` (desktop_tokens_store.go:97): every row
+    /// **strictly** below `min_create_at`. The whole of the `cleanup_desktop_tokens` job.
+    ///
+    /// `min_create_at` is Unix **seconds**, like the column — the worker passes
+    /// `time.Now().Add(-5 * time.Minute).Unix()`, not `GetMillis()`. Passing milliseconds here
+    /// would make the cut-off sit a thousand-fold in the future and delete the whole table on
+    /// the first run, which is why the unit is in the parameter's name and in this sentence.
+    fn delete_older_than(
+        &self,
+        min_create_at: i64,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
@@ -108,6 +121,25 @@ impl DesktopTokensStore for SqlDesktopTokensStore {
                 context: "failed to delete token row".to_owned(),
                 source,
             })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(min_create_at, deleted))]
+    async fn delete_older_than(&self, min_create_at: i64) -> Result<(), StoreError> {
+        // `sq.Lt` — strictly less than, so a row written in the same second as the cut-off
+        // survives. Go's cut-off is computed from `time.Now()`, so the boundary row is one that
+        // was written exactly `maxAge` ago to the second.
+        let result = sqlx::query!(
+            "DELETE FROM desktoptokens WHERE createat < $1",
+            min_create_at
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete token row".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
         Ok(())
     }
 }
