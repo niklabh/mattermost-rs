@@ -1394,8 +1394,27 @@ impl App {
     /// otherwise: a revoked session keeps receiving events, and a changed role or team membership
     /// is not seen by the addressing filters. So this is not a no-op here, whatever the session
     /// cache is.
-    pub fn clear_session_cache_for_user(&self, user_id: &str) {
+    ///
+    /// The session-cache half is the *Go* process's: [`crate::peer_cache::PeerCache`], awaited so
+    /// a revoked session is refused by Go before the revoking response is written.
+    pub async fn clear_session_cache_for_user(&self, user_id: &str) {
         self.hub().invalidate_user(user_id);
+        if let Some(peer) = self.peer_cache() {
+            peer.clear_user_sessions(user_id).await;
+        }
+    }
+
+    /// Port of `App.InvalidateCacheForUser` over `PlatformService.InvalidateCacheForUser`
+    /// (platform/web_hub.go:233), for the call sites that have been wired to it.
+    ///
+    /// Every cache it names is the *Go* process's; this one keeps none of them. Only the profile
+    /// half is reproduced ([`crate::peer_cache::PeerCache::invalidate_user`]), because that is the
+    /// one a login reads. Go calls this from about twenty-five places; only the credential one
+    /// (`update_password`) reaches it so far, and the rest are [D-190].
+    pub async fn invalidate_cache_for_user(&self, user_id: &str) {
+        if let Some(peer) = self.peer_cache() {
+            peer.invalidate_user(user_id).await;
+        }
     }
 
     /// Port of `PlatformService.HubUnregister` (web_hub.go:190) and the whole unregister arm

@@ -2,6 +2,7 @@
 //! half of `web.Context.ApiSessionRequired`.
 
 use axum::extract::FromRequestParts;
+use axum::http::Method;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use mm_model::session::Session;
@@ -15,6 +16,12 @@ const SESSION_COOKIE_TOKEN: &str = "MMAUTHTOKEN";
 const HEADER_BEARER: &str = "BEARER";
 /// `model.HeaderToken`. Go compares the first five bytes lower-cased.
 const HEADER_TOKEN: &str = "token";
+/// `model.HeaderCsrfToken`.
+const HEADER_CSRF_TOKEN: &str = "X-CSRF-Token";
+/// `model.HeaderRequestedWith`.
+const HEADER_REQUESTED_WITH: &str = "X-Requested-With";
+/// `model.HeaderRequestedWithXML`.
+const HEADER_REQUESTED_WITH_XML: &[u8] = b"XMLHttpRequest";
 /// Go truncates the returned token at 50 bytes in a deferred block. See [`parse_auth_token`].
 const MAX_TOKEN_LEN: usize = 50;
 
@@ -138,6 +145,19 @@ impl SessionRejection {
         }
     }
 
+    /// `checkCSRFToken` failed (web/handlers.go:296-300): the same generic 401 as a rejected
+    /// token, and the cookie is cleared — Go calls `RemoveSessionCookie` on this branch too.
+    ///
+    /// Go's detailed error, `token=<token> Appears to be a CSRF attempt`, is wiped before it
+    /// reaches the client unless `EnableDeveloper` is on; like the rest of this extractor, the
+    /// token is never interpolated here.
+    pub(crate) fn csrf_failed(subpath: String) -> Self {
+        Self {
+            error: ApiError::unauthenticated(),
+            clear_session_cookie: Some(subpath),
+        }
+    }
+
     fn no_token() -> Self {
         Self {
             error: ApiError::unauthenticated(),
@@ -214,6 +234,16 @@ fn sanitize_cookie_path(value: &str) -> String {
         .collect()
 }
 
+/// A plain error with no cookie to clear — every rejection but the rejected-token and CSRF ones.
+impl From<ApiError> for SessionRejection {
+    fn from(error: ApiError) -> Self {
+        Self {
+            error,
+            clear_session_cookie: None,
+        }
+    }
+}
+
 impl IntoResponse for SessionRejection {
     fn into_response(self) -> Response {
         let cookie = self
@@ -231,13 +261,158 @@ impl IntoResponse for SessionRejection {
     }
 }
 
+/// Marks a route Go registers with `APIHandlerTrustRequester` or
+/// `APISessionRequiredTrustRequester` — `TrustRequester: true` (api4/handlers.go), whose only
+/// effect is to waive [`check_csrf_token`]. Inserted as a request extension by
+/// `crate::trust_requester` on exactly those method routes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TrustRequester;
+
+/// What [`check_csrf_token`] decided. Port of its `(checked, passed)` pair, minus the one
+/// combination Go never returns (`checked == false, passed == true`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CsrfCheck {
+    /// Not a cookie, a `GET`, or a trusted requester: nothing was checked.
+    NotNeeded,
+    Passed,
+    Failed,
+}
+
+/// The request half of `csrfCheckNeeded`: a cookie token, an untrusted route, a method other than
+/// `GET`. The other half (a session resolved, no error yet) is the caller's position.
+fn csrf_check_applies(parts: &Parts, location: TokenLocation) -> bool {
+    location == TokenLocation::Cookie
+        && parts.extensions.get::<TrustRequester>().is_none()
+        && parts.method != Method::GET
+}
+
+/// Port of `Handler.checkCSRFToken` (web/handlers.go:508).
+///
+/// # When it runs
+///
+/// Only for a session that resolved, presented in the **cookie**, on a route that is not
+/// `TrustRequester`, with a method that is not literally `GET`. So `HEAD`, `OPTIONS` and every
+/// write are checked; a bearer token never is. The caller supplies "a session resolved and no
+/// error was set" by calling this only on that path (`session != nil && c.Err == nil`).
+///
+/// # What passes
+///
+/// 1. `X-CSRF-Token` equal to the session's `csrf` prop. **Equal, including empty**: a session
+///    whose props carry no `csrf` (`GetCSRF` answers `""`) passes a request with no header at all.
+///    Every login session has one, so this is not how a browser gets through, but it is Go's
+///    comparison and it is reproduced rather than tightened.
+/// 2. Otherwise `X-Requested-With: XMLHttpRequest` — the pre-2019 webapp's signal — passes
+///    **unless** `ExperimentalStrictCSRFEnforcement` is on. Either way Go logs it (debug when
+///    lenient, warn when strict).
+///
+/// Anything else fails. The header values are compared as bytes, as Go's `Header.Get` does; a
+/// value that is not UTF-8 is simply unequal rather than an error.
+pub(crate) fn check_csrf_token(
+    parts: &Parts,
+    location: TokenLocation,
+    session: &Session,
+    strict: bool,
+) -> CsrfCheck {
+    if !csrf_check_applies(parts, location) {
+        return CsrfCheck::NotNeeded;
+    }
+
+    let header = parts
+        .headers
+        .get(HEADER_CSRF_TOKEN)
+        .map(|value| value.as_bytes())
+        .unwrap_or_default();
+    if header == session.get_csrf().as_bytes() {
+        return CsrfCheck::Passed;
+    }
+
+    let requested_with = parts
+        .headers
+        .get(HEADER_REQUESTED_WITH)
+        .map(|value| value.as_bytes());
+    if requested_with == Some(HEADER_REQUESTED_WITH_XML) {
+        if strict {
+            tracing::warn!(
+                path = parts.uri.path(),
+                session_id = %session.id,
+                user_id = %session.user_id,
+                "CSRF Header check failed for request - Please upgrade your web application or custom app to set a CSRF Header"
+            );
+        } else {
+            tracing::debug!(
+                path = parts.uri.path(),
+                session_id = %session.id,
+                user_id = %session.user_id,
+                "CSRF Header check failed for request - Please upgrade your web application or custom app to set a CSRF Header"
+            );
+            return CsrfCheck::Passed;
+        }
+    }
+
+    CsrfCheck::Failed
+}
+
+/// [`check_csrf_token`] against this server's configuration, as the rejection Go answers.
+pub(crate) fn enforce_csrf(
+    parts: &Parts,
+    state: &AppState,
+    location: TokenLocation,
+    session: &Session,
+) -> Result<(), SessionRejection> {
+    let config = state.app.config();
+    match check_csrf_token(
+        parts,
+        location,
+        session,
+        config.experimental_strict_csrf_enforcement,
+    ) {
+        CsrfCheck::Failed => Err(SessionRejection::csrf_failed(config.subpath())),
+        CsrfCheck::NotNeeded | CsrfCheck::Passed => Ok(()),
+    }
+}
+
+/// The CSRF half of `ServeHTTP` for a handler that takes **no** session extractor.
+///
+/// Go runs `checkCSRFToken` inside `ServeHTTP` for every handler with a token, whether or not the
+/// handler wants a session — so `POST /users/login` with a live session cookie and no CSRF header
+/// is a 401 from Go before `login` runs. A handler here that never looks at the session would
+/// silently skip that, so it names this extractor instead. It does nothing unless the request is
+/// a checked one (cookie, not `GET`, not `TrustRequester`), and only then looks the session up.
+///
+/// The lookup's failures follow `RequireSession: false` (handlers.go:273): a rejected token is not
+/// an error and skips the check (Go's `session` is nil), while a store failure is the 500 Go sets
+/// as `c.Err`.
+pub struct CsrfGuard;
+
+impl FromRequestParts<AppState> for CsrfGuard {
+    type Rejection = SessionRejection;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let Some((token, location)) = parse_auth_token(parts) else {
+            return Ok(CsrfGuard);
+        };
+        // Only a request the check applies to pays for the session lookup.
+        if !csrf_check_applies(parts, location) {
+            return Ok(CsrfGuard);
+        }
+        match state.app.get_session(&token).await {
+            Ok(session) => enforce_csrf(parts, state, location, &session).map(|()| CsrfGuard),
+            Err(err) if err.status_code == 500 => Err(ApiError::from(err).into()),
+            Err(_) => Ok(CsrfGuard),
+        }
+    }
+}
+
 /// The session half shared by [`AuthenticatedSession`] and [`MfaSetupSession`] — everything
 /// `ServeHTTP` does before `MfaRequired`.
 async fn resolve_required_session(
     parts: &Parts,
     state: &AppState,
 ) -> Result<Session, SessionRejection> {
-    let Some((token, _location)) = parse_auth_token(parts) else {
+    let Some((token, location)) = parse_auth_token(parts) else {
         // Go's `ApiSessionRequired` with no token at all returns
         // `api.context.session_expired.app_error` rather than a "missing token" id.
         return Err(SessionRejection::no_token());
@@ -262,6 +437,9 @@ async fn resolve_required_session(
     let session = state.app.get_session(&token).await.map_err(|err| {
         SessionRejection::for_get_session_error(err, || state.app.config().subpath())
     })?;
+    // `checkCSRFToken` (handlers.go:295) — after the session resolves, before `SessionRequired`
+    // and `MfaRequired`.
+    enforce_csrf(parts, state, location, &session)?;
     Ok(session)
 }
 
@@ -390,6 +568,174 @@ mod tests {
         assert_eq!(
             rejection.error.0.id, "api.context.session_expired.app_error",
             "GetSession's own id is discarded by the web layer"
+        );
+        assert_eq!(rejection.error.0.status_code, 401);
+    }
+
+    const CSRF: &str = "csrfcsrfcsrfcsrfcsrfcsrf12";
+
+    fn session_with_csrf(csrf: Option<&str>) -> Session {
+        let mut session = Session::default();
+        if let Some(csrf) = csrf {
+            session.add_prop(mm_model::session::SESSION_PROP_CSRF, csrf);
+        }
+        session
+    }
+
+    fn request(method: Method, headers: &[(&str, &str)], trusted: bool) -> Parts {
+        let mut builder = Request::builder().method(method).uri("/api/v4/users/ids");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let mut parts = builder.body(()).expect("request builds").into_parts().0;
+        if trusted {
+            parts.extensions.insert(TrustRequester);
+        }
+        parts
+    }
+
+    fn check(
+        parts: &Parts,
+        location: TokenLocation,
+        csrf: Option<&str>,
+        strict: bool,
+    ) -> CsrfCheck {
+        check_csrf_token(parts, location, &session_with_csrf(csrf), strict)
+    }
+
+    /// `tokenLocation == TokenLocationCookie && !h.TrustRequester && r.Method != "GET"` — each
+    /// conjunct alone turns the check off, and a request that fails everything else is used so
+    /// that "not checked" cannot be confused with "passed".
+    #[test]
+    fn the_check_runs_only_for_a_cookie_write_on_an_untrusted_route() {
+        let bare = request(Method::POST, &[], false);
+        assert_eq!(
+            check(&bare, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Failed
+        );
+        for location in [TokenLocation::Header, TokenLocation::QueryString] {
+            assert_eq!(
+                check(&bare, location, Some(CSRF), false),
+                CsrfCheck::NotNeeded,
+                "{location:?}"
+            );
+        }
+        let get = request(Method::GET, &[], false);
+        assert_eq!(
+            check(&get, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::NotNeeded
+        );
+        let trusted = request(Method::POST, &[], true);
+        assert_eq!(
+            check(&trusted, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::NotNeeded
+        );
+    }
+
+    /// Only the literal `GET` is exempt: `HEAD`, `OPTIONS` and every write are checked.
+    #[test]
+    fn head_and_every_write_are_checked() {
+        for method in [
+            Method::HEAD,
+            Method::OPTIONS,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ] {
+            let parts = request(method.clone(), &[], false);
+            assert_eq!(
+                check(&parts, TokenLocation::Cookie, Some(CSRF), false),
+                CsrfCheck::Failed,
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_matching_token_passes_and_any_other_fails() {
+        let right = request(Method::POST, &[(HEADER_CSRF_TOKEN, CSRF)], false);
+        assert_eq!(
+            check(&right, TokenLocation::Cookie, Some(CSRF), true),
+            CsrfCheck::Passed
+        );
+        let wrong = request(Method::POST, &[(HEADER_CSRF_TOKEN, "nope")], false);
+        assert_eq!(
+            check(&wrong, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Failed
+        );
+        // Header names are case-insensitive, as `Header.Get` canonicalises them.
+        let lower = request(Method::POST, &[("x-csrf-token", CSRF)], false);
+        assert_eq!(
+            check(&lower, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Passed
+        );
+        // The value is not.
+        let upper = request(
+            Method::POST,
+            &[(HEADER_CSRF_TOKEN, "CSRFCSRFCSRFCSRFCSRFCSRF12")],
+            false,
+        );
+        assert_eq!(
+            check(&upper, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Failed
+        );
+    }
+
+    /// `csrfHeader == session.GetCSRF()` with both empty is a pass: a session with no `csrf` prop
+    /// accepts a cookie write with no header. Reproduced, not tightened.
+    #[test]
+    fn a_session_without_a_csrf_prop_passes_a_request_without_the_header() {
+        let bare = request(Method::POST, &[], false);
+        assert_eq!(
+            check(&bare, TokenLocation::Cookie, None, true),
+            CsrfCheck::Passed
+        );
+        let some = request(Method::POST, &[(HEADER_CSRF_TOKEN, CSRF)], false);
+        assert_eq!(
+            check(&some, TokenLocation::Cookie, None, true),
+            CsrfCheck::Failed
+        );
+    }
+
+    /// `X-Requested-With: XMLHttpRequest` rescues a mismatch only when enforcement is lenient,
+    /// and only with that exact value.
+    #[test]
+    fn the_legacy_header_passes_only_when_not_strict() {
+        let xhr = request(
+            Method::POST,
+            &[
+                (HEADER_CSRF_TOKEN, "nope"),
+                (HEADER_REQUESTED_WITH, "XMLHttpRequest"),
+            ],
+            false,
+        );
+        assert_eq!(
+            check(&xhr, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Passed
+        );
+        assert_eq!(
+            check(&xhr, TokenLocation::Cookie, Some(CSRF), true),
+            CsrfCheck::Failed
+        );
+        let other = request(
+            Method::POST,
+            &[(HEADER_REQUESTED_WITH, "xmlhttprequest")],
+            false,
+        );
+        assert_eq!(
+            check(&other, TokenLocation::Cookie, Some(CSRF), false),
+            CsrfCheck::Failed
+        );
+    }
+
+    /// The CSRF refusal is the generic session 401 and clears the cookie.
+    #[test]
+    fn a_csrf_failure_is_the_session_401_and_clears_the_cookie() {
+        let rejection = SessionRejection::csrf_failed("/".to_owned());
+        assert_eq!(rejection.clear_session_cookie.as_deref(), Some("/"));
+        assert_eq!(
+            rejection.error.0.id,
+            "api.context.session_expired.app_error"
         );
         assert_eq!(rejection.error.0.status_code, 401);
     }

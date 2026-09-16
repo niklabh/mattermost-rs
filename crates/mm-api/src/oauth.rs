@@ -522,7 +522,11 @@ pub async fn regenerate_oauth_app_secret(
 /// is what carries that for an enabled deployment, and for a disabled one there is nothing to
 /// limit. See [D-192].
 #[tracing::instrument(skip_all, fields(forwarded))]
-pub async fn register_oauth_client(State(state): State<AppState>, request: Request) -> Response {
+pub async fn register_oauth_client(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let (parts, body) = request.into_parts();
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,

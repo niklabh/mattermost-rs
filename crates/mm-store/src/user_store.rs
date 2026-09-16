@@ -2653,21 +2653,11 @@ impl UserStore for SqlUserStore {
             user.update_mention_keys_from_username(&old_user.username);
         }
 
-        let props = json_or_null(user.props.as_ref(), "props")?;
-        let notify_props = json_or_null(user.notify_props.as_ref(), "notifyprops")?;
-        let timezone = json_or_null(user.timezone.as_ref(), "timezone")?;
-        let mfa_used_timestamps = match user.mfa_used_timestamps.as_ref() {
-            None => None,
-            Some(value) => {
-                Some(
-                    serde_json::to_value(value).map_err(|source| StoreError::Decode {
-                        entity: "User",
-                        column: "mfausedtimestamps",
-                        source,
-                    })?,
-                )
-            }
-        };
+        let props = props_column(user.props.as_ref())?;
+        let notify_props = json_column(user.notify_props.as_ref(), "notifyprops")?;
+        let timezone = json_column(user.timezone.as_ref(), "timezone")?;
+        let mfa_used_timestamps =
+            json_column(user.mfa_used_timestamps.as_ref(), "mfausedtimestamps")?;
 
         // The column list is Go's, verbatim and in its order. `Id` is the only column of the
         // table that is **not** here: it is the key.
@@ -3696,21 +3686,11 @@ impl UserStore for SqlUserStore {
             }
         }
 
-        let props = json_or_null(user.props.as_ref(), "props")?;
-        let notify_props = json_or_null(user.notify_props.as_ref(), "notifyprops")?;
-        let timezone = json_or_null(user.timezone.as_ref(), "timezone")?;
-        let mfa_used_timestamps = match user.mfa_used_timestamps.as_ref() {
-            None => None,
-            Some(value) => {
-                Some(
-                    serde_json::to_value(value).map_err(|source| StoreError::Decode {
-                        entity: "User",
-                        column: "mfausedtimestamps",
-                        source,
-                    })?,
-                )
-            }
-        };
+        let props = props_column(user.props.as_ref())?;
+        let notify_props = json_column(user.notify_props.as_ref(), "notifyprops")?;
+        let timezone = json_column(user.timezone.as_ref(), "timezone")?;
+        let mfa_used_timestamps =
+            json_column(user.mfa_used_timestamps.as_ref(), "mfausedtimestamps")?;
 
         // Twenty-seven columns, Go's order. **`LastLogin` is not among them** — `update` writes
         // it and `insert` does not, so a freshly saved user carries the column default rather
@@ -4046,24 +4026,38 @@ impl UserReportRow {
     }
 }
 
-/// A `StringMap`/`StringArray`/`Timezone` column, or SQL NULL when the model holds `None`.
+/// A `StringMap`/`StringArray` column as Go's `driver.Valuer` writes it: **never SQL NULL**.
 ///
-/// Go writes `nil` maps as SQL NULL through `NamedExec`, and `user_from_row` already treats NULL
-/// and JSON `null` alike on the way back — so round-tripping a user with no props does not
-/// invent an empty object.
-fn json_or_null<T: serde::Serialize>(
+/// Both `StringMap.Value` and `StringArray.Value` (model/utils.go:100, :156) have value receivers
+/// and `json.Marshal` the receiver, so a nil map or slice is stored as the JSON text `null`. SQL
+/// NULL is not merely different: `SqlUserStore.Get` scans these columns into `[]byte` and
+/// `json.Unmarshal`s them, which fails on the empty buffer a NULL produces — Go 500s on the row.
+/// Reading back is unaffected: `user_from_row` treats NULL and `null` alike.
+fn json_column<T: serde::Serialize>(
     value: Option<&T>,
     column: &'static str,
-) -> Result<Option<serde_json::Value>, StoreError> {
+) -> Result<serde_json::Value, StoreError> {
     match value {
-        None => Ok(None),
-        Some(value) => Ok(Some(serde_json::to_value(value).map_err(|source| {
-            StoreError::Decode {
-                entity: "User",
-                column,
-                source,
-            }
-        })?)),
+        None => Ok(serde_json::Value::Null),
+        Some(value) => serde_json::to_value(value).map_err(|source| StoreError::Decode {
+            entity: "User",
+            column,
+            source,
+        }),
+    }
+}
+
+/// `Users.Props` as `Save` and `Update` write it: a nil map is stored as `{}`, not `null`.
+///
+/// The difference from [`json_column`] is `wrapBinaryParamStringMap` (sqlstore/utils.go:154),
+/// which both statements call on `user.Props` alone before `NamedExec`: it `make`s a nil map to
+/// plant the binary-parameter key, and `StringMap.Value` deletes the key again — leaving an empty,
+/// non-nil map. So a `PUT /users/{id}` that omits `props` **clears** them to `{}`; Go does not keep
+/// the stored ones. Measured by `parity::user_updates::an_omitted_map_is_stored_as_go_stores_it`.
+fn props_column<T: serde::Serialize>(value: Option<&T>) -> Result<serde_json::Value, StoreError> {
+    match value {
+        None => Ok(serde_json::Value::Object(serde_json::Map::new())),
+        Some(value) => json_column(Some(value), "props"),
     }
 }
 

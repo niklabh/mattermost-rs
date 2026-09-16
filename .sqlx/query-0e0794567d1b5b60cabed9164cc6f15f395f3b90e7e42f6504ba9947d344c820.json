@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM teammembers\n         WHERE userid = $1\n           AND teamid = ANY($2)\n           AND deleteat = 0\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0e0794567d1b5b60cabed9164cc6f15f395f3b90e7e42f6504ba9947d344c820"
+}

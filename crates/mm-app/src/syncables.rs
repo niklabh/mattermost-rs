@@ -410,7 +410,7 @@ impl App {
                 tracing::Span::current().record("updated", updated.len());
                 for member in &updated {
                     // syncables.go:244
-                    self.clear_session_cache_for_user(&member.user_id);
+                    self.clear_session_cache_for_user(&member.user_id).await;
                     self.send_updated_team_member_event(member).await;
                 }
             }
@@ -424,7 +424,7 @@ impl App {
                 tracing::Span::current().record("updated", updated.len());
                 for member in &updated {
                     // syncables.go:258
-                    self.clear_session_cache_for_user(&member.user_id);
+                    self.clear_session_cache_for_user(&member.user_id).await;
                     self.send_update_channel_member_event(member).await;
                 }
             }

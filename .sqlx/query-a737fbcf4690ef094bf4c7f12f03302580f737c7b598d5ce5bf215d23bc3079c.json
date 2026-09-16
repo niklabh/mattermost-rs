@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM productnoticeviewstate\n             WHERE cardinality($1::text[]) = 0\n                OR NOT (noticeid = ANY($1))\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a737fbcf4690ef094bf4c7f12f03302580f737c7b598d5ce5bf215d23bc3079c"
+}

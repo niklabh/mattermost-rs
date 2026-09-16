@@ -89,7 +89,52 @@ async fn main() -> anyhow::Result<()> {
         "loaded configuration from the shared database"
     );
 
-    let app = App::with_config(store, config);
+    let mut app = App::with_config(store, config);
+
+    // The Go server's session cache (`mm_app::peer_cache`, D-350). Without it a session revoked
+    // here keeps authenticating against Go until its cache entry ages out, so the absence is
+    // logged at warn rather than info.
+    match std::env::var("MM_API_GO_CACHE_USER") {
+        Ok(username) if !username.is_empty() => {
+            tracing::info!(
+                username,
+                "purging the Go server's session cache on session changes"
+            );
+            let invalidator = mm_api::go_cache::GoCacheInvalidator::new(
+                app.store().clone(),
+                &go_upstream,
+                username,
+            );
+            app = app.with_peer_cache(std::sync::Arc::new(invalidator));
+        }
+        _ => tracing::warn!(
+            "MM_API_GO_CACHE_USER is unset: a session revoked here stays valid on the Go server \
+             until its session cache expires"
+        ),
+    }
+
+    // The periodic half of `App::refresh_config` — the writes Go makes that never pass through
+    // this server (its own `Load` write-back at startup, a plugin's `SaveConfig`, a client talking
+    // to Go directly), which a Go cluster peer would learn of from `ConfigChanged`. The other
+    // half, after every write request, is `mm_api::refresh_config_after_write`. One indexed read
+    // of one column per period; a failure leaves the configuration in force and is retried.
+    if let Some(period) = config_poll_period() {
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(period);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                match app.refresh_config().await {
+                    Ok(true) => tracing::info!("the active configuration changed; reloaded"),
+                    Ok(false) => {}
+                    Err(err) => {
+                        tracing::warn!(error = %err, "could not check the active configuration")
+                    }
+                }
+            }
+        });
+    }
 
     // `markdown.SetMaxPostRunes(ps.MaxPostSize())` (platform/service.go:338): the markdown
     // walker refuses inputs longer than four bytes per rune of the post limit, and the limit is
@@ -227,6 +272,24 @@ async fn main() -> anyhow::Result<()> {
 /// Whether to run the job workers. Not a Mattermost setting — Go starts its workers
 /// unconditionally — so this is deliberately `MM_API_`-prefixed rather than `MM_SERVICESETTINGS_`,
 /// and parsed the same way Go parses a bool so a typo cannot read as true.
+/// How often to look for a configuration row this server did not see written:
+/// `MM_API_CONFIG_POLL_MS`, default one second, `0` for never.
+///
+/// Not a Mattermost setting — Go has no poll, because its peers are told. One second is the
+/// window in which this server can disagree with Go about a document Go changed on its own; a
+/// change made through this server is visible on the very next request regardless.
+fn config_poll_period() -> Option<std::time::Duration> {
+    const DEFAULT_MS: u64 = 1000;
+    let ms = match std::env::var("MM_API_CONFIG_POLL_MS") {
+        Ok(raw) => raw.parse::<u64>().unwrap_or_else(|_| {
+            tracing::warn!(value = %raw, "MM_API_CONFIG_POLL_MS is not a number of milliseconds; using the default");
+            DEFAULT_MS
+        }),
+        Err(_) => DEFAULT_MS,
+    };
+    (ms != 0).then(|| std::time::Duration::from_millis(ms))
+}
+
 fn job_workers_enabled() -> bool {
     match std::env::var("MM_API_ENABLE_JOB_WORKERS") {
         Ok(value) => matches!(value.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"),

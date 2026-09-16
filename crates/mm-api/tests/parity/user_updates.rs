@@ -279,6 +279,7 @@ async fn an_update_agrees_field_for_field() {
         "last_name": "EditedLast",
         "position": "EditedPosition",
         "locale": "fr",
+        "props": {"mmrs_upd": "kept"},
     });
 
     let (go_status, go_user) = put(
@@ -309,6 +310,17 @@ async fn an_update_agrees_field_for_field() {
     );
     assert_eq!(rs_user["nickname"], "EditedNick");
     assert_eq!(rs_user["locale"], "fr");
+    // The response is built from the request, so a store that dropped `props` would still echo
+    // them; the column says what was written. Added after `present-props-ignored` survived.
+    assert_eq!(
+        column_of("plainrs", "props").await.as_deref(),
+        Some(r#"{"mmrs_upd": "kept"}"#),
+        "the stored props"
+    );
+    assert_eq!(
+        column_of("plainrs", "props").await,
+        column_of("plaingo", "props").await
+    );
 
     scrub_pair("plain").await;
 }
@@ -413,6 +425,77 @@ async fn the_body_cannot_grant_itself_roles_or_undelete_itself() {
     );
 
     scrub_pair("priv").await;
+}
+
+/// **The omitted-map test.** A body with no `props`, no `timezone` and no `notify_props` stores
+/// the same *column text* on both servers, and that text is never SQL NULL.
+///
+/// Go reaches the columns through `StringMap.Value`, which marshals a nil map as the JSON text
+/// `null`; `Props` additionally passes `wrapBinaryParamStringMap`, which *creates* the map, so an
+/// omitted `props` is stored as `{}`. A port that wrote SQL NULL instead left a row Go's own
+/// `SqlUserStore.Get` cannot scan (`json.Unmarshal` of an empty buffer) — a 500 from Go on a row
+/// this server wrote, and a response comparison cannot see it because each server answers from
+/// its own write. Hence the column reads. Formerly D-601.
+#[tokio::test]
+async fn an_omitted_map_is_stored_as_go_stores_it() {
+    if !stack_enabled() {
+        return;
+    }
+    let _count = common::USER_COUNT.lock().await;
+    let http = client();
+    let (admin, team) = admin_and_team(&http).await;
+    let (go_id, rs_id) = pair(&http, &admin, &team, "nulls").await;
+
+    let extra = serde_json::json!({ "nickname": "NullsNick" });
+    let (go_status, go_user) = put(
+        &http,
+        GO,
+        &format!("/api/v4/users/{go_id}"),
+        &admin,
+        body_for(&go_id, "nullsgo", extra.clone()),
+        false,
+    )
+    .await;
+    let (rs_status, rs_user) = put(
+        &http,
+        RUST,
+        &format!("/api/v4/users/{rs_id}"),
+        &admin,
+        body_for(&rs_id, "nullsrs", extra),
+        true,
+    )
+    .await;
+    assert_eq!(go_status, 200, "Go refused: {go_user}");
+    assert_eq!(rs_status, 200, "we refused: {rs_user}");
+    assert_eq!(comparable(&go_user), comparable(&rs_user));
+
+    for column in ["props", "timezone", "notifyprops", "mfausedtimestamps"] {
+        let go = column_of("nullsgo", column).await;
+        let rs = column_of("nullsrs", column).await;
+        assert!(
+            go.is_some(),
+            "Go stored SQL NULL in {column}, which it never does"
+        );
+        assert_eq!(rs, go, "the stored {column} differs");
+    }
+
+    // And Go can read the row this server wrote. The first read after a write is a store read:
+    // `updateUser` invalidates Go's profile cache for the id on success, and this row was never
+    // written by Go after creation.
+    let response = http
+        .get(format!("{GO}/api/v4/users/{rs_id}"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(
+        response.status(),
+        200,
+        "Go cannot read the row we wrote: {}",
+        response.text().await.unwrap_or_default()
+    );
+
+    scrub_pair("nulls").await;
 }
 
 /// A body whose `id` is not the path's id is a 400 naming `user_id`, on both servers — and the

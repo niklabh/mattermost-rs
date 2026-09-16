@@ -39,7 +39,8 @@
 //! # Every request holds the busy read guard
 //!
 //! Both routes are `DisableWhenBusy`, and `busy_gates` marks this server busy under the write
-//! guard; a search made while it does would be a 503 that has nothing to do with search.
+//! guard; a search made while it does would be a 503 that has nothing to do with search. The
+//! `FILE_SEARCH_SETTING` read guard beside it keeps `config_reload`'s 501 window out the same way.
 
 use std::time::Duration;
 
@@ -526,6 +527,7 @@ async fn search_both(
     body: &serde_json::Value,
 ) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
     let _not_busy = BUSY_STATE.read().await;
+    let _searchable = common::FILE_SEARCH_SETTING.read().await;
     post_both_raw(client, token, path, body.to_string().as_bytes()).await
 }
 
@@ -570,6 +572,7 @@ async fn both_refuse(
     context: &str,
 ) -> serde_json::Value {
     let _not_busy = BUSY_STATE.read().await;
+    let _searchable = common::FILE_SEARCH_SETTING.read().await;
     let ((go_status, go), (rs_status, rs)) = post_both_raw(client, token, path, body).await;
     assert_eq!(
         go_status,
@@ -1070,6 +1073,7 @@ async fn the_body_failures_are_gos_400s() {
     }
 
     let _not_busy = BUSY_STATE.read().await;
+    let _searchable = common::FILE_SEARCH_SETTING.read().await;
     let ((go_status, go), (rs_status, rs)) =
         fetch_both_raw(&client, &admin, "/api/v4/files/search").await;
     assert_eq!(go_status, 400, "{}", String::from_utf8_lossy(&go));

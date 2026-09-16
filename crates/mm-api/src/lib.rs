@@ -47,6 +47,7 @@ pub mod file_search;
 /// `uploadFileStream` — the classic `POST /api/v4/files` upload.
 pub mod file_upload;
 pub mod files;
+pub mod go_cache;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
 pub mod image_proxy;
@@ -220,6 +221,18 @@ fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState>
     methods.fallback(proxy::forward_to_go)
 }
 
+/// Mark the method routes registered so far as `TrustRequester` — Go's
+/// `APIHandlerTrustRequester` / `APISessionRequiredTrustRequester` — which waives the CSRF check
+/// (see [`auth::check_csrf_token`]). Applied as a `route_layer`, so only the methods already on
+/// `methods` carry it: call it on the trusted method alone, before chaining any other.
+///
+/// It matters beyond the two trusted writes (`POST /roles/names`, `POST /client_perf`): the check
+/// exempts only a literal `GET`, and axum answers `HEAD` on a `GET` route, so an unmarked file
+/// route would refuse a cookie `HEAD` that Go registers and trusts.
+fn trust_requester(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
+    methods.route_layer(axum::Extension(auth::TrustRequester))
+}
+
 /// Go's path-parameter charset: `{channel_id:[A-Za-z0-9]+}` (api4/api.go, 91 occurrences).
 ///
 /// A segment outside that class never matches the route, so gorilla/mux answers its own 404 —
@@ -316,6 +329,39 @@ fn partially_migrated_with_ids(
     ))
 }
 
+/// Reload [`mm_app::App::config`] after any request that could have written the configuration.
+///
+/// This is the delivery half of [`mm_app::App::refresh_config`]: the stand-in for the
+/// `ConfigChanged` cluster message a Go peer would receive after `SaveConfig`. Every
+/// configuration save is Go's — the `/config` writes forward their save, and so do the plugin,
+/// certificate and licence routes that write the document as a side effect — so a server that
+/// only reloaded on the three `/config` paths would miss most of them. Any method other than
+/// `GET`, `HEAD` or `OPTIONS` is a candidate, served or forwarded, on either listener.
+///
+/// **After the response, and awaited.** Go's `SaveConfig` has swapped its copy before the
+/// handler writes a byte, so a client that reads right after its own write sees the new value
+/// from Go; awaiting the id check here gives it the same from this server. The cost is one
+/// indexed single-row read per write request. A failure is logged and the response is still
+/// sent: the old configuration stays in force, which is what Go does when `Load` fails, and the
+/// periodic check in `main.rs` retries.
+pub(crate) async fn refresh_config_after_write(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let may_write = !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    let response = next.run(request).await;
+    if may_write {
+        if let Err(err) = state.app.refresh_config().await {
+            tracing::warn!(error = %err, "could not check the active configuration after a write");
+        }
+    }
+    response
+}
+
 /// Port of the security headers `web.Handler.ServeHTTP` sets on **every** API response
 /// (web/handlers.go:242) and of the `Vary` that `gzhttp.GzipHandler` adds around it.
 ///
@@ -399,7 +445,10 @@ pub(crate) async fn go_global_headers(
 /// nine-character segment with exactly this error, before reading a body or touching the
 /// database. axum prefers a static segment over `{param}` and does not fall back across method
 /// routers, so without this the three would silently start being forwarded. See [D-330].
-async fn invalid_post_id_param() -> axum::response::Response {
+///
+/// All three Go handlers are `APISessionRequired`, so the session (and its CSRF check) is resolved
+/// before the id is looked at: without a session this is the 401, not the 400.
+async fn invalid_post_id_param(_session: auth::AuthenticatedSession) -> axum::response::Response {
     axum::response::IntoResponse::into_response(crate::error::ApiError::invalid_url_param(
         "post_id",
     ))
@@ -1503,7 +1552,7 @@ pub fn router(state: AppState) -> Router {
         // a GET falls to `partially_migrated`'s method fallback and Go answers exactly that.
         .route(
             "/api/v4/roles/names",
-            partially_migrated(post(roles::get_roles_by_names)),
+            partially_migrated(trust_requester(post(roles::get_roles_by_names))),
         )
         // `role_name` is deliberately not id-shaped: Go's class is `[a-z0-9_]+`, narrower than
         // the `[A-Za-z0-9]+` the id middleware enforces, so the handler carries its own mux
@@ -1511,7 +1560,7 @@ pub fn router(state: AppState) -> Router {
         // there is no conflict with it.
         .route(
             "/api/v4/roles/name/{role_name}",
-            partially_migrated(get(roles::get_role_by_name)),
+            partially_migrated(trust_requester(get(roles::get_role_by_name))),
         )
         // `BaseRoutes.Roles.Handle("", ...)` (api4/role.go:24) — the bare `/roles` collection,
         // one segment shorter than every `/api/v4/roles/...` route below, so axum sees a
@@ -1670,7 +1719,7 @@ pub fn router(state: AppState) -> Router {
         // `[A-Za-z0-9]+` matches the id middleware's rule exactly, on both paths.
         .route(
             "/api/v4/roles/{role_id}",
-            partially_migrated_with_ids(&state, get(roles::get_role)),
+            partially_migrated_with_ids(&state, trust_requester(get(roles::get_role))),
         )
         // `BaseRoutes.Roles.Handle("/{role_id:[A-Za-z0-9]+}/patch")` (api4/role.go:28) — the
         // console's permission editor.
@@ -1916,7 +1965,7 @@ pub fn router(state: AppState) -> Router {
         // `partially_migrated`'s method fallback.
         .route(
             "/api/v4/files/{file_id}",
-            partially_migrated_with_ids(&state, get(files::get_file)),
+            partially_migrated_with_ids(&state, trust_requester(get(files::get_file))),
         )
         // `BaseRoutes.Files.Handle("")` (api4/file.go:32) — `POST /files`, `uploadFileStream`.
         // One segment shorter than `/files/{file_id}` above, so a distinct path; the multipart
@@ -1927,11 +1976,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/files/{file_id}/thumbnail",
-            partially_migrated_with_ids(&state, get(files::get_file_thumbnail)),
+            partially_migrated_with_ids(&state, trust_requester(get(files::get_file_thumbnail))),
         )
         .route(
             "/api/v4/files/{file_id}/preview",
-            partially_migrated_with_ids(&state, get(files::get_file_preview)),
+            partially_migrated_with_ids(&state, trust_requester(get(files::get_file_preview))),
         )
         // `BaseRoutes.Channel.Handle("/pinned")` (api4/channel.go:60) — one segment deeper than
         // `/channels/{channel_id}` and a sibling of `/stats`, `/members` and `/posts`, all of
@@ -2008,13 +2057,13 @@ pub fn router(state: AppState) -> Router {
         // `images` for the table.
         .route(
             "/api/v4/emoji/{emoji_id}/image",
-            partially_migrated_with_ids(&state, get(images::get_emoji_image)),
+            partially_migrated_with_ids(&state, trust_requester(get(images::get_emoji_image))),
         )
         .route(
             "/api/v4/users/{user_id}/image",
             partially_migrated_with_ids(
                 &state,
-                get(images::get_profile_image)
+                trust_requester(get(images::get_profile_image))
                     .post(images::set_profile_image)
                     .delete(images::set_default_profile_image),
             ),
@@ -2026,7 +2075,10 @@ pub fn router(state: AppState) -> Router {
         // did not.
         .route(
             "/api/v4/users/{user_id}/image/default",
-            partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
+            partially_migrated_with_ids(
+                &state,
+                trust_requester(get(images::get_default_profile_image)),
+            ),
         )
         // `BaseRoutes.Team.Handle("/image")`: the GET reads the icon, the DELETE removes it, and
         // the POST answers its refusals and hands the upload (re-encoded as PNG) to Go — [D-411].
@@ -2034,7 +2086,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/image",
             partially_migrated_with_ids(
                 &state,
-                get(images::get_team_icon)
+                trust_requester(get(images::get_team_icon))
                     .delete(teams::remove_team_icon)
                     .post(images::set_team_icon),
             ),
@@ -2164,7 +2216,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/compliance/reports/{report_id}/download",
-            partially_migrated_with_ids(&state, get(compliance::download_compliance_report)),
+            partially_migrated_with_ids(
+                &state,
+                trust_requester(get(compliance::download_compliance_report)),
+            ),
         )
         .route(
             "/api/v4/ip_filtering",
@@ -2567,7 +2622,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/schemes/{scheme_id}",
             partially_migrated_with_ids(
                 &state,
-                get(schemes::get_scheme).delete(schemes::delete_scheme),
+                trust_requester(get(schemes::get_scheme)).delete(schemes::delete_scheme),
             ),
         )
         .route(
@@ -2576,11 +2631,17 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/schemes/{scheme_id}/teams",
-            partially_migrated_with_ids(&state, get(schemes::get_teams_for_scheme)),
+            partially_migrated_with_ids(
+                &state,
+                trust_requester(get(schemes::get_teams_for_scheme)),
+            ),
         )
         .route(
             "/api/v4/schemes/{scheme_id}/channels",
-            partially_migrated_with_ids(&state, get(schemes::get_channels_for_scheme)),
+            partially_migrated_with_ids(
+                &state,
+                trust_requester(get(schemes::get_channels_for_scheme)),
+            ),
         )
         // ---- system, usage and permissions (2026-09-07) ----
         //
@@ -2650,7 +2711,9 @@ pub fn router(state: AppState) -> Router {
         // link probe, through the outbound-connection guard.
         .route(
             "/api/v4/redirect_location",
-            partially_migrated(get(redirect_location::get_redirect_location)),
+            partially_migrated(trust_requester(get(
+                redirect_location::get_redirect_location,
+            ))),
         )
         // `BaseRoutes.APIRoot.Handle("/latest_version")` (api4/system.go:62) — the console's
         // GitHub release lookup, `manage_system` and not a restricted admin.
@@ -2662,13 +2725,15 @@ pub fn router(state: AppState) -> Router {
         // performance report, which no server in this project has a metrics sink for.
         .route(
             "/api/v4/client_perf",
-            partially_migrated(post(client_perf::submit_performance_report)),
+            partially_migrated(trust_requester(post(
+                client_perf::submit_performance_report,
+            ))),
         )
         // `BaseRoutes.Image.Handle("")` (api4/image.go:14) — the image proxy entry point, the
         // one 400 while the proxy is off; forwarded with it on.
         .route(
             "/api/v4/image",
-            partially_migrated(get(image_proxy::get_image)),
+            partially_migrated(trust_requester(get(image_proxy::get_image))),
         )
         // `BaseRoutes.APIRoot.Handle("/logs")` (api4/system.go:59), both methods: the `POST` is a
         // client's log line (`postLog`, `APIHandler`); the `GET` is the server's own log file
@@ -3066,7 +3131,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/jobs/{job_id}/download",
-            partially_migrated_with_ids(&state, get(gated_reads::download_job)),
+            partially_migrated_with_ids(&state, trust_requester(get(gated_reads::download_job))),
         )
         .route(
             "/api/v4/files/{file_id}/link",
@@ -3537,6 +3602,11 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             go_global_headers,
+        ))
+        // Outside the headers layer, so the reload waits on nothing but the response itself.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            refresh_config_after_write,
         ))
         .with_state(state)
 }

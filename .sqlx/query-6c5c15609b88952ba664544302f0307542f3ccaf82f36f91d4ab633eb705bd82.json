@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS \"name!\", num::float8 AS \"value!\"\n                      FROM posts_by_team_day\n                     WHERE teamid = $1 AND day >= $2 AND day <= $3\n                     ORDER BY 1 DESC\n                     LIMIT 30\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "value!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "6c5c15609b88952ba664544302f0307542f3ccaf82f36f91d4ab633eb705bd82"
+}

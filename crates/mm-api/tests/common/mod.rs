@@ -303,6 +303,12 @@ pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 /// waits for them all, so its 503 window never lands in a neighbour.
 pub static BUSY_STATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **`ServiceSettings.EnableFileSearch` is one setting for the whole installation**, and
+/// `config_reload` turns it off to prove this server notices a configuration write. A read guard
+/// for every file search that expects to be answered, the write guard for the tests that toggle
+/// it — the [`BUSY_STATE`] arrangement, for the same reason.
+pub static FILE_SEARCH_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
 ///
 /// `parity/custom_profile_attributes` plants rows in the `access_control` group and
@@ -1922,18 +1928,15 @@ pub async fn invalidate_go_caches(client: &reqwest::Client, admin_token: &str) {
     invalidate_go_caches_locked(client, admin_token).await;
 }
 
-/// Serialises the tests that make Go **fresh** against the one that asserts Go is **stale**.
+/// Serialises the tests that invalidate Go's caches by hand against the two that assert a
+/// revocation **served here** made Go forget a session.
 ///
-/// [`invalidate_go_caches`]'s "safe for the rest of the suite" argument — invalidation can only
-/// make Go fresher, and every staleness assertion in this suite is one-sided in that direction —
-/// has exactly one counterexample, and it is a credential one.
-/// `auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache` asserts that Go
-/// *still accepts* a session mm-api revoked, which is the tripwire on [D-237]. A concurrent
-/// invalidation from `system_usage` or `channel_creates` purges the very entry that test is
-/// pinning: Go answers 401, and the failure reads as "D-237 can be closed and the cache is being
-/// invalidated" when nothing about D-237 has changed.
-///
-/// Measured on a full-suite run on 2026-09-11, on unchanged code: left `401`, right `200`.
+/// Those two (`auth_writes::a_session_revoked_here_is_refused_by_both_servers` and
+/// `session_writes::go_refuses_a_session_we_revoked`) expect Go to refuse a revoked token because
+/// mm-api purged its cache (`mm_api::go_cache`). A concurrent hand invalidation from
+/// `system_usage` or `channel_creates` would purge it too, and the test would pass with the purge
+/// removed. Until 2026-09-16 the same lock guarded the opposite assertion — that Go *kept* the
+/// session — and measured the race from that side: left `401`, right `200`, on unchanged code.
 ///
 /// The lock is taken by [`invalidate_go_caches`] itself rather than at its call sites, so a
 /// future caller participates without having to know any of this. A test that must *hold* the

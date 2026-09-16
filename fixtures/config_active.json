@@ -137,6 +137,7 @@
     "EnforceMultifactorAuthentication": false,
     "ExperimentalEnableAuthenticationTransfer": true,
     "ExperimentalEnableHardenedMode": false,
+    "ExperimentalStrictCSRFEnforcement": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,
     "MaximumLoginAttempts": 10,

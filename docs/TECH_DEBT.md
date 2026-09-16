@@ -6666,32 +6666,22 @@ decision at the head of this file says to forward rather than port.
 
 ---
 
-## D-236 · CSRF is not checked on any migrated route
+## D-236 · CSRF is not checked on any migrated route — CLOSED 2026-09-16
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
-
-`web.Handler.ServeHTTP` calls `checkCSRFToken` (handlers.go:295) for every request whose token came
-from the **cookie**: a non-GET request must then carry `X-CSRF-Token` matching the session's, or
-`X-Requested-With: XMLHttpRequest`, or it is answered 401 with the session cookie cleared. Nothing
-in `mm-api` implements it. `crate::auth::AuthenticatedSession` reads the cookie and asks no further
-questions, and neither does `auth_writes::OptionalSession`.
-
-This predates the auth vertical — every migrated write has had the gap since the first one — but
-it was never written down, and the auth routes are where it stops being abstract: a cross-origin
-form post can now change a password or log a user out through this server where it could not
-through Go.
-
-What is owed is the check itself in the two extractors, keyed on the token's `TokenLocation`
-(already modelled) and the session's `props.csrf` (already stored and already read by
-`Session::get_csrf`). The pieces are all present; the wiring is not. A parity test needs a
-cookie-authenticated request, which the suite does not currently make — `go_minted_token` returns
-a bearer token — so the fixture is the other half of the work.
-
----
+`mm_api::auth::check_csrf_token` runs in `AuthenticatedSession`, `MfaSetupSession`,
+`OptionalSession` and, for handlers that take no session, `CsrfGuard`; `lib.rs::trust_requester`
+marks the `TrustRequester` routes. `parity::csrf` compares it with Go on a browser login, strict
+enforcement included.
 
 ## D-237 · A session revoked by mm-api is still accepted by Go until its cache is invalidated
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+**Closed** 2026-09-16 with [D-350]: the logout purges Go's session cache before it answers;
+`parity::auth_writes::a_session_revoked_here_is_refused_by_both_servers`. The password half too:
+`update_password` now calls `App::invalidate_cache_for_user`, which drives Go's
+`reset_failed_attempts` when the counter is already 0 (its local-cache layer purges the profile), and
+`a_self_service_password_change_takes_effect_on_both_servers` no longer invalidates by hand. Go's
+other ~24 `InvalidateCacheForUser` call sites are not wired and remain [D-190].
 
 [D-190] with a credential consequence, and measured rather than reasoned about:
 `POST /api/v4/users/logout` served by mm-api deletes the `Sessions` row, and the *Go* server keeps
@@ -7147,7 +7137,10 @@ for real.
 
 ## D-332 · nothing proves `.sqlx/` still covers the workspace
 
-**Status** OPEN · **Severity** tooling · **Raised** 2026-09-12 (properties read routes)
+**Status** CLOSED · **Severity** tooling · **Raised** 2026-09-12 (properties read routes)
+**Closed** 2026-09-16 — `scripts/sqlx-cache.sh check` exits 1 on a stale cache (measured by deleting
+an entry) and builds in its own target directory, so it disturbs no running suite. It is a script,
+not a hook: nothing runs it automatically before a merge.
 
 The cache itself is **fixed**: it held 87 entries against a store crate with several hundred
 queries, so `SQLX_OFFLINE=true cargo check --workspace` failed on `audit_store`, `bot_store` and
@@ -7173,7 +7166,15 @@ asserts rather than something a reader has to trust.
 
 ## D-350 · a session this server revokes keeps authenticating against Go
 
-**Status** OPEN · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+**Status** CLOSED · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+**Closed** 2026-09-16 — `App::clear_session_cache_for_user` now awaits
+`mm_app::peer_cache::PeerCache::clear_user_sessions`, which `mm_api::go_cache` implements by
+inserting a throwaway session for the user and having Go revoke it — Go's `RevokeSession` runs
+`ClearUserSessionCache` for exactly that user. Authenticated by a session mm-api mints for
+`MM_API_GO_CACHE_USER`; unset, it warns at startup and the gap returns. A first version called
+`/caches/invalidate` instead and blanked Go's `get_statuses` on every logout; only the all-users
+revoke still does, untested, which is [D-351]'s gap. Pinned by
+`parity::session_writes::go_refuses_a_session_we_revoked`, re-mint path included.
 
 The Go server keeps sessions in an in-memory cache and invalidates it only from its own revocation
 paths — `ClearUserSessionCache` (app/platform/session.go:105), which also fans out over the cluster
@@ -8768,7 +8769,12 @@ database (a fresh compose volume, or a transaction rolled back), not the shared 
 
 ## D-601 · `updateUser` writes an omitted `props`/`timezone` as SQL NULL, which Go's scanner cannot read
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
+**Closed** 2026-09-16 — the premise was wrong: Go does **not** keep the stored maps. Its
+`driver.Valuer`s write a nil map as the JSON text `null`, and `wrapBinaryParamStringMap` turns a
+nil `Props` into `{}` — so an omitted `props` is cleared. `mm_store::user_store::json_column` and
+`props_column` now write exactly that on `save` and `update`, `mfausedtimestamps` included;
+measured by `parity::user_updates::an_omitted_map_is_stored_as_go_stores_it`.
 
 Found by the local-socket user suite, which is the first test to have **Go read a row this
 server's `updateUser` wrote** (the forwarded `DELETE ?permanent=true` does a `GetUser` in Go).
@@ -8818,22 +8824,15 @@ function — *and*, for as long as the Go server runs beside this one, a way to 
 its `ReloadConfig` runs, which is `POST /config/reload` over the local socket. The parity suite
 that will cover it already sends the writes (`parity::configlic`) and asserts the forward.
 
-## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart
+## D-701 · `App::config()` is a start-up snapshot; a configuration write is invisible to the projected settings until restart — CLOSED 2026-09-16
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (config.go)
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-15 (config.go)
 
-`mm_app::App::config()` returns the `Config` projection loaded once in `App::new`
-(`Config::load`, then never again), while `getConfig`, `localGetConfig` and the write gates
-re-read the `Configurations` row per request (`load_model_config`). So after any configuration
-write — Go's own, or one forwarded through this server — the full-document reads and the
-`config_writes` gates see the new value at once and every ported gate that consults the
-projection (`show_full_name`, `enable_open_server`, `restrict_system_admin`, the file settings,
-the ninety-odd others) keeps the old one until this process restarts. Go's config listeners have
-no counterpart. **What is owed:** a reloadable projection — `ArcSwap`/`RwLock` behind `config()`
-with a reload on `POST /config/reload` and after a forwarded save, or a per-request read with a
-short TTL — and a parity test that patches a projected setting and reads a gated route back.
-Not fixed in the session that found it because `config()` returns `&Config` to several hundred
-call sites across seven concurrent worktrees.
+Paid off: `App::config()` returns an `Arc<Config>` swapped by `App::refresh_config`, which
+reloads when the active `Configurations.Id` changes. That runs after every non-GET request on
+both listeners (`mm_api::refresh_config_after_write`) and on a timer (`MM_API_CONFIG_POLL_MS`,
+default 1s), in place of the private cluster `ConfigChanged` message. The reasoning is in those
+doc comments; `parity::config_reload` proves all three paths.
 
 ## D-702 · `SaveLicense`, `RemoveLicense` with a licence in force, and the trial request are forwarded
 
@@ -9073,7 +9072,10 @@ is decided rather than inherited.
 
 ## D-683 · A user created here is not marked as having viewed the current product notices
 
-**Status** OPEN · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+**Status** CLOSED · **Severity** correctness · **Raised** 2026-09-15 (product_notices.go) · **Owner** the user-create family
+**Closed** 2026-09-16 — `App::update_viewed_product_notices_for_new_user`, awaited at the end of
+`create_user`; `mm-app/tests/db_new_user_notices.rs` plants the cache, since neither stack server
+can reach a feed.
 
 `App.CreateUser` ends with `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` (app/user.go:413),
 which writes a `ProductNoticeViewState` row with `Viewed = 1` for every notice in the cache, so a
@@ -9168,7 +9170,9 @@ worker shape and the cancellation watcher with it.
 
 ## D-805 · The committed `.sqlx` offline cache is thirty queries stale; `SQLX_OFFLINE=true` does not build
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (noticed while adding five queries)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-16 (noticed while adding five queries)
+**Closed** 2026-09-16 — regenerated with `scripts/sqlx-cache.sh prepare` (548 entries: 29 added,
+3 stale removed) and verified by `cargo sqlx prepare --check`, which rebuilds offline.
 
 `.sqlx/` is checked in, which is the sqlx convention for building without a database. It does not
 work: `SQLX_OFFLINE=true cargo check -p mm-store` fails with 27 errors across eleven modules —
@@ -9185,3 +9189,17 @@ unrelated change.
 **What is owed:** one `cargo sqlx prepare --workspace` against the development database, as its own
 commit — it rewrites about 34 files and belongs on no other change. Then a decision about whether
 it stays fresh: nothing enforces it, and it has silently rotted for months.
+
+## D-810 · A sessionless `APIHandler` does not refuse a non-OAuth token in the query string
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-16 (CSRF, web/handlers.go:281)
+
+`ServeHTTP` resolves any token it finds, for every handler, and a valid non-OAuth session presented
+as `?access_token=` is the 401 `api.context.token_provided.app_error` before the handler runs.
+`OptionalSession` reproduces that; the handlers that take no session at all (`login`,
+`login/type`, `login/desktop_token`, the two e-mail sends, `email/verify`, the OAuth DCR register,
+the CWS webhook, the remote-cluster gate) do not. Measured on stack 2: `POST
+/users/login/type?access_token=<valid>` is Go's 401 and this server's 404. **What is owed:** the
+same check in `mm_api::auth::CsrfGuard`, which already sits on every one of those handlers — at
+the cost of a session lookup for any request that carries a query token — and a `parity::csrf`
+case for it.

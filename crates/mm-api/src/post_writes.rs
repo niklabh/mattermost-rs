@@ -1601,11 +1601,13 @@ mod tests {
             ("GET", format!("/api/v4/posts/{AN_ID}"), 401),
             ("PUT", format!("/api/v4/posts/{AN_ID}"), 401),
             ("DELETE", format!("/api/v4/posts/{AN_ID}"), 401),
-            // The same three at the literal path. 400, not 401 and not 502: `ephemeral` is nine
-            // characters, so `RequirePostId` refuses it exactly as `{post_id}` did.
-            ("GET", "/api/v4/posts/ephemeral".to_owned(), 400),
-            ("PUT", "/api/v4/posts/ephemeral".to_owned(), 400),
-            ("DELETE", "/api/v4/posts/ephemeral".to_owned(), 400),
+            // The same three at the literal path: the session 401, as at `{post_id}` — Go's three
+            // handlers are `APISessionRequired`, so no credential is refused before
+            // `RequirePostId` gets to the nine-character segment (measured: Go answers 401).
+            // Not 502, which is what un-serving them would give.
+            ("GET", "/api/v4/posts/ephemeral".to_owned(), 401),
+            ("PUT", "/api/v4/posts/ephemeral".to_owned(), 401),
+            ("DELETE", "/api/v4/posts/ephemeral".to_owned(), 401),
             // The two newly registered POSTs.
             ("POST", "/api/v4/posts".to_owned(), 401),
             ("POST", "/api/v4/posts/ephemeral".to_owned(), 401),
@@ -1640,11 +1642,11 @@ mod tests {
                 401,
             ),
             ("POST", "/api/v4/posts/rewrite".to_owned(), 401),
-            // `rewrite` is a literal beside `{post_id}`: the other three methods keep
-            // `RequirePostId`'s 400, as `ephemeral` does.
-            ("GET", "/api/v4/posts/rewrite".to_owned(), 400),
-            ("PUT", "/api/v4/posts/rewrite".to_owned(), 400),
-            ("DELETE", "/api/v4/posts/rewrite".to_owned(), 400),
+            // `rewrite` is a literal beside `{post_id}`: the other three methods keep the
+            // `{post_id}` handlers' answer, as `ephemeral` does.
+            ("GET", "/api/v4/posts/rewrite".to_owned(), 401),
+            ("PUT", "/api/v4/posts/rewrite".to_owned(), 401),
+            ("DELETE", "/api/v4/posts/rewrite".to_owned(), 401),
         ] {
             assert_eq!(
                 status_of(method, &path).await,

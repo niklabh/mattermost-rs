@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(u.id) AS \"count!\"\n              FROM users u\n              LEFT JOIN bots b ON u.id = b.userid\n             WHERE u.deleteat > 0\n               AND b.userid IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "785e9c10f8dcca0f0d6755d3813fb34f9b5c4eb684d5fee4614de5b9e2b6c9d1"
+}

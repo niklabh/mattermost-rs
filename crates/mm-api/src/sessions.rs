@@ -325,10 +325,8 @@ pub async fn revoke_all_sessions_all_users(
 /// # The session cache, twice
 ///
 /// Go calls `ClearSessionCacheForUser` twice on this path; both are
-/// [`mm_app::App::clear_session_cache_for_user`] here. The **Go server beside us** keeps its own
-/// cache, and this handler both deletes session rows and moves `ExpiresAt`, so that cache can serve
-/// a revoked session until entry expiry. See [D-350]; it is the strangler's problem, not a wire
-/// difference.
+/// [`mm_app::App::clear_session_cache_for_user`] here, which also purges the **Go server's** session
+/// cache (`crate::go_cache`) — this handler both deletes session rows and moves `ExpiresAt`.
 #[tracing::instrument(skip_all, fields(session_id = %session.0.id, attached))]
 pub async fn handle_device_props(
     State(state): State<AppState>,
@@ -360,7 +358,10 @@ pub async fn handle_device_props(
         .await?;
 
     // `c.App.ClearSessionCacheForUser(...)` (user.go:2746).
-    state.app.clear_session_cache_for_user(&session.user_id);
+    state
+        .app
+        .clear_session_cache_for_user(&session.user_id)
+        .await;
 
     let mut response = status_ok();
     if let Some(cookie) = cookie {
@@ -512,7 +513,10 @@ async fn attach_device_ids(
     }
 
     // `c.App.ClearSessionCacheForUser(...)` (user.go:2779).
-    state.app.clear_session_cache_for_user(&session.user_id);
+    state
+        .app
+        .clear_session_cache_for_user(&session.user_id)
+        .await;
 
     let hours = state.app.config().session_length_mobile_in_hours;
     state.app.set_session_expire_in_hours(session, hours);

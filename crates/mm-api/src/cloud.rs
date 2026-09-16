@@ -120,7 +120,11 @@ pub async fn get_subscription(
 /// any caller, token or not. A Cloud licence would reach the key check, `ensureCloudInterface`
 /// and the webhook's event switch, and is forwarded.
 #[tracing::instrument(skip_all, fields(cloud))]
-pub async fn handle_cws_webhook(State(state): State<AppState>, request: Request) -> Response {
+pub async fn handle_cws_webhook(
+    State(state): State<AppState>,
+    _csrf: crate::auth::CsrfGuard,
+    request: Request,
+) -> Response {
     let cloud = match state.app.license().await {
         Ok(license) => license.is_some_and(|l| l.is_cloud()),
         Err(err) => return ApiError::from(*err).into_response(),

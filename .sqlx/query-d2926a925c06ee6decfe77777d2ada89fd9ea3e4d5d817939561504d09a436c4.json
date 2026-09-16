@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT TO_CHAR(day, 'YYYY-MM-DD') AS \"name!\",\n                           COALESCE(SUM(num), 0)::float8 AS \"value!\"\n                      FROM bot_posts_by_team_day\n                     WHERE day >= $1 AND day <= $2\n                     GROUP BY 1\n                     ORDER BY 1 DESC\n                     LIMIT 30\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "value!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "d2926a925c06ee6decfe77777d2ada89fd9ea3e4d5d817939561504d09a436c4"
+}

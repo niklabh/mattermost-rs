@@ -79,7 +79,7 @@ impl App {
             return Err(invalid_token("session is either nil or expired"));
         }
 
-        if session_is_idle_past_timeout(self.config(), &session, get_millis()) {
+        if session_is_idle_past_timeout(&self.config(), &session, get_millis()) {
             // Go: `a.Srv().Go(func() { RevokeSessionById(session.Id) })`, whose result it never
             // reads. `RevokeSessionById` re-fetches the row by id before deleting it; we already
             // hold the row, and the extra read exists in Go only because its goroutine captures
@@ -315,7 +315,7 @@ impl App {
         }
 
         // `ps.ClearUserSessionCache(userID)` (platform/session.go:342).
-        self.clear_session_cache_for_user(user_id);
+        self.clear_session_cache_for_user(user_id).await;
         Ok(())
     }
 
@@ -378,6 +378,9 @@ impl App {
 
         // `ClearAllUsersSessionCache` (platform/session.go:178) — its hub leg is `Hub.InvalidateAll`.
         self.hub().invalidate_all();
+        if let Some(peer) = self.peer_cache() {
+            peer.clear_all_sessions().await;
+        }
 
         Ok(())
     }

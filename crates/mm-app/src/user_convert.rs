@@ -334,7 +334,7 @@ impl App {
         }
 
         // `a.ClearSessionCacheForUser(user.Id)` (user.go:2844).
-        self.clear_session_cache_for_user(&user.id);
+        self.clear_session_cache_for_user(&user.id).await;
         Ok(())
     }
 
@@ -447,7 +447,7 @@ impl App {
         }
 
         // `a.ClearSessionCacheForUser(user.Id)` (user.go:2895).
-        self.clear_session_cache_for_user(&user.id);
+        self.clear_session_cache_for_user(&user.id).await;
         Ok(())
     }
 

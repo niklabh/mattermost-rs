@@ -77,6 +77,7 @@ mod parity {
     pub mod config_source;
     pub mod constant_refusals;
     pub mod cpa_licensed;
+    pub mod csrf;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;
@@ -259,6 +260,8 @@ mod parity {
     // Appended 2026-09-15: the searchmisc family.
     pub mod agents;
     pub mod file_search;
+    // Appended 2026-09-16: the configuration projection follows a write (D-701).
+    pub mod config_reload;
     pub mod outgoing_oauth_writes;
     pub mod properties_writes;
     pub mod retention_search;

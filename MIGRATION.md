@@ -14021,3 +14021,47 @@ Findings:
 Mutation tally (`job-workers.plan`): 29 run, 27 caught, 2 controls survived. One line was a
 harness fault on its first run — `status = $2` left a bind unused and `sqlx::query_as!` refused to
 compile — re-pointed at the bind list and re-run: caught.
+
+## Tech-debt: user map columns and new-user notice views (2026-09-16)
+
+- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed).
+  Go writes a nil map as JSON `null`, and a nil `Props` as `{}`, so an omitted `props` on
+  `PUT /users/{id}` is *cleared*; see `json_column`/`props_column` in `mm_store::user_store`.
+  Go's msgp user cache then renders a stored `null` timezone as `{}` on cached reads only.
+  `parity::user_updates`, 16 tests.
+- **`create_user` marks the cached product notices viewed** (D-683 closed);
+  `mm-app/tests/db_new_user_notices.rs`, 1 test.
+
+Mutation tally (`user-maps-and-notices.plan`): 7 run, 5 caught, 2 controls survived. The fifth
+(`present-props-ignored`) survived at first and was caught after `an_update_agrees_field_for_field`
+learned to read the stored `props` column.
+
+## Tech-debt: the Go server forgets a session this server revokes (2026-09-16)
+
+- **A session revoked here, or a password changed here, is forgotten by Go before the response**
+  (D-350, D-237 closed): `mm_app::peer_cache::PeerCache`, implemented in `mm_api::go_cache` by
+  driving the Go route whose handler runs the matching cache clear, as a session mm-api mints for
+  `MM_API_GO_CACHE_USER`. Never `/caches/invalidate` per user: it also wipes Go's status cache,
+  which `get_statuses` answers from alone.
+
+Mutation tally (`go-session-cache.plan`): 9 run, 7 caught, 2 controls survived. The two retry
+lines survived first — the test deleted the minted session by hand, which Go's cache never saw —
+and were caught once it revoked that session through Go.
+
+## `checkCSRFToken` on every served route (2026-09-16)
+
+Cookie-authenticated non-`GET` requests are checked in the session extractors plus `CsrfGuard`
+for sessionless handlers, and `trust_requester` marks Go's `TrustRequester` routes; D-236 closed,
+`parity::csrf` (1 stack test, 6 unit tests in `auth.rs`). `GET`/`PUT`/`DELETE` on the literal
+`/posts/{ephemeral,search,rewrite}` now require a session first, which is Go's 401 where this
+server used to answer 400.
+
+Mutation tally (`csrf.plan`): 15 run, 15 caught, 2 controls survived. The config-document line first
+reported SURVIVED because its filter named `config::tests`, which matches no test; the test is in
+`config::go_parity`. With the filter fixed and the line run again, it was caught.
+
+## The configuration projection follows a write — D-701 (2026-09-16)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Store.Load` on `ReloadConfig` / `ConfigChanged` | `mm-app/src/lib.rs` `App::refresh_config`, `mm-api` `refresh_config_after_write`, the `main.rs` timer | DONE | 3 parity | Keyed on the active row's id, because `DatabaseStore.persist` writes each change as a new row. The file backends stay built once, as Go's do. |

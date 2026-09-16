@@ -528,10 +528,13 @@ async fn a_local_account_lifecycle_matches_over_the_socket() {
     // `updateUser`: the whole user, `id` matching the path. The e-mail-change password check is
     // the self branch, which the local session cannot take.
     //
-    // `timezone` is sent explicitly. Left out, both servers store a null timezone — Go as the
-    // JSON text `null`, this port as SQL NULL — and from there the rows diverge under later
-    // writes and Go's reads; that is the HTTP `updateUser` port's finding ([D-601]), not this
-    // family's, and a present map keeps it out of the comparison.
+    // `props` is deliberately omitted: both servers store `{}`, and the forwarded permanent delete
+    // below is Go *reading* the row this server wrote — the path that once 500ed on a SQL NULL.
+    //
+    // `timezone` is sent. Omitted, both servers store the JSON text `null` and a cold read of
+    // either answers `"timezone": null` — but Go's user cache round-trips through msgp, which
+    // decodes a nil map as an empty one, so every *cached* Go read (and the next Go write of that
+    // cached user) says `{}`. Go disagrees with itself there; this server always reads the row.
     let update = |tag: &str, id: &str| {
         serde_json::json!({
             "id": id,
@@ -540,13 +543,6 @@ async fn a_local_account_lifecycle_matches_over_the_socket() {
             "nickname": "renamed",
             "position": "moved",
             "timezone": {"automaticTimezone": "", "manualTimezone": "", "useAutomaticTimezone": "true"},
-            // `props` is sent for the same reason as `timezone`: our HTTP `updateUser` writes an
-            // omitted `props`/`timezone` as **SQL NULL**, discarding the `{}`/default the create
-            // stored, and Go's row scanner then 500s reading that row — reachable here because
-            // the socket lets Go read a row our handler wrote (the forwarded permanent delete).
-            // A present value keeps that pre-existing divergence out of this family's comparison;
-            // it is [D-601], on `updateUser`.
-            "props": {"mmrs_local": "1"},
         })
         .to_string()
     };

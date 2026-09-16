@@ -199,21 +199,20 @@ async fn logout_answers_two_hundred_to_a_caller_with_no_usable_session() {
     }
 }
 
-/// A session revoked by mm-api is gone here immediately — and **is still accepted by Go** until
-/// Go's session cache is invalidated.
+/// A session revoked by mm-api is refused **by both servers** as soon as the logout answers.
 ///
-/// That second half is the finding, and it is measured rather than assumed: Go's
-/// `PlatformService` memoises sessions by token, our `DELETE` does not reach that map, and a user
-/// who logs out through mm-api stays authenticated against the Go server for the life of the
-/// cache entry. It is [D-190]'s class with a credential consequence, recorded separately as
-/// [D-237]. The test pins both halves so that neither can change without somebody noticing.
+/// Go's `PlatformService` memoises sessions by token, and our `DELETE` does not reach that map:
+/// until 2026-09-16 a user who logged out through mm-api stayed authenticated against Go for the
+/// life of the cache entry (formerly D-237). The logout's `ClearUserSessionCache` now purges Go's
+/// cache through `mm_api::go_cache`, awaited before the response — so the Go read below needs no
+/// explicit invalidation, and must not get one.
 #[tokio::test]
-async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
+async fn a_session_revoked_here_is_refused_by_both_servers() {
     if !stack_enabled() {
         return;
     }
-    // The only test in the binary that asserts Go has *not* caught up, so it is the only one that
-    // has to exclude the tests that make Go catch up. See `common::GO_CACHE`.
+    // Excludes the suites that invalidate Go's caches by hand, which would make Go refuse the
+    // token whether or not the logout purged anything. See `common::GO_CACHE`.
     let _go_cache = common::GO_CACHE.lock().await;
     let http = client();
     let (team, _channel) =
@@ -229,6 +228,15 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
     )
     .await;
     assert_eq!(status, 200);
+
+    // Warm Go's cache for the token, so the refusal below is a purge and not a cold store read.
+    let warm = http
+        .get(format!("{GO}/api/v4/users/me"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(warm.status(), 200);
 
     let response = http
         .post(format!("{RUST}/api/v4/users/logout"))
@@ -256,14 +264,9 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
     );
     assert_eq!(
         me(GO).await,
-        200,
-        "D-237: Go's session cache still holds the revoked session — if this ever becomes 401, \
-         the cache is being invalidated and the entry can be closed"
+        401,
+        "Go's session cache still holds the revoked session: the logout did not purge it"
     );
-
-    // Already holding `GO_CACHE`; the re-acquiring form would deadlock here.
-    common::invalidate_go_caches_locked(&http, &admin).await;
-    assert_eq!(me(GO).await, 401, "and the row really is gone");
 
     delete_plain_user(&http, &admin, &user.id).await;
 }
@@ -378,6 +381,20 @@ async fn a_self_service_password_change_takes_effect_on_both_servers() {
     let user = create_plain_user(&http, &admin, &team, "pwchange").await;
     let username = plain_username("pwchange");
     let new_password = "Mmrs-Changed-5678";
+    // Excludes the hand invalidations elsewhere, which would refresh Go's user cache whether or not
+    // the change purged it. See `common::GO_CACHE`.
+    let _go_cache = common::GO_CACHE.lock().await;
+    // Warm Go's profile cache for the user, so the refusal below is a purge and not a cold read.
+    // An admin read, not a login: a login would open a second session, which the change then
+    // revokes — purging the cache through `RevokeSession` and hiding a missing
+    // `InvalidateCacheForUser`.
+    let warm = http
+        .get(format!("{GO}/api/v4/users/{}", user.id))
+        .header("Authorization", format!("Bearer {admin}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(warm.status(), 200);
 
     let response = http
         .put(format!("{RUST}/api/v4/users/{}/password", user.id))
@@ -395,11 +412,10 @@ async fn a_self_service_password_change_takes_effect_on_both_servers() {
         br#"{"status":"OK"}"#
     );
 
-    // `POST /users/login` is forwarded, so the only server that can verify a password is Go —
-    // and Go answers it from a user cache our write did not touch ([D-190]). Without this the
-    // old password still works and the new one does not, which looks like a broken write and is
-    // a stale read. Measured.
-    common::invalidate_go_caches(&http, &admin).await;
+    // `POST /users/login` is forwarded, so the only server that can verify a password is Go, and
+    // Go answers it from a user cache. Until 2026-09-16 the change did not reach that cache and
+    // this test invalidated it by hand; `UpdatePassword`'s `InvalidateCacheForUser` now purges it
+    // (`mm_api::go_cache`), so no hand invalidation — one here would hide a missing purge.
 
     assert_eq!(
         login(&http, GO, &username, PLAIN_USER_PASSWORD).await.0,
