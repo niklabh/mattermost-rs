@@ -272,8 +272,8 @@ pass together, because the parity suites share fixture users, teams and channels
 that each sort correctly can still tie on a sort key once both sets exist.
 
 `.sqlx/` is committed, so `SQLX_OFFLINE=true cargo check --workspace` builds the compile-time
-checked queries with no database at all. Re-run `cargo sqlx prepare --workspace` after changing
-one.
+checked queries with no database at all. Re-run `scripts/sqlx-cache.sh prepare` after changing
+one; `scripts/sqlx-cache.sh check` says whether it is current.
 
 ### Regenerating fixtures
 

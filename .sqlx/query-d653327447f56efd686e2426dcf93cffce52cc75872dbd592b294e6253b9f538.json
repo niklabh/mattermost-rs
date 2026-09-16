@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(SUM(num), 0)::bigint AS \"total!\"\n              FROM posts_by_team_day\n             WHERE ($1 = '' OR teamid = $1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d653327447f56efd686e2426dcf93cffce52cc75872dbd592b294e6253b9f538"
+}

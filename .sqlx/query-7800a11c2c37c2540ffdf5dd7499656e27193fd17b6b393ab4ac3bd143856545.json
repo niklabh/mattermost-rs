@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT type::text AS \"channel_type!\", COUNT(*) AS \"count!\"\n              FROM channels\n             WHERE ($1 = '' OR teamid = $1)\n               AND type::text <> $2\n             GROUP BY type\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "7800a11c2c37c2540ffdf5dd7499656e27193fd17b6b393ab4ac3bd143856545"
+}

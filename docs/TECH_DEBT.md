@@ -7137,7 +7137,10 @@ for real.
 
 ## D-332 · nothing proves `.sqlx/` still covers the workspace
 
-**Status** OPEN · **Severity** tooling · **Raised** 2026-09-12 (properties read routes)
+**Status** CLOSED · **Severity** tooling · **Raised** 2026-09-12 (properties read routes)
+**Closed** 2026-09-16 — `scripts/sqlx-cache.sh check` exits 1 on a stale cache (measured by deleting
+an entry) and builds in its own target directory, so it disturbs no running suite. It is a script,
+not a hook: nothing runs it automatically before a merge.
 
 The cache itself is **fixed**: it held 87 entries against a store crate with several hundred
 queries, so `SQLX_OFFLINE=true cargo check --workspace` failed on `audit_store`, `bot_store` and
@@ -9167,7 +9170,9 @@ worker shape and the cancellation watcher with it.
 
 ## D-805 · The committed `.sqlx` offline cache is thirty queries stale; `SQLX_OFFLINE=true` does not build
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-16 (noticed while adding five queries)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-16 (noticed while adding five queries)
+**Closed** 2026-09-16 — regenerated with `scripts/sqlx-cache.sh prepare` (548 entries: 29 added,
+3 stale removed) and verified by `cargo sqlx prepare --check`, which rebuilds offline.
 
 `.sqlx/` is checked in, which is the sqlx convention for building without a database. It does not
 work: `SQLX_OFFLINE=true cargo check -p mm-store` fails with 27 errors across eleven modules —

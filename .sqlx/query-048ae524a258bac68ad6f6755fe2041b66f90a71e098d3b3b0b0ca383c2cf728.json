@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(num, 0)::bigint AS \"num!\" FROM file_stats",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "num!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "048ae524a258bac68ad6f6755fe2041b66f90a71e098d3b3b0b0ca383c2cf728"
+}

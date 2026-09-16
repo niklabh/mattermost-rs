@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO views\n            (id, channelid, type, creatorid, title,\n             description, sortorder, props,\n             createat, updateat, deleteat)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Int4",
+        "Jsonb",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "725421072ca6d04ea0b39716e0c14294ae6c937ef34d17a8f8928d572db25b9b"
+}
