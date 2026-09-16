@@ -480,3 +480,58 @@ async fn set_go_strict(http: &reqwest::Client, admin: &str, on: bool) {
         .expect("Go answers");
     assert_eq!(response.status(), 200, "the strict-CSRF patch is accepted");
 }
+
+/// A **valid non-OAuth session token in `?access_token=`** is refused before a handler that takes
+/// no session runs — `api.context.token_provided.app_error`, 401 — and an *unknown* one is not
+/// refused at all, because a token that resolves to nothing is no session (`RequireSession` is
+/// false on these handlers).
+///
+/// Formerly D-810: `CsrfGuard` sits on every sessionless handler for the CSRF half of `ServeHTTP`,
+/// and this is the other half of the same block (handlers.go:281).
+#[tokio::test]
+async fn a_session_token_in_the_query_string_is_refused_before_a_sessionless_handler() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = create_plain_user(&http, &admin, &team, "csrfquery").await;
+    let session = browser_login(&http, "csrfquery").await;
+
+    let body = format!(r#"{{"login_id":"{}"}}"#, plain_username("csrfquery"));
+    for path in ["/api/v4/users/login/type", "/api/v4/users/login"] {
+        let refused = both(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &format!("{path}?access_token={}", session.token),
+            &body,
+            &[],
+            "a valid session in the query string",
+        )
+        .await;
+        assert_eq!(refused.status, 401, "{path}");
+        assert_eq!(
+            refused.body["id"], "api.context.token_provided.app_error",
+            "{path}"
+        );
+
+        let unknown = both(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &format!("{path}?access_token=mmrsnotasessiontokenatall"),
+            &body,
+            &[],
+            "an unknown token in the query string",
+        )
+        .await;
+        assert_ne!(
+            unknown.body["id"], "api.context.token_provided.app_error",
+            "{path}: a token that resolves to nothing is not refused"
+        );
+    }
+
+    delete_plain_user(&http, &admin, &user.id).await;
+}

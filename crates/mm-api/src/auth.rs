@@ -371,16 +371,36 @@ pub(crate) fn enforce_csrf(
     }
 }
 
-/// The CSRF half of `ServeHTTP` for a handler that takes **no** session extractor.
+/// `api.context.token_provided.app_error` (handlers.go:281): a *valid* non-OAuth session presented
+/// as `?access_token=`. Go refuses it inside `ServeHTTP`, for every handler, before the handler
+/// runs — a session token in a URL leaks into logs and `Referer` headers, and only OAuth tokens are
+/// meant to travel that way.
+pub(crate) fn token_provided_rejection() -> SessionRejection {
+    ApiError::from(mm_model::utils::AppError::new(
+        "ServeHTTP",
+        "api.context.token_provided.app_error",
+        None,
+        // Go interpolates the token here; `wipe_detailed` blanks it before it reaches the client,
+        // so the value never leaves the process either way.
+        String::new(),
+        401,
+    ))
+    .into()
+}
+
+/// The token half of `ServeHTTP` for a handler that takes **no** session extractor: the
+/// query-string refusal and the CSRF check.
 ///
-/// Go runs `checkCSRFToken` inside `ServeHTTP` for every handler with a token, whether or not the
-/// handler wants a session — so `POST /users/login` with a live session cookie and no CSRF header
-/// is a 401 from Go before `login` runs. A handler here that never looks at the session would
-/// silently skip that, so it names this extractor instead. It does nothing unless the request is
-/// a checked one (cookie, not `GET`, not `TrustRequester`), and only then looks the session up.
+/// Go resolves any token it finds for every handler, whether or not the handler wants a session —
+/// so `POST /users/login` with a live session cookie and no CSRF header is a 401 from Go before
+/// `login` runs, and so is `POST /users/login/type?access_token=<a valid session token>`. A
+/// handler here that never looks at the session would silently skip both, so it names this
+/// extractor instead. It does nothing unless the request carries a token in the query string or is
+/// a CSRF-checked one (cookie, not `GET`, not `TrustRequester`), and only then looks the session
+/// up.
 ///
 /// The lookup's failures follow `RequireSession: false` (handlers.go:273): a rejected token is not
-/// an error and skips the check (Go's `session` is nil), while a store failure is the 500 Go sets
+/// an error and skips both checks (Go's `session` is nil), while a store failure is the 500 Go sets
 /// as `c.Err`.
 pub struct CsrfGuard;
 
@@ -394,12 +414,19 @@ impl FromRequestParts<AppState> for CsrfGuard {
         let Some((token, location)) = parse_auth_token(parts) else {
             return Ok(CsrfGuard);
         };
-        // Only a request the check applies to pays for the session lookup.
-        if !csrf_check_applies(parts, location) {
+        // Only a request one of the two checks applies to pays for the session lookup.
+        if location != TokenLocation::QueryString && !csrf_check_applies(parts, location) {
             return Ok(CsrfGuard);
         }
         match state.app.get_session(&token).await {
-            Ok(session) => enforce_csrf(parts, state, location, &session).map(|()| CsrfGuard),
+            Ok(session) => {
+                // `else if`: a refused query token never reaches the CSRF check. It could not
+                // fail it anyway — the check applies only to a cookie.
+                if !session.is_oauth && location == TokenLocation::QueryString {
+                    return Err(token_provided_rejection());
+                }
+                enforce_csrf(parts, state, location, &session).map(|()| CsrfGuard)
+            }
             Err(err) if err.status_code == 500 => Err(ApiError::from(err).into()),
             Err(_) => Ok(CsrfGuard),
         }

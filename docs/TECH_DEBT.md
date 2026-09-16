@@ -9191,7 +9191,10 @@ it stays fresh: nothing enforces it, and it has silently rotted for months.
 
 ## D-810 · A sessionless `APIHandler` does not refuse a non-OAuth token in the query string
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-16 (CSRF, web/handlers.go:281)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-16 (CSRF, web/handlers.go:281)
+**Closed** 2026-09-16 — `CsrfGuard` looks the session up for a query-string token too and answers
+`auth::token_provided_rejection`, shared with `OptionalSession`;
+`parity::csrf::a_session_token_in_the_query_string_is_refused_before_a_sessionless_handler`.
 
 `ServeHTTP` resolves any token it finds, for every handler, and a valid non-OAuth session presented
 as `?access_token=` is the 401 `api.context.token_provided.app_error` before the handler runs.

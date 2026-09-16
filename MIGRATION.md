@@ -14071,3 +14071,10 @@ reported SURVIVED because its filter named `config::tests`, which matches no tes
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `Store.Load` on `ReloadConfig` / `ConfigChanged` | `mm-app/src/lib.rs` `App::refresh_config`, `mm-api` `refresh_config_after_write`, the `main.rs` timer | DONE | 3 parity | Keyed on the active row's id, because `DatabaseStore.persist` writes each change as a new row. The file backends stay built once, as Go's do. |
+
+## Tech-debt: a session token in the query string, on a sessionless handler (2026-09-16)
+
+- **`CsrfGuard` refuses a valid non-OAuth `?access_token=`** with Go's
+  `api.context.token_provided.app_error` (D-810 closed), so `login`, `login/type` and the other
+  sessionless handlers match `ServeHTTP`; `parity::csrf`, 2 tests. Mutation tally (appended to
+  `csrf.plan`): 4 run, 2 caught, 2 controls survived.

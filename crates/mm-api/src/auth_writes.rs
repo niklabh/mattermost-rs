@@ -124,16 +124,7 @@ impl FromRequestParts<AppState> for OptionalSession {
         match state.app.get_session(&token).await {
             Ok(session) => {
                 if !session.is_oauth && location == TokenLocation::QueryString {
-                    return Err(ApiError::from(AppError::new(
-                        "ServeHTTP",
-                        "api.context.token_provided.app_error",
-                        None,
-                        // Go interpolates the token here; `wipe_detailed` blanks it before it
-                        // reaches the client, so the value never leaves the process either way.
-                        String::new(),
-                        401,
-                    ))
-                    .into());
+                    return Err(crate::auth::token_provided_rejection());
                 }
                 enforce_csrf(parts, state, location, &session)?;
                 Ok(OptionalSession(Some(session)))
