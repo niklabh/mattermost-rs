@@ -326,10 +326,27 @@ methods. Both directions match the oracle: arguments, returns, and Go's `encodab
 of four hooks' errors. The plugin-side halves (hooks server, API client) are so far checked only
 Rust-to-Rust. Mutations: 11 run, 11 caught, 2 controls survived.
 
-**Next in Phase 3:** the plugin half of `OnActivate` and `client_main`, which make the Rust SDK.
-They are checked under a Go host via `plugin.NewEnvironment`. After that: the other hand-written
-excluded methods, the database driver's RPC, and the Rust conformance plugin under the real Go
-server.
+**Rust plugin SDK: DONE 2026-09-17 (third part of Phase 3).** The SDK is:
+- the `Plugin` trait: `set_api` and `on_activate` on top of `Hooks`;
+- `plugin_server`, the plugin half of `OnActivate`, which runs in Go's order: dial the API and
+  driver connections, `SetAPI`, `OnConfigurationChange`, then `OnActivate`;
+- `client_main`.
+
+`examples/conformance_plugin.rs` is a Rust plugin written with it. `plugingen host` runs it under
+Go's real `plugin.Environment`: it installs the plugin as a bundle from a manifest, activates it,
+calls every generated hook, and shuts it down. The API is plugintest's mock. Both transcripts
+match the oracle in both directions, including Go's `encodableError` rewrite of 21 API returns
+and the activation order. An `AppError` from `OnActivate` makes Go refuse the activation.
+Mutations: 8 run, 6 caught, 2 controls survived. So the plugin-side halves of the RPC are now checked against Go too, not only
+Rust-to-Rust.
+
+**Next in Phase 3:**
+- the remaining hand-written methods: ServeHTTP/PluginHTTP streaming, `FileWillBeUploaded`,
+  `UploadData`, `InstallPlugin`, the log methods, `LoadPluginConfiguration`,
+  `MessageWillBePosted` and the other context hooks;
+- the database driver's RPC;
+- the error helpers (`ErrorString` codes);
+- then the Rust conformance plugin under the real Go server on the stack.
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

@@ -1,0 +1,18 @@
+# Mutation plan for the Rust plugin SDK (plugin plan Phase 3): the plugin half of OnActivate and
+# client_main, judged by a Rust plugin under Go's real plugin.Environment.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-sdk.plan
+#
+# Every line filters to `sdk_`. The decisions: which broker id is the API, that SetAPI happens,
+# that OnConfigurationChange runs before OnActivate, that OnActivate's error reaches Go, the
+# plugin name "hooks", and the handshake cookie. CONTROL- lines must SURVIVE: the two dials are
+# independent, since Go accepts both concurrently.
+
+sdk-dials-driver-as-api	crates/mm-plugin/src/rpc/plugin.rs	                .dial(args.api_mux_id)	                .dial(args.driver_mux_id)	pkg	sdk_
+sdk-set-api-skipped	crates/mm-plugin/src/rpc/plugin.rs	            plugin.set_api(\n                ApiClient::new(go_netrpc::Client::new(api)),\n                go_netrpc::Client::new(driver),\n            );	            let _ = (api, driver);	pkg	sdk_
+sdk-config-change-skipped	crates/mm-plugin/src/rpc/plugin.rs	            if let Ok(returns) = plugin\n                .on_configuration_change(Z_OnConfigurationChangeArgs {})\n                .await	            if let Ok(returns) = std::future::ready(Err::<crate::wire::plugin::Z_OnConfigurationChangeReturns, NotImplemented>(NotImplemented))\n                .await	pkg	sdk_
+sdk-activate-error-dropped	crates/mm-plugin/src/rpc/plugin.rs	plugin.on_activate().await.unwrap_or_default()	{ let _ = plugin.on_activate().await; Z_OnActivateReturns::default() }	pkg	sdk_
+sdk-plugin-name	crates/mm-plugin/src/rpc/plugin.rs	.plugin("hooks",	.plugin("hook",	pkg	sdk_
+sdk-handshake-cookie	crates/mm-plugin/src/rpc/plugin.rs	"Securely message teams, anywhere."	"Securely message teams anywhere."	pkg	sdk_
+CONTROL-dial-order	crates/mm-plugin/src/rpc/plugin.rs	            let api = broker\n                .dial(args.api_mux_id)\n                .await\n                .map_err(|e| ServiceError(e.to_string()))?;\n            let driver = broker\n                .dial(args.driver_mux_id)\n                .await\n                .map_err(|e| ServiceError(e.to_string()))?;	            let driver = broker\n                .dial(args.driver_mux_id)\n                .await\n                .map_err(|e| ServiceError(e.to_string()))?;\n            let api = broker\n                .dial(args.api_mux_id)\n                .await\n                .map_err(|e| ServiceError(e.to_string()))?;	pkg	sdk_
+CONTROL-rename-binding	crates/mm-plugin/src/rpc/plugin.rs	    let config = ServeConfig::new(handshake()).plugin(	    let serve_config = ServeConfig::new(handshake());\n    let config = serve_config.plugin(	pkg	sdk_

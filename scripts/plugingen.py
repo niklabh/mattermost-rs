@@ -567,7 +567,10 @@ def main():
     if check:
         stale = [p for p, src in files.items() if not p.exists() or p.read_text() != src]
         extra = [p for p in OUT.glob("*.rs") if p not in files]
-        extra += [p for p in RPC.glob("*.rs") if p not in files and p.name != "mod.rs"]
+        # rpc/ mixes generated and hand-written files: only a generated one can be stray.
+        extra += [
+            p for p in RPC.glob("*.rs") if p not in files and p.read_text().startswith(HEADER)
+        ]
         for p in stale + extra:
             print(f"stale: {p.relative_to(ROOT)}", file=sys.stderr)
         sys.exit(1 if stale or extra else 0)

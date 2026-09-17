@@ -81,7 +81,7 @@ func (c *conformance) fixture(name string) reflect.Value {
 func structOf(name string, values []reflect.Value) any {
 	v := reflect.New(wireTypes[name]).Elem()
 	for i, x := range values {
-		if x.Kind() == reflect.Interface && x.IsNil() {
+		if !x.IsValid() || (x.Kind() == reflect.Interface && x.IsNil()) {
 			continue
 		}
 		v.Field(i).Set(x)
@@ -122,6 +122,25 @@ func encodableError(err error) error {
 	return ret
 }
 
+// answer is what a mocked method returns (the fixture's fields), and what Go's RPC server then
+// sends: the same, with every `error` passed through `encodableError`.
+func answer(method reflect.Type, returns reflect.Value) (out, sent []reflect.Value) {
+	out = make([]reflect.Value, method.NumOut())
+	sent = make([]reflect.Value, len(out))
+	for i := range out {
+		out[i] = returns.Field(i)
+		sent[i] = out[i]
+		if method.Out(i) == errorT {
+			err, _ := out[i].Interface().(error)
+			sent[i] = reflect.ValueOf(&err).Elem()
+			if enc := encodableError(err); enc != nil {
+				sent[i] = reflect.ValueOf(&enc).Elem()
+			}
+		}
+	}
+	return out, sent
+}
+
 func (c *conformance) setUpHooks() {
 	hooksT := reflect.TypeFor[plugin.Hooks]()
 	for _, m := range c.idl.Hooks {
@@ -136,19 +155,7 @@ func (c *conformance) setUpHooks() {
 		returns := c.fixture("Z_" + m.Name + "Returns")
 		name := m.Name
 		fn := reflect.MakeFunc(method.Type, func(args []reflect.Value) []reflect.Value {
-			out := make([]reflect.Value, method.Type.NumOut())
-			sent := make([]reflect.Value, len(out))
-			for i := range out {
-				out[i] = returns.Field(i)
-				sent[i] = out[i]
-				if method.Type.Out(i) == errorT {
-					err, _ := out[i].Interface().(error)
-					sent[i] = reflect.ValueOf(&err).Elem()
-					if enc := encodableError(err); enc != nil {
-						sent[i] = reflect.ValueOf(&enc).Elem()
-					}
-				}
-			}
+			out, sent := answer(method.Type, returns)
 			record(map[string]any{
 				"hook":    name,
 				"args":    structOf("Z_"+name+"Args", args),

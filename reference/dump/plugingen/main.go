@@ -5,6 +5,7 @@
 //	plugingen gob <dir>        two gob streams per wire struct (full, sparse), plus expected.json
 //	plugingen echo <dir>       decode every <Z_name>[.sparse].gob in dir as that struct; print renders
 //	plugingen plugin <dir>     serve the RPC conformance plugin (conformance.go) from those fixtures
+//	plugingen host <dir> <plugins> <id>   drive a plugin through plugin.Environment (host.go)
 //
 // Types come from reflection over plugin.API and plugin.Hooks, so they are exactly what the
 // compiler sees, including instantiated generics and aliases resolved. Parameter names and doc
@@ -1039,8 +1040,8 @@ func echo(dir string) error {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | gob <dir> | echo <dir> | plugin <fixtures>")
+	if len(os.Args) < 3 || (os.Args[1] == "host") != (len(os.Args) == 5) {
+		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | gob <dir> | echo <dir> | plugin <fixtures> | host <fixtures> <plugin-dir> <plugin-id>")
 		os.Exit(2)
 	}
 	idl, err := buildIDL()
@@ -1054,6 +1055,8 @@ func main() {
 			err = echo(os.Args[2])
 		case "plugin":
 			err = servePlugin(os.Args[2], idl)
+		case "host":
+			err = runHost(os.Args[2], os.Args[3], os.Args[4], idl)
 		default:
 			err = fmt.Errorf("unknown mode %q", os.Args[1])
 		}

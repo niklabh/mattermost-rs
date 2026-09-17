@@ -5,9 +5,9 @@
 //! [`register_hooks`] over a [`Hooks`] implementation and calls the API through [`ApiClient`].
 //!
 //! Arguments and returns are the generated wire structs (`Z_<Method>Args`, `Z_<Method>Returns`),
-//! field for field what Go sends, so nothing is converted on the way through. The methods in
-//! `excludedPluginHooks` are not here yet, apart from `Implemented` and the host half of
-//! `OnActivate`.
+//! field for field what Go sends, so nothing is converted on the way through. A plugin process
+//! runs [`client_main`]. The methods in `excludedPluginHooks` are not here yet, apart from
+//! `Implemented` and both halves of `OnActivate`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,9 +21,11 @@ use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
 mod hooks;
+mod plugin;
 
 pub use api::{PluginApi, register_api};
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
+pub use plugin::{Plugin, client_main, handshake, plugin_server};
 
 /// A [`Hooks`] or [`PluginApi`] method the implementation does not provide.
 ///
@@ -33,8 +35,8 @@ pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotImplemented;
 
-/// The plugin's hooks server: `Plugin.Implemented` plus every generated hook
-/// (client_rpc.go, `hooksRPCServer`). `OnActivate` is not served yet.
+/// `Plugin.Implemented` plus every generated hook (client_rpc.go, `hooksRPCServer`). A plugin
+/// process serves [`plugin_server`], which adds `OnActivate`.
 pub fn hooks_server<H: Hooks>(hooks: &Arc<H>) -> Server {
     let mut server = Server::new();
     let this = Arc::clone(hooks);
