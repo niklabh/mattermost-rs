@@ -253,7 +253,6 @@ git -C reference/mattermost checkout FETCH_HEAD
 | model/permission.go (2,789 ln) | Generate from Go, do not hand-translate — **done 2026-08-19**, see the progress row |
 | model/config.go (5,795 ln) | Translate lazily, section by section |
 | enterprise/ | Separate license; proxy to Go permanently |
-| plugin host (hashicorp/go-plugin) | Keep Go process alive indefinitely |
 | search (Bleve / Elasticsearch) | Deferred past Phase 5 |
 
 Deferred work and known divergences live in `docs/TECH_DEBT.md`, not here. Log an entry there

@@ -258,7 +258,7 @@ agent from wandering into them:
 |---|---|
 | `model/client4.go` (8.5k lines) | **Skip.** It's the Go SDK for external callers. |
 | Enterprise / licensed code (`enterprise/`) | **Skip.** Different license; proxy to Go permanently. |
-| Plugin system (hashicorp/go-plugin, RPC) | **Skip initially.** Keep the Go plugin host alive behind the proxy. |
+| Plugin system (hashicorp/go-plugin, RPC) | ~~Skip initially.~~ **Superseded 2026-09-17:** ported, not forwarded — see `docs/PLUGIN_PLAN.md`. |
 | `model/permission.go` (2.8k lines) | **Generate**, don't translate — it's a static table. Write a one-off script. |
 | `model/config.go` (5.8k lines) | Translate **lazily**, section by section, only as consuming code needs it. |
 | Search (Bleve / Elasticsearch) | Defer past Phase 5. |
