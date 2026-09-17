@@ -276,7 +276,13 @@ and an undecodable body. The Rust client against the Go server, the Go client ag
 server, and Rust against Rust all reproduce it exactly. Scripted-peer tests cover the branches Go
 cannot easily provoke. The mutation plan is `scripts/mutations/go-netrpc.plan`.
 
-**`goplugin`: next.** It includes its own yamux (D3, revised).
+**`goplugin::yamux`: DONE 2026-09-17.** Its oracle is `reference/dump/yamux`. Its transcript
+covers 300 concurrent streams, 8 and 16 MiB transfers, half-closes in both orders, pings,
+acceptor-opened streams, idle time across the keepalive, 300 opens while the acceptor is not
+accepting, and GoAway. It matches Go in all four pairings. Scripted raw-frame tests cover
+resets, timeouts and protocol errors. The mutation plan is `scripts/mutations/goplugin-yamux.plan`.
+
+**`goplugin` host and plugin sides: next.** Its oracle is `reference/dump/goplugin`.
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

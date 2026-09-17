@@ -42,6 +42,10 @@ types stay reusable under the more permissive terms:
                                              dependency on any mm-* crate (publishable alone)
                                              full text: LICENSE-MIT, LICENSE-APACHE in each
 
+    crates/goplugin/          MPL-2.0        reimplements HashiCorp go-plugin's net/rpc
+                                             protocol and hashicorp/yamux; no Mattermost
+                                             code. full text: crates/goplugin/LICENSE
+
     everything else           AGPL-3.0-only  the repository default
 
 Apache-2.0 is one-way compatible with AGPL-3.0, so the AGPL crates may depend on

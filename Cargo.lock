@@ -665,6 +665,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "goplugin"
+version = "0.1.0"
+dependencies = [
+ "go-netrpc",
+ "gobwire",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

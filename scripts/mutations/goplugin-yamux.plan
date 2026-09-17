@@ -1,0 +1,35 @@
+# Mutation plan for goplugin's yamux (plugin plan Phase 2).
+#
+#   MUTATE_PACKAGE=goplugin scripts/mutate-batch.sh scripts/mutations/goplugin-yamux.plan
+#
+# The decisions hashicorp/yamux makes that go-plugin depends on: the eager SYN, the SYN backlog,
+# frame sizes up to the window, credit returned at half a window, half-close in both orders, the
+# backlog reset, GoAway, pings, the open and close timeouts, and draining queued frames on close.
+# The CONTROL- lines must SURVIVE.
+
+window-update-sent-too-eagerly	crates/goplugin/src/yamux.rs	        if delta < max / 2 && flags == 0 {	        if delta < max / 4 && flags == 0 {	pkg
+open-ignores-the-syn-backlog	crates/goplugin/src/yamux.rs	            p = inner.syn.clone().acquire_owned() => p.map_err(|_| Error::SessionShutdown)?,	            p = inner.syn.clone().acquire_many_owned(0) => p.map_err(|_| Error::SessionShutdown)?,	pkg
+first-frame-carries-no-syn	crates/goplugin/src/yamux.rs	            State::Init => {\n                self.state = State::SynSent;\n                FLAG_SYN	            State::Init => {\n                self.state = State::SynSent;\n                0	pkg
+fin-after-local-close-keeps-stream	crates/goplugin/src/yamux.rs	                State::LocalClose => {\n                    st.state = State::Closed;\n                    close = true;	                State::LocalClose => {\n                    st.state = State::Closed;\n                    close = false;	pkg
+receive-window-off-by-one	crates/goplugin/src/yamux.rs	        if len > 0 && len > st.recv_window {	        if len > 0 && len > st.recv_window + 1 {	pkg
+backlog-reset-keeps-stream	crates/goplugin/src/yamux.rs	                streams.map.remove(&id);\n                drop(streams);	                drop(streams);	pkg
+data-frames-capped-below-window	crates/goplugin/src/yamux.rs	        let n = (st.send_window as usize).min(buf.len());	        let n = (st.send_window as usize).min(buf.len()).min(16 * 1024);	pkg
+local-close-ends-reads	crates/goplugin/src/yamux.rs	            State::RemoteClose | State::Closed if st.recv_buf.is_empty() => {	            State::RemoteClose | State::Closed | State::LocalClose if st.recv_buf.is_empty() => {	pkg
+writes-allowed-after-local-close	crates/goplugin/src/yamux.rs	            State::LocalClose | State::Closed => {\n                return Poll::Ready(Err(Error::StreamClosed.into()));	            State::Closed => {\n                return Poll::Ready(Err(Error::StreamClosed.into()));	pkg
+client-opens-even-ids	crates/goplugin/src/yamux.rs	AtomicU32::new(if client { 1 } else { 2 })	AtomicU32::new(if client { 2 } else { 1 })	pkg
+ping-answered-with-syn	crates/goplugin/src/yamux.rs	header(TYPE_PING, FLAG_ACK, 0, id)	header(TYPE_PING, FLAG_SYN, 0, id)	pkg
+normal-go-away-is-an-error	crates/goplugin/src/yamux.rs	        GO_AWAY_NORMAL => {	        GO_AWAY_NORMAL if false => {	pkg
+ack-does-not-release-syn-slot	crates/goplugin/src/yamux.rs	        lock(&self.streams).inflight.remove(&id);	        let _ = id;	pkg
+window-credit-halved	crates/goplugin/src/yamux.rs	            st.send_window = st.send_window.wrapping_add(len);	            st.send_window = st.send_window.wrapping_add(len / 2);	pkg
+local-go-away-accepts-streams	crates/goplugin/src/yamux.rs	        if self.local_go_away.load(Ordering::SeqCst) {	        if false {	pkg
+open-timeout-ignores-ack	crates/goplugin/src/yamux.rs	                    && lock(&inner.streams).inflight.contains_key(&id)	                    && true	pkg
+close-sends-no-fin	crates/goplugin/src/yamux.rs	        let flags = st.send_flags() | FLAG_FIN;	        let flags = st.send_flags();	pkg
+half-close-never-times-out	crates/goplugin/src/yamux.rs	        if !finished && let Some(timeout) = self.config.stream_close_timeout {	        if false && let Some(timeout) = self.config.stream_close_timeout {	pkg
+
+# Equivalent: must SURVIVE. hashicorp/yamux's SynSent and Established states behave identically
+# once the SYN is out (same flags from sendFlags, same Close and FIN transitions), so an ACK that
+# fails to promote the state is unobservable.
+EQUIVALENT-ack-leaves-stream-unestablished	crates/goplugin/src/yamux.rs	            if st.state == State::SynSent {	            if st.state == State::Init {	pkg
+
+CONTROL-reorder-header-bytes	crates/goplugin/src/yamux.rs	    h[0] = PROTO_VERSION;\n    h[1] = ty;	    h[1] = ty;\n    h[0] = PROTO_VERSION;	pkg
+CONTROL-header-size-expression	crates/goplugin/src/yamux.rs	const HEADER_SIZE: usize = 12;	const HEADER_SIZE: usize = 4 * 3;	pkg

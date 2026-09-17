@@ -12,6 +12,7 @@ members = [
     "crates/gobwire",
     "crates/gobwire-derive",
     "crates/go-netrpc",
+    "crates/goplugin",
 ]
 
 [workspace.package]
