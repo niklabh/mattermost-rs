@@ -55,6 +55,29 @@ const PROBE_LIFETIME_MS: i64 = 60 * 1000;
 /// A request that hangs must not hold a logout open indefinitely.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// `true` for an `http://` upstream whose host is not loopback — where the minted administrator
+/// token, like every credential the proxy forwards, crosses a network in the clear.
+///
+/// A warning at startup, not a refusal: the same connection carries every client's own token to Go,
+/// so TLS is a property of the deployment's proxy hop as a whole, and this is the one place that
+/// knows the hop's URL at startup.
+pub fn is_plaintext_off_host(upstream: &str) -> bool {
+    let Some(rest) = upstream.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = match authority.strip_prefix('[') {
+        Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
+        None => authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host),
+    };
+    !(host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback()))
+}
+
 #[derive(Debug, thiserror::Error)]
 enum MintError {
     #[error("looking up the peer-cache user {username:?}: {source}")]
@@ -66,6 +89,24 @@ enum MintError {
     Save(mm_store::StoreError),
 }
 
+/// Why a [`GoCacheInvalidator`] could not be built, or its configuration is unusable. Fatal at
+/// startup: a server that cannot purge Go's caches honours revoked credentials there.
+#[derive(Debug, thiserror::Error)]
+pub enum GoCacheError {
+    #[error("building the HTTP client for the Go server: {0}")]
+    Client(#[from] reqwest::Error),
+    #[error("MM_API_GO_CACHE_USER names {username:?}, which cannot be read: {source}")]
+    User {
+        username: String,
+        source: mm_store::StoreError,
+    },
+    #[error(
+        "MM_API_GO_CACHE_USER names {username:?}, which is not a system administrator; Go refuses \
+         the cache routes to anyone else"
+    )]
+    NotAdmin { username: String },
+}
+
 /// Purges the Go server's caches through its authenticated REST API.
 #[derive(Debug)]
 pub struct GoCacheInvalidator {
@@ -73,19 +114,52 @@ pub struct GoCacheInvalidator {
     http: reqwest::Client,
     base: String,
     username: String,
+    /// The minted administrator token. Locked only to read, mint or discard it — never across a
+    /// request to Go, so a stalled Go server does not queue every purge behind one.
     token: tokio::sync::Mutex<Option<String>>,
 }
 
 impl GoCacheInvalidator {
     /// `go_upstream` is the Go server's base URL; `username` a system administrator's.
-    pub fn new(store: SqlStore, go_upstream: &str, username: String) -> Self {
-        Self {
+    ///
+    /// **Redirects are not followed.** The minted token is an administrator credential, and a
+    /// redirect would carry it to wherever the Go server — or anything answering in its place —
+    /// pointed. The transport itself is `MM_GO_UPSTREAM`'s, the same hop that already carries
+    /// every forwarded client's credentials.
+    pub fn new(store: SqlStore, go_upstream: &str, username: String) -> Result<Self, GoCacheError> {
+        Ok(Self {
             store,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
             base: go_upstream.trim_end_matches('/').to_owned(),
             username,
             token: tokio::sync::Mutex::new(None),
+        })
+    }
+
+    /// Check at startup that the configured account exists and is a system administrator, so a
+    /// typo is one fatal line rather than a warning on every logout.
+    pub async fn verify(&self) -> Result<(), GoCacheError> {
+        let user = self
+            .store
+            .user()
+            .get_by_username(&self.username)
+            .await
+            .map_err(|source| GoCacheError::User {
+                username: self.username.clone(),
+                source,
+            })?;
+        if !user
+            .roles
+            .split_whitespace()
+            .any(|role| role == mm_model::role::SYSTEM_ADMIN_ROLE_ID)
+        {
+            return Err(GoCacheError::NotAdmin {
+                username: self.username.clone(),
+            });
         }
+        Ok(())
     }
 
     async fn mint(&self) -> Result<String, MintError> {
@@ -114,22 +188,38 @@ impl GoCacheInvalidator {
         Ok(saved.token)
     }
 
+    /// The current token, minting one if there is none. Minting happens under the lock — it is a
+    /// database write, not a request to Go — so concurrent callers share one session.
+    async fn current_token(&self) -> Option<String> {
+        let mut token = self.token.lock().await;
+        if let Some(current) = token.as_deref() {
+            return Some(current.to_owned());
+        }
+        match self.mint().await {
+            Ok(minted) => Some(token.insert(minted).clone()),
+            Err(err) => {
+                tracing::warn!(error = %err, "could not mint a session to purge the Go server's cache");
+                None
+            }
+        }
+    }
+
+    /// Forget `stale` after Go refused it — **only if it is still the current token**. A caller
+    /// whose 401 arrives after another caller already minted a replacement must not discard the
+    /// replacement.
+    async fn discard(&self, stale: &str) {
+        let mut token = self.token.lock().await;
+        if token.as_deref() == Some(stale) {
+            *token = None;
+        }
+    }
+
     /// `POST {go}{path}` as the minted administrator; `true` on a 2xx.
     #[tracing::instrument(skip(self, body), fields(go_status))]
     async fn post(&self, path: &str, body: String) -> bool {
-        // Held across the request so concurrent purges share one minted session rather than each
-        // inserting their own.
-        let mut token = self.token.lock().await;
         for attempt in 0..2 {
-            let current = match token.as_deref() {
-                Some(current) => current.to_owned(),
-                None => match self.mint().await {
-                    Ok(minted) => token.insert(minted).clone(),
-                    Err(err) => {
-                        tracing::warn!(error = %err, "could not mint a session to purge the Go server's cache");
-                        return false;
-                    }
-                },
+            let Some(current) = self.current_token().await else {
+                return false;
             };
             let status = match self
                 .http
@@ -152,7 +242,7 @@ impl GoCacheInvalidator {
                 return true;
             }
             if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                *token = None;
+                self.discard(&current).await;
                 continue;
             }
             tracing::warn!(%status, "the Go server refused to purge its cache");
@@ -223,5 +313,36 @@ impl PeerCache for GoCacheInvalidator {
 
     fn invalidate_user<'a>(&'a self, user_id: &'a str) -> PeerFuture<'a> {
         Box::pin(self.invalidate_user_impl(user_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_plaintext_off_host;
+
+    #[test]
+    fn loopback_and_https_are_not_flagged() {
+        for upstream in [
+            "http://localhost:8065",
+            "http://LOCALHOST",
+            "http://127.0.0.1:8065/",
+            "http://127.8.0.1",
+            "http://[::1]:8065",
+            "https://mattermost.example.com",
+        ] {
+            assert!(!is_plaintext_off_host(upstream), "{upstream}");
+        }
+    }
+
+    #[test]
+    fn plain_http_elsewhere_is_flagged() {
+        for upstream in [
+            "http://mattermost:8065",
+            "http://10.0.0.5:8065",
+            "http://[2001:db8::1]:8065",
+            "http://localhost.example.com",
+        ] {
+            assert!(is_plaintext_off_host(upstream), "{upstream}");
+        }
     }
 }

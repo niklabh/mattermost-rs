@@ -1,4 +1,5 @@
-# Mutation plan for D-350/D-237: mm-api makes the Go server forget sessions and users (2026-09-16).
+# Mutation plan for D-350/D-237: mm-api makes the Go server forget sessions and users (2026-09-16),
+# extended after the PR #29 review with the token paths and the pre-hashed password.
 #
 #   scripts/mutate-batch.sh scripts/mutations/go-session-cache.plan
 #
@@ -6,9 +7,14 @@
 hub-clear-skips-the-peer	crates/mm-app/src/hub.rs	            peer.clear_user_sessions(user_id).await;	            let _ = (peer, user_id);	api	a_session_revoked_here_is_refused_by_both_servers
 probe-names-another-user	crates/mm-api/src/go_cache.rs	            user_id: user_id.to_owned(),\n            expires_at: mm_model::utils::get_millis() + PROBE_LIFETIME_MS,	            user_id: mm_model::utils::new_id(),\n            expires_at: mm_model::utils::get_millis() + PROBE_LIFETIME_MS,	api	go_refuses_a_session_we_revoked
 no-retry-on-401	crates/mm-api/src/go_cache.rs	            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {	            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 1 {	api	go_refuses_a_session_we_revoked
-retry-keeps-the-dead-token	crates/mm-api/src/go_cache.rs	                *token = None;\n                continue;	                continue;	api	go_refuses_a_session_we_revoked
+retry-keeps-the-dead-token	crates/mm-api/src/go_cache.rs	        if token.as_deref() == Some(stale) {	        if token.as_deref() != Some(stale) {	api	go_refuses_a_session_we_revoked
 minted-session-has-no-roles	crates/mm-api/src/go_cache.rs	            roles: user.roles,	            roles: String::new(),	api	go_refuses_a_session_we_revoked
-password-change-skips-the-user-cache	crates/mm-app/src/auth.rs	        self.invalidate_cache_for_user(&user.id).await;	        let _ = &user.id;	api	a_self_service_password_change_takes_effect_on_both_servers
+password-change-skips-the-user-cache	crates/mm-app/src/auth.rs	        // `a.InvalidateCacheForUser(user.Id)` (user.go:1782). Go's login reads the user through\n        // its profile cache, so without this the old password keeps working against Go.\n        self.invalidate_cache_for_user(&user.id).await;	        let _ = &user.id;	api	a_self_service_password_change_takes_effect_on_both_servers
 user-purge-only-when-attempts-nonzero	crates/mm-api/src/go_cache.rs	        if user.failed_attempts != 0 ||	        if user.failed_attempts == 0 ||	api	a_self_service_password_change_takes_effect_on_both_servers
-control-timeout-six-seconds	crates/mm-api/src/go_cache.rs	std::time::Duration::from_secs(5);	std::time::Duration::from_secs(6);	api	go_refuses_a_session_we_revoked
+pre-hashed-password-skips-the-user-cache	crates/mm-app/src/auth.rs	        // `a.InvalidateCacheForUser(user.Id)` (user.go:1845), as `update_password` does.\n        self.invalidate_cache_for_user(&user.id).await;	        let _ = &user.id;	api	a_pre_hashed_password_set_here_takes_effect_on_go
+revoke-token-skips-the-cache	crates/mm-app/src/user_access_token.rs	        let had_session = self.token_has_session(token).await;\n        self.store()\n            .user_access_token()\n            .delete(	        let had_session = false;\n        self.store()\n            .user_access_token()\n            .delete(	api	a_token_revoked_disabled_or_rotated_here_is_refused_by_go
+disable-token-skips-the-cache	crates/mm-app/src/user_access_token.rs	        let had_session = self.token_has_session(token).await;\n        self.store()\n            .user_access_token()\n            .update_token_disable(	        let had_session = false;\n        self.store()\n            .user_access_token()\n            .update_token_disable(	api	a_token_revoked_disabled_or_rotated_here_is_refused_by_go
+rotate-token-skips-the-cache	crates/mm-app/src/user_access_token.rs	        let had_session = self.token_has_session(&token).await;	        let had_session = false;	api	a_token_revoked_disabled_or_rotated_here_is_refused_by_go
+token-session-lookup-inverted	crates/mm-app/src/user_access_token.rs	        self.store().session().get(&token.token).await.is_ok()	        self.store().session().get(&token.token).await.is_err()	api	a_token_revoked_disabled_or_rotated_here_is_refused_by_go
+control-timeout-as-millis	crates/mm-api/src/go_cache.rs	std::time::Duration::from_secs(5);	std::time::Duration::from_millis(5_000);	api	a_token_revoked_disabled_or_rotated_here_is_refused_by_go
 control-lifetime-literal	crates/mm-api/src/go_cache.rs	const SESSION_LIFETIME_MS: i64 = 24 * 60 * 60 * 1000;	const SESSION_LIFETIME_MS: i64 = 86_400_000;	api	a_self_service_password_change_takes_effect_on_both_servers

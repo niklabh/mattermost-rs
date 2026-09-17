@@ -1038,6 +1038,18 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
         Some(&serde_json::json!({"team_id": fixture.go_team, "user_id": user})),
     )
     .await;
+    // `UpdateUpdateAt` (team.go:845): the join bumps `Users.UpdateAt`, which is the user object's
+    // `update_at` and the profile etag's input. Read from the row, since Go's own cached copy of
+    // the user would not show a write this server made. Formerly D-242.
+    let update_at = async || -> i64 {
+        let pool = common::fixture_pool().await.expect("the stack database");
+        sqlx::query_scalar("SELECT updateat FROM users WHERE id = $1")
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .expect("the user exists")
+    };
+    let before_rust_add = update_at().await;
     let (rust_status, rust_raw) = call(
         &http,
         RUST,
@@ -1049,6 +1061,11 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
     .await;
     assert_eq!(go_status, 201, "Go added the member: {go_raw}");
     assert_eq!(rust_status, go_status, "the add status differs: {rust_raw}");
+    let after_rust_add = update_at().await;
+    assert!(
+        after_rust_add > before_rust_add,
+        "a join served here bumps Users.UpdateAt ({before_rust_add} -> {after_rust_add})"
+    );
     assert_eq!(
         go_raw.ends_with('\n'),
         rust_raw.ends_with('\n'),
@@ -1097,6 +1114,11 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
     .await;
     assert_eq!(go_status, 201, "a re-add is still Created: {go_again}");
     assert_eq!(rust_status, go_status, "the re-add status differs");
+    assert_eq!(
+        update_at().await,
+        after_rust_add,
+        "`alreadyAdded` returns before `UpdateUpdateAt`, so a re-add writes nothing"
+    );
     assert_eq!(
         normalise(&serde_json::from_str(go_again.trim()).expect("a member")),
         normalise(&serde_json::from_str(rust_again.trim()).expect("a member")),

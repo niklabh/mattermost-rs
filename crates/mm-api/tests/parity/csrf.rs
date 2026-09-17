@@ -21,6 +21,8 @@
 //! (the main one holds a start-up snapshot of the configuration, D-701), and patches it back off
 //! before asserting anything.
 
+use futures_util::FutureExt;
+
 use crate::common;
 
 use common::{
@@ -398,50 +400,58 @@ async fn a_cookie_write_must_carry_the_sessions_csrf_token() {
         )],
     )
     .await;
-    let outcome = match &strict {
-        Some(server) => {
-            let request = async |headers: &[(&str, &str)], context: &str| {
-                let send = async |base: &str| {
-                    let mut request = http
-                        .post(format!("{base}/api/v4/users/ids"))
-                        .header("Content-Type", "application/json")
-                        .body(ids.clone());
-                    for (name, value) in headers {
-                        request = request.header(*name, *value);
-                    }
-                    request.send().await.expect("the server answers")
+    // Everything between the two patches runs under `catch_unwind`: the setting is persisted in
+    // the shared configuration, and a panic that skipped the reset would leave every later run
+    // strict — failing the lenient legacy-header case above for a reason nowhere near it.
+    let outcome = std::panic::AssertUnwindSafe(async {
+        match &strict {
+            Some(server) => {
+                let request = async |headers: &[(&str, &str)], context: &str| {
+                    let send = async |base: &str| {
+                        let mut request = http
+                            .post(format!("{base}/api/v4/users/ids"))
+                            .header("Content-Type", "application/json")
+                            .body(ids.clone());
+                        for (name, value) in headers {
+                            request = request.header(*name, *value);
+                        }
+                        request.send().await.expect("the server answers")
+                    };
+                    let go = answer(send(GO).await).await;
+                    let rs_response = send(&server.base).await;
+                    let served = rs_response
+                        .headers()
+                        .get("x-mmrs-served-by")
+                        .is_some_and(|v| v == "rust");
+                    (context.to_owned(), go, answer(rs_response).await, served)
                 };
-                let go = answer(send(GO).await).await;
-                let rs_response = send(&server.base).await;
-                let served = rs_response
-                    .headers()
-                    .get("x-mmrs-served-by")
-                    .is_some_and(|v| v == "rust");
-                (context.to_owned(), go, answer(rs_response).await, served)
-            };
-            Some((
-                request(
-                    &[
-                        ("Cookie", &cookie),
-                        ("X-CSRF-Token", "notthetoken"),
-                        ("X-Requested-With", "XMLHttpRequest"),
-                    ],
-                    "strict, legacy header",
-                )
-                .await,
-                request(
-                    &[("Cookie", &cookie), ("X-CSRF-Token", &session.csrf)],
-                    "strict, right token",
-                )
-                .await,
-            ))
+                Some((
+                    request(
+                        &[
+                            ("Cookie", &cookie),
+                            ("X-CSRF-Token", "notthetoken"),
+                            ("X-Requested-With", "XMLHttpRequest"),
+                        ],
+                        "strict, legacy header",
+                    )
+                    .await,
+                    request(
+                        &[("Cookie", &cookie), ("X-CSRF-Token", &session.csrf)],
+                        "strict, right token",
+                    )
+                    .await,
+                ))
+            }
+            None => None,
         }
-        None => None,
-    };
+    })
+    .catch_unwind()
+    .await;
     drop(strict);
     set_go_strict(&http, &admin, false).await;
     delete_plain_user(&http, &admin, &user.id).await;
 
+    let outcome = outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     let (legacy, right) = outcome.expect("the strict mm-api starts");
     let mut compared = Vec::new();
     for (context, go, rs, served) in [legacy, right] {
@@ -469,4 +479,78 @@ async fn set_go_strict(http: &reqwest::Client, admin: &str, on: bool) {
         .await
         .expect("Go answers");
     assert_eq!(response.status(), 200, "the strict-CSRF patch is accepted");
+}
+
+/// A **valid non-OAuth session token in `?access_token=`** is refused before any handler runs,
+/// sessionless or session-required — `api.context.token_provided.app_error`, 401 — and an
+/// *unknown* one is not refused at all on a sessionless handler, because a token that resolves to
+/// nothing is no session (`RequireSession` is false there).
+///
+/// Formerly D-810: `CsrfGuard` sits on every sessionless handler for the CSRF half of `ServeHTTP`,
+/// and this is the other half of the same block (handlers.go:281).
+#[tokio::test]
+async fn a_session_token_in_the_query_string_is_refused_before_a_sessionless_handler() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = create_plain_user(&http, &admin, &team, "csrfquery").await;
+    let session = browser_login(&http, "csrfquery").await;
+
+    let body = format!(r#"{{"login_id":"{}"}}"#, plain_username("csrfquery"));
+    for path in ["/api/v4/users/login/type", "/api/v4/users/login"] {
+        let refused = both(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &format!("{path}?access_token={}", session.token),
+            &body,
+            &[],
+            "a valid session in the query string",
+        )
+        .await;
+        assert_eq!(refused.status, 401, "{path}");
+        assert_eq!(
+            refused.body["id"], "api.context.token_provided.app_error",
+            "{path}"
+        );
+
+        let unknown = both(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &format!("{path}?access_token=mmrsnotasessiontokenatall"),
+            &body,
+            &[],
+            "an unknown token in the query string",
+        )
+        .await;
+        assert_ne!(
+            unknown.body["id"], "api.context.token_provided.app_error",
+            "{path}: a token that resolves to nothing is not refused"
+        );
+    }
+
+    // **And before a session-required handler.** The refusal is `ServeHTTP`'s, not the handler's,
+    // so `GET /users/me` — `AuthenticatedSession` here — is the same 401, where a port that only
+    // guarded the sessionless handlers would authenticate a credential carried in the URL.
+    let refused = both(
+        &http,
+        RUST,
+        reqwest::Method::GET,
+        &format!("/api/v4/users/me?access_token={}", session.token),
+        "",
+        &[],
+        "a valid session in the query string, session required",
+    )
+    .await;
+    assert_eq!(refused.status, 401, "/users/me");
+    assert_eq!(
+        refused.body["id"], "api.context.token_provided.app_error",
+        "/users/me"
+    );
+
+    delete_plain_user(&http, &admin, &user.id).await;
 }

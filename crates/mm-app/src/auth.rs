@@ -515,6 +515,9 @@ impl App {
                 update_password_failed()
             })?;
 
+        // `a.InvalidateCacheForUser(user.Id)` (user.go:1845), as `update_password` does.
+        self.invalidate_cache_for_user(&user.id).await;
+
         Ok(())
     }
 

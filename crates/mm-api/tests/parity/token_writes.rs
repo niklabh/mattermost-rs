@@ -23,11 +23,12 @@
 //! create and rotate path with the stock configuration untouched. The 501 itself is asserted too —
 //! it is what a human client actually gets here.
 //!
-//! # Nothing here asserts that Go is stale
+//! # Go's session cache
 //!
-//! Revoking a token deletes the session it minted, and Go serves sessions from a cache this port
-//! does not have. A test claiming "revoked here, still accepted there" would be racing every other
-//! suite's cache invalidation, so the DB effects are asserted against the rows instead.
+//! Revoking, disabling or rotating a token deletes the session it minted, and Go serves sessions
+//! from a cache. The row effects are asserted against the rows; that Go *also* stops honouring the
+//! secret is `a_token_revoked_disabled_or_rotated_here_is_refused_by_go`, which holds
+//! `common::GO_CACHE` so no hand invalidation elsewhere can make it pass.
 
 use crate::common;
 
@@ -936,6 +937,80 @@ async fn enable_and_disable_are_gated_on_opposite_permissions() {
         assert_eq!(go_body["id"], "api.context.permissions.app_error", "{path}");
 
         common::delete_plain_user(&client, &admin, &user.id).await;
+    }
+
+    sweep().await;
+}
+
+/// A token revoked, disabled or rotated **through this server** stops authenticating against Go
+/// at once.
+///
+/// Go's `RevokeUserAccessToken`, `DisableUserAccessToken` and `RotateUserAccessToken` each end in
+/// `RevokeSession` on the session the secret minted, and that is `ClearUserSessionCache`. The store
+/// deletes the row either way; without the clear, Go keeps the session it cached when the secret
+/// was first used and answers 200 until the entry expires. Each token is used against Go first, so
+/// the cache entry exists before the write.
+#[tokio::test]
+async fn a_token_revoked_disabled_or_rotated_here_is_refused_by_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _tokens = TOKENS.lock().await;
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let _go_cache = common::GO_CACHE.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let bot = TOKEN_BOT;
+
+    let me_on_go = async |secret: &str| {
+        client
+            .get(format!("{}/api/v4/users/me", common::GO))
+            .header("Authorization", format!("Bearer {secret}"))
+            .send()
+            .await
+            .expect("Go answers")
+            .status()
+            .as_u16()
+    };
+
+    for route in ["revoke", "disable", "rotate"] {
+        let (status, created) = post_one(
+            common::GO,
+            &admin,
+            &format!("/api/v4/users/{bot}/tokens"),
+            r#"{"description":"mmrs-write go cache"}"#,
+        )
+        .await;
+        assert_eq!(
+            status,
+            200,
+            "{route}: {}",
+            String::from_utf8_lossy(&created)
+        );
+        let created: serde_json::Value = serde_json::from_slice(&created).expect("json");
+        let id = created["id"].as_str().expect("an id").to_owned();
+        let secret = created["token"].as_str().expect("a secret").to_owned();
+
+        assert_eq!(
+            me_on_go(&secret).await,
+            200,
+            "{route}: the token works on Go"
+        );
+
+        let path = format!("/api/v4/users/tokens/{route}");
+        let body = if route == "rotate" {
+            format!(r#"{{"token_id":"{id}","expires_at":0}}"#)
+        } else {
+            format!(r#"{{"token_id":"{id}"}}"#)
+        };
+        let (status, answer) = post_one(common::RUST, &admin, &path, &body).await;
+        assert_eq!(status, 200, "{route}: {}", String::from_utf8_lossy(&answer));
+
+        assert_eq!(
+            me_on_go(&secret).await,
+            401,
+            "{route}: Go still honours a secret this server {route}d"
+        );
     }
 
     sweep().await;

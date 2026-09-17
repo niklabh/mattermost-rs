@@ -1,0 +1,12 @@
+# Mutation plan for D-242 (a team join bumps Users.UpdateAt) and D-222 (PostEditTimeLimit), 2026-09-16.
+#
+#   scripts/mutate-batch.sh scripts/mutations/join-update-at-and-edit-limit.plan
+#
+# The last two lines are no-op controls and must SURVIVE. D-222's lines need scripts/go-edit-limit.sh.
+join-skips-update-at	crates/mm-app/src/team_member.rs	        self.store()\n            .user()\n            .update_update_at(&user.id)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "user update_at bump failed");\n                join_error(	        let _ = self.store()\n            .user()\n            .get(&user.id)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "user update_at bump failed");\n                join_error(	api	adding_a_member_agrees_and_joins_the_default_channels
+limit-sentinel-is-zero	crates/mm-app/src/post_write.rs	    if post_edit_time_limit == -1 {	    if post_edit_time_limit == 0 {	api	every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not
+patch-refuses-an-empty-patch	crates/mm-api/src/post_writes.rs	    if post_edit_time_limit_expired(limit, &original) && !patch.is_empty() {	    if post_edit_time_limit_expired(limit, &original) {	api	every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not
+pin-checks-the-limit-before-the-no-op	crates/mm-api/src/post_writes.rs	    if post.is_pinned == is_pinned {\n        return Ok(status_ok());	    if false && post.is_pinned == is_pinned {\n        return Ok(status_ok());	api	every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not
+update-ignores-a-message-change	crates/mm-api/src/post_writes.rs	        && (post.message != original.message\n	        && (false\n	api	every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not
+control-limit-binding-renamed	crates/mm-app/src/post_write.rs	    get_millis() > post.create_at + post_edit_time_limit * 1000	    let window = post_edit_time_limit * 1000;\n    get_millis() > post.create_at + window	api	every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not
+control-join-error-message	crates/mm-app/src/team_member.rs	                tracing::error!(error = %err, "user update_at bump failed");\n                join_error(	                tracing::error!(error = %err, "bumping the user update_at failed");\n                join_error(	api	adding_a_member_agrees_and_joins_the_default_channels

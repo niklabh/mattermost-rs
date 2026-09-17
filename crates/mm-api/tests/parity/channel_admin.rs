@@ -466,21 +466,18 @@ async fn group_pool() -> sqlx::PgPool {
 async fn group_fixture(client: &reqwest::Client, token: &str) -> &'static GroupFixture {
     GROUP_FIXTURE
         .get_or_init(|| async {
-            let team = create_team(client, token, "chadmgrp").await;
-            let channel = create_channel(client, token, &team, "chadmgrp").await;
-
-            let admin = client
-                .get(format!("{GO}/api/v4/users/me"))
-                .header("Authorization", format!("Bearer {token}"))
-                .send()
-                .await
-                .expect("Go answers")
-                .json::<serde_json::Value>()
-                .await
-                .expect("a user")["id"]
-                .as_str()
-                .expect("an id")
-                .to_owned();
+            // **Created by a fixture owner of its own, not the shared administrator** (D-520). Every
+            // row in a `members_minus_group_members` page is compared byte for byte, and the shared
+            // administrator's `Users.UpdateAt` moves whenever any suite in the binary adds it to a
+            // team — so a page that contained it failed on that field whenever a join landed
+            // between the Go and the Rust fetch. The owner is a plain user nothing else touches;
+            // the shared administrator still adds and deactivates the members, as a system
+            // administrator it needs no membership for that, and the route itself is asked as it.
+            let home = create_team(client, token, "chadmhome").await;
+            let owner = create_plain_user(client, token, &home, "chadmown").await;
+            let team = create_team(client, &owner.token, "chadmgrp").await;
+            let channel = create_channel(client, &owner.token, &team, "chadmgrp").await;
+            let admin = owner.id;
 
             let mut users = std::collections::HashMap::new();
             let mut plain_token = String::new();

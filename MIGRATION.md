@@ -14024,11 +14024,12 @@ compile — re-pointed at the bind list and re-run: caught.
 
 ## Tech-debt: user map columns and new-user notice views (2026-09-16)
 
-- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed).
-  Go writes a nil map as JSON `null`, and a nil `Props` as `{}`, so an omitted `props` on
-  `PUT /users/{id}` is *cleared*; see `json_column`/`props_column` in `mm_store::user_store`.
-  Go's msgp user cache then renders a stored `null` timezone as `{}` on cached reads only.
+- **`Users.props`/`timezone`/`notifyprops`/`mfausedtimestamps` are never SQL NULL** (D-601 closed):
+  Go writes a nil map as JSON `null` and a nil `Props` as `{}`, so an omitted `props` on
+  `PUT /users/{id}` is *cleared*. See `json_column`/`props_column` in `mm_store::user_store`;
   `parity::user_updates`, 16 tests.
+- **Go's msgp user cache renders a stored `null` timezone as `{}`**, on cached reads only; this
+  server always reads the row. Noted in `parity::local_users`.
 - **`create_user` marks the cached product notices viewed** (D-683 closed);
   `mm-app/tests/db_new_user_notices.rs`, 1 test.
 
@@ -14048,6 +14049,11 @@ Mutation tally (`go-session-cache.plan`): 9 run, 7 caught, 2 controls survived. 
 lines survived first — the test deleted the minted session by hand, which Go's cache never saw —
 and were caught once it revoked that session through Go.
 
+- **Review follow-ups (PR #29):** the token revoke, disable and rotate paths and the pre-hashed
+  password now clear Go's caches as Go's own functions do, `MM_API_GO_CACHE_USER` is required at
+  startup, and `refresh_config` is serialised. `parity::token_writes` and `parity::auth_writes`
+  gained a Go-side test each; plan re-run: 14 run, 12 caught, 2 controls survived.
+
 ## `checkCSRFToken` on every served route (2026-09-16)
 
 Cookie-authenticated non-`GET` requests are checked in the session extractors plus `CsrfGuard`
@@ -14065,3 +14071,20 @@ reported SURVIVED because its filter named `config::tests`, which matches no tes
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `Store.Load` on `ReloadConfig` / `ConfigChanged` | `mm-app/src/lib.rs` `App::refresh_config`, `mm-api` `refresh_config_after_write`, the `main.rs` timer | DONE | 3 parity | Keyed on the active row's id, because `DatabaseStore.persist` writes each change as a new row. The file backends stay built once, as Go's do. |
+
+## Tech-debt: a session token in the query string, on a sessionless handler (2026-09-16)
+
+- **`CsrfGuard` refuses a valid non-OAuth `?access_token=`** with Go's
+  `api.context.token_provided.app_error` (D-810 closed), so `login`, `login/type` and the other
+  sessionless handlers match `ServeHTTP`; `parity::csrf`, 2 tests. Mutation tally (appended to
+  `csrf.plan`): 4 run, 2 caught, 2 controls survived.
+
+## Tech-debt: a team join bumps `Users.UpdateAt`; `PostEditTimeLimit` measured (2026-09-16)
+
+- **`join_user_to_team` bumps `Users.UpdateAt`** (D-242 closed) between the membership write and
+  the sidebar categories, a hard 500 on failure as in Go; `parity::team_member_writes` reads the row.
+- **The edit-limit 400 on patch, update and pin has a Go oracle** (D-222 closed):
+  `scripts/go-edit-limit.sh`, started by `stack.sh up`, runs Go with `PostEditTimeLimit=0`;
+  `parity::post_edit_time_limit`, 1 test over five cases.
+
+Mutation tally (`join-update-at-and-edit-limit.plan`): 7 run, 5 caught, 2 controls survived.
