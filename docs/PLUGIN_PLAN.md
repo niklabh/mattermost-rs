@@ -238,17 +238,34 @@ requirement on Phase 1 or 2.
    - An error return arrives as the registered interface value `*plugin.ErrorString`, with its
      zero `Code` omitted.
 
-### Phase 1 · `gobwire` (+ derive)
+### Phase 1 · `gobwire` (+ derive) — DONE 2026-09-17
 
-- The oracle is `reference/dump/gob/`, and it is **bidirectional**. `gen` writes `fixtures/gob/*.gob`
-  from fully populated values: every kind, every zero-omission edge, interfaces, recursion, merge
-  cases, and time zones. `echo` reads gob on stdin, decodes it into a named Go type and re-encodes
-  it. This is how Rust→Go is proven: Go must *accept* what Rust wrote, and byte equality is not
-  expected, because Go map order is random.
-- The tests are value-graph equality for Go→Rust, `echo` round trips for Rust→Go, and a
-  `cargo fuzz` target whose crashes are replayed through `echo`.
-- **Exit:** every fixture decodes; every Rust encoding is accepted by `echo`; the merge-decode
-  corpus matches Go's resulting values field by field.
+`crates/gobwire` and `crates/gobwire-derive` (MIT OR Apache-2.0). The oracle is
+`reference/dump/gob` → `fixtures/gob/` (48 cases). The suites are `go_parity.rs`, `protocol.rs`
+and `derive.rs`, with mutation plan `scripts/mutations/gobwire.plan`. The exit criteria are
+met, and every direction is checked against Go:
+- Go's stream decodes in Rust to what Go's decoder produced, or fails where Go fails.
+- It decodes dynamically to exactly what Go sent.
+- Rust's typed re-encoding and its dynamic re-encoding both decode in Go to the same values.
+
+What the oracle found, all now in the code where each applies:
+- **gob ignores `TextMarshaler`.** The branch is commented out (type.go:85-89) despite the
+  package documentation, so a `MarshalText`-only type is sent as its underlying kind.
+- **An interface's byte count is not its value's length** once a nested interface defines a type
+  inline: a partial chunk is flushed under its own count. Go's skip path trusts the count, so
+  **Go cannot skip such a field**, and it also misreads a nil interface it skips. Those are two
+  Go decoder bugs. Rust skips by parsing instead, and its encoder always defines types before the
+  value, so Go can skip anything Rust sends except a nil interface.
+- **`time.Time` with a negative offset that has seconds does not round-trip in Go itself.** The
+  seconds are written signed and read unsigned. Rust reproduces Go's bytes, and the drift with
+  them.
+- The zero instant in a non-UTC zone is not a zero `Time`, so gob sends it.
+- An empty non-nil Go map cannot survive a Rust `HashMap` re-encode (it goes back as nil). A
+  slice merges by Go capacity, and `Vec` length stands in for it. Both are divergences stated in
+  the crate docs and asserted in the suite.
+
+Not done, and owed before publishing (Phase 7): a `cargo fuzz` target. The suite's
+corrupt-input sweep covers panics on malformed bytes, but not coverage-guided input.
 
 ### Phase 2 · `go-netrpc` + `goplugin` (net/rpc protocol, both sides)
 

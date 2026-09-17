@@ -7,6 +7,10 @@ members = [
     "crates/mm-app",
     "crates/mm-api",
     "crates/mm-ws",
+    # Generic Go-interop crates (docs/PLUGIN_PLAN.md, D3): publishable, MIT OR Apache-2.0, and
+    # forbidden from depending on any mm-* crate.
+    "crates/gobwire",
+    "crates/gobwire-derive",
 ]
 
 [workspace.package]

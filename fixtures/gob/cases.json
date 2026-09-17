@@ -1,0 +1,2167 @@
+[
+  {
+    "name": "scalars",
+    "stream": "scalars.gob",
+    "decode_as": "Scalars",
+    "wire": [
+      {
+        "B": true,
+        "Bytes": {
+          "$bytes": "AAH+/w=="
+        },
+        "C128": {
+          "$c128": [
+            4609434218613702656,
+            13835058055282163712
+          ]
+        },
+        "F32": {
+          "$f64": 5183643170566569984
+        },
+        "F64": {
+          "$f64": 13848920697885163520
+        },
+        "I": -42,
+        "I16": 32767,
+        "I32": -2147483648,
+        "I64": -9223372036854775808,
+        "I8": -128,
+        "S": "héllo ✓\u0000end",
+        "U": 42,
+        "U16": 65000,
+        "U32": 4294967295,
+        "U64": 18446744073709551615,
+        "U8": 255,
+        "Uptr": 3735928559
+      }
+    ],
+    "decoded": [
+      {
+        "B": true,
+        "Bytes": {
+          "$bytes": "AAH+/w=="
+        },
+        "C128": {
+          "$c128": [
+            4609434218613702656,
+            13835058055282163712
+          ]
+        },
+        "F32": {
+          "$f64": 5183643170566569984
+        },
+        "F64": {
+          "$f64": 13848920697885163520
+        },
+        "I": -42,
+        "I16": 32767,
+        "I32": -2147483648,
+        "I64": -9223372036854775808,
+        "I8": -128,
+        "S": "héllo ✓\u0000end",
+        "U": 42,
+        "U16": 65000,
+        "U32": 4294967295,
+        "U64": 18446744073709551615,
+        "U8": 255,
+        "Uptr": 3735928559
+      }
+    ]
+  },
+  {
+    "name": "zeros",
+    "stream": "zeros.gob",
+    "decode_as": "Zeros",
+    "wire": [
+      {
+        "A": [
+          0,
+          0
+        ],
+        "E": {},
+        "Last": "last",
+        "ME": {
+          "$map": {}
+        },
+        "PS": {}
+      }
+    ],
+    "decoded": [
+      {
+        "A": [
+          0,
+          0
+        ],
+        "E": {},
+        "Last": "last",
+        "ME": {
+          "$map": {}
+        },
+        "PS": {}
+      }
+    ]
+  },
+  {
+    "name": "nested",
+    "stream": "nested.gob",
+    "decode_as": "Nested",
+    "wire": [
+      {
+        "Arr": [
+          {
+            "N": 6,
+            "S": "inner-6"
+          },
+          {},
+          {
+            "N": 7,
+            "S": "inner-7"
+          }
+        ],
+        "Blobs": [
+          {
+            "$bytes": "AQ=="
+          },
+          {
+            "$bytes": ""
+          },
+          {
+            "$bytes": "AgM="
+          }
+        ],
+        "Bools": [
+          false,
+          true
+        ],
+        "Floats": [
+          {
+            "$f64": 0
+          },
+          {
+            "$f64": 18442240474082181120
+          },
+          {
+            "$f64": 20240225330731
+          }
+        ],
+        "IntMap": {
+          "$map": {
+            "-1": "minus",
+            "0": "",
+            "1099511627776": "big"
+          }
+        },
+        "Map": {
+          "$map": {
+            "": {},
+            "a": {
+              "N": 8,
+              "S": "inner-8"
+            }
+          }
+        },
+        "Matrix": [
+          [
+            1,
+            2
+          ],
+          [],
+          [
+            -3
+          ]
+        ],
+        "Ptr": {
+          "N": 1,
+          "S": "inner-1"
+        },
+        "PtrMap": {
+          "$map": {
+            "p": {
+              "N": 9,
+              "S": "inner-9"
+            }
+          }
+        },
+        "PtrSlice": [
+          {
+            "N": 5,
+            "S": "inner-5"
+          },
+          {}
+        ],
+        "Slice": [
+          {
+            "N": 3,
+            "S": "inner-3"
+          },
+          {},
+          {
+            "N": 4,
+            "S": "inner-4"
+          }
+        ],
+        "Strings": [
+          "x",
+          "",
+          "z"
+        ],
+        "Val": {
+          "N": 2,
+          "S": "inner-2"
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "Arr": [
+          {
+            "N": 6,
+            "S": "inner-6"
+          },
+          {},
+          {
+            "N": 7,
+            "S": "inner-7"
+          }
+        ],
+        "Blobs": [
+          {
+            "$bytes": "AQ=="
+          },
+          {
+            "$bytes": ""
+          },
+          {
+            "$bytes": "AgM="
+          }
+        ],
+        "Bools": [
+          false,
+          true
+        ],
+        "Floats": [
+          {
+            "$f64": 0
+          },
+          {
+            "$f64": 18442240474082181120
+          },
+          {
+            "$f64": 20240225330731
+          }
+        ],
+        "IntMap": {
+          "$map": {
+            "-1": "minus",
+            "0": "",
+            "1099511627776": "big"
+          }
+        },
+        "Map": {
+          "$map": {
+            "": {},
+            "a": {
+              "N": 8,
+              "S": "inner-8"
+            }
+          }
+        },
+        "Matrix": [
+          [
+            1,
+            2
+          ],
+          [],
+          [
+            -3
+          ]
+        ],
+        "Ptr": {
+          "N": 1,
+          "S": "inner-1"
+        },
+        "PtrMap": {
+          "$map": {
+            "p": {
+              "N": 9,
+              "S": "inner-9"
+            }
+          }
+        },
+        "PtrSlice": [
+          {
+            "N": 5,
+            "S": "inner-5"
+          },
+          {}
+        ],
+        "Slice": [
+          {
+            "N": 3,
+            "S": "inner-3"
+          },
+          {},
+          {
+            "N": 4,
+            "S": "inner-4"
+          }
+        ],
+        "Strings": [
+          "x",
+          "",
+          "z"
+        ],
+        "Val": {
+          "N": 2,
+          "S": "inner-2"
+        }
+      }
+    ]
+  },
+  {
+    "name": "ifaces",
+    "stream": "ifaces.gob",
+    "decode_as": "Ifaces",
+    "wire": [
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "marshalers",
+    "stream": "marshalers.gob",
+    "decode_as": "Marshalers",
+    "wire": [
+      {
+        "After": "after",
+        "Big": {
+          "$gob": "AzAAAAAAAAAAAAAAAAA="
+        },
+        "P": {
+          "$bin": "L3JlbGF0aXZlP3g9eQ=="
+        },
+        "T": {
+          "$gob": "AQAAAA7g6SylAAAABv//"
+        },
+        "TL": {
+          "$gob": "AgAAAA3z52pvAAAAAAA8AQ=="
+        },
+        "TNeg": {
+          "$gob": "AgAAAA6wyFVRAAAD5//E/w=="
+        },
+        "TZ": {
+          "$gob": "AQAAAA7iPXu3B1vNFQFK"
+        },
+        "Txt": {
+          "$f64": 13854268722442665984
+        },
+        "U": {
+          "$bin": "aHR0cHM6Ly91c2VyOnBhc3NAZXhhbXBsZS50ZXN0OjgwNjUvcC9hJTIwdGg/cT0xJnI9MiNmcmFn"
+        },
+        "ZeroFixed": {
+          "$gob": "AQAAAAAAAAAAAAAAAAAA"
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "After": "after",
+        "Big": {
+          "$gob": "AzAAAAAAAAAAAAAAAAA="
+        },
+        "P": {
+          "$bin": "L3JlbGF0aXZlP3g9eQ=="
+        },
+        "T": {
+          "$gob": "AQAAAA7g6SylAAAABv//"
+        },
+        "TL": {
+          "$gob": "AgAAAA3z52pvAAAAAAA8AQ=="
+        },
+        "TNeg": {
+          "$gob": "AgAAAA6wyFVRAAAD5//J0w=="
+        },
+        "TZ": {
+          "$gob": "AQAAAA7iPXu3B1vNFQFK"
+        },
+        "Txt": {
+          "$f64": 13854268722442665984
+        },
+        "U": {
+          "$bin": "aHR0cHM6Ly91c2VyOnBhc3NAZXhhbXBsZS50ZXN0OjgwNjUvcC9hJTIwdGg/cT0xJnI9MiNmcmFn"
+        },
+        "ZeroFixed": {
+          "$gob": "AQAAAAAAAAAAAAAAAAAA"
+        }
+      }
+    ]
+  },
+  {
+    "name": "recursive",
+    "stream": "recursive.gob",
+    "decode_as": "Recursive",
+    "wire": [
+      {
+        "Kids": [
+          {
+            "Name": "k1",
+            "Next": {
+              "Name": "k1-next"
+            }
+          },
+          {
+            "Kids": [
+              {
+                "Name": "k2a"
+              }
+            ],
+            "Name": "k2"
+          }
+        ],
+        "Name": "root"
+      }
+    ],
+    "decoded": [
+      {
+        "Kids": [
+          {
+            "Name": "k1",
+            "Next": {
+              "Name": "k1-next"
+            }
+          },
+          {
+            "Kids": [
+              {
+                "Name": "k2a"
+              }
+            ],
+            "Name": "k2"
+          }
+        ],
+        "Name": "root"
+      }
+    ]
+  },
+  {
+    "name": "stream_inner",
+    "stream": "stream_inner.gob",
+    "decode_as": "Inner",
+    "wire": [
+      {
+        "N": 1,
+        "S": "inner-1"
+      },
+      {
+        "N": 2,
+        "S": "inner-2"
+      },
+      {
+        "N": 3
+      }
+    ],
+    "decoded": [
+      {
+        "N": 1,
+        "S": "inner-1"
+      },
+      {
+        "N": 2,
+        "S": "inner-2"
+      },
+      {
+        "N": 3
+      }
+    ]
+  },
+  {
+    "name": "stream_ifaces",
+    "stream": "stream_ifaces.gob",
+    "decode_as": "Ifaces",
+    "wire": [
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      },
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      },
+      {
+        "S": {
+          "$iface": "string",
+          "value": "again"
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      },
+      {
+        "Err": {
+          "$iface": "*main.AppError",
+          "value": {
+            "DetailedError": "detail",
+            "Id": "app.err",
+            "Message": "boom",
+            "StatusCode": 418,
+            "Where": "Where"
+          }
+        },
+        "F": {
+          "$iface": "float64",
+          "value": {
+            "$f64": 4612811918334230528
+          }
+        },
+        "I": {
+          "$iface": "int",
+          "value": 7
+        },
+        "L": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": ""
+            },
+            {
+              "$iface": "string",
+              "value": "x"
+            },
+            {
+              "$iface": "float64",
+              "value": {
+                "$f64": 4613937818241073152
+              }
+            },
+            {
+              "$iface": "[]interface {}",
+              "value": []
+            }
+          ]
+        },
+        "M": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "deep": {
+                "$iface": "map[string]interface {}",
+                "value": {
+                  "$map": {
+                    "list": {
+                      "$iface": "[]interface {}",
+                      "value": [
+                        {
+                          "$iface": "string",
+                          "value": "a"
+                        },
+                        {
+                          "$iface": ""
+                        },
+                        {
+                          "$iface": "bool",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "k": {
+                "$iface": "string",
+                "value": "v"
+              },
+              "n": {
+                "$iface": "float64",
+                "value": {
+                  "$f64": 4609434218613702656
+                }
+              }
+            }
+          }
+        },
+        "Nest": {
+          "$iface": "[]interface {}",
+          "value": [
+            {
+              "$iface": "map[string]interface {}",
+              "value": {
+                "$map": {
+                  "legacy": {
+                    "$iface": "[]*main.LegacyName",
+                    "value": [
+                      {
+                        "Count": 1,
+                        "Label": "legacy"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "$iface": "*main.Inner",
+              "value": {
+                "N": 12
+              }
+            }
+          ]
+        },
+        "P": {
+          "$iface": "*main.Inner",
+          "value": {
+            "N": 11,
+            "S": "ptr"
+          }
+        },
+        "S": {
+          "$iface": "string",
+          "value": "str"
+        },
+        "T": {
+          "$iface": "time.Time",
+          "value": {
+            "$gob": "AQAAAA7iPXu3B1vNFQFK"
+          }
+        },
+        "V": {
+          "$iface": "main.Val",
+          "value": {
+            "Count": 3,
+            "Label": "val"
+          }
+        }
+      },
+      {
+        "S": {
+          "$iface": "string",
+          "value": "again"
+        }
+      }
+    ]
+  },
+  {
+    "name": "singleton_string",
+    "stream": "singleton_string.gob",
+    "decode_as": "string",
+    "wire": [
+      "just a string",
+      ""
+    ],
+    "decoded": [
+      "just a string",
+      ""
+    ]
+  },
+  {
+    "name": "singleton_int",
+    "stream": "singleton_int.gob",
+    "decode_as": "int",
+    "wire": [
+      -7,
+      0,
+      9223372036854775807
+    ],
+    "decoded": [
+      -7,
+      0,
+      9223372036854775807
+    ]
+  },
+  {
+    "name": "singleton_strings",
+    "stream": "singleton_strings.gob",
+    "decode_as": "[]string",
+    "wire": [
+      [
+        "a",
+        ""
+      ],
+      []
+    ],
+    "decoded": [
+      [
+        "a",
+        ""
+      ],
+      []
+    ]
+  },
+  {
+    "name": "singleton_map",
+    "stream": "singleton_map.gob",
+    "decode_as": "map[string]int",
+    "wire": [
+      {
+        "$map": {
+          "one": 1
+        }
+      },
+      {
+        "$map": {}
+      }
+    ],
+    "decoded": [
+      {
+        "$map": {
+          "one": 1
+        }
+      },
+      {
+        "$map": {}
+      }
+    ]
+  },
+  {
+    "name": "singleton_time",
+    "stream": "singleton_time.gob",
+    "decode_as": "time.Time",
+    "wire": [
+      {
+        "$gob": "AQAAAA7iPXu3B1vNFQFK"
+      },
+      {
+        "$gob": "AQAAAAAAAAAAAAAAAP//"
+      }
+    ],
+    "decoded": [
+      {
+        "$gob": "AQAAAA7iPXu3B1vNFQFK"
+      },
+      {
+        "$gob": "AQAAAAAAAAAAAAAAAP//"
+      }
+    ]
+  },
+  {
+    "name": "top_pointer",
+    "stream": "top_pointer.gob",
+    "decode_as": "*Inner",
+    "wire": [
+      {
+        "N": 4,
+        "S": "p"
+      }
+    ],
+    "decoded": [
+      {
+        "N": 4,
+        "S": "p"
+      }
+    ]
+  },
+  {
+    "name": "skip_wide",
+    "stream": "skip_wide.gob",
+    "decode_as": "Narrow",
+    "wire": [
+      {
+        "Arr": [
+          {
+            "N": 2,
+            "S": "inner-2"
+          },
+          {}
+        ],
+        "Blob": {
+          "$bytes": "YmxvYg=="
+        },
+        "C": {
+          "$c128": [
+            0,
+            4607182418800017408
+          ]
+        },
+        "Iface": {
+          "$iface": "string",
+          "value": "iface"
+        },
+        "Keep": "kept",
+        "Last": 99,
+        "Map": {
+          "$map": {
+            "m": [
+              {
+                "N": 1,
+                "S": "inner-1"
+              }
+            ]
+          }
+        },
+        "Nums": [
+          1,
+          -2
+        ],
+        "Time": {
+          "$gob": "AQAAAA7iPXu3B1vNFQFK"
+        },
+        "Tree": {
+          "Kids": [
+            {
+              "Name": "k1",
+              "Next": {
+                "Name": "k1-next"
+              }
+            },
+            {
+              "Kids": [
+                {
+                  "Name": "k2a"
+                }
+              ],
+              "Name": "k2"
+            }
+          ],
+          "Name": "root"
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "Keep": "kept",
+        "Last": 99
+      }
+    ]
+  },
+  {
+    "name": "skip_iface_inline_type",
+    "stream": "skip_iface_inline_type.gob",
+    "decode_as": "Narrow",
+    "wire": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Iface": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "k": {
+                "$iface": "[]interface {}",
+                "value": [
+                  {
+                    "$iface": "string",
+                    "value": "v"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "Keep": "kept",
+        "Last": 99
+      }
+    ],
+    "decoded": [],
+    "error": "gob: bad data: field numbers out of bounds"
+  },
+  {
+    "name": "skip_iface_inline_type_decoded",
+    "stream": "skip_iface_inline_type_decoded.gob",
+    "decode_as": "WideNoNils",
+    "wire": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Iface": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "k": {
+                "$iface": "[]interface {}",
+                "value": [
+                  {
+                    "$iface": "string",
+                    "value": "v"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "Keep": "kept",
+        "Last": 99
+      }
+    ],
+    "decoded": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Iface": {
+          "$iface": "map[string]interface {}",
+          "value": {
+            "$map": {
+              "k": {
+                "$iface": "[]interface {}",
+                "value": [
+                  {
+                    "$iface": "string",
+                    "value": "v"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "Keep": "kept",
+        "Last": 99
+      }
+    ]
+  },
+  {
+    "name": "skip_nil_iface",
+    "stream": "skip_nil_iface.gob",
+    "decode_as": "Narrow",
+    "wire": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Keep": "kept",
+        "Last": 99,
+        "NilsIface": [
+          {
+            "$iface": ""
+          },
+          {
+            "$iface": "string",
+            "value": "x"
+          }
+        ]
+      }
+    ],
+    "decoded": [],
+    "error": "gob: bad interface encoding: data length too large for buffer"
+  },
+  {
+    "name": "skip_nil_iface_decoded",
+    "stream": "skip_nil_iface_decoded.gob",
+    "decode_as": "Wide",
+    "wire": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Keep": "kept",
+        "Last": 99,
+        "NilsIface": [
+          {
+            "$iface": ""
+          },
+          {
+            "$iface": "string",
+            "value": "x"
+          }
+        ]
+      }
+    ],
+    "decoded": [
+      {
+        "Arr": [
+          {},
+          {}
+        ],
+        "Keep": "kept",
+        "Last": 99,
+        "NilsIface": [
+          {
+            "$iface": ""
+          },
+          {
+            "$iface": "string",
+            "value": "x"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "fits_small",
+    "stream": "fits_small.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "F32": {
+          "$f64": 5183643170566569984
+        },
+        "I8": -128,
+        "U8": 255
+      }
+    ],
+    "decoded": [
+      {
+        "F32": {
+          "$f64": 5183643170566569984
+        },
+        "I8": -128,
+        "U8": 255
+      }
+    ]
+  },
+  {
+    "name": "overflow_int8",
+    "stream": "overflow_int8.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "I8": 128
+      }
+    ],
+    "decoded": [],
+    "error": "value for \"I8\" out of range"
+  },
+  {
+    "name": "overflow_int8_negative",
+    "stream": "overflow_int8_negative.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "I8": -129
+      }
+    ],
+    "decoded": [],
+    "error": "value for \"I8\" out of range"
+  },
+  {
+    "name": "overflow_uint8",
+    "stream": "overflow_uint8.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "U8": 256
+      }
+    ],
+    "decoded": [],
+    "error": "value for \"U8\" out of range"
+  },
+  {
+    "name": "overflow_uint16",
+    "stream": "overflow_uint16.gob",
+    "decode_as": "U16s",
+    "wire": [
+      {
+        "N": 65536
+      }
+    ],
+    "decoded": [],
+    "error": "value for \"N\" out of range"
+  },
+  {
+    "name": "fits_uint16",
+    "stream": "fits_uint16.gob",
+    "decode_as": "U16s",
+    "wire": [
+      {
+        "N": 65535
+      }
+    ],
+    "decoded": [
+      {
+        "N": 65535
+      }
+    ]
+  },
+  {
+    "name": "overflow_float32",
+    "stream": "overflow_float32.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "F32": {
+          "$f64": 9218868437227405311
+        }
+      }
+    ],
+    "decoded": [],
+    "error": "value for \"F32\" out of range"
+  },
+  {
+    "name": "float32_inf_ok",
+    "stream": "float32_inf_ok.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "F32": {
+          "$f64": 18442240474082181120
+        },
+        "I8": 1
+      }
+    ],
+    "decoded": [
+      {
+        "F32": {
+          "$f64": 18442240474082181120
+        },
+        "I8": 1
+      }
+    ]
+  },
+  {
+    "name": "float32_underflow_ok",
+    "stream": "float32_underflow_ok.gob",
+    "decode_as": "Small",
+    "wire": [
+      {
+        "F32": {
+          "$f64": 1
+        }
+      }
+    ],
+    "decoded": [
+      {}
+    ]
+  },
+  {
+    "name": "array_len_mismatch",
+    "stream": "array_len_mismatch.gob",
+    "decode_as": "ArrSmall",
+    "wire": [
+      {
+        "A": [
+          1,
+          2,
+          3
+        ]
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type ([2]int) for received field ArrBig.A"
+  },
+  {
+    "name": "no_fields_matched",
+    "stream": "no_fields_matched.gob",
+    "decode_as": "Unrelated",
+    "wire": [
+      {
+        "N": 1,
+        "S": "inner-1"
+      }
+    ],
+    "decoded": [],
+    "error": "gob: type mismatch: no fields matched compiling decoder for Unrelated"
+  },
+  {
+    "name": "slice_of_unrelated",
+    "stream": "slice_of_unrelated.gob",
+    "decode_as": "[]Unrelated",
+    "wire": [
+      [
+        {
+          "N": 1,
+          "S": "inner-1"
+        },
+        {
+          "N": 2,
+          "S": "inner-2"
+        }
+      ]
+    ],
+    "decoded": [
+      [
+        {},
+        {}
+      ]
+    ]
+  },
+  {
+    "name": "int_into_uint",
+    "stream": "int_into_uint.gob",
+    "decode_as": "Uints",
+    "wire": [
+      {
+        "N": 1
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (uint) for received field Ints.N"
+  },
+  {
+    "name": "uint_into_int",
+    "stream": "uint_into_int.gob",
+    "decode_as": "Ints",
+    "wire": [
+      {
+        "N": 1
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (int) for received field Uints.N"
+  },
+  {
+    "name": "int_into_string",
+    "stream": "int_into_string.gob",
+    "decode_as": "Strs",
+    "wire": [
+      {
+        "N": 1
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (string) for received field Ints.N"
+  },
+  {
+    "name": "int_into_float",
+    "stream": "int_into_float.gob",
+    "decode_as": "Floats",
+    "wire": [
+      {
+        "N": 1
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (float64) for received field Ints.N"
+  },
+  {
+    "name": "slice_into_array",
+    "stream": "slice_into_array.gob",
+    "decode_as": "IntArr",
+    "wire": [
+      {
+        "N": [
+          1
+        ]
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type ([1]int) for received field IntSlice.N"
+  },
+  {
+    "name": "map_key_mismatch",
+    "stream": "map_key_mismatch.gob",
+    "decode_as": "IntMap",
+    "wire": [
+      {
+        "N": {
+          "$map": {
+            "a": 1
+          }
+        }
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (map[int]int) for received field StrMap.N"
+  },
+  {
+    "name": "absent_field_mismatch",
+    "stream": "absent_field_mismatch.gob",
+    "decode_as": "Strs",
+    "wire": [
+      {}
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (string) for received field Ints.N"
+  },
+  {
+    "name": "concrete_into_iface",
+    "stream": "concrete_into_iface.gob",
+    "decode_as": "IfaceField",
+    "wire": [
+      {
+        "N": 1
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (interface {}) for received field Ints.N"
+  },
+  {
+    "name": "struct_into_scalar",
+    "stream": "struct_into_scalar.gob",
+    "decode_as": "Ints",
+    "wire": [
+      {
+        "N": {
+          "N": 1,
+          "S": "inner-1"
+        }
+      }
+    ],
+    "decoded": [],
+    "error": "gob: wrong type (int) for received field StructField.N"
+  },
+  {
+    "name": "top_string_into_int",
+    "stream": "top_string_into_int.gob",
+    "decode_as": "int",
+    "wire": [
+      "s"
+    ],
+    "decoded": [],
+    "error": "gob: decoding into local type *int, received remote type string"
+  },
+  {
+    "name": "top_struct_into_string",
+    "stream": "top_struct_into_string.gob",
+    "decode_as": "string",
+    "wire": [
+      {
+        "N": 1,
+        "S": "inner-1"
+      }
+    ],
+    "decoded": [],
+    "error": "gob: decoding into local type *string, received remote type Inner = struct { N int; S string; }"
+  },
+  {
+    "name": "top_concrete_into_any",
+    "stream": "top_concrete_into_any.gob",
+    "decode_as": "any",
+    "wire": [
+      "s"
+    ],
+    "decoded": [],
+    "error": "gob: local interface type *interface {} can only be decoded from remote interface type; received concrete type string"
+  },
+  {
+    "name": "merge",
+    "stream": "merge.gob",
+    "base": "merge.base.gob",
+    "decode_as": "Merge",
+    "wire": [
+      {
+        "Arr": [
+          {
+            "S": "a1-new"
+          },
+          {}
+        ],
+        "Bytes": {
+          "$bytes": "bg=="
+        },
+        "Change": "new",
+        "Iface": {
+          "$iface": "main.Val",
+          "value": {
+            "Label": "iface-new"
+          }
+        },
+        "Map": {
+          "$map": {
+            "x": {
+              "S": "mx-new"
+            }
+          }
+        },
+        "Nested": {
+          "S": "nested-new"
+        },
+        "Ptr": {
+          "N": 7
+        },
+        "Short": [
+          {
+            "S": "grow1"
+          },
+          {
+            "N": 2
+          }
+        ],
+        "Slice": [
+          {
+            "S": "s1-new"
+          },
+          {
+            "N": 20
+          }
+        ]
+      }
+    ],
+    "decoded": [
+      {
+        "Arr": [
+          {
+            "N": 1,
+            "S": "a1-new"
+          },
+          {
+            "N": 2,
+            "S": "a2"
+          }
+        ],
+        "Bytes": {
+          "$bytes": "bg=="
+        },
+        "Change": "new",
+        "Iface": {
+          "$iface": "main.Val",
+          "value": {
+            "Label": "iface-new"
+          }
+        },
+        "Keep": "keep",
+        "Map": {
+          "$map": {
+            "x": {
+              "S": "mx-new"
+            },
+            "y": {
+              "N": 2,
+              "S": "my"
+            }
+          }
+        },
+        "Nested": {
+          "N": 5,
+          "S": "nested-new"
+        },
+        "Ptr": {
+          "N": 7,
+          "S": "ptr-old"
+        },
+        "Short": [
+          {
+            "S": "grow1"
+          },
+          {
+            "N": 2
+          }
+        ],
+        "Slice": [
+          {
+            "N": 1,
+            "S": "s1-new"
+          },
+          {
+            "N": 20,
+            "S": "s2"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "merge_post",
+    "stream": "merge_post.gob",
+    "base": "merge_post.base.gob",
+    "decode_as": "Post",
+    "wire": [
+      {
+        "FileIds": [
+          "f9"
+        ],
+        "Message": "edited by plugin",
+        "Metadata": {
+          "Count": 4
+        },
+        "Props": {
+          "$map": {
+            "b": {
+              "$iface": "string",
+              "value": "changed"
+            }
+          }
+        }
+      }
+    ],
+    "decoded": [
+      {
+        "CreateAt": 1758000000123,
+        "FileIds": [
+          "f9"
+        ],
+        "Id": "post1",
+        "Message": "edited by plugin",
+        "Metadata": {
+          "Count": 4,
+          "Emojis": [
+            {
+              "N": 1,
+              "S": "smile"
+            }
+          ]
+        },
+        "Pinned": true,
+        "Props": {
+          "$map": {
+            "a": {
+              "$iface": "string",
+              "value": "1"
+            },
+            "b": {
+              "$iface": "string",
+              "value": "changed"
+            }
+          }
+        },
+        "RemoteId": "remote-1",
+        "ReplyTo": [
+          {
+            "N": 1,
+            "S": "r1"
+          }
+        ]
+      }
+    ]
+  }
+]

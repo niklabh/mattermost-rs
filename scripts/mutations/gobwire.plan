@@ -1,0 +1,51 @@
+# Mutation plan for crates/gobwire (Phase 1, docs/PLUGIN_PLAN.md).
+#
+#   MUTATE_PACKAGE=gobwire scripts/mutate-batch.sh scripts/mutations/gobwire.plan
+#
+# The decisions: the primitive encodings, which zero values Go omits, merge-versus-replace on
+# decode for every container, the interface type-sequence boundary rule, Go's compile-time
+# compatibility checks, range checks, time.Time's binary quirks, and dynamic recursion.
+# The EQUIVALENT- and CONTROL- lines at the end must SURVIVE.
+
+wire-int-sign-not-complemented	crates/gobwire/src/wire.rs	(!(i as u64)) << 1 | 1	(i as u64) << 1 | 1	pkg
+wire-uint-accepts-nine-byte-counts	crates/gobwire/src/wire.rs	    if n > 8 {	    if n > 9 {	pkg
+dec-float-not-byte-reversed	crates/gobwire/src/decode.rs	Ok(f64::from_bits(self.read_uint()?.swap_bytes()))	Ok(f64::from_bits(self.read_uint()?))	pkg
+enc-field-delta-is-absolute	crates/gobwire/src/encode.rs	put_uint(self.e.out, (index - self.last) as u64);	put_uint(self.e.out, (index + 1) as u64);	pkg
+enc-nil-interface-not-written	crates/gobwire/src/encode.rs	            put_uint(self.out, 0);\n            return Ok(());	            return Ok(());	pkg
+enc-failed-encode-keeps-types	crates/gobwire/src/encode.rs	self.sent.rollback(mark);	let _ = mark;	pkg
+vec-empty-slice-is-sent	crates/gobwire/src/impls.rs	    /// Go omits an empty slice whether or not it is nil.\n    fn is_zero(&self) -> bool {\n        self.is_empty()	    /// Go omits an empty slice whether or not it is nil.\n    fn is_zero(&self) -> bool {\n        false	pkg
+array-zero-is-omitted	crates/gobwire/src/impls.rs	    /// Arrays are always sent (encode.go: the array op has no zero check).\n    fn is_zero(&self) -> bool {\n        false	    /// Arrays are always sent (encode.go: the array op has no zero check).\n    fn is_zero(&self) -> bool {\n        self.iter().all(Encode::is_zero)	pkg
+map-empty-is-sent	crates/gobwire/src/impls.rs	            /// must tell the two apart has to keep the distinction itself.\n            fn is_zero(&self) -> bool {\n                self.is_empty()	            /// must tell the two apart has to keep the distinction itself.\n            fn is_zero(&self) -> bool {\n                false	pkg
+map-entries-merge-instead-of-replace	crates/gobwire/src/impls.rs	                    let mut v = V::default();	                    let mut v = self.remove(&k).unwrap_or_default();	pkg
+vec-equal-length-starts-fresh	crates/gobwire/src/decode.rs	        if vec.len() < n {	        if vec.len() <= n {	pkg
+vec-never-merges	crates/gobwire/src/decode.rs	        if vec.len() < n {	        if true {	pkg
+ptr-replaces-pointee	crates/gobwire/src/impls.rs	self.get_or_insert_with(T::default).decode_into(d, wire)	self.insert(T::default()).decode_into(d, wire)	pkg
+iface-skips-count-at-message-end	crates/gobwire/src/decode.rs	            if !self.at_message_end() {	            if !self.at_end() {	pkg
+iface-skip-trusts-go-byte-count	crates/gobwire/src/decode.rs	        self.read_uint()?; // the (unreliable) byte count\n        if !self.types.is_struct(id)	        let n = self.read_len()?;\n        self.pos += n;\n        if false && !self.types.is_struct(id)	pkg
+plan-ignores-field-compatibility	crates/gobwire/src/decode.rs	                        if !compatible(self.types, i, f.id) {	                        if false && !compatible(self.types, i, f.id) {	pkg
+plan-no-fields-matched-never-fires	crates/gobwire/src/decode.rs	if check_matched && plan.matched == 0	if check_matched && plan.matched == usize::MAX	pkg
+framed-checks-matched-for-non-structs	crates/gobwire/src/decode.rs	self.check_matched = is_struct;	self.check_matched = true;	pkg
+f32-infinity-overflows	crates/gobwire/src/impls.rs	if f64::from(f32::MAX) < av && av <= f64::MAX {	if f64::from(f32::MAX) < av {	pkg
+int-narrowing-unchecked	crates/gobwire/src/impls.rs	                let v = d.read_int()?;\n                *self = <$t>::try_from(v).map_err(|_| Error::Overflow(stringify!($t)))?;	                let v = d.read_int()?;\n                *self = v as $t;	pkg
+uint-narrowing-unchecked	crates/gobwire/src/impls.rs	                let v = d.read_uint()?;\n                *self = <$t>::try_from(v).map_err(|_| Error::Overflow(stringify!($t)))?;	                let v = d.read_uint()?;\n                *self = v as $t;	pkg
+time-offset-seconds-read-signed	crates/gobwire/src/time.rs	offset += i32::from(data[15]);	offset += i32::from(data[15] as i8);	pkg
+time-utc-sentinel-is-zero-offset	crates/gobwire/src/time.rs	let zone = if offset == -60 {	let zone = if offset == 0 {	pkg
+time-lmt-stays-version-one	crates/gobwire/src/time.rs	                    version = 2;	                    version = 1;	pkg
+time-fixed-zone-zero-is-omitted	crates/gobwire/src/time.rs	self.sec == 0 && self.nsec == 0 && self.zone == Zone::Utc	self.sec == 0 && self.nsec == 0	pkg
+struct-field-bound-off-by-one	crates/gobwire/src/decode.rs	    if next >= count as i64 {	    if next > count as i64 {	pkg
+dyn-ref-resolves-one-level-out	crates/gobwire/src/decode.rs	                    .checked_sub(n + 1)\n                    .and_then(|i| self.dyn_structs.get(i))	                    .checked_sub(n + 2)\n                    .and_then(|i| self.dyn_structs.get(i))	pkg
+dyn-empty-map-is-omitted	crates/gobwire/src/value.rs	            Value::Map(_) => false,	            Value::Map(pairs) => pairs.is_empty(),	pkg
+scan-staged-types-kept	crates/gobwire/src/decode.rs	        self.types.clear_staged();\n        match scanned {	        self.types.end_staging();\n        match scanned {	pkg
+singleton-delta-not-checked	crates/gobwire/src/decode.rs	        let is_struct = self.types.is_struct(id);\n        if !is_struct && self.read_uint()? != 0 {	        let is_struct = self.types.is_struct(id);\n        if !is_struct && self.read_uint()? != 99 {	pkg
+guard-wiretype-field-count	crates/gobwire/src/types.rs	                                    d.expect_element(count)?;\n	                                    let _ = count;\n	pkg
+guard-skip-map-count	crates/gobwire/src/decode.rs	                            self.expect_element(n)?;\n                            self.skip(*key)?;	                            self.skip(*key)?;	pkg
+
+# Equivalent mutants: must SURVIVE. Typed and dynamic decoding only run on a value the skip-scan
+# in Decoder::push_message has already accepted, and that scan carries the same count guard
+# (guard-skip-map-count), so these two guards are unreachable through the public API. They stay
+# in the code as defence in depth; a CAUGHT here means the scan and the decode have diverged.
+EQUIVALENT-guard-dynamic-map-count	crates/gobwire/src/decode.rs	                    self.expect_element(n)?;\n                    let k = self.read_dynamic(kt, key_id)?;	                    let k = self.read_dynamic(kt, key_id)?;	pkg
+EQUIVALENT-guard-typed-map-count	crates/gobwire/src/impls.rs	                    d.expect_element(n)?;\n                    let mut k = K::default();	                    let mut k = K::default();	pkg
+
+CONTROL-rename-a-binding	crates/gobwire/src/wire.rs	    let skip = (u.leading_zeros() / 8) as usize;\n    let n = 8 - skip;\n    out.push((n as u8).wrapping_neg());\n    out.extend_from_slice(&be[skip..]);	    let lead = (u.leading_zeros() / 8) as usize;\n    let n = 8 - lead;\n    out.push((n as u8).wrapping_neg());\n    out.extend_from_slice(&be[lead..]);	pkg
+CONTROL-reorder-struct-literal-fields	crates/gobwire/src/decode.rs	            buf,\n            pos: 0,\n            ends,	            pos: 0,\n            buf,\n            ends,	pkg
