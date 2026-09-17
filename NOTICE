@@ -37,7 +37,8 @@ types stay reusable under the more permissive terms:
     crates/mm-ws/                            full text: ./LICENSE
 
     crates/gobwire/           MIT OR         original implementations of Go's documented
-    crates/gobwire-derive/    Apache-2.0     encoding/gob format; no Mattermost code, and no
+    crates/gobwire-derive/    Apache-2.0     encoding/gob and net/rpc protocols; no Mattermost
+    crates/go-netrpc/                        code, and no
                                              dependency on any mm-* crate (publishable alone)
                                              full text: LICENSE-MIT, LICENSE-APACHE in each
 

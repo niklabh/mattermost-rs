@@ -1,0 +1,22 @@
+# Mutation plan for crates/go-netrpc (plugin plan Phase 2).
+#
+#   MUTATE_PACKAGE=go-netrpc scripts/mutate-batch.sh scripts/mutations/go-netrpc.plan
+#
+# The decisions: sequence numbering and routing, discarding bodies nobody will read, how a
+# connection's end reaches pending calls, encoding the argument before the header, Go's exact
+# dispatch errors, and the server waiting for in-flight calls. The CONTROL- lines must SURVIVE.
+
+client-seq-starts-at-one	crates/go-netrpc/src/client.rs	                enc: Encoder::new(),\n                seq: 0,	                enc: Encoder::new(),\n                seq: 1,	pkg
+client-seq-never-advances	crates/go-netrpc/src/client.rs	            w.seq += 1;	            w.seq += 0;	pkg
+client-stray-reply-body-not-discarded	crates/go-netrpc/src/client.rs	                if let Err(e) = dec.discard() {	                if let Err(e) = Ok::<(), gobwire::Error>(()) {	pkg
+client-error-reply-treated-as-success	crates/go-netrpc/src/client.rs	            Some(call) if !header.error.is_empty() => {	            Some(call) if header.error.is_empty() && false => {	pkg
+client-eof-after-close-is-unexpected	crates/go-netrpc/src/client.rs	        None if st.closing => Error::Shutdown,	        None if !st.closing => Error::Shutdown,	pkg
+client-pending-calls-not-failed	crates/go-netrpc/src/client.rs	        let _ = call(Outcome::Failed(err.clone()));	        drop(call);	pkg
+client-calls-after-failure-are-sent	crates/go-netrpc/src/client.rs	            if st.shutdown || st.closing {	            if st.closing {	pkg
+client-header-encoded-before-argument	crates/go-netrpc/src/client.rs	        let encoded = w.enc.encode_into(args, &mut body).and_then(|()| {\n            w.enc.encode_into(\n                &Request {\n                    service_method: service_method.to_owned(),\n                    seq,\n                },\n                &mut header,\n            )	        let encoded = w.enc.encode_into(\n                &Request {\n                    service_method: service_method.to_owned(),\n                    seq,\n                },\n                &mut header,\n            ).and_then(|()| {\n            w.enc.encode_into(args, &mut body)	pkg
+server-missing-method-says-service	crates/go-netrpc/src/server.rs	format!("rpc: can't find method {service_method}")	format!("rpc: can't find service {service_method}")	pkg
+server-unknown-method-body-not-discarded	crates/go-netrpc/src/server.rs	                    dec.discard()?;	                    let _ = &dec;	pkg
+server-does-not-wait-for-calls	crates/go-netrpc/src/server.rs	        while calls.join_next().await.is_some() {}	        calls.detach_all();	pkg
+server-success-carries-an-error	crates/go-netrpc/src/server.rs	        Ok(r) => (String::new(), r),	        Ok(r) => ("x".to_string(), r),	pkg
+CONTROL-swap-buffer-declarations	crates/go-netrpc/src/client.rs	        let mut body = Vec::new();\n        let mut header = Vec::new();	        let mut header = Vec::new();\n        let mut body = Vec::new();	pkg
+CONTROL-rename-discarded	crates/go-netrpc/src/client.rs	                let discarded = dec.discard();\n                let _ = call(Outcome::Failed(Error::Server(header.error)));\n                if let Err(e) = discarded {	                let dropped = dec.discard();\n                let _ = call(Outcome::Failed(Error::Server(header.error)));\n                if let Err(e) = dropped {	pkg

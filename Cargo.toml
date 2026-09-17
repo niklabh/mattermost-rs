@@ -11,6 +11,7 @@ members = [
     # forbidden from depending on any mm-* crate.
     "crates/gobwire",
     "crates/gobwire-derive",
+    "crates/go-netrpc",
 ]
 
 [workspace.package]

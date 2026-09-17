@@ -269,6 +269,16 @@ corrupt-input sweep covers panics on malformed bytes, but not coverage-guided in
 
 ### Phase 2 · `go-netrpc` + `goplugin` (net/rpc protocol, both sides)
 
+**`go-netrpc`: DONE 2026-09-17.** Its oracle is `reference/dump/netrpc`, a live Go client and
+server. The reference is the Go client's transcript against the Go server, covering sixteen
+calls: errors, Go's dispatch messages, interfaces, a 3 MiB body, 50 out-of-order concurrent calls
+and an undecodable body. The Rust client against the Go server, the Go client against the Rust
+server, and Rust against Rust all reproduce it exactly. Scripted-peer tests cover the branches Go
+cannot easily provoke. The mutation plan is `scripts/mutations/go-netrpc.plan`.
+
+**`goplugin`: next.** It includes its own yamux (D3, revised).
+
+
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a
   concurrent client multiplexed by `Seq`, and a server dispatching `"Service.Method"` to async
   handlers. Go's `ServerError` string semantics are kept exactly.
