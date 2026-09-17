@@ -1,0 +1,26 @@
+# Mutation plan for goplugin's broker, protocol, host and plugin (plugin plan Phase 2).
+#
+#   MUTATE_PACKAGE=goplugin scripts/mutate-batch.sh scripts/mutations/goplugin-host.plan
+#
+# The decisions: the broker's rendezvous in both orders and its little-endian ack, the order of
+# the control/stdout/stderr streams, Control.Quit ending the plugin, Go's dispense error, the
+# host's version, checksum and reattach checks, stderr capture, the graceful kill, the socket
+# file's removal, version negotiation, and hclog line classification. CONTROL- lines must SURVIVE.
+
+broker-parked-stream-claims-receiver	crates/goplugin/src/broker.rs	                let tx = broker.sender(id);	                let (tx, _) = broker.slot(id);	pkg
+broker-ack-big-endian	crates/goplugin/src/broker.rs	            _ => return Err(BrokerError::AcceptTimeout),\n        };\n        stream.write_all(&id.to_le_bytes()).await?;	            _ => return Err(BrokerError::AcceptTimeout),\n        };\n        stream.write_all(&id.to_be_bytes()).await?;	pkg
+broker-ack-not-checked	crates/goplugin/src/broker.rs	        if got != id {	        if false {	pkg
+rpc-stdio-streams-swapped	crates/goplugin/src/rpc.rs	        let out = session.open().await?;\n        let err = session.open().await?;	        let err = session.open().await?;\n        let out = session.open().await?;	pkg
+rpc-quit-does-not-end-serve	crates/goplugin/src/rpc.rs	            quit.send_replace(true);	            quit.send_replace(false);	pkg
+rpc-unknown-plugin-message	crates/goplugin/src/rpc.rs	format!("unknown plugin type: {name}")	format!("unknown plugin: {name}")	pkg
+client-version-check-skipped	crates/goplugin/src/client.rs	    if !versions.contains(&plugin_version) {	    if versions.is_empty() {	pkg
+client-checksum-inverted	crates/goplugin/src/client.rs	        if !constant_time_eq(&got, want) {	        if constant_time_eq(&got, want) {	pkg
+client-raw-stderr-not-copied	crates/goplugin/src/client.rs	                let _ = raw_stderr.write_all(line.as_bytes()).await;	                let _ = raw_stderr.write_all(b"").await;	pkg
+client-kill-skips-graceful-wait	crates/goplugin/src/client.rs	tokio::time::timeout(Duration::from_secs(2), exited.wait_for(|e| *e))	tokio::time::timeout(Duration::from_secs(0), exited.wait_for(|e| *e))	pkg
+client-reattach-ignores-dead-pid	crates/goplugin/src/client.rs	    if !pid_alive(r.pid) {	    if false {	pkg
+server-socket-not-removed	crates/goplugin/src/server.rs	    listener.cleanup();	    let _ = &listener;	pkg
+server-negotiation-inverted	crates/goplugin/src/server.rs	        if client.contains(version) {	        if !client.contains(version) {	pkg
+hclog-panic-state-not-kept	crates/goplugin/src/hclog.rs	            self.in_panic = true;	            self.in_panic = false;	pkg
+hclog-warning-alias	crates/goplugin/src/hclog.rs	            "warn" => Some(Level::Warn),	            "warn" | "warning" => Some(Level::Warn),	pkg
+CONTROL-reorder-level-names	crates/goplugin/src/hclog.rs	            Level::Trace => "trace",\n            Level::Debug => "debug",	            Level::Debug => "debug",\n            Level::Trace => "trace",	pkg
+CONTROL-reorder-stdio-copies	crates/goplugin/src/rpc.rs	        tokio::spawn(copy_stream(out, stdout));\n        tokio::spawn(copy_stream(err, stderr));	        tokio::spawn(copy_stream(err, stderr));\n        tokio::spawn(copy_stream(out, stdout));	pkg

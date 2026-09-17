@@ -282,7 +282,16 @@ acceptor-opened streams, idle time across the keepalive, 300 opens while the acc
 accepting, and GoAway. It matches Go in all four pairings. Scripted raw-frame tests cover
 resets, timeouts and protocol errors. The mutation plan is `scripts/mutations/goplugin-yamux.plan`.
 
-**`goplugin` host and plugin sides: next.** Its oracle is `reference/dump/goplugin`.
+**`goplugin` host and plugin sides: DONE 2026-09-17. Phase 2 is complete.** The oracle is
+`reference/dump/goplugin`. The Go host's transcript against the Go plugin has 19 steps: dispense,
+calls and errors, broker servers offered in both directions, stdio streams, hclog stderr, ping,
+reattach, graceful kill, and the checksum, cookie and version refusals. The Rust host with the
+Go plugin, the Go host with the Rust `examples/kv_plugin.rs`, and Rust with Rust all reproduce
+it. Mutation testing found a broker race: a stream that arrived before its accept was dropped.
+It is fixed and covered by `tests/broker.rs`. Deferred: gRPC (Phase 8), AutoMTLS, and a
+test-mode `ServeTestConfig`.
+
+**Phase 3 (`mm-plugin`) is next.**
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

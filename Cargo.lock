@@ -668,9 +668,12 @@ dependencies = [
 name = "goplugin"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "go-netrpc",
  "gobwire",
+ "libc",
  "serde_json",
+ "sha2",
  "thiserror",
  "tokio",
  "tracing",

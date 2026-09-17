@@ -15,9 +15,15 @@ categories = ["network-programming", "asynchronous"]
 gobwire = { path = "../gobwire", version = "0.1.0" }
 go-netrpc = { path = "../go-netrpc", version = "0.1.0" }
 thiserror.workspace = true
-tokio = { version = "1", features = ["io-util", "sync", "rt", "macros", "time", "net", "process"] }
+tokio = { version = "1", features = ["io-util", "sync", "rt", "macros", "time", "net", "process", "signal", "fs"] }
 tracing.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 serde_json.workspace = true
