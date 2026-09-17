@@ -23,12 +23,76 @@ mod common;
 use common::*;
 
 macro_rules! names {
-    ($(($method:ident, $name:literal, $args:ty, $returns:ty),)*) => {
+    ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
         &[$($name),*]
     };
 }
 const HOOKS: &[&str] = mm_plugin::for_each_hook!(names);
-const API: &[&str] = mm_plugin::for_each_api_method!(names);
+
+/// The API methods the Rust plugin calls with their fixture arguments: everything with a
+/// generated client. The log methods are checked by name; `LogAuditRec` and
+/// `LogAuditRecWithLevel` have no Rust client yet (see `rpc/handwritten.rs`).
+const API_CALLED: &[&str] = mm_plugin::for_each_api_call!(names);
+
+/// The hooks whose Go client seeds its answer with the value it passed, so what it records is the
+/// plugin's answer decoded into that (client_rpc.go).
+const MERGING_HOOKS: [&str; 4] = [
+    "MessageWillBePosted",
+    "MessageWillBeUpdated",
+    "ChannelMemberWillBeAdded",
+    "TeamMemberWillBeAdded",
+];
+
+/// What Go's API mock must have seen from the plugin's log calls.
+fn logged_args() -> Json {
+    serde_json::json!({
+        "A": "a logged line",
+        "B": [
+            {"$iface": "string", "value": "key"},
+            {"$iface": "string", "value": "42"},
+            {"$iface": "string", "value": "true"},
+        ],
+    })
+}
+
+/// What a merging hook's Go client records: the plugin's whole fixture answer, decoded into the
+/// value the host passed. `MessageWillBeUpdated` replaces instead, so it keeps the fixture.
+fn merged_returns(name: &str) -> Json {
+    use mm_plugin::wire::plugin as w;
+    match name {
+        "MessageWillBePosted" => {
+            let sent: w::Z_MessageWillBePostedArgs = fixture("Z_MessageWillBePostedArgs");
+            merged(
+                "Z_MessageWillBePostedReturns",
+                w::Z_MessageWillBePostedReturns {
+                    a: sent.b,
+                    b: String::new(),
+                },
+            )
+        }
+        "ChannelMemberWillBeAdded" => {
+            let sent: w::Z_ChannelMemberWillBeAddedArgs = fixture("Z_ChannelMemberWillBeAddedArgs");
+            merged(
+                "Z_ChannelMemberWillBeAddedReturns",
+                w::Z_ChannelMemberWillBeAddedReturns {
+                    a: sent.b,
+                    b: String::new(),
+                },
+            )
+        }
+        "TeamMemberWillBeAdded" => {
+            let sent: w::Z_TeamMemberWillBeAddedArgs = fixture("Z_TeamMemberWillBeAddedArgs");
+            merged(
+                "Z_TeamMemberWillBeAddedReturns",
+                w::Z_TeamMemberWillBeAddedReturns {
+                    a: sent.b,
+                    b: String::new(),
+                },
+            )
+        }
+        other => panic!("{other} does not merge"),
+    }
+}
 
 /// `examples/conformance_plugin`, built by this test.
 ///
@@ -72,6 +136,9 @@ fn read_transcript(path: &Path) -> Transcript {
 }
 
 /// Every record naming `key`, by name: the last one wins.
+///
+/// `LoadPluginConfiguration` records a `config` rather than `args`/`returns`, so it is looked up
+/// by name like the rest.
 fn by_name(transcript: &[Map<String, Json>], key: &str) -> BTreeMap<String, Map<String, Json>> {
     transcript
         .iter()
@@ -173,7 +240,7 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
 
     let go_api = by_name(&go, "api");
     let rust_api = by_name(&rust, "api");
-    for name in API {
+    for name in API_CALLED {
         let want_args = &expected[&format!("Z_{name}Args")];
         match go_api.get(*name) {
             None => failures.push(format!("api {name}: the Go host never saw the call")),
@@ -211,9 +278,15 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
             )),
             None => failures.push(format!("hook {name}: the Rust plugin never saw the call")),
         }
-        let want_returns = &expected[&format!("Z_{name}Returns")];
+        // A merging hook's client decodes the plugin's answer into the value it passed;
+        // MessageWillBeUpdated takes the answer as it is.
+        let want_returns = if MERGING_HOOKS.contains(name) && *name != "MessageWillBeUpdated" {
+            merged_returns(name)
+        } else {
+            expected[&format!("Z_{name}Returns")].clone()
+        };
         match go_hooks.get(*name) {
-            Some(e) if &e["returns"] == want_returns => {}
+            Some(e) if e["returns"] == want_returns => {}
             Some(e) => failures.push(format!(
                 "hook {name}: Go received\n{}\nexpected\n{want_returns}",
                 e["returns"]
@@ -221,6 +294,26 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
             None => failures.push(format!("hook {name}: the Go host recorded no returns")),
         }
     }
+
+    // The API methods whose clients are hand-written.
+    for name in ["LogDebug", "LogInfo", "LogWarn", "LogError"] {
+        match go_api.get(name) {
+            Some(e) if e["args"] == logged_args() => {}
+            other => failures.push(format!("api {name}: Go received {other:?}")),
+        }
+    }
+    // The host answered LoadPluginConfiguration with a value; the plugin must have it as JSON.
+    let config = serde_json::json!({"enabled": true, "name": "conformance"});
+    assert_eq!(
+        go_api.get("LoadPluginConfiguration").map(|e| &e["config"]),
+        Some(&config)
+    );
+    assert_eq!(
+        rust_api
+            .get("LoadPluginConfiguration")
+            .map(|e| &e["config"]),
+        Some(&config)
+    );
     report(&failures);
 }
 

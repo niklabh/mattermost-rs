@@ -3041,6 +3041,156 @@ pub trait PluginApi: Send + Sync + 'static {
         async { Err(NotImplemented) }
     }
 
+    /// Go: `LoadPluginConfiguration(dest any) error`
+    ///
+    /// ```text
+    /// LoadPluginConfiguration loads the plugin's configuration. dest should be a pointer to a
+    /// struct that the configuration JSON can be unmarshalled to.
+    ///
+    /// @tag Plugin
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LoadPluginConfigurationArgsArgs`
+    /// and `Z_LoadPluginConfigurationArgsReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn load_plugin_configuration(
+        &self,
+        args: Z_LoadPluginConfigurationArgsArgs,
+    ) -> impl Future<Output = Result<Z_LoadPluginConfigurationArgsReturns, NotImplemented>> + Send
+    {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogAuditRec(rec *model.AuditRecord)`
+    ///
+    /// ```text
+    /// LogAuditRec logs an audit record using the default audit logger.
+    ///
+    /// @tag Audit
+    /// Minimum server version: 10.10
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogAuditRecArgs`
+    /// and `Z_LogAuditRecReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_audit_rec(
+        &self,
+        args: Z_LogAuditRecArgs,
+    ) -> impl Future<Output = Result<Z_LogAuditRecReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogAuditRecWithLevel(rec *model.AuditRecord, level v2.Level)`
+    ///
+    /// ```text
+    /// LogAuditRecWithLevel logs an audit record with a specific log level.
+    ///
+    /// @tag Audit
+    /// Minimum server version: 10.10
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogAuditRecWithLevelArgs`
+    /// and `Z_LogAuditRecWithLevelReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_audit_rec_with_level(
+        &self,
+        args: Z_LogAuditRecWithLevelArgs,
+    ) -> impl Future<Output = Result<Z_LogAuditRecWithLevelReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogDebug(msg string, keyValuePairs []any)`
+    ///
+    /// ```text
+    /// LogDebug writes a log message to the Mattermost server log file.
+    /// Appropriate context such as the plugin name will already be added as fields so plugins
+    /// do not need to add that info.
+    ///
+    /// @tag Logging
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogDebugArgs`
+    /// and `Z_LogDebugReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_debug(
+        &self,
+        args: Z_LogDebugArgs,
+    ) -> impl Future<Output = Result<Z_LogDebugReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogError(msg string, keyValuePairs []any)`
+    ///
+    /// ```text
+    /// LogError writes a log message to the Mattermost server log file.
+    /// Appropriate context such as the plugin name will already be added as fields so plugins
+    /// do not need to add that info.
+    ///
+    /// @tag Logging
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogErrorArgs`
+    /// and `Z_LogErrorReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_error(
+        &self,
+        args: Z_LogErrorArgs,
+    ) -> impl Future<Output = Result<Z_LogErrorReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogInfo(msg string, keyValuePairs []any)`
+    ///
+    /// ```text
+    /// LogInfo writes a log message to the Mattermost server log file.
+    /// Appropriate context such as the plugin name will already be added as fields so plugins
+    /// do not need to add that info.
+    ///
+    /// @tag Logging
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogInfoArgs`
+    /// and `Z_LogInfoReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_info(
+        &self,
+        args: Z_LogInfoArgs,
+    ) -> impl Future<Output = Result<Z_LogInfoReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `LogWarn(msg string, keyValuePairs []any)`
+    ///
+    /// ```text
+    /// LogWarn writes a log message to the Mattermost server log file.
+    /// Appropriate context such as the plugin name will already be added as fields so plugins
+    /// do not need to add that info.
+    ///
+    /// @tag Logging
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_LogWarnArgs`
+    /// and `Z_LogWarnReturns`.
+    /// The default answers as Go does for a method the implementation lacks.
+    fn log_warn(
+        &self,
+        args: Z_LogWarnArgs,
+    ) -> impl Future<Output = Result<Z_LogWarnReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
     /// Go: `OpenInteractiveDialog(dialog model.OpenDialogRequest) *model.AppError`
     ///
     /// ```text
@@ -4689,6 +4839,8 @@ pub trait PluginApi: Send + Sync + 'static {
 }
 
 /// Register every generated method of `PluginApi` on `server` as `Plugin.<Method>`.
+///
+/// Not registered here: Implemented, LoadPluginConfiguration, OnActivate, whose servers are hand-written.
 pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) {
     let this = Arc::clone(implementation);
     server.register(
@@ -6665,6 +6817,65 @@ pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) 
             }
         },
     );
+    let this = Arc::clone(implementation);
+    server.register("Plugin.LogAuditRec", move |args: Z_LogAuditRecArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            this.log_audit_rec(args).await.map_err(|NotImplemented| {
+                ServiceError("API LogAuditRec called but not implemented".into())
+            })
+        }
+    });
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.LogAuditRecWithLevel",
+        move |args: Z_LogAuditRecWithLevelArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.log_audit_rec_with_level(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError("API LogAuditRecWithLevel called but not implemented".into())
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register("Plugin.LogDebug", move |args: Z_LogDebugArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            this.log_debug(args).await.map_err(|NotImplemented| {
+                ServiceError("API LogDebug called but not implemented".into())
+            })
+        }
+    });
+    let this = Arc::clone(implementation);
+    server.register("Plugin.LogError", move |args: Z_LogErrorArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            this.log_error(args).await.map_err(|NotImplemented| {
+                ServiceError("API LogError called but not implemented".into())
+            })
+        }
+    });
+    let this = Arc::clone(implementation);
+    server.register("Plugin.LogInfo", move |args: Z_LogInfoArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            this.log_info(args).await.map_err(|NotImplemented| {
+                ServiceError("API LogInfo called but not implemented".into())
+            })
+        }
+    });
+    let this = Arc::clone(implementation);
+    server.register("Plugin.LogWarn", move |args: Z_LogWarnArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            this.log_warn(args).await.map_err(|NotImplemented| {
+                ServiceError("API LogWarn called but not implemented".into())
+            })
+        }
+    });
     let this = Arc::clone(implementation);
     server.register(
         "Plugin.OpenInteractiveDialog",
@@ -11866,259 +12077,525 @@ impl ApiClient {
     }
 }
 
-/// Invoke `$m!` with every generated API method as `(method, "GoName", Args, Returns),`.
+/// Invoke `$m!` with every API method a host serves as
+/// `(method, "GoName", "Z_Args", Args, "Z_Returns", Returns),`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! for_each_api_method {
     ($m:ident) => {
         $m! {
-            (add_channel_member, "AddChannelMember", $crate::wire::plugin::Z_AddChannelMemberArgs, $crate::wire::plugin::Z_AddChannelMemberReturns),
-            (add_reaction, "AddReaction", $crate::wire::plugin::Z_AddReactionArgs, $crate::wire::plugin::Z_AddReactionReturns),
-            (add_user_to_channel, "AddUserToChannel", $crate::wire::plugin::Z_AddUserToChannelArgs, $crate::wire::plugin::Z_AddUserToChannelReturns),
-            (check_access_control_expression, "CheckAccessControlExpression", $crate::wire::plugin::Z_CheckAccessControlExpressionArgs, $crate::wire::plugin::Z_CheckAccessControlExpressionReturns),
-            (copy_file_infos, "CopyFileInfos", $crate::wire::plugin::Z_CopyFileInfosArgs, $crate::wire::plugin::Z_CopyFileInfosReturns),
-            (count_property_fields, "CountPropertyFields", $crate::wire::plugin::Z_CountPropertyFieldsArgs, $crate::wire::plugin::Z_CountPropertyFieldsReturns),
-            (count_property_fields_for_target, "CountPropertyFieldsForTarget", $crate::wire::plugin::Z_CountPropertyFieldsForTargetArgs, $crate::wire::plugin::Z_CountPropertyFieldsForTargetReturns),
-            (create_bot, "CreateBot", $crate::wire::plugin::Z_CreateBotArgs, $crate::wire::plugin::Z_CreateBotReturns),
-            (create_channel, "CreateChannel", $crate::wire::plugin::Z_CreateChannelArgs, $crate::wire::plugin::Z_CreateChannelReturns),
-            (create_channel_sidebar_category, "CreateChannelSidebarCategory", $crate::wire::plugin::Z_CreateChannelSidebarCategoryArgs, $crate::wire::plugin::Z_CreateChannelSidebarCategoryReturns),
-            (create_command, "CreateCommand", $crate::wire::plugin::Z_CreateCommandArgs, $crate::wire::plugin::Z_CreateCommandReturns),
-            (create_default_syncable_memberships, "CreateDefaultSyncableMemberships", $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsArgs, $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsReturns),
-            (create_group, "CreateGroup", $crate::wire::plugin::Z_CreateGroupArgs, $crate::wire::plugin::Z_CreateGroupReturns),
-            (create_o_auth_app, "CreateOAuthApp", $crate::wire::plugin::Z_CreateOAuthAppArgs, $crate::wire::plugin::Z_CreateOAuthAppReturns),
-            (create_post, "CreatePost", $crate::wire::plugin::Z_CreatePostArgs, $crate::wire::plugin::Z_CreatePostReturns),
-            (create_property_field, "CreatePropertyField", $crate::wire::plugin::Z_CreatePropertyFieldArgs, $crate::wire::plugin::Z_CreatePropertyFieldReturns),
-            (create_property_value, "CreatePropertyValue", $crate::wire::plugin::Z_CreatePropertyValueArgs, $crate::wire::plugin::Z_CreatePropertyValueReturns),
-            (create_session, "CreateSession", $crate::wire::plugin::Z_CreateSessionArgs, $crate::wire::plugin::Z_CreateSessionReturns),
-            (create_team, "CreateTeam", $crate::wire::plugin::Z_CreateTeamArgs, $crate::wire::plugin::Z_CreateTeamReturns),
-            (create_team_member, "CreateTeamMember", $crate::wire::plugin::Z_CreateTeamMemberArgs, $crate::wire::plugin::Z_CreateTeamMemberReturns),
-            (create_team_members, "CreateTeamMembers", $crate::wire::plugin::Z_CreateTeamMembersArgs, $crate::wire::plugin::Z_CreateTeamMembersReturns),
-            (create_team_members_gracefully, "CreateTeamMembersGracefully", $crate::wire::plugin::Z_CreateTeamMembersGracefullyArgs, $crate::wire::plugin::Z_CreateTeamMembersGracefullyReturns),
-            (create_upload_session, "CreateUploadSession", $crate::wire::plugin::Z_CreateUploadSessionArgs, $crate::wire::plugin::Z_CreateUploadSessionReturns),
-            (create_user, "CreateUser", $crate::wire::plugin::Z_CreateUserArgs, $crate::wire::plugin::Z_CreateUserReturns),
-            (create_user_access_token, "CreateUserAccessToken", $crate::wire::plugin::Z_CreateUserAccessTokenArgs, $crate::wire::plugin::Z_CreateUserAccessTokenReturns),
-            (delete_access_control_policy, "DeleteAccessControlPolicy", $crate::wire::plugin::Z_DeleteAccessControlPolicyArgs, $crate::wire::plugin::Z_DeleteAccessControlPolicyReturns),
-            (delete_channel, "DeleteChannel", $crate::wire::plugin::Z_DeleteChannelArgs, $crate::wire::plugin::Z_DeleteChannelReturns),
-            (delete_channel_member, "DeleteChannelMember", $crate::wire::plugin::Z_DeleteChannelMemberArgs, $crate::wire::plugin::Z_DeleteChannelMemberReturns),
-            (delete_command, "DeleteCommand", $crate::wire::plugin::Z_DeleteCommandArgs, $crate::wire::plugin::Z_DeleteCommandReturns),
-            (delete_ephemeral_post, "DeleteEphemeralPost", $crate::wire::plugin::Z_DeleteEphemeralPostArgs, $crate::wire::plugin::Z_DeleteEphemeralPostReturns),
-            (delete_group, "DeleteGroup", $crate::wire::plugin::Z_DeleteGroupArgs, $crate::wire::plugin::Z_DeleteGroupReturns),
-            (delete_group_constrained_memberships, "DeleteGroupConstrainedMemberships", $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsArgs, $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsReturns),
-            (delete_group_member, "DeleteGroupMember", $crate::wire::plugin::Z_DeleteGroupMemberArgs, $crate::wire::plugin::Z_DeleteGroupMemberReturns),
-            (delete_group_syncable, "DeleteGroupSyncable", $crate::wire::plugin::Z_DeleteGroupSyncableArgs, $crate::wire::plugin::Z_DeleteGroupSyncableReturns),
-            (delete_o_auth_app, "DeleteOAuthApp", $crate::wire::plugin::Z_DeleteOAuthAppArgs, $crate::wire::plugin::Z_DeleteOAuthAppReturns),
-            (delete_post, "DeletePost", $crate::wire::plugin::Z_DeletePostArgs, $crate::wire::plugin::Z_DeletePostReturns),
-            (delete_preferences_for_user, "DeletePreferencesForUser", $crate::wire::plugin::Z_DeletePreferencesForUserArgs, $crate::wire::plugin::Z_DeletePreferencesForUserReturns),
-            (delete_property_field, "DeletePropertyField", $crate::wire::plugin::Z_DeletePropertyFieldArgs, $crate::wire::plugin::Z_DeletePropertyFieldReturns),
-            (delete_property_value, "DeletePropertyValue", $crate::wire::plugin::Z_DeletePropertyValueArgs, $crate::wire::plugin::Z_DeletePropertyValueReturns),
-            (delete_property_value_with_options, "DeletePropertyValueWithOptions", $crate::wire::plugin::Z_DeletePropertyValueWithOptionsArgs, $crate::wire::plugin::Z_DeletePropertyValueWithOptionsReturns),
-            (delete_property_values_for_field, "DeletePropertyValuesForField", $crate::wire::plugin::Z_DeletePropertyValuesForFieldArgs, $crate::wire::plugin::Z_DeletePropertyValuesForFieldReturns),
-            (delete_property_values_for_field_with_options, "DeletePropertyValuesForFieldWithOptions", $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsArgs, $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsReturns),
-            (delete_property_values_for_target, "DeletePropertyValuesForTarget", $crate::wire::plugin::Z_DeletePropertyValuesForTargetArgs, $crate::wire::plugin::Z_DeletePropertyValuesForTargetReturns),
-            (delete_property_values_for_target_with_options, "DeletePropertyValuesForTargetWithOptions", $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsArgs, $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsReturns),
-            (delete_team, "DeleteTeam", $crate::wire::plugin::Z_DeleteTeamArgs, $crate::wire::plugin::Z_DeleteTeamReturns),
-            (delete_team_member, "DeleteTeamMember", $crate::wire::plugin::Z_DeleteTeamMemberArgs, $crate::wire::plugin::Z_DeleteTeamMemberReturns),
-            (delete_user, "DeleteUser", $crate::wire::plugin::Z_DeleteUserArgs, $crate::wire::plugin::Z_DeleteUserReturns),
-            (disable_plugin, "DisablePlugin", $crate::wire::plugin::Z_DisablePluginArgs, $crate::wire::plugin::Z_DisablePluginReturns),
-            (enable_plugin, "EnablePlugin", $crate::wire::plugin::Z_EnablePluginArgs, $crate::wire::plugin::Z_EnablePluginReturns),
-            (ensure_bot_user, "EnsureBotUser", $crate::wire::plugin::Z_EnsureBotUserArgs, $crate::wire::plugin::Z_EnsureBotUserReturns),
-            (evaluate_access_control, "EvaluateAccessControl", $crate::wire::plugin::Z_EvaluateAccessControlArgs, $crate::wire::plugin::Z_EvaluateAccessControlReturns),
-            (execute_slash_command, "ExecuteSlashCommand", $crate::wire::plugin::Z_ExecuteSlashCommandArgs, $crate::wire::plugin::Z_ExecuteSlashCommandReturns),
-            (extend_session_expiry, "ExtendSessionExpiry", $crate::wire::plugin::Z_ExtendSessionExpiryArgs, $crate::wire::plugin::Z_ExtendSessionExpiryReturns),
-            (get_access_control_fields_autocomplete, "GetAccessControlFieldsAutocomplete", $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteArgs, $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteReturns),
-            (get_access_control_policy, "GetAccessControlPolicy", $crate::wire::plugin::Z_GetAccessControlPolicyArgs, $crate::wire::plugin::Z_GetAccessControlPolicyReturns),
-            (get_access_control_visual_ast, "GetAccessControlVisualAST", $crate::wire::plugin::Z_GetAccessControlVisualASTArgs, $crate::wire::plugin::Z_GetAccessControlVisualASTReturns),
-            (get_bot, "GetBot", $crate::wire::plugin::Z_GetBotArgs, $crate::wire::plugin::Z_GetBotReturns),
-            (get_bots, "GetBots", $crate::wire::plugin::Z_GetBotsArgs, $crate::wire::plugin::Z_GetBotsReturns),
-            (get_bundle_path, "GetBundlePath", $crate::wire::plugin::Z_GetBundlePathArgs, $crate::wire::plugin::Z_GetBundlePathReturns),
-            (get_channel, "GetChannel", $crate::wire::plugin::Z_GetChannelArgs, $crate::wire::plugin::Z_GetChannelReturns),
-            (get_channel_by_name, "GetChannelByName", $crate::wire::plugin::Z_GetChannelByNameArgs, $crate::wire::plugin::Z_GetChannelByNameReturns),
-            (get_channel_by_name_for_team_name, "GetChannelByNameForTeamName", $crate::wire::plugin::Z_GetChannelByNameForTeamNameArgs, $crate::wire::plugin::Z_GetChannelByNameForTeamNameReturns),
-            (get_channel_member, "GetChannelMember", $crate::wire::plugin::Z_GetChannelMemberArgs, $crate::wire::plugin::Z_GetChannelMemberReturns),
-            (get_channel_members, "GetChannelMembers", $crate::wire::plugin::Z_GetChannelMembersArgs, $crate::wire::plugin::Z_GetChannelMembersReturns),
-            (get_channel_members_by_ids, "GetChannelMembersByIds", $crate::wire::plugin::Z_GetChannelMembersByIdsArgs, $crate::wire::plugin::Z_GetChannelMembersByIdsReturns),
-            (get_channel_members_for_user, "GetChannelMembersForUser", $crate::wire::plugin::Z_GetChannelMembersForUserArgs, $crate::wire::plugin::Z_GetChannelMembersForUserReturns),
-            (get_channel_of_type, "GetChannelOfType", $crate::wire::plugin::Z_GetChannelOfTypeArgs, $crate::wire::plugin::Z_GetChannelOfTypeReturns),
-            (get_channel_sidebar_categories, "GetChannelSidebarCategories", $crate::wire::plugin::Z_GetChannelSidebarCategoriesArgs, $crate::wire::plugin::Z_GetChannelSidebarCategoriesReturns),
-            (get_channel_stats, "GetChannelStats", $crate::wire::plugin::Z_GetChannelStatsArgs, $crate::wire::plugin::Z_GetChannelStatsReturns),
-            (get_channels_for_team_for_user, "GetChannelsForTeamForUser", $crate::wire::plugin::Z_GetChannelsForTeamForUserArgs, $crate::wire::plugin::Z_GetChannelsForTeamForUserReturns),
-            (get_cloud_limits, "GetCloudLimits", $crate::wire::plugin::Z_GetCloudLimitsArgs, $crate::wire::plugin::Z_GetCloudLimitsReturns),
-            (get_command, "GetCommand", $crate::wire::plugin::Z_GetCommandArgs, $crate::wire::plugin::Z_GetCommandReturns),
-            (get_config, "GetConfig", $crate::wire::plugin::Z_GetConfigArgs, $crate::wire::plugin::Z_GetConfigReturns),
-            (get_diagnostic_id, "GetDiagnosticId", $crate::wire::plugin::Z_GetDiagnosticIdArgs, $crate::wire::plugin::Z_GetDiagnosticIdReturns),
-            (get_direct_channel, "GetDirectChannel", $crate::wire::plugin::Z_GetDirectChannelArgs, $crate::wire::plugin::Z_GetDirectChannelReturns),
-            (get_emoji, "GetEmoji", $crate::wire::plugin::Z_GetEmojiArgs, $crate::wire::plugin::Z_GetEmojiReturns),
-            (get_emoji_by_name, "GetEmojiByName", $crate::wire::plugin::Z_GetEmojiByNameArgs, $crate::wire::plugin::Z_GetEmojiByNameReturns),
-            (get_emoji_image, "GetEmojiImage", $crate::wire::plugin::Z_GetEmojiImageArgs, $crate::wire::plugin::Z_GetEmojiImageReturns),
-            (get_emoji_list, "GetEmojiList", $crate::wire::plugin::Z_GetEmojiListArgs, $crate::wire::plugin::Z_GetEmojiListReturns),
-            (get_file, "GetFile", $crate::wire::plugin::Z_GetFileArgs, $crate::wire::plugin::Z_GetFileReturns),
-            (get_file_info, "GetFileInfo", $crate::wire::plugin::Z_GetFileInfoArgs, $crate::wire::plugin::Z_GetFileInfoReturns),
-            (get_file_infos, "GetFileInfos", $crate::wire::plugin::Z_GetFileInfosArgs, $crate::wire::plugin::Z_GetFileInfosReturns),
-            (get_file_link, "GetFileLink", $crate::wire::plugin::Z_GetFileLinkArgs, $crate::wire::plugin::Z_GetFileLinkReturns),
-            (get_group, "GetGroup", $crate::wire::plugin::Z_GetGroupArgs, $crate::wire::plugin::Z_GetGroupReturns),
-            (get_group_by_name, "GetGroupByName", $crate::wire::plugin::Z_GetGroupByNameArgs, $crate::wire::plugin::Z_GetGroupByNameReturns),
-            (get_group_by_remote_id, "GetGroupByRemoteID", $crate::wire::plugin::Z_GetGroupByRemoteIDArgs, $crate::wire::plugin::Z_GetGroupByRemoteIDReturns),
-            (get_group_channel, "GetGroupChannel", $crate::wire::plugin::Z_GetGroupChannelArgs, $crate::wire::plugin::Z_GetGroupChannelReturns),
-            (get_group_member_users, "GetGroupMemberUsers", $crate::wire::plugin::Z_GetGroupMemberUsersArgs, $crate::wire::plugin::Z_GetGroupMemberUsersReturns),
-            (get_group_syncable, "GetGroupSyncable", $crate::wire::plugin::Z_GetGroupSyncableArgs, $crate::wire::plugin::Z_GetGroupSyncableReturns),
-            (get_group_syncables, "GetGroupSyncables", $crate::wire::plugin::Z_GetGroupSyncablesArgs, $crate::wire::plugin::Z_GetGroupSyncablesReturns),
-            (get_groups, "GetGroups", $crate::wire::plugin::Z_GetGroupsArgs, $crate::wire::plugin::Z_GetGroupsReturns),
-            (get_groups_by_source, "GetGroupsBySource", $crate::wire::plugin::Z_GetGroupsBySourceArgs, $crate::wire::plugin::Z_GetGroupsBySourceReturns),
-            (get_groups_for_user, "GetGroupsForUser", $crate::wire::plugin::Z_GetGroupsForUserArgs, $crate::wire::plugin::Z_GetGroupsForUserReturns),
-            (get_ldap_user_attributes, "GetLDAPUserAttributes", $crate::wire::plugin::Z_GetLDAPUserAttributesArgs, $crate::wire::plugin::Z_GetLDAPUserAttributesReturns),
-            (get_license, "GetLicense", $crate::wire::plugin::Z_GetLicenseArgs, $crate::wire::plugin::Z_GetLicenseReturns),
-            (get_o_auth_app, "GetOAuthApp", $crate::wire::plugin::Z_GetOAuthAppArgs, $crate::wire::plugin::Z_GetOAuthAppReturns),
-            (get_plugin_config, "GetPluginConfig", $crate::wire::plugin::Z_GetPluginConfigArgs, $crate::wire::plugin::Z_GetPluginConfigReturns),
-            (get_plugin_id, "GetPluginID", $crate::wire::plugin::Z_GetPluginIDArgs, $crate::wire::plugin::Z_GetPluginIDReturns),
-            (get_plugin_status, "GetPluginStatus", $crate::wire::plugin::Z_GetPluginStatusArgs, $crate::wire::plugin::Z_GetPluginStatusReturns),
-            (get_plugins, "GetPlugins", $crate::wire::plugin::Z_GetPluginsArgs, $crate::wire::plugin::Z_GetPluginsReturns),
-            (get_post, "GetPost", $crate::wire::plugin::Z_GetPostArgs, $crate::wire::plugin::Z_GetPostReturns),
-            (get_post_thread, "GetPostThread", $crate::wire::plugin::Z_GetPostThreadArgs, $crate::wire::plugin::Z_GetPostThreadReturns),
-            (get_posts_after, "GetPostsAfter", $crate::wire::plugin::Z_GetPostsAfterArgs, $crate::wire::plugin::Z_GetPostsAfterReturns),
-            (get_posts_before, "GetPostsBefore", $crate::wire::plugin::Z_GetPostsBeforeArgs, $crate::wire::plugin::Z_GetPostsBeforeReturns),
-            (get_posts_for_channel, "GetPostsForChannel", $crate::wire::plugin::Z_GetPostsForChannelArgs, $crate::wire::plugin::Z_GetPostsForChannelReturns),
-            (get_posts_since, "GetPostsSince", $crate::wire::plugin::Z_GetPostsSinceArgs, $crate::wire::plugin::Z_GetPostsSinceReturns),
-            (get_preference_for_user, "GetPreferenceForUser", $crate::wire::plugin::Z_GetPreferenceForUserArgs, $crate::wire::plugin::Z_GetPreferenceForUserReturns),
-            (get_preferences_for_user, "GetPreferencesForUser", $crate::wire::plugin::Z_GetPreferencesForUserArgs, $crate::wire::plugin::Z_GetPreferencesForUserReturns),
-            (get_profile_image, "GetProfileImage", $crate::wire::plugin::Z_GetProfileImageArgs, $crate::wire::plugin::Z_GetProfileImageReturns),
-            (get_property_field, "GetPropertyField", $crate::wire::plugin::Z_GetPropertyFieldArgs, $crate::wire::plugin::Z_GetPropertyFieldReturns),
-            (get_property_field_by_name, "GetPropertyFieldByName", $crate::wire::plugin::Z_GetPropertyFieldByNameArgs, $crate::wire::plugin::Z_GetPropertyFieldByNameReturns),
-            (get_property_fields, "GetPropertyFields", $crate::wire::plugin::Z_GetPropertyFieldsArgs, $crate::wire::plugin::Z_GetPropertyFieldsReturns),
-            (get_property_group, "GetPropertyGroup", $crate::wire::plugin::Z_GetPropertyGroupArgs, $crate::wire::plugin::Z_GetPropertyGroupReturns),
-            (get_property_value, "GetPropertyValue", $crate::wire::plugin::Z_GetPropertyValueArgs, $crate::wire::plugin::Z_GetPropertyValueReturns),
-            (get_property_values, "GetPropertyValues", $crate::wire::plugin::Z_GetPropertyValuesArgs, $crate::wire::plugin::Z_GetPropertyValuesReturns),
-            (get_public_channels_for_team, "GetPublicChannelsForTeam", $crate::wire::plugin::Z_GetPublicChannelsForTeamArgs, $crate::wire::plugin::Z_GetPublicChannelsForTeamReturns),
-            (get_reactions, "GetReactions", $crate::wire::plugin::Z_GetReactionsArgs, $crate::wire::plugin::Z_GetReactionsReturns),
-            (get_server_version, "GetServerVersion", $crate::wire::plugin::Z_GetServerVersionArgs, $crate::wire::plugin::Z_GetServerVersionReturns),
-            (get_session, "GetSession", $crate::wire::plugin::Z_GetSessionArgs, $crate::wire::plugin::Z_GetSessionReturns),
-            (get_system_install_date, "GetSystemInstallDate", $crate::wire::plugin::Z_GetSystemInstallDateArgs, $crate::wire::plugin::Z_GetSystemInstallDateReturns),
-            (get_team, "GetTeam", $crate::wire::plugin::Z_GetTeamArgs, $crate::wire::plugin::Z_GetTeamReturns),
-            (get_team_by_name, "GetTeamByName", $crate::wire::plugin::Z_GetTeamByNameArgs, $crate::wire::plugin::Z_GetTeamByNameReturns),
-            (get_team_icon, "GetTeamIcon", $crate::wire::plugin::Z_GetTeamIconArgs, $crate::wire::plugin::Z_GetTeamIconReturns),
-            (get_team_member, "GetTeamMember", $crate::wire::plugin::Z_GetTeamMemberArgs, $crate::wire::plugin::Z_GetTeamMemberReturns),
-            (get_team_members, "GetTeamMembers", $crate::wire::plugin::Z_GetTeamMembersArgs, $crate::wire::plugin::Z_GetTeamMembersReturns),
-            (get_team_members_for_user, "GetTeamMembersForUser", $crate::wire::plugin::Z_GetTeamMembersForUserArgs, $crate::wire::plugin::Z_GetTeamMembersForUserReturns),
-            (get_team_stats, "GetTeamStats", $crate::wire::plugin::Z_GetTeamStatsArgs, $crate::wire::plugin::Z_GetTeamStatsReturns),
-            (get_teams, "GetTeams", $crate::wire::plugin::Z_GetTeamsArgs, $crate::wire::plugin::Z_GetTeamsReturns),
-            (get_teams_for_user, "GetTeamsForUser", $crate::wire::plugin::Z_GetTeamsForUserArgs, $crate::wire::plugin::Z_GetTeamsForUserReturns),
-            (get_teams_unread_for_user, "GetTeamsUnreadForUser", $crate::wire::plugin::Z_GetTeamsUnreadForUserArgs, $crate::wire::plugin::Z_GetTeamsUnreadForUserReturns),
-            (get_telemetry_id, "GetTelemetryId", $crate::wire::plugin::Z_GetTelemetryIdArgs, $crate::wire::plugin::Z_GetTelemetryIdReturns),
-            (get_unsanitized_config, "GetUnsanitizedConfig", $crate::wire::plugin::Z_GetUnsanitizedConfigArgs, $crate::wire::plugin::Z_GetUnsanitizedConfigReturns),
-            (get_upload_session, "GetUploadSession", $crate::wire::plugin::Z_GetUploadSessionArgs, $crate::wire::plugin::Z_GetUploadSessionReturns),
-            (get_user, "GetUser", $crate::wire::plugin::Z_GetUserArgs, $crate::wire::plugin::Z_GetUserReturns),
-            (get_user_by_email, "GetUserByEmail", $crate::wire::plugin::Z_GetUserByEmailArgs, $crate::wire::plugin::Z_GetUserByEmailReturns),
-            (get_user_by_username, "GetUserByUsername", $crate::wire::plugin::Z_GetUserByUsernameArgs, $crate::wire::plugin::Z_GetUserByUsernameReturns),
-            (get_user_status, "GetUserStatus", $crate::wire::plugin::Z_GetUserStatusArgs, $crate::wire::plugin::Z_GetUserStatusReturns),
-            (get_user_statuses_by_ids, "GetUserStatusesByIds", $crate::wire::plugin::Z_GetUserStatusesByIdsArgs, $crate::wire::plugin::Z_GetUserStatusesByIdsReturns),
-            (get_users, "GetUsers", $crate::wire::plugin::Z_GetUsersArgs, $crate::wire::plugin::Z_GetUsersReturns),
-            (get_users_by_ids, "GetUsersByIds", $crate::wire::plugin::Z_GetUsersByIdsArgs, $crate::wire::plugin::Z_GetUsersByIdsReturns),
-            (get_users_by_usernames, "GetUsersByUsernames", $crate::wire::plugin::Z_GetUsersByUsernamesArgs, $crate::wire::plugin::Z_GetUsersByUsernamesReturns),
-            (get_users_in_channel, "GetUsersInChannel", $crate::wire::plugin::Z_GetUsersInChannelArgs, $crate::wire::plugin::Z_GetUsersInChannelReturns),
-            (get_users_in_team, "GetUsersInTeam", $crate::wire::plugin::Z_GetUsersInTeamArgs, $crate::wire::plugin::Z_GetUsersInTeamReturns),
-            (has_permission_to, "HasPermissionTo", $crate::wire::plugin::Z_HasPermissionToArgs, $crate::wire::plugin::Z_HasPermissionToReturns),
-            (has_permission_to_channel, "HasPermissionToChannel", $crate::wire::plugin::Z_HasPermissionToChannelArgs, $crate::wire::plugin::Z_HasPermissionToChannelReturns),
-            (has_permission_to_team, "HasPermissionToTeam", $crate::wire::plugin::Z_HasPermissionToTeamArgs, $crate::wire::plugin::Z_HasPermissionToTeamReturns),
-            (invite_remote_to_channel, "InviteRemoteToChannel", $crate::wire::plugin::Z_InviteRemoteToChannelArgs, $crate::wire::plugin::Z_InviteRemoteToChannelReturns),
-            (is_enterprise_ready, "IsEnterpriseReady", $crate::wire::plugin::Z_IsEnterpriseReadyArgs, $crate::wire::plugin::Z_IsEnterpriseReadyReturns),
-            (kv_compare_and_delete, "KVCompareAndDelete", $crate::wire::plugin::Z_KVCompareAndDeleteArgs, $crate::wire::plugin::Z_KVCompareAndDeleteReturns),
-            (kv_compare_and_set, "KVCompareAndSet", $crate::wire::plugin::Z_KVCompareAndSetArgs, $crate::wire::plugin::Z_KVCompareAndSetReturns),
-            (kv_delete, "KVDelete", $crate::wire::plugin::Z_KVDeleteArgs, $crate::wire::plugin::Z_KVDeleteReturns),
-            (kv_delete_all, "KVDeleteAll", $crate::wire::plugin::Z_KVDeleteAllArgs, $crate::wire::plugin::Z_KVDeleteAllReturns),
-            (kv_get, "KVGet", $crate::wire::plugin::Z_KVGetArgs, $crate::wire::plugin::Z_KVGetReturns),
-            (kv_list, "KVList", $crate::wire::plugin::Z_KVListArgs, $crate::wire::plugin::Z_KVListReturns),
-            (kv_set, "KVSet", $crate::wire::plugin::Z_KVSetArgs, $crate::wire::plugin::Z_KVSetReturns),
-            (kv_set_with_expiry, "KVSetWithExpiry", $crate::wire::plugin::Z_KVSetWithExpiryArgs, $crate::wire::plugin::Z_KVSetWithExpiryReturns),
-            (kv_set_with_options, "KVSetWithOptions", $crate::wire::plugin::Z_KVSetWithOptionsArgs, $crate::wire::plugin::Z_KVSetWithOptionsReturns),
-            (list_built_in_commands, "ListBuiltInCommands", $crate::wire::plugin::Z_ListBuiltInCommandsArgs, $crate::wire::plugin::Z_ListBuiltInCommandsReturns),
-            (list_commands, "ListCommands", $crate::wire::plugin::Z_ListCommandsArgs, $crate::wire::plugin::Z_ListCommandsReturns),
-            (list_custom_commands, "ListCustomCommands", $crate::wire::plugin::Z_ListCustomCommandsArgs, $crate::wire::plugin::Z_ListCustomCommandsReturns),
-            (list_plugin_commands, "ListPluginCommands", $crate::wire::plugin::Z_ListPluginCommandsArgs, $crate::wire::plugin::Z_ListPluginCommandsReturns),
-            (open_interactive_dialog, "OpenInteractiveDialog", $crate::wire::plugin::Z_OpenInteractiveDialogArgs, $crate::wire::plugin::Z_OpenInteractiveDialogReturns),
-            (patch_bot, "PatchBot", $crate::wire::plugin::Z_PatchBotArgs, $crate::wire::plugin::Z_PatchBotReturns),
-            (patch_channel_members_notifications, "PatchChannelMembersNotifications", $crate::wire::plugin::Z_PatchChannelMembersNotificationsArgs, $crate::wire::plugin::Z_PatchChannelMembersNotificationsReturns),
-            (permanent_delete_bot, "PermanentDeleteBot", $crate::wire::plugin::Z_PermanentDeleteBotArgs, $crate::wire::plugin::Z_PermanentDeleteBotReturns),
-            (publish_plugin_cluster_event, "PublishPluginClusterEvent", $crate::wire::plugin::Z_PublishPluginClusterEventArgs, $crate::wire::plugin::Z_PublishPluginClusterEventReturns),
-            (publish_user_typing, "PublishUserTyping", $crate::wire::plugin::Z_PublishUserTypingArgs, $crate::wire::plugin::Z_PublishUserTypingReturns),
-            (publish_web_socket_event, "PublishWebSocketEvent", $crate::wire::plugin::Z_PublishWebSocketEventArgs, $crate::wire::plugin::Z_PublishWebSocketEventReturns),
-            (query_users_for_access_control_expression, "QueryUsersForAccessControlExpression", $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionArgs, $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionReturns),
-            (read_file, "ReadFile", $crate::wire::plugin::Z_ReadFileArgs, $crate::wire::plugin::Z_ReadFileReturns),
-            (receive_shared_channel_profile_image_sync_msg, "ReceiveSharedChannelProfileImageSyncMsg", $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgArgs, $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgReturns),
-            (receive_shared_channel_sync_msg, "ReceiveSharedChannelSyncMsg", $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgArgs, $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgReturns),
-            (register_channel_guard, "RegisterChannelGuard", $crate::wire::plugin::Z_RegisterChannelGuardArgs, $crate::wire::plugin::Z_RegisterChannelGuardReturns),
-            (register_collection_and_topic, "RegisterCollectionAndTopic", $crate::wire::plugin::Z_RegisterCollectionAndTopicArgs, $crate::wire::plugin::Z_RegisterCollectionAndTopicReturns),
-            (register_command, "RegisterCommand", $crate::wire::plugin::Z_RegisterCommandArgs, $crate::wire::plugin::Z_RegisterCommandReturns),
-            (register_plugin_for_shared_channels, "RegisterPluginForSharedChannels", $crate::wire::plugin::Z_RegisterPluginForSharedChannelsArgs, $crate::wire::plugin::Z_RegisterPluginForSharedChannelsReturns),
-            (register_property_group, "RegisterPropertyGroup", $crate::wire::plugin::Z_RegisterPropertyGroupArgs, $crate::wire::plugin::Z_RegisterPropertyGroupReturns),
-            (remove_plugin, "RemovePlugin", $crate::wire::plugin::Z_RemovePluginArgs, $crate::wire::plugin::Z_RemovePluginReturns),
-            (remove_reaction, "RemoveReaction", $crate::wire::plugin::Z_RemoveReactionArgs, $crate::wire::plugin::Z_RemoveReactionReturns),
-            (remove_team_icon, "RemoveTeamIcon", $crate::wire::plugin::Z_RemoveTeamIconArgs, $crate::wire::plugin::Z_RemoveTeamIconReturns),
-            (remove_user_custom_status, "RemoveUserCustomStatus", $crate::wire::plugin::Z_RemoveUserCustomStatusArgs, $crate::wire::plugin::Z_RemoveUserCustomStatusReturns),
-            (request_trial_license, "RequestTrialLicense", $crate::wire::plugin::Z_RequestTrialLicenseArgs, $crate::wire::plugin::Z_RequestTrialLicenseReturns),
-            (restore_channel, "RestoreChannel", $crate::wire::plugin::Z_RestoreChannelArgs, $crate::wire::plugin::Z_RestoreChannelReturns),
-            (restore_group, "RestoreGroup", $crate::wire::plugin::Z_RestoreGroupArgs, $crate::wire::plugin::Z_RestoreGroupReturns),
-            (revoke_session, "RevokeSession", $crate::wire::plugin::Z_RevokeSessionArgs, $crate::wire::plugin::Z_RevokeSessionReturns),
-            (revoke_user_access_token, "RevokeUserAccessToken", $crate::wire::plugin::Z_RevokeUserAccessTokenArgs, $crate::wire::plugin::Z_RevokeUserAccessTokenReturns),
-            (roles_grant_permission, "RolesGrantPermission", $crate::wire::plugin::Z_RolesGrantPermissionArgs, $crate::wire::plugin::Z_RolesGrantPermissionReturns),
-            (save_access_control_policy, "SaveAccessControlPolicy", $crate::wire::plugin::Z_SaveAccessControlPolicyArgs, $crate::wire::plugin::Z_SaveAccessControlPolicyReturns),
-            (save_config, "SaveConfig", $crate::wire::plugin::Z_SaveConfigArgs, $crate::wire::plugin::Z_SaveConfigReturns),
-            (save_plugin_config, "SavePluginConfig", $crate::wire::plugin::Z_SavePluginConfigArgs, $crate::wire::plugin::Z_SavePluginConfigReturns),
-            (search_channels, "SearchChannels", $crate::wire::plugin::Z_SearchChannelsArgs, $crate::wire::plugin::Z_SearchChannelsReturns),
-            (search_posts_in_team, "SearchPostsInTeam", $crate::wire::plugin::Z_SearchPostsInTeamArgs, $crate::wire::plugin::Z_SearchPostsInTeamReturns),
-            (search_posts_in_team_for_user, "SearchPostsInTeamForUser", $crate::wire::plugin::Z_SearchPostsInTeamForUserArgs, $crate::wire::plugin::Z_SearchPostsInTeamForUserReturns),
-            (search_property_fields, "SearchPropertyFields", $crate::wire::plugin::Z_SearchPropertyFieldsArgs, $crate::wire::plugin::Z_SearchPropertyFieldsReturns),
-            (search_property_values, "SearchPropertyValues", $crate::wire::plugin::Z_SearchPropertyValuesArgs, $crate::wire::plugin::Z_SearchPropertyValuesReturns),
-            (search_teams, "SearchTeams", $crate::wire::plugin::Z_SearchTeamsArgs, $crate::wire::plugin::Z_SearchTeamsReturns),
-            (search_users, "SearchUsers", $crate::wire::plugin::Z_SearchUsersArgs, $crate::wire::plugin::Z_SearchUsersReturns),
-            (send_ephemeral_post, "SendEphemeralPost", $crate::wire::plugin::Z_SendEphemeralPostArgs, $crate::wire::plugin::Z_SendEphemeralPostReturns),
-            (send_mail, "SendMail", $crate::wire::plugin::Z_SendMailArgs, $crate::wire::plugin::Z_SendMailReturns),
-            (send_push_notification, "SendPushNotification", $crate::wire::plugin::Z_SendPushNotificationArgs, $crate::wire::plugin::Z_SendPushNotificationReturns),
-            (send_toast_message, "SendToastMessage", $crate::wire::plugin::Z_SendToastMessageArgs, $crate::wire::plugin::Z_SendToastMessageReturns),
-            (set_file_searchable_content, "SetFileSearchableContent", $crate::wire::plugin::Z_SetFileSearchableContentArgs, $crate::wire::plugin::Z_SetFileSearchableContentReturns),
-            (set_profile_image, "SetProfileImage", $crate::wire::plugin::Z_SetProfileImageArgs, $crate::wire::plugin::Z_SetProfileImageReturns),
-            (set_team_icon, "SetTeamIcon", $crate::wire::plugin::Z_SetTeamIconArgs, $crate::wire::plugin::Z_SetTeamIconReturns),
-            (set_user_status_timed_dnd, "SetUserStatusTimedDND", $crate::wire::plugin::Z_SetUserStatusTimedDNDArgs, $crate::wire::plugin::Z_SetUserStatusTimedDNDReturns),
-            (share_channel, "ShareChannel", $crate::wire::plugin::Z_ShareChannelArgs, $crate::wire::plugin::Z_ShareChannelReturns),
-            (sync_shared_channel, "SyncSharedChannel", $crate::wire::plugin::Z_SyncSharedChannelArgs, $crate::wire::plugin::Z_SyncSharedChannelReturns),
-            (uninvite_remote_from_channel, "UninviteRemoteFromChannel", $crate::wire::plugin::Z_UninviteRemoteFromChannelArgs, $crate::wire::plugin::Z_UninviteRemoteFromChannelReturns),
-            (unregister_channel_guard, "UnregisterChannelGuard", $crate::wire::plugin::Z_UnregisterChannelGuardArgs, $crate::wire::plugin::Z_UnregisterChannelGuardReturns),
-            (unregister_command, "UnregisterCommand", $crate::wire::plugin::Z_UnregisterCommandArgs, $crate::wire::plugin::Z_UnregisterCommandReturns),
-            (unregister_plugin_for_shared_channels, "UnregisterPluginForSharedChannels", $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsArgs, $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsReturns),
-            (unregister_plugin_remote_for_shared_channels, "UnregisterPluginRemoteForSharedChannels", $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsArgs, $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsReturns),
-            (unshare_channel, "UnshareChannel", $crate::wire::plugin::Z_UnshareChannelArgs, $crate::wire::plugin::Z_UnshareChannelReturns),
-            (update_bot_active, "UpdateBotActive", $crate::wire::plugin::Z_UpdateBotActiveArgs, $crate::wire::plugin::Z_UpdateBotActiveReturns),
-            (update_channel, "UpdateChannel", $crate::wire::plugin::Z_UpdateChannelArgs, $crate::wire::plugin::Z_UpdateChannelReturns),
-            (update_channel_member_notifications, "UpdateChannelMemberNotifications", $crate::wire::plugin::Z_UpdateChannelMemberNotificationsArgs, $crate::wire::plugin::Z_UpdateChannelMemberNotificationsReturns),
-            (update_channel_member_roles, "UpdateChannelMemberRoles", $crate::wire::plugin::Z_UpdateChannelMemberRolesArgs, $crate::wire::plugin::Z_UpdateChannelMemberRolesReturns),
-            (update_channel_sidebar_categories, "UpdateChannelSidebarCategories", $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesArgs, $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesReturns),
-            (update_command, "UpdateCommand", $crate::wire::plugin::Z_UpdateCommandArgs, $crate::wire::plugin::Z_UpdateCommandReturns),
-            (update_ephemeral_post, "UpdateEphemeralPost", $crate::wire::plugin::Z_UpdateEphemeralPostArgs, $crate::wire::plugin::Z_UpdateEphemeralPostReturns),
-            (update_group, "UpdateGroup", $crate::wire::plugin::Z_UpdateGroupArgs, $crate::wire::plugin::Z_UpdateGroupReturns),
-            (update_group_syncable, "UpdateGroupSyncable", $crate::wire::plugin::Z_UpdateGroupSyncableArgs, $crate::wire::plugin::Z_UpdateGroupSyncableReturns),
-            (update_o_auth_app, "UpdateOAuthApp", $crate::wire::plugin::Z_UpdateOAuthAppArgs, $crate::wire::plugin::Z_UpdateOAuthAppReturns),
-            (update_post, "UpdatePost", $crate::wire::plugin::Z_UpdatePostArgs, $crate::wire::plugin::Z_UpdatePostReturns),
-            (update_preferences_for_user, "UpdatePreferencesForUser", $crate::wire::plugin::Z_UpdatePreferencesForUserArgs, $crate::wire::plugin::Z_UpdatePreferencesForUserReturns),
-            (update_property_field, "UpdatePropertyField", $crate::wire::plugin::Z_UpdatePropertyFieldArgs, $crate::wire::plugin::Z_UpdatePropertyFieldReturns),
-            (update_property_fields, "UpdatePropertyFields", $crate::wire::plugin::Z_UpdatePropertyFieldsArgs, $crate::wire::plugin::Z_UpdatePropertyFieldsReturns),
-            (update_property_value, "UpdatePropertyValue", $crate::wire::plugin::Z_UpdatePropertyValueArgs, $crate::wire::plugin::Z_UpdatePropertyValueReturns),
-            (update_property_values, "UpdatePropertyValues", $crate::wire::plugin::Z_UpdatePropertyValuesArgs, $crate::wire::plugin::Z_UpdatePropertyValuesReturns),
-            (update_shared_channel, "UpdateSharedChannel", $crate::wire::plugin::Z_UpdateSharedChannelArgs, $crate::wire::plugin::Z_UpdateSharedChannelReturns),
-            (update_shared_channel_cursor, "UpdateSharedChannelCursor", $crate::wire::plugin::Z_UpdateSharedChannelCursorArgs, $crate::wire::plugin::Z_UpdateSharedChannelCursorReturns),
-            (update_team, "UpdateTeam", $crate::wire::plugin::Z_UpdateTeamArgs, $crate::wire::plugin::Z_UpdateTeamReturns),
-            (update_team_member_roles, "UpdateTeamMemberRoles", $crate::wire::plugin::Z_UpdateTeamMemberRolesArgs, $crate::wire::plugin::Z_UpdateTeamMemberRolesReturns),
-            (update_user, "UpdateUser", $crate::wire::plugin::Z_UpdateUserArgs, $crate::wire::plugin::Z_UpdateUserReturns),
-            (update_user_active, "UpdateUserActive", $crate::wire::plugin::Z_UpdateUserActiveArgs, $crate::wire::plugin::Z_UpdateUserActiveReturns),
-            (update_user_auth, "UpdateUserAuth", $crate::wire::plugin::Z_UpdateUserAuthArgs, $crate::wire::plugin::Z_UpdateUserAuthReturns),
-            (update_user_custom_status, "UpdateUserCustomStatus", $crate::wire::plugin::Z_UpdateUserCustomStatusArgs, $crate::wire::plugin::Z_UpdateUserCustomStatusReturns),
-            (update_user_roles, "UpdateUserRoles", $crate::wire::plugin::Z_UpdateUserRolesArgs, $crate::wire::plugin::Z_UpdateUserRolesReturns),
-            (update_user_status, "UpdateUserStatus", $crate::wire::plugin::Z_UpdateUserStatusArgs, $crate::wire::plugin::Z_UpdateUserStatusReturns),
-            (upload_file, "UploadFile", $crate::wire::plugin::Z_UploadFileArgs, $crate::wire::plugin::Z_UploadFileReturns),
-            (upsert_group_member, "UpsertGroupMember", $crate::wire::plugin::Z_UpsertGroupMemberArgs, $crate::wire::plugin::Z_UpsertGroupMemberReturns),
-            (upsert_group_members, "UpsertGroupMembers", $crate::wire::plugin::Z_UpsertGroupMembersArgs, $crate::wire::plugin::Z_UpsertGroupMembersReturns),
-            (upsert_group_syncable, "UpsertGroupSyncable", $crate::wire::plugin::Z_UpsertGroupSyncableArgs, $crate::wire::plugin::Z_UpsertGroupSyncableReturns),
-            (upsert_property_value, "UpsertPropertyValue", $crate::wire::plugin::Z_UpsertPropertyValueArgs, $crate::wire::plugin::Z_UpsertPropertyValueReturns),
-            (upsert_property_value_with_options, "UpsertPropertyValueWithOptions", $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsArgs, $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsReturns),
-            (upsert_property_values, "UpsertPropertyValues", $crate::wire::plugin::Z_UpsertPropertyValuesArgs, $crate::wire::plugin::Z_UpsertPropertyValuesReturns),
-            (upsert_property_values_with_options, "UpsertPropertyValuesWithOptions", $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsArgs, $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsReturns),
+            (add_channel_member, "AddChannelMember", "Z_AddChannelMemberArgs", $crate::wire::plugin::Z_AddChannelMemberArgs, "Z_AddChannelMemberReturns", $crate::wire::plugin::Z_AddChannelMemberReturns),
+            (add_reaction, "AddReaction", "Z_AddReactionArgs", $crate::wire::plugin::Z_AddReactionArgs, "Z_AddReactionReturns", $crate::wire::plugin::Z_AddReactionReturns),
+            (add_user_to_channel, "AddUserToChannel", "Z_AddUserToChannelArgs", $crate::wire::plugin::Z_AddUserToChannelArgs, "Z_AddUserToChannelReturns", $crate::wire::plugin::Z_AddUserToChannelReturns),
+            (check_access_control_expression, "CheckAccessControlExpression", "Z_CheckAccessControlExpressionArgs", $crate::wire::plugin::Z_CheckAccessControlExpressionArgs, "Z_CheckAccessControlExpressionReturns", $crate::wire::plugin::Z_CheckAccessControlExpressionReturns),
+            (copy_file_infos, "CopyFileInfos", "Z_CopyFileInfosArgs", $crate::wire::plugin::Z_CopyFileInfosArgs, "Z_CopyFileInfosReturns", $crate::wire::plugin::Z_CopyFileInfosReturns),
+            (count_property_fields, "CountPropertyFields", "Z_CountPropertyFieldsArgs", $crate::wire::plugin::Z_CountPropertyFieldsArgs, "Z_CountPropertyFieldsReturns", $crate::wire::plugin::Z_CountPropertyFieldsReturns),
+            (count_property_fields_for_target, "CountPropertyFieldsForTarget", "Z_CountPropertyFieldsForTargetArgs", $crate::wire::plugin::Z_CountPropertyFieldsForTargetArgs, "Z_CountPropertyFieldsForTargetReturns", $crate::wire::plugin::Z_CountPropertyFieldsForTargetReturns),
+            (create_bot, "CreateBot", "Z_CreateBotArgs", $crate::wire::plugin::Z_CreateBotArgs, "Z_CreateBotReturns", $crate::wire::plugin::Z_CreateBotReturns),
+            (create_channel, "CreateChannel", "Z_CreateChannelArgs", $crate::wire::plugin::Z_CreateChannelArgs, "Z_CreateChannelReturns", $crate::wire::plugin::Z_CreateChannelReturns),
+            (create_channel_sidebar_category, "CreateChannelSidebarCategory", "Z_CreateChannelSidebarCategoryArgs", $crate::wire::plugin::Z_CreateChannelSidebarCategoryArgs, "Z_CreateChannelSidebarCategoryReturns", $crate::wire::plugin::Z_CreateChannelSidebarCategoryReturns),
+            (create_command, "CreateCommand", "Z_CreateCommandArgs", $crate::wire::plugin::Z_CreateCommandArgs, "Z_CreateCommandReturns", $crate::wire::plugin::Z_CreateCommandReturns),
+            (create_default_syncable_memberships, "CreateDefaultSyncableMemberships", "Z_CreateDefaultSyncableMembershipsArgs", $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsArgs, "Z_CreateDefaultSyncableMembershipsReturns", $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsReturns),
+            (create_group, "CreateGroup", "Z_CreateGroupArgs", $crate::wire::plugin::Z_CreateGroupArgs, "Z_CreateGroupReturns", $crate::wire::plugin::Z_CreateGroupReturns),
+            (create_o_auth_app, "CreateOAuthApp", "Z_CreateOAuthAppArgs", $crate::wire::plugin::Z_CreateOAuthAppArgs, "Z_CreateOAuthAppReturns", $crate::wire::plugin::Z_CreateOAuthAppReturns),
+            (create_post, "CreatePost", "Z_CreatePostArgs", $crate::wire::plugin::Z_CreatePostArgs, "Z_CreatePostReturns", $crate::wire::plugin::Z_CreatePostReturns),
+            (create_property_field, "CreatePropertyField", "Z_CreatePropertyFieldArgs", $crate::wire::plugin::Z_CreatePropertyFieldArgs, "Z_CreatePropertyFieldReturns", $crate::wire::plugin::Z_CreatePropertyFieldReturns),
+            (create_property_value, "CreatePropertyValue", "Z_CreatePropertyValueArgs", $crate::wire::plugin::Z_CreatePropertyValueArgs, "Z_CreatePropertyValueReturns", $crate::wire::plugin::Z_CreatePropertyValueReturns),
+            (create_session, "CreateSession", "Z_CreateSessionArgs", $crate::wire::plugin::Z_CreateSessionArgs, "Z_CreateSessionReturns", $crate::wire::plugin::Z_CreateSessionReturns),
+            (create_team, "CreateTeam", "Z_CreateTeamArgs", $crate::wire::plugin::Z_CreateTeamArgs, "Z_CreateTeamReturns", $crate::wire::plugin::Z_CreateTeamReturns),
+            (create_team_member, "CreateTeamMember", "Z_CreateTeamMemberArgs", $crate::wire::plugin::Z_CreateTeamMemberArgs, "Z_CreateTeamMemberReturns", $crate::wire::plugin::Z_CreateTeamMemberReturns),
+            (create_team_members, "CreateTeamMembers", "Z_CreateTeamMembersArgs", $crate::wire::plugin::Z_CreateTeamMembersArgs, "Z_CreateTeamMembersReturns", $crate::wire::plugin::Z_CreateTeamMembersReturns),
+            (create_team_members_gracefully, "CreateTeamMembersGracefully", "Z_CreateTeamMembersGracefullyArgs", $crate::wire::plugin::Z_CreateTeamMembersGracefullyArgs, "Z_CreateTeamMembersGracefullyReturns", $crate::wire::plugin::Z_CreateTeamMembersGracefullyReturns),
+            (create_upload_session, "CreateUploadSession", "Z_CreateUploadSessionArgs", $crate::wire::plugin::Z_CreateUploadSessionArgs, "Z_CreateUploadSessionReturns", $crate::wire::plugin::Z_CreateUploadSessionReturns),
+            (create_user, "CreateUser", "Z_CreateUserArgs", $crate::wire::plugin::Z_CreateUserArgs, "Z_CreateUserReturns", $crate::wire::plugin::Z_CreateUserReturns),
+            (create_user_access_token, "CreateUserAccessToken", "Z_CreateUserAccessTokenArgs", $crate::wire::plugin::Z_CreateUserAccessTokenArgs, "Z_CreateUserAccessTokenReturns", $crate::wire::plugin::Z_CreateUserAccessTokenReturns),
+            (delete_access_control_policy, "DeleteAccessControlPolicy", "Z_DeleteAccessControlPolicyArgs", $crate::wire::plugin::Z_DeleteAccessControlPolicyArgs, "Z_DeleteAccessControlPolicyReturns", $crate::wire::plugin::Z_DeleteAccessControlPolicyReturns),
+            (delete_channel, "DeleteChannel", "Z_DeleteChannelArgs", $crate::wire::plugin::Z_DeleteChannelArgs, "Z_DeleteChannelReturns", $crate::wire::plugin::Z_DeleteChannelReturns),
+            (delete_channel_member, "DeleteChannelMember", "Z_DeleteChannelMemberArgs", $crate::wire::plugin::Z_DeleteChannelMemberArgs, "Z_DeleteChannelMemberReturns", $crate::wire::plugin::Z_DeleteChannelMemberReturns),
+            (delete_command, "DeleteCommand", "Z_DeleteCommandArgs", $crate::wire::plugin::Z_DeleteCommandArgs, "Z_DeleteCommandReturns", $crate::wire::plugin::Z_DeleteCommandReturns),
+            (delete_ephemeral_post, "DeleteEphemeralPost", "Z_DeleteEphemeralPostArgs", $crate::wire::plugin::Z_DeleteEphemeralPostArgs, "Z_DeleteEphemeralPostReturns", $crate::wire::plugin::Z_DeleteEphemeralPostReturns),
+            (delete_group, "DeleteGroup", "Z_DeleteGroupArgs", $crate::wire::plugin::Z_DeleteGroupArgs, "Z_DeleteGroupReturns", $crate::wire::plugin::Z_DeleteGroupReturns),
+            (delete_group_constrained_memberships, "DeleteGroupConstrainedMemberships", "Z_DeleteGroupConstrainedMembershipsArgs", $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsArgs, "Z_DeleteGroupConstrainedMembershipsReturns", $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsReturns),
+            (delete_group_member, "DeleteGroupMember", "Z_DeleteGroupMemberArgs", $crate::wire::plugin::Z_DeleteGroupMemberArgs, "Z_DeleteGroupMemberReturns", $crate::wire::plugin::Z_DeleteGroupMemberReturns),
+            (delete_group_syncable, "DeleteGroupSyncable", "Z_DeleteGroupSyncableArgs", $crate::wire::plugin::Z_DeleteGroupSyncableArgs, "Z_DeleteGroupSyncableReturns", $crate::wire::plugin::Z_DeleteGroupSyncableReturns),
+            (delete_o_auth_app, "DeleteOAuthApp", "Z_DeleteOAuthAppArgs", $crate::wire::plugin::Z_DeleteOAuthAppArgs, "Z_DeleteOAuthAppReturns", $crate::wire::plugin::Z_DeleteOAuthAppReturns),
+            (delete_post, "DeletePost", "Z_DeletePostArgs", $crate::wire::plugin::Z_DeletePostArgs, "Z_DeletePostReturns", $crate::wire::plugin::Z_DeletePostReturns),
+            (delete_preferences_for_user, "DeletePreferencesForUser", "Z_DeletePreferencesForUserArgs", $crate::wire::plugin::Z_DeletePreferencesForUserArgs, "Z_DeletePreferencesForUserReturns", $crate::wire::plugin::Z_DeletePreferencesForUserReturns),
+            (delete_property_field, "DeletePropertyField", "Z_DeletePropertyFieldArgs", $crate::wire::plugin::Z_DeletePropertyFieldArgs, "Z_DeletePropertyFieldReturns", $crate::wire::plugin::Z_DeletePropertyFieldReturns),
+            (delete_property_value, "DeletePropertyValue", "Z_DeletePropertyValueArgs", $crate::wire::plugin::Z_DeletePropertyValueArgs, "Z_DeletePropertyValueReturns", $crate::wire::plugin::Z_DeletePropertyValueReturns),
+            (delete_property_value_with_options, "DeletePropertyValueWithOptions", "Z_DeletePropertyValueWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValueWithOptionsArgs, "Z_DeletePropertyValueWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValueWithOptionsReturns),
+            (delete_property_values_for_field, "DeletePropertyValuesForField", "Z_DeletePropertyValuesForFieldArgs", $crate::wire::plugin::Z_DeletePropertyValuesForFieldArgs, "Z_DeletePropertyValuesForFieldReturns", $crate::wire::plugin::Z_DeletePropertyValuesForFieldReturns),
+            (delete_property_values_for_field_with_options, "DeletePropertyValuesForFieldWithOptions", "Z_DeletePropertyValuesForFieldWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsArgs, "Z_DeletePropertyValuesForFieldWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsReturns),
+            (delete_property_values_for_target, "DeletePropertyValuesForTarget", "Z_DeletePropertyValuesForTargetArgs", $crate::wire::plugin::Z_DeletePropertyValuesForTargetArgs, "Z_DeletePropertyValuesForTargetReturns", $crate::wire::plugin::Z_DeletePropertyValuesForTargetReturns),
+            (delete_property_values_for_target_with_options, "DeletePropertyValuesForTargetWithOptions", "Z_DeletePropertyValuesForTargetWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsArgs, "Z_DeletePropertyValuesForTargetWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsReturns),
+            (delete_team, "DeleteTeam", "Z_DeleteTeamArgs", $crate::wire::plugin::Z_DeleteTeamArgs, "Z_DeleteTeamReturns", $crate::wire::plugin::Z_DeleteTeamReturns),
+            (delete_team_member, "DeleteTeamMember", "Z_DeleteTeamMemberArgs", $crate::wire::plugin::Z_DeleteTeamMemberArgs, "Z_DeleteTeamMemberReturns", $crate::wire::plugin::Z_DeleteTeamMemberReturns),
+            (delete_user, "DeleteUser", "Z_DeleteUserArgs", $crate::wire::plugin::Z_DeleteUserArgs, "Z_DeleteUserReturns", $crate::wire::plugin::Z_DeleteUserReturns),
+            (disable_plugin, "DisablePlugin", "Z_DisablePluginArgs", $crate::wire::plugin::Z_DisablePluginArgs, "Z_DisablePluginReturns", $crate::wire::plugin::Z_DisablePluginReturns),
+            (enable_plugin, "EnablePlugin", "Z_EnablePluginArgs", $crate::wire::plugin::Z_EnablePluginArgs, "Z_EnablePluginReturns", $crate::wire::plugin::Z_EnablePluginReturns),
+            (ensure_bot_user, "EnsureBotUser", "Z_EnsureBotUserArgs", $crate::wire::plugin::Z_EnsureBotUserArgs, "Z_EnsureBotUserReturns", $crate::wire::plugin::Z_EnsureBotUserReturns),
+            (evaluate_access_control, "EvaluateAccessControl", "Z_EvaluateAccessControlArgs", $crate::wire::plugin::Z_EvaluateAccessControlArgs, "Z_EvaluateAccessControlReturns", $crate::wire::plugin::Z_EvaluateAccessControlReturns),
+            (execute_slash_command, "ExecuteSlashCommand", "Z_ExecuteSlashCommandArgs", $crate::wire::plugin::Z_ExecuteSlashCommandArgs, "Z_ExecuteSlashCommandReturns", $crate::wire::plugin::Z_ExecuteSlashCommandReturns),
+            (extend_session_expiry, "ExtendSessionExpiry", "Z_ExtendSessionExpiryArgs", $crate::wire::plugin::Z_ExtendSessionExpiryArgs, "Z_ExtendSessionExpiryReturns", $crate::wire::plugin::Z_ExtendSessionExpiryReturns),
+            (get_access_control_fields_autocomplete, "GetAccessControlFieldsAutocomplete", "Z_GetAccessControlFieldsAutocompleteArgs", $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteArgs, "Z_GetAccessControlFieldsAutocompleteReturns", $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteReturns),
+            (get_access_control_policy, "GetAccessControlPolicy", "Z_GetAccessControlPolicyArgs", $crate::wire::plugin::Z_GetAccessControlPolicyArgs, "Z_GetAccessControlPolicyReturns", $crate::wire::plugin::Z_GetAccessControlPolicyReturns),
+            (get_access_control_visual_ast, "GetAccessControlVisualAST", "Z_GetAccessControlVisualASTArgs", $crate::wire::plugin::Z_GetAccessControlVisualASTArgs, "Z_GetAccessControlVisualASTReturns", $crate::wire::plugin::Z_GetAccessControlVisualASTReturns),
+            (get_bot, "GetBot", "Z_GetBotArgs", $crate::wire::plugin::Z_GetBotArgs, "Z_GetBotReturns", $crate::wire::plugin::Z_GetBotReturns),
+            (get_bots, "GetBots", "Z_GetBotsArgs", $crate::wire::plugin::Z_GetBotsArgs, "Z_GetBotsReturns", $crate::wire::plugin::Z_GetBotsReturns),
+            (get_bundle_path, "GetBundlePath", "Z_GetBundlePathArgs", $crate::wire::plugin::Z_GetBundlePathArgs, "Z_GetBundlePathReturns", $crate::wire::plugin::Z_GetBundlePathReturns),
+            (get_channel, "GetChannel", "Z_GetChannelArgs", $crate::wire::plugin::Z_GetChannelArgs, "Z_GetChannelReturns", $crate::wire::plugin::Z_GetChannelReturns),
+            (get_channel_by_name, "GetChannelByName", "Z_GetChannelByNameArgs", $crate::wire::plugin::Z_GetChannelByNameArgs, "Z_GetChannelByNameReturns", $crate::wire::plugin::Z_GetChannelByNameReturns),
+            (get_channel_by_name_for_team_name, "GetChannelByNameForTeamName", "Z_GetChannelByNameForTeamNameArgs", $crate::wire::plugin::Z_GetChannelByNameForTeamNameArgs, "Z_GetChannelByNameForTeamNameReturns", $crate::wire::plugin::Z_GetChannelByNameForTeamNameReturns),
+            (get_channel_member, "GetChannelMember", "Z_GetChannelMemberArgs", $crate::wire::plugin::Z_GetChannelMemberArgs, "Z_GetChannelMemberReturns", $crate::wire::plugin::Z_GetChannelMemberReturns),
+            (get_channel_members, "GetChannelMembers", "Z_GetChannelMembersArgs", $crate::wire::plugin::Z_GetChannelMembersArgs, "Z_GetChannelMembersReturns", $crate::wire::plugin::Z_GetChannelMembersReturns),
+            (get_channel_members_by_ids, "GetChannelMembersByIds", "Z_GetChannelMembersByIdsArgs", $crate::wire::plugin::Z_GetChannelMembersByIdsArgs, "Z_GetChannelMembersByIdsReturns", $crate::wire::plugin::Z_GetChannelMembersByIdsReturns),
+            (get_channel_members_for_user, "GetChannelMembersForUser", "Z_GetChannelMembersForUserArgs", $crate::wire::plugin::Z_GetChannelMembersForUserArgs, "Z_GetChannelMembersForUserReturns", $crate::wire::plugin::Z_GetChannelMembersForUserReturns),
+            (get_channel_of_type, "GetChannelOfType", "Z_GetChannelOfTypeArgs", $crate::wire::plugin::Z_GetChannelOfTypeArgs, "Z_GetChannelOfTypeReturns", $crate::wire::plugin::Z_GetChannelOfTypeReturns),
+            (get_channel_sidebar_categories, "GetChannelSidebarCategories", "Z_GetChannelSidebarCategoriesArgs", $crate::wire::plugin::Z_GetChannelSidebarCategoriesArgs, "Z_GetChannelSidebarCategoriesReturns", $crate::wire::plugin::Z_GetChannelSidebarCategoriesReturns),
+            (get_channel_stats, "GetChannelStats", "Z_GetChannelStatsArgs", $crate::wire::plugin::Z_GetChannelStatsArgs, "Z_GetChannelStatsReturns", $crate::wire::plugin::Z_GetChannelStatsReturns),
+            (get_channels_for_team_for_user, "GetChannelsForTeamForUser", "Z_GetChannelsForTeamForUserArgs", $crate::wire::plugin::Z_GetChannelsForTeamForUserArgs, "Z_GetChannelsForTeamForUserReturns", $crate::wire::plugin::Z_GetChannelsForTeamForUserReturns),
+            (get_cloud_limits, "GetCloudLimits", "Z_GetCloudLimitsArgs", $crate::wire::plugin::Z_GetCloudLimitsArgs, "Z_GetCloudLimitsReturns", $crate::wire::plugin::Z_GetCloudLimitsReturns),
+            (get_command, "GetCommand", "Z_GetCommandArgs", $crate::wire::plugin::Z_GetCommandArgs, "Z_GetCommandReturns", $crate::wire::plugin::Z_GetCommandReturns),
+            (get_config, "GetConfig", "Z_GetConfigArgs", $crate::wire::plugin::Z_GetConfigArgs, "Z_GetConfigReturns", $crate::wire::plugin::Z_GetConfigReturns),
+            (get_diagnostic_id, "GetDiagnosticId", "Z_GetDiagnosticIdArgs", $crate::wire::plugin::Z_GetDiagnosticIdArgs, "Z_GetDiagnosticIdReturns", $crate::wire::plugin::Z_GetDiagnosticIdReturns),
+            (get_direct_channel, "GetDirectChannel", "Z_GetDirectChannelArgs", $crate::wire::plugin::Z_GetDirectChannelArgs, "Z_GetDirectChannelReturns", $crate::wire::plugin::Z_GetDirectChannelReturns),
+            (get_emoji, "GetEmoji", "Z_GetEmojiArgs", $crate::wire::plugin::Z_GetEmojiArgs, "Z_GetEmojiReturns", $crate::wire::plugin::Z_GetEmojiReturns),
+            (get_emoji_by_name, "GetEmojiByName", "Z_GetEmojiByNameArgs", $crate::wire::plugin::Z_GetEmojiByNameArgs, "Z_GetEmojiByNameReturns", $crate::wire::plugin::Z_GetEmojiByNameReturns),
+            (get_emoji_image, "GetEmojiImage", "Z_GetEmojiImageArgs", $crate::wire::plugin::Z_GetEmojiImageArgs, "Z_GetEmojiImageReturns", $crate::wire::plugin::Z_GetEmojiImageReturns),
+            (get_emoji_list, "GetEmojiList", "Z_GetEmojiListArgs", $crate::wire::plugin::Z_GetEmojiListArgs, "Z_GetEmojiListReturns", $crate::wire::plugin::Z_GetEmojiListReturns),
+            (get_file, "GetFile", "Z_GetFileArgs", $crate::wire::plugin::Z_GetFileArgs, "Z_GetFileReturns", $crate::wire::plugin::Z_GetFileReturns),
+            (get_file_info, "GetFileInfo", "Z_GetFileInfoArgs", $crate::wire::plugin::Z_GetFileInfoArgs, "Z_GetFileInfoReturns", $crate::wire::plugin::Z_GetFileInfoReturns),
+            (get_file_infos, "GetFileInfos", "Z_GetFileInfosArgs", $crate::wire::plugin::Z_GetFileInfosArgs, "Z_GetFileInfosReturns", $crate::wire::plugin::Z_GetFileInfosReturns),
+            (get_file_link, "GetFileLink", "Z_GetFileLinkArgs", $crate::wire::plugin::Z_GetFileLinkArgs, "Z_GetFileLinkReturns", $crate::wire::plugin::Z_GetFileLinkReturns),
+            (get_group, "GetGroup", "Z_GetGroupArgs", $crate::wire::plugin::Z_GetGroupArgs, "Z_GetGroupReturns", $crate::wire::plugin::Z_GetGroupReturns),
+            (get_group_by_name, "GetGroupByName", "Z_GetGroupByNameArgs", $crate::wire::plugin::Z_GetGroupByNameArgs, "Z_GetGroupByNameReturns", $crate::wire::plugin::Z_GetGroupByNameReturns),
+            (get_group_by_remote_id, "GetGroupByRemoteID", "Z_GetGroupByRemoteIDArgs", $crate::wire::plugin::Z_GetGroupByRemoteIDArgs, "Z_GetGroupByRemoteIDReturns", $crate::wire::plugin::Z_GetGroupByRemoteIDReturns),
+            (get_group_channel, "GetGroupChannel", "Z_GetGroupChannelArgs", $crate::wire::plugin::Z_GetGroupChannelArgs, "Z_GetGroupChannelReturns", $crate::wire::plugin::Z_GetGroupChannelReturns),
+            (get_group_member_users, "GetGroupMemberUsers", "Z_GetGroupMemberUsersArgs", $crate::wire::plugin::Z_GetGroupMemberUsersArgs, "Z_GetGroupMemberUsersReturns", $crate::wire::plugin::Z_GetGroupMemberUsersReturns),
+            (get_group_syncable, "GetGroupSyncable", "Z_GetGroupSyncableArgs", $crate::wire::plugin::Z_GetGroupSyncableArgs, "Z_GetGroupSyncableReturns", $crate::wire::plugin::Z_GetGroupSyncableReturns),
+            (get_group_syncables, "GetGroupSyncables", "Z_GetGroupSyncablesArgs", $crate::wire::plugin::Z_GetGroupSyncablesArgs, "Z_GetGroupSyncablesReturns", $crate::wire::plugin::Z_GetGroupSyncablesReturns),
+            (get_groups, "GetGroups", "Z_GetGroupsArgs", $crate::wire::plugin::Z_GetGroupsArgs, "Z_GetGroupsReturns", $crate::wire::plugin::Z_GetGroupsReturns),
+            (get_groups_by_source, "GetGroupsBySource", "Z_GetGroupsBySourceArgs", $crate::wire::plugin::Z_GetGroupsBySourceArgs, "Z_GetGroupsBySourceReturns", $crate::wire::plugin::Z_GetGroupsBySourceReturns),
+            (get_groups_for_user, "GetGroupsForUser", "Z_GetGroupsForUserArgs", $crate::wire::plugin::Z_GetGroupsForUserArgs, "Z_GetGroupsForUserReturns", $crate::wire::plugin::Z_GetGroupsForUserReturns),
+            (get_ldap_user_attributes, "GetLDAPUserAttributes", "Z_GetLDAPUserAttributesArgs", $crate::wire::plugin::Z_GetLDAPUserAttributesArgs, "Z_GetLDAPUserAttributesReturns", $crate::wire::plugin::Z_GetLDAPUserAttributesReturns),
+            (get_license, "GetLicense", "Z_GetLicenseArgs", $crate::wire::plugin::Z_GetLicenseArgs, "Z_GetLicenseReturns", $crate::wire::plugin::Z_GetLicenseReturns),
+            (get_o_auth_app, "GetOAuthApp", "Z_GetOAuthAppArgs", $crate::wire::plugin::Z_GetOAuthAppArgs, "Z_GetOAuthAppReturns", $crate::wire::plugin::Z_GetOAuthAppReturns),
+            (get_plugin_config, "GetPluginConfig", "Z_GetPluginConfigArgs", $crate::wire::plugin::Z_GetPluginConfigArgs, "Z_GetPluginConfigReturns", $crate::wire::plugin::Z_GetPluginConfigReturns),
+            (get_plugin_id, "GetPluginID", "Z_GetPluginIDArgs", $crate::wire::plugin::Z_GetPluginIDArgs, "Z_GetPluginIDReturns", $crate::wire::plugin::Z_GetPluginIDReturns),
+            (get_plugin_status, "GetPluginStatus", "Z_GetPluginStatusArgs", $crate::wire::plugin::Z_GetPluginStatusArgs, "Z_GetPluginStatusReturns", $crate::wire::plugin::Z_GetPluginStatusReturns),
+            (get_plugins, "GetPlugins", "Z_GetPluginsArgs", $crate::wire::plugin::Z_GetPluginsArgs, "Z_GetPluginsReturns", $crate::wire::plugin::Z_GetPluginsReturns),
+            (get_post, "GetPost", "Z_GetPostArgs", $crate::wire::plugin::Z_GetPostArgs, "Z_GetPostReturns", $crate::wire::plugin::Z_GetPostReturns),
+            (get_post_thread, "GetPostThread", "Z_GetPostThreadArgs", $crate::wire::plugin::Z_GetPostThreadArgs, "Z_GetPostThreadReturns", $crate::wire::plugin::Z_GetPostThreadReturns),
+            (get_posts_after, "GetPostsAfter", "Z_GetPostsAfterArgs", $crate::wire::plugin::Z_GetPostsAfterArgs, "Z_GetPostsAfterReturns", $crate::wire::plugin::Z_GetPostsAfterReturns),
+            (get_posts_before, "GetPostsBefore", "Z_GetPostsBeforeArgs", $crate::wire::plugin::Z_GetPostsBeforeArgs, "Z_GetPostsBeforeReturns", $crate::wire::plugin::Z_GetPostsBeforeReturns),
+            (get_posts_for_channel, "GetPostsForChannel", "Z_GetPostsForChannelArgs", $crate::wire::plugin::Z_GetPostsForChannelArgs, "Z_GetPostsForChannelReturns", $crate::wire::plugin::Z_GetPostsForChannelReturns),
+            (get_posts_since, "GetPostsSince", "Z_GetPostsSinceArgs", $crate::wire::plugin::Z_GetPostsSinceArgs, "Z_GetPostsSinceReturns", $crate::wire::plugin::Z_GetPostsSinceReturns),
+            (get_preference_for_user, "GetPreferenceForUser", "Z_GetPreferenceForUserArgs", $crate::wire::plugin::Z_GetPreferenceForUserArgs, "Z_GetPreferenceForUserReturns", $crate::wire::plugin::Z_GetPreferenceForUserReturns),
+            (get_preferences_for_user, "GetPreferencesForUser", "Z_GetPreferencesForUserArgs", $crate::wire::plugin::Z_GetPreferencesForUserArgs, "Z_GetPreferencesForUserReturns", $crate::wire::plugin::Z_GetPreferencesForUserReturns),
+            (get_profile_image, "GetProfileImage", "Z_GetProfileImageArgs", $crate::wire::plugin::Z_GetProfileImageArgs, "Z_GetProfileImageReturns", $crate::wire::plugin::Z_GetProfileImageReturns),
+            (get_property_field, "GetPropertyField", "Z_GetPropertyFieldArgs", $crate::wire::plugin::Z_GetPropertyFieldArgs, "Z_GetPropertyFieldReturns", $crate::wire::plugin::Z_GetPropertyFieldReturns),
+            (get_property_field_by_name, "GetPropertyFieldByName", "Z_GetPropertyFieldByNameArgs", $crate::wire::plugin::Z_GetPropertyFieldByNameArgs, "Z_GetPropertyFieldByNameReturns", $crate::wire::plugin::Z_GetPropertyFieldByNameReturns),
+            (get_property_fields, "GetPropertyFields", "Z_GetPropertyFieldsArgs", $crate::wire::plugin::Z_GetPropertyFieldsArgs, "Z_GetPropertyFieldsReturns", $crate::wire::plugin::Z_GetPropertyFieldsReturns),
+            (get_property_group, "GetPropertyGroup", "Z_GetPropertyGroupArgs", $crate::wire::plugin::Z_GetPropertyGroupArgs, "Z_GetPropertyGroupReturns", $crate::wire::plugin::Z_GetPropertyGroupReturns),
+            (get_property_value, "GetPropertyValue", "Z_GetPropertyValueArgs", $crate::wire::plugin::Z_GetPropertyValueArgs, "Z_GetPropertyValueReturns", $crate::wire::plugin::Z_GetPropertyValueReturns),
+            (get_property_values, "GetPropertyValues", "Z_GetPropertyValuesArgs", $crate::wire::plugin::Z_GetPropertyValuesArgs, "Z_GetPropertyValuesReturns", $crate::wire::plugin::Z_GetPropertyValuesReturns),
+            (get_public_channels_for_team, "GetPublicChannelsForTeam", "Z_GetPublicChannelsForTeamArgs", $crate::wire::plugin::Z_GetPublicChannelsForTeamArgs, "Z_GetPublicChannelsForTeamReturns", $crate::wire::plugin::Z_GetPublicChannelsForTeamReturns),
+            (get_reactions, "GetReactions", "Z_GetReactionsArgs", $crate::wire::plugin::Z_GetReactionsArgs, "Z_GetReactionsReturns", $crate::wire::plugin::Z_GetReactionsReturns),
+            (get_server_version, "GetServerVersion", "Z_GetServerVersionArgs", $crate::wire::plugin::Z_GetServerVersionArgs, "Z_GetServerVersionReturns", $crate::wire::plugin::Z_GetServerVersionReturns),
+            (get_session, "GetSession", "Z_GetSessionArgs", $crate::wire::plugin::Z_GetSessionArgs, "Z_GetSessionReturns", $crate::wire::plugin::Z_GetSessionReturns),
+            (get_system_install_date, "GetSystemInstallDate", "Z_GetSystemInstallDateArgs", $crate::wire::plugin::Z_GetSystemInstallDateArgs, "Z_GetSystemInstallDateReturns", $crate::wire::plugin::Z_GetSystemInstallDateReturns),
+            (get_team, "GetTeam", "Z_GetTeamArgs", $crate::wire::plugin::Z_GetTeamArgs, "Z_GetTeamReturns", $crate::wire::plugin::Z_GetTeamReturns),
+            (get_team_by_name, "GetTeamByName", "Z_GetTeamByNameArgs", $crate::wire::plugin::Z_GetTeamByNameArgs, "Z_GetTeamByNameReturns", $crate::wire::plugin::Z_GetTeamByNameReturns),
+            (get_team_icon, "GetTeamIcon", "Z_GetTeamIconArgs", $crate::wire::plugin::Z_GetTeamIconArgs, "Z_GetTeamIconReturns", $crate::wire::plugin::Z_GetTeamIconReturns),
+            (get_team_member, "GetTeamMember", "Z_GetTeamMemberArgs", $crate::wire::plugin::Z_GetTeamMemberArgs, "Z_GetTeamMemberReturns", $crate::wire::plugin::Z_GetTeamMemberReturns),
+            (get_team_members, "GetTeamMembers", "Z_GetTeamMembersArgs", $crate::wire::plugin::Z_GetTeamMembersArgs, "Z_GetTeamMembersReturns", $crate::wire::plugin::Z_GetTeamMembersReturns),
+            (get_team_members_for_user, "GetTeamMembersForUser", "Z_GetTeamMembersForUserArgs", $crate::wire::plugin::Z_GetTeamMembersForUserArgs, "Z_GetTeamMembersForUserReturns", $crate::wire::plugin::Z_GetTeamMembersForUserReturns),
+            (get_team_stats, "GetTeamStats", "Z_GetTeamStatsArgs", $crate::wire::plugin::Z_GetTeamStatsArgs, "Z_GetTeamStatsReturns", $crate::wire::plugin::Z_GetTeamStatsReturns),
+            (get_teams, "GetTeams", "Z_GetTeamsArgs", $crate::wire::plugin::Z_GetTeamsArgs, "Z_GetTeamsReturns", $crate::wire::plugin::Z_GetTeamsReturns),
+            (get_teams_for_user, "GetTeamsForUser", "Z_GetTeamsForUserArgs", $crate::wire::plugin::Z_GetTeamsForUserArgs, "Z_GetTeamsForUserReturns", $crate::wire::plugin::Z_GetTeamsForUserReturns),
+            (get_teams_unread_for_user, "GetTeamsUnreadForUser", "Z_GetTeamsUnreadForUserArgs", $crate::wire::plugin::Z_GetTeamsUnreadForUserArgs, "Z_GetTeamsUnreadForUserReturns", $crate::wire::plugin::Z_GetTeamsUnreadForUserReturns),
+            (get_telemetry_id, "GetTelemetryId", "Z_GetTelemetryIdArgs", $crate::wire::plugin::Z_GetTelemetryIdArgs, "Z_GetTelemetryIdReturns", $crate::wire::plugin::Z_GetTelemetryIdReturns),
+            (get_unsanitized_config, "GetUnsanitizedConfig", "Z_GetUnsanitizedConfigArgs", $crate::wire::plugin::Z_GetUnsanitizedConfigArgs, "Z_GetUnsanitizedConfigReturns", $crate::wire::plugin::Z_GetUnsanitizedConfigReturns),
+            (get_upload_session, "GetUploadSession", "Z_GetUploadSessionArgs", $crate::wire::plugin::Z_GetUploadSessionArgs, "Z_GetUploadSessionReturns", $crate::wire::plugin::Z_GetUploadSessionReturns),
+            (get_user, "GetUser", "Z_GetUserArgs", $crate::wire::plugin::Z_GetUserArgs, "Z_GetUserReturns", $crate::wire::plugin::Z_GetUserReturns),
+            (get_user_by_email, "GetUserByEmail", "Z_GetUserByEmailArgs", $crate::wire::plugin::Z_GetUserByEmailArgs, "Z_GetUserByEmailReturns", $crate::wire::plugin::Z_GetUserByEmailReturns),
+            (get_user_by_username, "GetUserByUsername", "Z_GetUserByUsernameArgs", $crate::wire::plugin::Z_GetUserByUsernameArgs, "Z_GetUserByUsernameReturns", $crate::wire::plugin::Z_GetUserByUsernameReturns),
+            (get_user_status, "GetUserStatus", "Z_GetUserStatusArgs", $crate::wire::plugin::Z_GetUserStatusArgs, "Z_GetUserStatusReturns", $crate::wire::plugin::Z_GetUserStatusReturns),
+            (get_user_statuses_by_ids, "GetUserStatusesByIds", "Z_GetUserStatusesByIdsArgs", $crate::wire::plugin::Z_GetUserStatusesByIdsArgs, "Z_GetUserStatusesByIdsReturns", $crate::wire::plugin::Z_GetUserStatusesByIdsReturns),
+            (get_users, "GetUsers", "Z_GetUsersArgs", $crate::wire::plugin::Z_GetUsersArgs, "Z_GetUsersReturns", $crate::wire::plugin::Z_GetUsersReturns),
+            (get_users_by_ids, "GetUsersByIds", "Z_GetUsersByIdsArgs", $crate::wire::plugin::Z_GetUsersByIdsArgs, "Z_GetUsersByIdsReturns", $crate::wire::plugin::Z_GetUsersByIdsReturns),
+            (get_users_by_usernames, "GetUsersByUsernames", "Z_GetUsersByUsernamesArgs", $crate::wire::plugin::Z_GetUsersByUsernamesArgs, "Z_GetUsersByUsernamesReturns", $crate::wire::plugin::Z_GetUsersByUsernamesReturns),
+            (get_users_in_channel, "GetUsersInChannel", "Z_GetUsersInChannelArgs", $crate::wire::plugin::Z_GetUsersInChannelArgs, "Z_GetUsersInChannelReturns", $crate::wire::plugin::Z_GetUsersInChannelReturns),
+            (get_users_in_team, "GetUsersInTeam", "Z_GetUsersInTeamArgs", $crate::wire::plugin::Z_GetUsersInTeamArgs, "Z_GetUsersInTeamReturns", $crate::wire::plugin::Z_GetUsersInTeamReturns),
+            (has_permission_to, "HasPermissionTo", "Z_HasPermissionToArgs", $crate::wire::plugin::Z_HasPermissionToArgs, "Z_HasPermissionToReturns", $crate::wire::plugin::Z_HasPermissionToReturns),
+            (has_permission_to_channel, "HasPermissionToChannel", "Z_HasPermissionToChannelArgs", $crate::wire::plugin::Z_HasPermissionToChannelArgs, "Z_HasPermissionToChannelReturns", $crate::wire::plugin::Z_HasPermissionToChannelReturns),
+            (has_permission_to_team, "HasPermissionToTeam", "Z_HasPermissionToTeamArgs", $crate::wire::plugin::Z_HasPermissionToTeamArgs, "Z_HasPermissionToTeamReturns", $crate::wire::plugin::Z_HasPermissionToTeamReturns),
+            (invite_remote_to_channel, "InviteRemoteToChannel", "Z_InviteRemoteToChannelArgs", $crate::wire::plugin::Z_InviteRemoteToChannelArgs, "Z_InviteRemoteToChannelReturns", $crate::wire::plugin::Z_InviteRemoteToChannelReturns),
+            (is_enterprise_ready, "IsEnterpriseReady", "Z_IsEnterpriseReadyArgs", $crate::wire::plugin::Z_IsEnterpriseReadyArgs, "Z_IsEnterpriseReadyReturns", $crate::wire::plugin::Z_IsEnterpriseReadyReturns),
+            (kv_compare_and_delete, "KVCompareAndDelete", "Z_KVCompareAndDeleteArgs", $crate::wire::plugin::Z_KVCompareAndDeleteArgs, "Z_KVCompareAndDeleteReturns", $crate::wire::plugin::Z_KVCompareAndDeleteReturns),
+            (kv_compare_and_set, "KVCompareAndSet", "Z_KVCompareAndSetArgs", $crate::wire::plugin::Z_KVCompareAndSetArgs, "Z_KVCompareAndSetReturns", $crate::wire::plugin::Z_KVCompareAndSetReturns),
+            (kv_delete, "KVDelete", "Z_KVDeleteArgs", $crate::wire::plugin::Z_KVDeleteArgs, "Z_KVDeleteReturns", $crate::wire::plugin::Z_KVDeleteReturns),
+            (kv_delete_all, "KVDeleteAll", "Z_KVDeleteAllArgs", $crate::wire::plugin::Z_KVDeleteAllArgs, "Z_KVDeleteAllReturns", $crate::wire::plugin::Z_KVDeleteAllReturns),
+            (kv_get, "KVGet", "Z_KVGetArgs", $crate::wire::plugin::Z_KVGetArgs, "Z_KVGetReturns", $crate::wire::plugin::Z_KVGetReturns),
+            (kv_list, "KVList", "Z_KVListArgs", $crate::wire::plugin::Z_KVListArgs, "Z_KVListReturns", $crate::wire::plugin::Z_KVListReturns),
+            (kv_set, "KVSet", "Z_KVSetArgs", $crate::wire::plugin::Z_KVSetArgs, "Z_KVSetReturns", $crate::wire::plugin::Z_KVSetReturns),
+            (kv_set_with_expiry, "KVSetWithExpiry", "Z_KVSetWithExpiryArgs", $crate::wire::plugin::Z_KVSetWithExpiryArgs, "Z_KVSetWithExpiryReturns", $crate::wire::plugin::Z_KVSetWithExpiryReturns),
+            (kv_set_with_options, "KVSetWithOptions", "Z_KVSetWithOptionsArgs", $crate::wire::plugin::Z_KVSetWithOptionsArgs, "Z_KVSetWithOptionsReturns", $crate::wire::plugin::Z_KVSetWithOptionsReturns),
+            (list_built_in_commands, "ListBuiltInCommands", "Z_ListBuiltInCommandsArgs", $crate::wire::plugin::Z_ListBuiltInCommandsArgs, "Z_ListBuiltInCommandsReturns", $crate::wire::plugin::Z_ListBuiltInCommandsReturns),
+            (list_commands, "ListCommands", "Z_ListCommandsArgs", $crate::wire::plugin::Z_ListCommandsArgs, "Z_ListCommandsReturns", $crate::wire::plugin::Z_ListCommandsReturns),
+            (list_custom_commands, "ListCustomCommands", "Z_ListCustomCommandsArgs", $crate::wire::plugin::Z_ListCustomCommandsArgs, "Z_ListCustomCommandsReturns", $crate::wire::plugin::Z_ListCustomCommandsReturns),
+            (list_plugin_commands, "ListPluginCommands", "Z_ListPluginCommandsArgs", $crate::wire::plugin::Z_ListPluginCommandsArgs, "Z_ListPluginCommandsReturns", $crate::wire::plugin::Z_ListPluginCommandsReturns),
+            (load_plugin_configuration, "LoadPluginConfiguration", "Z_LoadPluginConfigurationArgsArgs", $crate::wire::plugin::Z_LoadPluginConfigurationArgsArgs, "Z_LoadPluginConfigurationArgsReturns", $crate::wire::plugin::Z_LoadPluginConfigurationArgsReturns),
+            (log_audit_rec, "LogAuditRec", "Z_LogAuditRecArgs", $crate::wire::plugin::Z_LogAuditRecArgs, "Z_LogAuditRecReturns", $crate::wire::plugin::Z_LogAuditRecReturns),
+            (log_audit_rec_with_level, "LogAuditRecWithLevel", "Z_LogAuditRecWithLevelArgs", $crate::wire::plugin::Z_LogAuditRecWithLevelArgs, "Z_LogAuditRecWithLevelReturns", $crate::wire::plugin::Z_LogAuditRecWithLevelReturns),
+            (log_debug, "LogDebug", "Z_LogDebugArgs", $crate::wire::plugin::Z_LogDebugArgs, "Z_LogDebugReturns", $crate::wire::plugin::Z_LogDebugReturns),
+            (log_error, "LogError", "Z_LogErrorArgs", $crate::wire::plugin::Z_LogErrorArgs, "Z_LogErrorReturns", $crate::wire::plugin::Z_LogErrorReturns),
+            (log_info, "LogInfo", "Z_LogInfoArgs", $crate::wire::plugin::Z_LogInfoArgs, "Z_LogInfoReturns", $crate::wire::plugin::Z_LogInfoReturns),
+            (log_warn, "LogWarn", "Z_LogWarnArgs", $crate::wire::plugin::Z_LogWarnArgs, "Z_LogWarnReturns", $crate::wire::plugin::Z_LogWarnReturns),
+            (open_interactive_dialog, "OpenInteractiveDialog", "Z_OpenInteractiveDialogArgs", $crate::wire::plugin::Z_OpenInteractiveDialogArgs, "Z_OpenInteractiveDialogReturns", $crate::wire::plugin::Z_OpenInteractiveDialogReturns),
+            (patch_bot, "PatchBot", "Z_PatchBotArgs", $crate::wire::plugin::Z_PatchBotArgs, "Z_PatchBotReturns", $crate::wire::plugin::Z_PatchBotReturns),
+            (patch_channel_members_notifications, "PatchChannelMembersNotifications", "Z_PatchChannelMembersNotificationsArgs", $crate::wire::plugin::Z_PatchChannelMembersNotificationsArgs, "Z_PatchChannelMembersNotificationsReturns", $crate::wire::plugin::Z_PatchChannelMembersNotificationsReturns),
+            (permanent_delete_bot, "PermanentDeleteBot", "Z_PermanentDeleteBotArgs", $crate::wire::plugin::Z_PermanentDeleteBotArgs, "Z_PermanentDeleteBotReturns", $crate::wire::plugin::Z_PermanentDeleteBotReturns),
+            (publish_plugin_cluster_event, "PublishPluginClusterEvent", "Z_PublishPluginClusterEventArgs", $crate::wire::plugin::Z_PublishPluginClusterEventArgs, "Z_PublishPluginClusterEventReturns", $crate::wire::plugin::Z_PublishPluginClusterEventReturns),
+            (publish_user_typing, "PublishUserTyping", "Z_PublishUserTypingArgs", $crate::wire::plugin::Z_PublishUserTypingArgs, "Z_PublishUserTypingReturns", $crate::wire::plugin::Z_PublishUserTypingReturns),
+            (publish_web_socket_event, "PublishWebSocketEvent", "Z_PublishWebSocketEventArgs", $crate::wire::plugin::Z_PublishWebSocketEventArgs, "Z_PublishWebSocketEventReturns", $crate::wire::plugin::Z_PublishWebSocketEventReturns),
+            (query_users_for_access_control_expression, "QueryUsersForAccessControlExpression", "Z_QueryUsersForAccessControlExpressionArgs", $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionArgs, "Z_QueryUsersForAccessControlExpressionReturns", $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionReturns),
+            (read_file, "ReadFile", "Z_ReadFileArgs", $crate::wire::plugin::Z_ReadFileArgs, "Z_ReadFileReturns", $crate::wire::plugin::Z_ReadFileReturns),
+            (receive_shared_channel_profile_image_sync_msg, "ReceiveSharedChannelProfileImageSyncMsg", "Z_ReceiveSharedChannelProfileImageSyncMsgArgs", $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgArgs, "Z_ReceiveSharedChannelProfileImageSyncMsgReturns", $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgReturns),
+            (receive_shared_channel_sync_msg, "ReceiveSharedChannelSyncMsg", "Z_ReceiveSharedChannelSyncMsgArgs", $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgArgs, "Z_ReceiveSharedChannelSyncMsgReturns", $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgReturns),
+            (register_channel_guard, "RegisterChannelGuard", "Z_RegisterChannelGuardArgs", $crate::wire::plugin::Z_RegisterChannelGuardArgs, "Z_RegisterChannelGuardReturns", $crate::wire::plugin::Z_RegisterChannelGuardReturns),
+            (register_collection_and_topic, "RegisterCollectionAndTopic", "Z_RegisterCollectionAndTopicArgs", $crate::wire::plugin::Z_RegisterCollectionAndTopicArgs, "Z_RegisterCollectionAndTopicReturns", $crate::wire::plugin::Z_RegisterCollectionAndTopicReturns),
+            (register_command, "RegisterCommand", "Z_RegisterCommandArgs", $crate::wire::plugin::Z_RegisterCommandArgs, "Z_RegisterCommandReturns", $crate::wire::plugin::Z_RegisterCommandReturns),
+            (register_plugin_for_shared_channels, "RegisterPluginForSharedChannels", "Z_RegisterPluginForSharedChannelsArgs", $crate::wire::plugin::Z_RegisterPluginForSharedChannelsArgs, "Z_RegisterPluginForSharedChannelsReturns", $crate::wire::plugin::Z_RegisterPluginForSharedChannelsReturns),
+            (register_property_group, "RegisterPropertyGroup", "Z_RegisterPropertyGroupArgs", $crate::wire::plugin::Z_RegisterPropertyGroupArgs, "Z_RegisterPropertyGroupReturns", $crate::wire::plugin::Z_RegisterPropertyGroupReturns),
+            (remove_plugin, "RemovePlugin", "Z_RemovePluginArgs", $crate::wire::plugin::Z_RemovePluginArgs, "Z_RemovePluginReturns", $crate::wire::plugin::Z_RemovePluginReturns),
+            (remove_reaction, "RemoveReaction", "Z_RemoveReactionArgs", $crate::wire::plugin::Z_RemoveReactionArgs, "Z_RemoveReactionReturns", $crate::wire::plugin::Z_RemoveReactionReturns),
+            (remove_team_icon, "RemoveTeamIcon", "Z_RemoveTeamIconArgs", $crate::wire::plugin::Z_RemoveTeamIconArgs, "Z_RemoveTeamIconReturns", $crate::wire::plugin::Z_RemoveTeamIconReturns),
+            (remove_user_custom_status, "RemoveUserCustomStatus", "Z_RemoveUserCustomStatusArgs", $crate::wire::plugin::Z_RemoveUserCustomStatusArgs, "Z_RemoveUserCustomStatusReturns", $crate::wire::plugin::Z_RemoveUserCustomStatusReturns),
+            (request_trial_license, "RequestTrialLicense", "Z_RequestTrialLicenseArgs", $crate::wire::plugin::Z_RequestTrialLicenseArgs, "Z_RequestTrialLicenseReturns", $crate::wire::plugin::Z_RequestTrialLicenseReturns),
+            (restore_channel, "RestoreChannel", "Z_RestoreChannelArgs", $crate::wire::plugin::Z_RestoreChannelArgs, "Z_RestoreChannelReturns", $crate::wire::plugin::Z_RestoreChannelReturns),
+            (restore_group, "RestoreGroup", "Z_RestoreGroupArgs", $crate::wire::plugin::Z_RestoreGroupArgs, "Z_RestoreGroupReturns", $crate::wire::plugin::Z_RestoreGroupReturns),
+            (revoke_session, "RevokeSession", "Z_RevokeSessionArgs", $crate::wire::plugin::Z_RevokeSessionArgs, "Z_RevokeSessionReturns", $crate::wire::plugin::Z_RevokeSessionReturns),
+            (revoke_user_access_token, "RevokeUserAccessToken", "Z_RevokeUserAccessTokenArgs", $crate::wire::plugin::Z_RevokeUserAccessTokenArgs, "Z_RevokeUserAccessTokenReturns", $crate::wire::plugin::Z_RevokeUserAccessTokenReturns),
+            (roles_grant_permission, "RolesGrantPermission", "Z_RolesGrantPermissionArgs", $crate::wire::plugin::Z_RolesGrantPermissionArgs, "Z_RolesGrantPermissionReturns", $crate::wire::plugin::Z_RolesGrantPermissionReturns),
+            (save_access_control_policy, "SaveAccessControlPolicy", "Z_SaveAccessControlPolicyArgs", $crate::wire::plugin::Z_SaveAccessControlPolicyArgs, "Z_SaveAccessControlPolicyReturns", $crate::wire::plugin::Z_SaveAccessControlPolicyReturns),
+            (save_config, "SaveConfig", "Z_SaveConfigArgs", $crate::wire::plugin::Z_SaveConfigArgs, "Z_SaveConfigReturns", $crate::wire::plugin::Z_SaveConfigReturns),
+            (save_plugin_config, "SavePluginConfig", "Z_SavePluginConfigArgs", $crate::wire::plugin::Z_SavePluginConfigArgs, "Z_SavePluginConfigReturns", $crate::wire::plugin::Z_SavePluginConfigReturns),
+            (search_channels, "SearchChannels", "Z_SearchChannelsArgs", $crate::wire::plugin::Z_SearchChannelsArgs, "Z_SearchChannelsReturns", $crate::wire::plugin::Z_SearchChannelsReturns),
+            (search_posts_in_team, "SearchPostsInTeam", "Z_SearchPostsInTeamArgs", $crate::wire::plugin::Z_SearchPostsInTeamArgs, "Z_SearchPostsInTeamReturns", $crate::wire::plugin::Z_SearchPostsInTeamReturns),
+            (search_posts_in_team_for_user, "SearchPostsInTeamForUser", "Z_SearchPostsInTeamForUserArgs", $crate::wire::plugin::Z_SearchPostsInTeamForUserArgs, "Z_SearchPostsInTeamForUserReturns", $crate::wire::plugin::Z_SearchPostsInTeamForUserReturns),
+            (search_property_fields, "SearchPropertyFields", "Z_SearchPropertyFieldsArgs", $crate::wire::plugin::Z_SearchPropertyFieldsArgs, "Z_SearchPropertyFieldsReturns", $crate::wire::plugin::Z_SearchPropertyFieldsReturns),
+            (search_property_values, "SearchPropertyValues", "Z_SearchPropertyValuesArgs", $crate::wire::plugin::Z_SearchPropertyValuesArgs, "Z_SearchPropertyValuesReturns", $crate::wire::plugin::Z_SearchPropertyValuesReturns),
+            (search_teams, "SearchTeams", "Z_SearchTeamsArgs", $crate::wire::plugin::Z_SearchTeamsArgs, "Z_SearchTeamsReturns", $crate::wire::plugin::Z_SearchTeamsReturns),
+            (search_users, "SearchUsers", "Z_SearchUsersArgs", $crate::wire::plugin::Z_SearchUsersArgs, "Z_SearchUsersReturns", $crate::wire::plugin::Z_SearchUsersReturns),
+            (send_ephemeral_post, "SendEphemeralPost", "Z_SendEphemeralPostArgs", $crate::wire::plugin::Z_SendEphemeralPostArgs, "Z_SendEphemeralPostReturns", $crate::wire::plugin::Z_SendEphemeralPostReturns),
+            (send_mail, "SendMail", "Z_SendMailArgs", $crate::wire::plugin::Z_SendMailArgs, "Z_SendMailReturns", $crate::wire::plugin::Z_SendMailReturns),
+            (send_push_notification, "SendPushNotification", "Z_SendPushNotificationArgs", $crate::wire::plugin::Z_SendPushNotificationArgs, "Z_SendPushNotificationReturns", $crate::wire::plugin::Z_SendPushNotificationReturns),
+            (send_toast_message, "SendToastMessage", "Z_SendToastMessageArgs", $crate::wire::plugin::Z_SendToastMessageArgs, "Z_SendToastMessageReturns", $crate::wire::plugin::Z_SendToastMessageReturns),
+            (set_file_searchable_content, "SetFileSearchableContent", "Z_SetFileSearchableContentArgs", $crate::wire::plugin::Z_SetFileSearchableContentArgs, "Z_SetFileSearchableContentReturns", $crate::wire::plugin::Z_SetFileSearchableContentReturns),
+            (set_profile_image, "SetProfileImage", "Z_SetProfileImageArgs", $crate::wire::plugin::Z_SetProfileImageArgs, "Z_SetProfileImageReturns", $crate::wire::plugin::Z_SetProfileImageReturns),
+            (set_team_icon, "SetTeamIcon", "Z_SetTeamIconArgs", $crate::wire::plugin::Z_SetTeamIconArgs, "Z_SetTeamIconReturns", $crate::wire::plugin::Z_SetTeamIconReturns),
+            (set_user_status_timed_dnd, "SetUserStatusTimedDND", "Z_SetUserStatusTimedDNDArgs", $crate::wire::plugin::Z_SetUserStatusTimedDNDArgs, "Z_SetUserStatusTimedDNDReturns", $crate::wire::plugin::Z_SetUserStatusTimedDNDReturns),
+            (share_channel, "ShareChannel", "Z_ShareChannelArgs", $crate::wire::plugin::Z_ShareChannelArgs, "Z_ShareChannelReturns", $crate::wire::plugin::Z_ShareChannelReturns),
+            (sync_shared_channel, "SyncSharedChannel", "Z_SyncSharedChannelArgs", $crate::wire::plugin::Z_SyncSharedChannelArgs, "Z_SyncSharedChannelReturns", $crate::wire::plugin::Z_SyncSharedChannelReturns),
+            (uninvite_remote_from_channel, "UninviteRemoteFromChannel", "Z_UninviteRemoteFromChannelArgs", $crate::wire::plugin::Z_UninviteRemoteFromChannelArgs, "Z_UninviteRemoteFromChannelReturns", $crate::wire::plugin::Z_UninviteRemoteFromChannelReturns),
+            (unregister_channel_guard, "UnregisterChannelGuard", "Z_UnregisterChannelGuardArgs", $crate::wire::plugin::Z_UnregisterChannelGuardArgs, "Z_UnregisterChannelGuardReturns", $crate::wire::plugin::Z_UnregisterChannelGuardReturns),
+            (unregister_command, "UnregisterCommand", "Z_UnregisterCommandArgs", $crate::wire::plugin::Z_UnregisterCommandArgs, "Z_UnregisterCommandReturns", $crate::wire::plugin::Z_UnregisterCommandReturns),
+            (unregister_plugin_for_shared_channels, "UnregisterPluginForSharedChannels", "Z_UnregisterPluginForSharedChannelsArgs", $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsArgs, "Z_UnregisterPluginForSharedChannelsReturns", $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsReturns),
+            (unregister_plugin_remote_for_shared_channels, "UnregisterPluginRemoteForSharedChannels", "Z_UnregisterPluginRemoteForSharedChannelsArgs", $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsArgs, "Z_UnregisterPluginRemoteForSharedChannelsReturns", $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsReturns),
+            (unshare_channel, "UnshareChannel", "Z_UnshareChannelArgs", $crate::wire::plugin::Z_UnshareChannelArgs, "Z_UnshareChannelReturns", $crate::wire::plugin::Z_UnshareChannelReturns),
+            (update_bot_active, "UpdateBotActive", "Z_UpdateBotActiveArgs", $crate::wire::plugin::Z_UpdateBotActiveArgs, "Z_UpdateBotActiveReturns", $crate::wire::plugin::Z_UpdateBotActiveReturns),
+            (update_channel, "UpdateChannel", "Z_UpdateChannelArgs", $crate::wire::plugin::Z_UpdateChannelArgs, "Z_UpdateChannelReturns", $crate::wire::plugin::Z_UpdateChannelReturns),
+            (update_channel_member_notifications, "UpdateChannelMemberNotifications", "Z_UpdateChannelMemberNotificationsArgs", $crate::wire::plugin::Z_UpdateChannelMemberNotificationsArgs, "Z_UpdateChannelMemberNotificationsReturns", $crate::wire::plugin::Z_UpdateChannelMemberNotificationsReturns),
+            (update_channel_member_roles, "UpdateChannelMemberRoles", "Z_UpdateChannelMemberRolesArgs", $crate::wire::plugin::Z_UpdateChannelMemberRolesArgs, "Z_UpdateChannelMemberRolesReturns", $crate::wire::plugin::Z_UpdateChannelMemberRolesReturns),
+            (update_channel_sidebar_categories, "UpdateChannelSidebarCategories", "Z_UpdateChannelSidebarCategoriesArgs", $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesArgs, "Z_UpdateChannelSidebarCategoriesReturns", $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesReturns),
+            (update_command, "UpdateCommand", "Z_UpdateCommandArgs", $crate::wire::plugin::Z_UpdateCommandArgs, "Z_UpdateCommandReturns", $crate::wire::plugin::Z_UpdateCommandReturns),
+            (update_ephemeral_post, "UpdateEphemeralPost", "Z_UpdateEphemeralPostArgs", $crate::wire::plugin::Z_UpdateEphemeralPostArgs, "Z_UpdateEphemeralPostReturns", $crate::wire::plugin::Z_UpdateEphemeralPostReturns),
+            (update_group, "UpdateGroup", "Z_UpdateGroupArgs", $crate::wire::plugin::Z_UpdateGroupArgs, "Z_UpdateGroupReturns", $crate::wire::plugin::Z_UpdateGroupReturns),
+            (update_group_syncable, "UpdateGroupSyncable", "Z_UpdateGroupSyncableArgs", $crate::wire::plugin::Z_UpdateGroupSyncableArgs, "Z_UpdateGroupSyncableReturns", $crate::wire::plugin::Z_UpdateGroupSyncableReturns),
+            (update_o_auth_app, "UpdateOAuthApp", "Z_UpdateOAuthAppArgs", $crate::wire::plugin::Z_UpdateOAuthAppArgs, "Z_UpdateOAuthAppReturns", $crate::wire::plugin::Z_UpdateOAuthAppReturns),
+            (update_post, "UpdatePost", "Z_UpdatePostArgs", $crate::wire::plugin::Z_UpdatePostArgs, "Z_UpdatePostReturns", $crate::wire::plugin::Z_UpdatePostReturns),
+            (update_preferences_for_user, "UpdatePreferencesForUser", "Z_UpdatePreferencesForUserArgs", $crate::wire::plugin::Z_UpdatePreferencesForUserArgs, "Z_UpdatePreferencesForUserReturns", $crate::wire::plugin::Z_UpdatePreferencesForUserReturns),
+            (update_property_field, "UpdatePropertyField", "Z_UpdatePropertyFieldArgs", $crate::wire::plugin::Z_UpdatePropertyFieldArgs, "Z_UpdatePropertyFieldReturns", $crate::wire::plugin::Z_UpdatePropertyFieldReturns),
+            (update_property_fields, "UpdatePropertyFields", "Z_UpdatePropertyFieldsArgs", $crate::wire::plugin::Z_UpdatePropertyFieldsArgs, "Z_UpdatePropertyFieldsReturns", $crate::wire::plugin::Z_UpdatePropertyFieldsReturns),
+            (update_property_value, "UpdatePropertyValue", "Z_UpdatePropertyValueArgs", $crate::wire::plugin::Z_UpdatePropertyValueArgs, "Z_UpdatePropertyValueReturns", $crate::wire::plugin::Z_UpdatePropertyValueReturns),
+            (update_property_values, "UpdatePropertyValues", "Z_UpdatePropertyValuesArgs", $crate::wire::plugin::Z_UpdatePropertyValuesArgs, "Z_UpdatePropertyValuesReturns", $crate::wire::plugin::Z_UpdatePropertyValuesReturns),
+            (update_shared_channel, "UpdateSharedChannel", "Z_UpdateSharedChannelArgs", $crate::wire::plugin::Z_UpdateSharedChannelArgs, "Z_UpdateSharedChannelReturns", $crate::wire::plugin::Z_UpdateSharedChannelReturns),
+            (update_shared_channel_cursor, "UpdateSharedChannelCursor", "Z_UpdateSharedChannelCursorArgs", $crate::wire::plugin::Z_UpdateSharedChannelCursorArgs, "Z_UpdateSharedChannelCursorReturns", $crate::wire::plugin::Z_UpdateSharedChannelCursorReturns),
+            (update_team, "UpdateTeam", "Z_UpdateTeamArgs", $crate::wire::plugin::Z_UpdateTeamArgs, "Z_UpdateTeamReturns", $crate::wire::plugin::Z_UpdateTeamReturns),
+            (update_team_member_roles, "UpdateTeamMemberRoles", "Z_UpdateTeamMemberRolesArgs", $crate::wire::plugin::Z_UpdateTeamMemberRolesArgs, "Z_UpdateTeamMemberRolesReturns", $crate::wire::plugin::Z_UpdateTeamMemberRolesReturns),
+            (update_user, "UpdateUser", "Z_UpdateUserArgs", $crate::wire::plugin::Z_UpdateUserArgs, "Z_UpdateUserReturns", $crate::wire::plugin::Z_UpdateUserReturns),
+            (update_user_active, "UpdateUserActive", "Z_UpdateUserActiveArgs", $crate::wire::plugin::Z_UpdateUserActiveArgs, "Z_UpdateUserActiveReturns", $crate::wire::plugin::Z_UpdateUserActiveReturns),
+            (update_user_auth, "UpdateUserAuth", "Z_UpdateUserAuthArgs", $crate::wire::plugin::Z_UpdateUserAuthArgs, "Z_UpdateUserAuthReturns", $crate::wire::plugin::Z_UpdateUserAuthReturns),
+            (update_user_custom_status, "UpdateUserCustomStatus", "Z_UpdateUserCustomStatusArgs", $crate::wire::plugin::Z_UpdateUserCustomStatusArgs, "Z_UpdateUserCustomStatusReturns", $crate::wire::plugin::Z_UpdateUserCustomStatusReturns),
+            (update_user_roles, "UpdateUserRoles", "Z_UpdateUserRolesArgs", $crate::wire::plugin::Z_UpdateUserRolesArgs, "Z_UpdateUserRolesReturns", $crate::wire::plugin::Z_UpdateUserRolesReturns),
+            (update_user_status, "UpdateUserStatus", "Z_UpdateUserStatusArgs", $crate::wire::plugin::Z_UpdateUserStatusArgs, "Z_UpdateUserStatusReturns", $crate::wire::plugin::Z_UpdateUserStatusReturns),
+            (upload_file, "UploadFile", "Z_UploadFileArgs", $crate::wire::plugin::Z_UploadFileArgs, "Z_UploadFileReturns", $crate::wire::plugin::Z_UploadFileReturns),
+            (upsert_group_member, "UpsertGroupMember", "Z_UpsertGroupMemberArgs", $crate::wire::plugin::Z_UpsertGroupMemberArgs, "Z_UpsertGroupMemberReturns", $crate::wire::plugin::Z_UpsertGroupMemberReturns),
+            (upsert_group_members, "UpsertGroupMembers", "Z_UpsertGroupMembersArgs", $crate::wire::plugin::Z_UpsertGroupMembersArgs, "Z_UpsertGroupMembersReturns", $crate::wire::plugin::Z_UpsertGroupMembersReturns),
+            (upsert_group_syncable, "UpsertGroupSyncable", "Z_UpsertGroupSyncableArgs", $crate::wire::plugin::Z_UpsertGroupSyncableArgs, "Z_UpsertGroupSyncableReturns", $crate::wire::plugin::Z_UpsertGroupSyncableReturns),
+            (upsert_property_value, "UpsertPropertyValue", "Z_UpsertPropertyValueArgs", $crate::wire::plugin::Z_UpsertPropertyValueArgs, "Z_UpsertPropertyValueReturns", $crate::wire::plugin::Z_UpsertPropertyValueReturns),
+            (upsert_property_value_with_options, "UpsertPropertyValueWithOptions", "Z_UpsertPropertyValueWithOptionsArgs", $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsArgs, "Z_UpsertPropertyValueWithOptionsReturns", $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsReturns),
+            (upsert_property_values, "UpsertPropertyValues", "Z_UpsertPropertyValuesArgs", $crate::wire::plugin::Z_UpsertPropertyValuesArgs, "Z_UpsertPropertyValuesReturns", $crate::wire::plugin::Z_UpsertPropertyValuesReturns),
+            (upsert_property_values_with_options, "UpsertPropertyValuesWithOptions", "Z_UpsertPropertyValuesWithOptionsArgs", $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsArgs, "Z_UpsertPropertyValuesWithOptionsReturns", $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsReturns),
+        }
+    };
+}
+
+/// Invoke `$m!` with every API method whose `ApiClient` method is generated as
+/// `(method, "GoName", "Z_Args", Args, "Z_Returns", Returns),`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! for_each_api_call {
+    ($m:ident) => {
+        $m! {
+            (add_channel_member, "AddChannelMember", "Z_AddChannelMemberArgs", $crate::wire::plugin::Z_AddChannelMemberArgs, "Z_AddChannelMemberReturns", $crate::wire::plugin::Z_AddChannelMemberReturns),
+            (add_reaction, "AddReaction", "Z_AddReactionArgs", $crate::wire::plugin::Z_AddReactionArgs, "Z_AddReactionReturns", $crate::wire::plugin::Z_AddReactionReturns),
+            (add_user_to_channel, "AddUserToChannel", "Z_AddUserToChannelArgs", $crate::wire::plugin::Z_AddUserToChannelArgs, "Z_AddUserToChannelReturns", $crate::wire::plugin::Z_AddUserToChannelReturns),
+            (check_access_control_expression, "CheckAccessControlExpression", "Z_CheckAccessControlExpressionArgs", $crate::wire::plugin::Z_CheckAccessControlExpressionArgs, "Z_CheckAccessControlExpressionReturns", $crate::wire::plugin::Z_CheckAccessControlExpressionReturns),
+            (copy_file_infos, "CopyFileInfos", "Z_CopyFileInfosArgs", $crate::wire::plugin::Z_CopyFileInfosArgs, "Z_CopyFileInfosReturns", $crate::wire::plugin::Z_CopyFileInfosReturns),
+            (count_property_fields, "CountPropertyFields", "Z_CountPropertyFieldsArgs", $crate::wire::plugin::Z_CountPropertyFieldsArgs, "Z_CountPropertyFieldsReturns", $crate::wire::plugin::Z_CountPropertyFieldsReturns),
+            (count_property_fields_for_target, "CountPropertyFieldsForTarget", "Z_CountPropertyFieldsForTargetArgs", $crate::wire::plugin::Z_CountPropertyFieldsForTargetArgs, "Z_CountPropertyFieldsForTargetReturns", $crate::wire::plugin::Z_CountPropertyFieldsForTargetReturns),
+            (create_bot, "CreateBot", "Z_CreateBotArgs", $crate::wire::plugin::Z_CreateBotArgs, "Z_CreateBotReturns", $crate::wire::plugin::Z_CreateBotReturns),
+            (create_channel, "CreateChannel", "Z_CreateChannelArgs", $crate::wire::plugin::Z_CreateChannelArgs, "Z_CreateChannelReturns", $crate::wire::plugin::Z_CreateChannelReturns),
+            (create_channel_sidebar_category, "CreateChannelSidebarCategory", "Z_CreateChannelSidebarCategoryArgs", $crate::wire::plugin::Z_CreateChannelSidebarCategoryArgs, "Z_CreateChannelSidebarCategoryReturns", $crate::wire::plugin::Z_CreateChannelSidebarCategoryReturns),
+            (create_command, "CreateCommand", "Z_CreateCommandArgs", $crate::wire::plugin::Z_CreateCommandArgs, "Z_CreateCommandReturns", $crate::wire::plugin::Z_CreateCommandReturns),
+            (create_default_syncable_memberships, "CreateDefaultSyncableMemberships", "Z_CreateDefaultSyncableMembershipsArgs", $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsArgs, "Z_CreateDefaultSyncableMembershipsReturns", $crate::wire::plugin::Z_CreateDefaultSyncableMembershipsReturns),
+            (create_group, "CreateGroup", "Z_CreateGroupArgs", $crate::wire::plugin::Z_CreateGroupArgs, "Z_CreateGroupReturns", $crate::wire::plugin::Z_CreateGroupReturns),
+            (create_o_auth_app, "CreateOAuthApp", "Z_CreateOAuthAppArgs", $crate::wire::plugin::Z_CreateOAuthAppArgs, "Z_CreateOAuthAppReturns", $crate::wire::plugin::Z_CreateOAuthAppReturns),
+            (create_post, "CreatePost", "Z_CreatePostArgs", $crate::wire::plugin::Z_CreatePostArgs, "Z_CreatePostReturns", $crate::wire::plugin::Z_CreatePostReturns),
+            (create_property_field, "CreatePropertyField", "Z_CreatePropertyFieldArgs", $crate::wire::plugin::Z_CreatePropertyFieldArgs, "Z_CreatePropertyFieldReturns", $crate::wire::plugin::Z_CreatePropertyFieldReturns),
+            (create_property_value, "CreatePropertyValue", "Z_CreatePropertyValueArgs", $crate::wire::plugin::Z_CreatePropertyValueArgs, "Z_CreatePropertyValueReturns", $crate::wire::plugin::Z_CreatePropertyValueReturns),
+            (create_session, "CreateSession", "Z_CreateSessionArgs", $crate::wire::plugin::Z_CreateSessionArgs, "Z_CreateSessionReturns", $crate::wire::plugin::Z_CreateSessionReturns),
+            (create_team, "CreateTeam", "Z_CreateTeamArgs", $crate::wire::plugin::Z_CreateTeamArgs, "Z_CreateTeamReturns", $crate::wire::plugin::Z_CreateTeamReturns),
+            (create_team_member, "CreateTeamMember", "Z_CreateTeamMemberArgs", $crate::wire::plugin::Z_CreateTeamMemberArgs, "Z_CreateTeamMemberReturns", $crate::wire::plugin::Z_CreateTeamMemberReturns),
+            (create_team_members, "CreateTeamMembers", "Z_CreateTeamMembersArgs", $crate::wire::plugin::Z_CreateTeamMembersArgs, "Z_CreateTeamMembersReturns", $crate::wire::plugin::Z_CreateTeamMembersReturns),
+            (create_team_members_gracefully, "CreateTeamMembersGracefully", "Z_CreateTeamMembersGracefullyArgs", $crate::wire::plugin::Z_CreateTeamMembersGracefullyArgs, "Z_CreateTeamMembersGracefullyReturns", $crate::wire::plugin::Z_CreateTeamMembersGracefullyReturns),
+            (create_upload_session, "CreateUploadSession", "Z_CreateUploadSessionArgs", $crate::wire::plugin::Z_CreateUploadSessionArgs, "Z_CreateUploadSessionReturns", $crate::wire::plugin::Z_CreateUploadSessionReturns),
+            (create_user, "CreateUser", "Z_CreateUserArgs", $crate::wire::plugin::Z_CreateUserArgs, "Z_CreateUserReturns", $crate::wire::plugin::Z_CreateUserReturns),
+            (create_user_access_token, "CreateUserAccessToken", "Z_CreateUserAccessTokenArgs", $crate::wire::plugin::Z_CreateUserAccessTokenArgs, "Z_CreateUserAccessTokenReturns", $crate::wire::plugin::Z_CreateUserAccessTokenReturns),
+            (delete_access_control_policy, "DeleteAccessControlPolicy", "Z_DeleteAccessControlPolicyArgs", $crate::wire::plugin::Z_DeleteAccessControlPolicyArgs, "Z_DeleteAccessControlPolicyReturns", $crate::wire::plugin::Z_DeleteAccessControlPolicyReturns),
+            (delete_channel, "DeleteChannel", "Z_DeleteChannelArgs", $crate::wire::plugin::Z_DeleteChannelArgs, "Z_DeleteChannelReturns", $crate::wire::plugin::Z_DeleteChannelReturns),
+            (delete_channel_member, "DeleteChannelMember", "Z_DeleteChannelMemberArgs", $crate::wire::plugin::Z_DeleteChannelMemberArgs, "Z_DeleteChannelMemberReturns", $crate::wire::plugin::Z_DeleteChannelMemberReturns),
+            (delete_command, "DeleteCommand", "Z_DeleteCommandArgs", $crate::wire::plugin::Z_DeleteCommandArgs, "Z_DeleteCommandReturns", $crate::wire::plugin::Z_DeleteCommandReturns),
+            (delete_ephemeral_post, "DeleteEphemeralPost", "Z_DeleteEphemeralPostArgs", $crate::wire::plugin::Z_DeleteEphemeralPostArgs, "Z_DeleteEphemeralPostReturns", $crate::wire::plugin::Z_DeleteEphemeralPostReturns),
+            (delete_group, "DeleteGroup", "Z_DeleteGroupArgs", $crate::wire::plugin::Z_DeleteGroupArgs, "Z_DeleteGroupReturns", $crate::wire::plugin::Z_DeleteGroupReturns),
+            (delete_group_constrained_memberships, "DeleteGroupConstrainedMemberships", "Z_DeleteGroupConstrainedMembershipsArgs", $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsArgs, "Z_DeleteGroupConstrainedMembershipsReturns", $crate::wire::plugin::Z_DeleteGroupConstrainedMembershipsReturns),
+            (delete_group_member, "DeleteGroupMember", "Z_DeleteGroupMemberArgs", $crate::wire::plugin::Z_DeleteGroupMemberArgs, "Z_DeleteGroupMemberReturns", $crate::wire::plugin::Z_DeleteGroupMemberReturns),
+            (delete_group_syncable, "DeleteGroupSyncable", "Z_DeleteGroupSyncableArgs", $crate::wire::plugin::Z_DeleteGroupSyncableArgs, "Z_DeleteGroupSyncableReturns", $crate::wire::plugin::Z_DeleteGroupSyncableReturns),
+            (delete_o_auth_app, "DeleteOAuthApp", "Z_DeleteOAuthAppArgs", $crate::wire::plugin::Z_DeleteOAuthAppArgs, "Z_DeleteOAuthAppReturns", $crate::wire::plugin::Z_DeleteOAuthAppReturns),
+            (delete_post, "DeletePost", "Z_DeletePostArgs", $crate::wire::plugin::Z_DeletePostArgs, "Z_DeletePostReturns", $crate::wire::plugin::Z_DeletePostReturns),
+            (delete_preferences_for_user, "DeletePreferencesForUser", "Z_DeletePreferencesForUserArgs", $crate::wire::plugin::Z_DeletePreferencesForUserArgs, "Z_DeletePreferencesForUserReturns", $crate::wire::plugin::Z_DeletePreferencesForUserReturns),
+            (delete_property_field, "DeletePropertyField", "Z_DeletePropertyFieldArgs", $crate::wire::plugin::Z_DeletePropertyFieldArgs, "Z_DeletePropertyFieldReturns", $crate::wire::plugin::Z_DeletePropertyFieldReturns),
+            (delete_property_value, "DeletePropertyValue", "Z_DeletePropertyValueArgs", $crate::wire::plugin::Z_DeletePropertyValueArgs, "Z_DeletePropertyValueReturns", $crate::wire::plugin::Z_DeletePropertyValueReturns),
+            (delete_property_value_with_options, "DeletePropertyValueWithOptions", "Z_DeletePropertyValueWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValueWithOptionsArgs, "Z_DeletePropertyValueWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValueWithOptionsReturns),
+            (delete_property_values_for_field, "DeletePropertyValuesForField", "Z_DeletePropertyValuesForFieldArgs", $crate::wire::plugin::Z_DeletePropertyValuesForFieldArgs, "Z_DeletePropertyValuesForFieldReturns", $crate::wire::plugin::Z_DeletePropertyValuesForFieldReturns),
+            (delete_property_values_for_field_with_options, "DeletePropertyValuesForFieldWithOptions", "Z_DeletePropertyValuesForFieldWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsArgs, "Z_DeletePropertyValuesForFieldWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsReturns),
+            (delete_property_values_for_target, "DeletePropertyValuesForTarget", "Z_DeletePropertyValuesForTargetArgs", $crate::wire::plugin::Z_DeletePropertyValuesForTargetArgs, "Z_DeletePropertyValuesForTargetReturns", $crate::wire::plugin::Z_DeletePropertyValuesForTargetReturns),
+            (delete_property_values_for_target_with_options, "DeletePropertyValuesForTargetWithOptions", "Z_DeletePropertyValuesForTargetWithOptionsArgs", $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsArgs, "Z_DeletePropertyValuesForTargetWithOptionsReturns", $crate::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsReturns),
+            (delete_team, "DeleteTeam", "Z_DeleteTeamArgs", $crate::wire::plugin::Z_DeleteTeamArgs, "Z_DeleteTeamReturns", $crate::wire::plugin::Z_DeleteTeamReturns),
+            (delete_team_member, "DeleteTeamMember", "Z_DeleteTeamMemberArgs", $crate::wire::plugin::Z_DeleteTeamMemberArgs, "Z_DeleteTeamMemberReturns", $crate::wire::plugin::Z_DeleteTeamMemberReturns),
+            (delete_user, "DeleteUser", "Z_DeleteUserArgs", $crate::wire::plugin::Z_DeleteUserArgs, "Z_DeleteUserReturns", $crate::wire::plugin::Z_DeleteUserReturns),
+            (disable_plugin, "DisablePlugin", "Z_DisablePluginArgs", $crate::wire::plugin::Z_DisablePluginArgs, "Z_DisablePluginReturns", $crate::wire::plugin::Z_DisablePluginReturns),
+            (enable_plugin, "EnablePlugin", "Z_EnablePluginArgs", $crate::wire::plugin::Z_EnablePluginArgs, "Z_EnablePluginReturns", $crate::wire::plugin::Z_EnablePluginReturns),
+            (ensure_bot_user, "EnsureBotUser", "Z_EnsureBotUserArgs", $crate::wire::plugin::Z_EnsureBotUserArgs, "Z_EnsureBotUserReturns", $crate::wire::plugin::Z_EnsureBotUserReturns),
+            (evaluate_access_control, "EvaluateAccessControl", "Z_EvaluateAccessControlArgs", $crate::wire::plugin::Z_EvaluateAccessControlArgs, "Z_EvaluateAccessControlReturns", $crate::wire::plugin::Z_EvaluateAccessControlReturns),
+            (execute_slash_command, "ExecuteSlashCommand", "Z_ExecuteSlashCommandArgs", $crate::wire::plugin::Z_ExecuteSlashCommandArgs, "Z_ExecuteSlashCommandReturns", $crate::wire::plugin::Z_ExecuteSlashCommandReturns),
+            (extend_session_expiry, "ExtendSessionExpiry", "Z_ExtendSessionExpiryArgs", $crate::wire::plugin::Z_ExtendSessionExpiryArgs, "Z_ExtendSessionExpiryReturns", $crate::wire::plugin::Z_ExtendSessionExpiryReturns),
+            (get_access_control_fields_autocomplete, "GetAccessControlFieldsAutocomplete", "Z_GetAccessControlFieldsAutocompleteArgs", $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteArgs, "Z_GetAccessControlFieldsAutocompleteReturns", $crate::wire::plugin::Z_GetAccessControlFieldsAutocompleteReturns),
+            (get_access_control_policy, "GetAccessControlPolicy", "Z_GetAccessControlPolicyArgs", $crate::wire::plugin::Z_GetAccessControlPolicyArgs, "Z_GetAccessControlPolicyReturns", $crate::wire::plugin::Z_GetAccessControlPolicyReturns),
+            (get_access_control_visual_ast, "GetAccessControlVisualAST", "Z_GetAccessControlVisualASTArgs", $crate::wire::plugin::Z_GetAccessControlVisualASTArgs, "Z_GetAccessControlVisualASTReturns", $crate::wire::plugin::Z_GetAccessControlVisualASTReturns),
+            (get_bot, "GetBot", "Z_GetBotArgs", $crate::wire::plugin::Z_GetBotArgs, "Z_GetBotReturns", $crate::wire::plugin::Z_GetBotReturns),
+            (get_bots, "GetBots", "Z_GetBotsArgs", $crate::wire::plugin::Z_GetBotsArgs, "Z_GetBotsReturns", $crate::wire::plugin::Z_GetBotsReturns),
+            (get_bundle_path, "GetBundlePath", "Z_GetBundlePathArgs", $crate::wire::plugin::Z_GetBundlePathArgs, "Z_GetBundlePathReturns", $crate::wire::plugin::Z_GetBundlePathReturns),
+            (get_channel, "GetChannel", "Z_GetChannelArgs", $crate::wire::plugin::Z_GetChannelArgs, "Z_GetChannelReturns", $crate::wire::plugin::Z_GetChannelReturns),
+            (get_channel_by_name, "GetChannelByName", "Z_GetChannelByNameArgs", $crate::wire::plugin::Z_GetChannelByNameArgs, "Z_GetChannelByNameReturns", $crate::wire::plugin::Z_GetChannelByNameReturns),
+            (get_channel_by_name_for_team_name, "GetChannelByNameForTeamName", "Z_GetChannelByNameForTeamNameArgs", $crate::wire::plugin::Z_GetChannelByNameForTeamNameArgs, "Z_GetChannelByNameForTeamNameReturns", $crate::wire::plugin::Z_GetChannelByNameForTeamNameReturns),
+            (get_channel_member, "GetChannelMember", "Z_GetChannelMemberArgs", $crate::wire::plugin::Z_GetChannelMemberArgs, "Z_GetChannelMemberReturns", $crate::wire::plugin::Z_GetChannelMemberReturns),
+            (get_channel_members, "GetChannelMembers", "Z_GetChannelMembersArgs", $crate::wire::plugin::Z_GetChannelMembersArgs, "Z_GetChannelMembersReturns", $crate::wire::plugin::Z_GetChannelMembersReturns),
+            (get_channel_members_by_ids, "GetChannelMembersByIds", "Z_GetChannelMembersByIdsArgs", $crate::wire::plugin::Z_GetChannelMembersByIdsArgs, "Z_GetChannelMembersByIdsReturns", $crate::wire::plugin::Z_GetChannelMembersByIdsReturns),
+            (get_channel_members_for_user, "GetChannelMembersForUser", "Z_GetChannelMembersForUserArgs", $crate::wire::plugin::Z_GetChannelMembersForUserArgs, "Z_GetChannelMembersForUserReturns", $crate::wire::plugin::Z_GetChannelMembersForUserReturns),
+            (get_channel_of_type, "GetChannelOfType", "Z_GetChannelOfTypeArgs", $crate::wire::plugin::Z_GetChannelOfTypeArgs, "Z_GetChannelOfTypeReturns", $crate::wire::plugin::Z_GetChannelOfTypeReturns),
+            (get_channel_sidebar_categories, "GetChannelSidebarCategories", "Z_GetChannelSidebarCategoriesArgs", $crate::wire::plugin::Z_GetChannelSidebarCategoriesArgs, "Z_GetChannelSidebarCategoriesReturns", $crate::wire::plugin::Z_GetChannelSidebarCategoriesReturns),
+            (get_channel_stats, "GetChannelStats", "Z_GetChannelStatsArgs", $crate::wire::plugin::Z_GetChannelStatsArgs, "Z_GetChannelStatsReturns", $crate::wire::plugin::Z_GetChannelStatsReturns),
+            (get_channels_for_team_for_user, "GetChannelsForTeamForUser", "Z_GetChannelsForTeamForUserArgs", $crate::wire::plugin::Z_GetChannelsForTeamForUserArgs, "Z_GetChannelsForTeamForUserReturns", $crate::wire::plugin::Z_GetChannelsForTeamForUserReturns),
+            (get_cloud_limits, "GetCloudLimits", "Z_GetCloudLimitsArgs", $crate::wire::plugin::Z_GetCloudLimitsArgs, "Z_GetCloudLimitsReturns", $crate::wire::plugin::Z_GetCloudLimitsReturns),
+            (get_command, "GetCommand", "Z_GetCommandArgs", $crate::wire::plugin::Z_GetCommandArgs, "Z_GetCommandReturns", $crate::wire::plugin::Z_GetCommandReturns),
+            (get_config, "GetConfig", "Z_GetConfigArgs", $crate::wire::plugin::Z_GetConfigArgs, "Z_GetConfigReturns", $crate::wire::plugin::Z_GetConfigReturns),
+            (get_diagnostic_id, "GetDiagnosticId", "Z_GetDiagnosticIdArgs", $crate::wire::plugin::Z_GetDiagnosticIdArgs, "Z_GetDiagnosticIdReturns", $crate::wire::plugin::Z_GetDiagnosticIdReturns),
+            (get_direct_channel, "GetDirectChannel", "Z_GetDirectChannelArgs", $crate::wire::plugin::Z_GetDirectChannelArgs, "Z_GetDirectChannelReturns", $crate::wire::plugin::Z_GetDirectChannelReturns),
+            (get_emoji, "GetEmoji", "Z_GetEmojiArgs", $crate::wire::plugin::Z_GetEmojiArgs, "Z_GetEmojiReturns", $crate::wire::plugin::Z_GetEmojiReturns),
+            (get_emoji_by_name, "GetEmojiByName", "Z_GetEmojiByNameArgs", $crate::wire::plugin::Z_GetEmojiByNameArgs, "Z_GetEmojiByNameReturns", $crate::wire::plugin::Z_GetEmojiByNameReturns),
+            (get_emoji_image, "GetEmojiImage", "Z_GetEmojiImageArgs", $crate::wire::plugin::Z_GetEmojiImageArgs, "Z_GetEmojiImageReturns", $crate::wire::plugin::Z_GetEmojiImageReturns),
+            (get_emoji_list, "GetEmojiList", "Z_GetEmojiListArgs", $crate::wire::plugin::Z_GetEmojiListArgs, "Z_GetEmojiListReturns", $crate::wire::plugin::Z_GetEmojiListReturns),
+            (get_file, "GetFile", "Z_GetFileArgs", $crate::wire::plugin::Z_GetFileArgs, "Z_GetFileReturns", $crate::wire::plugin::Z_GetFileReturns),
+            (get_file_info, "GetFileInfo", "Z_GetFileInfoArgs", $crate::wire::plugin::Z_GetFileInfoArgs, "Z_GetFileInfoReturns", $crate::wire::plugin::Z_GetFileInfoReturns),
+            (get_file_infos, "GetFileInfos", "Z_GetFileInfosArgs", $crate::wire::plugin::Z_GetFileInfosArgs, "Z_GetFileInfosReturns", $crate::wire::plugin::Z_GetFileInfosReturns),
+            (get_file_link, "GetFileLink", "Z_GetFileLinkArgs", $crate::wire::plugin::Z_GetFileLinkArgs, "Z_GetFileLinkReturns", $crate::wire::plugin::Z_GetFileLinkReturns),
+            (get_group, "GetGroup", "Z_GetGroupArgs", $crate::wire::plugin::Z_GetGroupArgs, "Z_GetGroupReturns", $crate::wire::plugin::Z_GetGroupReturns),
+            (get_group_by_name, "GetGroupByName", "Z_GetGroupByNameArgs", $crate::wire::plugin::Z_GetGroupByNameArgs, "Z_GetGroupByNameReturns", $crate::wire::plugin::Z_GetGroupByNameReturns),
+            (get_group_by_remote_id, "GetGroupByRemoteID", "Z_GetGroupByRemoteIDArgs", $crate::wire::plugin::Z_GetGroupByRemoteIDArgs, "Z_GetGroupByRemoteIDReturns", $crate::wire::plugin::Z_GetGroupByRemoteIDReturns),
+            (get_group_channel, "GetGroupChannel", "Z_GetGroupChannelArgs", $crate::wire::plugin::Z_GetGroupChannelArgs, "Z_GetGroupChannelReturns", $crate::wire::plugin::Z_GetGroupChannelReturns),
+            (get_group_member_users, "GetGroupMemberUsers", "Z_GetGroupMemberUsersArgs", $crate::wire::plugin::Z_GetGroupMemberUsersArgs, "Z_GetGroupMemberUsersReturns", $crate::wire::plugin::Z_GetGroupMemberUsersReturns),
+            (get_group_syncable, "GetGroupSyncable", "Z_GetGroupSyncableArgs", $crate::wire::plugin::Z_GetGroupSyncableArgs, "Z_GetGroupSyncableReturns", $crate::wire::plugin::Z_GetGroupSyncableReturns),
+            (get_group_syncables, "GetGroupSyncables", "Z_GetGroupSyncablesArgs", $crate::wire::plugin::Z_GetGroupSyncablesArgs, "Z_GetGroupSyncablesReturns", $crate::wire::plugin::Z_GetGroupSyncablesReturns),
+            (get_groups, "GetGroups", "Z_GetGroupsArgs", $crate::wire::plugin::Z_GetGroupsArgs, "Z_GetGroupsReturns", $crate::wire::plugin::Z_GetGroupsReturns),
+            (get_groups_by_source, "GetGroupsBySource", "Z_GetGroupsBySourceArgs", $crate::wire::plugin::Z_GetGroupsBySourceArgs, "Z_GetGroupsBySourceReturns", $crate::wire::plugin::Z_GetGroupsBySourceReturns),
+            (get_groups_for_user, "GetGroupsForUser", "Z_GetGroupsForUserArgs", $crate::wire::plugin::Z_GetGroupsForUserArgs, "Z_GetGroupsForUserReturns", $crate::wire::plugin::Z_GetGroupsForUserReturns),
+            (get_ldap_user_attributes, "GetLDAPUserAttributes", "Z_GetLDAPUserAttributesArgs", $crate::wire::plugin::Z_GetLDAPUserAttributesArgs, "Z_GetLDAPUserAttributesReturns", $crate::wire::plugin::Z_GetLDAPUserAttributesReturns),
+            (get_license, "GetLicense", "Z_GetLicenseArgs", $crate::wire::plugin::Z_GetLicenseArgs, "Z_GetLicenseReturns", $crate::wire::plugin::Z_GetLicenseReturns),
+            (get_o_auth_app, "GetOAuthApp", "Z_GetOAuthAppArgs", $crate::wire::plugin::Z_GetOAuthAppArgs, "Z_GetOAuthAppReturns", $crate::wire::plugin::Z_GetOAuthAppReturns),
+            (get_plugin_config, "GetPluginConfig", "Z_GetPluginConfigArgs", $crate::wire::plugin::Z_GetPluginConfigArgs, "Z_GetPluginConfigReturns", $crate::wire::plugin::Z_GetPluginConfigReturns),
+            (get_plugin_id, "GetPluginID", "Z_GetPluginIDArgs", $crate::wire::plugin::Z_GetPluginIDArgs, "Z_GetPluginIDReturns", $crate::wire::plugin::Z_GetPluginIDReturns),
+            (get_plugin_status, "GetPluginStatus", "Z_GetPluginStatusArgs", $crate::wire::plugin::Z_GetPluginStatusArgs, "Z_GetPluginStatusReturns", $crate::wire::plugin::Z_GetPluginStatusReturns),
+            (get_plugins, "GetPlugins", "Z_GetPluginsArgs", $crate::wire::plugin::Z_GetPluginsArgs, "Z_GetPluginsReturns", $crate::wire::plugin::Z_GetPluginsReturns),
+            (get_post, "GetPost", "Z_GetPostArgs", $crate::wire::plugin::Z_GetPostArgs, "Z_GetPostReturns", $crate::wire::plugin::Z_GetPostReturns),
+            (get_post_thread, "GetPostThread", "Z_GetPostThreadArgs", $crate::wire::plugin::Z_GetPostThreadArgs, "Z_GetPostThreadReturns", $crate::wire::plugin::Z_GetPostThreadReturns),
+            (get_posts_after, "GetPostsAfter", "Z_GetPostsAfterArgs", $crate::wire::plugin::Z_GetPostsAfterArgs, "Z_GetPostsAfterReturns", $crate::wire::plugin::Z_GetPostsAfterReturns),
+            (get_posts_before, "GetPostsBefore", "Z_GetPostsBeforeArgs", $crate::wire::plugin::Z_GetPostsBeforeArgs, "Z_GetPostsBeforeReturns", $crate::wire::plugin::Z_GetPostsBeforeReturns),
+            (get_posts_for_channel, "GetPostsForChannel", "Z_GetPostsForChannelArgs", $crate::wire::plugin::Z_GetPostsForChannelArgs, "Z_GetPostsForChannelReturns", $crate::wire::plugin::Z_GetPostsForChannelReturns),
+            (get_posts_since, "GetPostsSince", "Z_GetPostsSinceArgs", $crate::wire::plugin::Z_GetPostsSinceArgs, "Z_GetPostsSinceReturns", $crate::wire::plugin::Z_GetPostsSinceReturns),
+            (get_preference_for_user, "GetPreferenceForUser", "Z_GetPreferenceForUserArgs", $crate::wire::plugin::Z_GetPreferenceForUserArgs, "Z_GetPreferenceForUserReturns", $crate::wire::plugin::Z_GetPreferenceForUserReturns),
+            (get_preferences_for_user, "GetPreferencesForUser", "Z_GetPreferencesForUserArgs", $crate::wire::plugin::Z_GetPreferencesForUserArgs, "Z_GetPreferencesForUserReturns", $crate::wire::plugin::Z_GetPreferencesForUserReturns),
+            (get_profile_image, "GetProfileImage", "Z_GetProfileImageArgs", $crate::wire::plugin::Z_GetProfileImageArgs, "Z_GetProfileImageReturns", $crate::wire::plugin::Z_GetProfileImageReturns),
+            (get_property_field, "GetPropertyField", "Z_GetPropertyFieldArgs", $crate::wire::plugin::Z_GetPropertyFieldArgs, "Z_GetPropertyFieldReturns", $crate::wire::plugin::Z_GetPropertyFieldReturns),
+            (get_property_field_by_name, "GetPropertyFieldByName", "Z_GetPropertyFieldByNameArgs", $crate::wire::plugin::Z_GetPropertyFieldByNameArgs, "Z_GetPropertyFieldByNameReturns", $crate::wire::plugin::Z_GetPropertyFieldByNameReturns),
+            (get_property_fields, "GetPropertyFields", "Z_GetPropertyFieldsArgs", $crate::wire::plugin::Z_GetPropertyFieldsArgs, "Z_GetPropertyFieldsReturns", $crate::wire::plugin::Z_GetPropertyFieldsReturns),
+            (get_property_group, "GetPropertyGroup", "Z_GetPropertyGroupArgs", $crate::wire::plugin::Z_GetPropertyGroupArgs, "Z_GetPropertyGroupReturns", $crate::wire::plugin::Z_GetPropertyGroupReturns),
+            (get_property_value, "GetPropertyValue", "Z_GetPropertyValueArgs", $crate::wire::plugin::Z_GetPropertyValueArgs, "Z_GetPropertyValueReturns", $crate::wire::plugin::Z_GetPropertyValueReturns),
+            (get_property_values, "GetPropertyValues", "Z_GetPropertyValuesArgs", $crate::wire::plugin::Z_GetPropertyValuesArgs, "Z_GetPropertyValuesReturns", $crate::wire::plugin::Z_GetPropertyValuesReturns),
+            (get_public_channels_for_team, "GetPublicChannelsForTeam", "Z_GetPublicChannelsForTeamArgs", $crate::wire::plugin::Z_GetPublicChannelsForTeamArgs, "Z_GetPublicChannelsForTeamReturns", $crate::wire::plugin::Z_GetPublicChannelsForTeamReturns),
+            (get_reactions, "GetReactions", "Z_GetReactionsArgs", $crate::wire::plugin::Z_GetReactionsArgs, "Z_GetReactionsReturns", $crate::wire::plugin::Z_GetReactionsReturns),
+            (get_server_version, "GetServerVersion", "Z_GetServerVersionArgs", $crate::wire::plugin::Z_GetServerVersionArgs, "Z_GetServerVersionReturns", $crate::wire::plugin::Z_GetServerVersionReturns),
+            (get_session, "GetSession", "Z_GetSessionArgs", $crate::wire::plugin::Z_GetSessionArgs, "Z_GetSessionReturns", $crate::wire::plugin::Z_GetSessionReturns),
+            (get_system_install_date, "GetSystemInstallDate", "Z_GetSystemInstallDateArgs", $crate::wire::plugin::Z_GetSystemInstallDateArgs, "Z_GetSystemInstallDateReturns", $crate::wire::plugin::Z_GetSystemInstallDateReturns),
+            (get_team, "GetTeam", "Z_GetTeamArgs", $crate::wire::plugin::Z_GetTeamArgs, "Z_GetTeamReturns", $crate::wire::plugin::Z_GetTeamReturns),
+            (get_team_by_name, "GetTeamByName", "Z_GetTeamByNameArgs", $crate::wire::plugin::Z_GetTeamByNameArgs, "Z_GetTeamByNameReturns", $crate::wire::plugin::Z_GetTeamByNameReturns),
+            (get_team_icon, "GetTeamIcon", "Z_GetTeamIconArgs", $crate::wire::plugin::Z_GetTeamIconArgs, "Z_GetTeamIconReturns", $crate::wire::plugin::Z_GetTeamIconReturns),
+            (get_team_member, "GetTeamMember", "Z_GetTeamMemberArgs", $crate::wire::plugin::Z_GetTeamMemberArgs, "Z_GetTeamMemberReturns", $crate::wire::plugin::Z_GetTeamMemberReturns),
+            (get_team_members, "GetTeamMembers", "Z_GetTeamMembersArgs", $crate::wire::plugin::Z_GetTeamMembersArgs, "Z_GetTeamMembersReturns", $crate::wire::plugin::Z_GetTeamMembersReturns),
+            (get_team_members_for_user, "GetTeamMembersForUser", "Z_GetTeamMembersForUserArgs", $crate::wire::plugin::Z_GetTeamMembersForUserArgs, "Z_GetTeamMembersForUserReturns", $crate::wire::plugin::Z_GetTeamMembersForUserReturns),
+            (get_team_stats, "GetTeamStats", "Z_GetTeamStatsArgs", $crate::wire::plugin::Z_GetTeamStatsArgs, "Z_GetTeamStatsReturns", $crate::wire::plugin::Z_GetTeamStatsReturns),
+            (get_teams, "GetTeams", "Z_GetTeamsArgs", $crate::wire::plugin::Z_GetTeamsArgs, "Z_GetTeamsReturns", $crate::wire::plugin::Z_GetTeamsReturns),
+            (get_teams_for_user, "GetTeamsForUser", "Z_GetTeamsForUserArgs", $crate::wire::plugin::Z_GetTeamsForUserArgs, "Z_GetTeamsForUserReturns", $crate::wire::plugin::Z_GetTeamsForUserReturns),
+            (get_teams_unread_for_user, "GetTeamsUnreadForUser", "Z_GetTeamsUnreadForUserArgs", $crate::wire::plugin::Z_GetTeamsUnreadForUserArgs, "Z_GetTeamsUnreadForUserReturns", $crate::wire::plugin::Z_GetTeamsUnreadForUserReturns),
+            (get_telemetry_id, "GetTelemetryId", "Z_GetTelemetryIdArgs", $crate::wire::plugin::Z_GetTelemetryIdArgs, "Z_GetTelemetryIdReturns", $crate::wire::plugin::Z_GetTelemetryIdReturns),
+            (get_unsanitized_config, "GetUnsanitizedConfig", "Z_GetUnsanitizedConfigArgs", $crate::wire::plugin::Z_GetUnsanitizedConfigArgs, "Z_GetUnsanitizedConfigReturns", $crate::wire::plugin::Z_GetUnsanitizedConfigReturns),
+            (get_upload_session, "GetUploadSession", "Z_GetUploadSessionArgs", $crate::wire::plugin::Z_GetUploadSessionArgs, "Z_GetUploadSessionReturns", $crate::wire::plugin::Z_GetUploadSessionReturns),
+            (get_user, "GetUser", "Z_GetUserArgs", $crate::wire::plugin::Z_GetUserArgs, "Z_GetUserReturns", $crate::wire::plugin::Z_GetUserReturns),
+            (get_user_by_email, "GetUserByEmail", "Z_GetUserByEmailArgs", $crate::wire::plugin::Z_GetUserByEmailArgs, "Z_GetUserByEmailReturns", $crate::wire::plugin::Z_GetUserByEmailReturns),
+            (get_user_by_username, "GetUserByUsername", "Z_GetUserByUsernameArgs", $crate::wire::plugin::Z_GetUserByUsernameArgs, "Z_GetUserByUsernameReturns", $crate::wire::plugin::Z_GetUserByUsernameReturns),
+            (get_user_status, "GetUserStatus", "Z_GetUserStatusArgs", $crate::wire::plugin::Z_GetUserStatusArgs, "Z_GetUserStatusReturns", $crate::wire::plugin::Z_GetUserStatusReturns),
+            (get_user_statuses_by_ids, "GetUserStatusesByIds", "Z_GetUserStatusesByIdsArgs", $crate::wire::plugin::Z_GetUserStatusesByIdsArgs, "Z_GetUserStatusesByIdsReturns", $crate::wire::plugin::Z_GetUserStatusesByIdsReturns),
+            (get_users, "GetUsers", "Z_GetUsersArgs", $crate::wire::plugin::Z_GetUsersArgs, "Z_GetUsersReturns", $crate::wire::plugin::Z_GetUsersReturns),
+            (get_users_by_ids, "GetUsersByIds", "Z_GetUsersByIdsArgs", $crate::wire::plugin::Z_GetUsersByIdsArgs, "Z_GetUsersByIdsReturns", $crate::wire::plugin::Z_GetUsersByIdsReturns),
+            (get_users_by_usernames, "GetUsersByUsernames", "Z_GetUsersByUsernamesArgs", $crate::wire::plugin::Z_GetUsersByUsernamesArgs, "Z_GetUsersByUsernamesReturns", $crate::wire::plugin::Z_GetUsersByUsernamesReturns),
+            (get_users_in_channel, "GetUsersInChannel", "Z_GetUsersInChannelArgs", $crate::wire::plugin::Z_GetUsersInChannelArgs, "Z_GetUsersInChannelReturns", $crate::wire::plugin::Z_GetUsersInChannelReturns),
+            (get_users_in_team, "GetUsersInTeam", "Z_GetUsersInTeamArgs", $crate::wire::plugin::Z_GetUsersInTeamArgs, "Z_GetUsersInTeamReturns", $crate::wire::plugin::Z_GetUsersInTeamReturns),
+            (has_permission_to, "HasPermissionTo", "Z_HasPermissionToArgs", $crate::wire::plugin::Z_HasPermissionToArgs, "Z_HasPermissionToReturns", $crate::wire::plugin::Z_HasPermissionToReturns),
+            (has_permission_to_channel, "HasPermissionToChannel", "Z_HasPermissionToChannelArgs", $crate::wire::plugin::Z_HasPermissionToChannelArgs, "Z_HasPermissionToChannelReturns", $crate::wire::plugin::Z_HasPermissionToChannelReturns),
+            (has_permission_to_team, "HasPermissionToTeam", "Z_HasPermissionToTeamArgs", $crate::wire::plugin::Z_HasPermissionToTeamArgs, "Z_HasPermissionToTeamReturns", $crate::wire::plugin::Z_HasPermissionToTeamReturns),
+            (invite_remote_to_channel, "InviteRemoteToChannel", "Z_InviteRemoteToChannelArgs", $crate::wire::plugin::Z_InviteRemoteToChannelArgs, "Z_InviteRemoteToChannelReturns", $crate::wire::plugin::Z_InviteRemoteToChannelReturns),
+            (is_enterprise_ready, "IsEnterpriseReady", "Z_IsEnterpriseReadyArgs", $crate::wire::plugin::Z_IsEnterpriseReadyArgs, "Z_IsEnterpriseReadyReturns", $crate::wire::plugin::Z_IsEnterpriseReadyReturns),
+            (kv_compare_and_delete, "KVCompareAndDelete", "Z_KVCompareAndDeleteArgs", $crate::wire::plugin::Z_KVCompareAndDeleteArgs, "Z_KVCompareAndDeleteReturns", $crate::wire::plugin::Z_KVCompareAndDeleteReturns),
+            (kv_compare_and_set, "KVCompareAndSet", "Z_KVCompareAndSetArgs", $crate::wire::plugin::Z_KVCompareAndSetArgs, "Z_KVCompareAndSetReturns", $crate::wire::plugin::Z_KVCompareAndSetReturns),
+            (kv_delete, "KVDelete", "Z_KVDeleteArgs", $crate::wire::plugin::Z_KVDeleteArgs, "Z_KVDeleteReturns", $crate::wire::plugin::Z_KVDeleteReturns),
+            (kv_delete_all, "KVDeleteAll", "Z_KVDeleteAllArgs", $crate::wire::plugin::Z_KVDeleteAllArgs, "Z_KVDeleteAllReturns", $crate::wire::plugin::Z_KVDeleteAllReturns),
+            (kv_get, "KVGet", "Z_KVGetArgs", $crate::wire::plugin::Z_KVGetArgs, "Z_KVGetReturns", $crate::wire::plugin::Z_KVGetReturns),
+            (kv_list, "KVList", "Z_KVListArgs", $crate::wire::plugin::Z_KVListArgs, "Z_KVListReturns", $crate::wire::plugin::Z_KVListReturns),
+            (kv_set, "KVSet", "Z_KVSetArgs", $crate::wire::plugin::Z_KVSetArgs, "Z_KVSetReturns", $crate::wire::plugin::Z_KVSetReturns),
+            (kv_set_with_expiry, "KVSetWithExpiry", "Z_KVSetWithExpiryArgs", $crate::wire::plugin::Z_KVSetWithExpiryArgs, "Z_KVSetWithExpiryReturns", $crate::wire::plugin::Z_KVSetWithExpiryReturns),
+            (kv_set_with_options, "KVSetWithOptions", "Z_KVSetWithOptionsArgs", $crate::wire::plugin::Z_KVSetWithOptionsArgs, "Z_KVSetWithOptionsReturns", $crate::wire::plugin::Z_KVSetWithOptionsReturns),
+            (list_built_in_commands, "ListBuiltInCommands", "Z_ListBuiltInCommandsArgs", $crate::wire::plugin::Z_ListBuiltInCommandsArgs, "Z_ListBuiltInCommandsReturns", $crate::wire::plugin::Z_ListBuiltInCommandsReturns),
+            (list_commands, "ListCommands", "Z_ListCommandsArgs", $crate::wire::plugin::Z_ListCommandsArgs, "Z_ListCommandsReturns", $crate::wire::plugin::Z_ListCommandsReturns),
+            (list_custom_commands, "ListCustomCommands", "Z_ListCustomCommandsArgs", $crate::wire::plugin::Z_ListCustomCommandsArgs, "Z_ListCustomCommandsReturns", $crate::wire::plugin::Z_ListCustomCommandsReturns),
+            (list_plugin_commands, "ListPluginCommands", "Z_ListPluginCommandsArgs", $crate::wire::plugin::Z_ListPluginCommandsArgs, "Z_ListPluginCommandsReturns", $crate::wire::plugin::Z_ListPluginCommandsReturns),
+            (open_interactive_dialog, "OpenInteractiveDialog", "Z_OpenInteractiveDialogArgs", $crate::wire::plugin::Z_OpenInteractiveDialogArgs, "Z_OpenInteractiveDialogReturns", $crate::wire::plugin::Z_OpenInteractiveDialogReturns),
+            (patch_bot, "PatchBot", "Z_PatchBotArgs", $crate::wire::plugin::Z_PatchBotArgs, "Z_PatchBotReturns", $crate::wire::plugin::Z_PatchBotReturns),
+            (patch_channel_members_notifications, "PatchChannelMembersNotifications", "Z_PatchChannelMembersNotificationsArgs", $crate::wire::plugin::Z_PatchChannelMembersNotificationsArgs, "Z_PatchChannelMembersNotificationsReturns", $crate::wire::plugin::Z_PatchChannelMembersNotificationsReturns),
+            (permanent_delete_bot, "PermanentDeleteBot", "Z_PermanentDeleteBotArgs", $crate::wire::plugin::Z_PermanentDeleteBotArgs, "Z_PermanentDeleteBotReturns", $crate::wire::plugin::Z_PermanentDeleteBotReturns),
+            (publish_plugin_cluster_event, "PublishPluginClusterEvent", "Z_PublishPluginClusterEventArgs", $crate::wire::plugin::Z_PublishPluginClusterEventArgs, "Z_PublishPluginClusterEventReturns", $crate::wire::plugin::Z_PublishPluginClusterEventReturns),
+            (publish_user_typing, "PublishUserTyping", "Z_PublishUserTypingArgs", $crate::wire::plugin::Z_PublishUserTypingArgs, "Z_PublishUserTypingReturns", $crate::wire::plugin::Z_PublishUserTypingReturns),
+            (publish_web_socket_event, "PublishWebSocketEvent", "Z_PublishWebSocketEventArgs", $crate::wire::plugin::Z_PublishWebSocketEventArgs, "Z_PublishWebSocketEventReturns", $crate::wire::plugin::Z_PublishWebSocketEventReturns),
+            (query_users_for_access_control_expression, "QueryUsersForAccessControlExpression", "Z_QueryUsersForAccessControlExpressionArgs", $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionArgs, "Z_QueryUsersForAccessControlExpressionReturns", $crate::wire::plugin::Z_QueryUsersForAccessControlExpressionReturns),
+            (read_file, "ReadFile", "Z_ReadFileArgs", $crate::wire::plugin::Z_ReadFileArgs, "Z_ReadFileReturns", $crate::wire::plugin::Z_ReadFileReturns),
+            (receive_shared_channel_profile_image_sync_msg, "ReceiveSharedChannelProfileImageSyncMsg", "Z_ReceiveSharedChannelProfileImageSyncMsgArgs", $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgArgs, "Z_ReceiveSharedChannelProfileImageSyncMsgReturns", $crate::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgReturns),
+            (receive_shared_channel_sync_msg, "ReceiveSharedChannelSyncMsg", "Z_ReceiveSharedChannelSyncMsgArgs", $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgArgs, "Z_ReceiveSharedChannelSyncMsgReturns", $crate::wire::plugin::Z_ReceiveSharedChannelSyncMsgReturns),
+            (register_channel_guard, "RegisterChannelGuard", "Z_RegisterChannelGuardArgs", $crate::wire::plugin::Z_RegisterChannelGuardArgs, "Z_RegisterChannelGuardReturns", $crate::wire::plugin::Z_RegisterChannelGuardReturns),
+            (register_collection_and_topic, "RegisterCollectionAndTopic", "Z_RegisterCollectionAndTopicArgs", $crate::wire::plugin::Z_RegisterCollectionAndTopicArgs, "Z_RegisterCollectionAndTopicReturns", $crate::wire::plugin::Z_RegisterCollectionAndTopicReturns),
+            (register_command, "RegisterCommand", "Z_RegisterCommandArgs", $crate::wire::plugin::Z_RegisterCommandArgs, "Z_RegisterCommandReturns", $crate::wire::plugin::Z_RegisterCommandReturns),
+            (register_plugin_for_shared_channels, "RegisterPluginForSharedChannels", "Z_RegisterPluginForSharedChannelsArgs", $crate::wire::plugin::Z_RegisterPluginForSharedChannelsArgs, "Z_RegisterPluginForSharedChannelsReturns", $crate::wire::plugin::Z_RegisterPluginForSharedChannelsReturns),
+            (register_property_group, "RegisterPropertyGroup", "Z_RegisterPropertyGroupArgs", $crate::wire::plugin::Z_RegisterPropertyGroupArgs, "Z_RegisterPropertyGroupReturns", $crate::wire::plugin::Z_RegisterPropertyGroupReturns),
+            (remove_plugin, "RemovePlugin", "Z_RemovePluginArgs", $crate::wire::plugin::Z_RemovePluginArgs, "Z_RemovePluginReturns", $crate::wire::plugin::Z_RemovePluginReturns),
+            (remove_reaction, "RemoveReaction", "Z_RemoveReactionArgs", $crate::wire::plugin::Z_RemoveReactionArgs, "Z_RemoveReactionReturns", $crate::wire::plugin::Z_RemoveReactionReturns),
+            (remove_team_icon, "RemoveTeamIcon", "Z_RemoveTeamIconArgs", $crate::wire::plugin::Z_RemoveTeamIconArgs, "Z_RemoveTeamIconReturns", $crate::wire::plugin::Z_RemoveTeamIconReturns),
+            (remove_user_custom_status, "RemoveUserCustomStatus", "Z_RemoveUserCustomStatusArgs", $crate::wire::plugin::Z_RemoveUserCustomStatusArgs, "Z_RemoveUserCustomStatusReturns", $crate::wire::plugin::Z_RemoveUserCustomStatusReturns),
+            (request_trial_license, "RequestTrialLicense", "Z_RequestTrialLicenseArgs", $crate::wire::plugin::Z_RequestTrialLicenseArgs, "Z_RequestTrialLicenseReturns", $crate::wire::plugin::Z_RequestTrialLicenseReturns),
+            (restore_channel, "RestoreChannel", "Z_RestoreChannelArgs", $crate::wire::plugin::Z_RestoreChannelArgs, "Z_RestoreChannelReturns", $crate::wire::plugin::Z_RestoreChannelReturns),
+            (restore_group, "RestoreGroup", "Z_RestoreGroupArgs", $crate::wire::plugin::Z_RestoreGroupArgs, "Z_RestoreGroupReturns", $crate::wire::plugin::Z_RestoreGroupReturns),
+            (revoke_session, "RevokeSession", "Z_RevokeSessionArgs", $crate::wire::plugin::Z_RevokeSessionArgs, "Z_RevokeSessionReturns", $crate::wire::plugin::Z_RevokeSessionReturns),
+            (revoke_user_access_token, "RevokeUserAccessToken", "Z_RevokeUserAccessTokenArgs", $crate::wire::plugin::Z_RevokeUserAccessTokenArgs, "Z_RevokeUserAccessTokenReturns", $crate::wire::plugin::Z_RevokeUserAccessTokenReturns),
+            (roles_grant_permission, "RolesGrantPermission", "Z_RolesGrantPermissionArgs", $crate::wire::plugin::Z_RolesGrantPermissionArgs, "Z_RolesGrantPermissionReturns", $crate::wire::plugin::Z_RolesGrantPermissionReturns),
+            (save_access_control_policy, "SaveAccessControlPolicy", "Z_SaveAccessControlPolicyArgs", $crate::wire::plugin::Z_SaveAccessControlPolicyArgs, "Z_SaveAccessControlPolicyReturns", $crate::wire::plugin::Z_SaveAccessControlPolicyReturns),
+            (save_config, "SaveConfig", "Z_SaveConfigArgs", $crate::wire::plugin::Z_SaveConfigArgs, "Z_SaveConfigReturns", $crate::wire::plugin::Z_SaveConfigReturns),
+            (save_plugin_config, "SavePluginConfig", "Z_SavePluginConfigArgs", $crate::wire::plugin::Z_SavePluginConfigArgs, "Z_SavePluginConfigReturns", $crate::wire::plugin::Z_SavePluginConfigReturns),
+            (search_channels, "SearchChannels", "Z_SearchChannelsArgs", $crate::wire::plugin::Z_SearchChannelsArgs, "Z_SearchChannelsReturns", $crate::wire::plugin::Z_SearchChannelsReturns),
+            (search_posts_in_team, "SearchPostsInTeam", "Z_SearchPostsInTeamArgs", $crate::wire::plugin::Z_SearchPostsInTeamArgs, "Z_SearchPostsInTeamReturns", $crate::wire::plugin::Z_SearchPostsInTeamReturns),
+            (search_posts_in_team_for_user, "SearchPostsInTeamForUser", "Z_SearchPostsInTeamForUserArgs", $crate::wire::plugin::Z_SearchPostsInTeamForUserArgs, "Z_SearchPostsInTeamForUserReturns", $crate::wire::plugin::Z_SearchPostsInTeamForUserReturns),
+            (search_property_fields, "SearchPropertyFields", "Z_SearchPropertyFieldsArgs", $crate::wire::plugin::Z_SearchPropertyFieldsArgs, "Z_SearchPropertyFieldsReturns", $crate::wire::plugin::Z_SearchPropertyFieldsReturns),
+            (search_property_values, "SearchPropertyValues", "Z_SearchPropertyValuesArgs", $crate::wire::plugin::Z_SearchPropertyValuesArgs, "Z_SearchPropertyValuesReturns", $crate::wire::plugin::Z_SearchPropertyValuesReturns),
+            (search_teams, "SearchTeams", "Z_SearchTeamsArgs", $crate::wire::plugin::Z_SearchTeamsArgs, "Z_SearchTeamsReturns", $crate::wire::plugin::Z_SearchTeamsReturns),
+            (search_users, "SearchUsers", "Z_SearchUsersArgs", $crate::wire::plugin::Z_SearchUsersArgs, "Z_SearchUsersReturns", $crate::wire::plugin::Z_SearchUsersReturns),
+            (send_ephemeral_post, "SendEphemeralPost", "Z_SendEphemeralPostArgs", $crate::wire::plugin::Z_SendEphemeralPostArgs, "Z_SendEphemeralPostReturns", $crate::wire::plugin::Z_SendEphemeralPostReturns),
+            (send_mail, "SendMail", "Z_SendMailArgs", $crate::wire::plugin::Z_SendMailArgs, "Z_SendMailReturns", $crate::wire::plugin::Z_SendMailReturns),
+            (send_push_notification, "SendPushNotification", "Z_SendPushNotificationArgs", $crate::wire::plugin::Z_SendPushNotificationArgs, "Z_SendPushNotificationReturns", $crate::wire::plugin::Z_SendPushNotificationReturns),
+            (send_toast_message, "SendToastMessage", "Z_SendToastMessageArgs", $crate::wire::plugin::Z_SendToastMessageArgs, "Z_SendToastMessageReturns", $crate::wire::plugin::Z_SendToastMessageReturns),
+            (set_file_searchable_content, "SetFileSearchableContent", "Z_SetFileSearchableContentArgs", $crate::wire::plugin::Z_SetFileSearchableContentArgs, "Z_SetFileSearchableContentReturns", $crate::wire::plugin::Z_SetFileSearchableContentReturns),
+            (set_profile_image, "SetProfileImage", "Z_SetProfileImageArgs", $crate::wire::plugin::Z_SetProfileImageArgs, "Z_SetProfileImageReturns", $crate::wire::plugin::Z_SetProfileImageReturns),
+            (set_team_icon, "SetTeamIcon", "Z_SetTeamIconArgs", $crate::wire::plugin::Z_SetTeamIconArgs, "Z_SetTeamIconReturns", $crate::wire::plugin::Z_SetTeamIconReturns),
+            (set_user_status_timed_dnd, "SetUserStatusTimedDND", "Z_SetUserStatusTimedDNDArgs", $crate::wire::plugin::Z_SetUserStatusTimedDNDArgs, "Z_SetUserStatusTimedDNDReturns", $crate::wire::plugin::Z_SetUserStatusTimedDNDReturns),
+            (share_channel, "ShareChannel", "Z_ShareChannelArgs", $crate::wire::plugin::Z_ShareChannelArgs, "Z_ShareChannelReturns", $crate::wire::plugin::Z_ShareChannelReturns),
+            (sync_shared_channel, "SyncSharedChannel", "Z_SyncSharedChannelArgs", $crate::wire::plugin::Z_SyncSharedChannelArgs, "Z_SyncSharedChannelReturns", $crate::wire::plugin::Z_SyncSharedChannelReturns),
+            (uninvite_remote_from_channel, "UninviteRemoteFromChannel", "Z_UninviteRemoteFromChannelArgs", $crate::wire::plugin::Z_UninviteRemoteFromChannelArgs, "Z_UninviteRemoteFromChannelReturns", $crate::wire::plugin::Z_UninviteRemoteFromChannelReturns),
+            (unregister_channel_guard, "UnregisterChannelGuard", "Z_UnregisterChannelGuardArgs", $crate::wire::plugin::Z_UnregisterChannelGuardArgs, "Z_UnregisterChannelGuardReturns", $crate::wire::plugin::Z_UnregisterChannelGuardReturns),
+            (unregister_command, "UnregisterCommand", "Z_UnregisterCommandArgs", $crate::wire::plugin::Z_UnregisterCommandArgs, "Z_UnregisterCommandReturns", $crate::wire::plugin::Z_UnregisterCommandReturns),
+            (unregister_plugin_for_shared_channels, "UnregisterPluginForSharedChannels", "Z_UnregisterPluginForSharedChannelsArgs", $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsArgs, "Z_UnregisterPluginForSharedChannelsReturns", $crate::wire::plugin::Z_UnregisterPluginForSharedChannelsReturns),
+            (unregister_plugin_remote_for_shared_channels, "UnregisterPluginRemoteForSharedChannels", "Z_UnregisterPluginRemoteForSharedChannelsArgs", $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsArgs, "Z_UnregisterPluginRemoteForSharedChannelsReturns", $crate::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsReturns),
+            (unshare_channel, "UnshareChannel", "Z_UnshareChannelArgs", $crate::wire::plugin::Z_UnshareChannelArgs, "Z_UnshareChannelReturns", $crate::wire::plugin::Z_UnshareChannelReturns),
+            (update_bot_active, "UpdateBotActive", "Z_UpdateBotActiveArgs", $crate::wire::plugin::Z_UpdateBotActiveArgs, "Z_UpdateBotActiveReturns", $crate::wire::plugin::Z_UpdateBotActiveReturns),
+            (update_channel, "UpdateChannel", "Z_UpdateChannelArgs", $crate::wire::plugin::Z_UpdateChannelArgs, "Z_UpdateChannelReturns", $crate::wire::plugin::Z_UpdateChannelReturns),
+            (update_channel_member_notifications, "UpdateChannelMemberNotifications", "Z_UpdateChannelMemberNotificationsArgs", $crate::wire::plugin::Z_UpdateChannelMemberNotificationsArgs, "Z_UpdateChannelMemberNotificationsReturns", $crate::wire::plugin::Z_UpdateChannelMemberNotificationsReturns),
+            (update_channel_member_roles, "UpdateChannelMemberRoles", "Z_UpdateChannelMemberRolesArgs", $crate::wire::plugin::Z_UpdateChannelMemberRolesArgs, "Z_UpdateChannelMemberRolesReturns", $crate::wire::plugin::Z_UpdateChannelMemberRolesReturns),
+            (update_channel_sidebar_categories, "UpdateChannelSidebarCategories", "Z_UpdateChannelSidebarCategoriesArgs", $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesArgs, "Z_UpdateChannelSidebarCategoriesReturns", $crate::wire::plugin::Z_UpdateChannelSidebarCategoriesReturns),
+            (update_command, "UpdateCommand", "Z_UpdateCommandArgs", $crate::wire::plugin::Z_UpdateCommandArgs, "Z_UpdateCommandReturns", $crate::wire::plugin::Z_UpdateCommandReturns),
+            (update_ephemeral_post, "UpdateEphemeralPost", "Z_UpdateEphemeralPostArgs", $crate::wire::plugin::Z_UpdateEphemeralPostArgs, "Z_UpdateEphemeralPostReturns", $crate::wire::plugin::Z_UpdateEphemeralPostReturns),
+            (update_group, "UpdateGroup", "Z_UpdateGroupArgs", $crate::wire::plugin::Z_UpdateGroupArgs, "Z_UpdateGroupReturns", $crate::wire::plugin::Z_UpdateGroupReturns),
+            (update_group_syncable, "UpdateGroupSyncable", "Z_UpdateGroupSyncableArgs", $crate::wire::plugin::Z_UpdateGroupSyncableArgs, "Z_UpdateGroupSyncableReturns", $crate::wire::plugin::Z_UpdateGroupSyncableReturns),
+            (update_o_auth_app, "UpdateOAuthApp", "Z_UpdateOAuthAppArgs", $crate::wire::plugin::Z_UpdateOAuthAppArgs, "Z_UpdateOAuthAppReturns", $crate::wire::plugin::Z_UpdateOAuthAppReturns),
+            (update_post, "UpdatePost", "Z_UpdatePostArgs", $crate::wire::plugin::Z_UpdatePostArgs, "Z_UpdatePostReturns", $crate::wire::plugin::Z_UpdatePostReturns),
+            (update_preferences_for_user, "UpdatePreferencesForUser", "Z_UpdatePreferencesForUserArgs", $crate::wire::plugin::Z_UpdatePreferencesForUserArgs, "Z_UpdatePreferencesForUserReturns", $crate::wire::plugin::Z_UpdatePreferencesForUserReturns),
+            (update_property_field, "UpdatePropertyField", "Z_UpdatePropertyFieldArgs", $crate::wire::plugin::Z_UpdatePropertyFieldArgs, "Z_UpdatePropertyFieldReturns", $crate::wire::plugin::Z_UpdatePropertyFieldReturns),
+            (update_property_fields, "UpdatePropertyFields", "Z_UpdatePropertyFieldsArgs", $crate::wire::plugin::Z_UpdatePropertyFieldsArgs, "Z_UpdatePropertyFieldsReturns", $crate::wire::plugin::Z_UpdatePropertyFieldsReturns),
+            (update_property_value, "UpdatePropertyValue", "Z_UpdatePropertyValueArgs", $crate::wire::plugin::Z_UpdatePropertyValueArgs, "Z_UpdatePropertyValueReturns", $crate::wire::plugin::Z_UpdatePropertyValueReturns),
+            (update_property_values, "UpdatePropertyValues", "Z_UpdatePropertyValuesArgs", $crate::wire::plugin::Z_UpdatePropertyValuesArgs, "Z_UpdatePropertyValuesReturns", $crate::wire::plugin::Z_UpdatePropertyValuesReturns),
+            (update_shared_channel, "UpdateSharedChannel", "Z_UpdateSharedChannelArgs", $crate::wire::plugin::Z_UpdateSharedChannelArgs, "Z_UpdateSharedChannelReturns", $crate::wire::plugin::Z_UpdateSharedChannelReturns),
+            (update_shared_channel_cursor, "UpdateSharedChannelCursor", "Z_UpdateSharedChannelCursorArgs", $crate::wire::plugin::Z_UpdateSharedChannelCursorArgs, "Z_UpdateSharedChannelCursorReturns", $crate::wire::plugin::Z_UpdateSharedChannelCursorReturns),
+            (update_team, "UpdateTeam", "Z_UpdateTeamArgs", $crate::wire::plugin::Z_UpdateTeamArgs, "Z_UpdateTeamReturns", $crate::wire::plugin::Z_UpdateTeamReturns),
+            (update_team_member_roles, "UpdateTeamMemberRoles", "Z_UpdateTeamMemberRolesArgs", $crate::wire::plugin::Z_UpdateTeamMemberRolesArgs, "Z_UpdateTeamMemberRolesReturns", $crate::wire::plugin::Z_UpdateTeamMemberRolesReturns),
+            (update_user, "UpdateUser", "Z_UpdateUserArgs", $crate::wire::plugin::Z_UpdateUserArgs, "Z_UpdateUserReturns", $crate::wire::plugin::Z_UpdateUserReturns),
+            (update_user_active, "UpdateUserActive", "Z_UpdateUserActiveArgs", $crate::wire::plugin::Z_UpdateUserActiveArgs, "Z_UpdateUserActiveReturns", $crate::wire::plugin::Z_UpdateUserActiveReturns),
+            (update_user_auth, "UpdateUserAuth", "Z_UpdateUserAuthArgs", $crate::wire::plugin::Z_UpdateUserAuthArgs, "Z_UpdateUserAuthReturns", $crate::wire::plugin::Z_UpdateUserAuthReturns),
+            (update_user_custom_status, "UpdateUserCustomStatus", "Z_UpdateUserCustomStatusArgs", $crate::wire::plugin::Z_UpdateUserCustomStatusArgs, "Z_UpdateUserCustomStatusReturns", $crate::wire::plugin::Z_UpdateUserCustomStatusReturns),
+            (update_user_roles, "UpdateUserRoles", "Z_UpdateUserRolesArgs", $crate::wire::plugin::Z_UpdateUserRolesArgs, "Z_UpdateUserRolesReturns", $crate::wire::plugin::Z_UpdateUserRolesReturns),
+            (update_user_status, "UpdateUserStatus", "Z_UpdateUserStatusArgs", $crate::wire::plugin::Z_UpdateUserStatusArgs, "Z_UpdateUserStatusReturns", $crate::wire::plugin::Z_UpdateUserStatusReturns),
+            (upload_file, "UploadFile", "Z_UploadFileArgs", $crate::wire::plugin::Z_UploadFileArgs, "Z_UploadFileReturns", $crate::wire::plugin::Z_UploadFileReturns),
+            (upsert_group_member, "UpsertGroupMember", "Z_UpsertGroupMemberArgs", $crate::wire::plugin::Z_UpsertGroupMemberArgs, "Z_UpsertGroupMemberReturns", $crate::wire::plugin::Z_UpsertGroupMemberReturns),
+            (upsert_group_members, "UpsertGroupMembers", "Z_UpsertGroupMembersArgs", $crate::wire::plugin::Z_UpsertGroupMembersArgs, "Z_UpsertGroupMembersReturns", $crate::wire::plugin::Z_UpsertGroupMembersReturns),
+            (upsert_group_syncable, "UpsertGroupSyncable", "Z_UpsertGroupSyncableArgs", $crate::wire::plugin::Z_UpsertGroupSyncableArgs, "Z_UpsertGroupSyncableReturns", $crate::wire::plugin::Z_UpsertGroupSyncableReturns),
+            (upsert_property_value, "UpsertPropertyValue", "Z_UpsertPropertyValueArgs", $crate::wire::plugin::Z_UpsertPropertyValueArgs, "Z_UpsertPropertyValueReturns", $crate::wire::plugin::Z_UpsertPropertyValueReturns),
+            (upsert_property_value_with_options, "UpsertPropertyValueWithOptions", "Z_UpsertPropertyValueWithOptionsArgs", $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsArgs, "Z_UpsertPropertyValueWithOptionsReturns", $crate::wire::plugin::Z_UpsertPropertyValueWithOptionsReturns),
+            (upsert_property_values, "UpsertPropertyValues", "Z_UpsertPropertyValuesArgs", $crate::wire::plugin::Z_UpsertPropertyValuesArgs, "Z_UpsertPropertyValuesReturns", $crate::wire::plugin::Z_UpsertPropertyValuesReturns),
+            (upsert_property_values_with_options, "UpsertPropertyValuesWithOptions", "Z_UpsertPropertyValuesWithOptionsArgs", $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsArgs, "Z_UpsertPropertyValuesWithOptionsReturns", $crate::wire::plugin::Z_UpsertPropertyValuesWithOptionsReturns),
         }
     };
 }

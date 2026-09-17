@@ -40,39 +40,84 @@ func mockAPI(c *conformance) *plugintest.API {
 	api := &plugintest.API{}
 	apiT := reflect.TypeFor[plugin.API]()
 	for _, m := range c.idl.API {
-		if m.Excluded {
-			continue
+		if m.Custom || m.Name == "LoadPluginConfiguration" {
+			continue // LoadPluginConfiguration writes through its argument: mocked below.
 		}
 		method, _ := apiT.MethodByName(m.Name)
-		anything := make([]any, method.Type.NumIn())
-		for i := range anything {
-			anything[i] = mock.Anything
-		}
-		returns := c.fixture("Z_" + m.Name + "Returns")
-		name := m.Name
+		returns := c.fixture(m.Returns)
+		name, argsName, returnsName := m.Name, m.Args, m.Returns
 		fn := reflect.MakeFunc(method.Type, func(args []reflect.Value) []reflect.Value {
 			out, sent := answer(method.Type, returns)
 			record(map[string]any{
 				"api":     name,
-				"args":    structOf("Z_"+name+"Args", args),
-				"returns": structOf("Z_"+name+"Returns", sent),
+				"args":    structOf(argsName, args),
+				"returns": structOf(returnsName, sent),
 			})
 			return out
 		})
-		call := api.On(name, anything...)
-		if method.Type.NumOut() > 0 {
-			call.Return(fn.Interface())
-		} else {
-			call.Run(func(args mock.Arguments) {
-				values := make([]reflect.Value, len(args))
-				for i, a := range args {
-					values[i] = reflect.ValueOf(a)
-				}
-				fn.Call(values)
-			})
+		// testify matches on the number of arguments, and spreads a variadic call's values, so a
+		// variadic method needs an expectation per arity the test can produce.
+		arities := []int{method.Type.NumIn()}
+		if method.Type.IsVariadic() {
+			fixed := method.Type.NumIn() - 1
+			arities = []int{fixed, fixed + 1, fixed + 2, fixed + 3, fixed + 4}
+		}
+		for _, arity := range arities {
+			anything := make([]any, arity)
+			for i := range anything {
+				anything[i] = mock.Anything
+			}
+			call := api.On(name, anything...)
+			if method.Type.NumOut() > 0 {
+				call.Return(fn.Interface())
+			} else {
+				call.Run(func(args mock.Arguments) {
+					values := callArgs(method.Type, args)
+					// CallSlice, because the last value is already the variadic slice.
+					if method.Type.IsVariadic() {
+						fn.CallSlice(values)
+					} else {
+						fn.Call(values)
+					}
+				})
+			}
 		}
 	}
+	// LoadPluginConfiguration hands the plugin whatever the host writes into its argument, as
+	// JSON; the RPC server marshals it (client_rpc.go).
+	api.On("LoadPluginConfiguration", mock.Anything).Run(func(args mock.Arguments) {
+		dest, ok := args.Get(0).(*any)
+		if !ok {
+			panic("LoadPluginConfiguration was not given a *any")
+		}
+		*dest = PluginConfiguration
+		record(map[string]any{"api": "LoadPluginConfiguration", "config": PluginConfiguration})
+	}).Return(nil)
 	return api
+}
+
+// PluginConfiguration is what the host answers LoadPluginConfiguration with.
+var PluginConfiguration = map[string]any{"enabled": true, "name": "conformance"}
+
+// callArgs turns the flat arguments testify reports back into the method's own shape, gathering
+// a variadic call's trailing values into the slice the function expects.
+func callArgs(method reflect.Type, args mock.Arguments) []reflect.Value {
+	fixed := method.NumIn()
+	if method.IsVariadic() {
+		fixed--
+	}
+	values := make([]reflect.Value, 0, fixed+1)
+	for i := 0; i < fixed; i++ {
+		values = append(values, reflect.ValueOf(args[i]))
+	}
+	if method.IsVariadic() {
+		rest := reflect.MakeSlice(method.In(fixed), 0, len(args)-fixed)
+		for _, a := range args[fixed:] {
+			rest = reflect.Append(rest, reflect.ValueOf(a))
+		}
+		values = append(values, rest)
+	}
+	return values
 }
 
 func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
@@ -119,16 +164,16 @@ func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 	}
 	hooksV := reflect.ValueOf(hooks)
 	for _, m := range idl.Hooks {
-		if m.Excluded {
+		if m.Custom {
 			continue
 		}
-		args := c.fixture("Z_" + m.Name + "Args")
+		args := c.fixture(m.Args)
 		in := make([]reflect.Value, args.NumField())
 		for i := range in {
 			in[i] = args.Field(i)
 		}
 		out := hooksV.MethodByName(m.Name).Call(in)
-		record(map[string]any{"hook": m.Name, "returns": structOf("Z_"+m.Name+"Returns", out)})
+		record(map[string]any{"hook": m.Name, "returns": structOf(m.Returns, out)})
 	}
 	env.Shutdown()
 	record(map[string]any{"shutdown": true})

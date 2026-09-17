@@ -122,6 +122,9 @@ func encodableError(err error) error {
 	return ret
 }
 
+// partialPostMessage is the one field the plugin sets in its MessageWillBePosted answer.
+const partialPostMessage = "edited by the conformance plugin"
+
 // answer is what a mocked method returns (the fixture's fields), and what Go's RPC server then
 // sends: the same, with every `error` passed through `encodableError`.
 func answer(method reflect.Type, returns reflect.Value) (out, sent []reflect.Value) {
@@ -144,22 +147,29 @@ func answer(method reflect.Type, returns reflect.Value) (out, sent []reflect.Val
 func (c *conformance) setUpHooks() {
 	hooksT := reflect.TypeFor[plugin.Hooks]()
 	for _, m := range c.idl.Hooks {
-		if m.Excluded {
+		if m.Custom {
 			continue
 		}
 		method, _ := hooksT.MethodByName(m.Name)
+		argsName, returnsName := m.Args, m.Returns
 		anything := make([]any, method.Type.NumIn())
 		for i := range anything {
 			anything[i] = mock.Anything
 		}
-		returns := c.fixture("Z_" + m.Name + "Returns")
+		returns := c.fixture(m.Returns)
+		if m.Name == "MessageWillBePosted" {
+			// Answer with a post that carries one field, to show the host's merge: every other
+			// field of its answer must come from the post it sent (client_rpc.go).
+			returns = reflect.New(wireTypes[m.Returns]).Elem()
+			returns.Field(0).Set(reflect.ValueOf(&model.Post{Message: partialPostMessage}))
+		}
 		name := m.Name
 		fn := reflect.MakeFunc(method.Type, func(args []reflect.Value) []reflect.Value {
 			out, sent := answer(method.Type, returns)
 			record(map[string]any{
 				"hook":    name,
-				"args":    structOf("Z_"+name+"Args", args),
-				"returns": structOf("Z_"+name+"Returns", sent),
+				"args":    structOf(argsName, args),
+				"returns": structOf(returnsName, sent),
 			})
 			return out
 		})
@@ -183,10 +193,10 @@ func (c *conformance) OnActivate() error {
 	apiT := reflect.TypeFor[plugin.API]()
 	api := reflect.ValueOf(c.API)
 	for _, m := range c.idl.API {
-		if m.Excluded {
+		if m.Custom || m.Excluded {
 			continue
 		}
-		args := c.fixture("Z_" + m.Name + "Args")
+		args := c.fixture(m.Args)
 		in := make([]reflect.Value, args.NumField())
 		for i := range in {
 			in[i] = args.Field(i)
@@ -198,11 +208,35 @@ func (c *conformance) OnActivate() error {
 		} else {
 			out = api.MethodByName(m.Name).Call(in)
 		}
-		record(map[string]any{"api": m.Name, "returns": structOf("Z_"+m.Name+"Returns", out)})
+		record(map[string]any{"api": m.Name, "returns": structOf(m.Returns, out)})
 	}
+	c.tourHandWrittenAPI()
 	record(map[string]any{"activated": true})
 	return nil
 }
+
+// tourHandWrittenAPI calls the API methods whose clients Go writes by hand, with the values
+// crates/mm-plugin's test expects.
+func (c *conformance) tourHandWrittenAPI() {
+	c.API.LogDebug(LogMessage, LogPairs...)
+	c.API.LogInfo(LogMessage, LogPairs...)
+	c.API.LogWarn(LogMessage, LogPairs...)
+	c.API.LogError(LogMessage, LogPairs...)
+	var config any
+	err := c.API.LoadPluginConfiguration(&config)
+	entry := map[string]any{"api": "LoadPluginConfiguration", "config": config}
+	if err != nil {
+		entry["error"] = err.Error()
+	}
+	record(entry)
+}
+
+// LogMessage and LogPairs are what both conformance plugins send to the log methods. Go
+// stringifies the pairs with %+v before they cross (stringifier.go), so they arrive as strings.
+var (
+	LogMessage = "a logged line"
+	LogPairs   = []any{"key", 42, true}
+)
 
 func servePlugin(fixtures string, idl *IDL) error {
 	path := os.Getenv("PLUGINGEN_TRANSCRIPT")

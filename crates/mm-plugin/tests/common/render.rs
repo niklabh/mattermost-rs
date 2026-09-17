@@ -108,6 +108,26 @@ pub fn render_typed<T: Encode + ?Sized>(value: &T) -> Json {
     render_stream(&bytes).unwrap()
 }
 
+/// Decode a fixture stream **into** `seed`, as a merging client does: a field the stream omits
+/// keeps the seed's value.
+pub fn fixture_into<T: gobwire::Decode + Send + 'static>(name: &str, seed: T) -> T {
+    let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();
+    let mut value = Some(seed);
+    first_value(&stream, |dec| {
+        let mut taken = value.take().expect("one value");
+        dec.decode_into(&mut taken)?;
+        value = Some(taken);
+        Ok(())
+    })
+    .unwrap();
+    value.expect("one value")
+}
+
+/// How a merging client's answer renders: the fixture stream decoded into `seed`.
+pub fn merged<T: gobwire::Decode + Encode + Send + 'static>(name: &str, seed: T) -> Json {
+    render_typed(&fixture_into(name, seed))
+}
+
 /// Decode a fixture stream (`fixtures/plugin/gob/<name>.gob`) into `T`.
 pub fn fixture<T: gobwire::Decode + Default + Send + 'static>(name: &str) -> T {
     let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();

@@ -20,10 +20,11 @@ use goplugin::{Dispensed, MuxBroker};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
+mod handwritten;
 mod hooks;
 mod plugin;
 
-pub use api::{PluginApi, register_api};
+pub use api::{PluginApi, register_api as register_generated_api};
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
 
@@ -34,6 +35,13 @@ pub use plugin::{Plugin, client_main, handshake, plugin_server};
 /// implemented.`, and the caller receives zero values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotImplemented;
+
+/// Every method of [`PluginApi`] a plugin can call: the generated ones, plus
+/// `LoadPluginConfiguration`, whose server is hand-written.
+pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) {
+    register_generated_api(server, implementation);
+    handwritten::register_load_plugin_configuration(server, implementation);
+}
 
 /// `Plugin.Implemented` plus every generated hook (client_rpc.go, `hooksRPCServer`). A plugin
 /// process serves [`plugin_server`], which adds `OnActivate`.
@@ -133,13 +141,45 @@ impl HooksClient {
         if !self.implements(id) {
             return R::default();
         }
-        match self.client.call(&format!("Plugin.{name}"), args).await {
+        match self.rpc(name, args).await {
             Ok(returns) => returns,
             Err(e) => {
                 tracing::error!(error = %e, "RPC call {name} to plugin failed.");
                 R::default()
             }
         }
+    }
+
+    /// [`HooksClient::call`] for the hooks whose answer defaults to `seed`: the reply decodes
+    /// **into** it, so a field the plugin leaves out keeps the caller's value.
+    async fn call_merging<A, R>(&self, id: usize, name: &str, args: &A, seed: R) -> R
+    where
+        A: Encode,
+        R: Decode + Clone + Default + Send + 'static,
+    {
+        if !self.implements(id) {
+            return seed;
+        }
+        match self
+            .client
+            .call_into(&format!("Plugin.{name}"), args, seed.clone())
+            .await
+        {
+            Ok(returns) => returns,
+            Err(e) => {
+                tracing::error!(error = %e, "RPC call {name} to plugin failed.");
+                // Go answers with its seeded struct, which a failed call left untouched.
+                seed
+            }
+        }
+    }
+
+    async fn rpc<A, R>(&self, name: &str, args: &A) -> Result<R, go_netrpc::Error>
+    where
+        A: Encode,
+        R: Decode + Default + Send + 'static,
+    {
+        self.client.call(&format!("Plugin.{name}"), args).await
     }
 
     /// client_rpc_generated.go, `<Hook>WithRPCErr`: the returns are zero values whenever the

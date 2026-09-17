@@ -105,6 +105,13 @@ RUST_KEYWORDS = {
 NOT_RAW = {"self", "Self", "super", "crate"}
 
 
+# Methods whose RPC server is hand-written in crates/mm-plugin/src/rpc/: `OnActivate` dials the
+# brokered connections, `Implemented` has no wire structs, and `LoadPluginConfiguration` answers
+# `null` rather than a not-implemented error. Their trait methods are still generated, except for
+# the two that have no plain wire structs.
+REGISTER_BY_HAND = {"OnActivate", "Implemented", "LoadPluginConfiguration"}
+
+
 class GenError(Exception):
     pass
 
@@ -388,7 +395,9 @@ class Generator:
         return lines
 
     def generated(self, methods):
-        out = [m for m in methods if not m.get("excluded")]
+        """The methods whose trait method and server registration are generated: everything whose
+        wire structs are the plain A, B, C layout, hand-written ones included."""
+        out = [m for m in methods if not m.get("custom")]
         seen = {}
         for m in out:
             rust = snake(m["name"])
@@ -401,42 +410,56 @@ class Generator:
         for m in methods:
             name, rust = m["name"], snake(m["name"])
             out.extend(self.doc(m, "    "))
-            out.append(f"    ///")
+            out.append("    ///")
+            if m.get("excluded"):
+                out.append(f"    /// Hand-written in Go (client_rpc.go), so its wire structs are `{m['args']}`")
+                out.append(f"    /// and `{m['returns']}`.")
             out.append(f'    /// The default answers as Go does for a {what} the implementation lacks.')
             out.append(
-                f"    fn {rust}(&self, args: Z_{name}Args) -> impl Future<Output = Result<Z_{name}Returns, NotImplemented>> + Send {{"
+                f"    fn {rust}(&self, args: {m['args']}) -> impl Future<Output = Result<{m['returns']}, NotImplemented>> + Send {{"
             )
             out.append("        let _ = args;")
             out.append("        async { Err(NotImplemented) }")
             out.append("    }")
             out.append("")
 
-    def rpc_register(self, out, fn, trait, methods, prefix):
+    def rpc_register(self, out, fn, trait, methods):
         out.append(f"/// Register every generated method of `{trait}` on `server` as `Plugin.<Method>`.")
+        out.append("///")
+        out.append(f"/// Not registered here: {', '.join(sorted(REGISTER_BY_HAND))}, whose servers are hand-written.")
         out.append(f"pub fn {fn}<T: {trait}>(server: &mut Server, implementation: &Arc<T>) {{")
         for m in methods:
+            if m["name"] in REGISTER_BY_HAND:
+                continue
             name, rust = m["name"], snake(m["name"])
+            message = m["not_implemented"]
+            if '"' in message:
+                raise GenError(f"{name}: the not-implemented message is not a plain string")
             out.append("    let this = Arc::clone(implementation);")
-            out.append(f'    server.register("Plugin.{name}", move |args: Z_{name}Args| {{')
+            out.append(f'    server.register("Plugin.{name}", move |args: {m["args"]}| {{')
             out.append("        let this = Arc::clone(&this);")
             out.append(
-                f'        async move {{ this.{rust}(args).await.map_err(|NotImplemented| ServiceError("{prefix} {name} called but not implemented.".into())) }}'
+                f'        async move {{ this.{rust}(args).await.map_err(|NotImplemented| ServiceError("{message}".into())) }}'
             )
             out.append("    });")
         out.append("}")
         out.append("")
 
     def rpc_macro(self, out, macro, methods, what):
-        out.append(f"/// Invoke `$m!` with every generated {what} as `(method, \"GoName\", Args, Returns),`.")
+        out.append(
+            f'/// Invoke `$m!` with every {what} as'
+        )
+        out.append('/// `(method, "GoName", "Z_Args", Args, "Z_Returns", Returns),`.')
         out.append("#[doc(hidden)]")
         out.append("#[macro_export]")
         out.append(f"macro_rules! {macro} {{")
         out.append("    ($m:ident) => {")
         out.append("        $m! {")
         for m in methods:
-            name = m["name"]
             out.append(
-                f'            ({snake(name)}, "{name}", $crate::wire::plugin::Z_{name}Args, $crate::wire::plugin::Z_{name}Returns),'
+                f'            ({snake(m["name"])}, "{m["name"]}",'
+                f' "{m["args"]}", $crate::wire::plugin::{m["args"]},'
+                f' "{m["returns"]}", $crate::wire::plugin::{m["returns"]}),'
             )
         out.append("        }")
         out.append("    };")
@@ -493,9 +516,9 @@ class Generator:
         self.rpc_trait(out, "Hooks", hooks, "hook")
         out.append("}")
         out.append("")
-        self.rpc_register(out, "register_hooks", "Hooks", hooks, "Hook")
+        self.rpc_register(out, "register_hooks", "Hooks", hooks)
         out.append("impl HooksClient {")
-        for m in hooks:
+        for m in (m for m in hooks if not m.get("excluded")):
             name, rust = m["name"], snake(m["name"])
             out.extend(self.doc(m, "    "))
             out.append("    ///")
@@ -514,7 +537,12 @@ class Generator:
             out.append("")
         out.append("}")
         out.append("")
-        self.rpc_macro(out, "for_each_hook", hooks, "hook")
+        self.rpc_macro(out, "for_each_hook", hooks, "hook a plugin serves")
+        out.append("")
+        self.rpc_macro(
+            out, "for_each_hook_call", [m for m in hooks if not m.get("excluded")],
+            "hook whose `HooksClient` method is generated",
+        )
         return "\n".join(out) + "\n"
 
     def api_file(self):
@@ -531,9 +559,9 @@ class Generator:
         self.rpc_trait(out, "PluginApi", api, "method")
         out.append("}")
         out.append("")
-        self.rpc_register(out, "register_api", "PluginApi", api, "API")
+        self.rpc_register(out, "register_api", "PluginApi", api)
         out.append("impl ApiClient {")
-        for m in api:
+        for m in (m for m in api if not m.get("excluded")):
             name, rust = m["name"], snake(m["name"])
             out.extend(self.doc(m, "    "))
             out.append("    ///")
@@ -544,7 +572,12 @@ class Generator:
             out.append("")
         out.append("}")
         out.append("")
-        self.rpc_macro(out, "for_each_api_method", api, "API method")
+        self.rpc_macro(out, "for_each_api_method", api, "API method a host serves")
+        out.append("")
+        self.rpc_macro(
+            out, "for_each_api_call", [m for m in api if not m.get("excluded")],
+            "API method whose `ApiClient` method is generated",
+        )
         return "\n".join(out) + "\n"
 
 

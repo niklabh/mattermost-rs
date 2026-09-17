@@ -340,12 +340,37 @@ and the activation order. An `AppError` from `OnActivate` makes Go refuse the ac
 Mutations: 8 run, 6 caught, 2 controls survived. So the plugin-side halves of the RPC are now checked against Go too, not only
 Rust-to-Rust.
 
+**The hand-written methods with plain wire structs: DONE 2026-09-18 (fourth part of Phase 3).**
+Eleven of the twenty-two excluded methods have ordinary `Z_` structs and differ only in
+behaviour, so their servers are generated from the IDL — which now carries each method's wire
+struct names and its exact not-implemented text, parsed from client_rpc.go rather than
+transcribed — and their clients are written by hand in `rpc/handwritten.rs`:
+
+- `MessageWillBePosted`, `ChannelMemberWillBeAdded` and `TeamMemberWillBeAdded` seed the answer
+  with the value the caller passed and let gob decode **into** it, so a plugin that answers with
+  a partial value does not drop the fields it left out. The conformance plugin answers
+  `MessageWillBePosted` with a post carrying one field, which is what proves it.
+- `MessageWillBeUpdated` defaults to the new post but replaces rather than merges, and the three
+  `WithRPCErr` companions never seed.
+- `MessagesWillBeConsumed` and its context form keep no default at all.
+- `LogDebug`/`Info`/`Warn`/`Error` send their pairs as strings, because Go formats them with
+  `%+v` client-side (stringifier.go).
+- `LoadPluginConfiguration` answers `null` when the host has none, instead of the
+  not-implemented error every other method answers with.
+
+Both conformance runs cover them in both directions. Mutations: 11 run, 9 caught, 2 controls survived.
+
+**Still unported**, and the reason: `LogAuditRec` and `LogAuditRecWithLevel`. Their client passes
+the record through a JSON round trip first (audit.go, `makeAuditRecordGobSafe`), and Go's JSON
+uses the `json:` tags, which the gob wire types do not carry. `gobwire`'s `json` feature is
+declared in its manifest and has no implementation behind it. That is the next unit.
+
 **Next in Phase 3:**
-- the remaining hand-written methods: ServeHTTP/PluginHTTP streaming, `FileWillBeUploaded`,
-  `UploadData`, `InstallPlugin`, the log methods, `LoadPluginConfiguration`,
-  `MessageWillBePosted` and the other context hooks;
-- the database driver's RPC;
-- the error helpers (`ErrorString` codes);
+- `gobwire`'s `json` feature, then the two audit methods;
+- the nine methods that carry brokered streams: ServeHTTP and ServeMetrics, PluginHTTP and its
+  stream form, `FileWillBeUploaded`, `UploadData`, `InstallPlugin`,
+  `ReceiveSharedChannelAttachmentSyncMsg`, and `io_rpc`'s varint pull behind them;
+- the database driver's RPC, and the error helpers (`ErrorString` codes);
 - then the Rust conformance plugin under the real Go server on the stack.
 
 

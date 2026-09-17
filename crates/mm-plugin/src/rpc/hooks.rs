@@ -219,6 +219,31 @@ pub trait Hooks: Send + Sync + 'static {
         async { Err(NotImplemented) }
     }
 
+    /// Go: `ChannelMemberWillBeAdded(c *plugin.Context, channelMember *model.ChannelMember) (*model.ChannelMember, string)`
+    ///
+    /// ```text
+    /// ChannelMemberWillBeAdded is invoked before a member is added to a channel, allowing
+    /// plugins to modify the channel member or reject the addition.
+    ///
+    /// To reject the addition, return a non-empty string describing why it was rejected.
+    /// To modify the member, return the replacement, non-nil *model.ChannelMember and an empty string.
+    /// To allow the addition without modification, return a nil *model.ChannelMember and an empty string.
+    ///
+    /// Minimum server version: 11.7
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_ChannelMemberWillBeAddedArgs`
+    /// and `Z_ChannelMemberWillBeAddedReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn channel_member_will_be_added(
+        &self,
+        args: Z_ChannelMemberWillBeAddedArgs,
+    ) -> impl Future<Output = Result<Z_ChannelMemberWillBeAddedReturns, NotImplemented>> + Send
+    {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
     /// Go: `ChannelWillBeArchived(c *plugin.Context, channel *model.Channel) string`
     ///
     /// ```text
@@ -477,6 +502,113 @@ pub trait Hooks: Send + Sync + 'static {
         &self,
         args: Z_MessageHasBeenUpdatedArgs,
     ) -> impl Future<Output = Result<Z_MessageHasBeenUpdatedReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string)`
+    ///
+    /// ```text
+    /// MessageWillBePosted is invoked when a message is posted by a user before it is committed
+    /// to the database. If you also want to act on edited posts, see MessageWillBeUpdated.
+    ///
+    /// To reject a post, return an non-empty string describing why the post was rejected.
+    /// To modify the post, return the replacement, non-nil *model.Post and an empty string.
+    /// To allow the post without modification, return a nil *model.Post and an empty string.
+    /// To dismiss the post, return a nil *model.Post and the const DismissPostError string.
+    ///
+    /// If you don't need to modify or reject posts, use MessageHasBeenPosted instead.
+    ///
+    /// Note that this method will be called for posts created by plugins, including the plugin that
+    /// created the post.
+    ///
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_MessageWillBePostedArgs`
+    /// and `Z_MessageWillBePostedReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn message_will_be_posted(
+        &self,
+        args: Z_MessageWillBePostedArgs,
+    ) -> impl Future<Output = Result<Z_MessageWillBePostedReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `MessageWillBeUpdated(c *plugin.Context, newPost *model.Post, oldPost *model.Post) (*model.Post, string)`
+    ///
+    /// ```text
+    /// MessageWillBeUpdated is invoked when a message is updated by a user before it is committed
+    /// to the database. If you also want to act on new posts, see MessageWillBePosted.
+    /// Return values should be the modified post or nil if rejected and an explanation for the user.
+    /// On rejection, the post will be kept in its previous state.
+    ///
+    /// If you don't need to modify or rejected updated posts, use MessageHasBeenUpdated instead.
+    ///
+    /// Note that this method will be called for posts updated by plugins, including the plugin that
+    /// updated the post.
+    ///
+    /// Minimum server version: 5.2
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_MessageWillBeUpdatedArgs`
+    /// and `Z_MessageWillBeUpdatedReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn message_will_be_updated(
+        &self,
+        args: Z_MessageWillBeUpdatedArgs,
+    ) -> impl Future<Output = Result<Z_MessageWillBeUpdatedReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `MessagesWillBeConsumed(posts []*model.Post) []*model.Post`
+    ///
+    /// ```text
+    /// MessagesWillBeConsumed is invoked when a message is requested by a client before it is returned
+    /// to the client
+    ///
+    /// Note that this method will be called for posts created by plugins, including the plugin that
+    /// created the post.
+    ///
+    /// Minimum server version: 9.3
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_MessagesWillBeConsumedArgs`
+    /// and `Z_MessagesWillBeConsumedReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn messages_will_be_consumed(
+        &self,
+        args: Z_MessagesWillBeConsumedArgs,
+    ) -> impl Future<Output = Result<Z_MessagesWillBeConsumedReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
+    /// Go: `MessagesWillBeConsumedWithContext(c *plugin.Context, posts []*model.Post) []*model.Post`
+    ///
+    /// ```text
+    /// MessagesWillBeConsumedWithContext is invoked when messages are requested by a client, before
+    /// they are returned to the client. It is the context-aware variant of MessagesWillBeConsumed.
+    ///
+    /// To modify a post, return the replacement post; the returned posts are matched to the originals
+    /// by ID. Posts that should be left unchanged may be omitted from the returned slice.
+    ///
+    /// Note that this method will be called for posts created by plugins, including the plugin that
+    /// created the post.
+    ///
+    /// Minimum server version: 11.9
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_MessagesWillBeConsumedWithContextArgs`
+    /// and `Z_MessagesWillBeConsumedWithContextReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn messages_will_be_consumed_with_context(
+        &self,
+        args: Z_MessagesWillBeConsumedWithContextArgs,
+    ) -> impl Future<Output = Result<Z_MessagesWillBeConsumedWithContextReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -864,6 +996,30 @@ pub trait Hooks: Send + Sync + 'static {
         async { Err(NotImplemented) }
     }
 
+    /// Go: `TeamMemberWillBeAdded(c *plugin.Context, teamMember *model.TeamMember) (*model.TeamMember, string)`
+    ///
+    /// ```text
+    /// TeamMemberWillBeAdded is invoked before a member is added to a team, allowing
+    /// plugins to modify the team member or reject the addition.
+    ///
+    /// To reject the addition, return a non-empty string describing why it was rejected.
+    /// To modify the member, return the replacement, non-nil *model.TeamMember and an empty string.
+    /// To allow the addition without modification, return a nil *model.TeamMember and an empty string.
+    ///
+    /// Minimum server version: 11.7
+    /// ```
+    ///
+    /// Hand-written in Go (client_rpc.go), so its wire structs are `Z_TeamMemberWillBeAddedArgs`
+    /// and `Z_TeamMemberWillBeAddedReturns`.
+    /// The default answers as Go does for a hook the implementation lacks.
+    fn team_member_will_be_added(
+        &self,
+        args: Z_TeamMemberWillBeAddedArgs,
+    ) -> impl Future<Output = Result<Z_TeamMemberWillBeAddedReturns, NotImplemented>> + Send {
+        let _ = args;
+        async { Err(NotImplemented) }
+    }
+
     /// Go: `UserHasBeenCreated(c *plugin.Context, user *model.User)`
     ///
     /// ```text
@@ -1025,6 +1181,8 @@ pub trait Hooks: Send + Sync + 'static {
 }
 
 /// Register every generated method of `Hooks` on `server` as `Plugin.<Method>`.
+///
+/// Not registered here: Implemented, LoadPluginConfiguration, OnActivate, whose servers are hand-written.
 pub fn register_hooks<T: Hooks>(server: &mut Server, implementation: &Arc<T>) {
     let this = Arc::clone(implementation);
     server.register(
@@ -1037,6 +1195,22 @@ pub fn register_hooks<T: Hooks>(server: &mut Server, implementation: &Arc<T>) {
                     .map_err(|NotImplemented| {
                         ServiceError(
                             "Hook ChannelHasBeenCreated called but not implemented.".into(),
+                        )
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.ChannelMemberWillBeAdded",
+        move |args: Z_ChannelMemberWillBeAddedArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.channel_member_will_be_added(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError(
+                            "hook ChannelMemberWillBeAdded called but not implemented".into(),
                         )
                     })
             }
@@ -1215,6 +1389,67 @@ pub fn register_hooks<T: Hooks>(server: &mut Server, implementation: &Arc<T>) {
                     .map_err(|NotImplemented| {
                         ServiceError(
                             "Hook MessageHasBeenUpdated called but not implemented.".into(),
+                        )
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.MessageWillBePosted",
+        move |args: Z_MessageWillBePostedArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.message_will_be_posted(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError("hook MessageWillBePosted called but not implemented".into())
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.MessageWillBeUpdated",
+        move |args: Z_MessageWillBeUpdatedArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.message_will_be_updated(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError("hook MessageWillBeUpdated called but not implemented".into())
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.MessagesWillBeConsumed",
+        move |args: Z_MessagesWillBeConsumedArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.messages_will_be_consumed(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError(
+                            "hook MessagesWillBeConsumed called but not implemented".into(),
+                        )
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.MessagesWillBeConsumedWithContext",
+        move |args: Z_MessagesWillBeConsumedWithContextArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.messages_will_be_consumed_with_context(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError(
+                            "hook MessagesWillBeConsumedWithContext called but not implemented"
+                                .into(),
                         )
                     })
             }
@@ -1487,6 +1722,20 @@ pub fn register_hooks<T: Hooks>(server: &mut Server, implementation: &Arc<T>) {
                         ServiceError(
                             "Hook ScheduledPostWillBeCreated called but not implemented.".into(),
                         )
+                    })
+            }
+        },
+    );
+    let this = Arc::clone(implementation);
+    server.register(
+        "Plugin.TeamMemberWillBeAdded",
+        move |args: Z_TeamMemberWillBeAddedArgs| {
+            let this = Arc::clone(&this);
+            async move {
+                this.team_member_will_be_added(args)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError("hook TeamMemberWillBeAdded called but not implemented".into())
                     })
             }
         },
@@ -3067,53 +3316,112 @@ impl HooksClient {
     }
 }
 
-/// Invoke `$m!` with every generated hook as `(method, "GoName", Args, Returns),`.
+/// Invoke `$m!` with every hook a plugin serves as
+/// `(method, "GoName", "Z_Args", Args, "Z_Returns", Returns),`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! for_each_hook {
     ($m:ident) => {
         $m! {
-            (channel_has_been_created, "ChannelHasBeenCreated", $crate::wire::plugin::Z_ChannelHasBeenCreatedArgs, $crate::wire::plugin::Z_ChannelHasBeenCreatedReturns),
-            (channel_will_be_archived, "ChannelWillBeArchived", $crate::wire::plugin::Z_ChannelWillBeArchivedArgs, $crate::wire::plugin::Z_ChannelWillBeArchivedReturns),
-            (channel_will_be_restored, "ChannelWillBeRestored", $crate::wire::plugin::Z_ChannelWillBeRestoredArgs, $crate::wire::plugin::Z_ChannelWillBeRestoredReturns),
-            (channel_will_be_updated, "ChannelWillBeUpdated", $crate::wire::plugin::Z_ChannelWillBeUpdatedArgs, $crate::wire::plugin::Z_ChannelWillBeUpdatedReturns),
-            (configuration_will_be_saved, "ConfigurationWillBeSaved", $crate::wire::plugin::Z_ConfigurationWillBeSavedArgs, $crate::wire::plugin::Z_ConfigurationWillBeSavedReturns),
-            (draft_will_be_upserted, "DraftWillBeUpserted", $crate::wire::plugin::Z_DraftWillBeUpsertedArgs, $crate::wire::plugin::Z_DraftWillBeUpsertedReturns),
-            (email_notification_will_be_sent, "EmailNotificationWillBeSent", $crate::wire::plugin::Z_EmailNotificationWillBeSentArgs, $crate::wire::plugin::Z_EmailNotificationWillBeSentReturns),
-            (execute_command, "ExecuteCommand", $crate::wire::plugin::Z_ExecuteCommandArgs, $crate::wire::plugin::Z_ExecuteCommandReturns),
-            (file_will_be_downloaded, "FileWillBeDownloaded", $crate::wire::plugin::Z_FileWillBeDownloadedArgs, $crate::wire::plugin::Z_FileWillBeDownloadedReturns),
-            (generate_support_data, "GenerateSupportData", $crate::wire::plugin::Z_GenerateSupportDataArgs, $crate::wire::plugin::Z_GenerateSupportDataReturns),
-            (message_has_been_deleted, "MessageHasBeenDeleted", $crate::wire::plugin::Z_MessageHasBeenDeletedArgs, $crate::wire::plugin::Z_MessageHasBeenDeletedReturns),
-            (message_has_been_posted, "MessageHasBeenPosted", $crate::wire::plugin::Z_MessageHasBeenPostedArgs, $crate::wire::plugin::Z_MessageHasBeenPostedReturns),
-            (message_has_been_updated, "MessageHasBeenUpdated", $crate::wire::plugin::Z_MessageHasBeenUpdatedArgs, $crate::wire::plugin::Z_MessageHasBeenUpdatedReturns),
-            (notification_will_be_pushed, "NotificationWillBePushed", $crate::wire::plugin::Z_NotificationWillBePushedArgs, $crate::wire::plugin::Z_NotificationWillBePushedReturns),
-            (on_cloud_limits_updated, "OnCloudLimitsUpdated", $crate::wire::plugin::Z_OnCloudLimitsUpdatedArgs, $crate::wire::plugin::Z_OnCloudLimitsUpdatedReturns),
-            (on_configuration_change, "OnConfigurationChange", $crate::wire::plugin::Z_OnConfigurationChangeArgs, $crate::wire::plugin::Z_OnConfigurationChangeReturns),
-            (on_deactivate, "OnDeactivate", $crate::wire::plugin::Z_OnDeactivateArgs, $crate::wire::plugin::Z_OnDeactivateReturns),
-            (on_install, "OnInstall", $crate::wire::plugin::Z_OnInstallArgs, $crate::wire::plugin::Z_OnInstallReturns),
-            (on_plugin_cluster_event, "OnPluginClusterEvent", $crate::wire::plugin::Z_OnPluginClusterEventArgs, $crate::wire::plugin::Z_OnPluginClusterEventReturns),
-            (on_saml_login, "OnSAMLLogin", $crate::wire::plugin::Z_OnSAMLLoginArgs, $crate::wire::plugin::Z_OnSAMLLoginReturns),
-            (on_send_daily_telemetry, "OnSendDailyTelemetry", $crate::wire::plugin::Z_OnSendDailyTelemetryArgs, $crate::wire::plugin::Z_OnSendDailyTelemetryReturns),
-            (on_shared_channels_attachment_sync_msg, "OnSharedChannelsAttachmentSyncMsg", $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgArgs, $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgReturns),
-            (on_shared_channels_ping, "OnSharedChannelsPing", $crate::wire::plugin::Z_OnSharedChannelsPingArgs, $crate::wire::plugin::Z_OnSharedChannelsPingReturns),
-            (on_shared_channels_profile_image_sync_msg, "OnSharedChannelsProfileImageSyncMsg", $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgArgs, $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgReturns),
-            (on_shared_channels_sync_msg, "OnSharedChannelsSyncMsg", $crate::wire::plugin::Z_OnSharedChannelsSyncMsgArgs, $crate::wire::plugin::Z_OnSharedChannelsSyncMsgReturns),
-            (on_web_socket_connect, "OnWebSocketConnect", $crate::wire::plugin::Z_OnWebSocketConnectArgs, $crate::wire::plugin::Z_OnWebSocketConnectReturns),
-            (on_web_socket_disconnect, "OnWebSocketDisconnect", $crate::wire::plugin::Z_OnWebSocketDisconnectArgs, $crate::wire::plugin::Z_OnWebSocketDisconnectReturns),
-            (preferences_have_changed, "PreferencesHaveChanged", $crate::wire::plugin::Z_PreferencesHaveChangedArgs, $crate::wire::plugin::Z_PreferencesHaveChangedReturns),
-            (reaction_has_been_added, "ReactionHasBeenAdded", $crate::wire::plugin::Z_ReactionHasBeenAddedArgs, $crate::wire::plugin::Z_ReactionHasBeenAddedReturns),
-            (reaction_has_been_removed, "ReactionHasBeenRemoved", $crate::wire::plugin::Z_ReactionHasBeenRemovedArgs, $crate::wire::plugin::Z_ReactionHasBeenRemovedReturns),
-            (run_data_retention, "RunDataRetention", $crate::wire::plugin::Z_RunDataRetentionArgs, $crate::wire::plugin::Z_RunDataRetentionReturns),
-            (scheduled_post_will_be_created, "ScheduledPostWillBeCreated", $crate::wire::plugin::Z_ScheduledPostWillBeCreatedArgs, $crate::wire::plugin::Z_ScheduledPostWillBeCreatedReturns),
-            (user_has_been_created, "UserHasBeenCreated", $crate::wire::plugin::Z_UserHasBeenCreatedArgs, $crate::wire::plugin::Z_UserHasBeenCreatedReturns),
-            (user_has_been_deactivated, "UserHasBeenDeactivated", $crate::wire::plugin::Z_UserHasBeenDeactivatedArgs, $crate::wire::plugin::Z_UserHasBeenDeactivatedReturns),
-            (user_has_joined_channel, "UserHasJoinedChannel", $crate::wire::plugin::Z_UserHasJoinedChannelArgs, $crate::wire::plugin::Z_UserHasJoinedChannelReturns),
-            (user_has_joined_team, "UserHasJoinedTeam", $crate::wire::plugin::Z_UserHasJoinedTeamArgs, $crate::wire::plugin::Z_UserHasJoinedTeamReturns),
-            (user_has_left_channel, "UserHasLeftChannel", $crate::wire::plugin::Z_UserHasLeftChannelArgs, $crate::wire::plugin::Z_UserHasLeftChannelReturns),
-            (user_has_left_team, "UserHasLeftTeam", $crate::wire::plugin::Z_UserHasLeftTeamArgs, $crate::wire::plugin::Z_UserHasLeftTeamReturns),
-            (user_has_logged_in, "UserHasLoggedIn", $crate::wire::plugin::Z_UserHasLoggedInArgs, $crate::wire::plugin::Z_UserHasLoggedInReturns),
-            (user_will_log_in, "UserWillLogIn", $crate::wire::plugin::Z_UserWillLogInArgs, $crate::wire::plugin::Z_UserWillLogInReturns),
-            (web_socket_message_has_been_posted, "WebSocketMessageHasBeenPosted", $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedArgs, $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedReturns),
+            (channel_has_been_created, "ChannelHasBeenCreated", "Z_ChannelHasBeenCreatedArgs", $crate::wire::plugin::Z_ChannelHasBeenCreatedArgs, "Z_ChannelHasBeenCreatedReturns", $crate::wire::plugin::Z_ChannelHasBeenCreatedReturns),
+            (channel_member_will_be_added, "ChannelMemberWillBeAdded", "Z_ChannelMemberWillBeAddedArgs", $crate::wire::plugin::Z_ChannelMemberWillBeAddedArgs, "Z_ChannelMemberWillBeAddedReturns", $crate::wire::plugin::Z_ChannelMemberWillBeAddedReturns),
+            (channel_will_be_archived, "ChannelWillBeArchived", "Z_ChannelWillBeArchivedArgs", $crate::wire::plugin::Z_ChannelWillBeArchivedArgs, "Z_ChannelWillBeArchivedReturns", $crate::wire::plugin::Z_ChannelWillBeArchivedReturns),
+            (channel_will_be_restored, "ChannelWillBeRestored", "Z_ChannelWillBeRestoredArgs", $crate::wire::plugin::Z_ChannelWillBeRestoredArgs, "Z_ChannelWillBeRestoredReturns", $crate::wire::plugin::Z_ChannelWillBeRestoredReturns),
+            (channel_will_be_updated, "ChannelWillBeUpdated", "Z_ChannelWillBeUpdatedArgs", $crate::wire::plugin::Z_ChannelWillBeUpdatedArgs, "Z_ChannelWillBeUpdatedReturns", $crate::wire::plugin::Z_ChannelWillBeUpdatedReturns),
+            (configuration_will_be_saved, "ConfigurationWillBeSaved", "Z_ConfigurationWillBeSavedArgs", $crate::wire::plugin::Z_ConfigurationWillBeSavedArgs, "Z_ConfigurationWillBeSavedReturns", $crate::wire::plugin::Z_ConfigurationWillBeSavedReturns),
+            (draft_will_be_upserted, "DraftWillBeUpserted", "Z_DraftWillBeUpsertedArgs", $crate::wire::plugin::Z_DraftWillBeUpsertedArgs, "Z_DraftWillBeUpsertedReturns", $crate::wire::plugin::Z_DraftWillBeUpsertedReturns),
+            (email_notification_will_be_sent, "EmailNotificationWillBeSent", "Z_EmailNotificationWillBeSentArgs", $crate::wire::plugin::Z_EmailNotificationWillBeSentArgs, "Z_EmailNotificationWillBeSentReturns", $crate::wire::plugin::Z_EmailNotificationWillBeSentReturns),
+            (execute_command, "ExecuteCommand", "Z_ExecuteCommandArgs", $crate::wire::plugin::Z_ExecuteCommandArgs, "Z_ExecuteCommandReturns", $crate::wire::plugin::Z_ExecuteCommandReturns),
+            (file_will_be_downloaded, "FileWillBeDownloaded", "Z_FileWillBeDownloadedArgs", $crate::wire::plugin::Z_FileWillBeDownloadedArgs, "Z_FileWillBeDownloadedReturns", $crate::wire::plugin::Z_FileWillBeDownloadedReturns),
+            (generate_support_data, "GenerateSupportData", "Z_GenerateSupportDataArgs", $crate::wire::plugin::Z_GenerateSupportDataArgs, "Z_GenerateSupportDataReturns", $crate::wire::plugin::Z_GenerateSupportDataReturns),
+            (message_has_been_deleted, "MessageHasBeenDeleted", "Z_MessageHasBeenDeletedArgs", $crate::wire::plugin::Z_MessageHasBeenDeletedArgs, "Z_MessageHasBeenDeletedReturns", $crate::wire::plugin::Z_MessageHasBeenDeletedReturns),
+            (message_has_been_posted, "MessageHasBeenPosted", "Z_MessageHasBeenPostedArgs", $crate::wire::plugin::Z_MessageHasBeenPostedArgs, "Z_MessageHasBeenPostedReturns", $crate::wire::plugin::Z_MessageHasBeenPostedReturns),
+            (message_has_been_updated, "MessageHasBeenUpdated", "Z_MessageHasBeenUpdatedArgs", $crate::wire::plugin::Z_MessageHasBeenUpdatedArgs, "Z_MessageHasBeenUpdatedReturns", $crate::wire::plugin::Z_MessageHasBeenUpdatedReturns),
+            (message_will_be_posted, "MessageWillBePosted", "Z_MessageWillBePostedArgs", $crate::wire::plugin::Z_MessageWillBePostedArgs, "Z_MessageWillBePostedReturns", $crate::wire::plugin::Z_MessageWillBePostedReturns),
+            (message_will_be_updated, "MessageWillBeUpdated", "Z_MessageWillBeUpdatedArgs", $crate::wire::plugin::Z_MessageWillBeUpdatedArgs, "Z_MessageWillBeUpdatedReturns", $crate::wire::plugin::Z_MessageWillBeUpdatedReturns),
+            (messages_will_be_consumed, "MessagesWillBeConsumed", "Z_MessagesWillBeConsumedArgs", $crate::wire::plugin::Z_MessagesWillBeConsumedArgs, "Z_MessagesWillBeConsumedReturns", $crate::wire::plugin::Z_MessagesWillBeConsumedReturns),
+            (messages_will_be_consumed_with_context, "MessagesWillBeConsumedWithContext", "Z_MessagesWillBeConsumedWithContextArgs", $crate::wire::plugin::Z_MessagesWillBeConsumedWithContextArgs, "Z_MessagesWillBeConsumedWithContextReturns", $crate::wire::plugin::Z_MessagesWillBeConsumedWithContextReturns),
+            (notification_will_be_pushed, "NotificationWillBePushed", "Z_NotificationWillBePushedArgs", $crate::wire::plugin::Z_NotificationWillBePushedArgs, "Z_NotificationWillBePushedReturns", $crate::wire::plugin::Z_NotificationWillBePushedReturns),
+            (on_cloud_limits_updated, "OnCloudLimitsUpdated", "Z_OnCloudLimitsUpdatedArgs", $crate::wire::plugin::Z_OnCloudLimitsUpdatedArgs, "Z_OnCloudLimitsUpdatedReturns", $crate::wire::plugin::Z_OnCloudLimitsUpdatedReturns),
+            (on_configuration_change, "OnConfigurationChange", "Z_OnConfigurationChangeArgs", $crate::wire::plugin::Z_OnConfigurationChangeArgs, "Z_OnConfigurationChangeReturns", $crate::wire::plugin::Z_OnConfigurationChangeReturns),
+            (on_deactivate, "OnDeactivate", "Z_OnDeactivateArgs", $crate::wire::plugin::Z_OnDeactivateArgs, "Z_OnDeactivateReturns", $crate::wire::plugin::Z_OnDeactivateReturns),
+            (on_install, "OnInstall", "Z_OnInstallArgs", $crate::wire::plugin::Z_OnInstallArgs, "Z_OnInstallReturns", $crate::wire::plugin::Z_OnInstallReturns),
+            (on_plugin_cluster_event, "OnPluginClusterEvent", "Z_OnPluginClusterEventArgs", $crate::wire::plugin::Z_OnPluginClusterEventArgs, "Z_OnPluginClusterEventReturns", $crate::wire::plugin::Z_OnPluginClusterEventReturns),
+            (on_saml_login, "OnSAMLLogin", "Z_OnSAMLLoginArgs", $crate::wire::plugin::Z_OnSAMLLoginArgs, "Z_OnSAMLLoginReturns", $crate::wire::plugin::Z_OnSAMLLoginReturns),
+            (on_send_daily_telemetry, "OnSendDailyTelemetry", "Z_OnSendDailyTelemetryArgs", $crate::wire::plugin::Z_OnSendDailyTelemetryArgs, "Z_OnSendDailyTelemetryReturns", $crate::wire::plugin::Z_OnSendDailyTelemetryReturns),
+            (on_shared_channels_attachment_sync_msg, "OnSharedChannelsAttachmentSyncMsg", "Z_OnSharedChannelsAttachmentSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgArgs, "Z_OnSharedChannelsAttachmentSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgReturns),
+            (on_shared_channels_ping, "OnSharedChannelsPing", "Z_OnSharedChannelsPingArgs", $crate::wire::plugin::Z_OnSharedChannelsPingArgs, "Z_OnSharedChannelsPingReturns", $crate::wire::plugin::Z_OnSharedChannelsPingReturns),
+            (on_shared_channels_profile_image_sync_msg, "OnSharedChannelsProfileImageSyncMsg", "Z_OnSharedChannelsProfileImageSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgArgs, "Z_OnSharedChannelsProfileImageSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgReturns),
+            (on_shared_channels_sync_msg, "OnSharedChannelsSyncMsg", "Z_OnSharedChannelsSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsSyncMsgArgs, "Z_OnSharedChannelsSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsSyncMsgReturns),
+            (on_web_socket_connect, "OnWebSocketConnect", "Z_OnWebSocketConnectArgs", $crate::wire::plugin::Z_OnWebSocketConnectArgs, "Z_OnWebSocketConnectReturns", $crate::wire::plugin::Z_OnWebSocketConnectReturns),
+            (on_web_socket_disconnect, "OnWebSocketDisconnect", "Z_OnWebSocketDisconnectArgs", $crate::wire::plugin::Z_OnWebSocketDisconnectArgs, "Z_OnWebSocketDisconnectReturns", $crate::wire::plugin::Z_OnWebSocketDisconnectReturns),
+            (preferences_have_changed, "PreferencesHaveChanged", "Z_PreferencesHaveChangedArgs", $crate::wire::plugin::Z_PreferencesHaveChangedArgs, "Z_PreferencesHaveChangedReturns", $crate::wire::plugin::Z_PreferencesHaveChangedReturns),
+            (reaction_has_been_added, "ReactionHasBeenAdded", "Z_ReactionHasBeenAddedArgs", $crate::wire::plugin::Z_ReactionHasBeenAddedArgs, "Z_ReactionHasBeenAddedReturns", $crate::wire::plugin::Z_ReactionHasBeenAddedReturns),
+            (reaction_has_been_removed, "ReactionHasBeenRemoved", "Z_ReactionHasBeenRemovedArgs", $crate::wire::plugin::Z_ReactionHasBeenRemovedArgs, "Z_ReactionHasBeenRemovedReturns", $crate::wire::plugin::Z_ReactionHasBeenRemovedReturns),
+            (run_data_retention, "RunDataRetention", "Z_RunDataRetentionArgs", $crate::wire::plugin::Z_RunDataRetentionArgs, "Z_RunDataRetentionReturns", $crate::wire::plugin::Z_RunDataRetentionReturns),
+            (scheduled_post_will_be_created, "ScheduledPostWillBeCreated", "Z_ScheduledPostWillBeCreatedArgs", $crate::wire::plugin::Z_ScheduledPostWillBeCreatedArgs, "Z_ScheduledPostWillBeCreatedReturns", $crate::wire::plugin::Z_ScheduledPostWillBeCreatedReturns),
+            (team_member_will_be_added, "TeamMemberWillBeAdded", "Z_TeamMemberWillBeAddedArgs", $crate::wire::plugin::Z_TeamMemberWillBeAddedArgs, "Z_TeamMemberWillBeAddedReturns", $crate::wire::plugin::Z_TeamMemberWillBeAddedReturns),
+            (user_has_been_created, "UserHasBeenCreated", "Z_UserHasBeenCreatedArgs", $crate::wire::plugin::Z_UserHasBeenCreatedArgs, "Z_UserHasBeenCreatedReturns", $crate::wire::plugin::Z_UserHasBeenCreatedReturns),
+            (user_has_been_deactivated, "UserHasBeenDeactivated", "Z_UserHasBeenDeactivatedArgs", $crate::wire::plugin::Z_UserHasBeenDeactivatedArgs, "Z_UserHasBeenDeactivatedReturns", $crate::wire::plugin::Z_UserHasBeenDeactivatedReturns),
+            (user_has_joined_channel, "UserHasJoinedChannel", "Z_UserHasJoinedChannelArgs", $crate::wire::plugin::Z_UserHasJoinedChannelArgs, "Z_UserHasJoinedChannelReturns", $crate::wire::plugin::Z_UserHasJoinedChannelReturns),
+            (user_has_joined_team, "UserHasJoinedTeam", "Z_UserHasJoinedTeamArgs", $crate::wire::plugin::Z_UserHasJoinedTeamArgs, "Z_UserHasJoinedTeamReturns", $crate::wire::plugin::Z_UserHasJoinedTeamReturns),
+            (user_has_left_channel, "UserHasLeftChannel", "Z_UserHasLeftChannelArgs", $crate::wire::plugin::Z_UserHasLeftChannelArgs, "Z_UserHasLeftChannelReturns", $crate::wire::plugin::Z_UserHasLeftChannelReturns),
+            (user_has_left_team, "UserHasLeftTeam", "Z_UserHasLeftTeamArgs", $crate::wire::plugin::Z_UserHasLeftTeamArgs, "Z_UserHasLeftTeamReturns", $crate::wire::plugin::Z_UserHasLeftTeamReturns),
+            (user_has_logged_in, "UserHasLoggedIn", "Z_UserHasLoggedInArgs", $crate::wire::plugin::Z_UserHasLoggedInArgs, "Z_UserHasLoggedInReturns", $crate::wire::plugin::Z_UserHasLoggedInReturns),
+            (user_will_log_in, "UserWillLogIn", "Z_UserWillLogInArgs", $crate::wire::plugin::Z_UserWillLogInArgs, "Z_UserWillLogInReturns", $crate::wire::plugin::Z_UserWillLogInReturns),
+            (web_socket_message_has_been_posted, "WebSocketMessageHasBeenPosted", "Z_WebSocketMessageHasBeenPostedArgs", $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedArgs, "Z_WebSocketMessageHasBeenPostedReturns", $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedReturns),
+        }
+    };
+}
+
+/// Invoke `$m!` with every hook whose `HooksClient` method is generated as
+/// `(method, "GoName", "Z_Args", Args, "Z_Returns", Returns),`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! for_each_hook_call {
+    ($m:ident) => {
+        $m! {
+            (channel_has_been_created, "ChannelHasBeenCreated", "Z_ChannelHasBeenCreatedArgs", $crate::wire::plugin::Z_ChannelHasBeenCreatedArgs, "Z_ChannelHasBeenCreatedReturns", $crate::wire::plugin::Z_ChannelHasBeenCreatedReturns),
+            (channel_will_be_archived, "ChannelWillBeArchived", "Z_ChannelWillBeArchivedArgs", $crate::wire::plugin::Z_ChannelWillBeArchivedArgs, "Z_ChannelWillBeArchivedReturns", $crate::wire::plugin::Z_ChannelWillBeArchivedReturns),
+            (channel_will_be_restored, "ChannelWillBeRestored", "Z_ChannelWillBeRestoredArgs", $crate::wire::plugin::Z_ChannelWillBeRestoredArgs, "Z_ChannelWillBeRestoredReturns", $crate::wire::plugin::Z_ChannelWillBeRestoredReturns),
+            (channel_will_be_updated, "ChannelWillBeUpdated", "Z_ChannelWillBeUpdatedArgs", $crate::wire::plugin::Z_ChannelWillBeUpdatedArgs, "Z_ChannelWillBeUpdatedReturns", $crate::wire::plugin::Z_ChannelWillBeUpdatedReturns),
+            (configuration_will_be_saved, "ConfigurationWillBeSaved", "Z_ConfigurationWillBeSavedArgs", $crate::wire::plugin::Z_ConfigurationWillBeSavedArgs, "Z_ConfigurationWillBeSavedReturns", $crate::wire::plugin::Z_ConfigurationWillBeSavedReturns),
+            (draft_will_be_upserted, "DraftWillBeUpserted", "Z_DraftWillBeUpsertedArgs", $crate::wire::plugin::Z_DraftWillBeUpsertedArgs, "Z_DraftWillBeUpsertedReturns", $crate::wire::plugin::Z_DraftWillBeUpsertedReturns),
+            (email_notification_will_be_sent, "EmailNotificationWillBeSent", "Z_EmailNotificationWillBeSentArgs", $crate::wire::plugin::Z_EmailNotificationWillBeSentArgs, "Z_EmailNotificationWillBeSentReturns", $crate::wire::plugin::Z_EmailNotificationWillBeSentReturns),
+            (execute_command, "ExecuteCommand", "Z_ExecuteCommandArgs", $crate::wire::plugin::Z_ExecuteCommandArgs, "Z_ExecuteCommandReturns", $crate::wire::plugin::Z_ExecuteCommandReturns),
+            (file_will_be_downloaded, "FileWillBeDownloaded", "Z_FileWillBeDownloadedArgs", $crate::wire::plugin::Z_FileWillBeDownloadedArgs, "Z_FileWillBeDownloadedReturns", $crate::wire::plugin::Z_FileWillBeDownloadedReturns),
+            (generate_support_data, "GenerateSupportData", "Z_GenerateSupportDataArgs", $crate::wire::plugin::Z_GenerateSupportDataArgs, "Z_GenerateSupportDataReturns", $crate::wire::plugin::Z_GenerateSupportDataReturns),
+            (message_has_been_deleted, "MessageHasBeenDeleted", "Z_MessageHasBeenDeletedArgs", $crate::wire::plugin::Z_MessageHasBeenDeletedArgs, "Z_MessageHasBeenDeletedReturns", $crate::wire::plugin::Z_MessageHasBeenDeletedReturns),
+            (message_has_been_posted, "MessageHasBeenPosted", "Z_MessageHasBeenPostedArgs", $crate::wire::plugin::Z_MessageHasBeenPostedArgs, "Z_MessageHasBeenPostedReturns", $crate::wire::plugin::Z_MessageHasBeenPostedReturns),
+            (message_has_been_updated, "MessageHasBeenUpdated", "Z_MessageHasBeenUpdatedArgs", $crate::wire::plugin::Z_MessageHasBeenUpdatedArgs, "Z_MessageHasBeenUpdatedReturns", $crate::wire::plugin::Z_MessageHasBeenUpdatedReturns),
+            (notification_will_be_pushed, "NotificationWillBePushed", "Z_NotificationWillBePushedArgs", $crate::wire::plugin::Z_NotificationWillBePushedArgs, "Z_NotificationWillBePushedReturns", $crate::wire::plugin::Z_NotificationWillBePushedReturns),
+            (on_cloud_limits_updated, "OnCloudLimitsUpdated", "Z_OnCloudLimitsUpdatedArgs", $crate::wire::plugin::Z_OnCloudLimitsUpdatedArgs, "Z_OnCloudLimitsUpdatedReturns", $crate::wire::plugin::Z_OnCloudLimitsUpdatedReturns),
+            (on_configuration_change, "OnConfigurationChange", "Z_OnConfigurationChangeArgs", $crate::wire::plugin::Z_OnConfigurationChangeArgs, "Z_OnConfigurationChangeReturns", $crate::wire::plugin::Z_OnConfigurationChangeReturns),
+            (on_deactivate, "OnDeactivate", "Z_OnDeactivateArgs", $crate::wire::plugin::Z_OnDeactivateArgs, "Z_OnDeactivateReturns", $crate::wire::plugin::Z_OnDeactivateReturns),
+            (on_install, "OnInstall", "Z_OnInstallArgs", $crate::wire::plugin::Z_OnInstallArgs, "Z_OnInstallReturns", $crate::wire::plugin::Z_OnInstallReturns),
+            (on_plugin_cluster_event, "OnPluginClusterEvent", "Z_OnPluginClusterEventArgs", $crate::wire::plugin::Z_OnPluginClusterEventArgs, "Z_OnPluginClusterEventReturns", $crate::wire::plugin::Z_OnPluginClusterEventReturns),
+            (on_saml_login, "OnSAMLLogin", "Z_OnSAMLLoginArgs", $crate::wire::plugin::Z_OnSAMLLoginArgs, "Z_OnSAMLLoginReturns", $crate::wire::plugin::Z_OnSAMLLoginReturns),
+            (on_send_daily_telemetry, "OnSendDailyTelemetry", "Z_OnSendDailyTelemetryArgs", $crate::wire::plugin::Z_OnSendDailyTelemetryArgs, "Z_OnSendDailyTelemetryReturns", $crate::wire::plugin::Z_OnSendDailyTelemetryReturns),
+            (on_shared_channels_attachment_sync_msg, "OnSharedChannelsAttachmentSyncMsg", "Z_OnSharedChannelsAttachmentSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgArgs, "Z_OnSharedChannelsAttachmentSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgReturns),
+            (on_shared_channels_ping, "OnSharedChannelsPing", "Z_OnSharedChannelsPingArgs", $crate::wire::plugin::Z_OnSharedChannelsPingArgs, "Z_OnSharedChannelsPingReturns", $crate::wire::plugin::Z_OnSharedChannelsPingReturns),
+            (on_shared_channels_profile_image_sync_msg, "OnSharedChannelsProfileImageSyncMsg", "Z_OnSharedChannelsProfileImageSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgArgs, "Z_OnSharedChannelsProfileImageSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgReturns),
+            (on_shared_channels_sync_msg, "OnSharedChannelsSyncMsg", "Z_OnSharedChannelsSyncMsgArgs", $crate::wire::plugin::Z_OnSharedChannelsSyncMsgArgs, "Z_OnSharedChannelsSyncMsgReturns", $crate::wire::plugin::Z_OnSharedChannelsSyncMsgReturns),
+            (on_web_socket_connect, "OnWebSocketConnect", "Z_OnWebSocketConnectArgs", $crate::wire::plugin::Z_OnWebSocketConnectArgs, "Z_OnWebSocketConnectReturns", $crate::wire::plugin::Z_OnWebSocketConnectReturns),
+            (on_web_socket_disconnect, "OnWebSocketDisconnect", "Z_OnWebSocketDisconnectArgs", $crate::wire::plugin::Z_OnWebSocketDisconnectArgs, "Z_OnWebSocketDisconnectReturns", $crate::wire::plugin::Z_OnWebSocketDisconnectReturns),
+            (preferences_have_changed, "PreferencesHaveChanged", "Z_PreferencesHaveChangedArgs", $crate::wire::plugin::Z_PreferencesHaveChangedArgs, "Z_PreferencesHaveChangedReturns", $crate::wire::plugin::Z_PreferencesHaveChangedReturns),
+            (reaction_has_been_added, "ReactionHasBeenAdded", "Z_ReactionHasBeenAddedArgs", $crate::wire::plugin::Z_ReactionHasBeenAddedArgs, "Z_ReactionHasBeenAddedReturns", $crate::wire::plugin::Z_ReactionHasBeenAddedReturns),
+            (reaction_has_been_removed, "ReactionHasBeenRemoved", "Z_ReactionHasBeenRemovedArgs", $crate::wire::plugin::Z_ReactionHasBeenRemovedArgs, "Z_ReactionHasBeenRemovedReturns", $crate::wire::plugin::Z_ReactionHasBeenRemovedReturns),
+            (run_data_retention, "RunDataRetention", "Z_RunDataRetentionArgs", $crate::wire::plugin::Z_RunDataRetentionArgs, "Z_RunDataRetentionReturns", $crate::wire::plugin::Z_RunDataRetentionReturns),
+            (scheduled_post_will_be_created, "ScheduledPostWillBeCreated", "Z_ScheduledPostWillBeCreatedArgs", $crate::wire::plugin::Z_ScheduledPostWillBeCreatedArgs, "Z_ScheduledPostWillBeCreatedReturns", $crate::wire::plugin::Z_ScheduledPostWillBeCreatedReturns),
+            (user_has_been_created, "UserHasBeenCreated", "Z_UserHasBeenCreatedArgs", $crate::wire::plugin::Z_UserHasBeenCreatedArgs, "Z_UserHasBeenCreatedReturns", $crate::wire::plugin::Z_UserHasBeenCreatedReturns),
+            (user_has_been_deactivated, "UserHasBeenDeactivated", "Z_UserHasBeenDeactivatedArgs", $crate::wire::plugin::Z_UserHasBeenDeactivatedArgs, "Z_UserHasBeenDeactivatedReturns", $crate::wire::plugin::Z_UserHasBeenDeactivatedReturns),
+            (user_has_joined_channel, "UserHasJoinedChannel", "Z_UserHasJoinedChannelArgs", $crate::wire::plugin::Z_UserHasJoinedChannelArgs, "Z_UserHasJoinedChannelReturns", $crate::wire::plugin::Z_UserHasJoinedChannelReturns),
+            (user_has_joined_team, "UserHasJoinedTeam", "Z_UserHasJoinedTeamArgs", $crate::wire::plugin::Z_UserHasJoinedTeamArgs, "Z_UserHasJoinedTeamReturns", $crate::wire::plugin::Z_UserHasJoinedTeamReturns),
+            (user_has_left_channel, "UserHasLeftChannel", "Z_UserHasLeftChannelArgs", $crate::wire::plugin::Z_UserHasLeftChannelArgs, "Z_UserHasLeftChannelReturns", $crate::wire::plugin::Z_UserHasLeftChannelReturns),
+            (user_has_left_team, "UserHasLeftTeam", "Z_UserHasLeftTeamArgs", $crate::wire::plugin::Z_UserHasLeftTeamArgs, "Z_UserHasLeftTeamReturns", $crate::wire::plugin::Z_UserHasLeftTeamReturns),
+            (user_has_logged_in, "UserHasLoggedIn", "Z_UserHasLoggedInArgs", $crate::wire::plugin::Z_UserHasLoggedInArgs, "Z_UserHasLoggedInReturns", $crate::wire::plugin::Z_UserHasLoggedInReturns),
+            (user_will_log_in, "UserWillLogIn", "Z_UserWillLogInArgs", $crate::wire::plugin::Z_UserWillLogInArgs, "Z_UserWillLogInReturns", $crate::wire::plugin::Z_UserWillLogInReturns),
+            (web_socket_message_has_been_posted, "WebSocketMessageHasBeenPosted", "Z_WebSocketMessageHasBeenPostedArgs", $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedArgs, "Z_WebSocketMessageHasBeenPostedReturns", $crate::wire::plugin::Z_WebSocketMessageHasBeenPostedReturns),
         }
     };
 }

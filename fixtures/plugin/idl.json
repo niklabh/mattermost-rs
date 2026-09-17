@@ -14,7 +14,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Channel"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_ChannelHasBeenCreatedArgs",
+   "returns": "Z_ChannelHasBeenCreatedReturns",
+   "not_implemented": "Hook ChannelHasBeenCreated called but not implemented."
   },
   {
    "name": "ChannelMemberWillBeAdded",
@@ -39,7 +42,10 @@
      "type": "string"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_ChannelMemberWillBeAddedArgs",
+   "returns": "Z_ChannelMemberWillBeAddedReturns",
+   "not_implemented": "hook ChannelMemberWillBeAdded called but not implemented"
   },
   {
    "name": "ChannelWillBeArchived",
@@ -59,7 +65,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_ChannelWillBeArchivedArgs",
+   "returns": "Z_ChannelWillBeArchivedReturns",
+   "not_implemented": "Hook ChannelWillBeArchived called but not implemented."
   },
   {
    "name": "ChannelWillBeRestored",
@@ -79,7 +88,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_ChannelWillBeRestoredArgs",
+   "returns": "Z_ChannelWillBeRestoredReturns",
+   "not_implemented": "Hook ChannelWillBeRestored called but not implemented."
   },
   {
    "name": "ChannelWillBeUpdated",
@@ -107,7 +119,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_ChannelWillBeUpdatedArgs",
+   "returns": "Z_ChannelWillBeUpdatedReturns",
+   "not_implemented": "Hook ChannelWillBeUpdated called but not implemented."
   },
   {
    "name": "ConfigurationWillBeSaved",
@@ -127,7 +142,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ConfigurationWillBeSavedArgs",
+   "returns": "Z_ConfigurationWillBeSavedReturns",
+   "not_implemented": "Hook ConfigurationWillBeSaved called but not implemented."
   },
   {
    "name": "DraftWillBeUpserted",
@@ -151,7 +169,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_DraftWillBeUpsertedArgs",
+   "returns": "Z_DraftWillBeUpsertedReturns",
+   "not_implemented": "Hook DraftWillBeUpserted called but not implemented."
   },
   {
    "name": "EmailNotificationWillBeSent",
@@ -171,7 +192,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_EmailNotificationWillBeSentArgs",
+   "returns": "Z_EmailNotificationWillBeSentReturns",
+   "not_implemented": "Hook EmailNotificationWillBeSent called but not implemented."
   },
   {
    "name": "ExecuteCommand",
@@ -195,7 +219,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_ExecuteCommandArgs",
+   "returns": "Z_ExecuteCommandReturns",
+   "not_implemented": "Hook ExecuteCommand called but not implemented."
   },
   {
    "name": "FileWillBeDownloaded",
@@ -223,7 +250,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_FileWillBeDownloadedArgs",
+   "returns": "Z_FileWillBeDownloadedReturns",
+   "not_implemented": "Hook FileWillBeDownloaded called but not implemented."
   },
   {
    "name": "FileWillBeUploaded",
@@ -256,7 +286,11 @@
      "type": "string"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_FileWillBeUploadedArgs",
+   "returns": "Z_FileWillBeUploadedReturns",
+   "not_implemented": "hook FileWillBeUploaded called but not implemented",
+   "custom": true
   },
   {
    "name": "GenerateSupportData",
@@ -276,7 +310,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GenerateSupportDataArgs",
+   "returns": "Z_GenerateSupportDataReturns",
+   "not_implemented": "Hook GenerateSupportData called but not implemented."
   },
   {
    "name": "Implemented",
@@ -292,7 +329,8 @@
      "type": "error"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "custom": true
   },
   {
    "name": "MessageHasBeenDeleted",
@@ -307,7 +345,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Post"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_MessageHasBeenDeletedArgs",
+   "returns": "Z_MessageHasBeenDeletedReturns",
+   "not_implemented": "Hook MessageHasBeenDeleted called but not implemented."
   },
   {
    "name": "MessageHasBeenPosted",
@@ -322,7 +363,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Post"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_MessageHasBeenPostedArgs",
+   "returns": "Z_MessageHasBeenPostedReturns",
+   "not_implemented": "Hook MessageHasBeenPosted called but not implemented."
   },
   {
    "name": "MessageHasBeenUpdated",
@@ -341,7 +385,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Post"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_MessageHasBeenUpdatedArgs",
+   "returns": "Z_MessageHasBeenUpdatedReturns",
+   "not_implemented": "Hook MessageHasBeenUpdated called but not implemented."
   },
   {
    "name": "MessageWillBePosted",
@@ -366,7 +413,10 @@
      "type": "string"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_MessageWillBePostedArgs",
+   "returns": "Z_MessageWillBePostedReturns",
+   "not_implemented": "hook MessageWillBePosted called but not implemented"
   },
   {
    "name": "MessageWillBeUpdated",
@@ -395,7 +445,10 @@
      "type": "string"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_MessageWillBeUpdatedArgs",
+   "returns": "Z_MessageWillBeUpdatedReturns",
+   "not_implemented": "hook MessageWillBeUpdated called but not implemented"
   },
   {
    "name": "MessagesWillBeConsumed",
@@ -412,7 +465,10 @@
      "type": "[]*github.com/mattermost/mattermost/server/public/model.Post"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_MessagesWillBeConsumedArgs",
+   "returns": "Z_MessagesWillBeConsumedReturns",
+   "not_implemented": "hook MessagesWillBeConsumed called but not implemented"
   },
   {
    "name": "MessagesWillBeConsumedWithContext",
@@ -433,7 +489,10 @@
      "type": "[]*github.com/mattermost/mattermost/server/public/model.Post"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_MessagesWillBeConsumedWithContextArgs",
+   "returns": "Z_MessagesWillBeConsumedWithContextReturns",
+   "not_implemented": "hook MessagesWillBeConsumedWithContext called but not implemented"
   },
   {
    "name": "NotificationWillBePushed",
@@ -457,7 +516,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_NotificationWillBePushedArgs",
+   "returns": "Z_NotificationWillBePushedReturns",
+   "not_implemented": "Hook NotificationWillBePushed called but not implemented."
   },
   {
    "name": "OnActivate",
@@ -469,7 +531,10 @@
      "type": "error"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_OnActivateArgs",
+   "returns": "Z_OnActivateReturns",
+   "custom": true
   },
   {
    "name": "OnCloudLimitsUpdated",
@@ -480,7 +545,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.ProductLimits"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_OnCloudLimitsUpdatedArgs",
+   "returns": "Z_OnCloudLimitsUpdatedReturns",
+   "not_implemented": "Hook OnCloudLimitsUpdated called but not implemented."
   },
   {
    "name": "OnConfigurationChange",
@@ -491,7 +559,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnConfigurationChangeArgs",
+   "returns": "Z_OnConfigurationChangeReturns",
+   "not_implemented": "Hook OnConfigurationChange called but not implemented."
   },
   {
    "name": "OnDeactivate",
@@ -502,7 +573,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnDeactivateArgs",
+   "returns": "Z_OnDeactivateReturns",
+   "not_implemented": "Hook OnDeactivate called but not implemented."
   },
   {
    "name": "OnInstall",
@@ -522,7 +596,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnInstallArgs",
+   "returns": "Z_OnInstallReturns",
+   "not_implemented": "Hook OnInstall called but not implemented."
   },
   {
    "name": "OnPluginClusterEvent",
@@ -537,7 +614,10 @@
      "type": "github.com/mattermost/mattermost/server/public/model.PluginClusterEvent"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_OnPluginClusterEventArgs",
+   "returns": "Z_OnPluginClusterEventReturns",
+   "not_implemented": "Hook OnPluginClusterEvent called but not implemented."
   },
   {
    "name": "OnSAMLLogin",
@@ -561,13 +641,19 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnSAMLLoginArgs",
+   "returns": "Z_OnSAMLLoginReturns",
+   "not_implemented": "Hook OnSAMLLogin called but not implemented."
   },
   {
    "name": "OnSendDailyTelemetry",
    "doc": "OnSendDailyTelemetry is invoked when the server send the daily telemetry data.\n\nMinimum server version: 6.5",
    "params": [],
-   "results": []
+   "results": [],
+   "args": "Z_OnSendDailyTelemetryArgs",
+   "returns": "Z_OnSendDailyTelemetryReturns",
+   "not_implemented": "Hook OnSendDailyTelemetry called but not implemented."
   },
   {
    "name": "OnSharedChannelsAttachmentSyncMsg",
@@ -591,7 +677,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnSharedChannelsAttachmentSyncMsgArgs",
+   "returns": "Z_OnSharedChannelsAttachmentSyncMsgReturns",
+   "not_implemented": "Hook OnSharedChannelsAttachmentSyncMsg called but not implemented."
   },
   {
    "name": "OnSharedChannelsPing",
@@ -607,7 +696,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_OnSharedChannelsPingArgs",
+   "returns": "Z_OnSharedChannelsPingReturns",
+   "not_implemented": "Hook OnSharedChannelsPing called but not implemented."
   },
   {
    "name": "OnSharedChannelsProfileImageSyncMsg",
@@ -627,7 +719,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnSharedChannelsProfileImageSyncMsgArgs",
+   "returns": "Z_OnSharedChannelsProfileImageSyncMsgReturns",
+   "not_implemented": "Hook OnSharedChannelsProfileImageSyncMsg called but not implemented."
   },
   {
    "name": "OnSharedChannelsSyncMsg",
@@ -651,7 +746,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_OnSharedChannelsSyncMsgArgs",
+   "returns": "Z_OnSharedChannelsSyncMsgReturns",
+   "not_implemented": "Hook OnSharedChannelsSyncMsg called but not implemented."
   },
   {
    "name": "OnWebSocketConnect",
@@ -666,7 +764,10 @@
      "type": "string"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_OnWebSocketConnectArgs",
+   "returns": "Z_OnWebSocketConnectReturns",
+   "not_implemented": "Hook OnWebSocketConnect called but not implemented."
   },
   {
    "name": "OnWebSocketDisconnect",
@@ -681,7 +782,10 @@
      "type": "string"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_OnWebSocketDisconnectArgs",
+   "returns": "Z_OnWebSocketDisconnectReturns",
+   "not_implemented": "Hook OnWebSocketDisconnect called but not implemented."
   },
   {
    "name": "PreferencesHaveChanged",
@@ -696,7 +800,10 @@
      "type": "[]github.com/mattermost/mattermost/server/public/model.Preference"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_PreferencesHaveChangedArgs",
+   "returns": "Z_PreferencesHaveChangedReturns",
+   "not_implemented": "Hook PreferencesHaveChanged called but not implemented."
   },
   {
    "name": "ReactionHasBeenAdded",
@@ -711,7 +818,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Reaction"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_ReactionHasBeenAddedArgs",
+   "returns": "Z_ReactionHasBeenAddedReturns",
+   "not_implemented": "Hook ReactionHasBeenAdded called but not implemented."
   },
   {
    "name": "ReactionHasBeenRemoved",
@@ -726,7 +836,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.Reaction"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_ReactionHasBeenRemovedArgs",
+   "returns": "Z_ReactionHasBeenRemovedReturns",
+   "not_implemented": "Hook ReactionHasBeenRemoved called but not implemented."
   },
   {
    "name": "RunDataRetention",
@@ -750,7 +863,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_RunDataRetentionArgs",
+   "returns": "Z_RunDataRetentionReturns",
+   "not_implemented": "Hook RunDataRetention called but not implemented."
   },
   {
    "name": "ScheduledPostWillBeCreated",
@@ -774,7 +890,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_ScheduledPostWillBeCreatedArgs",
+   "returns": "Z_ScheduledPostWillBeCreatedReturns",
+   "not_implemented": "Hook ScheduledPostWillBeCreated called but not implemented."
   },
   {
    "name": "ServeHTTP",
@@ -794,7 +913,8 @@
     }
    ],
    "results": [],
-   "excluded": true
+   "excluded": true,
+   "custom": true
   },
   {
    "name": "ServeMetrics",
@@ -814,7 +934,8 @@
     }
    ],
    "results": [],
-   "excluded": true
+   "excluded": true,
+   "custom": true
   },
   {
    "name": "TeamMemberWillBeAdded",
@@ -839,7 +960,10 @@
      "type": "string"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_TeamMemberWillBeAddedArgs",
+   "returns": "Z_TeamMemberWillBeAddedReturns",
+   "not_implemented": "hook TeamMemberWillBeAdded called but not implemented"
   },
   {
    "name": "UserHasBeenCreated",
@@ -854,7 +978,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasBeenCreatedArgs",
+   "returns": "Z_UserHasBeenCreatedReturns",
+   "not_implemented": "Hook UserHasBeenCreated called but not implemented."
   },
   {
    "name": "UserHasBeenDeactivated",
@@ -869,7 +996,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasBeenDeactivatedArgs",
+   "returns": "Z_UserHasBeenDeactivatedReturns",
+   "not_implemented": "Hook UserHasBeenDeactivated called but not implemented."
   },
   {
    "name": "UserHasJoinedChannel",
@@ -888,7 +1018,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasJoinedChannelArgs",
+   "returns": "Z_UserHasJoinedChannelReturns",
+   "not_implemented": "Hook UserHasJoinedChannel called but not implemented."
   },
   {
    "name": "UserHasJoinedTeam",
@@ -907,7 +1040,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasJoinedTeamArgs",
+   "returns": "Z_UserHasJoinedTeamReturns",
+   "not_implemented": "Hook UserHasJoinedTeam called but not implemented."
   },
   {
    "name": "UserHasLeftChannel",
@@ -926,7 +1062,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasLeftChannelArgs",
+   "returns": "Z_UserHasLeftChannelReturns",
+   "not_implemented": "Hook UserHasLeftChannel called but not implemented."
   },
   {
    "name": "UserHasLeftTeam",
@@ -945,7 +1084,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasLeftTeamArgs",
+   "returns": "Z_UserHasLeftTeamReturns",
+   "not_implemented": "Hook UserHasLeftTeam called but not implemented."
   },
   {
    "name": "UserHasLoggedIn",
@@ -960,7 +1102,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.User"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_UserHasLoggedInArgs",
+   "returns": "Z_UserHasLoggedInReturns",
+   "not_implemented": "Hook UserHasLoggedIn called but not implemented."
   },
   {
    "name": "UserWillLogIn",
@@ -980,7 +1125,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_UserWillLogInArgs",
+   "returns": "Z_UserWillLogInReturns",
+   "not_implemented": "Hook UserWillLogIn called but not implemented."
   },
   {
    "name": "WebSocketMessageHasBeenPosted",
@@ -999,7 +1147,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.WebSocketRequest"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_WebSocketMessageHasBeenPostedArgs",
+   "returns": "Z_WebSocketMessageHasBeenPostedReturns",
+   "not_implemented": "Hook WebSocketMessageHasBeenPosted called but not implemented."
   }
  ],
  "api": [
@@ -1025,7 +1176,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_AddChannelMemberArgs",
+   "returns": "Z_AddChannelMemberReturns",
+   "not_implemented": "API AddChannelMember called but not implemented."
   },
   {
    "name": "AddReaction",
@@ -1045,7 +1199,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_AddReactionArgs",
+   "returns": "Z_AddReactionReturns",
+   "not_implemented": "API AddReaction called but not implemented."
   },
   {
    "name": "AddUserToChannel",
@@ -1073,7 +1230,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_AddUserToChannelArgs",
+   "returns": "Z_AddUserToChannelReturns",
+   "not_implemented": "API AddUserToChannel called but not implemented."
   },
   {
    "name": "CheckAccessControlExpression",
@@ -1101,7 +1261,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CheckAccessControlExpressionArgs",
+   "returns": "Z_CheckAccessControlExpressionReturns",
+   "not_implemented": "API CheckAccessControlExpression called but not implemented."
   },
   {
    "name": "CopyFileInfos",
@@ -1125,7 +1288,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CopyFileInfosArgs",
+   "returns": "Z_CopyFileInfosReturns",
+   "not_implemented": "API CopyFileInfos called but not implemented."
   },
   {
    "name": "CountPropertyFields",
@@ -1149,7 +1315,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CountPropertyFieldsArgs",
+   "returns": "Z_CountPropertyFieldsReturns",
+   "not_implemented": "API CountPropertyFields called but not implemented."
   },
   {
    "name": "CountPropertyFieldsForTarget",
@@ -1181,7 +1350,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CountPropertyFieldsForTargetArgs",
+   "returns": "Z_CountPropertyFieldsForTargetReturns",
+   "not_implemented": "API CountPropertyFieldsForTarget called but not implemented."
   },
   {
    "name": "CreateBot",
@@ -1201,7 +1373,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateBotArgs",
+   "returns": "Z_CreateBotReturns",
+   "not_implemented": "API CreateBot called but not implemented."
   },
   {
    "name": "CreateChannel",
@@ -1221,7 +1396,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateChannelArgs",
+   "returns": "Z_CreateChannelReturns",
+   "not_implemented": "API CreateChannel called but not implemented."
   },
   {
    "name": "CreateChannelSidebarCategory",
@@ -1249,7 +1427,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateChannelSidebarCategoryArgs",
+   "returns": "Z_CreateChannelSidebarCategoryReturns",
+   "not_implemented": "API CreateChannelSidebarCategory called but not implemented."
   },
   {
    "name": "CreateCommand",
@@ -1269,7 +1450,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CreateCommandArgs",
+   "returns": "Z_CreateCommandReturns",
+   "not_implemented": "API CreateCommand called but not implemented."
   },
   {
    "name": "CreateDefaultSyncableMemberships",
@@ -1285,7 +1469,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateDefaultSyncableMembershipsArgs",
+   "returns": "Z_CreateDefaultSyncableMembershipsReturns",
+   "not_implemented": "API CreateDefaultSyncableMemberships called but not implemented."
   },
   {
    "name": "CreateGroup",
@@ -1305,7 +1492,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateGroupArgs",
+   "returns": "Z_CreateGroupReturns",
+   "not_implemented": "API CreateGroup called but not implemented."
   },
   {
    "name": "CreateOAuthApp",
@@ -1325,7 +1515,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateOAuthAppArgs",
+   "returns": "Z_CreateOAuthAppReturns",
+   "not_implemented": "API CreateOAuthApp called but not implemented."
   },
   {
    "name": "CreatePost",
@@ -1345,7 +1538,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreatePostArgs",
+   "returns": "Z_CreatePostReturns",
+   "not_implemented": "API CreatePost called but not implemented."
   },
   {
    "name": "CreatePropertyField",
@@ -1365,7 +1561,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CreatePropertyFieldArgs",
+   "returns": "Z_CreatePropertyFieldReturns",
+   "not_implemented": "API CreatePropertyField called but not implemented."
   },
   {
    "name": "CreatePropertyValue",
@@ -1385,7 +1584,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CreatePropertyValueArgs",
+   "returns": "Z_CreatePropertyValueReturns",
+   "not_implemented": "API CreatePropertyValue called but not implemented."
   },
   {
    "name": "CreateSession",
@@ -1405,7 +1607,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateSessionArgs",
+   "returns": "Z_CreateSessionReturns",
+   "not_implemented": "API CreateSession called but not implemented."
   },
   {
    "name": "CreateTeam",
@@ -1425,7 +1630,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateTeamArgs",
+   "returns": "Z_CreateTeamReturns",
+   "not_implemented": "API CreateTeam called but not implemented."
   },
   {
    "name": "CreateTeamMember",
@@ -1449,7 +1657,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateTeamMemberArgs",
+   "returns": "Z_CreateTeamMemberReturns",
+   "not_implemented": "API CreateTeamMember called but not implemented."
   },
   {
    "name": "CreateTeamMembers",
@@ -1477,7 +1688,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateTeamMembersArgs",
+   "returns": "Z_CreateTeamMembersReturns",
+   "not_implemented": "API CreateTeamMembers called but not implemented."
   },
   {
    "name": "CreateTeamMembersGracefully",
@@ -1505,7 +1719,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateTeamMembersGracefullyArgs",
+   "returns": "Z_CreateTeamMembersGracefullyReturns",
+   "not_implemented": "API CreateTeamMembersGracefully called but not implemented."
   },
   {
    "name": "CreateUploadSession",
@@ -1525,7 +1742,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_CreateUploadSessionArgs",
+   "returns": "Z_CreateUploadSessionReturns",
+   "not_implemented": "API CreateUploadSession called but not implemented."
   },
   {
    "name": "CreateUser",
@@ -1545,7 +1765,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateUserArgs",
+   "returns": "Z_CreateUserReturns",
+   "not_implemented": "API CreateUser called but not implemented."
   },
   {
    "name": "CreateUserAccessToken",
@@ -1565,7 +1788,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_CreateUserAccessTokenArgs",
+   "returns": "Z_CreateUserAccessTokenReturns",
+   "not_implemented": "API CreateUserAccessToken called but not implemented."
   },
   {
    "name": "DeleteAccessControlPolicy",
@@ -1589,7 +1815,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteAccessControlPolicyArgs",
+   "returns": "Z_DeleteAccessControlPolicyReturns",
+   "not_implemented": "API DeleteAccessControlPolicy called but not implemented."
   },
   {
    "name": "DeleteChannel",
@@ -1605,7 +1834,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteChannelArgs",
+   "returns": "Z_DeleteChannelReturns",
+   "not_implemented": "API DeleteChannel called but not implemented."
   },
   {
    "name": "DeleteChannelMember",
@@ -1625,7 +1857,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteChannelMemberArgs",
+   "returns": "Z_DeleteChannelMemberReturns",
+   "not_implemented": "API DeleteChannelMember called but not implemented."
   },
   {
    "name": "DeleteCommand",
@@ -1641,7 +1876,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeleteCommandArgs",
+   "returns": "Z_DeleteCommandReturns",
+   "not_implemented": "API DeleteCommand called but not implemented."
   },
   {
    "name": "DeleteEphemeralPost",
@@ -1656,7 +1894,10 @@
      "type": "string"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_DeleteEphemeralPostArgs",
+   "returns": "Z_DeleteEphemeralPostReturns",
+   "not_implemented": "API DeleteEphemeralPost called but not implemented."
   },
   {
    "name": "DeleteGroup",
@@ -1676,7 +1917,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteGroupArgs",
+   "returns": "Z_DeleteGroupReturns",
+   "not_implemented": "API DeleteGroup called but not implemented."
   },
   {
    "name": "DeleteGroupConstrainedMemberships",
@@ -1687,7 +1931,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteGroupConstrainedMembershipsArgs",
+   "returns": "Z_DeleteGroupConstrainedMembershipsReturns",
+   "not_implemented": "API DeleteGroupConstrainedMemberships called but not implemented."
   },
   {
    "name": "DeleteGroupMember",
@@ -1711,7 +1958,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteGroupMemberArgs",
+   "returns": "Z_DeleteGroupMemberReturns",
+   "not_implemented": "API DeleteGroupMember called but not implemented."
   },
   {
    "name": "DeleteGroupSyncable",
@@ -1739,7 +1989,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteGroupSyncableArgs",
+   "returns": "Z_DeleteGroupSyncableReturns",
+   "not_implemented": "API DeleteGroupSyncable called but not implemented."
   },
   {
    "name": "DeleteOAuthApp",
@@ -1755,7 +2008,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteOAuthAppArgs",
+   "returns": "Z_DeleteOAuthAppReturns",
+   "not_implemented": "API DeleteOAuthApp called but not implemented."
   },
   {
    "name": "DeletePost",
@@ -1771,7 +2027,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeletePostArgs",
+   "returns": "Z_DeletePostReturns",
+   "not_implemented": "API DeletePost called but not implemented."
   },
   {
    "name": "DeletePreferencesForUser",
@@ -1791,7 +2050,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeletePreferencesForUserArgs",
+   "returns": "Z_DeletePreferencesForUserReturns",
+   "not_implemented": "API DeletePreferencesForUser called but not implemented."
   },
   {
    "name": "DeletePropertyField",
@@ -1811,7 +2073,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyFieldArgs",
+   "returns": "Z_DeletePropertyFieldReturns",
+   "not_implemented": "API DeletePropertyField called but not implemented."
   },
   {
    "name": "DeletePropertyValue",
@@ -1831,7 +2096,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValueArgs",
+   "returns": "Z_DeletePropertyValueReturns",
+   "not_implemented": "API DeletePropertyValue called but not implemented."
   },
   {
    "name": "DeletePropertyValueWithOptions",
@@ -1855,7 +2123,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValueWithOptionsArgs",
+   "returns": "Z_DeletePropertyValueWithOptionsReturns",
+   "not_implemented": "API DeletePropertyValueWithOptions called but not implemented."
   },
   {
    "name": "DeletePropertyValuesForField",
@@ -1875,7 +2146,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValuesForFieldArgs",
+   "returns": "Z_DeletePropertyValuesForFieldReturns",
+   "not_implemented": "API DeletePropertyValuesForField called but not implemented."
   },
   {
    "name": "DeletePropertyValuesForFieldWithOptions",
@@ -1899,7 +2173,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValuesForFieldWithOptionsArgs",
+   "returns": "Z_DeletePropertyValuesForFieldWithOptionsReturns",
+   "not_implemented": "API DeletePropertyValuesForFieldWithOptions called but not implemented."
   },
   {
    "name": "DeletePropertyValuesForTarget",
@@ -1923,7 +2200,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValuesForTargetArgs",
+   "returns": "Z_DeletePropertyValuesForTargetReturns",
+   "not_implemented": "API DeletePropertyValuesForTarget called but not implemented."
   },
   {
    "name": "DeletePropertyValuesForTargetWithOptions",
@@ -1951,7 +2231,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_DeletePropertyValuesForTargetWithOptionsArgs",
+   "returns": "Z_DeletePropertyValuesForTargetWithOptionsReturns",
+   "not_implemented": "API DeletePropertyValuesForTargetWithOptions called but not implemented."
   },
   {
    "name": "DeleteTeam",
@@ -1967,7 +2250,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteTeamArgs",
+   "returns": "Z_DeleteTeamReturns",
+   "not_implemented": "API DeleteTeam called but not implemented."
   },
   {
    "name": "DeleteTeamMember",
@@ -1991,7 +2277,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteTeamMemberArgs",
+   "returns": "Z_DeleteTeamMemberReturns",
+   "not_implemented": "API DeleteTeamMember called but not implemented."
   },
   {
    "name": "DeleteUser",
@@ -2007,7 +2296,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DeleteUserArgs",
+   "returns": "Z_DeleteUserReturns",
+   "not_implemented": "API DeleteUser called but not implemented."
   },
   {
    "name": "DisablePlugin",
@@ -2023,7 +2315,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_DisablePluginArgs",
+   "returns": "Z_DisablePluginReturns",
+   "not_implemented": "API DisablePlugin called but not implemented."
   },
   {
    "name": "EnablePlugin",
@@ -2039,7 +2334,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_EnablePluginArgs",
+   "returns": "Z_EnablePluginReturns",
+   "not_implemented": "API EnablePlugin called but not implemented."
   },
   {
    "name": "EnsureBotUser",
@@ -2059,7 +2357,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_EnsureBotUserArgs",
+   "returns": "Z_EnsureBotUserReturns",
+   "not_implemented": "API EnsureBotUser called but not implemented."
   },
   {
    "name": "EvaluateAccessControl",
@@ -2091,7 +2392,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_EvaluateAccessControlArgs",
+   "returns": "Z_EvaluateAccessControlReturns",
+   "not_implemented": "API EvaluateAccessControl called but not implemented."
   },
   {
    "name": "ExecuteSlashCommand",
@@ -2111,7 +2415,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ExecuteSlashCommandArgs",
+   "returns": "Z_ExecuteSlashCommandReturns",
+   "not_implemented": "API ExecuteSlashCommand called but not implemented."
   },
   {
    "name": "ExtendSessionExpiry",
@@ -2131,7 +2438,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_ExtendSessionExpiryArgs",
+   "returns": "Z_ExtendSessionExpiryReturns",
+   "not_implemented": "API ExtendSessionExpiry called but not implemented."
   },
   {
    "name": "GetAccessControlFieldsAutocomplete",
@@ -2159,7 +2469,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetAccessControlFieldsAutocompleteArgs",
+   "returns": "Z_GetAccessControlFieldsAutocompleteReturns",
+   "not_implemented": "API GetAccessControlFieldsAutocomplete called but not implemented."
   },
   {
    "name": "GetAccessControlPolicy",
@@ -2179,7 +2492,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetAccessControlPolicyArgs",
+   "returns": "Z_GetAccessControlPolicyReturns",
+   "not_implemented": "API GetAccessControlPolicy called but not implemented."
   },
   {
    "name": "GetAccessControlVisualAST",
@@ -2207,7 +2523,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetAccessControlVisualASTArgs",
+   "returns": "Z_GetAccessControlVisualASTReturns",
+   "not_implemented": "API GetAccessControlVisualAST called but not implemented."
   },
   {
    "name": "GetBot",
@@ -2231,7 +2550,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetBotArgs",
+   "returns": "Z_GetBotReturns",
+   "not_implemented": "API GetBot called but not implemented."
   },
   {
    "name": "GetBots",
@@ -2251,7 +2573,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetBotsArgs",
+   "returns": "Z_GetBotsReturns",
+   "not_implemented": "API GetBots called but not implemented."
   },
   {
    "name": "GetBundlePath",
@@ -2266,7 +2591,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetBundlePathArgs",
+   "returns": "Z_GetBundlePathReturns",
+   "not_implemented": "API GetBundlePath called but not implemented."
   },
   {
    "name": "GetChannel",
@@ -2286,7 +2614,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelArgs",
+   "returns": "Z_GetChannelReturns",
+   "not_implemented": "API GetChannel called but not implemented."
   },
   {
    "name": "GetChannelByName",
@@ -2314,7 +2645,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelByNameArgs",
+   "returns": "Z_GetChannelByNameReturns",
+   "not_implemented": "API GetChannelByName called but not implemented."
   },
   {
    "name": "GetChannelByNameForTeamName",
@@ -2342,7 +2676,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelByNameForTeamNameArgs",
+   "returns": "Z_GetChannelByNameForTeamNameReturns",
+   "not_implemented": "API GetChannelByNameForTeamName called but not implemented."
   },
   {
    "name": "GetChannelMember",
@@ -2366,7 +2703,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelMemberArgs",
+   "returns": "Z_GetChannelMemberReturns",
+   "not_implemented": "API GetChannelMember called but not implemented."
   },
   {
    "name": "GetChannelMembers",
@@ -2394,7 +2734,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelMembersArgs",
+   "returns": "Z_GetChannelMembersReturns",
+   "not_implemented": "API GetChannelMembers called but not implemented."
   },
   {
    "name": "GetChannelMembersByIds",
@@ -2418,7 +2761,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelMembersByIdsArgs",
+   "returns": "Z_GetChannelMembersByIdsReturns",
+   "not_implemented": "API GetChannelMembersByIds called but not implemented."
   },
   {
    "name": "GetChannelMembersForUser",
@@ -2450,7 +2796,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelMembersForUserArgs",
+   "returns": "Z_GetChannelMembersForUserReturns",
+   "not_implemented": "API GetChannelMembersForUser called but not implemented."
   },
   {
    "name": "GetChannelOfType",
@@ -2474,7 +2823,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelOfTypeArgs",
+   "returns": "Z_GetChannelOfTypeReturns",
+   "not_implemented": "API GetChannelOfType called but not implemented."
   },
   {
    "name": "GetChannelSidebarCategories",
@@ -2498,7 +2850,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelSidebarCategoriesArgs",
+   "returns": "Z_GetChannelSidebarCategoriesReturns",
+   "not_implemented": "API GetChannelSidebarCategories called but not implemented."
   },
   {
    "name": "GetChannelStats",
@@ -2518,7 +2873,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelStatsArgs",
+   "returns": "Z_GetChannelStatsReturns",
+   "not_implemented": "API GetChannelStats called but not implemented."
   },
   {
    "name": "GetChannelsForTeamForUser",
@@ -2546,7 +2904,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetChannelsForTeamForUserArgs",
+   "returns": "Z_GetChannelsForTeamForUserReturns",
+   "not_implemented": "API GetChannelsForTeamForUser called but not implemented."
   },
   {
    "name": "GetCloudLimits",
@@ -2561,7 +2922,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetCloudLimitsArgs",
+   "returns": "Z_GetCloudLimitsReturns",
+   "not_implemented": "API GetCloudLimits called but not implemented."
   },
   {
    "name": "GetCommand",
@@ -2581,7 +2945,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetCommandArgs",
+   "returns": "Z_GetCommandReturns",
+   "not_implemented": "API GetCommand called but not implemented."
   },
   {
    "name": "GetConfig",
@@ -2592,7 +2959,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.Config"
     }
-   ]
+   ],
+   "args": "Z_GetConfigArgs",
+   "returns": "Z_GetConfigReturns",
+   "not_implemented": "API GetConfig called but not implemented."
   },
   {
    "name": "GetDiagnosticId",
@@ -2603,7 +2973,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_GetDiagnosticIdArgs",
+   "returns": "Z_GetDiagnosticIdReturns",
+   "not_implemented": "API GetDiagnosticId called but not implemented."
   },
   {
    "name": "GetDirectChannel",
@@ -2627,7 +3000,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetDirectChannelArgs",
+   "returns": "Z_GetDirectChannelReturns",
+   "not_implemented": "API GetDirectChannel called but not implemented."
   },
   {
    "name": "GetEmoji",
@@ -2647,7 +3023,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetEmojiArgs",
+   "returns": "Z_GetEmojiReturns",
+   "not_implemented": "API GetEmoji called but not implemented."
   },
   {
    "name": "GetEmojiByName",
@@ -2667,7 +3046,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetEmojiByNameArgs",
+   "returns": "Z_GetEmojiByNameReturns",
+   "not_implemented": "API GetEmojiByName called but not implemented."
   },
   {
    "name": "GetEmojiImage",
@@ -2691,7 +3073,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetEmojiImageArgs",
+   "returns": "Z_GetEmojiImageReturns",
+   "not_implemented": "API GetEmojiImage called but not implemented."
   },
   {
    "name": "GetEmojiList",
@@ -2719,7 +3104,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetEmojiListArgs",
+   "returns": "Z_GetEmojiListReturns",
+   "not_implemented": "API GetEmojiList called but not implemented."
   },
   {
    "name": "GetFile",
@@ -2739,7 +3127,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetFileArgs",
+   "returns": "Z_GetFileReturns",
+   "not_implemented": "API GetFile called but not implemented."
   },
   {
    "name": "GetFileInfo",
@@ -2759,7 +3150,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetFileInfoArgs",
+   "returns": "Z_GetFileInfoReturns",
+   "not_implemented": "API GetFileInfo called but not implemented."
   },
   {
    "name": "GetFileInfos",
@@ -2787,7 +3181,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetFileInfosArgs",
+   "returns": "Z_GetFileInfosReturns",
+   "not_implemented": "API GetFileInfos called but not implemented."
   },
   {
    "name": "GetFileLink",
@@ -2807,7 +3204,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetFileLinkArgs",
+   "returns": "Z_GetFileLinkReturns",
+   "not_implemented": "API GetFileLink called but not implemented."
   },
   {
    "name": "GetGroup",
@@ -2827,7 +3227,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupArgs",
+   "returns": "Z_GetGroupReturns",
+   "not_implemented": "API GetGroup called but not implemented."
   },
   {
    "name": "GetGroupByName",
@@ -2847,7 +3250,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupByNameArgs",
+   "returns": "Z_GetGroupByNameReturns",
+   "not_implemented": "API GetGroupByName called but not implemented."
   },
   {
    "name": "GetGroupByRemoteID",
@@ -2871,7 +3277,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupByRemoteIDArgs",
+   "returns": "Z_GetGroupByRemoteIDReturns",
+   "not_implemented": "API GetGroupByRemoteID called but not implemented."
   },
   {
    "name": "GetGroupChannel",
@@ -2891,7 +3300,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupChannelArgs",
+   "returns": "Z_GetGroupChannelReturns",
+   "not_implemented": "API GetGroupChannel called but not implemented."
   },
   {
    "name": "GetGroupMemberUsers",
@@ -2919,7 +3331,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupMemberUsersArgs",
+   "returns": "Z_GetGroupMemberUsersReturns",
+   "not_implemented": "API GetGroupMemberUsers called but not implemented."
   },
   {
    "name": "GetGroupSyncable",
@@ -2947,7 +3362,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupSyncableArgs",
+   "returns": "Z_GetGroupSyncableReturns",
+   "not_implemented": "API GetGroupSyncable called but not implemented."
   },
   {
    "name": "GetGroupSyncables",
@@ -2971,7 +3389,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupSyncablesArgs",
+   "returns": "Z_GetGroupSyncablesReturns",
+   "not_implemented": "API GetGroupSyncables called but not implemented."
   },
   {
    "name": "GetGroups",
@@ -3003,7 +3424,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupsArgs",
+   "returns": "Z_GetGroupsReturns",
+   "not_implemented": "API GetGroups called but not implemented."
   },
   {
    "name": "GetGroupsBySource",
@@ -3023,7 +3447,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupsBySourceArgs",
+   "returns": "Z_GetGroupsBySourceReturns",
+   "not_implemented": "API GetGroupsBySource called but not implemented."
   },
   {
    "name": "GetGroupsForUser",
@@ -3043,7 +3470,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetGroupsForUserArgs",
+   "returns": "Z_GetGroupsForUserReturns",
+   "not_implemented": "API GetGroupsForUser called but not implemented."
   },
   {
    "name": "GetLDAPUserAttributes",
@@ -3067,7 +3497,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetLDAPUserAttributesArgs",
+   "returns": "Z_GetLDAPUserAttributesReturns",
+   "not_implemented": "API GetLDAPUserAttributes called but not implemented."
   },
   {
    "name": "GetLicense",
@@ -3078,7 +3511,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.License"
     }
-   ]
+   ],
+   "args": "Z_GetLicenseArgs",
+   "returns": "Z_GetLicenseReturns",
+   "not_implemented": "API GetLicense called but not implemented."
   },
   {
    "name": "GetOAuthApp",
@@ -3098,7 +3534,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetOAuthAppArgs",
+   "returns": "Z_GetOAuthAppReturns",
+   "not_implemented": "API GetOAuthApp called but not implemented."
   },
   {
    "name": "GetPluginConfig",
@@ -3109,7 +3548,10 @@
      "name": "",
      "type": "map[string]interface{}"
     }
-   ]
+   ],
+   "args": "Z_GetPluginConfigArgs",
+   "returns": "Z_GetPluginConfigReturns",
+   "not_implemented": "API GetPluginConfig called but not implemented."
   },
   {
    "name": "GetPluginID",
@@ -3120,7 +3562,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_GetPluginIDArgs",
+   "returns": "Z_GetPluginIDReturns",
+   "not_implemented": "API GetPluginID called but not implemented."
   },
   {
    "name": "GetPluginStatus",
@@ -3140,7 +3585,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPluginStatusArgs",
+   "returns": "Z_GetPluginStatusReturns",
+   "not_implemented": "API GetPluginStatus called but not implemented."
   },
   {
    "name": "GetPlugins",
@@ -3155,7 +3603,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPluginsArgs",
+   "returns": "Z_GetPluginsReturns",
+   "not_implemented": "API GetPlugins called but not implemented."
   },
   {
    "name": "GetPost",
@@ -3175,7 +3626,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostArgs",
+   "returns": "Z_GetPostReturns",
+   "not_implemented": "API GetPost called but not implemented."
   },
   {
    "name": "GetPostThread",
@@ -3195,7 +3649,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostThreadArgs",
+   "returns": "Z_GetPostThreadReturns",
+   "not_implemented": "API GetPostThread called but not implemented."
   },
   {
    "name": "GetPostsAfter",
@@ -3227,7 +3684,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostsAfterArgs",
+   "returns": "Z_GetPostsAfterReturns",
+   "not_implemented": "API GetPostsAfter called but not implemented."
   },
   {
    "name": "GetPostsBefore",
@@ -3259,7 +3719,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostsBeforeArgs",
+   "returns": "Z_GetPostsBeforeReturns",
+   "not_implemented": "API GetPostsBefore called but not implemented."
   },
   {
    "name": "GetPostsForChannel",
@@ -3287,7 +3750,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostsForChannelArgs",
+   "returns": "Z_GetPostsForChannelReturns",
+   "not_implemented": "API GetPostsForChannel called but not implemented."
   },
   {
    "name": "GetPostsSince",
@@ -3311,7 +3777,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPostsSinceArgs",
+   "returns": "Z_GetPostsSinceReturns",
+   "not_implemented": "API GetPostsSince called but not implemented."
   },
   {
    "name": "GetPreferenceForUser",
@@ -3339,7 +3808,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPreferenceForUserArgs",
+   "returns": "Z_GetPreferenceForUserReturns",
+   "not_implemented": "API GetPreferenceForUser called but not implemented."
   },
   {
    "name": "GetPreferencesForUser",
@@ -3359,7 +3831,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPreferencesForUserArgs",
+   "returns": "Z_GetPreferencesForUserReturns",
+   "not_implemented": "API GetPreferencesForUser called but not implemented."
   },
   {
    "name": "GetProfileImage",
@@ -3379,7 +3854,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetProfileImageArgs",
+   "returns": "Z_GetProfileImageReturns",
+   "not_implemented": "API GetProfileImage called but not implemented."
   },
   {
    "name": "GetPropertyField",
@@ -3403,7 +3881,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyFieldArgs",
+   "returns": "Z_GetPropertyFieldReturns",
+   "not_implemented": "API GetPropertyField called but not implemented."
   },
   {
    "name": "GetPropertyFieldByName",
@@ -3431,7 +3912,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyFieldByNameArgs",
+   "returns": "Z_GetPropertyFieldByNameReturns",
+   "not_implemented": "API GetPropertyFieldByName called but not implemented."
   },
   {
    "name": "GetPropertyFields",
@@ -3455,7 +3939,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyFieldsArgs",
+   "returns": "Z_GetPropertyFieldsReturns",
+   "not_implemented": "API GetPropertyFields called but not implemented."
   },
   {
    "name": "GetPropertyGroup",
@@ -3475,7 +3962,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyGroupArgs",
+   "returns": "Z_GetPropertyGroupReturns",
+   "not_implemented": "API GetPropertyGroup called but not implemented."
   },
   {
    "name": "GetPropertyValue",
@@ -3499,7 +3989,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyValueArgs",
+   "returns": "Z_GetPropertyValueReturns",
+   "not_implemented": "API GetPropertyValue called but not implemented."
   },
   {
    "name": "GetPropertyValues",
@@ -3523,7 +4016,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetPropertyValuesArgs",
+   "returns": "Z_GetPropertyValuesReturns",
+   "not_implemented": "API GetPropertyValues called but not implemented."
   },
   {
    "name": "GetPublicChannelsForTeam",
@@ -3551,7 +4047,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetPublicChannelsForTeamArgs",
+   "returns": "Z_GetPublicChannelsForTeamReturns",
+   "not_implemented": "API GetPublicChannelsForTeam called but not implemented."
   },
   {
    "name": "GetReactions",
@@ -3571,7 +4070,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetReactionsArgs",
+   "returns": "Z_GetReactionsReturns",
+   "not_implemented": "API GetReactions called but not implemented."
   },
   {
    "name": "GetServerVersion",
@@ -3582,7 +4084,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_GetServerVersionArgs",
+   "returns": "Z_GetServerVersionReturns",
+   "not_implemented": "API GetServerVersion called but not implemented."
   },
   {
    "name": "GetSession",
@@ -3602,7 +4107,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetSessionArgs",
+   "returns": "Z_GetSessionReturns",
+   "not_implemented": "API GetSession called but not implemented."
   },
   {
    "name": "GetSystemInstallDate",
@@ -3617,7 +4125,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetSystemInstallDateArgs",
+   "returns": "Z_GetSystemInstallDateReturns",
+   "not_implemented": "API GetSystemInstallDate called but not implemented."
   },
   {
    "name": "GetTeam",
@@ -3637,7 +4148,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamArgs",
+   "returns": "Z_GetTeamReturns",
+   "not_implemented": "API GetTeam called but not implemented."
   },
   {
    "name": "GetTeamByName",
@@ -3657,7 +4171,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamByNameArgs",
+   "returns": "Z_GetTeamByNameReturns",
+   "not_implemented": "API GetTeamByName called but not implemented."
   },
   {
    "name": "GetTeamIcon",
@@ -3677,7 +4194,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamIconArgs",
+   "returns": "Z_GetTeamIconReturns",
+   "not_implemented": "API GetTeamIcon called but not implemented."
   },
   {
    "name": "GetTeamMember",
@@ -3701,7 +4221,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamMemberArgs",
+   "returns": "Z_GetTeamMemberReturns",
+   "not_implemented": "API GetTeamMember called but not implemented."
   },
   {
    "name": "GetTeamMembers",
@@ -3729,7 +4252,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamMembersArgs",
+   "returns": "Z_GetTeamMembersReturns",
+   "not_implemented": "API GetTeamMembers called but not implemented."
   },
   {
    "name": "GetTeamMembersForUser",
@@ -3757,7 +4283,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamMembersForUserArgs",
+   "returns": "Z_GetTeamMembersForUserReturns",
+   "not_implemented": "API GetTeamMembersForUser called but not implemented."
   },
   {
    "name": "GetTeamStats",
@@ -3777,7 +4306,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamStatsArgs",
+   "returns": "Z_GetTeamStatsReturns",
+   "not_implemented": "API GetTeamStats called but not implemented."
   },
   {
    "name": "GetTeams",
@@ -3792,7 +4324,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamsArgs",
+   "returns": "Z_GetTeamsReturns",
+   "not_implemented": "API GetTeams called but not implemented."
   },
   {
    "name": "GetTeamsForUser",
@@ -3812,7 +4347,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamsForUserArgs",
+   "returns": "Z_GetTeamsForUserReturns",
+   "not_implemented": "API GetTeamsForUser called but not implemented."
   },
   {
    "name": "GetTeamsUnreadForUser",
@@ -3832,7 +4370,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetTeamsUnreadForUserArgs",
+   "returns": "Z_GetTeamsUnreadForUserReturns",
+   "not_implemented": "API GetTeamsUnreadForUser called but not implemented."
   },
   {
    "name": "GetTelemetryId",
@@ -3843,7 +4384,10 @@
      "name": "",
      "type": "string"
     }
-   ]
+   ],
+   "args": "Z_GetTelemetryIdArgs",
+   "returns": "Z_GetTelemetryIdReturns",
+   "not_implemented": "API GetTelemetryId called but not implemented."
   },
   {
    "name": "GetUnsanitizedConfig",
@@ -3854,7 +4398,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.Config"
     }
-   ]
+   ],
+   "args": "Z_GetUnsanitizedConfigArgs",
+   "returns": "Z_GetUnsanitizedConfigReturns",
+   "not_implemented": "API GetUnsanitizedConfig called but not implemented."
   },
   {
    "name": "GetUploadSession",
@@ -3874,7 +4421,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_GetUploadSessionArgs",
+   "returns": "Z_GetUploadSessionReturns",
+   "not_implemented": "API GetUploadSession called but not implemented."
   },
   {
    "name": "GetUser",
@@ -3894,7 +4444,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUserArgs",
+   "returns": "Z_GetUserReturns",
+   "not_implemented": "API GetUser called but not implemented."
   },
   {
    "name": "GetUserByEmail",
@@ -3914,7 +4467,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUserByEmailArgs",
+   "returns": "Z_GetUserByEmailReturns",
+   "not_implemented": "API GetUserByEmail called but not implemented."
   },
   {
    "name": "GetUserByUsername",
@@ -3934,7 +4490,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUserByUsernameArgs",
+   "returns": "Z_GetUserByUsernameReturns",
+   "not_implemented": "API GetUserByUsername called but not implemented."
   },
   {
    "name": "GetUserStatus",
@@ -3954,7 +4513,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUserStatusArgs",
+   "returns": "Z_GetUserStatusReturns",
+   "not_implemented": "API GetUserStatus called but not implemented."
   },
   {
    "name": "GetUserStatusesByIds",
@@ -3974,7 +4536,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUserStatusesByIdsArgs",
+   "returns": "Z_GetUserStatusesByIdsReturns",
+   "not_implemented": "API GetUserStatusesByIds called but not implemented."
   },
   {
    "name": "GetUsers",
@@ -3994,7 +4559,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUsersArgs",
+   "returns": "Z_GetUsersReturns",
+   "not_implemented": "API GetUsers called but not implemented."
   },
   {
    "name": "GetUsersByIds",
@@ -4014,7 +4582,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUsersByIdsArgs",
+   "returns": "Z_GetUsersByIdsReturns",
+   "not_implemented": "API GetUsersByIds called but not implemented."
   },
   {
    "name": "GetUsersByUsernames",
@@ -4034,7 +4605,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUsersByUsernamesArgs",
+   "returns": "Z_GetUsersByUsernamesReturns",
+   "not_implemented": "API GetUsersByUsernames called but not implemented."
   },
   {
    "name": "GetUsersInChannel",
@@ -4066,7 +4640,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUsersInChannelArgs",
+   "returns": "Z_GetUsersInChannelReturns",
+   "not_implemented": "API GetUsersInChannel called but not implemented."
   },
   {
    "name": "GetUsersInTeam",
@@ -4094,7 +4671,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_GetUsersInTeamArgs",
+   "returns": "Z_GetUsersInTeamReturns",
+   "not_implemented": "API GetUsersInTeam called but not implemented."
   },
   {
    "name": "HasPermissionTo",
@@ -4114,7 +4694,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_HasPermissionToArgs",
+   "returns": "Z_HasPermissionToReturns",
+   "not_implemented": "API HasPermissionTo called but not implemented."
   },
   {
    "name": "HasPermissionToChannel",
@@ -4138,7 +4721,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_HasPermissionToChannelArgs",
+   "returns": "Z_HasPermissionToChannelReturns",
+   "not_implemented": "API HasPermissionToChannel called but not implemented."
   },
   {
    "name": "HasPermissionToTeam",
@@ -4162,7 +4748,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_HasPermissionToTeamArgs",
+   "returns": "Z_HasPermissionToTeamReturns",
+   "not_implemented": "API HasPermissionToTeam called but not implemented."
   },
   {
    "name": "InstallPlugin",
@@ -4187,7 +4776,11 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_InstallPluginArgs",
+   "returns": "Z_InstallPluginReturns",
+   "not_implemented": "API InstallPlugin called but not implemented",
+   "custom": true
   },
   {
    "name": "InviteRemoteToChannel",
@@ -4215,7 +4808,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_InviteRemoteToChannelArgs",
+   "returns": "Z_InviteRemoteToChannelReturns",
+   "not_implemented": "API InviteRemoteToChannel called but not implemented."
   },
   {
    "name": "IsEnterpriseReady",
@@ -4226,7 +4822,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_IsEnterpriseReadyArgs",
+   "returns": "Z_IsEnterpriseReadyReturns",
+   "not_implemented": "API IsEnterpriseReady called but not implemented."
   },
   {
    "name": "KVCompareAndDelete",
@@ -4250,7 +4849,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVCompareAndDeleteArgs",
+   "returns": "Z_KVCompareAndDeleteReturns",
+   "not_implemented": "API KVCompareAndDelete called but not implemented."
   },
   {
    "name": "KVCompareAndSet",
@@ -4278,7 +4880,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVCompareAndSetArgs",
+   "returns": "Z_KVCompareAndSetReturns",
+   "not_implemented": "API KVCompareAndSet called but not implemented."
   },
   {
    "name": "KVDelete",
@@ -4294,7 +4899,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVDeleteArgs",
+   "returns": "Z_KVDeleteReturns",
+   "not_implemented": "API KVDelete called but not implemented."
   },
   {
    "name": "KVDeleteAll",
@@ -4305,7 +4913,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVDeleteAllArgs",
+   "returns": "Z_KVDeleteAllReturns",
+   "not_implemented": "API KVDeleteAll called but not implemented."
   },
   {
    "name": "KVGet",
@@ -4325,7 +4936,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVGetArgs",
+   "returns": "Z_KVGetReturns",
+   "not_implemented": "API KVGet called but not implemented."
   },
   {
    "name": "KVList",
@@ -4349,7 +4963,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVListArgs",
+   "returns": "Z_KVListReturns",
+   "not_implemented": "API KVList called but not implemented."
   },
   {
    "name": "KVSet",
@@ -4369,7 +4986,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVSetArgs",
+   "returns": "Z_KVSetReturns",
+   "not_implemented": "API KVSet called but not implemented."
   },
   {
    "name": "KVSetWithExpiry",
@@ -4393,7 +5013,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVSetWithExpiryArgs",
+   "returns": "Z_KVSetWithExpiryReturns",
+   "not_implemented": "API KVSetWithExpiry called but not implemented."
   },
   {
    "name": "KVSetWithOptions",
@@ -4421,7 +5044,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_KVSetWithOptionsArgs",
+   "returns": "Z_KVSetWithOptionsReturns",
+   "not_implemented": "API KVSetWithOptions called but not implemented."
   },
   {
    "name": "ListBuiltInCommands",
@@ -4436,7 +5062,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ListBuiltInCommandsArgs",
+   "returns": "Z_ListBuiltInCommandsReturns",
+   "not_implemented": "API ListBuiltInCommands called but not implemented."
   },
   {
    "name": "ListCommands",
@@ -4456,7 +5085,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ListCommandsArgs",
+   "returns": "Z_ListCommandsReturns",
+   "not_implemented": "API ListCommands called but not implemented."
   },
   {
    "name": "ListCustomCommands",
@@ -4476,7 +5108,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ListCustomCommandsArgs",
+   "returns": "Z_ListCustomCommandsReturns",
+   "not_implemented": "API ListCustomCommands called but not implemented."
   },
   {
    "name": "ListPluginCommands",
@@ -4496,7 +5131,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ListPluginCommandsArgs",
+   "returns": "Z_ListPluginCommandsReturns",
+   "not_implemented": "API ListPluginCommands called but not implemented."
   },
   {
    "name": "LoadPluginConfiguration",
@@ -4513,7 +5151,9 @@
      "type": "error"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LoadPluginConfigurationArgsArgs",
+   "returns": "Z_LoadPluginConfigurationArgsReturns"
   },
   {
    "name": "LogAuditRec",
@@ -4525,7 +5165,10 @@
     }
    ],
    "results": [],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogAuditRecArgs",
+   "returns": "Z_LogAuditRecReturns",
+   "not_implemented": "API LogAuditRec called but not implemented"
   },
   {
    "name": "LogAuditRecWithLevel",
@@ -4541,7 +5184,10 @@
     }
    ],
    "results": [],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogAuditRecWithLevelArgs",
+   "returns": "Z_LogAuditRecWithLevelReturns",
+   "not_implemented": "API LogAuditRecWithLevel called but not implemented"
   },
   {
    "name": "LogDebug",
@@ -4558,7 +5204,10 @@
    ],
    "results": [],
    "variadic": true,
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogDebugArgs",
+   "returns": "Z_LogDebugReturns",
+   "not_implemented": "API LogDebug called but not implemented"
   },
   {
    "name": "LogError",
@@ -4575,7 +5224,10 @@
    ],
    "results": [],
    "variadic": true,
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogErrorArgs",
+   "returns": "Z_LogErrorReturns",
+   "not_implemented": "API LogError called but not implemented"
   },
   {
    "name": "LogInfo",
@@ -4592,7 +5244,10 @@
    ],
    "results": [],
    "variadic": true,
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogInfoArgs",
+   "returns": "Z_LogInfoReturns",
+   "not_implemented": "API LogInfo called but not implemented"
   },
   {
    "name": "LogWarn",
@@ -4609,7 +5264,10 @@
    ],
    "results": [],
    "variadic": true,
-   "excluded": true
+   "excluded": true,
+   "args": "Z_LogWarnArgs",
+   "returns": "Z_LogWarnReturns",
+   "not_implemented": "API LogWarn called but not implemented"
   },
   {
    "name": "OpenInteractiveDialog",
@@ -4625,7 +5283,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_OpenInteractiveDialogArgs",
+   "returns": "Z_OpenInteractiveDialogReturns",
+   "not_implemented": "API OpenInteractiveDialog called but not implemented."
   },
   {
    "name": "PatchBot",
@@ -4649,7 +5310,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_PatchBotArgs",
+   "returns": "Z_PatchBotReturns",
+   "not_implemented": "API PatchBot called but not implemented."
   },
   {
    "name": "PatchChannelMembersNotifications",
@@ -4669,7 +5333,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_PatchChannelMembersNotificationsArgs",
+   "returns": "Z_PatchChannelMembersNotificationsReturns",
+   "not_implemented": "API PatchChannelMembersNotifications called but not implemented."
   },
   {
    "name": "PermanentDeleteBot",
@@ -4685,7 +5352,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_PermanentDeleteBotArgs",
+   "returns": "Z_PermanentDeleteBotReturns",
+   "not_implemented": "API PermanentDeleteBot called but not implemented."
   },
   {
    "name": "PluginHTTP",
@@ -4702,7 +5372,11 @@
      "type": "*net/http.Response"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_PluginHTTPArgs",
+   "returns": "Z_PluginHTTPReturns",
+   "not_implemented": "API PluginHTTP called but not implemented",
+   "custom": true
   },
   {
    "name": "PublishPluginClusterEvent",
@@ -4722,7 +5396,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_PublishPluginClusterEventArgs",
+   "returns": "Z_PublishPluginClusterEventReturns",
+   "not_implemented": "API PublishPluginClusterEvent called but not implemented."
   },
   {
    "name": "PublishUserTyping",
@@ -4746,7 +5423,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_PublishUserTypingArgs",
+   "returns": "Z_PublishUserTypingReturns",
+   "not_implemented": "API PublishUserTyping called but not implemented."
   },
   {
    "name": "PublishWebSocketEvent",
@@ -4765,7 +5445,10 @@
      "type": "*github.com/mattermost/mattermost/server/public/model.WebsocketBroadcast"
     }
    ],
-   "results": []
+   "results": [],
+   "args": "Z_PublishWebSocketEventArgs",
+   "returns": "Z_PublishWebSocketEventReturns",
+   "not_implemented": "API PublishWebSocketEvent called but not implemented."
   },
   {
    "name": "QueryUsersForAccessControlExpression",
@@ -4805,7 +5488,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_QueryUsersForAccessControlExpressionArgs",
+   "returns": "Z_QueryUsersForAccessControlExpressionReturns",
+   "not_implemented": "API QueryUsersForAccessControlExpression called but not implemented."
   },
   {
    "name": "ReadFile",
@@ -4825,7 +5511,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_ReadFileArgs",
+   "returns": "Z_ReadFileReturns",
+   "not_implemented": "API ReadFile called but not implemented."
   },
   {
    "name": "ReceiveSharedChannelAttachmentSyncMsg",
@@ -4858,7 +5547,11 @@
      "type": "error"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_ReceiveSharedChannelAttachmentSyncMsgArgs",
+   "returns": "Z_ReceiveSharedChannelAttachmentSyncMsgReturns",
+   "not_implemented": "API ReceiveSharedChannelAttachmentSyncMsg called but not implemented",
+   "custom": true
   },
   {
    "name": "ReceiveSharedChannelProfileImageSyncMsg",
@@ -4882,7 +5575,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ReceiveSharedChannelProfileImageSyncMsgArgs",
+   "returns": "Z_ReceiveSharedChannelProfileImageSyncMsgReturns",
+   "not_implemented": "API ReceiveSharedChannelProfileImageSyncMsg called but not implemented."
   },
   {
    "name": "ReceiveSharedChannelSyncMsg",
@@ -4906,7 +5602,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ReceiveSharedChannelSyncMsgArgs",
+   "returns": "Z_ReceiveSharedChannelSyncMsgReturns",
+   "not_implemented": "API ReceiveSharedChannelSyncMsg called but not implemented."
   },
   {
    "name": "RegisterChannelGuard",
@@ -4922,7 +5621,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RegisterChannelGuardArgs",
+   "returns": "Z_RegisterChannelGuardReturns",
+   "not_implemented": "API RegisterChannelGuard called but not implemented."
   },
   {
    "name": "RegisterCollectionAndTopic",
@@ -4942,7 +5644,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_RegisterCollectionAndTopicArgs",
+   "returns": "Z_RegisterCollectionAndTopicReturns",
+   "not_implemented": "API RegisterCollectionAndTopic called but not implemented."
   },
   {
    "name": "RegisterCommand",
@@ -4958,7 +5663,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_RegisterCommandArgs",
+   "returns": "Z_RegisterCommandReturns",
+   "not_implemented": "API RegisterCommand called but not implemented."
   },
   {
    "name": "RegisterPluginForSharedChannels",
@@ -4978,7 +5686,10 @@
      "name": "err",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_RegisterPluginForSharedChannelsArgs",
+   "returns": "Z_RegisterPluginForSharedChannelsReturns",
+   "not_implemented": "API RegisterPluginForSharedChannels called but not implemented."
   },
   {
    "name": "RegisterPropertyGroup",
@@ -4998,7 +5709,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_RegisterPropertyGroupArgs",
+   "returns": "Z_RegisterPropertyGroupReturns",
+   "not_implemented": "API RegisterPropertyGroup called but not implemented."
   },
   {
    "name": "RemovePlugin",
@@ -5014,7 +5728,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RemovePluginArgs",
+   "returns": "Z_RemovePluginReturns",
+   "not_implemented": "API RemovePlugin called but not implemented."
   },
   {
    "name": "RemoveReaction",
@@ -5030,7 +5747,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RemoveReactionArgs",
+   "returns": "Z_RemoveReactionReturns",
+   "not_implemented": "API RemoveReaction called but not implemented."
   },
   {
    "name": "RemoveTeamIcon",
@@ -5046,7 +5766,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RemoveTeamIconArgs",
+   "returns": "Z_RemoveTeamIconReturns",
+   "not_implemented": "API RemoveTeamIcon called but not implemented."
   },
   {
    "name": "RemoveUserCustomStatus",
@@ -5062,7 +5785,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RemoveUserCustomStatusArgs",
+   "returns": "Z_RemoveUserCustomStatusReturns",
+   "not_implemented": "API RemoveUserCustomStatus called but not implemented."
   },
   {
    "name": "RequestTrialLicense",
@@ -5090,7 +5816,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RequestTrialLicenseArgs",
+   "returns": "Z_RequestTrialLicenseReturns",
+   "not_implemented": "API RequestTrialLicense called but not implemented."
   },
   {
    "name": "RestoreChannel",
@@ -5106,7 +5835,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RestoreChannelArgs",
+   "returns": "Z_RestoreChannelReturns",
+   "not_implemented": "API RestoreChannel called but not implemented."
   },
   {
    "name": "RestoreGroup",
@@ -5126,7 +5858,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RestoreGroupArgs",
+   "returns": "Z_RestoreGroupReturns",
+   "not_implemented": "API RestoreGroup called but not implemented."
   },
   {
    "name": "RevokeSession",
@@ -5142,7 +5877,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RevokeSessionArgs",
+   "returns": "Z_RevokeSessionReturns",
+   "not_implemented": "API RevokeSession called but not implemented."
   },
   {
    "name": "RevokeUserAccessToken",
@@ -5158,7 +5896,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_RevokeUserAccessTokenArgs",
+   "returns": "Z_RevokeUserAccessTokenReturns",
+   "not_implemented": "API RevokeUserAccessToken called but not implemented."
   },
   {
    "name": "RolesGrantPermission",
@@ -5178,7 +5919,10 @@
      "name": "",
      "type": "bool"
     }
-   ]
+   ],
+   "args": "Z_RolesGrantPermissionArgs",
+   "returns": "Z_RolesGrantPermissionReturns",
+   "not_implemented": "API RolesGrantPermission called but not implemented."
   },
   {
    "name": "SaveAccessControlPolicy",
@@ -5202,7 +5946,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SaveAccessControlPolicyArgs",
+   "returns": "Z_SaveAccessControlPolicyReturns",
+   "not_implemented": "API SaveAccessControlPolicy called but not implemented."
   },
   {
    "name": "SaveConfig",
@@ -5218,7 +5965,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SaveConfigArgs",
+   "returns": "Z_SaveConfigReturns",
+   "not_implemented": "API SaveConfig called but not implemented."
   },
   {
    "name": "SavePluginConfig",
@@ -5234,7 +5984,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SavePluginConfigArgs",
+   "returns": "Z_SavePluginConfigReturns",
+   "not_implemented": "API SavePluginConfig called but not implemented."
   },
   {
    "name": "SearchChannels",
@@ -5258,7 +6011,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SearchChannelsArgs",
+   "returns": "Z_SearchChannelsReturns",
+   "not_implemented": "API SearchChannels called but not implemented."
   },
   {
    "name": "SearchPostsInTeam",
@@ -5282,7 +6038,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SearchPostsInTeamArgs",
+   "returns": "Z_SearchPostsInTeamReturns",
+   "not_implemented": "API SearchPostsInTeam called but not implemented."
   },
   {
    "name": "SearchPostsInTeamForUser",
@@ -5310,7 +6069,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SearchPostsInTeamForUserArgs",
+   "returns": "Z_SearchPostsInTeamForUserReturns",
+   "not_implemented": "API SearchPostsInTeamForUser called but not implemented."
   },
   {
    "name": "SearchPropertyFields",
@@ -5334,7 +6096,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_SearchPropertyFieldsArgs",
+   "returns": "Z_SearchPropertyFieldsReturns",
+   "not_implemented": "API SearchPropertyFields called but not implemented."
   },
   {
    "name": "SearchPropertyValues",
@@ -5358,7 +6123,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_SearchPropertyValuesArgs",
+   "returns": "Z_SearchPropertyValuesReturns",
+   "not_implemented": "API SearchPropertyValues called but not implemented."
   },
   {
    "name": "SearchTeams",
@@ -5378,7 +6146,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SearchTeamsArgs",
+   "returns": "Z_SearchTeamsReturns",
+   "not_implemented": "API SearchTeams called but not implemented."
   },
   {
    "name": "SearchUsers",
@@ -5398,7 +6169,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SearchUsersArgs",
+   "returns": "Z_SearchUsersReturns",
+   "not_implemented": "API SearchUsers called but not implemented."
   },
   {
    "name": "SendEphemeralPost",
@@ -5418,7 +6192,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.Post"
     }
-   ]
+   ],
+   "args": "Z_SendEphemeralPostArgs",
+   "returns": "Z_SendEphemeralPostReturns",
+   "not_implemented": "API SendEphemeralPost called but not implemented."
   },
   {
    "name": "SendMail",
@@ -5442,7 +6219,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SendMailArgs",
+   "returns": "Z_SendMailReturns",
+   "not_implemented": "API SendMail called but not implemented."
   },
   {
    "name": "SendPushNotification",
@@ -5462,7 +6242,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SendPushNotificationArgs",
+   "returns": "Z_SendPushNotificationReturns",
+   "not_implemented": "API SendPushNotification called but not implemented."
   },
   {
    "name": "SendToastMessage",
@@ -5490,7 +6273,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SendToastMessageArgs",
+   "returns": "Z_SendToastMessageReturns",
+   "not_implemented": "API SendToastMessage called but not implemented."
   },
   {
    "name": "SetFileSearchableContent",
@@ -5510,7 +6296,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SetFileSearchableContentArgs",
+   "returns": "Z_SetFileSearchableContentReturns",
+   "not_implemented": "API SetFileSearchableContent called but not implemented."
   },
   {
    "name": "SetProfileImage",
@@ -5530,7 +6319,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SetProfileImageArgs",
+   "returns": "Z_SetProfileImageReturns",
+   "not_implemented": "API SetProfileImage called but not implemented."
   },
   {
    "name": "SetTeamIcon",
@@ -5550,7 +6342,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SetTeamIconArgs",
+   "returns": "Z_SetTeamIconReturns",
+   "not_implemented": "API SetTeamIcon called but not implemented."
   },
   {
    "name": "SetUserStatusTimedDND",
@@ -5574,7 +6369,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_SetUserStatusTimedDNDArgs",
+   "returns": "Z_SetUserStatusTimedDNDReturns",
+   "not_implemented": "API SetUserStatusTimedDND called but not implemented."
   },
   {
    "name": "ShareChannel",
@@ -5594,7 +6392,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_ShareChannelArgs",
+   "returns": "Z_ShareChannelReturns",
+   "not_implemented": "API ShareChannel called but not implemented."
   },
   {
    "name": "SyncSharedChannel",
@@ -5610,7 +6411,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_SyncSharedChannelArgs",
+   "returns": "Z_SyncSharedChannelReturns",
+   "not_implemented": "API SyncSharedChannel called but not implemented."
   },
   {
    "name": "UninviteRemoteFromChannel",
@@ -5630,7 +6434,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UninviteRemoteFromChannelArgs",
+   "returns": "Z_UninviteRemoteFromChannelReturns",
+   "not_implemented": "API UninviteRemoteFromChannel called but not implemented."
   },
   {
    "name": "UnregisterChannelGuard",
@@ -5646,7 +6453,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UnregisterChannelGuardArgs",
+   "returns": "Z_UnregisterChannelGuardReturns",
+   "not_implemented": "API UnregisterChannelGuard called but not implemented."
   },
   {
    "name": "UnregisterCommand",
@@ -5666,7 +6476,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UnregisterCommandArgs",
+   "returns": "Z_UnregisterCommandReturns",
+   "not_implemented": "API UnregisterCommand called but not implemented."
   },
   {
    "name": "UnregisterPluginForSharedChannels",
@@ -5682,7 +6495,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UnregisterPluginForSharedChannelsArgs",
+   "returns": "Z_UnregisterPluginForSharedChannelsReturns",
+   "not_implemented": "API UnregisterPluginForSharedChannels called but not implemented."
   },
   {
    "name": "UnregisterPluginRemoteForSharedChannels",
@@ -5698,7 +6514,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UnregisterPluginRemoteForSharedChannelsArgs",
+   "returns": "Z_UnregisterPluginRemoteForSharedChannelsReturns",
+   "not_implemented": "API UnregisterPluginRemoteForSharedChannels called but not implemented."
   },
   {
    "name": "UnshareChannel",
@@ -5718,7 +6537,10 @@
      "name": "err",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UnshareChannelArgs",
+   "returns": "Z_UnshareChannelReturns",
+   "not_implemented": "API UnshareChannel called but not implemented."
   },
   {
    "name": "UpdateBotActive",
@@ -5742,7 +6564,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateBotActiveArgs",
+   "returns": "Z_UpdateBotActiveReturns",
+   "not_implemented": "API UpdateBotActive called but not implemented."
   },
   {
    "name": "UpdateChannel",
@@ -5762,7 +6587,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateChannelArgs",
+   "returns": "Z_UpdateChannelReturns",
+   "not_implemented": "API UpdateChannel called but not implemented."
   },
   {
    "name": "UpdateChannelMemberNotifications",
@@ -5790,7 +6618,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateChannelMemberNotificationsArgs",
+   "returns": "Z_UpdateChannelMemberNotificationsReturns",
+   "not_implemented": "API UpdateChannelMemberNotifications called but not implemented."
   },
   {
    "name": "UpdateChannelMemberRoles",
@@ -5818,7 +6649,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateChannelMemberRolesArgs",
+   "returns": "Z_UpdateChannelMemberRolesReturns",
+   "not_implemented": "API UpdateChannelMemberRoles called but not implemented."
   },
   {
    "name": "UpdateChannelSidebarCategories",
@@ -5846,7 +6680,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateChannelSidebarCategoriesArgs",
+   "returns": "Z_UpdateChannelSidebarCategoriesReturns",
+   "not_implemented": "API UpdateChannelSidebarCategories called but not implemented."
   },
   {
    "name": "UpdateCommand",
@@ -5870,7 +6707,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdateCommandArgs",
+   "returns": "Z_UpdateCommandReturns",
+   "not_implemented": "API UpdateCommand called but not implemented."
   },
   {
    "name": "UpdateEphemeralPost",
@@ -5890,7 +6730,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.Post"
     }
-   ]
+   ],
+   "args": "Z_UpdateEphemeralPostArgs",
+   "returns": "Z_UpdateEphemeralPostReturns",
+   "not_implemented": "API UpdateEphemeralPost called but not implemented."
   },
   {
    "name": "UpdateGroup",
@@ -5910,7 +6753,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateGroupArgs",
+   "returns": "Z_UpdateGroupReturns",
+   "not_implemented": "API UpdateGroup called but not implemented."
   },
   {
    "name": "UpdateGroupSyncable",
@@ -5930,7 +6776,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateGroupSyncableArgs",
+   "returns": "Z_UpdateGroupSyncableReturns",
+   "not_implemented": "API UpdateGroupSyncable called but not implemented."
   },
   {
    "name": "UpdateOAuthApp",
@@ -5950,7 +6799,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateOAuthAppArgs",
+   "returns": "Z_UpdateOAuthAppReturns",
+   "not_implemented": "API UpdateOAuthApp called but not implemented."
   },
   {
    "name": "UpdatePost",
@@ -5970,7 +6822,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdatePostArgs",
+   "returns": "Z_UpdatePostReturns",
+   "not_implemented": "API UpdatePost called but not implemented."
   },
   {
    "name": "UpdatePreferencesForUser",
@@ -5990,7 +6845,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdatePreferencesForUserArgs",
+   "returns": "Z_UpdatePreferencesForUserReturns",
+   "not_implemented": "API UpdatePreferencesForUser called but not implemented."
   },
   {
    "name": "UpdatePropertyField",
@@ -6014,7 +6872,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdatePropertyFieldArgs",
+   "returns": "Z_UpdatePropertyFieldReturns",
+   "not_implemented": "API UpdatePropertyField called but not implemented."
   },
   {
    "name": "UpdatePropertyFields",
@@ -6038,7 +6899,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdatePropertyFieldsArgs",
+   "returns": "Z_UpdatePropertyFieldsReturns",
+   "not_implemented": "API UpdatePropertyFields called but not implemented."
   },
   {
    "name": "UpdatePropertyValue",
@@ -6062,7 +6926,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdatePropertyValueArgs",
+   "returns": "Z_UpdatePropertyValueReturns",
+   "not_implemented": "API UpdatePropertyValue called but not implemented."
   },
   {
    "name": "UpdatePropertyValues",
@@ -6086,7 +6953,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdatePropertyValuesArgs",
+   "returns": "Z_UpdatePropertyValuesReturns",
+   "not_implemented": "API UpdatePropertyValues called but not implemented."
   },
   {
    "name": "UpdateSharedChannel",
@@ -6106,7 +6976,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdateSharedChannelArgs",
+   "returns": "Z_UpdateSharedChannelReturns",
+   "not_implemented": "API UpdateSharedChannel called but not implemented."
   },
   {
    "name": "UpdateSharedChannelCursor",
@@ -6130,7 +7003,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpdateSharedChannelCursorArgs",
+   "returns": "Z_UpdateSharedChannelCursorReturns",
+   "not_implemented": "API UpdateSharedChannelCursor called but not implemented."
   },
   {
    "name": "UpdateTeam",
@@ -6150,7 +7026,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateTeamArgs",
+   "returns": "Z_UpdateTeamReturns",
+   "not_implemented": "API UpdateTeam called but not implemented."
   },
   {
    "name": "UpdateTeamMemberRoles",
@@ -6178,7 +7057,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateTeamMemberRolesArgs",
+   "returns": "Z_UpdateTeamMemberRolesReturns",
+   "not_implemented": "API UpdateTeamMemberRoles called but not implemented."
   },
   {
    "name": "UpdateUser",
@@ -6198,7 +7080,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserArgs",
+   "returns": "Z_UpdateUserReturns",
+   "not_implemented": "API UpdateUser called but not implemented."
   },
   {
    "name": "UpdateUserActive",
@@ -6218,7 +7103,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserActiveArgs",
+   "returns": "Z_UpdateUserActiveReturns",
+   "not_implemented": "API UpdateUserActive called but not implemented."
   },
   {
    "name": "UpdateUserAuth",
@@ -6242,7 +7130,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserAuthArgs",
+   "returns": "Z_UpdateUserAuthReturns",
+   "not_implemented": "API UpdateUserAuth called but not implemented."
   },
   {
    "name": "UpdateUserCustomStatus",
@@ -6262,7 +7153,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserCustomStatusArgs",
+   "returns": "Z_UpdateUserCustomStatusReturns",
+   "not_implemented": "API UpdateUserCustomStatus called but not implemented."
   },
   {
    "name": "UpdateUserRoles",
@@ -6286,7 +7180,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserRolesArgs",
+   "returns": "Z_UpdateUserRolesReturns",
+   "not_implemented": "API UpdateUserRoles called but not implemented."
   },
   {
    "name": "UpdateUserStatus",
@@ -6310,7 +7207,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpdateUserStatusArgs",
+   "returns": "Z_UpdateUserStatusReturns",
+   "not_implemented": "API UpdateUserStatus called but not implemented."
   },
   {
    "name": "UploadData",
@@ -6335,7 +7235,11 @@
      "type": "error"
     }
    ],
-   "excluded": true
+   "excluded": true,
+   "args": "Z_UploadDataArgs",
+   "returns": "Z_UploadDataReturns",
+   "not_implemented": "API UploadData called but not implemented",
+   "custom": true
   },
   {
    "name": "UploadFile",
@@ -6363,7 +7267,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UploadFileArgs",
+   "returns": "Z_UploadFileReturns",
+   "not_implemented": "API UploadFile called but not implemented."
   },
   {
    "name": "UpsertGroupMember",
@@ -6387,7 +7294,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpsertGroupMemberArgs",
+   "returns": "Z_UpsertGroupMemberReturns",
+   "not_implemented": "API UpsertGroupMember called but not implemented."
   },
   {
    "name": "UpsertGroupMembers",
@@ -6411,7 +7321,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpsertGroupMembersArgs",
+   "returns": "Z_UpsertGroupMembersReturns",
+   "not_implemented": "API UpsertGroupMembers called but not implemented."
   },
   {
    "name": "UpsertGroupSyncable",
@@ -6431,7 +7344,10 @@
      "name": "",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
     }
-   ]
+   ],
+   "args": "Z_UpsertGroupSyncableArgs",
+   "returns": "Z_UpsertGroupSyncableReturns",
+   "not_implemented": "API UpsertGroupSyncable called but not implemented."
   },
   {
    "name": "UpsertPropertyValue",
@@ -6451,7 +7367,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpsertPropertyValueArgs",
+   "returns": "Z_UpsertPropertyValueReturns",
+   "not_implemented": "API UpsertPropertyValue called but not implemented."
   },
   {
    "name": "UpsertPropertyValueWithOptions",
@@ -6475,7 +7394,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpsertPropertyValueWithOptionsArgs",
+   "returns": "Z_UpsertPropertyValueWithOptionsReturns",
+   "not_implemented": "API UpsertPropertyValueWithOptions called but not implemented."
   },
   {
    "name": "UpsertPropertyValues",
@@ -6495,7 +7417,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpsertPropertyValuesArgs",
+   "returns": "Z_UpsertPropertyValuesReturns",
+   "not_implemented": "API UpsertPropertyValues called but not implemented."
   },
   {
    "name": "UpsertPropertyValuesWithOptions",
@@ -6519,7 +7444,10 @@
      "name": "",
      "type": "error"
     }
-   ]
+   ],
+   "args": "Z_UpsertPropertyValuesWithOptionsArgs",
+   "returns": "Z_UpsertPropertyValuesWithOptionsReturns",
+   "not_implemented": "API UpsertPropertyValuesWithOptions called but not implemented."
   }
  ],
  "wire": [

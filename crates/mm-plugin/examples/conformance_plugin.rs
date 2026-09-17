@@ -42,22 +42,28 @@ impl Conformance {
     fn answer<A: gobwire::Encode, R: gobwire::Decode + Default + Send + 'static>(
         &self,
         name: &str,
+        returns: &str,
         args: &A,
     ) -> R {
         self.record(json!({ "hook": name, "args": render_typed(args) }));
-        fixture(&format!("Z_{name}Returns"))
+        fixture(returns)
     }
 }
 
 macro_rules! names {
-    ($(($method:ident, $name:literal, $args:ty, $returns:ty),)*) => {
+    ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
         &[$($name),*]
     };
 }
 const HOOKS: &[&str] = mm_plugin::for_each_hook!(names);
 
+/// What the log methods send. Go's plugin sends `%+v` of ("key", 42, true), which is what these
+/// already are: Go stringifies them client-side (stringifier.go).
+const LOG_MESSAGE: &str = "a logged line";
+const LOG_PAIRS: [&str; 3] = ["key", "42", "true"];
+
 macro_rules! hooks {
-    ($(($method:ident, $name:literal, $args:ty, $returns:ty),)*) => {
+    ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
         impl Hooks for Conformance {
             fn implemented(&self) -> Vec<String> {
                 let mut names: Vec<String> = HOOKS.iter().map(|s| (*s).to_owned()).collect();
@@ -66,7 +72,7 @@ macro_rules! hooks {
             }
             $(
                 async fn $method(&self, args: $args) -> Result<$returns, NotImplemented> {
-                    Ok(self.answer($name, &args))
+                    Ok(self.answer($name, $returns_name, &args))
                 }
             )*
         }
@@ -98,14 +104,27 @@ impl Plugin for Conformance {
             });
         }
         macro_rules! tour {
-            ($(($method:ident, $name:literal, $args:ty, $returns:ty),)*) => {
+            ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
                 $(
-                    let returns = api.$method(fixture::<$args>(concat!("Z_", $name, "Args"))).await;
+                    let returns = api.$method(fixture::<$args>($args_name)).await;
                     self.record(json!({ "api": $name, "returns": render_typed(&returns) }));
                 )*
             };
         }
-        mm_plugin::for_each_api_method!(tour);
+        mm_plugin::for_each_api_call!(tour);
+
+        // The methods whose clients are hand-written, with the values the test expects.
+        let pairs = LOG_PAIRS.map(str::to_owned);
+        api.log_debug(LOG_MESSAGE, &pairs).await;
+        api.log_info(LOG_MESSAGE, &pairs).await;
+        api.log_warn(LOG_MESSAGE, &pairs).await;
+        api.log_error(LOG_MESSAGE, &pairs).await;
+        let config = api.load_plugin_configuration().await;
+        self.record(json!({
+            "api": "LoadPluginConfiguration",
+            "config": serde_json::from_slice::<Json>(&config).unwrap_or(Json::Null),
+        }));
+
         self.record(json!({ "activated": true }));
         Ok(Z_OnActivateReturns::default())
     }

@@ -135,6 +135,17 @@ type Method struct {
 	Variadic bool    `json:"variadic,omitempty"`
 	// Excluded: the wire structs are hand-written in client_rpc.go, not generated.
 	Excluded bool `json:"excluded,omitempty"`
+	// Args and Returns name the wire structs, which for a hand-written method are whatever its
+	// RPC server declares — `LoadPluginConfiguration` takes a `Z_LoadPluginConfigurationArgsArgs`.
+	Args    string `json:"args,omitempty"`
+	Returns string `json:"returns,omitempty"`
+	// NotImplemented is the error the RPC server answers with when the implementation lacks the
+	// method. The hand-written ones differ from the generated ones, and from each other.
+	NotImplemented string `json:"not_implemented,omitempty"`
+	// Custom: a wire struct whose fields are not the plain A, B, C parameters, so neither side can
+	// be generated from the signature. They carry brokered stream ids (ServeHTTP, UploadData) or a
+	// reshaped request (PluginHTTP).
+	Custom bool `json:"custom,omitempty"`
 }
 
 type Field struct {
@@ -487,6 +498,34 @@ func zStructs(file string) (map[string][]string, error) {
 	return declared, nil
 }
 
+// serverMethods parses client_rpc.go's hand-written RPC servers: the wire structs each method
+// takes, and the error it answers when the implementation lacks it.
+func serverMethods() (map[string]Method, error) {
+	src, err := os.ReadFile(filepath.Join(pluginDir, "client_rpc.go"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]Method{}
+	sig := regexp.MustCompile(`func \(s \*(?:hooks|api)RPCServer\) (\w+)\(args \*(\w+), returns \*(\w+)\) error \{`)
+	for _, m := range sig.FindAllSubmatchIndex(src, -1) {
+		name := string(src[m[2]:m[3]])
+		method := Method{
+			Args:    string(src[m[4]:m[5]]),
+			Returns: string(src[m[6]:m[7]]),
+		}
+		// The message lives in this function: search from its start to the next one.
+		body := src[m[1]:]
+		if next := sig.FindIndex(body); next != nil {
+			body = body[:next[0]]
+		}
+		if msg := regexp.MustCompile(`fmt\.Errorf\("([^"]*called but not implemented[^"]*)"\)`).FindSubmatch(body); msg != nil {
+			method.NotImplemented = string(msg[1])
+		}
+		out[name] = method
+	}
+	return out, nil
+}
+
 // wireTypes maps a wire struct's name to the Go type gob sees for it.
 var wireTypes = map[string]reflect.Type{}
 
@@ -650,6 +689,23 @@ func buildIDL() (*IDL, error) {
 		return nil, err
 	}
 	idl := &IDL{GoVersion: runtime.Version(), Hooks: hooks, API: api, HookIDs: ids, Types: w.types}
+	written, err := serverMethods()
+	if err != nil {
+		return nil, err
+	}
+	// A wire struct whose fields are not the plain A, B, C parameters is not generatable.
+	custom := func(name string) bool {
+		t, ok := wireTypes[name]
+		if !ok {
+			return false
+		}
+		for i := 0; i < t.NumField(); i++ {
+			if t.Field(i).Name != string(rune('A'+i)) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, m := range all {
 		if m.Excluded {
 			continue
@@ -676,6 +732,29 @@ func buildIDL() (*IDL, error) {
 	for _, t := range handWritten {
 		wireTypes[t.Name()] = t
 		idl.Wire = append(idl.Wire, w.add(t))
+	}
+	for _, side := range []struct {
+		kind    string
+		methods []Method
+	}{{"Hook", idl.Hooks}, {"API", idl.API}} {
+		for i := range side.methods {
+			m := &side.methods[i]
+			if m.Excluded {
+				hand, ok := written[m.Name]
+				if !ok {
+					// ServeHTTP, ServeMetrics and Implemented: their RPC servers do not take the
+					// (args, returns) pair at all.
+					m.Custom = true
+					continue
+				}
+				m.Args, m.Returns, m.NotImplemented = hand.Args, hand.Returns, hand.NotImplemented
+			} else {
+				m.Args, m.Returns = "Z_"+m.Name+"Args", "Z_"+m.Name+"Returns"
+				// interface_generator/main.go's template.
+				m.NotImplemented = fmt.Sprintf("%s %s called but not implemented.", side.kind, m.Name)
+			}
+			m.Custom = custom(m.Args) || custom(m.Returns)
+		}
 	}
 	for _, r := range registered {
 		rt := reflect.TypeOf(r.value)
