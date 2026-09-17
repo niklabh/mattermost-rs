@@ -99,6 +99,13 @@ boundary exists to prevent.
   with MPL-2.0. That removes the question at no cost to users, because MPL is file-level.
   `mm-plugin` is Apache-2.0 like `mm-model`, and the environment in `mm-app` stays AGPL. Accepted
   by the maintainer on 2026-09-17 (see §7).
+- **Revised after Phase 0: `goplugin` owns its yamux.** It implements hashicorp's semantics
+  directly, rather than depending on the `yamux` crate. That covers: a frame up to the whole
+  window; window updates on read when delta ≥ half; `Close` as a half-close; a `synCh`-style
+  semaphore of 256 unacknowledged outbound opens; eager SYN; keepalive answers; and handles that
+  are safe to split across tasks. The crate needed three workarounds and still showed one
+  unexplained reset (Phase 0, item 1). The `yamux` crate stays as a **dev-dependency**, a
+  second interop peer next to the Go one.
 - **Boundary enforcement.** A test runs `cargo tree -p <generic crate>` and fails on any `mm-`
   dependency. The generic crates get their own README, CHANGELOG and docs.rs-clean docs from the
   start, not at publish time.
@@ -112,6 +119,11 @@ no decode-into-existing merge, and it would force JSON renames and gob names ont
   the primitive and "decode fresh" as `Default` plus merge.
 - `#[derive(Gob)]` with `#[gob(name = "Id")]`, plus a `TypeRegistry` for interface values that
   supports `RegisterName` aliases.
+- **Revised after Phase 0: the decoder pulls, it is not fed one message per value.** A value
+  continues into the next message whenever an interface introduces a type. So the decoder reads
+  from a source it can refill mid-value, and it honours the boundary rule in
+  `decodeTypeSequence`: no count skip at a message end. The spike's restart-on-`NeedMore` is
+  quadratic, so do not copy it.
 - **The encoder and decoder are stateful per stream.** Gob sends each type definition once per
   connection, so net/rpc must own one encoder and one decoder for each direction.
 - Covered: unsigned and signed varints, byte-reversed floats, complex numbers, strings, bytes,
@@ -164,22 +176,67 @@ would reach only its own host's hub, and `OnConfigurationChange` would fire on o
 Each phase has an exit test. Mutation testing (CLAUDE.md) applies from Phase 1 on. The route-sized
 units in Phases 4-6 keep rule 1: each ports one handler plus what it needs.
 
-### Phase 0 · Spikes that can kill the design (1 session)
+### Phase 0 · Spikes that can kill the design — DONE 2026-09-17
 
-Every spike below prints its result into the session report. Any "no" reshapes D3 before real
-code is written.
+Reproduce with `spikes/plugin-phase0/run.sh`: Rust spikes in `spikes/plugin-phase0/` (outside
+the workspace), Go peers in `reference/dump/spike/`. **All three pass. Nothing killed the design,
+but two decisions change** (marked *Revised* in D3 and D4), and every finding below is now a
+requirement on Phase 1 or 2.
 
-1. **yamux interop.** Run the Rust `yamux` crate (0.14, libp2p) against `hashicorp/yamux` v0.1.2
-   in both directions, with 300 concurrent streams (a busy ServeHTTP opens two per request), 64 MB
-   transfers, and 35 s idle to cross hashicorp's keepalive. If backlog limits or window semantics
-   diverge, the fallback is our own yamux module in `goplugin`. The spec is short, so that is
-   roughly 1,200 lines.
-2. **Gob decode of real traffic.** Build a Go program that gob-encodes a `Z_ServeHTTPArgs` and a
-   `Z_MessageWillBePostedArgs`, then hand-decode them in a throwaway Rust test. The goal is to
-   size `gobwire` honestly.
-3. **Launch a real plugin.** A 40-line Go plugin in `reference/dump/plugins/hello/` goes through a
-   throwaway Rust launcher: handshake, `Dispenser.Dispense("hooks")`, `Plugin.Implemented`,
-   `Control.Quit`.
+1. **yamux interop: passes, but only with workarounds, so we write our own (D3 revised).** The
+   Rust `yamux` crate (0.14) and hashicorp/yamux v0.1.2 passed in both directions: 300 concurrent
+   streams of 64 KiB (~35 ms), a 64 MiB stream (~200 ms), and a 35 s idle across hashicorp's
+   keepalive. That required three workarounds, and one failure remains unexplained:
+   - **Frame size.** libp2p auto-tunes a receive window above 1 MiB, but rejects any frame over
+     1 MiB (`frame/io.rs:28`). hashicorp sends a whole window in one frame (`stream.go:206`).
+     The connection died with "frame body is too large (1572864)". *Workaround:* cap the
+     connection window at `max_num_streams × 256 KiB`, so no stream window can grow.
+   - **Lost wakeup.** `Stream::poll_read` sends window updates through the same
+     `futures::mpsc::Sender` that `poll_write` uses, and that sender parks one waker. A stream
+     split across two tasks stalls its writer forever, with send credit left. It reproduces
+     Rust↔Rust, so it is a crate bug, not interop. *Workaround:* drive each stream from a single
+     task. (net/rpc needs concurrent reads and writes on one stream, so this constrains every
+     layer above.)
+   - **Lazy SYN.** libp2p sends a stream's SYN with its first frame. go-plugin's server accepts
+     control, stdout and stderr before serving anything, and **assigns those roles by SYN arrival
+     order** (`rpc_server.go:78-96`). A host that never writes to the stdio streams deadlocks,
+     and a lazy control stream gets stdout's role. *Workaround:* send the SYN eagerly, with an
+     empty write, in that order.
+   - **Unexplained:** eager SYN on *every* open, with 300 concurrent opens, overflowed hashicorp's
+     256-stream accept backlog ("backlog exceeded", `session.go:710`) in 3 of 5 runs. Lazy SYN
+     passed 5 of 5. libp2p's own `MAX_ACK_BACKLOG` of 256 should have prevented it, and the
+     mechanism was not found.
+2. **Gob: passes; the decoder must pull across message boundaries (D4 revised).** A dynamic
+   decoder of about 400 lines reproduced all 9 payloads exactly: `Z_ServeHTTPArgs`, a fully
+   populated `Z_MessageWillBePostedArgs` with nested `Props`, `AppError`/`ErrorString`/nil error
+   returns, `time.Time`, extreme ints, floats and complex, and a singleton string. The payloads
+   came from Go and were checked against a reflection walker applying gob's own omission rules.
+   Findings:
+   - **One value spans several messages whenever an interface introduces a new type.**
+     `encodeInterface` → `sendTypeDescriptor` → `writeMessage` flushes the partial outer value as
+     a message, and the decoder calls `recvMessage` mid-value (`decoder.go:146-186`). Across the 9
+     values the stream carried 12 such continuations. At a message boundary, the "skip the delimited count"
+     step does **not** happen.
+   - User type ids start at **64**, not the 65 `doc.go` shows (`type.go:167`). They are assigned
+     per process, so ids in a stream are neither contiguous nor stable across Go builds.
+   - Interface names follow `gob.Register`'s quirk: `*model.AppError` and
+     `*plugin.ErrorString` carry no import path (`type.go`, `Register`).
+   - A **struct-kind field is always sent**, even when zero. Only nil pointers, zero scalars and
+     empty strings/slices/maps are omitted.
+   - `url.URL` crosses as a `BinaryMarshaler`, and `time.Time` as a `GobEncoder`.
+3. **Launching a real plugin: passes.** A Go plugin built on `plugin.ClientMain`
+   (`reference/dump/spike/hello`) was launched from Rust. The protocol line arrived in ~70 ms.
+   The launcher then ran `Dispenser.Dispense("hooks")`, the MuxBroker dial with the LE u32 id
+   and ack, `Plugin.Implemented`, `Plugin.UserWillLogIn`, `Plugin.OnDeactivate`, `Control.Ping`
+   and `Control.Quit`, and the process exited with status 0.
+   - **Go accepts a type the sender defines with only some of the fields.** `UserWillLogIn` was
+     called with a Rust-defined `User` carrying only `Id` and `Username`, and the plugin answered
+     `hello rustacean (uid1)`. The encoder therefore never needs a model type's full field list
+     just to call Go.
+   - An unimplemented hook fails in the net/rpc **header** (`Response.Error`, the text
+     "Hook UserHasBeenCreated called but not implemented."), not in the reply body.
+   - An error return arrives as the registered interface value `*plugin.ErrorString`, with its
+     zero `Code` omitted.
 
 ### Phase 1 · `gobwire` (+ derive)
 
@@ -290,7 +347,7 @@ world generated from the IDL, `PluginRuntime::Wasm`, and host-mediated DB access
 
 | Risk | Mitigation |
 |---|---|
-| Rust `yamux` and hashicorp's differ under load | Phase 0 spike; own implementation as fallback |
+| Our yamux diverges from hashicorp's under load | Phase 0 found four divergences in the `yamux` crate; the Phase 2 interop matrix runs our implementation against both hashicorp and the crate, at 300 streams, 64 MiB and 35 s idle |
 | `mm-model` structs lack gob-only fields (`json:"-"`) | The D5 generator fails on the gap; add the fields where the types live, with their JSON skip |
 | Gob merge-decode semantics mis-ported | Merge corpus in Phase 1; `MessageWillBePosted` gets its own conformance case |
 | Go version drift in gob's `time.Time` or `x509` encodings (see `client_rpc.go:419`) | The oracle is built with the pinned Go; the IDL records the Go version |
