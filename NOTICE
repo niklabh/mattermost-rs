@@ -46,6 +46,10 @@ types stay reusable under the more permissive terms:
                                              protocol and hashicorp/yamux; no Mattermost
                                              code. full text: crates/goplugin/LICENSE
 
+    crates/mm-plugin/         Apache-2.0     generated from server/public/plugin/ and
+                                             server/public/model/
+                                             full text: crates/mm-plugin/LICENSE
+
     everything else           AGPL-3.0-only  the repository default
 
 Apache-2.0 is one-way compatible with AGPL-3.0, so the AGPL crates may depend on

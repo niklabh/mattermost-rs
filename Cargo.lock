@@ -1242,6 +1242,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mm-plugin"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "gobwire",
+ "serde_json",
+]
+
+[[package]]
 name = "mm-store"
 version = "0.1.0"
 dependencies = [

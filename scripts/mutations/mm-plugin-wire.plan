@@ -1,0 +1,28 @@
+# Mutation plan for mm-plugin's generated wire types (plugin plan Phase 3).
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-wire.plan
+#
+# Mutations are made to the generated Rust, as a generator bug would leave it, and judged by the
+# Go round trip alone: the drift check (generated_rust_is_current) would catch every one of them
+# and prove nothing, so each line filters to `round_trip`: the wire structs, and the registered
+# types inside their interfaces. Wire-equivalent changes are not planned: Option<bool> for *bool
+# (gob omits a pointer to false exactly as it omits nil), and u64 for uint32 (Go-produced data
+# cannot tell). CONTROL- lines must SURVIVE.
+#
+# wire-int-narrowed survived its first run: ErrorString only crosses inside an interface, which
+# the wire structs decode dynamically, so no test touched the generated type. The fix is
+# registered_types_round_trip_through_their_generated_types.
+
+wire-field-go-name	crates/mm-plugin/src/wire/plugin.rs	#[gob(name = "IPAddress")]\n    pub ip_address	#[gob(name = "IpAddress")]\n    pub ip_address	pkg	round_trip
+wire-int-narrowed	crates/mm-plugin/src/wire/plugin.rs	pub struct ErrorString {\n    #[gob(name = "Code")]\n    pub code: i64,	pub struct ErrorString {\n    #[gob(name = "Code")]\n    pub code: i32,	pkg	round_trip
+wire-int-unsigned	crates/mm-plugin/src/wire/model.rs	pub status_code: i64,\n    #[gob(name = "Where")]	pub status_code: u64,\n    #[gob(name = "Where")]	pkg	round_trip
+wire-uint32-narrowed	crates/mm-plugin/src/wire/plugin.rs	pub api_mux_id: u32,	pub api_mux_id: u16,	pkg	round_trip
+wire-pointer-not-optional	crates/mm-plugin/src/wire/plugin.rs	pub struct Z_GetUserReturns {\n    #[gob(name = "A")]\n    pub a: ::std::option::Option<::std::boxed::Box<super::model::User>>,	pub struct Z_GetUserReturns {\n    #[gob(name = "A")]\n    pub a: ::std::boxed::Box<super::model::User>,	pkg	round_trip
+wire-bytes-as-string	crates/mm-plugin/src/wire/plugin.rs	pub b: ::std::vec::Vec<u8>,\n    #[gob(name = "C")]\n    pub c: super::model::PluginKVSetOptions,	pub b: ::std::string::String,\n    #[gob(name = "C")]\n    pub c: super::model::PluginKVSetOptions,	pkg	round_trip
+wire-field-dropped	crates/mm-plugin/src/wire/model.rs	#[gob(name = "SkipTranslation")]\n    pub skip_translation: bool,	#[gob(skip)]\n    pub skip_translation: bool,	pkg	round_trip
+wire-recursive-field-dropped	crates/mm-plugin/src/wire/model.rs	#[gob(name = "SubCommands")]\n    pub sub_commands	#[gob(skip)]\n    pub sub_commands	pkg	round_trip
+wire-interface-typed	crates/mm-plugin/src/wire/plugin.rs	pub struct Z_OnActivateReturns {\n    #[gob(name = "A")]\n    pub a: ::std::option::Option<::gobwire::Interface>,	pub struct Z_OnActivateReturns {\n    #[gob(name = "A")]\n    pub a: ::std::option::Option<super::model::AppError>,	pkg	round_trip
+wire-named-map-elem	crates/mm-plugin/src/wire/model.rs	pub type StringMap = ::std::collections::HashMap<::std::string::String, ::std::string::String>;	pub type StringMap = ::std::collections::HashMap<::std::string::String, ::std::vec::Vec<u8>>;	pkg	round_trip
+wire-registered-field-dropped	crates/mm-plugin/src/wire/pq.rs	#[gob(name = "Severity")]\n    pub severity	#[gob(skip)]\n    pub severity	pkg	round_trip
+CONTROL-swap-field-order	crates/mm-plugin/src/wire/plugin.rs	    #[gob(name = "Code")]\n    pub code: i64,\n    #[gob(name = "Err")]\n    pub err: ::std::string::String,	    #[gob(name = "Err")]\n    pub err: ::std::string::String,\n    #[gob(name = "Code")]\n    pub code: i64,	pkg	round_trip
+CONTROL-rename-rust-field	crates/mm-plugin/src/wire/plugin.rs	pub session_id: ::std::string::String,	pub session_ident: ::std::string::String,	pkg	round_trip

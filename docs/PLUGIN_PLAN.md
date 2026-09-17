@@ -144,9 +144,13 @@ field**: Go name, Go type, JSON tag, `json:"-"`-ness and exported-ness. Then
 `scripts/plugingen.py` turns that IDL into committed Rust under `mm-plugin/src/generated/`:
 
 - `Z_*` wire structs, `HookId`, and `const HOOK_NAMES`
-- `impl GobEncode/GobDecode for mm_model::X`, mapping Go field names to Rust fields. **The
-  generator fails** when a Go field has no Rust counterpart, so the 41 `json:"-"` fields surface
-  as a list at generation time instead of as silent drops at runtime.
+- **Revised in Phase 3: standalone gob types, not impls on `mm_model`.** Every Go type the RPC
+  reaches is generated as its own `#[derive(Gob)]` struct in `mm_plugin::wire`, holding every
+  field gob sends, named as Go names it and typed by its Go kind. Mapping onto `mm-model` would
+  have tied the wire to a JSON-shaped crate that omits `json:"-"` fields, models pointers for
+  JSON rather than for gob, and does not cover the `net/http`, `x509` and SAML types that
+  `PluginHTTP` and `OnSAMLLogin` send. The conversion to `mm-model` now lives in the host, where
+  each lossy step is explicit code.
 - The `Hooks` trait, the `PluginApi` trait (258 methods, each defaulting to a typed
   "not implemented" `AppError`) and the `Driver` trait
 - Later, the WIT world for D2's Wasm runtime, from the same IDL
@@ -291,7 +295,22 @@ it. Mutation testing found a broker race: a stream that arrived before its accep
 It is fixed and covered by `tests/broker.rs`. Deferred: gRPC (Phase 8), AutoMTLS, and a
 test-mode `ServeTestConfig`.
 
-**Phase 3 (`mm-plugin`) is next.**
+**`mm-plugin` wire types: DONE 2026-09-17 (first part of Phase 3).** `reference/dump/plugingen`
+writes the IDL (`fixtures/plugin/idl.json`): 52 hooks and 258 API methods, the 618 wire structs
+(576 generated, 42 hand-written in `client_rpc.go`), the 12 types `init()` registers, and every
+type reachable from them. It checks the `Z_` convention against `client_rpc_generated.go`, and
+its lists against `client_rpc.go` and `excludedPluginHooks`, and fails on any difference.
+`scripts/plugingen.py` turns the IDL into `crates/mm-plugin/src/wire/`. The oracle is two gob
+streams per wire struct. The full one sets all 2,951 reachable fields; only the three
+`io.ReadCloser` bodies stay nil, because they are never sent. The sparse one leaves pointers
+nil. Every stream decodes into its generated type, re-encodes, and Go decodes it back the same.
+Every registered interface value also downcasts into its generated type. Drift checks
+regenerate the IDL, the streams and the Rust. Mutations: 11 of 11 caught, and 2 controls
+survived. The first run found a gap: `ErrorString` only crosses inside an interface, so no test
+exercised its generated type.
+
+**Next in Phase 3:** the hook and API traits and the host-side hooks client, generated from the
+same IDL. After that: the hand-written excluded methods, the SDK, and the conformance plugin.
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

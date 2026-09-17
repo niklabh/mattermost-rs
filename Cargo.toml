@@ -13,6 +13,8 @@ members = [
     "crates/gobwire-derive",
     "crates/go-netrpc",
     "crates/goplugin",
+    # Mattermost plugin RPC surface (Apache-2.0, generated from server/public/plugin).
+    "crates/mm-plugin",
 ]
 
 [workspace.package]
