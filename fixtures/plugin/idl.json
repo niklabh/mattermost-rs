@@ -7192,6 +7192,240 @@
    "type": "map[string]interface{}"
   }
  ],
+ "hook_ids": [
+  {
+   "name": "OnActivate",
+   "id": 0
+  },
+  {
+   "name": "OnDeactivate",
+   "id": 1
+  },
+  {
+   "name": "ServeHTTP",
+   "id": 2
+  },
+  {
+   "name": "OnConfigurationChange",
+   "id": 3
+  },
+  {
+   "name": "ExecuteCommand",
+   "id": 4
+  },
+  {
+   "name": "MessageWillBePosted",
+   "id": 5
+  },
+  {
+   "name": "MessageWillBeUpdated",
+   "id": 6
+  },
+  {
+   "name": "MessageHasBeenPosted",
+   "id": 7
+  },
+  {
+   "name": "MessageHasBeenUpdated",
+   "id": 8
+  },
+  {
+   "name": "UserHasJoinedChannel",
+   "id": 9
+  },
+  {
+   "name": "UserHasLeftChannel",
+   "id": 10
+  },
+  {
+   "name": "UserHasJoinedTeam",
+   "id": 11
+  },
+  {
+   "name": "UserHasLeftTeam",
+   "id": 12
+  },
+  {
+   "name": "ChannelHasBeenCreated",
+   "id": 13
+  },
+  {
+   "name": "FileWillBeUploaded",
+   "id": 14
+  },
+  {
+   "name": "UserWillLogIn",
+   "id": 15
+  },
+  {
+   "name": "UserHasLoggedIn",
+   "id": 16
+  },
+  {
+   "name": "UserHasBeenCreated",
+   "id": 17
+  },
+  {
+   "name": "ReactionHasBeenAdded",
+   "id": 18
+  },
+  {
+   "name": "ReactionHasBeenRemoved",
+   "id": 19
+  },
+  {
+   "name": "OnPluginClusterEvent",
+   "id": 20
+  },
+  {
+   "name": "OnWebSocketConnect",
+   "id": 21
+  },
+  {
+   "name": "OnWebSocketDisconnect",
+   "id": 22
+  },
+  {
+   "name": "WebSocketMessageHasBeenPosted",
+   "id": 23
+  },
+  {
+   "name": "RunDataRetention",
+   "id": 24
+  },
+  {
+   "name": "OnInstall",
+   "id": 25
+  },
+  {
+   "name": "OnSendDailyTelemetry",
+   "id": 26
+  },
+  {
+   "name": "OnCloudLimitsUpdated",
+   "id": 27
+  },
+  {
+   "name": "deprecatedUserHasPermissionToCollection",
+   "id": 28
+  },
+  {
+   "name": "deprecatedGetAllUserIdsForCollection",
+   "id": 29
+  },
+  {
+   "name": "deprecatedGetAllCollectionIDsForUser",
+   "id": 30
+  },
+  {
+   "name": "deprecatedGetTopicRedirect",
+   "id": 31
+  },
+  {
+   "name": "deprecatedGetCollectionMetadataByIds",
+   "id": 32
+  },
+  {
+   "name": "deprecatedGetTopicMetadataByIds",
+   "id": 33
+  },
+  {
+   "name": "ConfigurationWillBeSaved",
+   "id": 34
+  },
+  {
+   "name": "NotificationWillBePushed",
+   "id": 35
+  },
+  {
+   "name": "UserHasBeenDeactivated",
+   "id": 36
+  },
+  {
+   "name": "MessageHasBeenDeleted",
+   "id": 37
+  },
+  {
+   "name": "MessagesWillBeConsumed",
+   "id": 38
+  },
+  {
+   "name": "ServeMetrics",
+   "id": 39
+  },
+  {
+   "name": "OnSharedChannelsSyncMsg",
+   "id": 40
+  },
+  {
+   "name": "OnSharedChannelsPing",
+   "id": 41
+  },
+  {
+   "name": "PreferencesHaveChanged",
+   "id": 42
+  },
+  {
+   "name": "OnSharedChannelsAttachmentSyncMsg",
+   "id": 43
+  },
+  {
+   "name": "OnSharedChannelsProfileImageSyncMsg",
+   "id": 44
+  },
+  {
+   "name": "GenerateSupportData",
+   "id": 45
+  },
+  {
+   "name": "OnSAMLLogin",
+   "id": 46
+  },
+  {
+   "name": "EmailNotificationWillBeSent",
+   "id": 47
+  },
+  {
+   "name": "FileWillBeDownloaded",
+   "id": 48
+  },
+  {
+   "name": "ChannelMemberWillBeAdded",
+   "id": 49
+  },
+  {
+   "name": "TeamMemberWillBeAdded",
+   "id": 50
+  },
+  {
+   "name": "ChannelWillBeArchived",
+   "id": 51
+  },
+  {
+   "name": "ChannelWillBeUpdated",
+   "id": 52
+  },
+  {
+   "name": "ChannelWillBeRestored",
+   "id": 53
+  },
+  {
+   "name": "ScheduledPostWillBeCreated",
+   "id": 54
+  },
+  {
+   "name": "DraftWillBeUpserted",
+   "id": 55
+  },
+  {
+   "name": "MessagesWillBeConsumedWithContext",
+   "id": 56
+  },
+  {
+   "name": "TotalHooks",
+   "id": 57
+  }
+ ],
  "types": {
   "*[]string": {
    "kind": "pointer",

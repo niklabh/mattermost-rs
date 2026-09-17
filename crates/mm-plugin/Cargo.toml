@@ -11,7 +11,12 @@ description = "Mattermost's plugin RPC surface: gob wire types generated from th
 
 [dependencies]
 gobwire = { path = "../gobwire" }
+go-netrpc = { path = "../go-netrpc" }
+goplugin = { path = "../goplugin" }
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing.workspace = true
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 serde_json.workspace = true
 base64.workspace = true

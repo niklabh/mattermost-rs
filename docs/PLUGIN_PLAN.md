@@ -309,8 +309,27 @@ regenerate the IDL, the streams and the Rust. Mutations: 11 of 11 caught, and 2 
 survived. The first run found a gap: `ErrorString` only crosses inside an interface, so no test
 exercised its generated type.
 
-**Next in Phase 3:** the hook and API traits and the host-side hooks client, generated from the
-same IDL. After that: the hand-written excluded methods, the SDK, and the conformance plugin.
+**`mm-plugin` RPC layer: DONE 2026-09-17 (second part of Phase 3).** Generated from the same IDL:
+- the hook ids of hooks.go;
+- the `Hooks` and `PluginApi` traits, whose method defaults answer with Go's not-implemented
+  error;
+- the servers that expose them;
+- `HooksClient`, with the implemented-hook gate and every `WithRPCErr` variant;
+- `ApiClient`.
+
+`Implemented` and the host half of `OnActivate` are hand-written.
+
+The oracle is `plugingen plugin`, a real Go plugin served by `plugin.ClientMain`. Its hooks are
+plugintest's mock, answering with the fixtures, and its `OnActivate` calls every generated API
+method. A Rust host launches it, calls all 41 generated hooks, and serves all 247 generated API
+methods. Both directions match the oracle: arguments, returns, and Go's `encodableError` rewrite
+of four hooks' errors. The plugin-side halves (hooks server, API client) are so far checked only
+Rust-to-Rust. Mutations: 11 run, 11 caught, 2 controls survived.
+
+**Next in Phase 3:** the plugin half of `OnActivate` and `client_main`, which make the Rust SDK.
+They are checked under a Go host via `plugin.NewEnvironment`. After that: the other hand-written
+excluded methods, the database driver's RPC, and the Rust conformance plugin under the real Go
+server.
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

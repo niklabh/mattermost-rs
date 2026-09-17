@@ -5,3 +5,5 @@
 
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod wire;
+
+pub mod rpc;

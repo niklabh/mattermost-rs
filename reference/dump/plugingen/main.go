@@ -4,6 +4,7 @@
 //	plugingen idl <out.json>   every hook and API method, every wire struct, every type they reach
 //	plugingen gob <dir>        two gob streams per wire struct (full, sparse), plus expected.json
 //	plugingen echo <dir>       decode every <Z_name>[.sparse].gob in dir as that struct; print renders
+//	plugingen plugin <dir>     serve the RPC conformance plugin (conformance.go) from those fixtures
 //
 // Types come from reflection over plugin.API and plugin.Hooks, so they are exactly what the
 // compiler sees, including instantiated generics and aliases resolved. Parameter names and doc
@@ -170,7 +171,80 @@ type IDL struct {
 	API       []Method        `json:"api"`
 	Wire      []string        `json:"wire"`
 	Register  []Registered    `json:"registered"`
+	HookIDs   []HookID        `json:"hook_ids"`
 	Types     map[string]Type `json:"types"`
+}
+
+// HookID is one `<Name>ID` constant of hooks.go: the index into a plugin's implemented-hooks
+// table, part of the wire protocol. The last is `TotalHooks`, the table's size.
+type HookID struct {
+	Name string `json:"name"`
+	ID   int    `json:"id"`
+}
+
+// hookIDs parses the constant block in hooks.go that holds OnActivateID.
+func hookIDs(hooks []Method) ([]HookID, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filepath.Join(pluginDir, "hooks.go"), nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []HookID
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		var block []HookID
+		for i, spec := range gd.Specs {
+			vs := spec.(*ast.ValueSpec)
+			if len(vs.Names) != 1 || len(vs.Values) != 1 {
+				return nil, fmt.Errorf("hooks.go:%d: unexpected constant shape", fset.Position(vs.Pos()).Line)
+			}
+			name, ok := strings.CutSuffix(vs.Names[0].Name, "ID")
+			if !ok {
+				block = nil
+				break
+			}
+			id := i // iota
+			switch v := vs.Values[0].(type) {
+			case *ast.BasicLit:
+				if _, err := fmt.Sscan(v.Value, &id); err != nil {
+					return nil, err
+				}
+			case *ast.Ident:
+				if v.Name != "iota" {
+					return nil, fmt.Errorf("hooks.go: %sID = %s", name, v.Name)
+				}
+			default:
+				return nil, fmt.Errorf("hooks.go: %sID has an unexpected value", name)
+			}
+			block = append(block, HookID{Name: name, ID: id})
+		}
+		if len(block) > 0 && block[0].Name == "OnActivate" {
+			out = block
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("hooks.go: the hook id constants were not found")
+	}
+	ids := map[string]bool{}
+	for i, h := range out {
+		if h.ID != i {
+			return nil, fmt.Errorf("hooks.go: %sID is %d, expected %d", h.Name, h.ID, i)
+		}
+		ids[h.Name] = true
+	}
+	if last := out[len(out)-1]; last.Name != "TotalHooks" {
+		return nil, fmt.Errorf("hooks.go: the last hook id is %s, not TotalHooks", last.Name)
+	}
+	for _, m := range hooks {
+		// `Implemented` is the one hook without an id: it is how the ids get their values.
+		if !ids[m.Name] && m.Name != "Implemented" {
+			return nil, fmt.Errorf("hook %s has no id in hooks.go", m.Name)
+		}
+	}
+	return out, nil
 }
 
 var (
@@ -570,7 +644,11 @@ func buildIDL() (*IDL, error) {
 		return nil, err
 	}
 
-	idl := &IDL{GoVersion: runtime.Version(), Hooks: hooks, API: api, Types: w.types}
+	ids, err := hookIDs(hooks)
+	if err != nil {
+		return nil, err
+	}
+	idl := &IDL{GoVersion: runtime.Version(), Hooks: hooks, API: api, HookIDs: ids, Types: w.types}
 	for _, m := range all {
 		if m.Excluded {
 			continue
@@ -962,7 +1040,7 @@ func echo(dir string) error {
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | plugingen gob <dir> | plugingen echo <dir>")
+		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | gob <dir> | echo <dir> | plugin <fixtures>")
 		os.Exit(2)
 	}
 	idl, err := buildIDL()
@@ -974,6 +1052,8 @@ func main() {
 			err = gobOracle(os.Args[2])
 		case "echo":
 			err = echo(os.Args[2])
+		case "plugin":
+			err = servePlugin(os.Args[2], idl)
 		default:
 			err = fmt.Errorf("unknown mode %q", os.Args[1])
 		}

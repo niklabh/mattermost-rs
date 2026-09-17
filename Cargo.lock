@@ -1246,8 +1246,12 @@ name = "mm-plugin"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "go-netrpc",
  "gobwire",
+ "goplugin",
  "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
