@@ -331,11 +331,22 @@ impl App {
     }
 
     /// `session, _ = GetSessionContext(rctx, token.Token)` followed by `session != nil`: whether
-    /// the secret currently authenticates a session. A read failure is Go's discarded error — no
-    /// session, so no cache clear.
+    /// the secret currently authenticates a session, i.e. whether there is a cache entry to clear.
+    ///
+    /// Go discards a lookup *failure* as "no session" and skips the clear. Here a failure other than
+    /// not-found answers **true** instead: the clear only purges the Go server's cache, which is
+    /// invisible on the wire, and skipping it on a transient database error would leave Go honouring
+    /// a revoked secret until its cache entry expired.
     async fn token_has_session(&self, token: &UserAccessToken) -> bool {
         use mm_store::SessionStore as _;
-        self.store().session().get(&token.token).await.is_ok()
+        match self.store().session().get(&token.token).await {
+            Ok(_) => true,
+            Err(err) if err.is_not_found() => false,
+            Err(err) => {
+                tracing::warn!(error = %err, "session lookup for a token failed; clearing the peer cache anyway");
+                true
+            }
+        }
     }
 
     /// Port of `App.EnableUserAccessToken` (session.go:813).

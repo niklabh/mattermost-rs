@@ -41,6 +41,8 @@ fn edit_limit_go_base() -> Option<String> {
     Some(format!("http://localhost:{}", port + 35))
 }
 
+const ORIGINAL: &str = "mmrs edit limit";
+
 const TIME_LIMIT: &str = "api.post.update_post.permissions_time_limit.app_error";
 
 async fn send(
@@ -96,8 +98,9 @@ async fn every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not() {
 
     // One post per server, created through the stack's Go: a write cannot be replayed on the same
     // row, and a refused edit here must not be the reason the other server's edit is a no-op.
-    let go_post = post_message(&http, &token, &channel, "mmrs edit limit go", None).await;
-    let rs_post = post_message(&http, &token, &channel, "mmrs edit limit rs", None).await;
+    // The same message on both, so the unchanged-update case can send it back.
+    let go_post = post_message(&http, &token, &channel, ORIGINAL, None).await;
+    let rs_post = post_message(&http, &token, &channel, ORIGINAL, None).await;
 
     struct Case {
         what: &'static str,
@@ -131,6 +134,15 @@ async fn every_edit_of_an_expired_post_is_refused_and_every_no_op_is_not() {
                 )
             },
             refused: true,
+        },
+        Case {
+            what: "an update that changes nothing",
+            method: reqwest::Method::PUT,
+            suffix: "",
+            body: |id, channel| {
+                Some(serde_json::json!({ "id": id, "channel_id": channel, "message": ORIGINAL }))
+            },
+            refused: false,
         },
         Case {
             what: "a pin of an unpinned post",

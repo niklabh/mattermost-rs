@@ -464,6 +464,12 @@ async fn resolve_required_session(
     let session = state.app.get_session(&token).await.map_err(|err| {
         SessionRejection::for_get_session_error(err, || state.app.config().subpath())
     })?;
+    // handlers.go:281 — a valid non-OAuth session in `?access_token=` is refused for **every**
+    // handler, session-required ones included; `c.Err` is set, so `SessionRequired` never sees a
+    // session. Only OAuth access tokens may travel in a URL.
+    if !session.is_oauth && location == TokenLocation::QueryString {
+        return Err(token_provided_rejection());
+    }
     // `checkCSRFToken` (handlers.go:295) — after the session resolves, before `SessionRequired`
     // and `MfaRequired`.
     enforce_csrf(parts, state, location, &session)?;

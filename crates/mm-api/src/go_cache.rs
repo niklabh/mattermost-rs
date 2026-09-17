@@ -55,6 +55,29 @@ const PROBE_LIFETIME_MS: i64 = 60 * 1000;
 /// A request that hangs must not hold a logout open indefinitely.
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// `true` for an `http://` upstream whose host is not loopback — where the minted administrator
+/// token, like every credential the proxy forwards, crosses a network in the clear.
+///
+/// A warning at startup, not a refusal: the same connection carries every client's own token to Go,
+/// so TLS is a property of the deployment's proxy hop as a whole, and this is the one place that
+/// knows the hop's URL at startup.
+pub fn is_plaintext_off_host(upstream: &str) -> bool {
+    let Some(rest) = upstream.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = match authority.strip_prefix('[') {
+        Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
+        None => authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host),
+    };
+    !(host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback()))
+}
+
 #[derive(Debug, thiserror::Error)]
 enum MintError {
     #[error("looking up the peer-cache user {username:?}: {source}")]
@@ -290,5 +313,36 @@ impl PeerCache for GoCacheInvalidator {
 
     fn invalidate_user<'a>(&'a self, user_id: &'a str) -> PeerFuture<'a> {
         Box::pin(self.invalidate_user_impl(user_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_plaintext_off_host;
+
+    #[test]
+    fn loopback_and_https_are_not_flagged() {
+        for upstream in [
+            "http://localhost:8065",
+            "http://LOCALHOST",
+            "http://127.0.0.1:8065/",
+            "http://127.8.0.1",
+            "http://[::1]:8065",
+            "https://mattermost.example.com",
+        ] {
+            assert!(!is_plaintext_off_host(upstream), "{upstream}");
+        }
+    }
+
+    #[test]
+    fn plain_http_elsewhere_is_flagged() {
+        for upstream in [
+            "http://mattermost:8065",
+            "http://10.0.0.5:8065",
+            "http://[2001:db8::1]:8065",
+            "http://localhost.example.com",
+        ] {
+            assert!(is_plaintext_off_host(upstream), "{upstream}");
+        }
     }
 }

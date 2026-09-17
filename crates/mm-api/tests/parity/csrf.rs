@@ -481,10 +481,10 @@ async fn set_go_strict(http: &reqwest::Client, admin: &str, on: bool) {
     assert_eq!(response.status(), 200, "the strict-CSRF patch is accepted");
 }
 
-/// A **valid non-OAuth session token in `?access_token=`** is refused before a handler that takes
-/// no session runs — `api.context.token_provided.app_error`, 401 — and an *unknown* one is not
-/// refused at all, because a token that resolves to nothing is no session (`RequireSession` is
-/// false on these handlers).
+/// A **valid non-OAuth session token in `?access_token=`** is refused before any handler runs,
+/// sessionless or session-required — `api.context.token_provided.app_error`, 401 — and an
+/// *unknown* one is not refused at all on a sessionless handler, because a token that resolves to
+/// nothing is no session (`RequireSession` is false there).
 ///
 /// Formerly D-810: `CsrfGuard` sits on every sessionless handler for the CSRF half of `ServeHTTP`,
 /// and this is the other half of the same block (handlers.go:281).
@@ -532,6 +532,25 @@ async fn a_session_token_in_the_query_string_is_refused_before_a_sessionless_han
             "{path}: a token that resolves to nothing is not refused"
         );
     }
+
+    // **And before a session-required handler.** The refusal is `ServeHTTP`'s, not the handler's,
+    // so `GET /users/me` — `AuthenticatedSession` here — is the same 401, where a port that only
+    // guarded the sessionless handlers would authenticate a credential carried in the URL.
+    let refused = both(
+        &http,
+        RUST,
+        reqwest::Method::GET,
+        &format!("/api/v4/users/me?access_token={}", session.token),
+        "",
+        &[],
+        "a valid session in the query string, session required",
+    )
+    .await;
+    assert_eq!(refused.status, 401, "/users/me");
+    assert_eq!(
+        refused.body["id"], "api.context.token_provided.app_error",
+        "/users/me"
+    );
 
     delete_plain_user(&http, &admin, &user.id).await;
 }

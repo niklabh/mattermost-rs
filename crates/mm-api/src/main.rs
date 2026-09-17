@@ -106,6 +106,14 @@ async fn main() -> anyhow::Result<()> {
         username = go_cache_user,
         "purging the Go server's caches on session and password changes"
     );
+    if mm_api::go_cache::is_plaintext_off_host(&go_upstream) {
+        tracing::warn!(
+            upstream = go_upstream,
+            "MM_GO_UPSTREAM is plain http to a host other than loopback: the administrator session \
+             used to purge Go's caches, and every forwarded client credential, cross the network \
+             unencrypted"
+        );
+    }
     let invalidator = mm_api::go_cache::GoCacheInvalidator::new(
         app.store().clone(),
         &go_upstream,

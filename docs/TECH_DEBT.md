@@ -6625,23 +6625,10 @@ The same engine is what forwards **deleting a reply**: `App.DeletePost` on a rep
 `parity::post_edit_time_limit` pairs each refused edit with an accepted no-op twin. A config patch
 on the shared servers was rejected as the vehicle: two dozen suites edit posts.
 
-`ServiceSettings.PostEditTimeLimit` is `-1` on a default-configured server, and
-`postEditTimeLimitExpired` (api4/post.go:1052) returns `false` on that value before it looks at
-anything else. So the **400** `api.post.update_post.permissions_time_limit.app_error` that three
-of the four write routes raise has no cross-server oracle on this stack, and no mutation of that
-branch can be caught — every one of them is unreachable rather than uncovered.
-
-Two things are covered without it: the value's *sign* convention, which is not obvious (`-1` is
-"no limit" and `0` means every post is already past its window — the opposite), and the unit
-(seconds, multiplied by 1000 against `CreateAt`). Both are unit-tested in
-`mm_app::post_write::tests`.
-
-What is owed is a parity run with the setting changed on **both** servers, which needs
-`scripts/go-server.sh` to set `MM_SERVICESETTINGS_POSTEDITTIMELIMIT` and a Go restart — the same
-shape as the feature-flag run that [D-213] describes. Until then the branch is transcribed from
-the Go source and not measured, and the one thing a reader should know is that the pin routes check
-it **after** their no-op short circuit, so pinning an already-pinned ancient post is a 200 on both
-servers and only a *change* can hit the 400.
+The branch was transcribed from Go but unreachable on the stack, whose `PostEditTimeLimit` is the
+stock `-1` that `postEditTimeLimitExpired` (api4/post.go:1052) returns `false` on before reading
+anything else. `0` expires every post. The pin routes check the limit after their no-op short
+circuit, so only a *change* reaches the 400.
 
 ---
 
@@ -6752,25 +6739,10 @@ stack can distinguish the refusal from the forward, because nobody here is restr
 added it to `UserStore`), a hard 500 as in Go, and not on an idempotent re-add;
 `parity::team_member_writes::adding_a_member_agrees_and_joins_the_default_channels` reads the row.
 
-`App.JoinUserToTeam` (app/team.go:851) calls `Store().User().UpdateUpdateAt(user.Id)` between the
-membership write and the sidebar categories, and treats its failure as a **hard** error —
-`app.user.update_update.app_error`, 500. This port does not make that write: `UserStore` has no
-`update_update_at`, and `crates/mm-store/src/user_store.rs` belonged to a sibling worktree for
-the session that ported these routes.
-
-It is on the wire. `Users.UpdateAt` is the `update_at` field of every user object and the input to
-the profile etag, so after a join served by **this** server a client's `GET /users/{id}` reports
-the old timestamp and a cached profile is not invalidated. `POST /teams/{id}/members` and
-`POST …/members/batch` both have it; `addUserToTeamFromInvite` will inherit it.
-
-What is owed: one method — `UPDATE Users SET UpdateAt = $2 WHERE Id = $1`, returning the value
-written — appended to `UserStore`, called from `mm_app::App::join_user_to_team` where the comment
-marking its absence sits, and a parity assertion comparing `GET /users/{id}`'s `update_at` across
-the two servers after a join. The error branch comes with it: Go fails the whole join if the
-update fails, which is a branch this port currently does not have.
-
-The same method is one of the three things `DELETE /api/v4/teams/{team_id}/members/{user_id}`
-is blocked on — `postProcessTeamMemberLeave` (app/team.go:1312) calls it too.
+`App.JoinUserToTeam` (app/team.go:845) bumps `Users.UpdateAt` — the user object's `update_at` and
+the profile etag's input — between the membership write and the sidebar categories. The port
+omitted it, so a join served here left `GET /users/{id}` reporting the old timestamp. The write is
+not atomic with the membership insert, in Go or here.
 
 ---
 
@@ -8404,7 +8376,11 @@ signs has the flag on) and is pinned by a mutation instead.
 
 ## D-520 · `team_admin` compares two sequentially-fetched bodies, and the shared admin's row moves between them
 
-**Status** OPEN · **Severity** test reliability · **Raised** 2026-09-13 (closing the parallel-agent session)
+**Status** CLOSED · **Severity** test reliability · **Raised** 2026-09-13 (closing the parallel-agent session)
+**Closed** 2026-09-17 — option 2, lighter: both `members_minus_group_members` fixtures
+(`parity::team_admin`, `parity::channel_admin`) are created by a plain owner of their own, so the
+shared administrator is in neither page. It became urgent when D-242 made every team join bump the
+administrator's `UpdateAt`: four `channel_admin` tests failed on one full run.
 
 Five of `parity::team_admin`'s tests fail on a full run and pass in isolation, every time. It is
 not an order tie and not a route regression — the diagnosis is exact.
@@ -8777,21 +8753,11 @@ database (a fresh compose volume, or a transaction rolled back), not the shared 
 ## D-601 · `updateUser` writes an omitted `props`/`timezone` as SQL NULL, which Go's scanner cannot read
 
 **Status** CLOSED · **Severity** correctness · **Raised** 2026-09-14 (user_local.go)
-**Closed** 2026-09-16 — the premise was wrong: Go does **not** keep the stored maps. Its
-`driver.Valuer`s write a nil map as the JSON text `null`, and `wrapBinaryParamStringMap` turns a
-nil `Props` into `{}` — so an omitted `props` is cleared. `mm_store::user_store::json_column` and
-`props_column` now write exactly that on `save` and `update`, `mfausedtimestamps` included;
-measured by `parity::user_updates::an_omitted_map_is_stored_as_go_stores_it`.
+**Closed** 2026-09-16 — Go writes a nil map as the JSON text `null` and a nil `Props` as `{}`,
+never SQL NULL; `mm_store::user_store::json_column` and `props_column` now do the same;
+`parity::user_updates::an_omitted_map_is_stored_as_go_stores_it`.
 
-Found by the local-socket user suite, which is the first test to have **Go read a row this
-server's `updateUser` wrote** (the forwarded `DELETE ?permanent=true` does a `GetUser` in Go).
-`PUT /api/v4/users/{id}` with a body that omits `props` or `timezone` decodes them as `None`, and
-`mm_store` (`user_store.rs`, `json_or_null`) writes `None` as **SQL NULL** — discarding the `{}` /
-default-timezone the create stored. Go's `User` scanner then fails on that row with
-`failed to unmarshal user props: unexpected end of JSON input` and the read 500s; Go's own
-`updateUser` never writes NULL. The HTTP parity suite misses it
-because each server only reads its own rows. The fix first proposed here — keep the stored maps —
-was a misreading of Go; the closure above records what Go does.
+A SQL NULL written by this server's `updateUser` made Go's user scanner 500 on the row.
 
 ## D-610 · `DELETE /channels/{id}?permanent=true` over the socket is forwarded: `PermanentDeleteChannel` is unported
 
@@ -9199,16 +9165,11 @@ it stays fresh: nothing enforces it, and it has silently rotted for months.
 ## D-810 · A sessionless `APIHandler` does not refuse a non-OAuth token in the query string
 
 **Status** CLOSED · **Severity** divergence · **Raised** 2026-09-16 (CSRF, web/handlers.go:281)
-**Closed** 2026-09-16 — `CsrfGuard` looks the session up for a query-string token too and answers
-`auth::token_provided_rejection`, shared with `OptionalSession`;
+**Closed** 2026-09-16 — `CsrfGuard` and `resolve_required_session` look the session up for a
+query-string token too and answer `auth::token_provided_rejection`, shared with `OptionalSession`;
 `parity::csrf::a_session_token_in_the_query_string_is_refused_before_a_sessionless_handler`.
 
-`ServeHTTP` resolves any token it finds, for every handler, and a valid non-OAuth session presented
-as `?access_token=` is the 401 `api.context.token_provided.app_error` before the handler runs.
-`OptionalSession` reproduces that; the handlers that take no session at all (`login`,
-`login/type`, `login/desktop_token`, the two e-mail sends, `email/verify`, the OAuth DCR register,
-the CWS webhook, the remote-cluster gate) do not. Measured on stack 2: `POST
-/users/login/type?access_token=<valid>` is Go's 401 and this server's 404. **What is owed:** the
-same check in `mm_api::auth::CsrfGuard`, which already sits on every one of those handlers — at
-the cost of a session lookup for any request that carries a query token — and a `parity::csrf`
-case for it.
+`ServeHTTP` refuses a valid non-OAuth session presented as `?access_token=` for every handler
+(web/handlers.go:281). Only `OptionalSession` reproduced it: `POST /users/login/type` answered 404
+here where Go answered 401, and the PR #30 review found `AuthenticatedSession` accepted it too —
+both extractors now refuse it.
