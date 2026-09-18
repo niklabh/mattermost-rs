@@ -253,6 +253,8 @@ func (c *conformance) tourHandWrittenAPI() {
 	withLevel := c.auditRecord("Z_LogAuditRecWithLevelArgs")
 	c.API.LogAuditRecWithLevel(&withLevel, c.auditLevel())
 
+	c.tourStreams()
+
 	var config any
 	err := c.API.LoadPluginConfiguration(&config)
 	entry := map[string]any{"api": "LoadPluginConfiguration", "config": config}
@@ -277,6 +279,47 @@ func (c *conformance) auditLevel() mlog.Level {
 		panic("Z_LogAuditRecWithLevelArgs has no level")
 	}
 	return level
+}
+
+// tourStreams calls the API methods that lend the host a reader, each with StreamPayload.
+func (c *conformance) tourStreams() {
+	upload := c.fixture("Z_UploadDataArgs")
+	session, _ := upload.Field(0).Interface().(*model.UploadSession)
+	fi, err := c.API.UploadData(session, bytes.NewReader(StreamPayload()))
+	record(map[string]any{"api": "UploadData", "returns": structOf("Z_UploadDataReturns", values(fi, err))})
+
+	install := c.fixture("Z_InstallPluginArgs")
+	manifest, appErr := c.API.InstallPlugin(bytes.NewReader(StreamPayload()), install.Field(1).Bool())
+	record(map[string]any{"api": "InstallPlugin", "returns": structOf("Z_InstallPluginReturns", values(manifest, appErr))})
+
+	sync := c.fixture("Z_ReceiveSharedChannelAttachmentSyncMsgArgs")
+	info, _ := sync.Field(2).Interface().(*model.FileInfo)
+	synced, syncErr := c.API.ReceiveSharedChannelAttachmentSyncMsg(
+		sync.Field(0).String(), sync.Field(1).String(), info, bytes.NewReader(StreamPayload()),
+	)
+	record(map[string]any{
+		"api":     "ReceiveSharedChannelAttachmentSyncMsg",
+		"returns": structOf("Z_ReceiveSharedChannelAttachmentSyncMsgReturns", values(synced, syncErr)),
+	})
+}
+
+// values makes reflect.Values of a call's results, keeping a nil interface nil.
+func values(results ...any) []reflect.Value {
+	out := make([]reflect.Value, len(results))
+	for i, r := range results {
+		out[i] = reflect.ValueOf(&r).Elem().Elem()
+	}
+	return out
+}
+
+// StreamPayload is what every conformance stream carries: more than one 32 KiB chunk of
+// io_rpc.go's copy buffer, so the framing is exercised rather than a single read.
+func StreamPayload() []byte {
+	payload := make([]byte, 70_000)
+	for i := range payload {
+		payload[i] = byte((i*31 + 7) % 251)
+	}
+	return payload
 }
 
 // LogMessage and LogPairs are what both conformance plugins send to the log methods. Go

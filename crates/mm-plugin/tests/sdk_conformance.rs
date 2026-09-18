@@ -302,6 +302,25 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
             other => failures.push(format!("api {name}: Go received {other:?}")),
         }
     }
+    // Each stream the Rust plugin lent arrived whole at the Go host, and it answered with the
+    // method's fixture.
+    let want_stream = stream_digest(&stream_payload());
+    for name in [
+        "UploadData",
+        "InstallPlugin",
+        "ReceiveSharedChannelAttachmentSyncMsg",
+    ] {
+        match go_api.get(name).map(|e| &e["stream"]) {
+            Some(got) if got == &want_stream => {}
+            other => failures.push(format!("api {name}: Go read {other:?}")),
+        }
+        let want_returns = &expected[&format!("Z_{name}Returns")];
+        match rust_api.get(name).map(|e| &e["returns"]) {
+            Some(got) if got == want_returns => {}
+            other => failures.push(format!("api {name}: the Rust plugin recorded {other:?}")),
+        }
+    }
+
     // The Rust plugin's audit record reached Go in its gob-safe form.
     for name in ["LogAuditRec", "LogAuditRecWithLevel"] {
         let want = &expected[&format!("Z_{name}Args.safe")];

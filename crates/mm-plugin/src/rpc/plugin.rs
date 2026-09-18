@@ -62,7 +62,7 @@ pub fn plugin_server<P: Plugin>(plugin: &Arc<P>, broker: MuxBroker) -> Server {
                 .await
                 .map_err(|e| ServiceError(e.to_string()))?;
             plugin.set_api(
-                ApiClient::new(go_netrpc::Client::new(api)),
+                ApiClient::new(go_netrpc::Client::new(api), broker.clone()),
                 go_netrpc::Client::new(driver),
             );
 

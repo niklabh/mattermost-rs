@@ -26,7 +26,7 @@ use serde_json::{Value as Json, json};
 
 #[path = "../tests/common/render.rs"]
 mod render;
-use render::{fixture, render_typed};
+use render::{fixture, render_typed, stream_payload};
 
 struct Conformance {
     api: OnceLock<ApiClient>,
@@ -119,6 +119,34 @@ impl Plugin for Conformance {
         api.log_info(LOG_MESSAGE, &pairs).await;
         api.log_warn(LOG_MESSAGE, &pairs).await;
         api.log_error(LOG_MESSAGE, &pairs).await;
+        // The methods that lend the host a reader.
+        let upload: mm_plugin::wire::plugin::Z_UploadDataArgs = fixture("Z_UploadDataArgs");
+        let returns = api
+            .upload_data(upload.a, std::io::Cursor::new(stream_payload()))
+            .await;
+        self.record(json!({ "api": "UploadData", "returns": render_typed(&returns) }));
+
+        let install: mm_plugin::wire::plugin::Z_InstallPluginArgs = fixture("Z_InstallPluginArgs");
+        let returns = api
+            .install_plugin(std::io::Cursor::new(stream_payload()), install.b)
+            .await;
+        self.record(json!({ "api": "InstallPlugin", "returns": render_typed(&returns) }));
+
+        let sync: mm_plugin::wire::plugin::Z_ReceiveSharedChannelAttachmentSyncMsgArgs =
+            fixture("Z_ReceiveSharedChannelAttachmentSyncMsgArgs");
+        let returns = api
+            .receive_shared_channel_attachment_sync_msg(
+                sync.a,
+                sync.b,
+                sync.c,
+                std::io::Cursor::new(stream_payload()),
+            )
+            .await;
+        self.record(json!({
+            "api": "ReceiveSharedChannelAttachmentSyncMsg",
+            "returns": render_typed(&returns),
+        }));
+
         // The audit record goes through the gob-safe JSON round trip inside the client.
         // Each method sends its own fixture's record, which is what the test expects of it.
         let logged: mm_plugin::wire::plugin::Z_LogAuditRecArgs = fixture("Z_LogAuditRecArgs");

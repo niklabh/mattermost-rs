@@ -102,6 +102,18 @@ pub fn render(
     }
 }
 
+/// What every conformance stream carries: more than one 32 KiB chunk of io_rpc.go's copy buffer,
+/// so the framing is exercised rather than a single read.
+pub fn stream_payload() -> Vec<u8> {
+    (0..70_000u32).map(|i| ((i * 31 + 7) % 251) as u8).collect()
+}
+
+/// How a transcript identifies a stream's contents.
+pub fn stream_digest(data: &[u8]) -> Json {
+    use sha2::{Digest, Sha256};
+    json!({ "len": data.len(), "sha256": format!("{:x}", Sha256::digest(data)) })
+}
+
 /// How Go would render a typed value: encode it, read it back dynamically, render.
 pub fn render_typed<T: Encode + ?Sized>(value: &T) -> Json {
     let bytes = Encoder::new().encode(value).unwrap();

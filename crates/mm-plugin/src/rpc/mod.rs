@@ -23,10 +23,12 @@ mod api;
 mod handwritten;
 mod hooks;
 mod plugin;
+mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
+pub use streams::PluginApiStreams;
 
 /// A [`Hooks`] or [`PluginApi`] method the implementation does not provide.
 ///
@@ -36,11 +38,17 @@ pub use plugin::{Plugin, client_main, handshake, plugin_server};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotImplemented;
 
-/// Every method of [`PluginApi`] a plugin can call: the generated ones, plus
-/// `LoadPluginConfiguration`, whose server is hand-written.
-pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) {
+/// Every method of [`PluginApi`] a plugin can call: the generated ones, `LoadPluginConfiguration`
+/// and the methods that carry a reader, whose servers are hand-written. The broker is how those
+/// readers reach the plugin.
+pub fn register_api<T: PluginApi + PluginApiStreams>(
+    server: &mut Server,
+    implementation: &Arc<T>,
+    broker: &MuxBroker,
+) {
     register_generated_api(server, implementation);
     handwritten::register_load_plugin_configuration(server, implementation);
+    streams::register_api_streams(server, implementation, broker);
 }
 
 /// `Plugin.Implemented` plus every generated hook (client_rpc.go, `hooksRPCServer`). A plugin
@@ -101,9 +109,12 @@ impl HooksClient {
     ///
     /// The driver is not ported yet: its connection is served with no methods, so a plugin's
     /// database call fails with net/rpc's `rpc: can't find service Plugin.<Method>`.
-    pub async fn on_activate<A: PluginApi>(&self, api: &Arc<A>) -> Z_OnActivateReturns {
+    pub async fn on_activate<A: PluginApi + PluginApiStreams>(
+        &self,
+        api: &Arc<A>,
+    ) -> Z_OnActivateReturns {
         let mut api_server = Server::new();
-        register_api(&mut api_server, api);
+        register_api(&mut api_server, api, &self.broker);
         let api_mux_id = self.broker.next_id();
         let broker = self.broker.clone();
         tokio::spawn(async move {
@@ -211,12 +222,24 @@ impl HooksClient {
 #[derive(Clone)]
 pub struct ApiClient {
     client: go_netrpc::Client,
+    /// The plugin's broker, for the methods that lend the host a reader.
+    broker: MuxBroker,
 }
 
 impl ApiClient {
     /// A client over the brokered connection the host named in `OnActivate`.
-    pub fn new(client: go_netrpc::Client) -> Self {
-        Self { client }
+    pub fn new(client: go_netrpc::Client, broker: MuxBroker) -> Self {
+        Self { client, broker }
+    }
+
+    /// The net/rpc client underneath, for calling a method this crate does not wrap.
+    pub fn client(&self) -> &go_netrpc::Client {
+        &self.client
+    }
+
+    /// The plugin's broker, for lending the host a stream this crate does not wrap.
+    pub fn broker(&self) -> &MuxBroker {
+        &self.broker
     }
 
     async fn call<A, R>(&self, name: &str, args: &A) -> R

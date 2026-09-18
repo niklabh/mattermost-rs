@@ -1,0 +1,22 @@
+# Mutation plan for the streaming API methods (plugin plan Phase 3): io_rpc's pull protocol and
+# the three methods that lend the host a reader.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-streams.plan
+#
+# `rpc_` is the Rust host reading a Go plugin's stream, `sdk_` the Go host reading a Rust
+# plugin's, and `io_rpc::tests` the varint corpus. The decisions: the zig-zag varint, that a read
+# asks before it reads, that a short answer ends the transfer, that the lent stream's id is the
+# one the wire struct carries, and which argument each method's reader is. CONTROL- lines must
+# SURVIVE.
+
+varint-not-zigzag	crates/mm-plugin/src/io_rpc.rs	    let mut u = ((value << 1) ^ (value >> 63)) as u64;	    let mut u = value as u64;	pkg	varints_match_go
+varint-read-no-zigzag	crates/mm-plugin/src/io_rpc.rs	            return Ok(Some(((u >> 1) as i64) ^ -((u & 1) as i64)));	            return Ok(Some(u as i64));	pkg	io_rpc::tests
+reader-does-not-ask	crates/mm-plugin/src/io_rpc.rs	        if this.request.is_none() {\n            let mut varint = [0u8; 10];\n            let len = put_varint(buf.remaining() as i64, &mut varint);\n            this.request = Some((len, varint, 0));\n        }	        if this.request.is_none() {\n            let mut varint = [0u8; 10];\n            let len = put_varint(buf.remaining() as i64, &mut varint);\n            this.request = Some((len, varint, len));\n        }	pkg	rpc_rust_host
+reader-asks-once	crates/mm-plugin/src/io_rpc.rs	        let read = Pin::new(&mut this.conn).poll_read(cx, buf);\n        if read.is_ready() {\n            this.request = None;\n        }	        let read = Pin::new(&mut this.conn).poll_read(cx, buf);\n        if read.is_ready() {\n            let _ = &this.request;\n        }	pkg	rpc_rust_host
+serve-ignores-short-source	crates/mm-plugin/src/io_rpc.rs	            if read == 0 {\n                // The source is spent: fewer bytes than asked for, so the transfer ends here.\n                conn.shutdown().await?;\n                return Ok(());\n            }	            if read == 0 {\n                break;\n            }	pkg	sdk_
+serve-sends-whole-buffer	crates/mm-plugin/src/io_rpc.rs	            conn.write_all(&buf[..read]).await?;	            conn.write_all(&buf).await?;	pkg	sdk_
+lend-id-not-the-one-served	crates/mm-plugin/src/rpc/streams.rs	            plugin_stream_id: self.lend_reader(data, "UploadData"),	            plugin_stream_id: self.lend_reader(data, "UploadData") + 1,	pkg	sdk_
+install-plugin-reader-not-lent	crates/mm-plugin/src/rpc/streams.rs	            plugin_stream_id: self.lend_reader(bundle, "InstallPlugin"),	            plugin_stream_id: self.lend_reader(::tokio::io::empty(), "InstallPlugin"),	pkg	sdk_
+upload-data-dials-nothing	crates/mm-plugin/src/rpc/streams.rs	            let data = lend(&broker, args.plugin_stream_id).await?;\n            this.upload_data(args.a, data)	            let data = lend(&broker, args.plugin_stream_id.wrapping_add(1)).await?;\n            this.upload_data(args.a, data)	pkg	rpc_rust_host
+CONTROL-rename-chunk	crates/mm-plugin/src/io_rpc.rs	            let mut buf = vec![0u8; left.min(CHUNK)];\n            let read = reader.read(&mut buf).await?;	            let mut chunk = vec![0u8; left.min(CHUNK)];\n            let read = reader.read(&mut chunk).await?;\n            let buf = chunk;	pkg	sdk_
+CONTROL-rename-registration-binding	crates/mm-plugin/src/rpc/streams.rs	    let this = Arc::clone(implementation);\n    let b = broker.clone();\n    server.register("Plugin.UploadData", move |args: Z_UploadDataArgs| {\n        let (this, broker) = (Arc::clone(&this), b.clone());	    let this = Arc::clone(implementation);\n    let lender = broker.clone();\n    server.register("Plugin.UploadData", move |args: Z_UploadDataArgs| {\n        let (this, broker) = (Arc::clone(&this), lender.clone());	pkg	sdk_

@@ -381,10 +381,25 @@ their own direction. Mutations: 10 run, 8 caught, 2 controls survived.
 Also removed: `gobwire`'s `json` feature, declared in its manifest with no implementation behind
 it. The conversion that was wanted needs the `json:` tags, which a gob codec does not have.
 
+**`io_rpc` and the methods that lend a reader: DONE 2026-09-18 (sixth part of Phase 3).**
+`io_rpc.go` is a pull protocol, not a push: the reading side writes a varint saying how many
+bytes it wants and reads up to that many, and the serving side answers with exactly that many or
+closes, which is how the far side sees the end. `crates/mm-plugin/src/io_rpc.rs` has Go's
+`binary.PutVarint` and both halves, `RemoteReader` as an `AsyncRead` that asks before every read.
+
+On top of it, the three API methods that lend the host a reader — `UploadData`, `InstallPlugin`
+and `ReceiveSharedChannelAttachmentSyncMsg` — on both sides. The caller allocates a broker id,
+serves the reader on it, and sends the id as a field of the wire struct; the far side dials it
+and reads while the call is outstanding. `PluginApiStreams` holds them, because the generated
+`PluginApi` cannot describe a method that takes a reader.
+
+Both conformance runs carry a 70,000-byte payload, which is more than one 32 KiB copy buffer, and
+check its length and SHA-256 at the far end. The varint corpus is checked against Go's own
+`PutVarint`. Mutations: 11 run, 9 caught, 2 controls survived.
+
 **Next in Phase 3:**
-- the nine methods that carry brokered streams: ServeHTTP and ServeMetrics, PluginHTTP and its
-  stream form, `FileWillBeUploaded`, `UploadData`, `InstallPlugin`,
-  `ReceiveSharedChannelAttachmentSyncMsg`, and `io_rpc`'s varint pull behind them;
+- the methods that carry a stream in each direction: ServeHTTP and ServeMetrics, PluginHTTP and
+  its stream form, and `FileWillBeUploaded`, which lends a reader and a writer at once;
 - the database driver's RPC, and the error helpers (`ErrorString` codes);
 - then the Rust conformance plugin under the real Go server on the stack.
 

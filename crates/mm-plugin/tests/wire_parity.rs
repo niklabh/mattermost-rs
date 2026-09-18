@@ -295,6 +295,24 @@ fn fixtures_match_the_go_tree() {
     assert!(diffs.is_empty(), "fixtures/plugin/gob is stale: {diffs:?}");
 }
 
+/// io_rpc's framing is Go's `binary.PutVarint`, byte for byte.
+#[test]
+fn varints_match_go() {
+    let go: Map<String, Json> =
+        serde_json::from_slice(&run_plugingen(&["varints".as_ref(), "-".as_ref()])).unwrap();
+    assert!(go.len() >= 18, "the corpus shrank: {}", go.len());
+    for (value, hex) in &go {
+        let value: i64 = value.parse().unwrap();
+        let mut buf = [0u8; 10];
+        let n = mm_plugin::io_rpc::put_varint(value, &mut buf);
+        let encoded = buf[..n]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(Json::String(encoded), *hex, "PutVarint({value})");
+    }
+}
+
 /// The committed Rust is what scripts/plugingen.py generates from the committed IDL.
 #[test]
 fn generated_rust_is_current() {

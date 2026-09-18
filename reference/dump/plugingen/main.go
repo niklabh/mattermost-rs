@@ -6,6 +6,7 @@
 //	plugingen echo <dir>       decode every <Z_name>[.sparse].gob in dir as that struct; print renders
 //	plugingen plugin <dir>     serve the RPC conformance plugin (conformance.go) from those fixtures
 //	plugingen host <dir> <plugins> <id>   drive a plugin through plugin.Environment (host.go)
+//	plugingen varints -         binary.PutVarint over a corpus, for io_rpc's framing
 //
 // Types come from reflection over plugin.API and plugin.Hooks, so they are exactly what the
 // compiler sees, including instantiated generics and aliases resolved. Parameter names and doc
@@ -25,6 +26,7 @@ import (
 	"crypto/x509"
 	"encoding"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -1092,6 +1094,21 @@ func decodeRender(name string, stream []byte) (any, error) {
 	return out, nil
 }
 
+// varints is `binary.PutVarint` over a corpus, as hex: the framing io_rpc.go puts in front of
+// every read of a remote reader.
+func varints() map[string]string {
+	out := map[string]string{}
+	for _, v := range []int64{
+		0, 1, -1, 2, 63, 64, 127, 128, 129, 300, -300, 4096, 32 * 1024,
+		1 << 20, math.MaxInt32, math.MinInt32, math.MaxInt64, math.MinInt64,
+	} {
+		var buf [10]byte
+		n := binary.PutVarint(buf[:], v)
+		out[fmt.Sprint(v)] = fmt.Sprintf("%x", buf[:n])
+	}
+	return out
+}
+
 // writeStable writes a stream unless the file already holds one that decodes the same way.
 //
 // Go encodes a map in its randomised iteration order, so a stream carrying a map with more than
@@ -1221,6 +1238,8 @@ func main() {
 			err = writeJSON(os.Args[2], idl)
 		case "gob":
 			err = gobOracle(os.Args[2])
+		case "varints":
+			err = writeJSON("-", varints())
 		case "echo":
 			err = echo(os.Args[2])
 		case "plugin":

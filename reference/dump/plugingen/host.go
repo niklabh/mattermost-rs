@@ -18,7 +18,10 @@ package main
 //	{"shutdown": true}
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"reflect"
 
@@ -83,6 +86,41 @@ func mockAPI(c *conformance) *plugintest.API {
 			}
 		}
 	}
+	// The methods that take a reader: read it to the end and record what arrived, as the Rust
+	// host's fake does, so both directions are compared against the same payload.
+	streamed := []struct {
+		name   string
+		reader int // which argument is the io.Reader
+	}{
+		{"UploadData", 1},
+		{"InstallPlugin", 0},
+		{"ReceiveSharedChannelAttachmentSyncMsg", 3},
+	}
+	for _, m := range streamed {
+		method, _ := apiT.MethodByName(m.name)
+		returns := c.fixture("Z_" + m.name + "Returns")
+		name, at := m.name, m.reader
+		fn := reflect.MakeFunc(method.Type, func(args []reflect.Value) []reflect.Value {
+			reader, ok := args[at].Interface().(io.Reader)
+			if !ok {
+				panic(name + ": argument is not an io.Reader")
+			}
+			data, err := io.ReadAll(reader)
+			entry := map[string]any{"api": name, "stream": streamDigest(data)}
+			if err != nil {
+				entry["stream_error"] = err.Error()
+			}
+			record(entry)
+			out, _ := answer(method.Type, returns)
+			return out
+		})
+		anything := make([]any, method.Type.NumIn())
+		for i := range anything {
+			anything[i] = mock.Anything
+		}
+		api.On(name, anything...).Return(fn.Interface())
+	}
+
 	// LoadPluginConfiguration hands the plugin whatever the host writes into its argument, as
 	// JSON; the RPC server marshals it (client_rpc.go).
 	api.On("LoadPluginConfiguration", mock.Anything).Run(func(args mock.Arguments) {
@@ -94,6 +132,11 @@ func mockAPI(c *conformance) *plugintest.API {
 		record(map[string]any{"api": "LoadPluginConfiguration", "config": PluginConfiguration})
 	}).Return(nil)
 	return api
+}
+
+// streamDigest identifies a stream's contents without putting them in a transcript.
+func streamDigest(data []byte) map[string]any {
+	return map[string]any{"len": len(data), "sha256": fmt.Sprintf("%x", sha256.Sum256(data))}
 }
 
 // PluginConfiguration is what the host answers LoadPluginConfiguration with.

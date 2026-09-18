@@ -1250,6 +1250,7 @@ dependencies = [
  "gobwire",
  "goplugin",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
 ]

@@ -24,7 +24,8 @@ use go_netrpc::Server;
 use goplugin::yamux::{Config, Session};
 use goplugin::{Client, ClientConfig, Dispensed, HandshakeConfig, MuxBroker, PluginCommand};
 use mm_plugin::rpc::{
-    ApiClient, Hooks, HooksClient, NotImplemented, PluginApi, hooks_server, register_api,
+    ApiClient, Hooks, HooksClient, NotImplemented, PluginApi, PluginApiStreams, hooks_server,
+    register_api,
 };
 use mm_plugin::wire::plugin::{
     Z_ChannelMemberWillBeAddedArgs, Z_MessageWillBePostedArgs, Z_MessageWillBeUpdatedArgs,
@@ -62,6 +63,21 @@ impl Fake {
             .unwrap()
             .insert(name.to_owned(), render_typed(args));
         fixture(returns)
+    }
+
+    /// Read a lent stream to the end and record what arrived.
+    async fn record_stream(&self, name: &str, mut data: mm_plugin::io_rpc::RemoteReader) {
+        use tokio::io::AsyncReadExt as _;
+        let mut bytes = Vec::new();
+        let read = data.read_to_end(&mut bytes).await;
+        let mut digest = stream_digest(&bytes);
+        if let Err(e) = read {
+            digest["error"] = Json::String(e.to_string());
+        }
+        self.received
+            .lock()
+            .unwrap()
+            .insert(format!("{name}.stream"), digest);
     }
 
     fn received(&self) -> BTreeMap<String, Json> {
@@ -133,6 +149,42 @@ macro_rules! fake_api {
 }
 mm_plugin::for_each_api_call!(fake_api);
 
+/// Reads each lent stream to the end and answers with the method's fixture, as the Go host does.
+impl PluginApiStreams for Fake {
+    async fn upload_data(
+        &self,
+        _: Option<Box<mm_plugin::wire::model::UploadSession>>,
+        data: mm_plugin::io_rpc::RemoteReader,
+    ) -> Result<mm_plugin::wire::plugin::Z_UploadDataReturns, NotImplemented> {
+        self.record_stream("UploadData", data).await;
+        Ok(fixture("Z_UploadDataReturns"))
+    }
+
+    async fn install_plugin(
+        &self,
+        bundle: mm_plugin::io_rpc::RemoteReader,
+        _: bool,
+    ) -> Result<mm_plugin::wire::plugin::Z_InstallPluginReturns, NotImplemented> {
+        self.record_stream("InstallPlugin", bundle).await;
+        Ok(fixture("Z_InstallPluginReturns"))
+    }
+
+    async fn receive_shared_channel_attachment_sync_msg(
+        &self,
+        _: String,
+        _: String,
+        _: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        data: mm_plugin::io_rpc::RemoteReader,
+    ) -> Result<
+        mm_plugin::wire::plugin::Z_ReceiveSharedChannelAttachmentSyncMsgReturns,
+        NotImplemented,
+    > {
+        self.record_stream("ReceiveSharedChannelAttachmentSyncMsg", data)
+            .await;
+        Ok(fixture("Z_ReceiveSharedChannelAttachmentSyncMsgReturns"))
+    }
+}
+
 macro_rules! fake_hooks {
     ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
         impl Hooks for Fake {
@@ -187,7 +239,18 @@ fn logged_args() -> Json {
 
 /// Every API method this suite does not call with its fixture arguments, and why. A new
 /// hand-written method lands here as a failure until it is either called or listed.
-const API_NOT_CALLED: [&str; 3] = [
+/// The API methods that lend the host a reader rather than taking fixture arguments.
+const API_STREAMS: [&str; 3] = [
+    "UploadData",
+    "InstallPlugin",
+    "ReceiveSharedChannelAttachmentSyncMsg",
+];
+
+const API_NOT_CALLED: [&str; 6] = [
+    // Called with a lent stream, and checked by what arrived on it.
+    "UploadData",
+    "InstallPlugin",
+    "ReceiveSharedChannelAttachmentSyncMsg",
     // Called, but checked on their own: their arguments are the record after its JSON round trip.
     "LogAuditRec",
     "LogAuditRecWithLevel",
@@ -378,6 +441,21 @@ async fn rpc_rust_host_drives_the_go_plugin() {
             other => failures.push(format!("api {name}: Rust received {other:?}")),
         }
     }
+    // Each lent stream arrived whole, through io_rpc's varint framing, and the plugin got the
+    // method's fixture back.
+    let want_stream = stream_digest(&stream_payload());
+    for name in API_STREAMS {
+        match received.get(&format!("{name}.stream")) {
+            Some(got) if got == &want_stream => {}
+            other => failures.push(format!("api {name}: the stream arrived as {other:?}")),
+        }
+        let want_returns = &expected[&format!("Z_{name}Returns")];
+        match go_api.get(name) {
+            Some(got) if got == want_returns => {}
+            other => failures.push(format!("api {name}: the Go plugin recorded {other:?}")),
+        }
+    }
+
     // The audit record crossed in its gob-safe form: the JSON round trip turned its integers
     // into floats and its structs into objects keyed by their `json:` tags (audit.go).
     for name in ["LogAuditRec", "LogAuditRecWithLevel"] {
@@ -458,6 +536,29 @@ fn merged_post(message: &str) -> Json {
     })
 }
 
+/// A connected host and plugin over an in-memory yamux session, with the host serving the API.
+/// Both sides get a broker, because the streaming methods lend a reader over one.
+async fn rust_api_pair<A: PluginApi + PluginApiStreams>(api: Arc<A>) -> ApiClient {
+    let (a, b) = tokio::io::duplex(1 << 20);
+    let host = Session::server(a, Config::default()).unwrap();
+    let plugin = Session::client(b, Config::default()).unwrap();
+
+    let stream = plugin.open().await.unwrap();
+    let (plugin_broker, run) = MuxBroker::new(plugin.clone());
+    tokio::spawn(run);
+
+    tokio::spawn(async move {
+        let served = host.accept().await.unwrap();
+        let (host_broker, run) = MuxBroker::new(host.clone());
+        tokio::spawn(run);
+        let mut server = Server::new();
+        register_api(&mut server, &api, &host_broker);
+        let _ = Arc::new(server).serve(served).await;
+        drop((host, host_broker));
+    });
+    ApiClient::new(go_netrpc::Client::new(stream), plugin_broker)
+}
+
 /// A connected host and plugin over an in-memory yamux session, with the plugin serving `hooks`.
 /// As in go-plugin, each side's broker starts only after the hooks stream is open: a running broker
 /// claims every stream the session accepts.
@@ -526,11 +627,7 @@ async fn rpc_rust_hooks_round_trip_every_hook() {
 async fn rpc_rust_api_round_trips_every_method() {
     let expected = expected();
     let fake = Arc::new(Fake::default());
-    let (a, b) = tokio::io::duplex(1 << 20);
-    let mut server = Server::new();
-    register_api(&mut server, &fake);
-    tokio::spawn(Arc::new(server).serve(b));
-    let client = ApiClient::new(go_netrpc::Client::new(a));
+    let client = rust_api_pair(Arc::clone(&fake)).await;
     let returned = within(call_every_api_method(&client)).await;
 
     let mut failures = Vec::new();
@@ -738,22 +835,25 @@ async fn rpc_unimplemented_hooks_are_skipped_and_unprovided_ones_fail_as_in_go()
 async fn rpc_an_unprovided_api_method_fails_as_in_go() {
     struct Nothing;
     impl PluginApi for Nothing {}
+    impl PluginApiStreams for Nothing {}
 
-    let (a, b) = tokio::io::duplex(1 << 16);
-    let mut server = Server::new();
-    register_api(&mut server, &Arc::new(Nothing));
-    tokio::spawn(Arc::new(server).serve(b));
-    let client = go_netrpc::Client::new(a);
-    let err = within(client.call::<_, mm_plugin::wire::plugin::Z_GetUserReturns>(
-        "Plugin.GetUser",
-        &mm_plugin::wire::plugin::Z_GetUserArgs { a: "u".into() },
-    ))
+    let api = rust_api_pair(Arc::new(Nothing)).await;
+    let err = within(
+        api.client()
+            .call::<_, mm_plugin::wire::plugin::Z_GetUserReturns>(
+                "Plugin.GetUser",
+                &mm_plugin::wire::plugin::Z_GetUserArgs { a: "u".into() },
+            ),
+    )
     .await
     .unwrap_err();
     assert_eq!(err.to_string(), "API GetUser called but not implemented.");
 
+    // A streaming method's message is Go's, which carries no full stop (client_rpc.go).
+    let returns = within(api.install_plugin(&b"bundle"[..], true)).await;
+    assert_eq!(returns, Default::default());
+
     // The plugin's client logs the failure and answers zero values.
-    let api = ApiClient::new(client);
     let returns =
         within(api.get_user(mm_plugin::wire::plugin::Z_GetUserArgs { a: "u".into() })).await;
     assert_eq!(returns, Default::default());
