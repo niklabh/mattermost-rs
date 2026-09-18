@@ -20,6 +20,7 @@ use goplugin::{Dispensed, MuxBroker};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
+mod driver;
 mod file_upload;
 mod handwritten;
 mod hooks;
@@ -28,6 +29,7 @@ mod serve_http;
 mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
+pub use driver::{Driver, register_driver};
 pub use file_upload::HooksFileUpload;
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
@@ -112,12 +114,12 @@ impl HooksClient {
     /// called whether or not the plugin implements it, because the plugin's API client is set up
     /// here.
     ///
-    /// The driver is not ported yet: its connection is served with no methods, so a plugin's
-    /// database call fails with net/rpc's `rpc: can't find service Plugin.<Method>`.
-    pub async fn on_activate<A: PluginApi + PluginApiStreams + PluginApiHttp>(
-        &self,
-        api: &Arc<A>,
-    ) -> Z_OnActivateReturns {
+    /// `driver` answers the plugin's database calls on the second connection (db_rpc.go).
+    pub async fn on_activate<A, D>(&self, api: &Arc<A>, driver: &Arc<D>) -> Z_OnActivateReturns
+    where
+        A: PluginApi + PluginApiStreams + PluginApiHttp,
+        D: Driver,
+    {
         let mut api_server = Server::new();
         register_api(&mut api_server, api, &self.broker);
         let api_mux_id = self.broker.next_id();
@@ -128,11 +130,13 @@ impl HooksClient {
                 .await;
         });
 
+        let mut driver_server = Server::new();
+        register_driver(&mut driver_server, driver);
         let driver_mux_id = self.broker.next_id();
         let broker = self.broker.clone();
         tokio::spawn(async move {
             broker
-                .accept_and_serve(driver_mux_id, Arc::new(Server::new()))
+                .accept_and_serve(driver_mux_id, Arc::new(driver_server))
                 .await;
         });
 
@@ -218,6 +222,36 @@ impl HooksClient {
             Err(e) => {
                 tracing::debug!(error = %e, "RPC call {name} to plugin failed.");
                 (R::default(), Some(e))
+            }
+        }
+    }
+}
+
+/// The plugin's handle on the host's database (db_rpc.go, `dbRPCClient`).
+///
+/// Every method answers zero values when the call fails, as Go's does, and the error fields come
+/// back as they were sent: read them with [`crate::error::decodable_error`].
+#[derive(Clone)]
+pub struct DriverClient {
+    client: go_netrpc::Client,
+}
+
+impl DriverClient {
+    /// A client over the brokered connection the host named in `OnActivate`.
+    pub fn new(client: go_netrpc::Client) -> Self {
+        Self { client }
+    }
+
+    async fn call<A, R>(&self, name: &str, args: &A) -> R
+    where
+        A: Encode,
+        R: Decode + Default + Send + 'static,
+    {
+        match self.client.call(&format!("Plugin.{name}"), args).await {
+            Ok(returns) => returns,
+            Err(e) => {
+                tracing::error!(error = %e, "error during Plugin.{name}");
+                R::default()
             }
         }
     }

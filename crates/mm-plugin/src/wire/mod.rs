@@ -3,7 +3,7 @@
 //! The gob form of every value Mattermost's plugin RPC sends, generated from the Go
 //! tree (docs/PLUGIN_PLAN.md, D5).
 //!
-//! Generated from Go go1.26.4: 618 wire structs, 888 named types.
+//! Generated from Go go1.26.4: 633 wire structs, 907 named types.
 
 pub mod asn1;
 pub mod big;
@@ -19,6 +19,7 @@ pub mod pq;
 pub mod pqerror;
 pub mod saml2;
 pub mod saml2_types;
+pub mod sql_driver;
 pub mod textproto;
 pub mod tls;
 pub mod url;
@@ -162,6 +163,21 @@ macro_rules! for_each_wire_struct {
             ("Z_CreateUserAccessTokenReturns", $crate::wire::plugin::Z_CreateUserAccessTokenReturns),
             ("Z_CreateUserArgs", $crate::wire::plugin::Z_CreateUserArgs),
             ("Z_CreateUserReturns", $crate::wire::plugin::Z_CreateUserReturns),
+            ("Z_DbBoolReturn", $crate::wire::plugin::Z_DbBoolReturn),
+            ("Z_DbConnArgs", $crate::wire::plugin::Z_DbConnArgs),
+            ("Z_DbErrReturn", $crate::wire::plugin::Z_DbErrReturn),
+            ("Z_DbInt64ErrReturn", $crate::wire::plugin::Z_DbInt64ErrReturn),
+            ("Z_DbIntReturn", $crate::wire::plugin::Z_DbIntReturn),
+            ("Z_DbResultContErrReturn", $crate::wire::plugin::Z_DbResultContErrReturn),
+            ("Z_DbRowScanArg", $crate::wire::plugin::Z_DbRowScanArg),
+            ("Z_DbRowScanReturn", $crate::wire::plugin::Z_DbRowScanReturn),
+            ("Z_DbRowsColumnArg", $crate::wire::plugin::Z_DbRowsColumnArg),
+            ("Z_DbRowsColumnTypePrecisionScaleReturn", $crate::wire::plugin::Z_DbRowsColumnTypePrecisionScaleReturn),
+            ("Z_DbStmtArgs", $crate::wire::plugin::Z_DbStmtArgs),
+            ("Z_DbStmtQueryArgs", $crate::wire::plugin::Z_DbStmtQueryArgs),
+            ("Z_DbStrErrReturn", $crate::wire::plugin::Z_DbStrErrReturn),
+            ("Z_DbStrSliceReturn", $crate::wire::plugin::Z_DbStrSliceReturn),
+            ("Z_DbTxArgs", $crate::wire::plugin::Z_DbTxArgs),
             ("Z_DeleteAccessControlPolicyArgs", $crate::wire::plugin::Z_DeleteAccessControlPolicyArgs),
             ("Z_DeleteAccessControlPolicyReturns", $crate::wire::plugin::Z_DeleteAccessControlPolicyReturns),
             ("Z_DeleteChannelArgs", $crate::wire::plugin::Z_DeleteChannelArgs),

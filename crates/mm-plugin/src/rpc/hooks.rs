@@ -214,7 +214,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn channel_has_been_created(
         &self,
         args: Z_ChannelHasBeenCreatedArgs,
-    ) -> impl Future<Output = Result<Z_ChannelHasBeenCreatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ChannelHasBeenCreatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -238,8 +240,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn channel_member_will_be_added(
         &self,
         args: Z_ChannelMemberWillBeAddedArgs,
-    ) -> impl Future<Output = Result<Z_ChannelMemberWillBeAddedReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_ChannelMemberWillBeAddedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -260,7 +266,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn channel_will_be_archived(
         &self,
         args: Z_ChannelWillBeArchivedArgs,
-    ) -> impl Future<Output = Result<Z_ChannelWillBeArchivedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ChannelWillBeArchivedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -281,7 +289,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn channel_will_be_restored(
         &self,
         args: Z_ChannelWillBeRestoredArgs,
-    ) -> impl Future<Output = Result<Z_ChannelWillBeRestoredReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ChannelWillBeRestoredReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -306,7 +316,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn channel_will_be_updated(
         &self,
         args: Z_ChannelWillBeUpdatedArgs,
-    ) -> impl Future<Output = Result<Z_ChannelWillBeUpdatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ChannelWillBeUpdatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -325,8 +337,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn configuration_will_be_saved(
         &self,
         args: Z_ConfigurationWillBeSavedArgs,
-    ) -> impl Future<Output = Result<Z_ConfigurationWillBeSavedReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_ConfigurationWillBeSavedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -346,7 +362,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn draft_will_be_upserted(
         &self,
         args: Z_DraftWillBeUpsertedArgs,
-    ) -> impl Future<Output = Result<Z_DraftWillBeUpsertedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DraftWillBeUpsertedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -373,8 +391,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn email_notification_will_be_sent(
         &self,
         args: Z_EmailNotificationWillBeSentArgs,
-    ) -> impl Future<Output = Result<Z_EmailNotificationWillBeSentReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_EmailNotificationWillBeSentReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -392,7 +414,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn execute_command(
         &self,
         args: Z_ExecuteCommandArgs,
-    ) -> impl Future<Output = Result<Z_ExecuteCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ExecuteCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -418,7 +442,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn file_will_be_downloaded(
         &self,
         args: Z_FileWillBeDownloadedArgs,
-    ) -> impl Future<Output = Result<Z_FileWillBeDownloadedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_FileWillBeDownloadedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -442,7 +468,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn generate_support_data(
         &self,
         args: Z_GenerateSupportDataArgs,
-    ) -> impl Future<Output = Result<Z_GenerateSupportDataReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GenerateSupportDataReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -461,7 +489,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn message_has_been_deleted(
         &self,
         args: Z_MessageHasBeenDeletedArgs,
-    ) -> impl Future<Output = Result<Z_MessageHasBeenDeletedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_MessageHasBeenDeletedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -481,7 +511,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn message_has_been_posted(
         &self,
         args: Z_MessageHasBeenPostedArgs,
-    ) -> impl Future<Output = Result<Z_MessageHasBeenPostedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_MessageHasBeenPostedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -501,7 +533,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn message_has_been_updated(
         &self,
         args: Z_MessageHasBeenUpdatedArgs,
-    ) -> impl Future<Output = Result<Z_MessageHasBeenUpdatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_MessageHasBeenUpdatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -531,7 +565,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn message_will_be_posted(
         &self,
         args: Z_MessageWillBePostedArgs,
-    ) -> impl Future<Output = Result<Z_MessageWillBePostedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_MessageWillBePostedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -558,7 +594,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn message_will_be_updated(
         &self,
         args: Z_MessageWillBeUpdatedArgs,
-    ) -> impl Future<Output = Result<Z_MessageWillBeUpdatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_MessageWillBeUpdatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -581,7 +619,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn messages_will_be_consumed(
         &self,
         args: Z_MessagesWillBeConsumedArgs,
-    ) -> impl Future<Output = Result<Z_MessagesWillBeConsumedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_MessagesWillBeConsumedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -607,8 +650,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn messages_will_be_consumed_with_context(
         &self,
         args: Z_MessagesWillBeConsumedWithContextArgs,
-    ) -> impl Future<Output = Result<Z_MessagesWillBeConsumedWithContextReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_MessagesWillBeConsumedWithContextReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -633,8 +680,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn notification_will_be_pushed(
         &self,
         args: Z_NotificationWillBePushedArgs,
-    ) -> impl Future<Output = Result<Z_NotificationWillBePushedReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_NotificationWillBePushedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -651,7 +702,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_cloud_limits_updated(
         &self,
         args: Z_OnCloudLimitsUpdatedArgs,
-    ) -> impl Future<Output = Result<Z_OnCloudLimitsUpdatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnCloudLimitsUpdatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -670,7 +723,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_configuration_change(
         &self,
         args: Z_OnConfigurationChangeArgs,
-    ) -> impl Future<Output = Result<Z_OnConfigurationChangeReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnConfigurationChangeReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -689,7 +744,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_deactivate(
         &self,
         args: Z_OnDeactivateArgs,
-    ) -> impl Future<Output = Result<Z_OnDeactivateReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnDeactivateReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -709,7 +766,8 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_install(
         &self,
         args: Z_OnInstallArgs,
-    ) -> impl Future<Output = Result<Z_OnInstallReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_OnInstallReturns, NotImplemented>>
+    + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -730,7 +788,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_plugin_cluster_event(
         &self,
         args: Z_OnPluginClusterEventArgs,
-    ) -> impl Future<Output = Result<Z_OnPluginClusterEventReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnPluginClusterEventReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -747,7 +807,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_saml_login(
         &self,
         args: Z_OnSAMLLoginArgs,
-    ) -> impl Future<Output = Result<Z_OnSAMLLoginReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnSAMLLoginReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -764,7 +826,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_send_daily_telemetry(
         &self,
         args: Z_OnSendDailyTelemetryArgs,
-    ) -> impl Future<Output = Result<Z_OnSendDailyTelemetryReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnSendDailyTelemetryReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -785,8 +849,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_shared_channels_attachment_sync_msg(
         &self,
         args: Z_OnSharedChannelsAttachmentSyncMsgArgs,
-    ) -> impl Future<Output = Result<Z_OnSharedChannelsAttachmentSyncMsgReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_OnSharedChannelsAttachmentSyncMsgReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -811,7 +879,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_shared_channels_ping(
         &self,
         args: Z_OnSharedChannelsPingArgs,
-    ) -> impl Future<Output = Result<Z_OnSharedChannelsPingReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnSharedChannelsPingReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -832,8 +902,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_shared_channels_profile_image_sync_msg(
         &self,
         args: Z_OnSharedChannelsProfileImageSyncMsgArgs,
-    ) -> impl Future<Output = Result<Z_OnSharedChannelsProfileImageSyncMsgReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_OnSharedChannelsProfileImageSyncMsgReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -854,7 +928,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_shared_channels_sync_msg(
         &self,
         args: Z_OnSharedChannelsSyncMsgArgs,
-    ) -> impl Future<Output = Result<Z_OnSharedChannelsSyncMsgReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_OnSharedChannelsSyncMsgReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -874,7 +953,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_web_socket_connect(
         &self,
         args: Z_OnWebSocketConnectArgs,
-    ) -> impl Future<Output = Result<Z_OnWebSocketConnectReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnWebSocketConnectReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -894,7 +975,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn on_web_socket_disconnect(
         &self,
         args: Z_OnWebSocketDisconnectArgs,
-    ) -> impl Future<Output = Result<Z_OnWebSocketDisconnectReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OnWebSocketDisconnectReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -913,7 +996,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn preferences_have_changed(
         &self,
         args: Z_PreferencesHaveChangedArgs,
-    ) -> impl Future<Output = Result<Z_PreferencesHaveChangedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_PreferencesHaveChangedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -933,7 +1021,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn reaction_has_been_added(
         &self,
         args: Z_ReactionHasBeenAddedArgs,
-    ) -> impl Future<Output = Result<Z_ReactionHasBeenAddedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ReactionHasBeenAddedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -953,7 +1043,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn reaction_has_been_removed(
         &self,
         args: Z_ReactionHasBeenRemovedArgs,
-    ) -> impl Future<Output = Result<Z_ReactionHasBeenRemovedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_ReactionHasBeenRemovedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -970,7 +1065,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn run_data_retention(
         &self,
         args: Z_RunDataRetentionArgs,
-    ) -> impl Future<Output = Result<Z_RunDataRetentionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RunDataRetentionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -990,8 +1087,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn scheduled_post_will_be_created(
         &self,
         args: Z_ScheduledPostWillBeCreatedArgs,
-    ) -> impl Future<Output = Result<Z_ScheduledPostWillBeCreatedReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_ScheduledPostWillBeCreatedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1015,7 +1116,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn team_member_will_be_added(
         &self,
         args: Z_TeamMemberWillBeAddedArgs,
-    ) -> impl Future<Output = Result<Z_TeamMemberWillBeAddedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_TeamMemberWillBeAddedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1032,7 +1135,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_been_created(
         &self,
         args: Z_UserHasBeenCreatedArgs,
-    ) -> impl Future<Output = Result<Z_UserHasBeenCreatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasBeenCreatedReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1049,7 +1154,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_been_deactivated(
         &self,
         args: Z_UserHasBeenDeactivatedArgs,
-    ) -> impl Future<Output = Result<Z_UserHasBeenDeactivatedReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UserHasBeenDeactivatedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1067,7 +1177,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_joined_channel(
         &self,
         args: Z_UserHasJoinedChannelArgs,
-    ) -> impl Future<Output = Result<Z_UserHasJoinedChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasJoinedChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1085,7 +1197,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_joined_team(
         &self,
         args: Z_UserHasJoinedTeamArgs,
-    ) -> impl Future<Output = Result<Z_UserHasJoinedTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasJoinedTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1103,7 +1217,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_left_channel(
         &self,
         args: Z_UserHasLeftChannelArgs,
-    ) -> impl Future<Output = Result<Z_UserHasLeftChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasLeftChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1121,7 +1237,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_left_team(
         &self,
         args: Z_UserHasLeftTeamArgs,
-    ) -> impl Future<Output = Result<Z_UserHasLeftTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasLeftTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1138,7 +1256,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_has_logged_in(
         &self,
         args: Z_UserHasLoggedInArgs,
-    ) -> impl Future<Output = Result<Z_UserHasLoggedInReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserHasLoggedInReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1156,7 +1276,9 @@ pub trait Hooks: Send + Sync + 'static {
     fn user_will_log_in(
         &self,
         args: Z_UserWillLogInArgs,
-    ) -> impl Future<Output = Result<Z_UserWillLogInReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UserWillLogInReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1173,8 +1295,12 @@ pub trait Hooks: Send + Sync + 'static {
     fn web_socket_message_has_been_posted(
         &self,
         args: Z_WebSocketMessageHasBeenPostedArgs,
-    ) -> impl Future<Output = Result<Z_WebSocketMessageHasBeenPostedReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_WebSocketMessageHasBeenPostedReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }

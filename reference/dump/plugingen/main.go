@@ -7,6 +7,7 @@
 //	plugingen plugin <dir>     serve the RPC conformance plugin (conformance.go) from those fixtures
 //	plugingen host <dir> <plugins> <id>   drive a plugin through plugin.Environment (host.go)
 //	plugingen varints -         binary.PutVarint over a corpus, for io_rpc's framing
+//	plugingen sentinels -       what encodableError makes of the errors it gives a code
 //
 // Types come from reflection over plugin.API and plugin.Hooks, so they are exactly what the
 // compiler sees, including instantiated generics and aliases resolved. Parameter names and doc
@@ -24,6 +25,8 @@ package main
 import (
 	"bytes"
 	"crypto/x509"
+	"database/sql"
+	"database/sql/driver"
 	"encoding"
 	"encoding/base64"
 	"encoding/binary"
@@ -35,6 +38,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"io"
 	"math"
 	"math/big"
 	"os"
@@ -100,6 +104,26 @@ var handWritten = []reflect.Type{
 	reflect.TypeFor[plugin.Z_ChannelMemberWillBeAddedReturns](),
 	reflect.TypeFor[plugin.Z_TeamMemberWillBeAddedArgs](),
 	reflect.TypeFor[plugin.Z_TeamMemberWillBeAddedReturns](),
+}
+
+// dbWireStructs is every wire struct of the database driver's RPC (db_rpc.go). Its methods take
+// a plain value as often as a struct, so they are listed rather than derived.
+var dbWireStructs = []reflect.Type{
+	reflect.TypeFor[plugin.Z_DbStrErrReturn](),
+	reflect.TypeFor[plugin.Z_DbErrReturn](),
+	reflect.TypeFor[plugin.Z_DbInt64ErrReturn](),
+	reflect.TypeFor[plugin.Z_DbBoolReturn](),
+	reflect.TypeFor[plugin.Z_DbTxArgs](),
+	reflect.TypeFor[plugin.Z_DbStmtArgs](),
+	reflect.TypeFor[plugin.Z_DbIntReturn](),
+	reflect.TypeFor[plugin.Z_DbStmtQueryArgs](),
+	reflect.TypeFor[plugin.Z_DbConnArgs](),
+	reflect.TypeFor[plugin.Z_DbResultContErrReturn](),
+	reflect.TypeFor[plugin.Z_DbStrSliceReturn](),
+	reflect.TypeFor[plugin.Z_DbRowScanReturn](),
+	reflect.TypeFor[plugin.Z_DbRowScanArg](),
+	reflect.TypeFor[plugin.Z_DbRowsColumnArg](),
+	reflect.TypeFor[plugin.Z_DbRowsColumnTypePrecisionScaleReturn](),
 }
 
 // registered mirrors client_rpc.go's init(), keyed by the argument's source text there, which
@@ -183,6 +207,7 @@ type IDL struct {
 	GoVersion string          `json:"go_version"`
 	Hooks     []Method        `json:"hooks"`
 	API       []Method        `json:"api"`
+	Driver    []Method        `json:"driver"`
 	Wire      []string        `json:"wire"`
 	Register  []Registered    `json:"registered"`
 	HookIDs   []HookID        `json:"hook_ids"`
@@ -528,6 +553,24 @@ func serverMethods() (map[string]Method, error) {
 	return out, nil
 }
 
+// driverMethods parses db_rpc.go's RPC server: what each method takes and answers on the wire.
+// Unlike the hooks and API servers, an argument here is as often a plain string as a struct.
+func driverMethods() (map[string]Method, error) {
+	src, err := os.ReadFile(filepath.Join(pluginDir, "db_rpc.go"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]Method{}
+	sig := regexp.MustCompile(`func \(db \*dbRPCServer\) (\w+)\((?:\w+) (\*?\w+), ret \*(\w+)\) error \{`)
+	for _, m := range sig.FindAllSubmatch(src, -1) {
+		out[string(m[1])] = Method{
+			Args:    strings.TrimPrefix(string(m[2]), "*"),
+			Returns: string(m[3]),
+		}
+	}
+	return out, nil
+}
+
 // wireTypes maps a wire struct's name to the Go type gob sees for it.
 var wireTypes = map[string]reflect.Type{}
 
@@ -731,10 +774,31 @@ func buildIDL() (*IDL, error) {
 			idl.Wire = append(idl.Wire, pluginPkg+"."+name)
 		}
 	}
-	for _, t := range handWritten {
+	for _, t := range append(append([]reflect.Type{}, handWritten...), dbWireStructs...) {
 		wireTypes[t.Name()] = t
 		idl.Wire = append(idl.Wire, w.add(t))
 	}
+
+	// The database driver a plugin calls through (driver.go, `Driver`).
+	driverT := reflect.TypeFor[plugin.Driver]()
+	driver, err := methods(w, driverT, "driver.go", map[string]bool{})
+	if err != nil {
+		return nil, err
+	}
+	driverWire, err := driverMethods()
+	if err != nil {
+		return nil, err
+	}
+	for i := range driver {
+		m := &driver[i]
+		hand, ok := driverWire[m.Name]
+		if !ok {
+			return nil, fmt.Errorf("driver method %s has no RPC server in db_rpc.go", m.Name)
+		}
+		m.Args, m.Returns = hand.Args, hand.Returns
+		// Its servers answer no not-implemented error: the host always has a driver.
+	}
+	idl.Driver = driver
 	for _, side := range []struct {
 		kind    string
 		methods []Method
@@ -1094,6 +1158,23 @@ func decodeRender(name string, stream []byte) (any, error) {
 	return out, nil
 }
 
+// sentinels is what `encodableError` makes of the errors it gives a code (client_rpc.go): the
+// code, and the message Go's own error carries.
+func sentinels() []map[string]any {
+	out := []map[string]any{}
+	for _, err := range []error{
+		io.EOF, sql.ErrNoRows, sql.ErrConnDone, sql.ErrTxDone,
+		driver.ErrSkip, driver.ErrBadConn, driver.ErrRemoveArgument,
+	} {
+		encoded, ok := encodableError(err).(*plugin.ErrorString)
+		if !ok {
+			panic("encodableError did not wrap a sentinel")
+		}
+		out = append(out, map[string]any{"code": encoded.Code, "message": encoded.Err})
+	}
+	return out
+}
+
 // varints is `binary.PutVarint` over a corpus, as hex: the framing io_rpc.go puts in front of
 // every read of a remote reader.
 func varints() map[string]string {
@@ -1238,6 +1319,8 @@ func main() {
 			err = writeJSON(os.Args[2], idl)
 		case "gob":
 			err = gobOracle(os.Args[2])
+		case "sentinels":
+			err = writeJSON("-", sentinels())
 		case "varints":
 			err = writeJSON("-", varints())
 		case "echo":

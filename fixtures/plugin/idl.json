@@ -7450,6 +7450,432 @@
    "not_implemented": "API UpsertPropertyValuesWithOptions called but not implemented."
   }
  ],
+ "driver": [
+  {
+   "name": "Conn",
+   "doc": "Connection",
+   "params": [
+    {
+     "name": "isMaster",
+     "type": "bool"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "bool",
+   "returns": "Z_DbStrErrReturn"
+  },
+  {
+   "name": "ConnClose",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "ConnExec",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    },
+    {
+     "name": "q",
+     "type": "string"
+    },
+    {
+     "name": "args",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "github.com/mattermost/mattermost/server/public/plugin.ResultContainer"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbConnArgs",
+   "returns": "Z_DbResultContErrReturn"
+  },
+  {
+   "name": "ConnPing",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "ConnQuery",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    },
+    {
+     "name": "q",
+     "type": "string"
+    },
+    {
+     "name": "args",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbConnArgs",
+   "returns": "Z_DbStrErrReturn"
+  },
+  {
+   "name": "RowsClose",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "RowsColumnTypeDatabaseTypeName",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    },
+    {
+     "name": "index",
+     "type": "int"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    }
+   ],
+   "args": "Z_DbRowsColumnArg",
+   "returns": "string"
+  },
+  {
+   "name": "RowsColumnTypePrecisionScale",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    },
+    {
+     "name": "index",
+     "type": "int"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "int64"
+    },
+    {
+     "name": "",
+     "type": "int64"
+    },
+    {
+     "name": "",
+     "type": "bool"
+    }
+   ],
+   "args": "Z_DbRowsColumnArg",
+   "returns": "Z_DbRowsColumnTypePrecisionScaleReturn"
+  },
+  {
+   "name": "RowsColumns",
+   "doc": "Rows",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "[]string"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbStrSliceReturn"
+  },
+  {
+   "name": "RowsHasNextResultSet",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "bool"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbBoolReturn"
+  },
+  {
+   "name": "RowsNext",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    },
+    {
+     "name": "dest",
+     "type": "[]database/sql/driver.Value"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbRowScanArg",
+   "returns": "Z_DbRowScanReturn"
+  },
+  {
+   "name": "RowsNextResultSet",
+   "params": [
+    {
+     "name": "rowsID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "Stmt",
+   "doc": "Statement",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    },
+    {
+     "name": "q",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbStmtArgs",
+   "returns": "Z_DbStrErrReturn"
+  },
+  {
+   "name": "StmtClose",
+   "params": [
+    {
+     "name": "stID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "StmtExec",
+   "params": [
+    {
+     "name": "stID",
+     "type": "string"
+    },
+    {
+     "name": "args",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "github.com/mattermost/mattermost/server/public/plugin.ResultContainer"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbStmtQueryArgs",
+   "returns": "Z_DbResultContErrReturn"
+  },
+  {
+   "name": "StmtNumInput",
+   "params": [
+    {
+     "name": "stID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "int"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbIntReturn"
+  },
+  {
+   "name": "StmtQuery",
+   "params": [
+    {
+     "name": "stID",
+     "type": "string"
+    },
+    {
+     "name": "args",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbStmtQueryArgs",
+   "returns": "Z_DbStrErrReturn"
+  },
+  {
+   "name": "Tx",
+   "doc": "Transaction",
+   "params": [
+    {
+     "name": "connID",
+     "type": "string"
+    },
+    {
+     "name": "opts",
+     "type": "database/sql/driver.TxOptions"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "string"
+    },
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "Z_DbTxArgs",
+   "returns": "Z_DbStrErrReturn"
+  },
+  {
+   "name": "TxCommit",
+   "params": [
+    {
+     "name": "txID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  },
+  {
+   "name": "TxRollback",
+   "params": [
+    {
+     "name": "txID",
+     "type": "string"
+    }
+   ],
+   "results": [
+    {
+     "name": "",
+     "type": "error"
+    }
+   ],
+   "args": "string",
+   "returns": "Z_DbErrReturn"
+  }
+ ],
  "wire": [
   "github.com/mattermost/mattermost/server/public/plugin.Z_AddChannelMemberArgs",
   "github.com/mattermost/mattermost/server/public/plugin.Z_AddChannelMemberReturns",
@@ -7513,6 +7939,21 @@
   "github.com/mattermost/mattermost/server/public/plugin.Z_CreateUserAccessTokenReturns",
   "github.com/mattermost/mattermost/server/public/plugin.Z_CreateUserArgs",
   "github.com/mattermost/mattermost/server/public/plugin.Z_CreateUserReturns",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbBoolReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbConnArgs",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbErrReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbInt64ErrReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbIntReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbResultContErrReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanArg",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnArg",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnTypePrecisionScaleReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtArgs",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtQueryArgs",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStrErrReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStrSliceReturn",
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbTxArgs",
   "github.com/mattermost/mattermost/server/public/plugin.Z_DeleteAccessControlPolicyArgs",
   "github.com/mattermost/mattermost/server/public/plugin.Z_DeleteAccessControlPolicyReturns",
   "github.com/mattermost/mattermost/server/public/plugin.Z_DeleteChannelArgs",
@@ -9139,6 +9580,14 @@
    "kind": "slice",
    "elem": "crypto/x509/pkix.Extension"
   },
+  "[]database/sql/driver.NamedValue": {
+   "kind": "slice",
+   "elem": "database/sql/driver.NamedValue"
+  },
+  "[]database/sql/driver.Value": {
+   "kind": "slice",
+   "elem": "database/sql/driver.Value"
+  },
   "[]encoding/asn1.ObjectIdentifier": {
    "kind": "slice",
    "elem": "encoding/asn1.ObjectIdentifier"
@@ -9630,6 +10079,50 @@
      "type": "[]crypto/x509/pkix.AttributeTypeAndValue"
     }
    ]
+  },
+  "database/sql/driver.IsolationLevel": {
+   "kind": "int",
+   "name": "IsolationLevel",
+   "package": "database/sql/driver"
+  },
+  "database/sql/driver.NamedValue": {
+   "kind": "struct",
+   "name": "NamedValue",
+   "package": "database/sql/driver",
+   "fields": [
+    {
+     "name": "Name",
+     "type": "string"
+    },
+    {
+     "name": "Ordinal",
+     "type": "int"
+    },
+    {
+     "name": "Value",
+     "type": "database/sql/driver.Value"
+    }
+   ]
+  },
+  "database/sql/driver.TxOptions": {
+   "kind": "struct",
+   "name": "TxOptions",
+   "package": "database/sql/driver",
+   "fields": [
+    {
+     "name": "Isolation",
+     "type": "database/sql/driver.IsolationLevel"
+    },
+    {
+     "name": "ReadOnly",
+     "type": "bool"
+    }
+   ]
+  },
+  "database/sql/driver.Value": {
+   "kind": "interface",
+   "name": "Value",
+   "package": "database/sql/driver"
   },
   "encoding/asn1.ObjectIdentifier": {
    "kind": "slice",
@@ -19544,6 +20037,29 @@
     }
    ]
   },
+  "github.com/mattermost/mattermost/server/public/plugin.ResultContainer": {
+   "kind": "struct",
+   "name": "ResultContainer",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "LastID",
+     "type": "int64"
+    },
+    {
+     "name": "LastIDError",
+     "type": "error"
+    },
+    {
+     "name": "RowsAffected",
+     "type": "int64"
+    },
+    {
+     "name": "RowsAffectedError",
+     "type": "error"
+    }
+   ]
+  },
   "github.com/mattermost/mattermost/server/public/plugin.Z_AddChannelMemberArgs": {
    "kind": "struct",
    "name": "Z_AddChannelMemberArgs",
@@ -20417,6 +20933,223 @@
     {
      "name": "B",
      "type": "*github.com/mattermost/mattermost/server/public/model.AppError"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbBoolReturn": {
+   "kind": "struct",
+   "name": "Z_DbBoolReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "bool"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbConnArgs": {
+   "kind": "struct",
+   "name": "Z_DbConnArgs",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "string"
+    },
+    {
+     "name": "C",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbErrReturn": {
+   "kind": "struct",
+   "name": "Z_DbErrReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "error"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbInt64ErrReturn": {
+   "kind": "struct",
+   "name": "Z_DbInt64ErrReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "int64"
+    },
+    {
+     "name": "B",
+     "type": "error"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbIntReturn": {
+   "kind": "struct",
+   "name": "Z_DbIntReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "int"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbResultContErrReturn": {
+   "kind": "struct",
+   "name": "Z_DbResultContErrReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "github.com/mattermost/mattermost/server/public/plugin.ResultContainer"
+    },
+    {
+     "name": "B",
+     "type": "error"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanArg": {
+   "kind": "struct",
+   "name": "Z_DbRowScanArg",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "[]database/sql/driver.Value"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanReturn": {
+   "kind": "struct",
+   "name": "Z_DbRowScanReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "error"
+    },
+    {
+     "name": "B",
+     "type": "[]database/sql/driver.Value"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnArg": {
+   "kind": "struct",
+   "name": "Z_DbRowsColumnArg",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "int"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnTypePrecisionScaleReturn": {
+   "kind": "struct",
+   "name": "Z_DbRowsColumnTypePrecisionScaleReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "int64"
+    },
+    {
+     "name": "B",
+     "type": "int64"
+    },
+    {
+     "name": "C",
+     "type": "bool"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtArgs": {
+   "kind": "struct",
+   "name": "Z_DbStmtArgs",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "string"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtQueryArgs": {
+   "kind": "struct",
+   "name": "Z_DbStmtQueryArgs",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "[]database/sql/driver.NamedValue"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStrErrReturn": {
+   "kind": "struct",
+   "name": "Z_DbStrErrReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "error"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbStrSliceReturn": {
+   "kind": "struct",
+   "name": "Z_DbStrSliceReturn",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "[]string"
+    }
+   ]
+  },
+  "github.com/mattermost/mattermost/server/public/plugin.Z_DbTxArgs": {
+   "kind": "struct",
+   "name": "Z_DbTxArgs",
+   "package": "github.com/mattermost/mattermost/server/public/plugin",
+   "fields": [
+    {
+     "name": "A",
+     "type": "string"
+    },
+    {
+     "name": "B",
+     "type": "database/sql/driver.TxOptions"
     }
    ]
   },

@@ -30,6 +30,7 @@ use render::{fixture, render_typed, replacement_file, stream_digest, stream_payl
 
 struct Conformance {
     api: OnceLock<ApiClient>,
+    driver: OnceLock<mm_plugin::rpc::DriverClient>,
     transcript: Mutex<std::fs::File>,
 }
 
@@ -180,9 +181,10 @@ impl mm_plugin::rpc::HooksFileUpload for Conformance {
 }
 
 impl Plugin for Conformance {
-    fn set_api(&self, api: ApiClient, _driver: go_netrpc::Client) {
+    fn set_api(&self, api: ApiClient, driver: mm_plugin::rpc::DriverClient) {
         self.record(json!({ "set_api": true }));
         let _ = self.api.set(api);
+        let _ = self.driver.set(driver);
     }
 
     async fn on_activate(&self) -> Result<Z_OnActivateReturns, NotImplemented> {
@@ -291,6 +293,34 @@ impl Plugin for Conformance {
             "config": serde_json::from_slice::<Json>(&config).unwrap_or(Json::Null),
         }));
 
+        // The database, which the host serves on the second connection of OnActivate.
+        let driver = self.driver.get().expect("a driver");
+        let conn = driver.conn(true).await;
+        let ping = driver.conn_ping(conn.a.clone()).await;
+        let rows = driver
+            .conn_query(mm_plugin::wire::plugin::Z_DbConnArgs {
+                a: conn.a.clone(),
+                b: "SELECT 1".into(),
+                c: vec![mm_plugin::wire::sql_driver::NamedValue {
+                    name: "one".into(),
+                    ordinal: 1,
+                    // As Go's `int64(1)` crosses: the name is the concrete type's.
+                    value: Some(
+                        gobwire::Interface::new(gobwire::names::INT64, &1i64).expect("an int64"),
+                    ),
+                }],
+            })
+            .await;
+        let columns = driver.rows_columns(rows.a.clone()).await;
+        self.record(json!({
+            "driver": "tour",
+            "conn": conn.a,
+            "conn_error": render_typed(&conn.b),
+            "ping_error": render_typed(&ping.a),
+            "rows": rows.a,
+            "columns": columns.a,
+        }));
+
         self.record(json!({ "activated": true }));
         Ok(Z_OnActivateReturns::default())
     }
@@ -307,6 +337,7 @@ async fn main() {
         .expect("open the transcript");
     let plugin = Conformance {
         api: OnceLock::new(),
+        driver: OnceLock::new(),
         transcript: Mutex::new(transcript),
     };
     if let Err(e) = client_main(plugin).await {

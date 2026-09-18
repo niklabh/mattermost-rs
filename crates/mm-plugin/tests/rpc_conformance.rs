@@ -247,6 +247,78 @@ impl mm_plugin::rpc::PluginApiHttp for Fake {
     }
 }
 
+/// A database the conformance plugins can query: fixed answers, and a record of what was asked.
+#[derive(Default)]
+struct FakeDriver {
+    asked: Mutex<Vec<String>>,
+}
+
+impl mm_plugin::rpc::Driver for FakeDriver {
+    async fn conn(
+        &self,
+        is_master: bool,
+    ) -> Result<mm_plugin::wire::plugin::Z_DbStrErrReturn, NotImplemented> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(format!("Conn({is_master})"));
+        Ok(mm_plugin::wire::plugin::Z_DbStrErrReturn {
+            a: "conn-1".into(),
+            b: None,
+        })
+    }
+
+    async fn conn_ping(
+        &self,
+        conn_id: String,
+    ) -> Result<mm_plugin::wire::plugin::Z_DbErrReturn, NotImplemented> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(format!("ConnPing({conn_id})"));
+        // The sentinel `driver.ErrBadConn`, which must still be one on the far side.
+        Ok(mm_plugin::wire::plugin::Z_DbErrReturn {
+            a: mm_plugin::error::encodable_error(Some(&mm_plugin::error::PluginError::Sentinel(
+                mm_plugin::error::Sentinel::BadConn,
+            ))),
+        })
+    }
+
+    async fn conn_query(
+        &self,
+        args: mm_plugin::wire::plugin::Z_DbConnArgs,
+    ) -> Result<mm_plugin::wire::plugin::Z_DbStrErrReturn, NotImplemented> {
+        let named: Vec<String> = args
+            .c
+            .iter()
+            .map(|v| format!("{}={:?}", v.name, v.value.as_ref().map(|i| i.name.clone())))
+            .collect();
+        self.asked.lock().unwrap().push(format!(
+            "ConnQuery({}, {}, [{}])",
+            args.a,
+            args.b,
+            named.join(", ")
+        ));
+        Ok(mm_plugin::wire::plugin::Z_DbStrErrReturn {
+            a: "rows-1".into(),
+            b: None,
+        })
+    }
+
+    async fn rows_columns(
+        &self,
+        rows_id: String,
+    ) -> Result<mm_plugin::wire::plugin::Z_DbStrSliceReturn, NotImplemented> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(format!("RowsColumns({rows_id})"));
+        Ok(mm_plugin::wire::plugin::Z_DbStrSliceReturn {
+            a: vec!["id".into(), "name".into()],
+        })
+    }
+}
+
 macro_rules! fake_hooks {
     ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
         impl Hooks for Fake {
@@ -426,7 +498,8 @@ async fn rpc_rust_host_drives_the_go_plugin() {
     }
 
     let api = Arc::new(Fake::default());
-    let activated = within(hooks.on_activate(&api)).await;
+    let driver = Arc::new(FakeDriver::default());
+    let activated = within(hooks.on_activate(&api, &driver)).await;
     assert_eq!(activated.a, None, "OnActivate returned an error");
     let returned = within(call_every_hook(&hooks)).await;
 
@@ -444,6 +517,20 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         }
         served.insert(name, recorder.response());
     }
+    // What the Go plugin asked the database, in order.
+    let asked = driver.asked.lock().unwrap().clone();
+    assert_eq!(
+        asked,
+        [
+            "Conn(true)",
+            "ConnPing(conn-1)",
+            // Go registers an int64 under its own name, not `int`.
+            "ConnQuery(conn-1, SELECT 1, [one=Some(\"int64\")])",
+            "RowsColumns(rows-1)",
+        ],
+        "the plugin's database calls"
+    );
+
     // The hook that lends a reader and a writer at once.
     let replacement = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let file_returns = within(hooks.file_will_be_uploaded(
@@ -463,6 +550,7 @@ async fn rpc_rust_host_drives_the_go_plugin() {
     let mut go_hooks = BTreeMap::new();
     let mut go_api = BTreeMap::new();
     let mut go_config = None;
+    let mut driver_tour = None;
     let mut outward = None;
     let mut activated = false;
     for entry in read_transcript(&transcript) {
@@ -478,6 +566,8 @@ async fn rpc_rust_host_drives_the_go_plugin() {
                     go_api.insert(name.clone(), entry["returns"].clone());
                 }
             }
+        } else if entry.get("driver") == Some(&Json::from("tour")) {
+            driver_tour = Some(entry.clone());
         } else if entry.get("activated").is_some() {
             activated = true;
         }
@@ -594,6 +684,17 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         go_hooks["FileWillBeUploaded"]["stream"],
         stream_digest(&stream_payload()),
         "the file the plugin read"
+    );
+
+    // Go's decodableError turned the sentinel this host sent back into the real
+    // `driver.ErrBadConn`, which is what its own sql driver retries on (client_rpc.go).
+    let tour = driver_tour.expect("the Go plugin made no database calls");
+    assert_eq!(tour["conn"], Json::from("conn-1"));
+    assert_eq!(tour["columns"], serde_json::json!(["id", "name"]));
+    assert_eq!(
+        tour["ping_is_bad_conn"],
+        Json::Bool(true),
+        "the sentinel did not survive the round trip"
     );
 
     // The audit record crossed in its gob-safe form: the JSON round trip turned its integers

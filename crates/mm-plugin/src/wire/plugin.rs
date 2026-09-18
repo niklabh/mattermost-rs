@@ -58,6 +58,20 @@ pub struct HTTPRequestSubset {
     pub body: ::std::option::Option<::gobwire::Interface>,
 }
 
+/// Go `github.com/mattermost/mattermost/server/public/plugin.ResultContainer`, as gob sends it.
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "ResultContainer")]
+pub struct ResultContainer {
+    #[gob(name = "LastID")]
+    pub last_id: i64,
+    #[gob(name = "LastIDError")]
+    pub last_id_error: ::std::option::Option<::gobwire::Interface>,
+    #[gob(name = "RowsAffected")]
+    pub rows_affected: i64,
+    #[gob(name = "RowsAffectedError")]
+    pub rows_affected_error: ::std::option::Option<::gobwire::Interface>,
+}
+
 /// Go `github.com/mattermost/mattermost/server/public/plugin.Z_AddChannelMemberArgs`, as gob sends it.
 #[allow(non_camel_case_types)]
 #[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
@@ -711,6 +725,167 @@ pub struct Z_CreateUserReturns {
     pub a: ::std::option::Option<::std::boxed::Box<super::model::User>>,
     #[gob(name = "B")]
     pub b: ::std::option::Option<::std::boxed::Box<super::model::AppError>>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbBoolReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbBoolReturn")]
+pub struct Z_DbBoolReturn {
+    #[gob(name = "A")]
+    pub a: bool,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbConnArgs`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbConnArgs")]
+pub struct Z_DbConnArgs {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: ::std::string::String,
+    #[gob(name = "C")]
+    pub c: ::std::vec::Vec<super::sql_driver::NamedValue>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbErrReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbErrReturn")]
+pub struct Z_DbErrReturn {
+    #[gob(name = "A")]
+    pub a: ::std::option::Option<::gobwire::Interface>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbInt64ErrReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbInt64ErrReturn")]
+pub struct Z_DbInt64ErrReturn {
+    #[gob(name = "A")]
+    pub a: i64,
+    #[gob(name = "B")]
+    pub b: ::std::option::Option<::gobwire::Interface>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbIntReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbIntReturn")]
+pub struct Z_DbIntReturn {
+    #[gob(name = "A")]
+    pub a: i64,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbResultContErrReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbResultContErrReturn")]
+pub struct Z_DbResultContErrReturn {
+    #[gob(name = "A")]
+    pub a: ResultContainer,
+    #[gob(name = "B")]
+    pub b: ::std::option::Option<::gobwire::Interface>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanArg`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbRowScanArg")]
+pub struct Z_DbRowScanArg {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: ::std::vec::Vec<::std::option::Option<::gobwire::Interface>>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbRowScanReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbRowScanReturn")]
+pub struct Z_DbRowScanReturn {
+    #[gob(name = "A")]
+    pub a: ::std::option::Option<::gobwire::Interface>,
+    #[gob(name = "B")]
+    pub b: ::std::vec::Vec<::std::option::Option<::gobwire::Interface>>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnArg`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbRowsColumnArg")]
+pub struct Z_DbRowsColumnArg {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: i64,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbRowsColumnTypePrecisionScaleReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbRowsColumnTypePrecisionScaleReturn")]
+pub struct Z_DbRowsColumnTypePrecisionScaleReturn {
+    #[gob(name = "A")]
+    pub a: i64,
+    #[gob(name = "B")]
+    pub b: i64,
+    #[gob(name = "C")]
+    pub c: bool,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtArgs`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbStmtArgs")]
+pub struct Z_DbStmtArgs {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: ::std::string::String,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbStmtQueryArgs`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbStmtQueryArgs")]
+pub struct Z_DbStmtQueryArgs {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: ::std::vec::Vec<super::sql_driver::NamedValue>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbStrErrReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbStrErrReturn")]
+pub struct Z_DbStrErrReturn {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: ::std::option::Option<::gobwire::Interface>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbStrSliceReturn`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbStrSliceReturn")]
+pub struct Z_DbStrSliceReturn {
+    #[gob(name = "A")]
+    pub a: ::std::vec::Vec<::std::string::String>,
+}
+
+/// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DbTxArgs`, as gob sends it.
+#[allow(non_camel_case_types)]
+#[derive(::gobwire::Gob, Debug, Clone, Default, PartialEq)]
+#[gob(name = "Z_DbTxArgs")]
+pub struct Z_DbTxArgs {
+    #[gob(name = "A")]
+    pub a: ::std::string::String,
+    #[gob(name = "B")]
+    pub b: super::sql_driver::TxOptions,
 }
 
 /// Go `github.com/mattermost/mattermost/server/public/plugin.Z_DeleteAccessControlPolicyArgs`, as gob sends it.

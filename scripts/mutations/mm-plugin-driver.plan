@@ -1,0 +1,20 @@
+# Mutation plan for the database driver (plugin plan Phase 3) and the errors that cross with it.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-driver.plan
+#
+# `rpc_` is a Go plugin querying a Rust host, `sdk_` a Rust plugin querying the Go host, and
+# `error::tests` the helpers alone. The decisions: the sentinel codes encodableError writes and
+# decodableError reads, that an AppError and a pq.Error cross whole while anything else becomes an
+# ErrorString, and that each driver method calls its own name. CONTROL- lines must SURVIVE.
+
+sentinel-code-shifted	crates/mm-plugin/src/error.rs	            Sentinel::Eof => 1,\n            Sentinel::NoRows => 2,	            Sentinel::Eof => 2,\n            Sentinel::NoRows => 1,	pkg	sentinel_codes_match_go
+sentinel-bad-conn-code	crates/mm-plugin/src/error.rs	            Sentinel::BadConn => 6,	            Sentinel::BadConn => 5,	pkg	rpc_rust_host
+sentinel-not-decoded	crates/mm-plugin/src/error.rs	            match Sentinel::from_code(error.code) {\n                Some(sentinel) => PluginError::Sentinel(sentinel),	            match None {\n                Some(sentinel) => PluginError::Sentinel(sentinel),	pkg	error::tests
+sentinel-message-changed	crates/mm-plugin/src/error.rs	            Sentinel::BadConn => "driver: bad connection",	            Sentinel::BadConn => "driver: bad conn",	pkg	sentinel_codes_match_go
+app-error-wrapped	crates/mm-plugin/src/error.rs	        PluginError::App(app) => Interface::new(registered::APP_ERROR, &**app).ok(),	        PluginError::App(app) => wrap(0, &app.message),	pkg	error::tests
+plain-error-gets-a-code	crates/mm-plugin/src/error.rs	        PluginError::Message(message) => wrap(0, message),	        PluginError::Message(message) => wrap(1, message),	pkg	error::tests
+driver-method-name	crates/mm-plugin/src/rpc/driver.rs	        self.call("RowsColumns", &args).await	        self.call("RowsColumnsAll", &args).await	pkg	sdk_
+driver-server-name	crates/mm-plugin/src/rpc/driver.rs	        "Plugin.ConnQuery",	        "Plugin.ConnQueryAll",	pkg	rpc_rust_host
+driver-not-served	crates/mm-plugin/src/rpc/mod.rs	        register_driver(&mut driver_server, driver);	        let _ = driver;	pkg	rpc_rust_host
+CONTROL-rename-sentinel-binding	crates/mm-plugin/src/error.rs	        PluginError::Sentinel(sentinel) => wrap(sentinel.code(), sentinel.message()),	        PluginError::Sentinel(named) => wrap(named.code(), named.message()),	pkg	error::tests
+CONTROL-rename-driver-server	crates/mm-plugin/src/rpc/mod.rs	        let mut driver_server = Server::new();\n        register_driver(&mut driver_server, driver);	        let mut serving_driver = Server::new();\n        register_driver(&mut serving_driver, driver);\n        let driver_server = serving_driver;	pkg	rpc_rust_host

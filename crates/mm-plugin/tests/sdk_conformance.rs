@@ -335,6 +335,44 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
         }
     }
 
+    // The database: the Go host answered the plugin's four questions, and the sentinel it sent
+    // was still a sentinel when the plugin read it.
+    let asked: Vec<&Json> = go.iter().filter_map(|e| e.get("driver")).collect();
+    assert_eq!(
+        asked,
+        [
+            &Json::from("Conn"),
+            &Json::from("ConnPing"),
+            &Json::from("ConnQuery"),
+            &Json::from("RowsColumns")
+        ],
+        "the plugin's database calls, in order"
+    );
+    let query = go
+        .iter()
+        .find(|e| e.get("driver") == Some(&Json::from("ConnQuery")))
+        .expect("the query");
+    assert_eq!(query["query"], Json::from("SELECT 1"));
+    assert_eq!(query["args"], serde_json::json!(["one=1"]));
+
+    let tour = rust
+        .iter()
+        .find(|e| e.get("driver") == Some(&Json::from("tour")))
+        .expect("the Rust plugin's driver tour");
+    assert_eq!(tour["conn"], Json::from("conn-1"));
+    assert_eq!(tour["rows"], Json::from("rows-1"));
+    assert_eq!(tour["columns"], serde_json::json!(["id", "name"]));
+    assert_eq!(tour["conn_error"], serde_json::json!({"$iface": ""}));
+    // `driver.ErrBadConn` crossed as an ErrorString with Go's code 6.
+    assert_eq!(
+        tour["ping_error"],
+        serde_json::json!({
+            "$iface": "*plugin.ErrorString",
+            "value": {"Code": 6, "Err": "driver: bad connection"},
+        }),
+        "the sentinel the host sent"
+    );
+
     // The Go host lent the plugin a file and a writer: the replacement came back whole, and the
     // hook answered with the info it was given.
     let file = go

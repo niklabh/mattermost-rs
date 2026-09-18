@@ -32,7 +32,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn add_channel_member(
         &self,
         args: Z_AddChannelMemberArgs,
-    ) -> impl Future<Output = Result<Z_AddChannelMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_AddChannelMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -50,7 +52,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn add_reaction(
         &self,
         args: Z_AddReactionArgs,
-    ) -> impl Future<Output = Result<Z_AddReactionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_AddReactionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -70,7 +74,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn add_user_to_channel(
         &self,
         args: Z_AddUserToChannelArgs,
-    ) -> impl Future<Output = Result<Z_AddUserToChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_AddUserToChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -89,8 +95,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn check_access_control_expression(
         &self,
         args: Z_CheckAccessControlExpressionArgs,
-    ) -> impl Future<Output = Result<Z_CheckAccessControlExpressionReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_CheckAccessControlExpressionReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -114,7 +124,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn copy_file_infos(
         &self,
         args: Z_CopyFileInfosArgs,
-    ) -> impl Future<Output = Result<Z_CopyFileInfosReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CopyFileInfosReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -132,7 +144,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn count_property_fields(
         &self,
         args: Z_CountPropertyFieldsArgs,
-    ) -> impl Future<Output = Result<Z_CountPropertyFieldsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CountPropertyFieldsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -150,8 +164,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn count_property_fields_for_target(
         &self,
         args: Z_CountPropertyFieldsForTargetArgs,
-    ) -> impl Future<Output = Result<Z_CountPropertyFieldsForTargetReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_CountPropertyFieldsForTargetReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -169,7 +187,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_bot(
         &self,
         args: Z_CreateBotArgs,
-    ) -> impl Future<Output = Result<Z_CreateBotReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_CreateBotReturns, NotImplemented>>
+    + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -187,7 +206,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_channel(
         &self,
         args: Z_CreateChannelArgs,
-    ) -> impl Future<Output = Result<Z_CreateChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -205,8 +226,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_channel_sidebar_category(
         &self,
         args: Z_CreateChannelSidebarCategoryArgs,
-    ) -> impl Future<Output = Result<Z_CreateChannelSidebarCategoryReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_CreateChannelSidebarCategoryReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -226,7 +251,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_command(
         &self,
         args: Z_CreateCommandArgs,
-    ) -> impl Future<Output = Result<Z_CreateCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -244,8 +271,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_default_syncable_memberships(
         &self,
         args: Z_CreateDefaultSyncableMembershipsArgs,
-    ) -> impl Future<Output = Result<Z_CreateDefaultSyncableMembershipsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_CreateDefaultSyncableMembershipsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -263,7 +294,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_group(
         &self,
         args: Z_CreateGroupArgs,
-    ) -> impl Future<Output = Result<Z_CreateGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -281,7 +314,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_o_auth_app(
         &self,
         args: Z_CreateOAuthAppArgs,
-    ) -> impl Future<Output = Result<Z_CreateOAuthAppReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateOAuthAppReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -299,7 +334,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_post(
         &self,
         args: Z_CreatePostArgs,
-    ) -> impl Future<Output = Result<Z_CreatePostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreatePostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -322,7 +359,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_property_field(
         &self,
         args: Z_CreatePropertyFieldArgs,
-    ) -> impl Future<Output = Result<Z_CreatePropertyFieldReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreatePropertyFieldReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -340,7 +379,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_property_value(
         &self,
         args: Z_CreatePropertyValueArgs,
-    ) -> impl Future<Output = Result<Z_CreatePropertyValueReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreatePropertyValueReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -358,7 +399,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_session(
         &self,
         args: Z_CreateSessionArgs,
-    ) -> impl Future<Output = Result<Z_CreateSessionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateSessionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -376,7 +419,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_team(
         &self,
         args: Z_CreateTeamArgs,
-    ) -> impl Future<Output = Result<Z_CreateTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -395,7 +440,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_team_member(
         &self,
         args: Z_CreateTeamMemberArgs,
-    ) -> impl Future<Output = Result<Z_CreateTeamMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateTeamMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -414,7 +461,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_team_members(
         &self,
         args: Z_CreateTeamMembersArgs,
-    ) -> impl Future<Output = Result<Z_CreateTeamMembersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateTeamMembersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -433,8 +482,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_team_members_gracefully(
         &self,
         args: Z_CreateTeamMembersGracefullyArgs,
-    ) -> impl Future<Output = Result<Z_CreateTeamMembersGracefullyReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_CreateTeamMembersGracefullyReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -452,7 +505,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_upload_session(
         &self,
         args: Z_CreateUploadSessionArgs,
-    ) -> impl Future<Output = Result<Z_CreateUploadSessionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateUploadSessionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -470,7 +525,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_user(
         &self,
         args: Z_CreateUserArgs,
-    ) -> impl Future<Output = Result<Z_CreateUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -487,7 +544,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn create_user_access_token(
         &self,
         args: Z_CreateUserAccessTokenArgs,
-    ) -> impl Future<Output = Result<Z_CreateUserAccessTokenReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_CreateUserAccessTokenReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -507,8 +566,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_access_control_policy(
         &self,
         args: Z_DeleteAccessControlPolicyArgs,
-    ) -> impl Future<Output = Result<Z_DeleteAccessControlPolicyReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeleteAccessControlPolicyReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -526,7 +589,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_channel(
         &self,
         args: Z_DeleteChannelArgs,
-    ) -> impl Future<Output = Result<Z_DeleteChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -545,7 +610,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_channel_member(
         &self,
         args: Z_DeleteChannelMemberArgs,
-    ) -> impl Future<Output = Result<Z_DeleteChannelMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteChannelMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -563,7 +630,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_command(
         &self,
         args: Z_DeleteCommandArgs,
-    ) -> impl Future<Output = Result<Z_DeleteCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -582,7 +651,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_ephemeral_post(
         &self,
         args: Z_DeleteEphemeralPostArgs,
-    ) -> impl Future<Output = Result<Z_DeleteEphemeralPostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteEphemeralPostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -600,7 +671,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_group(
         &self,
         args: Z_DeleteGroupArgs,
-    ) -> impl Future<Output = Result<Z_DeleteGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -618,8 +691,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_group_constrained_memberships(
         &self,
         args: Z_DeleteGroupConstrainedMembershipsArgs,
-    ) -> impl Future<Output = Result<Z_DeleteGroupConstrainedMembershipsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeleteGroupConstrainedMembershipsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -638,7 +715,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_group_member(
         &self,
         args: Z_DeleteGroupMemberArgs,
-    ) -> impl Future<Output = Result<Z_DeleteGroupMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteGroupMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -656,7 +735,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_group_syncable(
         &self,
         args: Z_DeleteGroupSyncableArgs,
-    ) -> impl Future<Output = Result<Z_DeleteGroupSyncableReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteGroupSyncableReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -674,7 +755,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_o_auth_app(
         &self,
         args: Z_DeleteOAuthAppArgs,
-    ) -> impl Future<Output = Result<Z_DeleteOAuthAppReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteOAuthAppReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -692,7 +775,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_post(
         &self,
         args: Z_DeletePostArgs,
-    ) -> impl Future<Output = Result<Z_DeletePostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeletePostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -711,8 +796,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_preferences_for_user(
         &self,
         args: Z_DeletePreferencesForUserArgs,
-    ) -> impl Future<Output = Result<Z_DeletePreferencesForUserReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePreferencesForUserReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -733,7 +822,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_property_field(
         &self,
         args: Z_DeletePropertyFieldArgs,
-    ) -> impl Future<Output = Result<Z_DeletePropertyFieldReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeletePropertyFieldReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -751,7 +842,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_property_value(
         &self,
         args: Z_DeletePropertyValueArgs,
-    ) -> impl Future<Output = Result<Z_DeletePropertyValueReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeletePropertyValueReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -770,8 +863,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_property_value_with_options(
         &self,
         args: Z_DeletePropertyValueWithOptionsArgs,
-    ) -> impl Future<Output = Result<Z_DeletePropertyValueWithOptionsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePropertyValueWithOptionsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -789,8 +886,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_property_values_for_field(
         &self,
         args: Z_DeletePropertyValuesForFieldArgs,
-    ) -> impl Future<Output = Result<Z_DeletePropertyValuesForFieldReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePropertyValuesForFieldReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -810,7 +911,10 @@ pub trait PluginApi: Send + Sync + 'static {
         &self,
         args: Z_DeletePropertyValuesForFieldWithOptionsArgs,
     ) -> impl Future<
-        Output = Result<Z_DeletePropertyValuesForFieldWithOptionsReturns, NotImplemented>,
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePropertyValuesForFieldWithOptionsReturns,
+            NotImplemented,
+        >,
     > + Send {
         let _ = args;
         async { Err(NotImplemented) }
@@ -829,8 +933,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_property_values_for_target(
         &self,
         args: Z_DeletePropertyValuesForTargetArgs,
-    ) -> impl Future<Output = Result<Z_DeletePropertyValuesForTargetReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePropertyValuesForTargetReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -851,7 +959,10 @@ pub trait PluginApi: Send + Sync + 'static {
         &self,
         args: Z_DeletePropertyValuesForTargetWithOptionsArgs,
     ) -> impl Future<
-        Output = Result<Z_DeletePropertyValuesForTargetWithOptionsReturns, NotImplemented>,
+        Output = Result<
+            super::super::wire::plugin::Z_DeletePropertyValuesForTargetWithOptionsReturns,
+            NotImplemented,
+        >,
     > + Send {
         let _ = args;
         async { Err(NotImplemented) }
@@ -870,7 +981,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_team(
         &self,
         args: Z_DeleteTeamArgs,
-    ) -> impl Future<Output = Result<Z_DeleteTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -889,7 +1002,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_team_member(
         &self,
         args: Z_DeleteTeamMemberArgs,
-    ) -> impl Future<Output = Result<Z_DeleteTeamMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteTeamMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -907,7 +1022,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn delete_user(
         &self,
         args: Z_DeleteUserArgs,
-    ) -> impl Future<Output = Result<Z_DeleteUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DeleteUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -925,7 +1042,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn disable_plugin(
         &self,
         args: Z_DisablePluginArgs,
-    ) -> impl Future<Output = Result<Z_DisablePluginReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_DisablePluginReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -943,7 +1062,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn enable_plugin(
         &self,
         args: Z_EnablePluginArgs,
-    ) -> impl Future<Output = Result<Z_EnablePluginReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_EnablePluginReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -960,7 +1081,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn ensure_bot_user(
         &self,
         args: Z_EnsureBotUserArgs,
-    ) -> impl Future<Output = Result<Z_EnsureBotUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_EnsureBotUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -988,7 +1111,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn evaluate_access_control(
         &self,
         args: Z_EvaluateAccessControlArgs,
-    ) -> impl Future<Output = Result<Z_EvaluateAccessControlReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_EvaluateAccessControlReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1006,7 +1131,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn execute_slash_command(
         &self,
         args: Z_ExecuteSlashCommandArgs,
-    ) -> impl Future<Output = Result<Z_ExecuteSlashCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ExecuteSlashCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1024,7 +1151,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn extend_session_expiry(
         &self,
         args: Z_ExtendSessionExpiryArgs,
-    ) -> impl Future<Output = Result<Z_ExtendSessionExpiryReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ExtendSessionExpiryReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1043,8 +1172,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_access_control_fields_autocomplete(
         &self,
         args: Z_GetAccessControlFieldsAutocompleteArgs,
-    ) -> impl Future<Output = Result<Z_GetAccessControlFieldsAutocompleteReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetAccessControlFieldsAutocompleteReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1064,7 +1197,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_access_control_policy(
         &self,
         args: Z_GetAccessControlPolicyArgs,
-    ) -> impl Future<Output = Result<Z_GetAccessControlPolicyReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetAccessControlPolicyReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1083,8 +1221,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_access_control_visual_ast(
         &self,
         args: Z_GetAccessControlVisualASTArgs,
-    ) -> impl Future<Output = Result<Z_GetAccessControlVisualASTReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetAccessControlVisualASTReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1102,7 +1244,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_bot(
         &self,
         args: Z_GetBotArgs,
-    ) -> impl Future<Output = Result<Z_GetBotReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetBotReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1120,7 +1263,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_bots(
         &self,
         args: Z_GetBotsArgs,
-    ) -> impl Future<Output = Result<Z_GetBotsReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetBotsReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1138,7 +1282,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_bundle_path(
         &self,
         args: Z_GetBundlePathArgs,
-    ) -> impl Future<Output = Result<Z_GetBundlePathReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetBundlePathReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1156,7 +1302,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel(
         &self,
         args: Z_GetChannelArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1174,7 +1322,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_by_name(
         &self,
         args: Z_GetChannelByNameArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelByNameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelByNameReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1193,8 +1343,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_by_name_for_team_name(
         &self,
         args: Z_GetChannelByNameForTeamNameArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelByNameForTeamNameReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetChannelByNameForTeamNameReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1213,7 +1367,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_member(
         &self,
         args: Z_GetChannelMemberArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1232,7 +1388,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_members(
         &self,
         args: Z_GetChannelMembersArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelMembersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelMembersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1251,7 +1409,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_members_by_ids(
         &self,
         args: Z_GetChannelMembersByIdsArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelMembersByIdsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetChannelMembersByIdsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1270,8 +1433,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_members_for_user(
         &self,
         args: Z_GetChannelMembersForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelMembersForUserReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetChannelMembersForUserReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1291,7 +1458,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_of_type(
         &self,
         args: Z_GetChannelOfTypeArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelOfTypeReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelOfTypeReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1309,8 +1478,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_sidebar_categories(
         &self,
         args: Z_GetChannelSidebarCategoriesArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelSidebarCategoriesReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetChannelSidebarCategoriesReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1328,7 +1501,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channel_stats(
         &self,
         args: Z_GetChannelStatsArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelStatsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetChannelStatsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1349,8 +1524,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_channels_for_team_for_user(
         &self,
         args: Z_GetChannelsForTeamForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetChannelsForTeamForUserReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetChannelsForTeamForUserReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1367,7 +1546,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_cloud_limits(
         &self,
         args: Z_GetCloudLimitsArgs,
-    ) -> impl Future<Output = Result<Z_GetCloudLimitsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetCloudLimitsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1385,7 +1566,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_command(
         &self,
         args: Z_GetCommandArgs,
-    ) -> impl Future<Output = Result<Z_GetCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1403,7 +1586,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_config(
         &self,
         args: Z_GetConfigArgs,
-    ) -> impl Future<Output = Result<Z_GetConfigReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetConfigReturns, NotImplemented>>
+    + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1421,7 +1605,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_diagnostic_id(
         &self,
         args: Z_GetDiagnosticIdArgs,
-    ) -> impl Future<Output = Result<Z_GetDiagnosticIdReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetDiagnosticIdReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1441,7 +1627,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_direct_channel(
         &self,
         args: Z_GetDirectChannelArgs,
-    ) -> impl Future<Output = Result<Z_GetDirectChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetDirectChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1459,7 +1647,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_emoji(
         &self,
         args: Z_GetEmojiArgs,
-    ) -> impl Future<Output = Result<Z_GetEmojiReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetEmojiReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1477,7 +1666,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_emoji_by_name(
         &self,
         args: Z_GetEmojiByNameArgs,
-    ) -> impl Future<Output = Result<Z_GetEmojiByNameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetEmojiByNameReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1495,7 +1686,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_emoji_image(
         &self,
         args: Z_GetEmojiImageArgs,
-    ) -> impl Future<Output = Result<Z_GetEmojiImageReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetEmojiImageReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1515,7 +1708,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_emoji_list(
         &self,
         args: Z_GetEmojiListArgs,
-    ) -> impl Future<Output = Result<Z_GetEmojiListReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetEmojiListReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1533,7 +1728,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_file(
         &self,
         args: Z_GetFileArgs,
-    ) -> impl Future<Output = Result<Z_GetFileReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetFileReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1551,7 +1747,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_file_info(
         &self,
         args: Z_GetFileInfoArgs,
-    ) -> impl Future<Output = Result<Z_GetFileInfoReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetFileInfoReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1569,7 +1767,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_file_infos(
         &self,
         args: Z_GetFileInfosArgs,
-    ) -> impl Future<Output = Result<Z_GetFileInfosReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetFileInfosReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1587,7 +1787,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_file_link(
         &self,
         args: Z_GetFileLinkArgs,
-    ) -> impl Future<Output = Result<Z_GetFileLinkReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetFileLinkReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1605,7 +1807,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group(
         &self,
         args: Z_GetGroupArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetGroupReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1623,7 +1826,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_by_name(
         &self,
         args: Z_GetGroupByNameArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupByNameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupByNameReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1641,7 +1846,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_by_remote_id(
         &self,
         args: Z_GetGroupByRemoteIDArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupByRemoteIDReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupByRemoteIDReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1661,7 +1868,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_channel(
         &self,
         args: Z_GetGroupChannelArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1679,7 +1888,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_member_users(
         &self,
         args: Z_GetGroupMemberUsersArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupMemberUsersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupMemberUsersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1697,7 +1908,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_syncable(
         &self,
         args: Z_GetGroupSyncableArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupSyncableReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupSyncableReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1715,7 +1928,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_group_syncables(
         &self,
         args: Z_GetGroupSyncablesArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupSyncablesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupSyncablesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1733,7 +1948,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_groups(
         &self,
         args: Z_GetGroupsArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupsReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetGroupsReturns, NotImplemented>>
+    + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1751,7 +1967,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_groups_by_source(
         &self,
         args: Z_GetGroupsBySourceArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupsBySourceReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupsBySourceReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1770,7 +1988,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_groups_for_user(
         &self,
         args: Z_GetGroupsForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetGroupsForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetGroupsForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1791,7 +2011,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_ldap_user_attributes(
         &self,
         args: Z_GetLDAPUserAttributesArgs,
-    ) -> impl Future<Output = Result<Z_GetLDAPUserAttributesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetLDAPUserAttributesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1810,7 +2032,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_license(
         &self,
         args: Z_GetLicenseArgs,
-    ) -> impl Future<Output = Result<Z_GetLicenseReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetLicenseReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1828,7 +2052,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_o_auth_app(
         &self,
         args: Z_GetOAuthAppArgs,
-    ) -> impl Future<Output = Result<Z_GetOAuthAppReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetOAuthAppReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1846,7 +2072,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_plugin_config(
         &self,
         args: Z_GetPluginConfigArgs,
-    ) -> impl Future<Output = Result<Z_GetPluginConfigReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPluginConfigReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1864,7 +2092,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_plugin_id(
         &self,
         args: Z_GetPluginIDArgs,
-    ) -> impl Future<Output = Result<Z_GetPluginIDReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPluginIDReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1882,7 +2112,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_plugin_status(
         &self,
         args: Z_GetPluginStatusArgs,
-    ) -> impl Future<Output = Result<Z_GetPluginStatusReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPluginStatusReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1900,7 +2132,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_plugins(
         &self,
         args: Z_GetPluginsArgs,
-    ) -> impl Future<Output = Result<Z_GetPluginsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPluginsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1918,7 +2152,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_post(
         &self,
         args: Z_GetPostArgs,
-    ) -> impl Future<Output = Result<Z_GetPostReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetPostReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1936,7 +2171,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_post_thread(
         &self,
         args: Z_GetPostThreadArgs,
-    ) -> impl Future<Output = Result<Z_GetPostThreadReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPostThreadReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1955,7 +2192,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_posts_after(
         &self,
         args: Z_GetPostsAfterArgs,
-    ) -> impl Future<Output = Result<Z_GetPostsAfterReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPostsAfterReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1974,7 +2213,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_posts_before(
         &self,
         args: Z_GetPostsBeforeArgs,
-    ) -> impl Future<Output = Result<Z_GetPostsBeforeReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPostsBeforeReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -1993,7 +2234,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_posts_for_channel(
         &self,
         args: Z_GetPostsForChannelArgs,
-    ) -> impl Future<Output = Result<Z_GetPostsForChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPostsForChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2012,7 +2255,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_posts_since(
         &self,
         args: Z_GetPostsSinceArgs,
-    ) -> impl Future<Output = Result<Z_GetPostsSinceReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPostsSinceReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2032,7 +2277,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_preference_for_user(
         &self,
         args: Z_GetPreferenceForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetPreferenceForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPreferenceForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2051,7 +2298,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_preferences_for_user(
         &self,
         args: Z_GetPreferencesForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetPreferencesForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPreferencesForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2069,7 +2318,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_profile_image(
         &self,
         args: Z_GetProfileImageArgs,
-    ) -> impl Future<Output = Result<Z_GetProfileImageReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetProfileImageReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2087,7 +2338,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_field(
         &self,
         args: Z_GetPropertyFieldArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyFieldReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPropertyFieldReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2105,7 +2358,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_field_by_name(
         &self,
         args: Z_GetPropertyFieldByNameArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyFieldByNameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetPropertyFieldByNameReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2123,7 +2381,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_fields(
         &self,
         args: Z_GetPropertyFieldsArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyFieldsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPropertyFieldsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2141,7 +2401,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_group(
         &self,
         args: Z_GetPropertyGroupArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPropertyGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2159,7 +2421,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_value(
         &self,
         args: Z_GetPropertyValueArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyValueReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPropertyValueReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2177,7 +2441,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_property_values(
         &self,
         args: Z_GetPropertyValuesArgs,
-    ) -> impl Future<Output = Result<Z_GetPropertyValuesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetPropertyValuesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2196,8 +2462,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_public_channels_for_team(
         &self,
         args: Z_GetPublicChannelsForTeamArgs,
-    ) -> impl Future<Output = Result<Z_GetPublicChannelsForTeamReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_GetPublicChannelsForTeamReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2215,7 +2485,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_reactions(
         &self,
         args: Z_GetReactionsArgs,
-    ) -> impl Future<Output = Result<Z_GetReactionsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetReactionsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2233,7 +2505,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_server_version(
         &self,
         args: Z_GetServerVersionArgs,
-    ) -> impl Future<Output = Result<Z_GetServerVersionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetServerVersionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2250,7 +2524,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_session(
         &self,
         args: Z_GetSessionArgs,
-    ) -> impl Future<Output = Result<Z_GetSessionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetSessionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2268,7 +2544,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_system_install_date(
         &self,
         args: Z_GetSystemInstallDateArgs,
-    ) -> impl Future<Output = Result<Z_GetSystemInstallDateReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetSystemInstallDateReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2286,7 +2564,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team(
         &self,
         args: Z_GetTeamArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetTeamReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2304,7 +2583,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_by_name(
         &self,
         args: Z_GetTeamByNameArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamByNameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamByNameReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2322,7 +2603,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_icon(
         &self,
         args: Z_GetTeamIconArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamIconReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamIconReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2341,7 +2624,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_member(
         &self,
         args: Z_GetTeamMemberArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2360,7 +2645,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_members(
         &self,
         args: Z_GetTeamMembersArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamMembersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamMembersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2379,7 +2666,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_members_for_user(
         &self,
         args: Z_GetTeamMembersForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamMembersForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamMembersForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2397,7 +2686,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_team_stats(
         &self,
         args: Z_GetTeamStatsArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamStatsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamStatsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2415,7 +2706,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_teams(
         &self,
         args: Z_GetTeamsArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamsReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetTeamsReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2434,7 +2726,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_teams_for_user(
         &self,
         args: Z_GetTeamsForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamsForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamsForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2453,7 +2747,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_teams_unread_for_user(
         &self,
         args: Z_GetTeamsUnreadForUserArgs,
-    ) -> impl Future<Output = Result<Z_GetTeamsUnreadForUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTeamsUnreadForUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2471,7 +2767,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_telemetry_id(
         &self,
         args: Z_GetTelemetryIdArgs,
-    ) -> impl Future<Output = Result<Z_GetTelemetryIdReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetTelemetryIdReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2489,7 +2787,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_unsanitized_config(
         &self,
         args: Z_GetUnsanitizedConfigArgs,
-    ) -> impl Future<Output = Result<Z_GetUnsanitizedConfigReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUnsanitizedConfigReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2507,7 +2807,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_upload_session(
         &self,
         args: Z_GetUploadSessionArgs,
-    ) -> impl Future<Output = Result<Z_GetUploadSessionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUploadSessionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2525,7 +2827,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_user(
         &self,
         args: Z_GetUserArgs,
-    ) -> impl Future<Output = Result<Z_GetUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetUserReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2543,7 +2846,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_user_by_email(
         &self,
         args: Z_GetUserByEmailArgs,
-    ) -> impl Future<Output = Result<Z_GetUserByEmailReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUserByEmailReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2561,7 +2866,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_user_by_username(
         &self,
         args: Z_GetUserByUsernameArgs,
-    ) -> impl Future<Output = Result<Z_GetUserByUsernameReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUserByUsernameReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2579,7 +2886,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_user_status(
         &self,
         args: Z_GetUserStatusArgs,
-    ) -> impl Future<Output = Result<Z_GetUserStatusReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUserStatusReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2597,7 +2906,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_user_statuses_by_ids(
         &self,
         args: Z_GetUserStatusesByIdsArgs,
-    ) -> impl Future<Output = Result<Z_GetUserStatusesByIdsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUserStatusesByIdsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2617,7 +2928,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_users(
         &self,
         args: Z_GetUsersArgs,
-    ) -> impl Future<Output = Result<Z_GetUsersReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_GetUsersReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2635,7 +2947,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_users_by_ids(
         &self,
         args: Z_GetUsersByIdsArgs,
-    ) -> impl Future<Output = Result<Z_GetUsersByIdsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUsersByIdsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2653,7 +2967,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_users_by_usernames(
         &self,
         args: Z_GetUsersByUsernamesArgs,
-    ) -> impl Future<Output = Result<Z_GetUsersByUsernamesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUsersByUsernamesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2673,7 +2989,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_users_in_channel(
         &self,
         args: Z_GetUsersInChannelArgs,
-    ) -> impl Future<Output = Result<Z_GetUsersInChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUsersInChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2692,7 +3010,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn get_users_in_team(
         &self,
         args: Z_GetUsersInTeamArgs,
-    ) -> impl Future<Output = Result<Z_GetUsersInTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_GetUsersInTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2710,7 +3030,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn has_permission_to(
         &self,
         args: Z_HasPermissionToArgs,
-    ) -> impl Future<Output = Result<Z_HasPermissionToReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_HasPermissionToReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2729,7 +3051,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn has_permission_to_channel(
         &self,
         args: Z_HasPermissionToChannelArgs,
-    ) -> impl Future<Output = Result<Z_HasPermissionToChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_HasPermissionToChannelReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2748,7 +3075,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn has_permission_to_team(
         &self,
         args: Z_HasPermissionToTeamArgs,
-    ) -> impl Future<Output = Result<Z_HasPermissionToTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_HasPermissionToTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2768,7 +3097,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn invite_remote_to_channel(
         &self,
         args: Z_InviteRemoteToChannelArgs,
-    ) -> impl Future<Output = Result<Z_InviteRemoteToChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_InviteRemoteToChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2786,7 +3117,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn is_enterprise_ready(
         &self,
         args: Z_IsEnterpriseReadyArgs,
-    ) -> impl Future<Output = Result<Z_IsEnterpriseReadyReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_IsEnterpriseReadyReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2807,7 +3140,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_compare_and_delete(
         &self,
         args: Z_KVCompareAndDeleteArgs,
-    ) -> impl Future<Output = Result<Z_KVCompareAndDeleteReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_KVCompareAndDeleteReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2829,7 +3164,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_compare_and_set(
         &self,
         args: Z_KVCompareAndSetArgs,
-    ) -> impl Future<Output = Result<Z_KVCompareAndSetReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_KVCompareAndSetReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2847,7 +3184,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_delete(
         &self,
         args: Z_KVDeleteArgs,
-    ) -> impl Future<Output = Result<Z_KVDeleteReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_KVDeleteReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2865,7 +3203,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_delete_all(
         &self,
         args: Z_KVDeleteAllArgs,
-    ) -> impl Future<Output = Result<Z_KVDeleteAllReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_KVDeleteAllReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2883,7 +3223,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_get(
         &self,
         args: Z_KVGetArgs,
-    ) -> impl Future<Output = Result<Z_KVGetReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_KVGetReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2901,7 +3242,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_list(
         &self,
         args: Z_KVListArgs,
-    ) -> impl Future<Output = Result<Z_KVListReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_KVListReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2920,7 +3262,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_set(
         &self,
         args: Z_KVSetArgs,
-    ) -> impl Future<Output = Result<Z_KVSetReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_KVSetReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2938,7 +3281,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_set_with_expiry(
         &self,
         args: Z_KVSetWithExpiryArgs,
-    ) -> impl Future<Output = Result<Z_KVSetWithExpiryReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_KVSetWithExpiryReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2958,7 +3303,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn kv_set_with_options(
         &self,
         args: Z_KVSetWithOptionsArgs,
-    ) -> impl Future<Output = Result<Z_KVSetWithOptionsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_KVSetWithOptionsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2977,7 +3324,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn list_built_in_commands(
         &self,
         args: Z_ListBuiltInCommandsArgs,
-    ) -> impl Future<Output = Result<Z_ListBuiltInCommandsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ListBuiltInCommandsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -2998,7 +3347,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn list_commands(
         &self,
         args: Z_ListCommandsArgs,
-    ) -> impl Future<Output = Result<Z_ListCommandsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ListCommandsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3017,7 +3368,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn list_custom_commands(
         &self,
         args: Z_ListCustomCommandsArgs,
-    ) -> impl Future<Output = Result<Z_ListCustomCommandsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ListCustomCommandsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3036,7 +3389,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn list_plugin_commands(
         &self,
         args: Z_ListPluginCommandsArgs,
-    ) -> impl Future<Output = Result<Z_ListPluginCommandsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ListPluginCommandsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3057,8 +3412,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn load_plugin_configuration(
         &self,
         args: Z_LoadPluginConfigurationArgsArgs,
-    ) -> impl Future<Output = Result<Z_LoadPluginConfigurationArgsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_LoadPluginConfigurationArgsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3078,7 +3437,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_audit_rec(
         &self,
         args: Z_LogAuditRecArgs,
-    ) -> impl Future<Output = Result<Z_LogAuditRecReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_LogAuditRecReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3098,7 +3459,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_audit_rec_with_level(
         &self,
         args: Z_LogAuditRecWithLevelArgs,
-    ) -> impl Future<Output = Result<Z_LogAuditRecWithLevelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_LogAuditRecWithLevelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3120,7 +3483,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_debug(
         &self,
         args: Z_LogDebugArgs,
-    ) -> impl Future<Output = Result<Z_LogDebugReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_LogDebugReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3142,7 +3506,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_error(
         &self,
         args: Z_LogErrorArgs,
-    ) -> impl Future<Output = Result<Z_LogErrorReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_LogErrorReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3164,7 +3529,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_info(
         &self,
         args: Z_LogInfoArgs,
-    ) -> impl Future<Output = Result<Z_LogInfoReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_LogInfoReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3186,7 +3552,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn log_warn(
         &self,
         args: Z_LogWarnArgs,
-    ) -> impl Future<Output = Result<Z_LogWarnReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_LogWarnReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3205,7 +3572,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn open_interactive_dialog(
         &self,
         args: Z_OpenInteractiveDialogArgs,
-    ) -> impl Future<Output = Result<Z_OpenInteractiveDialogReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_OpenInteractiveDialogReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3223,7 +3592,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn patch_bot(
         &self,
         args: Z_PatchBotArgs,
-    ) -> impl Future<Output = Result<Z_PatchBotReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_PatchBotReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3244,8 +3614,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn patch_channel_members_notifications(
         &self,
         args: Z_PatchChannelMembersNotificationsArgs,
-    ) -> impl Future<Output = Result<Z_PatchChannelMembersNotificationsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_PatchChannelMembersNotificationsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3263,7 +3637,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn permanent_delete_bot(
         &self,
         args: Z_PermanentDeleteBotArgs,
-    ) -> impl Future<Output = Result<Z_PermanentDeleteBotReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_PermanentDeleteBotReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3285,8 +3661,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn publish_plugin_cluster_event(
         &self,
         args: Z_PublishPluginClusterEventArgs,
-    ) -> impl Future<Output = Result<Z_PublishPluginClusterEventReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_PublishPluginClusterEventReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3305,7 +3685,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn publish_user_typing(
         &self,
         args: Z_PublishUserTypingArgs,
-    ) -> impl Future<Output = Result<Z_PublishUserTypingReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_PublishUserTypingReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3325,7 +3707,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn publish_web_socket_event(
         &self,
         args: Z_PublishWebSocketEventArgs,
-    ) -> impl Future<Output = Result<Z_PublishWebSocketEventReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_PublishWebSocketEventReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3344,8 +3728,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn query_users_for_access_control_expression(
         &self,
         args: Z_QueryUsersForAccessControlExpressionArgs,
-    ) -> impl Future<Output = Result<Z_QueryUsersForAccessControlExpressionReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_QueryUsersForAccessControlExpressionReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3363,7 +3751,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn read_file(
         &self,
         args: Z_ReadFileArgs,
-    ) -> impl Future<Output = Result<Z_ReadFileReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_ReadFileReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3386,7 +3775,10 @@ pub trait PluginApi: Send + Sync + 'static {
         &self,
         args: Z_ReceiveSharedChannelProfileImageSyncMsgArgs,
     ) -> impl Future<
-        Output = Result<Z_ReceiveSharedChannelProfileImageSyncMsgReturns, NotImplemented>,
+        Output = Result<
+            super::super::wire::plugin::Z_ReceiveSharedChannelProfileImageSyncMsgReturns,
+            NotImplemented,
+        >,
     > + Send {
         let _ = args;
         async { Err(NotImplemented) }
@@ -3412,8 +3804,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn receive_shared_channel_sync_msg(
         &self,
         args: Z_ReceiveSharedChannelSyncMsgArgs,
-    ) -> impl Future<Output = Result<Z_ReceiveSharedChannelSyncMsgReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_ReceiveSharedChannelSyncMsgReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3437,7 +3833,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn register_channel_guard(
         &self,
         args: Z_RegisterChannelGuardArgs,
-    ) -> impl Future<Output = Result<Z_RegisterChannelGuardReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RegisterChannelGuardReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3454,8 +3852,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn register_collection_and_topic(
         &self,
         args: Z_RegisterCollectionAndTopicArgs,
-    ) -> impl Future<Output = Result<Z_RegisterCollectionAndTopicReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_RegisterCollectionAndTopicReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3474,7 +3876,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn register_command(
         &self,
         args: Z_RegisterCommandArgs,
-    ) -> impl Future<Output = Result<Z_RegisterCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RegisterCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3495,8 +3899,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn register_plugin_for_shared_channels(
         &self,
         args: Z_RegisterPluginForSharedChannelsArgs,
-    ) -> impl Future<Output = Result<Z_RegisterPluginForSharedChannelsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_RegisterPluginForSharedChannelsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3514,7 +3922,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn register_property_group(
         &self,
         args: Z_RegisterPropertyGroupArgs,
-    ) -> impl Future<Output = Result<Z_RegisterPropertyGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RegisterPropertyGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3532,7 +3942,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn remove_plugin(
         &self,
         args: Z_RemovePluginArgs,
-    ) -> impl Future<Output = Result<Z_RemovePluginReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RemovePluginReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3550,7 +3962,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn remove_reaction(
         &self,
         args: Z_RemoveReactionArgs,
-    ) -> impl Future<Output = Result<Z_RemoveReactionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RemoveReactionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3568,7 +3982,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn remove_team_icon(
         &self,
         args: Z_RemoveTeamIconArgs,
-    ) -> impl Future<Output = Result<Z_RemoveTeamIconReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RemoveTeamIconReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3586,7 +4002,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn remove_user_custom_status(
         &self,
         args: Z_RemoveUserCustomStatusArgs,
-    ) -> impl Future<Output = Result<Z_RemoveUserCustomStatusReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_RemoveUserCustomStatusReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3603,7 +4024,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn request_trial_license(
         &self,
         args: Z_RequestTrialLicenseArgs,
-    ) -> impl Future<Output = Result<Z_RequestTrialLicenseReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RequestTrialLicenseReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3621,7 +4044,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn restore_channel(
         &self,
         args: Z_RestoreChannelArgs,
-    ) -> impl Future<Output = Result<Z_RestoreChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RestoreChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3639,7 +4064,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn restore_group(
         &self,
         args: Z_RestoreGroupArgs,
-    ) -> impl Future<Output = Result<Z_RestoreGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RestoreGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3657,7 +4084,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn revoke_session(
         &self,
         args: Z_RevokeSessionArgs,
-    ) -> impl Future<Output = Result<Z_RevokeSessionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RevokeSessionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3674,7 +4103,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn revoke_user_access_token(
         &self,
         args: Z_RevokeUserAccessTokenArgs,
-    ) -> impl Future<Output = Result<Z_RevokeUserAccessTokenReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RevokeUserAccessTokenReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3691,7 +4122,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn roles_grant_permission(
         &self,
         args: Z_RolesGrantPermissionArgs,
-    ) -> impl Future<Output = Result<Z_RolesGrantPermissionReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_RolesGrantPermissionReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3711,7 +4144,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn save_access_control_policy(
         &self,
         args: Z_SaveAccessControlPolicyArgs,
-    ) -> impl Future<Output = Result<Z_SaveAccessControlPolicyReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_SaveAccessControlPolicyReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3729,7 +4167,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn save_config(
         &self,
         args: Z_SaveConfigArgs,
-    ) -> impl Future<Output = Result<Z_SaveConfigReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SaveConfigReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3747,7 +4187,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn save_plugin_config(
         &self,
         args: Z_SavePluginConfigArgs,
-    ) -> impl Future<Output = Result<Z_SavePluginConfigReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SavePluginConfigReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3765,7 +4207,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_channels(
         &self,
         args: Z_SearchChannelsArgs,
-    ) -> impl Future<Output = Result<Z_SearchChannelsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchChannelsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3784,7 +4228,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_posts_in_team(
         &self,
         args: Z_SearchPostsInTeamArgs,
-    ) -> impl Future<Output = Result<Z_SearchPostsInTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchPostsInTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3802,8 +4248,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_posts_in_team_for_user(
         &self,
         args: Z_SearchPostsInTeamForUserArgs,
-    ) -> impl Future<Output = Result<Z_SearchPostsInTeamForUserReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_SearchPostsInTeamForUserReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3821,7 +4271,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_property_fields(
         &self,
         args: Z_SearchPropertyFieldsArgs,
-    ) -> impl Future<Output = Result<Z_SearchPropertyFieldsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchPropertyFieldsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3839,7 +4291,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_property_values(
         &self,
         args: Z_SearchPropertyValuesArgs,
-    ) -> impl Future<Output = Result<Z_SearchPropertyValuesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchPropertyValuesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3857,7 +4311,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_teams(
         &self,
         args: Z_SearchTeamsArgs,
-    ) -> impl Future<Output = Result<Z_SearchTeamsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchTeamsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3875,7 +4331,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn search_users(
         &self,
         args: Z_SearchUsersArgs,
-    ) -> impl Future<Output = Result<Z_SearchUsersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SearchUsersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3893,7 +4351,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn send_ephemeral_post(
         &self,
         args: Z_SendEphemeralPostArgs,
-    ) -> impl Future<Output = Result<Z_SendEphemeralPostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SendEphemeralPostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3910,7 +4370,8 @@ pub trait PluginApi: Send + Sync + 'static {
     fn send_mail(
         &self,
         args: Z_SendMailArgs,
-    ) -> impl Future<Output = Result<Z_SendMailReturns, NotImplemented>> + Send {
+    ) -> impl Future<Output = Result<super::super::wire::plugin::Z_SendMailReturns, NotImplemented>> + Send
+    {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3934,7 +4395,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn send_push_notification(
         &self,
         args: Z_SendPushNotificationArgs,
-    ) -> impl Future<Output = Result<Z_SendPushNotificationReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SendPushNotificationReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3954,7 +4417,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn send_toast_message(
         &self,
         args: Z_SendToastMessageArgs,
-    ) -> impl Future<Output = Result<Z_SendToastMessageReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SendToastMessageReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3972,8 +4437,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn set_file_searchable_content(
         &self,
         args: Z_SetFileSearchableContentArgs,
-    ) -> impl Future<Output = Result<Z_SetFileSearchableContentReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_SetFileSearchableContentReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -3991,7 +4460,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn set_profile_image(
         &self,
         args: Z_SetProfileImageArgs,
-    ) -> impl Future<Output = Result<Z_SetProfileImageReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SetProfileImageReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4009,7 +4480,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn set_team_icon(
         &self,
         args: Z_SetTeamIconArgs,
-    ) -> impl Future<Output = Result<Z_SetTeamIconReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SetTeamIconReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4027,7 +4500,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn set_user_status_timed_dnd(
         &self,
         args: Z_SetUserStatusTimedDNDArgs,
-    ) -> impl Future<Output = Result<Z_SetUserStatusTimedDNDReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SetUserStatusTimedDNDReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4047,7 +4522,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn share_channel(
         &self,
         args: Z_ShareChannelArgs,
-    ) -> impl Future<Output = Result<Z_ShareChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_ShareChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4065,7 +4542,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn sync_shared_channel(
         &self,
         args: Z_SyncSharedChannelArgs,
-    ) -> impl Future<Output = Result<Z_SyncSharedChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_SyncSharedChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4084,8 +4563,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn uninvite_remote_from_channel(
         &self,
         args: Z_UninviteRemoteFromChannelArgs,
-    ) -> impl Future<Output = Result<Z_UninviteRemoteFromChannelReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UninviteRemoteFromChannelReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4105,7 +4588,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn unregister_channel_guard(
         &self,
         args: Z_UnregisterChannelGuardArgs,
-    ) -> impl Future<Output = Result<Z_UnregisterChannelGuardReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UnregisterChannelGuardReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4123,7 +4611,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn unregister_command(
         &self,
         args: Z_UnregisterCommandArgs,
-    ) -> impl Future<Output = Result<Z_UnregisterCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UnregisterCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4143,8 +4633,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn unregister_plugin_for_shared_channels(
         &self,
         args: Z_UnregisterPluginForSharedChannelsArgs,
-    ) -> impl Future<Output = Result<Z_UnregisterPluginForSharedChannelsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UnregisterPluginForSharedChannelsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4166,7 +4660,10 @@ pub trait PluginApi: Send + Sync + 'static {
         &self,
         args: Z_UnregisterPluginRemoteForSharedChannelsArgs,
     ) -> impl Future<
-        Output = Result<Z_UnregisterPluginRemoteForSharedChannelsReturns, NotImplemented>,
+        Output = Result<
+            super::super::wire::plugin::Z_UnregisterPluginRemoteForSharedChannelsReturns,
+            NotImplemented,
+        >,
     > + Send {
         let _ = args;
         async { Err(NotImplemented) }
@@ -4186,7 +4683,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn unshare_channel(
         &self,
         args: Z_UnshareChannelArgs,
-    ) -> impl Future<Output = Result<Z_UnshareChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UnshareChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4204,7 +4703,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_bot_active(
         &self,
         args: Z_UpdateBotActiveArgs,
-    ) -> impl Future<Output = Result<Z_UpdateBotActiveReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateBotActiveReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4222,7 +4723,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_channel(
         &self,
         args: Z_UpdateChannelArgs,
-    ) -> impl Future<Output = Result<Z_UpdateChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4241,8 +4744,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_channel_member_notifications(
         &self,
         args: Z_UpdateChannelMemberNotificationsArgs,
-    ) -> impl Future<Output = Result<Z_UpdateChannelMemberNotificationsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdateChannelMemberNotificationsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4261,8 +4768,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_channel_member_roles(
         &self,
         args: Z_UpdateChannelMemberRolesArgs,
-    ) -> impl Future<Output = Result<Z_UpdateChannelMemberRolesReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdateChannelMemberRolesReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4280,8 +4791,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_channel_sidebar_categories(
         &self,
         args: Z_UpdateChannelSidebarCategoriesArgs,
-    ) -> impl Future<Output = Result<Z_UpdateChannelSidebarCategoriesReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdateChannelSidebarCategoriesReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4302,7 +4817,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_command(
         &self,
         args: Z_UpdateCommandArgs,
-    ) -> impl Future<Output = Result<Z_UpdateCommandReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateCommandReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4321,7 +4838,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_ephemeral_post(
         &self,
         args: Z_UpdateEphemeralPostArgs,
-    ) -> impl Future<Output = Result<Z_UpdateEphemeralPostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateEphemeralPostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4339,7 +4858,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_group(
         &self,
         args: Z_UpdateGroupArgs,
-    ) -> impl Future<Output = Result<Z_UpdateGroupReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateGroupReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4357,7 +4878,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_group_syncable(
         &self,
         args: Z_UpdateGroupSyncableArgs,
-    ) -> impl Future<Output = Result<Z_UpdateGroupSyncableReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateGroupSyncableReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4375,7 +4898,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_o_auth_app(
         &self,
         args: Z_UpdateOAuthAppArgs,
-    ) -> impl Future<Output = Result<Z_UpdateOAuthAppReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateOAuthAppReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4393,7 +4918,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_post(
         &self,
         args: Z_UpdatePostArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePostReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdatePostReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4412,8 +4939,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_preferences_for_user(
         &self,
         args: Z_UpdatePreferencesForUserArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePreferencesForUserReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdatePreferencesForUserReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4434,7 +4965,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_property_field(
         &self,
         args: Z_UpdatePropertyFieldArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePropertyFieldReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdatePropertyFieldReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4452,7 +4985,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_property_fields(
         &self,
         args: Z_UpdatePropertyFieldsArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePropertyFieldsReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdatePropertyFieldsReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4470,7 +5005,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_property_value(
         &self,
         args: Z_UpdatePropertyValueArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePropertyValueReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdatePropertyValueReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4488,7 +5025,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_property_values(
         &self,
         args: Z_UpdatePropertyValuesArgs,
-    ) -> impl Future<Output = Result<Z_UpdatePropertyValuesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdatePropertyValuesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4507,7 +5046,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_shared_channel(
         &self,
         args: Z_UpdateSharedChannelArgs,
-    ) -> impl Future<Output = Result<Z_UpdateSharedChannelReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateSharedChannelReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4528,8 +5069,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_shared_channel_cursor(
         &self,
         args: Z_UpdateSharedChannelCursorArgs,
-    ) -> impl Future<Output = Result<Z_UpdateSharedChannelCursorReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdateSharedChannelCursorReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4547,7 +5092,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_team(
         &self,
         args: Z_UpdateTeamArgs,
-    ) -> impl Future<Output = Result<Z_UpdateTeamReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateTeamReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4566,7 +5113,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_team_member_roles(
         &self,
         args: Z_UpdateTeamMemberRolesArgs,
-    ) -> impl Future<Output = Result<Z_UpdateTeamMemberRolesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateTeamMemberRolesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4584,7 +5133,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user(
         &self,
         args: Z_UpdateUserArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateUserReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4602,7 +5153,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user_active(
         &self,
         args: Z_UpdateUserActiveArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserActiveReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateUserActiveReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4623,7 +5176,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user_auth(
         &self,
         args: Z_UpdateUserAuthArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserAuthReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateUserAuthReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4642,7 +5197,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user_custom_status(
         &self,
         args: Z_UpdateUserCustomStatusArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserCustomStatusReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpdateUserCustomStatusReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4661,7 +5221,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user_roles(
         &self,
         args: Z_UpdateUserRolesArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserRolesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateUserRolesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4680,7 +5242,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn update_user_status(
         &self,
         args: Z_UpdateUserStatusArgs,
-    ) -> impl Future<Output = Result<Z_UpdateUserStatusReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpdateUserStatusReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4699,7 +5263,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upload_file(
         &self,
         args: Z_UploadFileArgs,
-    ) -> impl Future<Output = Result<Z_UploadFileReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UploadFileReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4718,7 +5284,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_group_member(
         &self,
         args: Z_UpsertGroupMemberArgs,
-    ) -> impl Future<Output = Result<Z_UpsertGroupMemberReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpsertGroupMemberReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4737,7 +5305,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_group_members(
         &self,
         args: Z_UpsertGroupMembersArgs,
-    ) -> impl Future<Output = Result<Z_UpsertGroupMembersReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpsertGroupMembersReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4755,7 +5325,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_group_syncable(
         &self,
         args: Z_UpsertGroupSyncableArgs,
-    ) -> impl Future<Output = Result<Z_UpsertGroupSyncableReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpsertGroupSyncableReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4773,7 +5345,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_property_value(
         &self,
         args: Z_UpsertPropertyValueArgs,
-    ) -> impl Future<Output = Result<Z_UpsertPropertyValueReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpsertPropertyValueReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4792,8 +5366,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_property_value_with_options(
         &self,
         args: Z_UpsertPropertyValueWithOptionsArgs,
-    ) -> impl Future<Output = Result<Z_UpsertPropertyValueWithOptionsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpsertPropertyValueWithOptionsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4811,7 +5389,9 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_property_values(
         &self,
         args: Z_UpsertPropertyValuesArgs,
-    ) -> impl Future<Output = Result<Z_UpsertPropertyValuesReturns, NotImplemented>> + Send {
+    ) -> impl Future<
+        Output = Result<super::super::wire::plugin::Z_UpsertPropertyValuesReturns, NotImplemented>,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }
@@ -4831,8 +5411,12 @@ pub trait PluginApi: Send + Sync + 'static {
     fn upsert_property_values_with_options(
         &self,
         args: Z_UpsertPropertyValuesWithOptionsArgs,
-    ) -> impl Future<Output = Result<Z_UpsertPropertyValuesWithOptionsReturns, NotImplemented>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            super::super::wire::plugin::Z_UpsertPropertyValuesWithOptionsReturns,
+            NotImplemented,
+        >,
+    > + Send {
         let _ = args;
         async { Err(NotImplemented) }
     }

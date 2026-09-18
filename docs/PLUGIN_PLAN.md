@@ -437,9 +437,22 @@ side consumes.
 
 **Not ported:** `hijack.go`, which a plugin uses to take the connection over for websockets.
 
+**The database driver and the error helpers: DONE 2026-09-18 (ninth part of Phase 3).** A plugin
+queries the server's own database rather than opening its own connection: 20 methods over the
+second connection `OnActivate` names (db_rpc.go). The IDL now walks `plugin.Driver` as well, so
+those wire types and the `Z_Db…` structs are generated like everything else; only `DriverClient`
+is hand-written. Its wire shapes are not the A, B, C convention — an argument is as often a plain
+string as a struct.
+
+With it, the errors that cross the whole RPC (`crates/mm-plugin/src/error.rs`). Only a registered
+type can travel in a gob interface, so Go wraps anything else in an `ErrorString`, keeping the
+message and, for seven sentinels from `database/sql`, a code that names it again on the far side.
+`driver.ErrBadConn` is the one that matters: Go's own sql driver retries on it, and it only
+arrives as that error if the code survives. It does — the Go conformance plugin confirms Go's
+`errors.Is` still recognises the sentinel this crate sent. Mutations: 11 run, 9 caught, 2 controls survived.
+
 **Next in Phase 3:**
-- the database driver's RPC (`db_rpc.go`), and the error helpers (`ErrorString` codes);
-- `hijack.go`;
+- `hijack.go`, for plugins that take the connection over;
 - then the Rust conformance plugin under the real Go server on the stack, which is Phase 3's
   exit test.
 

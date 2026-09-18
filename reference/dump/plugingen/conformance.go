@@ -257,6 +257,7 @@ func (c *conformance) tourHandWrittenAPI() {
 	c.API.LogAuditRecWithLevel(&withLevel, c.auditLevel())
 
 	c.tourStreams()
+	c.tourDriver()
 	c.tourOutwardHTTP()
 
 	var config any
@@ -324,6 +325,32 @@ func (c *conformance) FileWillBeUploaded(_ *plugin.Context, info *model.FileInfo
 		"stream": map[string]any{"len": len(uploaded), "sha256": fmt.Sprintf("%x", sha256.Sum256(uploaded))},
 	})
 	return info, ""
+}
+
+// tourDriver asks the host's database the same four questions the Rust conformance plugin does.
+func (c *conformance) tourDriver() {
+	conn, connErr := c.Driver.Conn(true)
+	pingErr := c.Driver.ConnPing(conn)
+	rows, _ := c.Driver.ConnQuery(conn, "SELECT 1", []driver.NamedValue{
+		{Name: "one", Ordinal: 1, Value: int64(1)},
+	})
+	columns := c.Driver.RowsColumns(rows)
+
+	entry := map[string]any{
+		"driver":  "tour",
+		"conn":    conn,
+		"rows":    rows,
+		"columns": columns,
+	}
+	if connErr != nil {
+		entry["conn_error"] = connErr.Error()
+	}
+	if pingErr != nil {
+		// The sentinel the host answered with, named again by decodableError.
+		entry["ping_error"] = pingErr.Error()
+		entry["ping_is_bad_conn"] = errors.Is(pingErr, driver.ErrBadConn)
+	}
+	record(entry)
 }
 
 // tourOutwardHTTP calls the host's own HTTP handler through the API.

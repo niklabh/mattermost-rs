@@ -6063,6 +6063,563 @@
    "Where": "sb1d594"
   }
  },
+ "Z_DbBoolReturn": {
+  "A": true
+ },
+ "Z_DbBoolReturn.sparse": {
+  "A": true
+ },
+ "Z_DbConnArgs": {
+  "A": "se830fb",
+  "B": "seb3614",
+  "C": [
+   {
+    "Name": "sabb371",
+    "Ordinal": -4611686018427388003,
+    "Value": {
+     "$iface": "bool",
+     "value": true
+    }
+   }
+  ]
+ },
+ "Z_DbConnArgs.sparse": {
+  "A": "se830fb",
+  "B": "seb3614",
+  "C": [
+   {
+    "Name": "sabb371",
+    "Ordinal": -4611686018427388003
+   }
+  ]
+ },
+ "Z_DbErrReturn": {
+  "A": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387983,
+    "Err": "s7f18a1"
+   }
+  }
+ },
+ "Z_DbErrReturn.sparse": {
+  "A": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387983,
+    "Err": "s7f18a1"
+   }
+  }
+ },
+ "Z_DbInt64ErrReturn": {
+  "A": -4611686018427387947,
+  "B": {
+   "$iface": "*model.AppError",
+   "value": {
+    "DetailedError": "sb6af57",
+    "Id": "s3352e6",
+    "Message": "s8eccbb",
+    "RequestId": "sef5952",
+    "SkipTranslation": true,
+    "StatusCode": -4611686018427387953,
+    "Where": "s79cd5f"
+   }
+  }
+ },
+ "Z_DbInt64ErrReturn.sparse": {
+  "A": -4611686018427387947,
+  "B": {
+   "$iface": "*model.AppError",
+   "value": {
+    "DetailedError": "sb6af57",
+    "Id": "s3352e6",
+    "Message": "s8eccbb",
+    "RequestId": "sef5952",
+    "SkipTranslation": true,
+    "StatusCode": -4611686018427387953,
+    "Where": "s79cd5f"
+   }
+  }
+ },
+ "Z_DbIntReturn": {
+  "A": -4611686018427387952
+ },
+ "Z_DbIntReturn.sparse": {
+  "A": -4611686018427387952
+ },
+ "Z_DbResultContErrReturn": {
+  "A": {
+   "LastID": -4611686018427387924,
+   "LastIDError": {
+    "$iface": "*model.AppError",
+    "value": {
+     "DetailedError": "s6d415a",
+     "Id": "sae33b4",
+     "Message": "s5a7161",
+     "RequestId": "s2ec96f",
+     "SkipTranslation": true,
+     "StatusCode": -4611686018427388001,
+     "Where": "s697bad"
+    }
+   },
+   "RowsAffected": -4611686018427387928,
+   "RowsAffectedError": {
+    "$iface": "*pq.Error",
+    "value": {
+     "Code": "sffc6c3",
+     "Column": "s5d497c",
+     "Constraint": "s6f207e",
+     "DataTypeName": "s465e91",
+     "Detail": "s88af48",
+     "File": "s4b71b2",
+     "Hint": "s40bc2d",
+     "InternalPosition": "s3fe128",
+     "InternalQuery": "s72988a",
+     "Line": "sacd9b6",
+     "Message": "s7b00f1",
+     "Position": "s9dc91a",
+     "Routine": "s7cdf0a",
+     "Schema": "s7048e2",
+     "Severity": "s9c8a71",
+     "Table": "s710fb8",
+     "Where": "s3558b5"
+    }
+   }
+  },
+  "B": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387917,
+    "Err": "s232a4a"
+   }
+  }
+ },
+ "Z_DbResultContErrReturn.sparse": {
+  "A": {
+   "LastID": -4611686018427387924,
+   "LastIDError": {
+    "$iface": "*model.AppError",
+    "value": {
+     "DetailedError": "s6d415a",
+     "Id": "sae33b4",
+     "Message": "s5a7161",
+     "RequestId": "s2ec96f",
+     "SkipTranslation": true,
+     "StatusCode": -4611686018427388001,
+     "Where": "s697bad"
+    }
+   },
+   "RowsAffected": -4611686018427387928,
+   "RowsAffectedError": {
+    "$iface": "*pq.Error",
+    "value": {
+     "Code": "sffc6c3",
+     "Column": "s5d497c",
+     "Constraint": "s6f207e",
+     "DataTypeName": "s465e91",
+     "Detail": "s88af48",
+     "File": "s4b71b2",
+     "Hint": "s40bc2d",
+     "InternalPosition": "s3fe128",
+     "InternalQuery": "s72988a",
+     "Line": "sacd9b6",
+     "Message": "s7b00f1",
+     "Position": "s9dc91a",
+     "Routine": "s7cdf0a",
+     "Schema": "s7048e2",
+     "Severity": "s9c8a71",
+     "Table": "s710fb8",
+     "Where": "s3558b5"
+    }
+   }
+  },
+  "B": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387917,
+    "Err": "s232a4a"
+   }
+  }
+ },
+ "Z_DbRowScanArg": {
+  "A": "sf586ad",
+  "B": [
+   {
+    "$iface": "map[string]interface {}",
+    "value": {
+     "$map": {
+      "sad01f7": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "*model.AutocompleteStaticListArg",
+         "value": {
+          "PossibleArguments": [
+           {
+            "HelpText": "saea3e8",
+            "Hint": "sef69f5",
+            "Item": "s99d836"
+           }
+          ]
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
+  ]
+ },
+ "Z_DbRowScanArg.sparse": {
+  "A": "sf586ad"
+ },
+ "Z_DbRowScanReturn": {
+  "A": {
+   "$iface": "*pq.Error",
+   "value": {
+    "Code": "see8448",
+    "Column": "s5207eb",
+    "Constraint": "s3f9184",
+    "DataTypeName": "s2d232f",
+    "Detail": "sa06510",
+    "File": "s7c7211",
+    "Hint": "s882afc",
+    "InternalPosition": "saeea8a",
+    "InternalQuery": "sf7c9c5",
+    "Line": "se99694",
+    "Message": "se48afa",
+    "Position": "s605db5",
+    "Routine": "sbb9f30",
+    "Schema": "sa8e7af",
+    "Severity": "s1fc67d",
+    "Table": "sd3e762",
+    "Where": "s4232a3"
+   }
+  },
+  "B": [
+   {
+    "$iface": "*model.PreviewPost",
+    "value": {
+     "ChannelDisplayName": "sb6d75b",
+     "ChannelID": "s77cc56",
+     "ChannelType": "s111caa",
+     "Post": {
+      "ChannelId": "s8da96e",
+      "CreateAt": -4611686018427387954,
+      "DeleteAt": -4611686018427387977,
+      "EditAt": -4611686018427387910,
+      "FileIds": [
+       "sd985b8"
+      ],
+      "Filenames": [
+       "s118354"
+      ],
+      "HasReactions": true,
+      "Hashtags": "sb25fec",
+      "Id": "sf23882",
+      "IsFollowing": true,
+      "IsPinned": true,
+      "LastReplyAt": -4611686018427387936,
+      "Message": "sdc3ebd",
+      "MessageSource": "sa7a840",
+      "Metadata": {
+       "Acknowledgements": [
+        {
+         "AcknowledgedAt": -4611686018427388000,
+         "ChannelId": "s36424f",
+         "PostId": "sdc4f02",
+         "RemoteId": "s10fdf2",
+         "UserId": "s5e3a13"
+        }
+       ],
+       "Embeds": [
+        {
+         "Data": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4630703171541401600
+          }
+         },
+         "Type": "sb66965",
+         "URL": "s4ba652"
+        }
+       ],
+       "Emojis": [
+        {
+         "CreateAt": -4611686018427387942,
+         "CreatorId": "se03e31",
+         "DeleteAt": -4611686018427387985,
+         "Id": "sb1ed75",
+         "Name": "sf8e1ab",
+         "UpdateAt": -4611686018427387955
+        }
+       ],
+       "ExpireAt": -4611686018427387946,
+       "Files": [
+        {
+         "Archived": true,
+         "ChannelId": "s126356",
+         "Content": "sb7b301",
+         "CreateAt": -4611686018427387938,
+         "CreatorId": "s94ec3f",
+         "DeleteAt": -4611686018427387929,
+         "Extension": "sf0cd1d",
+         "HasPreviewImage": true,
+         "Height": -4611686018427387976,
+         "Id": "sbbdcaf",
+         "MimeType": "sfa8ae3",
+         "MiniPreview": {
+          "$bytes": "YmEzMGM="
+         },
+         "Name": "s9ccc6c",
+         "Path": "sed3bf4",
+         "PostId": "sca4d07",
+         "PreviewPath": "s165e99",
+         "RemoteId": "s972d57",
+         "Size": -4611686018427387946,
+         "ThumbnailPath": "s512fdf",
+         "UpdateAt": -4611686018427387947,
+         "Width": -4611686018427387937
+        }
+       ],
+       "Images": {
+        "$map": {
+         "s33d018": {
+          "Format": "s9e26a5",
+          "FrameCount": -4611686018427387988,
+          "Height": -4611686018427387947,
+          "Width": -4611686018427387960
+         }
+        }
+       },
+       "Priority": {
+        "ChannelId": "s536f19",
+        "PersistentNotifications": true,
+        "PostId": "s92894e",
+        "Priority": "s19bcf4",
+        "RequestedAck": true
+       },
+       "Reactions": [
+        {
+         "ChannelId": "sd9e18a",
+         "CreateAt": -4611686018427387957,
+         "DeleteAt": -4611686018427387918,
+         "EmojiName": "s5d7642",
+         "PostId": "s72c8d1",
+         "RemoteId": "s1d0bfc",
+         "UpdateAt": -4611686018427387972,
+         "UserId": "s2f739b"
+        }
+       ],
+       "Recipients": [
+        "s8acd9e"
+       ],
+       "RedactedFileCount": -4611686018427387997,
+       "Translations": {
+        "$map": {
+         "s98ffec": {
+          "Object": {
+           "$bytes": "YjA5N2Q="
+          },
+          "SourceLang": "sc2433e",
+          "State": "sb42f2b",
+          "Text": "s21b953",
+          "Type": "s77f6a2"
+         }
+        }
+       }
+      },
+      "OriginalId": "s6a2bf0",
+      "Participants": [
+       {
+        "AllowMarketing": true,
+        "AuthData": "s587962",
+        "AuthService": "sf676a7",
+        "BotDescription": "sc3ffd0",
+        "BotLastIconUpdate": -4611686018427387974,
+        "CreateAt": -4611686018427387932,
+        "DeleteAt": -4611686018427387995,
+        "DisableWelcomeEmail": true,
+        "Email": "se8fe11",
+        "EmailVerified": true,
+        "FailedAttempts": -4611686018427387918,
+        "FirstName": "sd57530",
+        "Id": "sceb94c",
+        "IsBot": true,
+        "LastActivityAt": -4611686018427387985,
+        "LastLogin": -4611686018427387942,
+        "LastName": "s8bd5b4",
+        "LastPasswordUpdate": -4611686018427387969,
+        "LastPictureUpdate": -4611686018427387948,
+        "Locale": "s832c04",
+        "MfaActive": true,
+        "MfaSecret": "saa3941",
+        "MfaUsedTimestamps": [
+         "sf2c8e1"
+        ],
+        "Nickname": "s2686db",
+        "NotifyProps": {
+         "$map": {
+          "s4a0a18": "sa0dba1"
+         }
+        },
+        "Password": "s6f7acb",
+        "Position": "se941da",
+        "Props": {
+         "$map": {
+          "sf3c699": "s275704"
+         }
+        },
+        "RemoteId": "sb062bf",
+        "Roles": "sc15e4b",
+        "TermsOfServiceCreateAt": -4611686018427387945,
+        "TermsOfServiceId": "s4bd5e1",
+        "Timezone": {
+         "$map": {
+          "s9ac14a": "sf345d4"
+         }
+        },
+        "UpdateAt": -4611686018427387913,
+        "Username": "s9fa111"
+       }
+      ],
+      "PendingPostId": "saf934b",
+      "Props": {
+       "$map": {
+        "s37cf88": {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4636649330424414208
+         }
+        }
+       }
+      },
+      "RemoteId": "sc7aaff",
+      "ReplyCount": -4611686018427387928,
+      "RootId": "sa48ef4",
+      "Type": "s0098d6",
+      "UpdateAt": -4611686018427387907,
+      "UserId": "sfb2e36"
+     },
+     "PostID": "s181c98",
+     "TeamName": "se4b0e3"
+    }
+   }
+  ]
+ },
+ "Z_DbRowScanReturn.sparse": {
+  "A": {
+   "$iface": "*pq.Error",
+   "value": {
+    "Code": "see8448",
+    "Column": "s5207eb",
+    "Constraint": "s3f9184",
+    "DataTypeName": "s2d232f",
+    "Detail": "sa06510",
+    "File": "s7c7211",
+    "Hint": "s882afc",
+    "InternalPosition": "saeea8a",
+    "InternalQuery": "sf7c9c5",
+    "Line": "se99694",
+    "Message": "se48afa",
+    "Position": "s605db5",
+    "Routine": "sbb9f30",
+    "Schema": "sa8e7af",
+    "Severity": "s1fc67d",
+    "Table": "sd3e762",
+    "Where": "s4232a3"
+   }
+  }
+ },
+ "Z_DbRowsColumnArg": {
+  "A": "s560fa4",
+  "B": -4611686018427387963
+ },
+ "Z_DbRowsColumnArg.sparse": {
+  "A": "s560fa4",
+  "B": -4611686018427387963
+ },
+ "Z_DbRowsColumnTypePrecisionScaleReturn": {
+  "A": -4611686018427387964,
+  "B": -4611686018427387997,
+  "C": true
+ },
+ "Z_DbRowsColumnTypePrecisionScaleReturn.sparse": {
+  "A": -4611686018427387964,
+  "B": -4611686018427387997,
+  "C": true
+ },
+ "Z_DbStmtArgs": {
+  "A": "sd3fee4",
+  "B": "sd703fd"
+ },
+ "Z_DbStmtArgs.sparse": {
+  "A": "sd3fee4",
+  "B": "sd703fd"
+ },
+ "Z_DbStmtQueryArgs": {
+  "A": "s92105a",
+  "B": [
+   {
+    "Name": "s8582a6",
+    "Ordinal": -4611686018427388002,
+    "Value": {
+     "$iface": "*model.AutocompleteTextArg",
+     "value": {
+      "Hint": "s5f4607",
+      "Pattern": "s45853f"
+     }
+    }
+   }
+  ]
+ },
+ "Z_DbStmtQueryArgs.sparse": {
+  "A": "s92105a"
+ },
+ "Z_DbStrErrReturn": {
+  "A": "s25c0c5",
+  "B": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387995,
+    "Err": "s7f812a"
+   }
+  }
+ },
+ "Z_DbStrErrReturn.sparse": {
+  "A": "s25c0c5",
+  "B": {
+   "$iface": "*plugin.ErrorString",
+   "value": {
+    "Code": -4611686018427387995,
+    "Err": "s7f812a"
+   }
+  }
+ },
+ "Z_DbStrSliceReturn": {
+  "A": [
+   "sf9ba4e"
+  ]
+ },
+ "Z_DbStrSliceReturn.sparse": {
+  "A": [
+   "sf9ba4e"
+  ]
+ },
+ "Z_DbTxArgs": {
+  "A": "s1bf3fe",
+  "B": {
+   "Isolation": -4611686018427387909,
+   "ReadOnly": true
+  }
+ },
+ "Z_DbTxArgs.sparse": {
+  "A": "s1bf3fe",
+  "B": {
+   "Isolation": -4611686018427387909,
+   "ReadOnly": true
+  }
+ },
  "Z_DeleteAccessControlPolicyArgs": {
   "A": "sdbc692",
   "B": "sdecbab",

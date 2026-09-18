@@ -313,6 +313,42 @@ fn varints_match_go() {
     }
 }
 
+/// The codes and messages `encodableError` gives the errors it names are Go's own, in Go's order
+/// (client_rpc.go). Transcribing them is exactly how a sentinel stops being recognised.
+#[test]
+fn sentinel_codes_match_go() {
+    let go: Vec<Json> =
+        serde_json::from_slice(&run_plugingen(&["sentinels".as_ref(), "-".as_ref()])).unwrap();
+    let rust = [
+        mm_plugin::error::Sentinel::Eof,
+        mm_plugin::error::Sentinel::NoRows,
+        mm_plugin::error::Sentinel::ConnDone,
+        mm_plugin::error::Sentinel::TxDone,
+        mm_plugin::error::Sentinel::Skip,
+        mm_plugin::error::Sentinel::BadConn,
+        mm_plugin::error::Sentinel::RemoveArgument,
+    ];
+    assert_eq!(
+        go.len(),
+        rust.len(),
+        "Go names a different number of errors"
+    );
+    for (sentinel, expected) in rust.into_iter().zip(go) {
+        let code = expected["code"].as_i64().expect("a code");
+        assert_eq!(sentinel.code(), code, "{sentinel:?}");
+        assert_eq!(
+            Json::from(sentinel.message()),
+            expected["message"],
+            "{sentinel:?}"
+        );
+        assert_eq!(
+            mm_plugin::error::Sentinel::from_code(code),
+            Some(sentinel),
+            "code {code}"
+        );
+    }
+}
+
 /// The committed Rust is what scripts/plugingen.py generates from the committed IDL.
 #[test]
 fn generated_rust_is_current() {

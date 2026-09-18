@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
@@ -249,6 +250,48 @@ func serveHTTP(hooks plugin.Hooks) {
 	}
 }
 
+// appDriver is the database the host serves the plugin: plugintest's mock, plus the two methods
+// the environment needs that are not part of the RPC surface (driver.go, `AppDriver`).
+type appDriver struct {
+	*plugintest.Driver
+}
+
+func (d *appDriver) ConnWithPluginID(isMaster bool, pluginID string) (string, error) {
+	return d.Conn(isMaster)
+}
+
+func (d *appDriver) ShutdownConns(pluginID string) {}
+
+// mockDriver answers the four questions both conformance plugins ask, and records them.
+func mockDriver() *appDriver {
+	db := &plugintest.Driver{}
+	db.On("Conn", mock.Anything).Return(func(isMaster bool) (string, error) {
+		record(map[string]any{"driver": "Conn", "is_master": isMaster})
+		return "conn-1", nil
+	})
+	db.On("ConnPing", mock.Anything).Return(func(connID string) error {
+		record(map[string]any{"driver": "ConnPing", "conn": connID})
+		// A sentinel, which must still be one after the round trip.
+		return driver.ErrBadConn
+	})
+	db.On("ConnQuery", mock.Anything, mock.Anything, mock.Anything).Return(
+		func(connID, q string, args []driver.NamedValue) (string, error) {
+			named := make([]string, 0, len(args))
+			for _, a := range args {
+				named = append(named, fmt.Sprintf("%s=%v", a.Name, a.Value))
+			}
+			record(map[string]any{
+				"driver": "ConnQuery", "conn": connID, "query": q, "args": named,
+			})
+			return "rows-1", nil
+		})
+	db.On("RowsColumns", mock.Anything).Return(func(rowsID string) []string {
+		record(map[string]any{"driver": "RowsColumns", "rows": rowsID})
+		return []string{"id", "name"}
+	})
+	return &appDriver{Driver: db}
+}
+
 func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 	path := os.Getenv("PLUGINGEN_TRANSCRIPT")
 	if path == "" {
@@ -268,7 +311,7 @@ func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 	}
 	env, err := plugin.NewEnvironment(
 		func(*model.Manifest) plugin.API { return api },
-		nil, pluginDir, pluginDir+"-webapp", logger, noMetrics{},
+		mockDriver(), pluginDir, pluginDir+"-webapp", logger, noMetrics{},
 	)
 	if err != nil {
 		return err

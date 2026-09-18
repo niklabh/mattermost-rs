@@ -9,7 +9,9 @@ use goplugin::{HandshakeConfig, MuxBroker, ServeConfig, ServeError};
 
 use super::file_upload::register_hooks_file_upload;
 use super::serve_http::register_hooks_http;
-use super::{ApiClient, Hooks, HooksFileUpload, HooksHttp, NotImplemented, hooks_server};
+use super::{
+    ApiClient, DriverClient, Hooks, HooksFileUpload, HooksHttp, NotImplemented, hooks_server,
+};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns, Z_OnConfigurationChangeArgs};
 
 /// api.go, `handshake`: what a Mattermost host and plugin must agree on.
@@ -29,10 +31,8 @@ pub fn handshake() -> HandshakeConfig {
 /// 2. It calls [`Hooks::on_configuration_change`].
 /// 3. It calls [`Plugin::on_activate`].
 pub trait Plugin: Hooks + HooksHttp + HooksFileUpload {
-    /// Go `MattermostPlugin.SetAPI` and `SetDriver`: the clients for this activation. `driver`
-    /// is the raw net/rpc connection to the host's database driver, whose methods are not
-    /// ported yet.
-    fn set_api(&self, api: ApiClient, driver: go_netrpc::Client) {
+    /// Go `MattermostPlugin.SetAPI` and `SetDriver`: the clients for this activation.
+    fn set_api(&self, api: ApiClient, driver: DriverClient) {
         let _ = (api, driver);
     }
 
@@ -67,7 +67,7 @@ pub fn plugin_server<P: Plugin>(plugin: &Arc<P>, broker: MuxBroker) -> Server {
                 .map_err(|e| ServiceError(e.to_string()))?;
             plugin.set_api(
                 ApiClient::new(go_netrpc::Client::new(api), broker.clone()),
-                go_netrpc::Client::new(driver),
+                DriverClient::new(go_netrpc::Client::new(driver)),
             );
 
             // Go logs a configuration error to stderr and activates regardless.

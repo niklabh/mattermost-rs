@@ -73,6 +73,7 @@ MODULES = {
     "net/url": "url",
     "time": "time",
     "io": "io",
+    "database/sql/driver": "sql_driver",
 }
 
 BASIC = {
@@ -562,6 +563,7 @@ class Generator:
             out[OUT / f"{module}.rs"] = self.module_file(module)
         out[OUT / "gob_safe.rs"] = self.gob_safe_file()
         out[RPC / "hooks.rs"] = self.hooks_file()
+        out[RPC / "driver.rs"] = self.driver_file()
         out[RPC / "api.rs"] = self.api_file()
         return out
 
@@ -618,7 +620,7 @@ class Generator:
                 out.append(f"    /// and `{m['returns']}`.")
             out.append(f'    /// The default answers as Go does for a {what} the implementation lacks.')
             out.append(
-                f"    fn {rust}(&self, args: {m['args']}) -> impl Future<Output = Result<{m['returns']}, NotImplemented>> + Send {{"
+                f"    fn {rust}(&self, args: {m['args']}) -> impl Future<Output = Result<{self.driver_type(m['returns'])}, NotImplemented>> + Send {{"
             )
             out.append("        let _ = args;")
             out.append("        async { Err(NotImplemented) }")
@@ -661,7 +663,7 @@ class Generator:
             out.append(
                 f'            ({snake(m["name"])}, "{m["name"]}",'
                 f' "{m["args"]}", $crate::wire::plugin::{m["args"]},'
-                f' "{m["returns"]}", $crate::wire::plugin::{m["returns"]}),'
+                f' "{m["returns"]}", {self.driver_type(m["returns"]).replace("super::super::wire::", "$crate::wire::")}),'
             )
         out.append("        }")
         out.append("    };")
@@ -684,6 +686,96 @@ class Generator:
             "use crate::wire::plugin::*;",
             "",
         ]
+
+    def driver_file(self):
+        """The database driver a plugin calls through (db_rpc.go): trait, server and client.
+
+        Its wire shapes are not the A, B, C convention: an argument is as often a plain value as
+        a struct, and the answer is one of a handful of shared `Z_Db…Return` types.
+        """
+        driver = self.idl["driver"]
+        out = self.rpc_prelude(
+            "The database driver, which a plugin uses to reach the server's own connection "
+            "(db_rpc.go). Every error crosses as `encodableError` made it, and comes back "
+            "through `decodableError`."
+        )
+        # The driver's types are spelled in full below, so the wildcard import is not used.
+        out.remove("#[allow(clippy::wildcard_imports)]")
+        out.remove("use crate::wire::plugin::*;")
+        out.append("use super::{DriverClient, NotImplemented};")
+        out.append("")
+        out.append("/// The database a plugin queries through the host. A host implements it over its own")
+        out.append("/// connection pool; nothing here opens one.")
+        out.append("pub trait Driver: Send + Sync + 'static {")
+        for m in driver:
+            args = self.driver_args_type(m)
+            out.extend(self.doc(m, "    "))
+            out.append("    ///")
+            out.append("    /// The default answers as a host without a driver would: the call fails.")
+            out.append(
+                f"    fn {snake(m['name'])}(&self, args: {args}) -> impl Future<Output = Result<{self.driver_type(m['returns'])}, NotImplemented>> + Send {{"
+            )
+            out.append("        let _ = args;")
+            out.append("        async { Err(NotImplemented) }")
+            out.append("    }")
+            out.append("")
+        out.append("}")
+        out.append("")
+        out.append("/// Register every driver method on `server` as `Plugin.<Method>`.")
+        out.append("pub fn register_driver<T: Driver>(server: &mut Server, implementation: &Arc<T>) {")
+        for m in driver:
+            args = self.driver_args_type(m)
+            out.append("    let this = Arc::clone(implementation);")
+            out.append(f'    server.register("Plugin.{m["name"]}", move |args: {args}| {{')
+            out.append("        let this = Arc::clone(&this);")
+            out.append(
+                f'        async move {{ this.{snake(m["name"])}(args).await.map_err(|NotImplemented| ServiceError("the host has no database driver".into())) }}'
+            )
+            out.append("    });")
+        out.append("}")
+        out.append("")
+        out.append("impl DriverClient {")
+        for m in driver:
+            args = self.driver_args_type(m)
+            out.extend(self.doc(m, "    "))
+            out.append("    ///")
+            out.append("    /// A failed call is logged and answers zero values, as Go's client does.")
+            out.append(
+                f"    pub async fn {snake(m['name'])}(&self, args: {args}) -> {self.driver_type(m['returns'])} {{"
+            )
+            out.append(f'        self.call("{m["name"]}", &args).await')
+            out.append("    }")
+            out.append("")
+        out.append("}")
+        out.append("")
+        self.rpc_macro_driver(out, driver)
+        return "\n".join(out) + "\n"
+
+    def driver_args_type(self, m):
+        """The Rust type of a driver method's argument, which may be a plain value."""
+        return self.driver_type(m["args"])
+
+    def driver_type(self, tid):
+        """A driver wire type: a `Z_Db…` struct, or the plain value the method takes or answers."""
+        if tid in BASIC:
+            return BASIC[tid]
+        return f"super::super::wire::plugin::{tid}"
+
+    def rpc_macro_driver(self, out, driver):
+        out.append('/// Invoke `$m!` with every driver method as `(method, "GoName", Args, Returns),`.')
+        out.append("#[doc(hidden)]")
+        out.append("#[macro_export]")
+        out.append("macro_rules! for_each_driver_method {")
+        out.append("    ($m:ident) => {")
+        out.append("        $m! {")
+        for m in driver:
+            args = self.driver_args_type(m).replace("super::", "$crate::wire::")
+            out.append(
+                f'            ({snake(m["name"])}, "{m["name"]}", {args}, {self.driver_type(m["returns"]).replace("super::super::wire::", "$crate::wire::")}),'
+            )
+        out.append("        }")
+        out.append("    };")
+        out.append("}")
 
     def hooks_file(self):
         hooks = self.generated(self.idl["hooks"])
