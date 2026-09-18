@@ -392,13 +392,15 @@ const COLLAPSED_THREADS_EXTENDED_PARAM: &str = "collapsedThreadsExtended";
 
 /// Port of `getPostsForChannel` (api4/post.go:271) — `GET /api/v4/channels/{channel_id}/posts`.
 ///
-/// # One handler, four store branches; this serves one of them
+/// # One handler, four store branches; this serves two of them
 ///
 /// `since`, `after` and `before` each select a different query, and the fourth — the plain page
-/// — is what a client asks for when it opens a channel. Only the page branch is served here.
-/// The other three are **forwarded before anything else happens**, including before their own
-/// validation, so Go answers their 400s as well as their bodies. `since=0` is not one of them:
-/// Go's test is `since > 0`, so an explicit zero falls through to the page branch, etag and all.
+/// — is what a client asks for when it opens a channel. The page and, since 2026-09-19, `since`
+/// (what the webapp sends for a channel it returns to) are served here; `after` and `before`
+/// are **forwarded before anything else happens**, including before their own validation, so Go
+/// answers their 400s as well as their bodies. `since=0` falls through to the page branch — Go's
+/// test is `since > 0` — and an unparsable `since` is forwarded for Go's strconv-worded 400. The
+/// `since` branch has no etag, and both cursors are empty; see `PostStore::get_posts_since`.
 ///
 /// `collapsedThreadsExtended=true` is forwarded for a different reason: it replaces each stub
 /// thread participant with a profile run through `SanitizeProfile`, whose output depends on
@@ -481,13 +483,13 @@ async fn serve_channel_posts(
     // `since` picks its branch only when **positive** — Go's test is `since > 0` — so `?since=0`
     // falls through to the page branch, etag and all. A value that does not parse is Go's 400,
     // whose detail string wraps strconv's own error text; forwarding is how a client gets it.
-    if let Some(since) = query_first(query, SINCE_PARAM).filter(|value| !value.is_empty()) {
-        match since.parse::<i64>() {
-            Ok(since) if since > 0 => return Outcome::Forward,
+    let since = match query_first(query, SINCE_PARAM).filter(|value| !value.is_empty()) {
+        None => 0,
+        Some(value) => match value.parse::<i64>() {
+            Ok(since) => since.max(0),
             Err(_) => return Outcome::Forward,
-            Ok(_) => {}
-        }
-    }
+        },
+    };
 
     let collapsed_threads = query_flag_is_true(query, COLLAPSED_THREADS_PARAM);
     if query_flag_is_true(query, COLLAPSED_THREADS_EXTENDED_PARAM) {
@@ -529,8 +531,13 @@ async fn serve_channel_posts(
         )));
     }
 
-    let etag = state.app.get_posts_etag(channel_id).await;
-    if if_none_match.as_deref() == Some(etag.as_str()) {
+    // The `since` branch has no etag: no header, and `If-None-Match` is not consulted.
+    let etag = if since > 0 {
+        String::new()
+    } else {
+        state.app.get_posts_etag(channel_id).await
+    };
+    if since == 0 && if_none_match.as_deref() == Some(etag.as_str()) {
         return Outcome::Served(
             (
                 StatusCode::NOT_MODIFIED,
@@ -549,7 +556,21 @@ async fn serve_channel_posts(
         collapsed_threads,
         include_deleted,
     };
-    let list = match state.app.get_posts_page(opts).await {
+    let list = if since > 0 {
+        state
+            .app
+            .get_posts_since(
+                channel_id,
+                since,
+                &session.0.user_id,
+                collapsed_threads,
+                skip_fetch_threads,
+            )
+            .await
+    } else {
+        state.app.get_posts_page(opts).await
+    };
+    let list = match list {
         Ok(list) => list,
         Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
@@ -567,14 +588,17 @@ async fn serve_channel_posts(
     // with `afterPost == ""`, `beforePost == ""` and `since == 0` — every conditional in it is
     // false, so both cursors come from the list itself. The branches that read `page` and
     // `perPage` belong to the forwarded requests and are deliberately not ported.
-    prepared.next_post_id = state
-        .app
-        .get_next_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
-        .await;
-    prepared.prev_post_id = state
-        .app
-        .get_prev_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
-        .await;
+    // …and with `since > 0` both are set, empty, before either lookup (post.go:1893).
+    if since == 0 {
+        prepared.next_post_id = state
+            .app
+            .get_next_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
+            .await;
+        prepared.prev_post_id = state
+            .app
+            .get_prev_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
+            .await;
+    }
 
     let (mut sanitized, _all_previews_have_membership) = match state
         .app
@@ -601,18 +625,22 @@ async fn serve_channel_posts(
         )));
     }
 
-    Outcome::Served(
-        (
-            StatusCode::OK,
-            [
-                (HEADER_ETAG_SERVER, etag.as_str()),
-                ("Content-Type", "application/json"),
-                ("x-mmrs-served-by", "rust"),
-            ],
-            body,
-        )
-            .into_response(),
+    let mut response = (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
     )
+        .into_response();
+    // `if etag != ""` — so the `since` branch sends none.
+    if !etag.is_empty()
+        && let Ok(value) = axum::http::HeaderValue::from_str(&etag)
+    {
+        response.headers_mut().insert(HEADER_ETAG_SERVER, value);
+    }
+    Outcome::Served(response)
 }
 
 /// `getPostThread`'s six query parameters (api4/post.go:812).

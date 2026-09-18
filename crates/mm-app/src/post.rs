@@ -894,6 +894,45 @@ impl App {
         })
     }
 
+    /// Port of `app.App.GetPostsSince` (post.go:1435): the store's list, or
+    /// `app.post.get_posts_since.app_error` at 500.
+    ///
+    /// The stages after the store are those [`App::get_posts_page`] documents and inert for the
+    /// same reasons: no auto-translation to supplement from, no licence carrying a post-history
+    /// limit for `filterInaccessiblePosts`, a burn-on-read post refused later by
+    /// [`App::prepare_post_list_for_client`] (so forwarded), and no plugin running here for
+    /// `PostsWillBeConsumed`.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, since, collapsed_threads))]
+    pub async fn get_posts_since(
+        &self,
+        channel_id: &str,
+        since: i64,
+        user_id: &str,
+        collapsed_threads: bool,
+        skip_fetch_threads: bool,
+    ) -> AppResult<PostList> {
+        self.store()
+            .post()
+            .get_posts_since(
+                channel_id,
+                since,
+                user_id,
+                collapsed_threads,
+                skip_fetch_threads,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "posts-since lookup failed");
+                AppError::boxed(
+                    "GetPostsSince",
+                    "app.post.get_posts_since.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetPostThread` (post.go:1555).
     ///
     /// The four stages Go runs after the store are the same four
