@@ -30,7 +30,7 @@ import webdriver  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 LINE = re.compile(r"mm_api::traffic: method=(\S+) path=(\S+) route=(\S+) status=(\d+) "
-                  r"served_by=(\S+) forwarded_at=(\S+)")
+                  r"served_by=(\S+) forwarded_at=(\S+)(?: params=(\S+))?")
 USER, PASSWORD = "tester", "Tester-Pass-2026"
 PEER, PEER_PASSWORD = "tester2", "Tester2-Pass-2026"
 ENTER, ESCAPE = webdriver.KEYS["enter"], webdriver.KEYS["escape"]
@@ -307,7 +307,7 @@ def report(log, offset=0):
 
     go_groups = collections.Counter()
     reasons = {}
-    for method, path, route, status, served_by, site in rows:
+    for method, path, route, status, served_by, site, params in rows:
         if served_by.startswith("rust"):
             continue
         if not path.startswith("/api/"):
@@ -322,6 +322,8 @@ def report(log, offset=0):
                 reason = reason_at(site)
                 why = reason if reason.startswith("method not registered") else \
                     f"forwarded branch at {site}: {reason}"
+            if params and params != "-":
+                template += "?" + params
             key = (method, template, why)
         go_groups[key] += 1
         reasons[key] = status

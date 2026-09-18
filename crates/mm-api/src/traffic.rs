@@ -4,7 +4,7 @@
 //! router, so nothing about routing changes. Each line is target `mm_api::traffic` at `info`:
 //!
 //! ```text
-//! method=GET path=/api/v4/users/me route=/api/v4/users/me status=200 served_by=rust forwarded_at=-
+//! method=GET path=/api/v4/users/me route=/api/v4/users/me status=200 served_by=rust forwarded_at=- params=-
 //! ```
 //!
 //! - `route` is axum's matched template, or `-` when the request matched no route and reached
@@ -12,6 +12,8 @@
 //!   Go's own templates with `scripts/routes.py`.
 //! - `served_by` is the `x-mmrs-served-by` header. A response this process built without the
 //!   header (the websocket upgrade's `101`) is `rust-unmarked`: nothing forwarded it.
+//! - `params` is the query's parameter **names**, comma-separated — never the values, which can
+//!   carry an `access_token`. A handler that forwards some branches picks them by parameter.
 //! - `forwarded_at` is the source line that handed the request to Go
 //!   ([`crate::proxy::ForwardSite`]). For a registered route that line names the forwarded branch.
 //!
@@ -63,6 +65,7 @@ async fn log_request(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     // Owned because the request is moved into the next layer before the line is written.
     let path = request.uri().path().to_owned();
+    let params = query_names(request.uri().query());
     let response = next.run(request).await;
     let route = response
         .extensions()
@@ -85,8 +88,21 @@ async fn log_request(request: Request, next: Next) -> Response {
         status = response.status().as_u16(),
         served_by = %served_by,
         forwarded_at = %forwarded_at.as_deref().unwrap_or("-"),
+        params = %params,
     );
     response
+}
+
+/// The query's parameter names in order, comma-separated, or `-` when there are none.
+fn query_names(query: Option<&str>) -> String {
+    let names: Vec<String> = form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+        .map(|(name, _)| name.into_owned())
+        .collect();
+    if names.is_empty() {
+        "-".to_owned()
+    } else {
+        names.join(",")
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +143,16 @@ mod tests {
             .unwrap();
         assert_eq!(fallback.status(), StatusCode::IM_A_TEAPOT);
         assert!(fallback.extensions().get::<RouteTemplate>().is_none());
+    }
+
+    #[test]
+    fn params_are_names_without_values() {
+        assert_eq!(query_names(None), "-");
+        assert_eq!(query_names(Some("")), "-");
+        assert_eq!(
+            query_names(Some("since=1&access_token=secret&unread")),
+            "since,access_token,unread"
+        );
     }
 
     #[test]
