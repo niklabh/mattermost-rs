@@ -180,13 +180,19 @@ def collect():
 # containing `_` or `-` to Go's 404. The rest are literal siblings axum must register because it
 # prefers a literal over a parameter where gorilla goes by registration order; they answer as
 # the `{...}` route Go would have chosen, so they add no pair to the numerator.
+#
+# The `me` literals are **not** aliases, since 2026-09-19. A method registered only on
+# `/users/me/preferences` answers only the literal `me`; the webapp sends its own id, which lands
+# on `{user_id}` and is forwarded if that route lacks the method. Aliasing them counted
+# `PUT /users/{user_id}/preferences` as served while every browser preference save went to Go —
+# found by `scripts/demo-traffic.sh`. A `me` literal now adds nothing to the numerator: the pair
+# is served when the `{user_id}` route registers the method.
 ALIASES = {
     "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}":
         "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category_id}",
-    "/api/v4/users/me": "/api/v4/users/{user_id}",
-    "/api/v4/users/me/preferences": "/api/v4/users/{user_id}/preferences",
-    "/api/v4/users/me/teams/members": "/api/v4/users/{user_id}/teams/members",
 }
+ME_LITERALS = {"/api/v4/users/me", "/api/v4/users/me/preferences",
+               "/api/v4/users/me/teams/members"}
 
 
 def served(source=LIBRS):
@@ -266,6 +272,8 @@ def served_in(text):
                 r'\b(get|post|put|delete|patch)\s*\(\s*(?:[a-z_0-9]+::)*[a-z_0-9]+\s*[),]',
                 body):
             here = normalise(path)
+            if here in ME_LITERALS:
+                continue
             out.add((verb.upper(), ALIASES.get(here, here)))
             # axum's `get` answers HEAD as well, dispatching it to the GET handler with the body
             # removed (`MethodRouter::call_with_state` tries `head` and then falls through to
