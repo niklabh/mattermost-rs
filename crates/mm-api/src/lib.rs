@@ -140,6 +140,9 @@ pub mod local_teams;
 /// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
 /// Appended for the same reason as `config`.
 pub mod marketplace_visit;
+/// `GET /plugins/statuses` (2026-09-18), served from this server's plugin host when
+/// `MMRS_PLUGIN_HOST=rust`. Appended for the same reason as `config`.
+pub mod plugins;
 /// Port of the five `RemoteClusterTokenRequired` routes of `api4/remote_cluster.go`.
 pub mod remote_cluster;
 
@@ -460,7 +463,17 @@ async fn invalid_post_id_param(_session: auth::AuthenticatedSession) -> axum::re
 /// both unregistered paths (`Router::fallback`) and unmigrated methods on registered paths
 /// (`partially_migrated`).
 pub fn router(state: AppState) -> Router {
+    // `api4/plugin.go:34`, only when this process hosts plugins; see `plugins`.
+    let plugin_routes = if state.app.plugin_host().hosted() {
+        Router::new().route(
+            "/api/v4/plugins/statuses",
+            partially_migrated(get(plugins::get_plugin_statuses)),
+        )
+    } else {
+        Router::new()
+    };
     Router::new()
+        .merge(plugin_routes)
         // `api.BaseRoutes.APIRoot.Handle("/{websocket:websocket(?:\\/)?}")` (api4/websocket.go:52)
         // — the gorilla pattern accepts a trailing slash, so both spellings are registered. This
         // is the one route the proxy could never forward: `forward_to_go` strips `Connection` and

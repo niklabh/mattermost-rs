@@ -79,6 +79,7 @@ pub mod oauth;
 pub mod onboarding;
 pub mod password;
 pub mod peer_cache;
+pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_create;
@@ -209,6 +210,9 @@ pub struct App {
     /// Go's `Channels.cachedNotices` and the three counts beside it — see
     /// `crate::product_notices`. Shared across clones for the same reason as the hub.
     notices_cache: crate::product_notices::SharedNoticesCache,
+    /// The plugin host, shared across clones like the hub: one environment per process. See
+    /// `crate::plugins`.
+    plugins: std::sync::Arc<crate::plugins::PluginHost>,
 }
 
 impl App {
@@ -271,7 +275,15 @@ impl App {
             upload_locks: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            plugins: std::sync::Arc::new(crate::plugins::PluginHost::default()),
         }
+    }
+
+    /// Install the plugin host — [`crate::plugins::plugin_host_from_env`] in `main.rs`. Call before
+    /// the `App` is cloned, as [`App::with_peer_cache`].
+    pub fn with_plugin_host(mut self, host: crate::plugins::PluginHost) -> Self {
+        self.plugins = std::sync::Arc::new(host);
+        self
     }
 
     /// Install the purge for the Go server's session cache. Call before the `App` is cloned: a
@@ -371,16 +383,24 @@ impl App {
                 return Ok(false);
             }
         }
-        let config = Config::load(self.store.config()).await?;
-        let mut loaded = self
+        let config = std::sync::Arc::new(Config::load(self.store.config()).await?);
+        let previous = {
+            let mut loaded = self
+                .config
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            std::mem::replace(
+                &mut *loaded,
+                LoadedConfig {
+                    id,
+                    config: std::sync::Arc::clone(&config),
+                },
+            )
             .config
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *loaded = LoadedConfig {
-            id,
-            config: std::sync::Arc::new(config),
         };
         tracing::Span::current().record("reloaded", true);
+        // Go's config listeners, of which the plugin host's are the ones ported.
+        self.plugins_config_changed(&previous, &config).await;
         Ok(true)
     }
 

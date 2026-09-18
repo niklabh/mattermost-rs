@@ -122,6 +122,46 @@ async fn main() -> anyhow::Result<()> {
     invalidator.verify().await?;
     app = app.with_peer_cache(std::sync::Arc::new(invalidator));
 
+    // The plugin host: `MMRS_PLUGIN_HOST=rust` runs plugins here instead of in Go, and must not be
+    // set while Go runs them too (see `mm_app::plugins`). Started before the config poll, whose
+    // reloads drive it from then on, as Go's config listeners do.
+    app = app.with_plugin_host(mm_app::plugins::plugin_host_from_env());
+    if app.plugin_host().hosted() {
+        let config = app.config();
+        tracing::info!(
+            directory = %config.plugin_directory,
+            client_directory = %config.plugin_client_directory,
+            "hosting plugins here (MMRS_PLUGIN_HOST=rust)"
+        );
+        app.init_plugins(
+            std::path::Path::new(&config.plugin_directory),
+            std::path::Path::new(&config.plugin_client_directory),
+        )
+        .await;
+
+        // Go's `Channels.Stop` → `ShutDownPlugins`: end the plugin processes on the way out. A
+        // signal otherwise ends this process without dropping anything, and the children the
+        // environment launched would outlive it.
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut term = match tokio::signal::unix::signal(
+                tokio::signal::unix::SignalKind::terminate(),
+            ) {
+                Ok(term) => term,
+                Err(err) => {
+                    tracing::warn!(error = %err, "cannot watch for SIGTERM; plugins will not be shut down on exit");
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = term.recv() => {}
+                _ = tokio::signal::ctrl_c() => {}
+            }
+            app.shut_down_plugins().await;
+            std::process::exit(0);
+        });
+    }
+
     // The periodic half of `App::refresh_config` — the writes Go makes that never pass through
     // this server (its own `Load` write-back at startup, a plugin's `SaveConfig`, a client talking
     // to Go directly), which a Go cluster peer would learn of from `ConfigChanged`. The other

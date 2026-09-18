@@ -11,6 +11,8 @@
 //! run, and `user_convert` and `users_list` failed with ":8090 unreachable" on every full run
 //! while passing alone. `custom_status_writes` and `channel_read_all` shared :8074 the same way.
 //!
+//! It also refuses the stack's own ports, which a second server would free just the same.
+//!
 //! This test needs no stack: it reads the test sources. Pick an unused port when it fails.
 
 use std::collections::BTreeMap;
@@ -83,5 +85,19 @@ fn no_two_second_servers_share_a_port() {
     assert!(
         shared.is_empty(),
         "ports claimed more than once: {shared:?}"
+    );
+
+    // The stack's own servers, which a second server would free and so kill: Go and mm-api, and
+    // the oracles `scripts/go-*.sh` start at Go's port + 30 to + 35 (boards, discoverable, the
+    // licensed three, edit limit). Measured 2026-09-18: a plugin suite on :8095 took the boards
+    // oracle down, and twenty tests in six other suites failed for it.
+    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8100).collect();
+    let taken: Vec<_> = claims
+        .iter()
+        .filter(|(port, _)| reserved.contains(port))
+        .collect();
+    assert!(
+        taken.is_empty(),
+        "second servers on a port the stack itself uses: {taken:?}"
     );
 }

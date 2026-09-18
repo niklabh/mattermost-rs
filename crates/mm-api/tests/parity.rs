@@ -271,6 +271,7 @@ mod parity {
     pub mod command_dispatch;
     pub mod local_uploads;
     pub mod marketplace_visit;
+    pub mod plugin_statuses;
     pub mod remote_cluster;
     // Appended 2026-09-15: the system-operations family.
     pub mod sysops;
