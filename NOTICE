@@ -36,6 +36,20 @@ types stay reusable under the more permissive terms:
     crates/mm-api/                           /api4/, which are AGPL v3.0
     crates/mm-ws/                            full text: ./LICENSE
 
+    crates/gobwire/           MIT OR         original implementations of Go's documented
+    crates/gobwire-derive/    Apache-2.0     encoding/gob and net/rpc protocols; no Mattermost
+    crates/go-netrpc/                        code, and no
+                                             dependency on any mm-* crate (publishable alone)
+                                             full text: LICENSE-MIT, LICENSE-APACHE in each
+
+    crates/goplugin/          MPL-2.0        reimplements HashiCorp go-plugin's net/rpc
+                                             protocol and hashicorp/yamux; no Mattermost
+                                             code. full text: crates/goplugin/LICENSE
+
+    crates/mm-plugin/         Apache-2.0     generated from server/public/plugin/ and
+                                             server/public/model/
+                                             full text: crates/mm-plugin/LICENSE
+
     everything else           AGPL-3.0-only  the repository default
 
 Apache-2.0 is one-way compatible with AGPL-3.0, so the AGPL crates may depend on

@@ -1,0 +1,21 @@
+# Mutation plan for ServeHTTP and ServeMetrics (plugin plan Phase 3): the response writer served
+# as net/rpc, and the two connections a served request carries.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-http.plan
+#
+# `rpc_` is the Rust host serving a Go plugin's writes, `sdk_` the Go host serving a Rust
+# plugin's. The decisions: that the header map is pushed before every write, the status check Go
+# makes rather than panicking, that a request with no body sends the id 0, which stream is which,
+# and Go's 404 for a plugin that does not serve. CONTROL- lines must SURVIVE.
+
+http-header-not-synced	crates/mm-plugin/src/http.rs	    pub async fn write(&mut self, body: &[u8]) -> Result<usize, go_netrpc::Error> {\n        self.sync_header().await?;	    pub async fn write(&mut self, body: &[u8]) -> Result<usize, go_netrpc::Error> {	pkg	rpc_http
+http-sync-header-drops-keys	crates/mm-plugin/src/http.rs	            w.lock().map_err(poisoned)?.sync_header(header);	            let _ = header;	pkg	rpc_
+http-status-check-dropped	crates/mm-plugin/src/http.rs	            if !(100..=999).contains(&status) {	            if false {	pkg	rpc_http
+http-write-header-loses-status	crates/mm-plugin/src/http.rs	            w.lock().map_err(poisoned)?.write_header(status);	            w.lock().map_err(poisoned)?.write_header(200);	pkg	rpc_
+http-body-id-not-zero	crates/mm-plugin/src/rpc/serve_http.rs	        let mut request_body_stream = 0;	        let mut request_body_stream = 1;	pkg	rpc_
+http-no-body-still-dialed	crates/mm-plugin/src/rpc/serve_http.rs	    let body = if body_stream == 0 {\n        None	    let body = if false {\n        None	pkg	rpc_http
+http-streams-swapped	crates/mm-plugin/src/rpc/serve_http.rs	            let (writer, body) = dial_http(\n                &broker,\n                args.response_writer_stream,\n                args.request_body_stream,\n            )\n            .await?;\n            let _ = this\n                .serve_http(	            let (writer, body) = dial_http(\n                &broker,\n                args.request_body_stream,\n                args.response_writer_stream,\n            )\n            .await?;\n            let _ = this\n                .serve_http(	pkg	sdk_
+http-not-found-status	crates/mm-plugin/src/rpc/serve_http.rs	    writer.write_header(404);	    writer.write_header(200);	pkg	rpc_http
+http-unimplemented-still-called	crates/mm-plugin/src/rpc/serve_http.rs	        if !self.implements(id) {\n            not_found(&mut writer);\n            return;\n        }	        if false {\n            not_found(&mut writer);\n            return;\n        }	pkg	rpc_http
+CONTROL-rename-writer-binding	crates/mm-plugin/src/rpc/serve_http.rs	        let response_writer_stream = self.broker.next_id();\n        let broker = self.broker.clone();\n        let served = response_writer_server(writer);	        let response_writer_stream = self.broker.next_id();\n        let broker = self.broker.clone();\n        let serving = response_writer_server(writer);\n        let served = serving;	pkg	rpc_
+CONTROL-rename-writer-capture	crates/mm-plugin/src/http.rs	    let w = Arc::clone(&writer);\n    server.register("Plugin.Header", move |_: Empty| {\n        let w = Arc::clone(&w);	    let held = Arc::clone(&writer);\n    server.register("Plugin.Header", move |_: Empty| {\n        let w = Arc::clone(&held);	pkg	rpc_

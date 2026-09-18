@@ -1,0 +1,22 @@
+# Mutation plan for the hand-written plain methods (plugin plan Phase 3): the hooks whose answer
+# is seeded with the caller's value, the log methods, and LoadPluginConfiguration.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-handwritten.plan
+#
+# Every line filters to `rpc_` or `sdk_`, never the drift check. The decisions: that a merging
+# hook seeds its answer and decodes into it, that MessageWillBeUpdated does not, that the
+# WithRPCErr companions never seed, that the log pairs cross as strings, that
+# LoadPluginConfiguration answers `null` when the host has none, and the hand-written error text,
+# which differs from the generated one in case and full stop. CONTROL- lines must SURVIVE.
+
+hand-merge-not-seeded	crates/mm-plugin/src/rpc/handwritten.rs	            let seed = <$returns>::default_from(args.b.clone());	            let seed = <$returns>::default();	pkg	rpc_
+hand-merge-not-decoded-into	crates/mm-plugin/src/rpc/mod.rs	            .call_into(&format!("Plugin.{name}"), args, seed.clone())	            .call_into(&format!("Plugin.{name}"), args, R::default())	pkg	rpc_
+hand-merge-skipped-loses-seed	crates/mm-plugin/src/rpc/mod.rs	        if !self.implements(id) {\n            return seed;\n        }	        if !self.implements(id) {\n            return R::default();\n        }	pkg	rpc_
+hand-updated-seeds-old-post	crates/mm-plugin/src/rpc/handwritten.rs	        let default = Z_MessageWillBeUpdatedReturns::default_from(args.b.clone());	        let default = Z_MessageWillBeUpdatedReturns::default_from(args.c.clone());	pkg	rpc_
+hand-updated-merges	crates/mm-plugin/src/rpc/handwritten.rs	        match self.rpc("MessageWillBeUpdated", &args).await {	        match self\n            .client\n            .call_into("Plugin.MessageWillBeUpdated", &args, default.clone())\n            .await\n            .map_err(Into::<go_netrpc::Error>::into)\n        {	pkg	rpc_
+hand-log-pairs-dropped	crates/mm-plugin/src/rpc/handwritten.rs	    pairs.iter().map(|s| Some(Interface::string(s))).collect()	    let _ = pairs;\n    Vec::new()	pkg	rpc_
+hand-log-wrong-method	crates/mm-plugin/src/rpc/handwritten.rs	    log_method!(log_warn, "LogWarn", Z_LogWarnArgs, Z_LogWarnReturns);	    log_method!(log_warn, "LogInfo", Z_LogWarnArgs, Z_LogWarnReturns);	pkg	sdk_
+hand-config-not-null	crates/mm-plugin/src/rpc/handwritten.rs	                    Err(NotImplemented) => Z_LoadPluginConfigurationArgsReturns {\n                        a: b"null".to_vec(),\n                    },	                    Err(NotImplemented) => Z_LoadPluginConfigurationArgsReturns::default(),	pkg	rpc_
+gen-handwritten-message-case	crates/mm-plugin/src/rpc/hooks.rs	ServiceError("hook MessageWillBePosted called but not implemented".into())	ServiceError("Hook MessageWillBePosted called but not implemented.".into())	pkg	rpc_
+CONTROL-rename-seed	crates/mm-plugin/src/rpc/handwritten.rs	            let seed = <$returns>::default_from(args.b.clone());\n            self.call_merging(hook_id::$id, $name, &args, seed).await	            let seeded = <$returns>::default_from(args.b.clone());\n            self.call_merging(hook_id::$id, $name, &args, seeded).await	pkg	rpc_
+CONTROL-reorder-log-methods	crates/mm-plugin/src/rpc/handwritten.rs	    log_method!(log_debug, "LogDebug", Z_LogDebugArgs, Z_LogDebugReturns);\n    log_method!(log_info, "LogInfo", Z_LogInfoArgs, Z_LogInfoReturns);	    log_method!(log_info, "LogInfo", Z_LogInfoArgs, Z_LogInfoReturns);\n    log_method!(log_debug, "LogDebug", Z_LogDebugArgs, Z_LogDebugReturns);	pkg	rpc_

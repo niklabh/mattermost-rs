@@ -1,0 +1,22 @@
+# Mutation plan for PluginHTTP and FileWillBeUploaded (plugin plan Phase 3): the outward HTTP
+# call a plugin makes through the host, and the hook that lends a reader and a writer at once.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-upload.plan
+#
+# `rpc_` is the Rust host answering a Go plugin, `sdk_` the Go host answering a Rust one. The
+# decisions: that the response body is pushed over its own connection after the head answers, that
+# the buffered fallback is taken only for Go's "can't find method" error, which stream is the file
+# and which the replacement, and that the host waits for the replacement copy before the hook
+# answers. CONTROL- lines must SURVIVE.
+
+http-response-head-swapped	crates/mm-plugin/src/rpc/streams.rs	                let returns = Z_PluginHTTPStreamReturns {\n                    status_code: response.status_code,\n                    header: response.header,\n                };	                let returns = Z_PluginHTTPStreamReturns {\n                    status_code: 200,\n                    header: response.header,\n                };	pkg	rpc_
+http-response-body-not-sent	crates/mm-plugin/src/rpc/streams.rs	                    if let Err(e) = tokio::io::copy(&mut body, &mut connection).await {	                    if let Err(e) = tokio::io::copy(&mut tokio::io::empty(), &mut connection).await {	pkg	rpc_
+http-request-body-not-lent	crates/mm-plugin/src/rpc/streams.rs	            Some(body) => self.lend_reader(body, "PluginHTTPStream"),	            Some(body) => { let _ = body; 0 }	pkg	sdk_
+http-fallback-on-any-error	crates/mm-plugin/src/rpc/streams.rs	            Err(go_netrpc::Error::Server(message))\n                if message == "rpc: can't find method Plugin.PluginHTTPStream" =>	            Err(go_netrpc::Error::Server(message))\n                if !message.is_empty() =>	pkg	rpc_the_outward
+http-no-request-body-dialed	crates/mm-plugin/src/rpc/streams.rs	                let body: Box<dyn AsyncRead + Send + Unpin> = match args.request_body_stream {\n                    0 => Box::new(tokio::io::empty()),	                let body: Box<dyn AsyncRead + Send + Unpin> = match u32::MAX {\n                    0 => Box::new(tokio::io::empty()),	pkg	rpc_
+upload-streams-swapped	crates/mm-plugin/src/rpc/file_upload.rs	                let file = broker\n                    .dial(args.uploaded_file_stream)	                let file = broker\n                    .dial(args.replacement_file_stream)	pkg	sdk_
+upload-does-not-wait-for-replacement	crates/mm-plugin/src/rpc/file_upload.rs	        let _ = replacement.await;	        replacement.abort();	pkg	rpc_
+upload-info-not-the-default	crates/mm-plugin/src/rpc/file_upload.rs	        let default = Z_FileWillBeUploadedReturns {\n            a: info.clone(),\n            b: String::new(),\n        };	        let default = Z_FileWillBeUploadedReturns::default();	pkg	rpc_
+upload-unimplemented-still-called	crates/mm-plugin/src/rpc/file_upload.rs	        if !self.implements(hook_id::FILE_WILL_BE_UPLOADED) {\n            return default;\n        }	        if false {\n            return default;\n        }	pkg	rpc_
+CONTROL-rename-response-binding	crates/mm-plugin/src/rpc/streams.rs	                tokio::spawn(async move {\n                    let mut body = response.body;\n                    let mut connection = response_connection;	                tokio::spawn(async move {\n                    let mut body = response.body;\n                    let mut connection = { let held = response_connection; held };	pkg	rpc_
+CONTROL-rename-file-binding	crates/mm-plugin/src/rpc/file_upload.rs	        let uploaded_file_stream = self.broker.next_id();\n        let broker = self.broker.clone();	        let uploaded_file_stream = self.broker.next_id();\n        let lender = self.broker.clone();\n        let broker = lender;	pkg	rpc_

@@ -1,0 +1,25 @@
+[package]
+name = "mm-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# Apache-2.0, like mm-model: everything here derives from `server/public/plugin` and
+# `server/public/model`, which upstream licenses under Apache-2.0 (docs/PLUGIN_PLAN.md, D3).
+license = "Apache-2.0"
+repository.workspace = true
+description = "Mattermost's plugin RPC surface: gob wire types generated from the Go server"
+
+[dependencies]
+gobwire = { path = "../gobwire" }
+serde_json.workspace = true
+base64.workspace = true
+go-netrpc = { path = "../go-netrpc" }
+goplugin = { path = "../goplugin" }
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+sha2.workspace = true
+serde_json.workspace = true
+base64.workspace = true

@@ -11,6 +11,9 @@
 #           app     mm-app DB-backed tests                 (needs Postgres)
 #           api     mm-api parity suites                   (needs Postgres + Go + a live mm-api)
 #           all     everything
+#           pkg     every test target of one package: MUTATE_PACKAGE=<crate> (no stack). For the
+#                   generic crates (gobwire, …) whose parity suites are integration tests and run
+#                   their Go oracle as a subprocess rather than against the stack.
 #
 # Pick the *narrowest* suite that should catch the mutation. The whole point of a mutation is that
 # you can predict which test dies; running everything turns a 5-second check into a 90-second one.
@@ -142,6 +145,7 @@ case "$SUITE" in
   #   MUTATE_STORE_TARGETS='--test db_post_channel_page'
   store) cargo test -p mm-store ${=MUTATE_STORE_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
+  pkg)   cargo test -p "${MUTATE_PACKAGE:?pkg suite needs MUTATE_PACKAGE}" ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
            # The parity tests are now in a single `--test parity` binary. Filter by test name
            # to narrow the suite under test — otherwise an unrelated failure decides the verdict:
@@ -186,6 +190,13 @@ if [ $RC -eq 0 ]; then
   echo "$NAME: **SURVIVED** — the suite cannot see this change. Fix the fixture, not the tally."
 else
   NAMED=$(grep -h '^test .* FAILED' "$LOG" | head -3 | sed 's/ \.\.\. FAILED//;s/^test //' | paste -sd'; ' -)
+  # A capped test allocator (crates/gobwire/tests/common) aborts a runaway mutant with
+  # "memory allocation of N bytes failed" before libtest can name the test. That abort *is* the
+  # suite seeing the change, and it names the binary; anything else without a named test is still
+  # a harness fault.
+  if [ -z "$NAMED" ] && grep -q 'memory allocation of [0-9]* bytes failed' "$LOG"; then
+    NAMED="allocation cap in $(grep -o 'deps/[a-z_]*-' "$LOG" | tail -1 | sed 's|deps/||;s|-$||')"
+  fi
   if [ -z "$NAMED" ]; then
     # The suite exited non-zero without failing a named test: a compile error, a server that
     # never came up, or the wrong targets being run. That is a harness fault, not a caught

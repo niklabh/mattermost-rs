@@ -633,6 +633,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "go-netrpc"
+version = "0.1.0"
+dependencies = [
+ "gobwire",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gobwire"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "gobwire-derive",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "gobwire-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "goplugin"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "go-netrpc",
+ "gobwire",
+ "libc",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1192,6 +1239,20 @@ dependencies = [
  "subtle",
  "thiserror",
  "unicode-normalization",
+]
+
+[[package]]
+name = "mm-plugin"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "go-netrpc",
+ "gobwire",
+ "goplugin",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

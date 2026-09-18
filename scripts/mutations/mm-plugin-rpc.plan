@@ -1,0 +1,24 @@
+# Mutation plan for mm-plugin's RPC layer (plugin plan Phase 3): the host's hooks client and
+# the generated traits, servers and clients.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-rpc.plan
+#
+# Generated files are mutated as a generator bug would leave them, and every line filters to
+# `rpc_` so the drift check (generated_rust_is_current) cannot decide the verdict. The decisions:
+# the implemented-hook gate, the hook ids and names that index it, OnActivate's two broker ids,
+# the service names, Go's not-implemented message, and the WithRPCErr transport error.
+# CONTROL- lines must SURVIVE.
+
+client-implemented-gate-skipped	crates/mm-plugin/src/rpc/mod.rs	        if !self.implements(id) {\n            return R::default();	        if false {\n            return R::default();	pkg	rpc_
+client-implemented-not-stored	crates/mm-plugin/src/rpc/mod.rs	self.implemented[id].store(true, Ordering::Relaxed);	self.implemented[id].store(false, Ordering::Relaxed);	pkg	rpc_
+client-rpc-err-dropped	crates/mm-plugin/src/rpc/mod.rs	(R::default(), Some(e))	(R::default(), None)	pkg	rpc_
+client-service-name	crates/mm-plugin/src/rpc/mod.rs	            return R::default();\n        }\n        match self.client.call(&format!("Plugin.{name}"), args).await {	            return R::default();\n        }\n        match self.client.call(&format!("Hooks.{name}"), args).await {	pkg	rpc_
+activate-mux-ids-swapped	crates/mm-plugin/src/rpc/mod.rs	        let args = Z_OnActivateArgs {\n            api_mux_id,\n            driver_mux_id,\n        };	        let args = Z_OnActivateArgs {\n            api_mux_id: driver_mux_id,\n            driver_mux_id: api_mux_id,\n        };	pkg	rpc_
+server-implemented-empty	crates/mm-plugin/src/rpc/mod.rs	        let names = this.implemented();	        let names: Vec<String> = { let _ = this.implemented(); Vec::new() };	pkg	rpc_
+gen-hook-id-off-by-one	crates/mm-plugin/src/rpc/hooks.rs	pub const ON_INSTALL: usize = 25;	pub const ON_INSTALL: usize = 26;	pkg	rpc_
+gen-hook-names-swapped	crates/mm-plugin/src/rpc/hooks.rs	    "OnInstall",\n    "OnSendDailyTelemetry",	    "OnSendDailyTelemetry",\n    "OnInstall",	pkg	rpc_
+gen-hook-wrong-id	crates/mm-plugin/src/rpc/hooks.rs	    pub async fn on_deactivate(&self, args: Z_OnDeactivateArgs) -> Z_OnDeactivateReturns {\n        self.call(hook_id::ON_DEACTIVATE,	    pub async fn on_deactivate(&self, args: Z_OnDeactivateArgs) -> Z_OnDeactivateReturns {\n        self.call(hook_id::ON_ACTIVATE,	pkg	rpc_
+gen-not-implemented-message	crates/mm-plugin/src/rpc/hooks.rs	"Hook OnInstall called but not implemented."	"API OnInstall called but not implemented."	pkg	rpc_
+gen-api-client-wrong-method	crates/mm-plugin/src/rpc/api.rs	self.call("GetUser", &args)	self.call("GetUserStatus", &args)	pkg	rpc_
+CONTROL-atomic-ordering	crates/mm-plugin/src/rpc/mod.rs	self.implemented[id].store(true, Ordering::Relaxed);	self.implemented[id].store(true, Ordering::SeqCst);	pkg	rpc_
+CONTROL-rename-binding	crates/mm-plugin/src/rpc/mod.rs	        let mut api_server = Server::new();\n        register_api(&mut api_server, api);	        let mut api_srv = Server::new();\n        register_api(&mut api_srv, api);\n        let api_server = api_srv;	pkg	rpc_

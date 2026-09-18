@@ -1,0 +1,354 @@
+//! A Mattermost plugin written in Rust with the `mm_plugin` SDK: the plugin half of
+//! `tests/sdk_conformance.rs`, run under a Go host (`reference/dump/plugingen host`).
+//!
+//! Every generated hook answers with its `Z_<Hook>Returns` fixture. `OnActivate` calls every
+//! generated API method with its `Z_<Method>Args` fixture. Everything the plugin sees goes to the
+//! JSON-lines file named by `$CONFORMANCE_TRANSCRIPT`, in order:
+//!
+//! ```text
+//! {"set_api": true}
+//! {"hook": "<Name>", "args": <render>}
+//! {"api": "<Name>", "returns": <render>}
+//! {"activated": true}
+//! ```
+//!
+//! With `$CONFORMANCE_REFUSE_ACTIVATION` set, `OnActivate` returns an `*model.AppError` instead
+//! of touring the API, and records `{"refused": true}`.
+
+use std::io::Write;
+use std::sync::{Mutex, OnceLock};
+
+use mm_plugin::rpc::{ApiClient, Hooks, HooksHttp, NotImplemented, Plugin, client_main};
+use mm_plugin::wire::model::AppError;
+use mm_plugin::wire::plugin::Z_OnActivateReturns;
+use mm_plugin::wire::registered;
+use serde_json::{Value as Json, json};
+
+#[path = "../tests/common/render.rs"]
+mod render;
+
+/// The gob oracle the test that launched this plugin generated.
+fn oracle_dir() -> std::path::PathBuf {
+    std::env::var_os("MM_PLUGIN_GOB_DIR")
+        .expect("MM_PLUGIN_GOB_DIR is not set: the conformance plugin reads the test's oracle")
+        .into()
+}
+use render::{fixture, render_typed, replacement_file, stream_digest, stream_payload};
+
+struct Conformance {
+    api: OnceLock<ApiClient>,
+    driver: OnceLock<mm_plugin::rpc::DriverClient>,
+    transcript: Mutex<std::fs::File>,
+}
+
+impl Conformance {
+    fn record(&self, entry: Json) {
+        let mut f = self.transcript.lock().unwrap();
+        writeln!(f, "{entry}").unwrap();
+    }
+
+    fn answer<A: gobwire::Encode, R: gobwire::Decode + Default + Send + 'static>(
+        &self,
+        name: &str,
+        returns: &str,
+        args: &A,
+    ) -> R {
+        self.record(json!({ "hook": name, "args": render_typed(args) }));
+        fixture(returns)
+    }
+}
+
+macro_rules! names {
+    ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
+        &[$($name),*]
+    };
+}
+const HOOKS: &[&str] = mm_plugin::for_each_hook!(names);
+
+/// What the log methods send. Go's plugin sends `%+v` of ("key", 42, true), which is what these
+/// already are: Go stringifies them client-side (stringifier.go).
+const LOG_MESSAGE: &str = "a logged line";
+const LOG_PAIRS: [&str; 3] = ["key", "42", "true"];
+
+macro_rules! hooks {
+    ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
+        impl Hooks for Conformance {
+            fn implemented(&self) -> Vec<String> {
+                let mut names: Vec<String> = HOOKS.iter().map(|s| (*s).to_owned()).collect();
+                names.extend(
+                    ["OnActivate", "ServeHTTP", "ServeMetrics", "FileWillBeUploaded"]
+                        .map(str::to_owned),
+                );
+                names
+            }
+            $(
+                async fn $method(&self, args: $args) -> Result<$returns, NotImplemented> {
+                    Ok(self.answer($name, $returns_name, &args))
+                }
+            )*
+        }
+    };
+}
+mm_plugin::for_each_hook!(hooks);
+
+/// Answers the request by the rule in `http_response`, and records what it was asked.
+impl HooksHttp for Conformance {
+    async fn serve_http(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        self.echo_http("ServeHTTP", request, body, writer).await;
+        Ok(())
+    }
+
+    async fn serve_metrics(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        self.echo_http("ServeMetrics", request, body, writer).await;
+        Ok(())
+    }
+}
+
+impl Conformance {
+    async fn echo_http(
+        &self,
+        hook: &str,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        mut writer: mm_plugin::http::RemoteResponseWriter,
+    ) {
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncReadExt as _;
+
+        let request = request.expect("a request");
+        let mut bytes = Vec::new();
+        if let Some(mut body) = body {
+            body.read_to_end(&mut bytes)
+                .await
+                .expect("the request body");
+        }
+        let url = String::from_utf8(request.url.clone().unwrap_or_default().0).expect("the URL");
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let echo = format!("{} {url} {}", request.method, &digest[..16]);
+
+        self.record(json!({
+            "hook": hook,
+            "args": render_typed(&*request),
+            "stream": stream_digest(&bytes),
+        }));
+
+        writer
+            .header()
+            .await
+            .insert("X-Conformance".into(), vec![echo]);
+        writer.write_header(203).await;
+        let answer = format!("conformance: {} bytes", bytes.len());
+        writer.write(answer.as_bytes()).await.expect("the answer");
+    }
+}
+
+/// Rewrites the file with the digest of what it read, and records both.
+impl mm_plugin::rpc::HooksFileUpload for Conformance {
+    async fn file_will_be_uploaded(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        info: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        mut file: mm_plugin::io_rpc::RemoteReader,
+        mut output: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let mut uploaded = Vec::new();
+        file.read_to_end(&mut uploaded).await.expect("the file");
+        output
+            .write_all(replacement_file(&uploaded).as_bytes())
+            .await
+            .expect("the replacement");
+        output
+            .shutdown()
+            .await
+            .expect("the replacement is complete");
+
+        self.record(json!({
+            "hook": "FileWillBeUploaded",
+            "stream": stream_digest(&uploaded),
+        }));
+        Ok(mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+            a: info,
+            b: String::new(),
+        })
+    }
+}
+
+impl Plugin for Conformance {
+    fn set_api(&self, api: ApiClient, driver: mm_plugin::rpc::DriverClient) {
+        self.record(json!({ "set_api": true }));
+        let _ = self.api.set(api);
+        let _ = self.driver.set(driver);
+    }
+
+    async fn on_activate(&self) -> Result<Z_OnActivateReturns, NotImplemented> {
+        let Some(api) = self.api.get() else {
+            panic!("OnActivate before SetAPI");
+        };
+        if std::env::var_os("CONFORMANCE_REFUSE_ACTIVATION").is_some() {
+            let err = AppError {
+                id: "conformance.refused".into(),
+                message: "activation refused".into(),
+                r#where: "conformance.OnActivate".into(),
+                status_code: 500,
+                ..AppError::default()
+            };
+            self.record(json!({ "refused": true }));
+            return Ok(Z_OnActivateReturns {
+                a: Some(gobwire::Interface::new(registered::APP_ERROR, &err).unwrap()),
+            });
+        }
+        macro_rules! tour {
+            ($(($method:ident, $name:literal, $args_name:literal, $args:ty, $returns_name:literal, $returns:ty),)*) => {
+                $(
+                    let returns = api.$method(fixture::<$args>($args_name)).await;
+                    self.record(json!({ "api": $name, "returns": render_typed(&returns) }));
+                )*
+            };
+        }
+        mm_plugin::for_each_api_call!(tour);
+
+        // The methods whose clients are hand-written, with the values the test expects.
+        let pairs = LOG_PAIRS.map(str::to_owned);
+        api.log_debug(LOG_MESSAGE, &pairs).await;
+        api.log_info(LOG_MESSAGE, &pairs).await;
+        api.log_warn(LOG_MESSAGE, &pairs).await;
+        api.log_error(LOG_MESSAGE, &pairs).await;
+        // The methods that lend the host a reader.
+        let upload: mm_plugin::wire::plugin::Z_UploadDataArgs = fixture("Z_UploadDataArgs");
+        let returns = api
+            .upload_data(upload.a, std::io::Cursor::new(stream_payload()))
+            .await;
+        self.record(json!({ "api": "UploadData", "returns": render_typed(&returns) }));
+
+        let install: mm_plugin::wire::plugin::Z_InstallPluginArgs = fixture("Z_InstallPluginArgs");
+        let returns = api
+            .install_plugin(std::io::Cursor::new(stream_payload()), install.b)
+            .await;
+        self.record(json!({ "api": "InstallPlugin", "returns": render_typed(&returns) }));
+
+        let sync: mm_plugin::wire::plugin::Z_ReceiveSharedChannelAttachmentSyncMsgArgs =
+            fixture("Z_ReceiveSharedChannelAttachmentSyncMsgArgs");
+        let returns = api
+            .receive_shared_channel_attachment_sync_msg(
+                sync.a,
+                sync.b,
+                sync.c,
+                std::io::Cursor::new(stream_payload()),
+            )
+            .await;
+        self.record(json!({
+            "api": "ReceiveSharedChannelAttachmentSyncMsg",
+            "returns": render_typed(&returns),
+        }));
+
+        // The outward HTTP call, whose response body arrives over its own connection.
+        let response = api
+            .plugin_http(
+                Some(Box::new(render::http_request())),
+                Some(std::io::Cursor::new(stream_payload())),
+            )
+            .await;
+        match response {
+            Some(mut response) => {
+                use tokio::io::AsyncReadExt as _;
+                let mut body = Vec::new();
+                response
+                    .body
+                    .read_to_end(&mut body)
+                    .await
+                    .expect("the body");
+                self.record(json!({
+                    "api": "PluginHTTP",
+                    "status": response.status_code,
+                    "header": response.header,
+                    "body": String::from_utf8_lossy(&body),
+                }));
+            }
+            None => self.record(json!({ "api": "PluginHTTP", "error": "no response" })),
+        }
+
+        // The audit record goes through the gob-safe JSON round trip inside the client.
+        // Each method sends its own fixture's record, which is what the test expects of it.
+        let logged: mm_plugin::wire::plugin::Z_LogAuditRecArgs = fixture("Z_LogAuditRecArgs");
+        api.log_audit_rec(*logged.a.expect("the fixture has a record"))
+            .await;
+        let with_level: mm_plugin::wire::plugin::Z_LogAuditRecWithLevelArgs =
+            fixture("Z_LogAuditRecWithLevelArgs");
+        api.log_audit_rec_with_level(
+            *with_level.a.expect("the fixture has a record"),
+            with_level.b,
+        )
+        .await;
+
+        let config = api.load_plugin_configuration().await;
+        self.record(json!({
+            "api": "LoadPluginConfiguration",
+            "config": serde_json::from_slice::<Json>(&config).unwrap_or(Json::Null),
+        }));
+
+        // The database, which the host serves on the second connection of OnActivate.
+        let driver = self.driver.get().expect("a driver");
+        let conn = driver.conn(true).await;
+        let ping = driver.conn_ping(conn.a.clone()).await;
+        let rows = driver
+            .conn_query(mm_plugin::wire::plugin::Z_DbConnArgs {
+                a: conn.a.clone(),
+                b: "SELECT 1".into(),
+                c: vec![mm_plugin::wire::sql_driver::NamedValue {
+                    name: "one".into(),
+                    ordinal: 1,
+                    // As Go's `int64(1)` crosses: the name is the concrete type's.
+                    value: Some(
+                        gobwire::Interface::new(gobwire::names::INT64, &1i64).expect("an int64"),
+                    ),
+                }],
+            })
+            .await;
+        let columns = driver.rows_columns(rows.a.clone()).await;
+        self.record(json!({
+            "driver": "tour",
+            "conn": conn.a,
+            "conn_error": render_typed(&conn.b),
+            "ping_error": render_typed(&ping.a),
+            "rows": rows.a,
+            "columns": columns.a,
+        }));
+
+        self.record(json!({ "activated": true }));
+        Ok(Z_OnActivateReturns::default())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let path =
+        std::env::var_os("CONFORMANCE_TRANSCRIPT").expect("CONFORMANCE_TRANSCRIPT is not set");
+    let transcript = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("open the transcript");
+    let plugin = Conformance {
+        api: OnceLock::new(),
+        driver: OnceLock::new(),
+        transcript: Mutex::new(transcript),
+    };
+    if let Err(e) = client_main(plugin).await {
+        eprintln!("conformance plugin: {e}");
+        std::process::exit(1);
+    }
+}
