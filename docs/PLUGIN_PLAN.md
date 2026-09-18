@@ -414,11 +414,34 @@ Both conformance plugins answer the same request the same way, so either host ca
 70,000-byte body read over one connection, a header, a status and a body written back over the
 other. Mutations: 11 run, 9 caught, 2 controls survived.
 
+**`PluginHTTP` and `FileWillBeUploaded`: DONE 2026-09-18 (eighth part of Phase 3). Every
+stream-carrying method is now ported except the hijack.** Both sides of each.
+
+`PluginHTTP` is the call a plugin makes *outward*, to the server's own handlers. The streaming
+shape lends the request body, answers the head through the call, and pushes the response body
+over its own connection afterwards. The buffered shape is the fallback, taken only for Go's exact
+`rpc: can't find method Plugin.PluginHTTPStream`, so a plugin still works against a host too old
+to stream.
+
+`FileWillBeUploaded` lends a reader and a writer at once: the uploaded file is pulled, and the
+replacement is pushed back raw. The host waits for that copy before the hook answers, so a
+rewritten file is complete when it returns.
+
+Both conformance plugins rewrite the file the same way — the digest of what they read — and make
+the same outward call, so either host can check it. Mutations: 11 run, 9 caught, 2 controls survived.
+
+**One asymmetry in Go, kept:** the response body of `PluginHTTPStream` is pushed with a plain
+`io.Copy`, while the plugin reads it through `connectIOReader`, which asks for bytes over the same
+connection. Nobody reads those asks. This crate does not send them, which changes only bytes no
+side consumes.
+
+**Not ported:** `hijack.go`, which a plugin uses to take the connection over for websockets.
+
 **Next in Phase 3:**
-- `PluginHTTP` and its stream form, the calls a plugin makes *outward* through the host;
-- `FileWillBeUploaded`, which lends a reader and a writer at once;
-- the database driver's RPC, and the error helpers (`ErrorString` codes);
-- then the Rust conformance plugin under the real Go server on the stack.
+- the database driver's RPC (`db_rpc.go`), and the error helpers (`ErrorString` codes);
+- `hijack.go`;
+- then the Rust conformance plugin under the real Go server on the stack, which is Phase 3's
+  exit test.
 
 
 - `go-netrpc`: `Request{ServiceMethod, Seq}` and `Response{ServiceMethod, Seq, Error}`, a

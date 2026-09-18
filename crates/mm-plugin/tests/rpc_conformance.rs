@@ -37,6 +37,41 @@ use serde_json::{Map, Value as Json};
 mod common;
 use common::*;
 
+/// A writer the test can read back, for the replacement file.
+#[derive(Clone)]
+struct SharedWriter(Arc<tokio::sync::Mutex<Vec<u8>>>);
+
+impl tokio::io::AsyncWrite for SharedWriter {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        let mut guard = std::pin::pin!(self.0.lock());
+        match guard.as_mut().poll(cx) {
+            std::task::Poll::Ready(mut held) => {
+                held.extend_from_slice(buf);
+                std::task::Poll::Ready(Ok(buf.len()))
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 async fn within<T>(f: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(120), f)
         .await
@@ -182,6 +217,33 @@ impl PluginApiStreams for Fake {
         self.record_stream("ReceiveSharedChannelAttachmentSyncMsg", data)
             .await;
         Ok(fixture("Z_ReceiveSharedChannelAttachmentSyncMsgReturns"))
+    }
+}
+
+/// Answers the plugin's outward HTTP call with what both suites expect, and records the request.
+impl mm_plugin::rpc::PluginApiHttp for Fake {
+    async fn plugin_http(
+        &self,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    ) -> Result<mm_plugin::rpc::HttpResponse, NotImplemented> {
+        use tokio::io::AsyncReadExt as _;
+        let mut body = body;
+        let mut bytes = Vec::new();
+        body.read_to_end(&mut bytes)
+            .await
+            .expect("the request body");
+        let mut received = self.received.lock().unwrap();
+        received.insert("PluginHTTP".into(), render_typed(&request));
+        received.insert("PluginHTTP.stream".into(), stream_digest(&bytes));
+        drop(received);
+
+        let (status_code, header, body) = outward_response();
+        Ok(mm_plugin::rpc::HttpResponse {
+            status_code,
+            header,
+            body: Box::new(std::io::Cursor::new(body)),
+        })
     }
 }
 
@@ -382,22 +444,39 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         }
         served.insert(name, recorder.response());
     }
+    // The hook that lends a reader and a writer at once.
+    let replacement = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let file_returns = within(hooks.file_will_be_uploaded(
+        None,
+        Some(Box::new(mm_plugin::wire::model::FileInfo {
+            id: "fileinfo".into(),
+            name: "upload.bin".into(),
+            ..Default::default()
+        })),
+        std::io::Cursor::new(stream_payload()),
+        SharedWriter(Arc::clone(&replacement)),
+    ))
+    .await;
     within(plugin.kill()).await;
 
     let mut failures = Vec::new();
     let mut go_hooks = BTreeMap::new();
     let mut go_api = BTreeMap::new();
     let mut go_config = None;
+    let mut outward = None;
     let mut activated = false;
     for entry in read_transcript(&transcript) {
         if let Some(Json::String(name)) = entry.get("hook") {
             // A later call replaces an earlier one: OnActivate itself calls OnConfigurationChange.
             go_hooks.insert(name.clone(), entry);
         } else if let Some(Json::String(name)) = entry.get("api") {
-            if name == "LoadPluginConfiguration" {
-                go_config = entry.get("config").cloned();
-            } else {
-                go_api.insert(name.clone(), entry["returns"].clone());
+            match name.as_str() {
+                "LoadPluginConfiguration" => go_config = entry.get("config").cloned(),
+                // The outward HTTP call records the response it received, not gob returns.
+                "PluginHTTP" => outward = Some(entry.clone()),
+                _ => {
+                    go_api.insert(name.clone(), entry["returns"].clone());
+                }
             }
         } else if entry.get("activated").is_some() {
             activated = true;
@@ -489,6 +568,34 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         }
     }
 
+    // The plugin's outward HTTP call reached the host's fake, and its answer came back whole.
+    let (status, header, body) = outward_response();
+    let outward = outward.expect("the Go plugin made no outward HTTP call");
+    assert_eq!(outward["status"], status);
+    assert_eq!(outward["header"], serde_json::json!(header));
+    assert_eq!(outward["body"], String::from_utf8_lossy(&body).as_ref());
+    assert_eq!(
+        received.get("PluginHTTP.stream"),
+        Some(&stream_digest(&stream_payload())),
+        "the request body the host read"
+    );
+
+    // The replacement the plugin wrote arrived whole, and the hook answered with the info.
+    assert_eq!(
+        String::from_utf8(replacement.lock().await.clone()).unwrap(),
+        replacement_file(&stream_payload()),
+        "the replacement file"
+    );
+    assert_eq!(
+        file_returns.a.map(|info| info.id),
+        Some("fileinfo".to_owned())
+    );
+    assert_eq!(
+        go_hooks["FileWillBeUploaded"]["stream"],
+        stream_digest(&stream_payload()),
+        "the file the plugin read"
+    );
+
     // The audit record crossed in its gob-safe form: the JSON round trip turned its integers
     // into floats and its structs into objects keyed by their `json:` tags (audit.go).
     for name in ["LogAuditRec", "LogAuditRecWithLevel"] {
@@ -571,7 +678,9 @@ fn merged_post(message: &str) -> Json {
 
 /// A connected host and plugin over an in-memory yamux session, with the host serving the API.
 /// Both sides get a broker, because the streaming methods lend a reader over one.
-async fn rust_api_pair<A: PluginApi + PluginApiStreams>(api: Arc<A>) -> ApiClient {
+async fn rust_api_pair<A: PluginApi + PluginApiStreams + mm_plugin::rpc::PluginApiHttp>(
+    api: Arc<A>,
+) -> ApiClient {
     let (a, b) = tokio::io::duplex(1 << 20);
     let host = Session::server(a, Config::default()).unwrap();
     let plugin = Session::client(b, Config::default()).unwrap();
@@ -668,6 +777,19 @@ impl Hooks for NoHttp {
         self.implemented.clone()
     }
 }
+impl mm_plugin::rpc::HooksFileUpload for NoHttp {
+    async fn file_will_be_uploaded(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        _: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        _: mm_plugin::io_rpc::RemoteReader,
+        _: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        // Answers as a plugin without the hook does, but notes that the host called anyway.
+        self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+        Err(NotImplemented)
+    }
+}
 impl mm_plugin::rpc::Plugin for NoHttp {}
 impl mm_plugin::rpc::HooksHttp for NoHttp {
     async fn serve_http(
@@ -733,6 +855,7 @@ async fn rpc_http_a_header_set_without_a_status_still_arrives() {
             vec!["ServeHTTP".into()]
         }
     }
+    impl mm_plugin::rpc::HooksFileUpload for HeaderOnly {}
     impl mm_plugin::rpc::Plugin for HeaderOnly {}
     impl mm_plugin::rpc::HooksHttp for HeaderOnly {
         async fn serve_http(
@@ -779,6 +902,7 @@ async fn rpc_http_an_invalid_status_is_refused() {
             vec!["ServeHTTP".into()]
         }
     }
+    impl mm_plugin::rpc::HooksFileUpload for Invalid {}
     impl mm_plugin::rpc::Plugin for Invalid {}
     impl mm_plugin::rpc::HooksHttp for Invalid {
         async fn serve_http(
@@ -808,6 +932,192 @@ async fn rpc_http_an_invalid_status_is_refused() {
     assert_eq!(response["status"], 200, "the invalid status was not kept");
     assert_eq!(response["body"], "body anyway");
 }
+
+/// A plugin that rewrites an uploaded file with a large replacement, so the host's copy is still
+/// in flight when the hook answers.
+struct Rewriter;
+impl Hooks for Rewriter {
+    fn implemented(&self) -> Vec<String> {
+        vec!["FileWillBeUploaded".into()]
+    }
+}
+impl mm_plugin::rpc::HooksHttp for Rewriter {}
+impl mm_plugin::rpc::Plugin for Rewriter {}
+impl mm_plugin::rpc::HooksFileUpload for Rewriter {
+    async fn file_will_be_uploaded(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        info: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        mut file: mm_plugin::io_rpc::RemoteReader,
+        output: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let mut uploaded = Vec::new();
+        file.read_to_end(&mut uploaded).await.unwrap();
+        // Answer first and write after, which is the case the host's wait exists for: Go's copy
+        // is still running when the call returns.
+        tokio::spawn(async move {
+            let mut output = output;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            output.write_all(&vec![b'r'; 1 << 20]).await.unwrap();
+            output.shutdown().await.unwrap();
+        });
+        Ok(mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+            a: info,
+            b: format!("read {}", uploaded.len()),
+        })
+    }
+}
+
+/// The host waits for the replacement copy before the hook answers, so the whole file is there
+/// (client_rpc.go, "Ensure the io.Copy from the replacementFileConnection above completes").
+#[tokio::test]
+async fn rpc_a_replacement_file_is_complete_when_the_hook_answers() {
+    let client = rust_plugin_pair(Arc::new(Rewriter)).await;
+    within(client.implemented()).await.unwrap();
+    let replacement = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let returns = within(client.file_will_be_uploaded(
+        None,
+        Some(Box::new(mm_plugin::wire::model::FileInfo {
+            id: "given".into(),
+            ..Default::default()
+        })),
+        std::io::Cursor::new(stream_payload()),
+        SharedWriter(Arc::clone(&replacement)),
+    ))
+    .await;
+    assert_eq!(returns.b, format!("read {}", stream_payload().len()));
+    assert_eq!(
+        replacement.lock().await.len(),
+        1 << 20,
+        "the replacement was still in flight when the hook answered"
+    );
+}
+
+/// A plugin that does not implement the hook is not called, and the file info the caller passed
+/// is the answer (client_rpc.go).
+#[tokio::test]
+async fn rpc_an_unimplemented_file_hook_answers_with_the_info_it_was_given() {
+    let plugin = Arc::new(NoHttp::new(&[]));
+    let client = rust_plugin_pair(Arc::clone(&plugin)).await;
+    within(client.implemented()).await.unwrap();
+    let replacement = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let returns = within(client.file_will_be_uploaded(
+        None,
+        Some(Box::new(mm_plugin::wire::model::FileInfo {
+            id: "given".into(),
+            ..Default::default()
+        })),
+        std::io::Cursor::new(stream_payload()),
+        SharedWriter(Arc::clone(&replacement)),
+    ))
+    .await;
+    assert_eq!(returns.a.map(|info| info.id), Some("given".to_owned()));
+    assert_eq!(returns.b, "");
+    assert!(replacement.lock().await.is_empty());
+    assert!(
+        !plugin.was_called(),
+        "the host called an unimplemented hook"
+    );
+}
+
+/// The plugin falls back to the buffered call only for Go's "can't find method" error, and gives
+/// up on any other (client_rpc.go, `PluginHTTP`).
+#[tokio::test]
+async fn rpc_the_outward_http_call_falls_back_only_when_the_method_is_missing() {
+    // A host from before the streaming shape: only `Plugin.PluginHTTP` exists, so the streaming
+    // call comes back with net/rpc's "can't find method".
+    let (a, b) = tokio::io::duplex(1 << 20);
+    let host = Session::server(a, Config::default()).unwrap();
+    let plugin_session = Session::client(b, Config::default()).unwrap();
+    let stream = plugin_session.open().await.unwrap();
+    let (plugin_broker, run) = MuxBroker::new(plugin_session.clone());
+    tokio::spawn(run);
+    tokio::spawn(async move {
+        let served = host.accept().await.unwrap();
+        let mut old_host = Server::new();
+        old_host.register(
+            "Plugin.PluginHTTP",
+            |_: mm_plugin::wire::plugin::Z_PluginHTTPArgs| async {
+                Ok::<_, go_netrpc::ServiceError>(mm_plugin::wire::plugin::Z_PluginHTTPReturns {
+                    response: Some(Box::new(mm_plugin::wire::http::Response {
+                        status_code: 204,
+                        ..Default::default()
+                    })),
+                    response_body: b"buffered".to_vec(),
+                })
+            },
+        );
+        let _ = Arc::new(old_host).serve(served).await;
+        drop(host);
+    });
+    let api = ApiClient::new(go_netrpc::Client::new(stream), plugin_broker);
+    let response = within(api.plugin_http(
+        Some(Box::new(http_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+    ))
+    .await
+    .expect("the buffered fallback answered");
+    assert_eq!(response.status_code, 204);
+    let mut body = Vec::new();
+    {
+        use tokio::io::AsyncReadExt as _;
+        let mut response = response;
+        response.body.read_to_end(&mut body).await.unwrap();
+    }
+    assert_eq!(body, b"buffered");
+
+    // A host whose streaming method fails for another reason, while its buffered one would
+    // answer: Go gives up rather than retrying, so the answer is none.
+    let (a, b) = tokio::io::duplex(1 << 20);
+    let host = Session::server(a, Config::default()).unwrap();
+    let plugin_session = Session::client(b, Config::default()).unwrap();
+    let stream = plugin_session.open().await.unwrap();
+    let (plugin_broker, run) = MuxBroker::new(plugin_session.clone());
+    tokio::spawn(run);
+    tokio::spawn(async move {
+        let served = host.accept().await.unwrap();
+        let mut broken = Server::new();
+        broken.register(
+            "Plugin.PluginHTTPStream",
+            |_: mm_plugin::wire::plugin::Z_PluginHTTPStreamArgs| async {
+                Err::<mm_plugin::wire::plugin::Z_PluginHTTPStreamReturns, _>(
+                    go_netrpc::ServiceError("the host is out of cheese".into()),
+                )
+            },
+        );
+        broken.register(
+            "Plugin.PluginHTTP",
+            |_: mm_plugin::wire::plugin::Z_PluginHTTPArgs| async {
+                Ok::<_, go_netrpc::ServiceError>(mm_plugin::wire::plugin::Z_PluginHTTPReturns {
+                    response: Some(Box::new(mm_plugin::wire::http::Response {
+                        status_code: 204,
+                        ..Default::default()
+                    })),
+                    response_body: b"buffered".to_vec(),
+                })
+            },
+        );
+        let _ = Arc::new(broken).serve(served).await;
+        drop(host);
+    });
+    let api = ApiClient::new(go_netrpc::Client::new(stream), plugin_broker);
+    assert!(
+        within(api.plugin_http(
+            Some(Box::new(http_request())),
+            None::<std::io::Cursor<Vec<u8>>>
+        ))
+        .await
+        .is_none(),
+        "only a missing method may be retried as buffered"
+    );
+}
+
+/// A host that implements nothing at all.
+struct Nothing;
+impl PluginApi for Nothing {}
+impl PluginApiStreams for Nothing {}
+impl mm_plugin::rpc::PluginApiHttp for Nothing {}
 
 #[tokio::test]
 async fn rpc_rust_hooks_round_trip_every_hook() {
@@ -1057,10 +1367,6 @@ async fn rpc_unimplemented_hooks_are_skipped_and_unprovided_ones_fail_as_in_go()
 
 #[tokio::test]
 async fn rpc_an_unprovided_api_method_fails_as_in_go() {
-    struct Nothing;
-    impl PluginApi for Nothing {}
-    impl PluginApiStreams for Nothing {}
-
     let api = rust_api_pair(Arc::new(Nothing)).await;
     let err = within(
         api.client()

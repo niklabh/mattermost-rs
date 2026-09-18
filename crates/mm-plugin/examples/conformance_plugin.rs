@@ -26,7 +26,7 @@ use serde_json::{Value as Json, json};
 
 #[path = "../tests/common/render.rs"]
 mod render;
-use render::{fixture, render_typed, stream_digest, stream_payload};
+use render::{fixture, render_typed, replacement_file, stream_digest, stream_payload};
 
 struct Conformance {
     api: OnceLock<ApiClient>,
@@ -67,7 +67,10 @@ macro_rules! hooks {
         impl Hooks for Conformance {
             fn implemented(&self) -> Vec<String> {
                 let mut names: Vec<String> = HOOKS.iter().map(|s| (*s).to_owned()).collect();
-                names.extend(["OnActivate", "ServeHTTP", "ServeMetrics"].map(str::to_owned));
+                names.extend(
+                    ["OnActivate", "ServeHTTP", "ServeMetrics", "FileWillBeUploaded"]
+                        .map(str::to_owned),
+                );
                 names
             }
             $(
@@ -143,6 +146,39 @@ impl Conformance {
     }
 }
 
+/// Rewrites the file with the digest of what it read, and records both.
+impl mm_plugin::rpc::HooksFileUpload for Conformance {
+    async fn file_will_be_uploaded(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        info: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        mut file: mm_plugin::io_rpc::RemoteReader,
+        mut output: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let mut uploaded = Vec::new();
+        file.read_to_end(&mut uploaded).await.expect("the file");
+        output
+            .write_all(replacement_file(&uploaded).as_bytes())
+            .await
+            .expect("the replacement");
+        output
+            .shutdown()
+            .await
+            .expect("the replacement is complete");
+
+        self.record(json!({
+            "hook": "FileWillBeUploaded",
+            "stream": stream_digest(&uploaded),
+        }));
+        Ok(mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+            a: info,
+            b: String::new(),
+        })
+    }
+}
+
 impl Plugin for Conformance {
     fn set_api(&self, api: ApiClient, _driver: go_netrpc::Client) {
         self.record(json!({ "set_api": true }));
@@ -209,6 +245,32 @@ impl Plugin for Conformance {
             "api": "ReceiveSharedChannelAttachmentSyncMsg",
             "returns": render_typed(&returns),
         }));
+
+        // The outward HTTP call, whose response body arrives over its own connection.
+        let response = api
+            .plugin_http(
+                Some(Box::new(render::http_request())),
+                Some(std::io::Cursor::new(stream_payload())),
+            )
+            .await;
+        match response {
+            Some(mut response) => {
+                use tokio::io::AsyncReadExt as _;
+                let mut body = Vec::new();
+                response
+                    .body
+                    .read_to_end(&mut body)
+                    .await
+                    .expect("the body");
+                self.record(json!({
+                    "api": "PluginHTTP",
+                    "status": response.status_code,
+                    "header": response.header,
+                    "body": String::from_utf8_lossy(&body),
+                }));
+            }
+            None => self.record(json!({ "api": "PluginHTTP", "error": "no response" })),
+        }
 
         // The audit record goes through the gob-safe JSON round trip inside the client.
         // Each method sends its own fixture's record, which is what the test expects of it.

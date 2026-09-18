@@ -125,6 +125,24 @@ func mockAPI(c *conformance) *plugintest.API {
 		api.On(name, anything...).Return(fn.Interface())
 	}
 
+	// The plugin's outward HTTP call: answer with the fixed response both suites expect.
+	api.On("PluginHTTP", mock.Anything).Return(func(request *http.Request) *http.Response {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			panic(err)
+		}
+		record(map[string]any{
+			"api":    "PluginHTTP",
+			"args":   map[string]any{"method": request.Method, "url": request.URL.String()},
+			"stream": streamDigest(body),
+		})
+		return &http.Response{
+			StatusCode: 207,
+			Header:     http.Header{"X-Host": []string{"conformance"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte("answered by the host"))),
+		}
+	})
+
 	// LoadPluginConfiguration hands the plugin whatever the host writes into its argument, as
 	// JSON; the RPC server marshals it (client_rpc.go).
 	api.On("LoadPluginConfiguration", mock.Anything).Run(func(args mock.Arguments) {
@@ -167,8 +185,25 @@ func callArgs(method reflect.Type, args mock.Arguments) []reflect.Value {
 	return values
 }
 
-// ConformanceURL is the request both conformance plugins are asked to serve.
-const ConformanceURL = "/plugins/conformance/hello?q=1"
+// fileWillBeUploaded lends the plugin a file and a writer, and records what came back.
+func fileWillBeUploaded(hooks plugin.Hooks) {
+	var replacement bytes.Buffer
+	info, rejection := hooks.FileWillBeUploaded(
+		&plugin.Context{},
+		&model.FileInfo{Id: "fileinfo", Name: "upload.bin"},
+		bytes.NewReader(StreamPayload()),
+		&replacement,
+	)
+	entry := map[string]any{
+		"hook":        "FileWillBeUploaded",
+		"replacement": replacement.String(),
+		"rejection":   rejection,
+	}
+	if info != nil {
+		entry["info_id"] = info.Id
+	}
+	record(entry)
+}
 
 // serveHTTP asks the plugin to serve one request through the hooks client, and records what the
 // response writer received: the status, the headers, and the body.
@@ -270,6 +305,7 @@ func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 		record(map[string]any{"hook": m.Name, "returns": structOf(m.Returns, out)})
 	}
 	serveHTTP(hooks)
+	fileWillBeUploaded(hooks)
 	env.Shutdown()
 	record(map[string]any{"shutdown": true})
 	return nil

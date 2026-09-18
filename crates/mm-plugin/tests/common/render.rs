@@ -204,6 +204,26 @@ pub fn http_response(method: &str, url: &str, body: &[u8]) -> Json {
     })
 }
 
+/// What a conformance plugin writes in place of an uploaded file: the digest of what it read.
+pub fn replacement_file(uploaded: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "replaced {} bytes: {:x}",
+        uploaded.len(),
+        Sha256::digest(uploaded)
+    )
+}
+
+/// What a conformance host answers a plugin's outward HTTP call with.
+pub fn outward_response() -> (i64, mm_plugin::wire::http::Header, Vec<u8>) {
+    use std::collections::HashMap;
+    (
+        207,
+        HashMap::from([("X-Host".to_owned(), vec!["conformance".to_owned()])]),
+        b"answered by the host".to_vec(),
+    )
+}
+
 /// What every conformance stream carries: more than one 32 KiB chunk of io_rpc.go's copy buffer,
 /// so the framing is exercised rather than a single read.
 pub fn stream_payload() -> Vec<u8> {

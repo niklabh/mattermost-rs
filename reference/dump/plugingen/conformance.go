@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -256,6 +257,7 @@ func (c *conformance) tourHandWrittenAPI() {
 	c.API.LogAuditRecWithLevel(&withLevel, c.auditLevel())
 
 	c.tourStreams()
+	c.tourOutwardHTTP()
 
 	var config any
 	err := c.API.LoadPluginConfiguration(&config)
@@ -306,6 +308,67 @@ func (c *conformance) echoHTTP(hook string, w http.ResponseWriter, r *http.Reque
 		panic(err)
 	}
 }
+
+// FileWillBeUploaded rewrites the file with the digest of what it read, as the Rust conformance
+// plugin does.
+func (c *conformance) FileWillBeUploaded(_ *plugin.Context, info *model.FileInfo, file io.Reader, output io.Writer) (*model.FileInfo, string) {
+	uploaded, err := io.ReadAll(file)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := fmt.Fprintf(output, "replaced %d bytes: %x", len(uploaded), sha256.Sum256(uploaded)); err != nil {
+		panic(err)
+	}
+	record(map[string]any{
+		"hook":   "FileWillBeUploaded",
+		"stream": map[string]any{"len": len(uploaded), "sha256": fmt.Sprintf("%x", sha256.Sum256(uploaded))},
+	})
+	return info, ""
+}
+
+// tourOutwardHTTP calls the host's own HTTP handler through the API.
+func (c *conformance) tourOutwardHTTP() {
+	url, err := neturl.Parse(ConformanceURL)
+	if err != nil {
+		panic(err)
+	}
+	response := c.API.PluginHTTP(&http.Request{
+		Method:     "POST",
+		URL:        url,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header: http.Header{
+			"X-Request":    []string{"one", "two"},
+			"Content-Type": []string{"text/plain"},
+		},
+		Host:       "example.test",
+		RemoteAddr: "10.0.0.1:1234",
+		RequestURI: ConformanceURL,
+		Body:       io.NopCloser(bytes.NewReader(StreamPayload())),
+	})
+	if response == nil {
+		record(map[string]any{"api": "PluginHTTP", "error": "no response"})
+		return
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		panic(err)
+	}
+	header := map[string]any{}
+	for k, v := range response.Header {
+		header[k] = v
+	}
+	record(map[string]any{
+		"api":    "PluginHTTP",
+		"status": response.StatusCode,
+		"header": header,
+		"body":   string(body),
+	})
+}
+
+// ConformanceURL is the request both conformance plugins send and serve.
+const ConformanceURL = "/plugins/conformance/hello?q=1"
 
 // auditRecord and auditLevel are the record both conformance plugins log, from the fixtures.
 func (c *conformance) auditRecord(fixture string) model.AuditRecord {

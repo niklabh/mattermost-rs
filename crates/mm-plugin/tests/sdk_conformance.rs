@@ -335,6 +335,39 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
         }
     }
 
+    // The Go host lent the plugin a file and a writer: the replacement came back whole, and the
+    // hook answered with the info it was given.
+    let file = go
+        .iter()
+        .find(|e| e.get("hook") == Some(&Json::from("FileWillBeUploaded")))
+        .expect("the Go host did not call FileWillBeUploaded");
+    assert_eq!(
+        file["replacement"],
+        Json::String(replacement_file(&stream_payload())),
+        "the replacement file"
+    );
+    assert_eq!(file["info_id"], Json::from("fileinfo"));
+    assert_eq!(file["rejection"], Json::from(""));
+    assert_eq!(
+        rust_hooks["FileWillBeUploaded"]["stream"],
+        stream_digest(&stream_payload()),
+        "the file the plugin read"
+    );
+
+    // The plugin's outward HTTP call reached the host, and its answer came back whole.
+    let (status, header, body) = outward_response();
+    let outward = rust_api
+        .get("PluginHTTP")
+        .expect("the Rust plugin made no outward HTTP call");
+    assert_eq!(outward["status"], status);
+    assert_eq!(outward["header"], serde_json::json!(header));
+    assert_eq!(outward["body"], String::from_utf8_lossy(&body).as_ref());
+    assert_eq!(
+        go_api.get("PluginHTTP").map(|e| &e["stream"]),
+        Some(&stream_digest(&stream_payload())),
+        "the request body the Go host read"
+    );
+
     // Each stream the Rust plugin lent arrived whole at the Go host, and it answered with the
     // method's fixture.
     let want_stream = stream_digest(&stream_payload());

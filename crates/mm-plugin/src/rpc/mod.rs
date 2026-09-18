@@ -20,6 +20,7 @@ use goplugin::{Dispensed, MuxBroker};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
+mod file_upload;
 mod handwritten;
 mod hooks;
 mod plugin;
@@ -27,10 +28,11 @@ mod serve_http;
 mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
+pub use file_upload::HooksFileUpload;
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
 pub use serve_http::HooksHttp;
-pub use streams::PluginApiStreams;
+pub use streams::{HttpResponse, PluginApiHttp, PluginApiStreams, RemoteHttpResponse};
 
 /// A [`Hooks`] or [`PluginApi`] method the implementation does not provide.
 ///
@@ -43,7 +45,7 @@ pub struct NotImplemented;
 /// Every method of [`PluginApi`] a plugin can call: the generated ones, `LoadPluginConfiguration`
 /// and the methods that carry a reader, whose servers are hand-written. The broker is how those
 /// readers reach the plugin.
-pub fn register_api<T: PluginApi + PluginApiStreams>(
+pub fn register_api<T: PluginApi + PluginApiStreams + PluginApiHttp>(
     server: &mut Server,
     implementation: &Arc<T>,
     broker: &MuxBroker,
@@ -51,6 +53,7 @@ pub fn register_api<T: PluginApi + PluginApiStreams>(
     register_generated_api(server, implementation);
     handwritten::register_load_plugin_configuration(server, implementation);
     streams::register_api_streams(server, implementation, broker);
+    streams::register_api_http(server, implementation, broker);
 }
 
 /// `Plugin.Implemented` plus every generated hook (client_rpc.go, `hooksRPCServer`). A plugin
@@ -111,7 +114,7 @@ impl HooksClient {
     ///
     /// The driver is not ported yet: its connection is served with no methods, so a plugin's
     /// database call fails with net/rpc's `rpc: can't find service Plugin.<Method>`.
-    pub async fn on_activate<A: PluginApi + PluginApiStreams>(
+    pub async fn on_activate<A: PluginApi + PluginApiStreams + PluginApiHttp>(
         &self,
         api: &Arc<A>,
     ) -> Z_OnActivateReturns {

@@ -10,13 +10,16 @@ use std::sync::Arc;
 
 use go_netrpc::{Server, ServiceError};
 use goplugin::MuxBroker;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncWriteExt};
 
 use super::{ApiClient, NotImplemented};
 use crate::io_rpc::{RemoteReader, serve_reader};
+use crate::wire::http::Header;
 use crate::wire::model::{FileInfo, UploadSession};
+use crate::wire::plugin::HTTPRequestSubset;
 use crate::wire::plugin::{
-    Z_InstallPluginArgs, Z_InstallPluginReturns, Z_ReceiveSharedChannelAttachmentSyncMsgArgs,
+    Z_InstallPluginArgs, Z_InstallPluginReturns, Z_PluginHTTPArgs, Z_PluginHTTPReturns,
+    Z_PluginHTTPStreamArgs, Z_PluginHTTPStreamReturns, Z_ReceiveSharedChannelAttachmentSyncMsgArgs,
     Z_ReceiveSharedChannelAttachmentSyncMsgReturns, Z_UploadDataArgs, Z_UploadDataReturns,
 };
 
@@ -195,5 +198,218 @@ impl ApiClient {
         };
         self.call("ReceiveSharedChannelAttachmentSyncMsg", &args)
             .await
+    }
+}
+
+/// What a host answers a plugin's outward HTTP call with (client_rpc.go, `PluginHTTPStream`).
+pub struct HttpResponse {
+    pub status_code: i64,
+    pub header: Header,
+    /// Streamed to the plugin over its own connection, after the call has answered.
+    pub body: Box<dyn AsyncRead + Send + Unpin>,
+}
+
+impl Default for HttpResponse {
+    fn default() -> Self {
+        Self {
+            status_code: 0,
+            header: Header::default(),
+            body: Box::new(tokio::io::empty()),
+        }
+    }
+}
+
+/// What the plugin gets back: the head, and the body as it arrives.
+pub struct RemoteHttpResponse {
+    pub status_code: i64,
+    pub header: Header,
+    /// The host pushes the body raw, so this reads the connection directly rather than through
+    /// a [`RemoteReader`]. Go asks for bytes over it that the host never reads (client_rpc.go,
+    /// `pluginHTTPStream` wraps it in `connectIOReader` while the host answers with a plain
+    /// `io.Copy`); this does not send those, which changes only bytes nobody consumes.
+    pub body: Box<dyn AsyncRead + Send + Unpin>,
+}
+
+/// The outward HTTP call, whose server half both wire shapes share.
+pub trait PluginApiHttp: Send + Sync + 'static {
+    /// Go: `PluginHTTP(request *http.Request) *http.Response`.
+    ///
+    /// The body is a reader either way: a connection for the streaming shape, and the inline
+    /// bytes for the buffered one.
+    fn plugin_http(
+        &self,
+        request: Option<Box<HTTPRequestSubset>>,
+        body: Box<dyn AsyncRead + Send + Unpin>,
+    ) -> impl Future<Output = Result<HttpResponse, NotImplemented>> + Send {
+        let _ = (request, body);
+        async { Err(NotImplemented) }
+    }
+}
+
+/// Register both wire shapes of the outward HTTP call: the streaming one a current plugin uses,
+/// and the buffered one an older plugin falls back to (client_rpc.go).
+pub(super) fn register_api_http<T: PluginApiHttp>(
+    server: &mut Server,
+    implementation: &Arc<T>,
+    broker: &MuxBroker,
+) {
+    let this = Arc::clone(implementation);
+    let b = broker.clone();
+    server.register(
+        "Plugin.PluginHTTPStream",
+        move |args: Z_PluginHTTPStreamArgs| {
+            let (this, broker) = (Arc::clone(&this), b.clone());
+            async move {
+                // Go dials the response connection before calling, and fails the call if it cannot.
+                let response_connection =
+                    broker.dial(args.response_body_stream).await.map_err(|e| {
+                        ServiceError(format!("can't connect to remote response body stream: {e}"))
+                    })?;
+                // Go reads an empty body when the plugin sent no stream.
+                let body: Box<dyn AsyncRead + Send + Unpin> = match args.request_body_stream {
+                    0 => Box::new(tokio::io::empty()),
+                    id => Box::new(RemoteReader::new(broker.dial(id).await.map_err(|e| {
+                        ServiceError(format!("can't connect to remote request body stream: {e}"))
+                    })?)),
+                };
+
+                let response =
+                    this.plugin_http(args.request, body)
+                        .await
+                        .map_err(|NotImplemented| {
+                            ServiceError("API PluginHTTP called but not implemented".into())
+                        })?;
+
+                // The head answers the call; the body follows over its own connection, pushed
+                // raw, as Go's `io.Copy` does.
+                let returns = Z_PluginHTTPStreamReturns {
+                    status_code: response.status_code,
+                    header: response.header,
+                };
+                tokio::spawn(async move {
+                    let mut body = response.body;
+                    let mut connection = response_connection;
+                    if let Err(e) = tokio::io::copy(&mut body, &mut connection).await {
+                        tracing::error!(error = %e, "error streaming response body");
+                    }
+                    let _ = connection.shutdown().await;
+                });
+                Ok::<_, ServiceError>(returns)
+            }
+        },
+    );
+
+    let this = Arc::clone(implementation);
+    server.register("Plugin.PluginHTTP", move |args: Z_PluginHTTPArgs| {
+        let this = Arc::clone(&this);
+        async move {
+            // The buffered shape carries the request body inline.
+            let body = Box::new(std::io::Cursor::new(args.request_body));
+            let response =
+                this.plugin_http(args.request, body)
+                    .await
+                    .map_err(|NotImplemented| {
+                        ServiceError("API PluginHTTP called but not implemented".into())
+                    })?;
+            let mut response_body = Vec::new();
+            let mut source = response.body;
+            tokio::io::copy(&mut source, &mut response_body)
+                .await
+                .map_err(|e| ServiceError(format!("RPC call to PluginHTTP API failed: {e}")))?;
+            Ok::<_, ServiceError>(Z_PluginHTTPReturns {
+                response: Some(Box::new(crate::wire::http::Response {
+                    status_code: response.status_code,
+                    header: response.header,
+                    ..crate::wire::http::Response::default()
+                })),
+                response_body,
+            })
+        }
+    });
+}
+
+impl ApiClient {
+    /// Go: `PluginHTTP(request *http.Request) *http.Response`, which the plugin uses to reach the
+    /// server's own HTTP handlers.
+    ///
+    /// The streaming shape is tried first; a host too old to have it answers
+    /// `rpc: can't find method Plugin.PluginHTTPStream`, and Go then falls back to the buffered
+    /// one (client_rpc.go, `PluginHTTP`). `None` is Go's nil response.
+    pub async fn plugin_http<B>(
+        &self,
+        request: Option<Box<HTTPRequestSubset>>,
+        body: Option<B>,
+    ) -> Option<RemoteHttpResponse>
+    where
+        B: AsyncRead + Send + Unpin + 'static,
+    {
+        let request_body_stream = match body {
+            Some(body) => self.lend_reader(body, "PluginHTTPStream"),
+            None => 0,
+        };
+        let response_body_stream = self.broker.next_id();
+        let accepted = {
+            let broker = self.broker.clone();
+            tokio::spawn(async move { broker.accept(response_body_stream).await })
+        };
+
+        let args = Z_PluginHTTPStreamArgs {
+            response_body_stream,
+            request,
+            request_body_stream,
+        };
+        let returns: Result<Z_PluginHTTPStreamReturns, _> =
+            self.client.call("Plugin.PluginHTTPStream", &args).await;
+        let returns = match returns {
+            Ok(returns) => returns,
+            Err(go_netrpc::Error::Server(message))
+                if message == "rpc: can't find method Plugin.PluginHTTPStream" =>
+            {
+                tracing::debug!("the host has no PluginHTTPStream; using the buffered call");
+                return self.plugin_http_buffered(args.request).await;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "RPC call to PluginHTTPStream API failed");
+                return None;
+            }
+        };
+
+        match accepted.await {
+            Ok(Ok(body)) => Some(RemoteHttpResponse {
+                status_code: returns.status_code,
+                header: returns.header,
+                body: Box::new(body),
+            }),
+            _ => {
+                tracing::error!("Failed to get response body stream for PluginHTTPStream");
+                None
+            }
+        }
+    }
+
+    /// The buffered shape: the request body crosses inline and the response arrives whole
+    /// (client_rpc.go, `pluginHTTPBuffered`).
+    async fn plugin_http_buffered(
+        &self,
+        request: Option<Box<HTTPRequestSubset>>,
+    ) -> Option<RemoteHttpResponse> {
+        let args = Z_PluginHTTPArgs {
+            request,
+            request_body: Vec::new(),
+        };
+        let returns: Z_PluginHTTPReturns = match self.client.call("Plugin.PluginHTTP", &args).await
+        {
+            Ok(returns) => returns,
+            Err(e) => {
+                tracing::error!(error = %e, "RPC call to PluginHTTP API failed");
+                return None;
+            }
+        };
+        let response = returns.response?;
+        Some(RemoteHttpResponse {
+            status_code: response.status_code,
+            header: response.header,
+            body: Box::new(std::io::Cursor::new(returns.response_body)),
+        })
     }
 }
