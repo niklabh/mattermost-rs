@@ -76,6 +76,13 @@
 # document Go replaced on its own, from the one-second default, so
 # `parity::config_reload`'s timer test sleeps 600ms rather than three seconds. A write made through
 # mm-api is visible on the next request whatever this says.
+# `MM_SERVICESETTINGS_SITEURL` (2026-09-19) is whatever the running Go server on this stack was
+# started with, read from its environment: `MMRS_SITE_URL` when `scripts/demo.sh` started it (the
+# LAN URL, so permalinks and e-mail links work from another machine), `http://localhost:<go port>`
+# otherwise — which is `$MMRS_GO_BASE`, the value this line always had, and the fallback when
+# there is no Go server to ask. An explicit `MMRS_SITE_URL` wins. Following Go rather than taking
+# the variable alone is what keeps the pair agreeing when the harness restarts mm-api on a stack
+# the demo launched: `GET /config/client` answers `SiteURL`, and the config suites compare it.
 # `MMRS_API_HOST` (2026-09-18) is the address mm-api binds, loopback unless set. `0.0.0.0` makes
 # the stack reachable from another machine on the network — the browser UI through mm-api, as
 # `scripts/mm-api.sh` documents. The parity harness never sets it.
@@ -83,6 +90,7 @@ mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
   local log="${1:-/tmp/mmrs-mm-api$MMRS_STACK_SUFFIX.log}"
+  local site_url="${MMRS_SITE_URL:-$(mmrs_listener_env "$MMRS_GO_PORT" MM_SERVICESETTINGS_SITEURL)}"
   (
     cd "$root/reference/.build/mmroot$MMRS_RUN_SUFFIX" || exit 1
     DATABASE_URL="$DATABASE_URL" \
@@ -91,7 +99,7 @@ mmrs_launch_mm_api() {
     MM_FILESETTINGS_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/data/" \
     MM_TEAMSETTINGS_ENABLEOPENSERVER=true \
     MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true \
-    MM_SERVICESETTINGS_SITEURL="$MMRS_GO_BASE" \
+    MM_SERVICESETTINGS_SITEURL="${site_url:-$MMRS_GO_BASE}" \
     MM_SERVICESETTINGS_LISTENADDRESS=":$MMRS_GO_PORT" \
     MM_SQLSETTINGS_DRIVERNAME=postgres \
     MM_SQLSETTINGS_DATASOURCE="$DATABASE_URL?sslmode=disable&connect_timeout=10" \
