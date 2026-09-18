@@ -1,0 +1,21 @@
+# Mutation plan for enable, disable and remove on the Rust plugin host, saved through Go.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-toggle.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-18: 10 run, 8 caught; the control survived. toggle-no-reload SURVIVED as an equivalent
+# mutant over HTTP: mm_api's refresh_config_after_write reloads after every write request before
+# the response leaves, so the activation happens before the client hears either way. The app-level
+# reload stays for callers inside the app (RemovePlugin's disable).
+
+toggle-id-not-lowercased	crates/mm-app/src/plugins.rs	        let id = id.to_lowercase();\n        if !available	        let id = id.to_owned();\n        if !available	api	plugin_toggle
+toggle-not-installed-dropped	crates/mm-app/src/plugins.rs	        if !available\n            .iter()\n            .any(|p| p.manifest.as_ref().is_some_and(|m| m.id == id))\n        {	        if false\n            && !available\n                .iter()\n                .any(|p| p.manifest.as_ref().is_some_and(|m| m.id == id))\n        {	api	plugin_toggle
+toggle-only-the-one-entry	crates/mm-app/src/plugins.rs	        let mut states = live.plugin_settings.plugin_states.unwrap_or_default();	        let mut states: std::collections::BTreeMap<String, mm_model::config::PluginState> = {\n            let _ = live;\n            Default::default()\n        };	api	plugin_toggle
+toggle-no-reload	crates/mm-app/src/plugins.rs	        if let Err(err) = self.refresh_config().await {\n            tracing::warn!(error = %err, "could not reload the configuration after saving a plugin state");\n        }	        let _ = ();	api	plugin_toggle
+toggle-disable-enables	crates/mm-app/src/plugins.rs	        self.set_plugin_state("DisablePlugin", id, false).await	        self.set_plugin_state("DisablePlugin", id, true).await	api	plugin_toggle
+remove-keeps-bundle	crates/mm-app/src/plugins.rs	        backend.remove_file(&bundle).await.map_err(remove_error)?;	        let _ = &bundle;	api	plugin_toggle
+remove-no-local-removal	crates/mm-app/src/plugins.rs	        self.disable_plugin(id).await?;\n        self.remove_plugin_locally(id).await?;	        self.disable_plugin(id).await?;	api	plugin_toggle
+write-wrong-permission	crates/mm-api/src/plugins.rs	            &mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS,\n        )\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            session,\n            &[&mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS],\n        )));\n    }\n    Ok(())	            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_PLUGINS,\n        )\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            session,\n            &[&mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS],\n        )));\n    }\n    Ok(())	api	plugin_toggle
+plugin-id-mux-any	crates/mm-api/src/lib.rs	                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))	                    .all(|b| b != b'/')	api	plugin_toggle
+CONTROL-rename-live	crates/mm-app/src/plugins.rs	        let live = crate::config::load_model_config(self.store().config())\n            .await\n            .map_err(|e| config_error(Box::new(e)))?;\n        let mut states = live.plugin_settings.plugin_states.unwrap_or_default();	        let document = crate::config::load_model_config(self.store().config())\n            .await\n            .map_err(|e| config_error(Box::new(e)))?;\n        let mut states = document.plugin_settings.plugin_states.unwrap_or_default();	api	plugin_toggle

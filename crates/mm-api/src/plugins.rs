@@ -1,7 +1,10 @@
 //! The plugin routes of `api4/plugin.go` this server answers from its own plugin host.
 //!
 //! ```text
-//! POST /api/v4/plugins           uploadPlugin (plugin.go:45), then installPlugin (:412)
+//! POST   /api/v4/plugins                      uploadPlugin (plugin.go:45), installPlugin (:412)
+//! DELETE /api/v4/plugins/{plugin_id}          removePlugin (plugin.go:220)
+//! POST   /api/v4/plugins/{plugin_id}/enable   enablePlugin (plugin.go:324)
+//! POST   /api/v4/plugins/{plugin_id}/disable  disablePlugin (plugin.go:353)
 //! GET /api/v4/plugins            getPlugins (plugin.go:176)
 //! GET /api/v4/plugins/statuses   getPluginStatuses (plugin.go:198)
 //! GET /api/v4/plugins/webapp     getWebappPlugins (plugin.go:250), with no session required
@@ -298,4 +301,94 @@ fn http_error(message: &str, status: StatusCode) -> Response {
         format!("{message}\n"),
     )
         .into_response()
+}
+
+/// The three writes on one plugin share Go's shape: `RequirePluginId`, the 501 when plugins are
+/// off (each under its own `where`), `sysconsole_write_plugins`, the app call, and
+/// `ReturnStatusOK`. The id is non-empty by routing.
+async fn plugin_write(state: &AppState, session: &Session, where_: &str) -> Result<(), ApiError> {
+    if !state.app.config().plugin_enable {
+        return Err(ApiError::from(AppError::new(
+            where_,
+            "app.plugin.disabled.app_error",
+            None,
+            "",
+            501,
+        )));
+    }
+    if !state
+        .app
+        .session_has_permission_to(
+            session,
+            &mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS,
+        )
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            session,
+            &[&mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS],
+        )));
+    }
+    Ok(())
+}
+
+/// `ReturnStatusOK`: `{"status":"OK"}` with no trailing newline.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
+}
+
+/// Port of `enablePlugin` (plugin.go:324).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plugin_id = %plugin_id))]
+pub async fn enable_plugin(
+    State(state): State<AppState>,
+    axum::extract::Path(plugin_id): axum::extract::Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    let result = async {
+        plugin_write(&state, &session.0, "activatePlugin").await?;
+        state.app.enable_plugin(&plugin_id).await?;
+        Ok::<_, ApiError>(status_ok())
+    }
+    .await;
+    result.unwrap_or_else(IntoResponse::into_response)
+}
+
+/// Port of `disablePlugin` (plugin.go:353).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plugin_id = %plugin_id))]
+pub async fn disable_plugin(
+    State(state): State<AppState>,
+    axum::extract::Path(plugin_id): axum::extract::Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    let result = async {
+        plugin_write(&state, &session.0, "deactivatePlugin").await?;
+        state.app.disable_plugin(&plugin_id).await?;
+        Ok::<_, ApiError>(status_ok())
+    }
+    .await;
+    result.unwrap_or_else(IntoResponse::into_response)
+}
+
+/// Port of `removePlugin` (plugin.go:220).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, plugin_id = %plugin_id))]
+pub async fn remove_plugin(
+    State(state): State<AppState>,
+    axum::extract::Path(plugin_id): axum::extract::Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    let result = async {
+        plugin_write(&state, &session.0, "removePlugin").await?;
+        state.app.remove_plugin(&plugin_id).await?;
+        Ok::<_, ApiError>(status_ok())
+    }
+    .await;
+    result.unwrap_or_else(IntoResponse::into_response)
 }

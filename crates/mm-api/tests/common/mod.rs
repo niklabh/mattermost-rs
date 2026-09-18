@@ -309,6 +309,12 @@ pub static BUSY_STATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(
 /// it — the [`BUSY_STATE`] arrangement, for the same reason.
 pub static FILE_SEARCH_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **`PluginSettings.PluginStates` is one map in one shared document, and a patch replaces it
+/// whole.** `plugin_statuses` toggles the NPS state with a one-entry patch, which drops every key
+/// another suite added a moment before; `plugin_toggle` adds and removes a key of its own. Every
+/// suite that writes the map, or reads a state another suite might be rewriting, holds this.
+pub static PLUGIN_STATES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
 ///
 /// `parity/custom_profile_attributes` plants rows in the `access_control` group and

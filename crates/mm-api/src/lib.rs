@@ -282,6 +282,13 @@ fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
                 && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         }
         "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),
+        // `{plugin_id:[A-Za-z0-9\\_\\-\\.]+}` (api4/api.go:252): the dot is in it.
+        "plugin_id" => {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        }
         // `{action_id:[A-Za-z0-9_-]+}` (api4/integration_action.go:17) — the one `_id`
         // parameter besides `plugin_id` with a wider class: `_` and `-` are in it.
         "action_id" => {
@@ -477,6 +484,18 @@ pub fn router(state: AppState) -> Router {
             .route(
                 "/api/v4/plugins/webapp",
                 partially_migrated(get(plugins::get_webapp_plugins)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}",
+                partially_migrated_with_ids(&state, delete(plugins::remove_plugin)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}/enable",
+                partially_migrated_with_ids(&state, post(plugins::enable_plugin)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}/disable",
+                partially_migrated_with_ids(&state, post(plugins::disable_plugin)),
             )
     } else {
         Router::new()

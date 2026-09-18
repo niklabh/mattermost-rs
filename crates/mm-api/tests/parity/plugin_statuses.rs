@@ -173,6 +173,7 @@ async fn statuses_from_this_host_match_go() {
     }
     // The read-only admin's permissions depend on the licence row.
     let _unlicensed = common::ACTIVE_LICENCE_ROW.read().await;
+    let _states = common::PLUGIN_STATES.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
 

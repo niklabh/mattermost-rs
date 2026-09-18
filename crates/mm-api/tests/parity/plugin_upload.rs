@@ -33,7 +33,7 @@ const SIGNED_PORT: u16 = 8070;
 const BOUNDARY: &str = "mmrsPluginUploadBoundary";
 
 /// `scripts/go-plugins.sh`: Go's port + 36.
-fn oracle() -> String {
+pub(crate) fn oracle() -> String {
     let port: u16 = GO
         .rsplit(':')
         .next()
@@ -43,7 +43,7 @@ fn oracle() -> String {
 }
 
 /// A bundle directory `<root>/<id>` holding `plugin.json` and a webapp, packed as `<id>.tar.gz`.
-fn bundle(scratch: &Path, name: &str, manifest: Option<&str>) -> Vec<u8> {
+pub(crate) fn bundle(scratch: &Path, name: &str, manifest: Option<&str>) -> Vec<u8> {
     let root = scratch.join("bundles").join(name);
     let _ = std::fs::remove_dir_all(&root);
     let dir = root.join("plugin");
@@ -66,7 +66,7 @@ fn bundle(scratch: &Path, name: &str, manifest: Option<&str>) -> Vec<u8> {
 }
 
 /// A `multipart/form-data` body: `force` when given, and the file under `plugin` when given.
-fn form(file: Option<&[u8]>, force: Option<&str>) -> Vec<u8> {
+pub(crate) fn form(file: Option<&[u8]>, force: Option<&str>) -> Vec<u8> {
     let mut body = Vec::new();
     if let Some(force) = force {
         body.extend_from_slice(
@@ -90,14 +90,14 @@ fn form(file: Option<&[u8]>, force: Option<&str>) -> Vec<u8> {
     body
 }
 
-struct Answer {
-    status: u16,
-    content_type: String,
-    body: Vec<u8>,
-    rust: bool,
+pub(crate) struct Answer {
+    pub(crate) status: u16,
+    pub(crate) content_type: String,
+    pub(crate) body: Vec<u8>,
+    pub(crate) rust: bool,
 }
 
-async fn send(
+pub(crate) async fn send(
     client: &reqwest::Client,
     base: &str,
     token: &str,
@@ -165,7 +165,7 @@ async fn both(
     serde_json::from_slice(&go.body).unwrap_or(serde_json::Value::Null)
 }
 
-const MULTIPART: &str = "multipart/form-data; boundary=mmrsPluginUploadBoundary";
+pub(crate) const MULTIPART: &str = "multipart/form-data; boundary=mmrsPluginUploadBoundary";
 
 #[tokio::test]
 async fn uploads_install_as_they_do_on_go() {
@@ -174,6 +174,7 @@ async fn uploads_install_as_they_do_on_go() {
     }
     // The read-only admin's permissions depend on the licence row.
     let _unlicensed = common::ACTIVE_LICENCE_ROW.read().await;
+    let _states = common::PLUGIN_STATES.lock().await;
     let client = client();
     let ping = client
         .get(format!("{}/api/v4/system/ping", oracle()))
@@ -401,11 +402,8 @@ async fn uploads_install_as_they_do_on_go() {
         )
         .await;
         assert_eq!((go_status, rs_status), (200, 200), "{path}");
-        assert_eq!(
-            String::from_utf8_lossy(&go_body),
-            String::from_utf8_lossy(&rs_body),
-            "{path} after the uploads"
-        );
+        // Only the plugins this suite installs: the oracle keeps whatever else was put on it.
+        assert_eq!(ours(&go_body), ours(&rs_body), "{path} after the uploads");
         assert!(
             String::from_utf8_lossy(&rs_body).contains("mattermost-ai"),
             "{path} names the enabled plugin"
@@ -442,4 +440,32 @@ async fn a_signature_requirement_refuses_every_upload() {
     assert_eq!(answer.status, 501);
     let error: serde_json::Value = serde_json::from_slice(&answer.body).expect("an error body");
     assert_eq!(error["id"], "app.plugin.upload_disabled.app_error");
+}
+
+/// A plugin list with only this suite's plugins kept: the webapp list is an array, `GET /plugins`
+/// an object of two arrays.
+fn ours(body: &[u8]) -> serde_json::Value {
+    const IDS: [&str; 2] = ["mmrs.upload.probe", "mattermost-ai"];
+    let keep = |list: &serde_json::Value| {
+        serde_json::Value::Array(
+            list.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|p| IDS.iter().any(|id| p["id"] == *id))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default(),
+        )
+    };
+    let value: serde_json::Value = serde_json::from_slice(body).expect("a plugin list");
+    match value.as_object() {
+        Some(lists) => serde_json::Value::Object(
+            lists
+                .iter()
+                .map(|(name, list)| (name.clone(), keep(list)))
+                .collect(),
+        ),
+        None => keep(&value),
+    }
 }

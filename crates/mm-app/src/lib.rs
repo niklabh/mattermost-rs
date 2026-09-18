@@ -79,6 +79,7 @@ pub mod oauth;
 pub mod onboarding;
 pub mod password;
 pub mod peer_cache;
+pub mod peer_config;
 pub mod plugin_install;
 pub mod plugins;
 pub mod post;
@@ -214,6 +215,8 @@ pub struct App {
     /// The plugin host, shared across clones like the hub: one environment per process. See
     /// `crate::plugins`.
     plugins: std::sync::Arc<crate::plugins::PluginHost>,
+    /// The Go server, for the configuration writes this server makes; see `crate::peer_config`.
+    peer_config: Option<std::sync::Arc<dyn crate::peer_config::PeerConfig>>,
 }
 
 impl App {
@@ -277,7 +280,23 @@ impl App {
                 std::collections::HashSet::new(),
             )),
             plugins: std::sync::Arc::new(crate::plugins::PluginHost::default()),
+            peer_config: None,
         }
+    }
+
+    /// Install the configuration writer — the Go server, in `main.rs`. Call before the `App` is
+    /// cloned, as [`App::with_peer_cache`].
+    pub fn with_peer_config(
+        mut self,
+        peer: std::sync::Arc<dyn crate::peer_config::PeerConfig>,
+    ) -> Self {
+        self.peer_config = Some(peer);
+        self
+    }
+
+    /// The installed configuration writer, if any.
+    pub fn peer_config(&self) -> Option<&dyn crate::peer_config::PeerConfig> {
+        self.peer_config.as_deref()
     }
 
     /// Install the plugin host — [`crate::plugins::plugin_host_from_env`] in `main.rs`. Call before

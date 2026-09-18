@@ -427,6 +427,118 @@ impl App {
         self.publish(message).await;
     }
 
+    /// Port of `Channels.enablePlugin` (app/plugin.go:417).
+    pub async fn enable_plugin(&self, id: &str) -> Result<(), Box<AppError>> {
+        self.set_plugin_state("EnablePlugin", id, true).await
+    }
+
+    /// Port of `Channels.disablePlugin` (app/plugin.go:468).
+    pub async fn disable_plugin(&self, id: &str) -> Result<(), Box<AppError>> {
+        self.set_plugin_state("DisablePlugin", id, false).await
+    }
+
+    /// The shared body of enable and disable: the plugin must be installed (by its lowercased id),
+    /// then `PluginStates[id]` is saved and the configuration reloaded, which activates or
+    /// deactivates it before this answers — Go's `SaveConfig` runs the same listener
+    /// synchronously.
+    ///
+    /// The save goes to Go (`crate::peer_config`), carrying the whole map as the live document
+    /// holds it with the one entry changed, because a patch replaces a map it names.
+    async fn set_plugin_state(
+        &self,
+        where_: &str,
+        id: &str,
+        enable: bool,
+    ) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                where_,
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        let config_error = |err: Box<dyn std::error::Error + Send + Sync>| {
+            Box::new(
+                AppError::new(where_, "app.plugin.config.app_error", None, "", 500)
+                    .wrap(StringError(err.to_string())),
+            )
+        };
+        let available = environment
+            .available()
+            .map_err(|e| config_error(Box::new(e)))?;
+        let id = id.to_lowercase();
+        if !available
+            .iter()
+            .any(|p| p.manifest.as_ref().is_some_and(|m| m.id == id))
+        {
+            return Err(AppError::boxed(
+                where_,
+                "app.plugin.not_installed.app_error",
+                None,
+                "",
+                404,
+            ));
+        }
+
+        let live = crate::config::load_model_config(self.store().config())
+            .await
+            .map_err(|e| config_error(Box::new(e)))?;
+        let mut states = live.plugin_settings.plugin_states.unwrap_or_default();
+        states.insert(id, mm_model::config::PluginState { enable });
+        let patch = serde_json::json!({ "PluginSettings": { "PluginStates": states } });
+        let Some(peer) = self.peer_config() else {
+            return Err(config_error(
+                "no Go server to save the configuration through".into(),
+            ));
+        };
+        peer.patch_config(&patch)
+            .await
+            .map_err(|e| config_error(Box::new(e)))?;
+        if let Err(err) = self.refresh_config().await {
+            tracing::warn!(error = %err, "could not reload the configuration after saving a plugin state");
+        }
+        Ok(())
+    }
+
+    /// Port of `Channels.RemovePlugin` (plugin_install.go:516): disable it (so a re-install stays
+    /// disabled), remove it here, and delete its bundle and signature from the file store.
+    pub async fn remove_plugin(&self, id: &str) -> Result<(), Box<AppError>> {
+        self.disable_plugin(id).await?;
+        self.remove_plugin_locally(id).await?;
+        let backend = self.file_backend();
+        let bundle = crate::plugin_install::bundle_store_path(id);
+        let remove_error = |e: crate::filestore::FileStoreError| {
+            Box::new(
+                AppError::new(
+                    "removePlugin",
+                    "app.plugin.remove_bundle.app_error",
+                    None,
+                    "",
+                    500,
+                )
+                .wrap(e),
+            )
+        };
+        if !backend.file_exists(&bundle).await.map_err(remove_error)? {
+            return Ok(());
+        }
+        backend.remove_file(&bundle).await.map_err(remove_error)?;
+        let signature = crate::plugin_install::signature_store_path(id);
+        match backend.file_exists(&signature).await {
+            Ok(true) => {
+                if let Err(err) = backend.remove_file(&signature).await {
+                    tracing::warn!(error = %err, plugin_id = %id, "Can't remove signature");
+                }
+            }
+            Ok(false) => tracing::debug!(plugin_id = %id, "no plugin signature to remove"),
+            Err(err) => tracing::warn!(error = %err, plugin_id = %id, "Can't remove signature"),
+        }
+        self.notify_plugin_statuses_changed().await;
+        Ok(())
+    }
+
     /// Port of `App.GetPlugins` (app/plugin.go:506): every available plugin's manifest, split
     /// by whether it is running, in plugin-directory order.
     pub fn get_plugins(&self) -> Result<mm_model::manifest::PluginsResponse, Box<AppError>> {
@@ -535,3 +647,15 @@ mod tests {
         assert!(PluginHost::hosting().hosted());
     }
 }
+
+/// An error that is only its text, for wrapping a failure whose type is not `'static`.
+#[derive(Debug)]
+struct StringError(String);
+
+impl std::fmt::Display for StringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for StringError {}

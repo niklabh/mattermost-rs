@@ -120,7 +120,12 @@ async fn main() -> anyhow::Result<()> {
         go_cache_user,
     )?;
     invalidator.verify().await?;
-    app = app.with_peer_cache(std::sync::Arc::new(invalidator));
+    // One session for both: the purges, and the configuration writes this server hands to Go
+    // (`mm_app::peer_config`).
+    let invalidator = std::sync::Arc::new(invalidator);
+    app = app
+        .with_peer_cache(invalidator.clone())
+        .with_peer_config(invalidator);
 
     // The plugin host: `MMRS_PLUGIN_HOST=rust` runs plugins here instead of in Go, and must not be
     // set while Go runs them too (see `mm_app::plugins`). Started before the config poll, whose
