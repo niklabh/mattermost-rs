@@ -12,8 +12,7 @@
 //!
 //! # What is not ported yet
 //!
-//! - `syncPlugins`: installing the bundles the file store holds under `plugins/` before
-//!   activation, with signature checks. Until it lands, the plugin directory is what is on disk.
+//! - Signature checks on the bundles `syncPlugins` installs (see `crate::plugin_install`).
 //! - Prepackaged and transitionally prepackaged plugins, the health-check job and the cluster
 //!   leader listener.
 //! - The plugin API itself: [`AppPluginApi`] answers every method with the typed
@@ -39,7 +38,7 @@ use crate::App;
 use crate::config::Config;
 
 /// Go's `model.PluginIdApps`, whose state follows `FeatureFlags.AppsEnabled`.
-const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
+pub(crate) const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 
 /// The server API a plugin is served. Every method answers Go's not-implemented error until the
 /// plugin plan's Phase 6 ports them.
@@ -176,6 +175,9 @@ impl App {
         );
         self.plugins.set(Some(Arc::new(environment)));
         drop(lifecycle);
+        if let Err(err) = self.sync_plugins().await {
+            tracing::error!(error = %err, "Failed to sync plugins from the file store");
+        }
         self.sync_plugins_active_state().await;
     }
 
@@ -250,8 +252,8 @@ impl App {
             }
         });
         tokio::join!(
-            futures_join(deactivations.collect()),
-            futures_join(activations.collect())
+            join_all(deactivations.collect()),
+            join_all(activations.collect())
         );
         self.notify_plugin_statuses_changed().await;
     }
@@ -371,7 +373,7 @@ impl App {
 
     /// Port of `notifyPluginStatusesChanged` (app/plugin_statuses.go:99): a signal to system
     /// admins, carrying an always-empty `plugin_statuses` for clients that index it.
-    async fn notify_plugin_statuses_changed(&self) {
+    pub(crate) async fn notify_plugin_statuses_changed(&self) {
         let mut message = WebSocketEvent::new(
             WEBSOCKET_EVENT_PLUGIN_STATUSES_CHANGED,
             "",
@@ -390,7 +392,11 @@ impl App {
 
     /// Port of `notifyPluginEnabled` (app/plugin.go:818), with no cluster to ask: announce a
     /// running plugin with a client component unless its status disagrees on the version.
-    async fn notify_plugin_enabled(&self, environment: &PluginsEnvironment, manifest: &Manifest) {
+    pub(crate) async fn notify_plugin_enabled(
+        &self,
+        environment: &PluginsEnvironment,
+        manifest: &Manifest,
+    ) {
         if !manifest.has_client() || !environment.is_active(&manifest.id) {
             return;
         }
@@ -428,7 +434,7 @@ impl App {
 }
 
 /// Await every future concurrently on the current task: Go's `WaitGroup` over goroutines.
-async fn futures_join<F: std::future::Future<Output = ()>>(futures: Vec<F>) {
+pub(crate) async fn join_all<F: std::future::Future<Output = ()>>(futures: Vec<F>) {
     let mut pending: Vec<std::pin::Pin<Box<F>>> = futures.into_iter().map(Box::pin).collect();
     std::future::poll_fn(|cx| {
         pending.retain_mut(|f| f.as_mut().poll(cx).is_pending());

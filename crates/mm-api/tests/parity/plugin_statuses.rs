@@ -13,6 +13,10 @@
 //! - `com.mattermost.calls`, enabled the same way, needs Mattermost 99 and fails to start;
 //! - `mmrsstatus.off`, which no state enables, stays off.
 //!
+//! This host installs its three from the file store as it starts (`syncPlugins`), so the suite
+//! puts them there as `plugins/<id>.tar.gz` and leaves a stale bundle in the plugin directory for
+//! the sync to remove; Go's were started long ago and read its plugin directory as it stands.
+//!
 //! Webapp-only on purpose: nothing is launched, so two hosts at once cannot step on each other
 //! (docs/PLUGIN_PLAN.md, D6), and the ids are the defaulted ones so the shared configuration gains
 //! no key. Go only looks at its plugin directory when its configuration changes, so the suite
@@ -71,6 +75,26 @@ fn install(plugins: &Path) {
         std::fs::create_dir_all(dir.join("dist")).unwrap();
         std::fs::write(dir.join("plugin.json"), manifest).unwrap();
         std::fs::write(dir.join("dist/main.js"), format!("// {id}\n")).unwrap();
+    }
+}
+
+/// The bundles as the file store keeps them, `plugins/<id>.tar.gz`: this host syncs from there when
+/// it starts, and removes whatever its plugin directory held before.
+fn store(data: &Path) {
+    let staging = data.join("staging");
+    install(&staging);
+    let store = data.join("plugins");
+    std::fs::create_dir_all(&store).unwrap();
+    for (id, _) in BUNDLES {
+        let status = std::process::Command::new("tar")
+            .arg("-czf")
+            .arg(store.join(format!("{id}.tar.gz")))
+            .arg("-C")
+            .arg(&staging)
+            .arg(id)
+            .status()
+            .expect("tar is on PATH");
+        assert!(status.success(), "packing {id}");
     }
 }
 
@@ -158,11 +182,19 @@ async fn statuses_from_this_host_match_go() {
     let _ = std::fs::remove_dir_all(&scratch);
     let rs_plugins = scratch.join("plugins");
     let rs_client = scratch.join("client");
+    let rs_data = scratch.join("data");
     std::fs::create_dir_all(&rs_plugins).unwrap();
+    // Left in the plugin directory to be swept away: the sync removes what it did not install.
+    std::fs::create_dir_all(rs_plugins.join("stale/dist")).unwrap();
+    std::fs::write(
+        rs_plugins.join("stale/plugin.json"),
+        r#"{"id":"stale","webapp":{"bundle_path":"dist/main.js"}}"#,
+    )
+    .unwrap();
 
     uninstall(&go_plugins, &go_client);
     install(&go_plugins);
-    install(&rs_plugins);
+    store(&rs_data);
     // Go reads its plugin directory on a configuration change.
     set_state(&client, &admin, "com.mattermost.nps", false).await;
     set_state(&client, &admin, "com.mattermost.nps", true).await;
@@ -170,12 +202,14 @@ async fn statuses_from_this_host_match_go() {
 
     let dir = rs_plugins.to_string_lossy().into_owned();
     let client_dir = rs_client.to_string_lossy().into_owned();
+    let data_dir = format!("{}/", rs_data.to_string_lossy());
     let Some(hosting) = SecondServer::start(
         HOSTING_PORT,
         &[
             ("MMRS_PLUGIN_HOST", "rust"),
             ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
             ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data_dir.as_str()),
         ],
     )
     .await
@@ -205,6 +239,10 @@ async fn statuses_from_this_host_match_go() {
         rust.as_array().map(Vec::len),
         Some(3),
         "the three probe bundles"
+    );
+    assert!(
+        !rs_plugins.join("stale").exists(),
+        "the sync removed the bundle it did not install"
     );
     // The webapp was unpacked where the setting points, under Go's name for it.
     let unpacked: Vec<String> = std::fs::read_dir(rs_client.join("playbooks"))

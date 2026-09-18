@@ -1,0 +1,27 @@
+# Mutation plan for plugin installation (plugin_install.go, extract_plugin_tar.go, syncPlugins).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-install.plan
+#
+# The unit lines are judged by plugin_install::go_parity, which runs Go's own extractTarGz over
+# the same corpus; the api lines by parity::plugin_statuses, whose host installs from the file
+# store. Not planned: the setuid bit, which both walks mask off. CONTROL- lines must SURVIVE.
+#
+# 2026-09-18: 15 run, 12 caught; both controls survived. install-never-activates SURVIVED and is
+# owed, not equivalent: at start-up syncPluginsActiveState activates straight after the sync, so
+# only an install after start-up (POST /plugins) can see it. Re-run it with that route's suite.
+
+extract-dir-mode	crates/mm-app/src/plugin_install.rs	            match std::fs::DirBuilder::new().mode(0o744).create(&path) {	            match std::fs::DirBuilder::new().mode(0o755).create(&path) {	unit	plugin_install
+extract-dir-recursive	crates/mm-app/src/plugin_install.rs	            match std::fs::DirBuilder::new().mode(0o744).create(&path) {	            match std::fs::DirBuilder::new().mode(0o744).recursive(true).create(&path) {	unit	plugin_install
+extract-legacy-dir-dropped	crates/mm-app/src/plugin_install.rs	            tar::EntryType::Regular => raw == 0 && name.ends_with('/'),	            tar::EntryType::Regular => false,	unit	plugin_install
+extract-sanitize-dropped	crates/mm-app/src/plugin_install.rs	        if !path.starts_with(dst) {	        if false {	unit	plugin_install
+extract-sanitize-strict	crates/mm-app/src/plugin_install.rs	        if !path.starts_with(dst) {	        if !path.starts_with(&format!("{dst}/")) {	unit	plugin_install
+extract-links-extracted	crates/mm-app/src/plugin_install.rs	        let is_file = !is_dir && entry.header().entry_type() == tar::EntryType::Regular;	        let is_file = !is_dir && entry.header().entry_type() != tar::EntryType::Directory;	unit	plugin_install
+extract-no-truncate	crates/mm-app/src/plugin_install.rs	            .truncate(true)\n            .mode(mode)	            .truncate(false)\n            .mode(mode)	unit	plugin_install
+extract-mode-ignored	crates/mm-app/src/plugin_install.rs	        let mode = entry.header().mode().unwrap_or(0) & 0o777;	        let mode = 0o644;	unit	plugin_install
+extract-single-gzip-member	crates/mm-app/src/plugin_install.rs	    let mut decoder = flate2::read::MultiGzDecoder::new(gzip_stream);	    let mut decoder = flate2::read::GzDecoder::new(gzip_stream);	unit	plugin_install
+file-paths-sig-unattached	crates/mm-app/src/plugin_install.rs	                Some(bundle) => bundle.signature_path = path.clone(),	                Some(bundle) => drop(bundle),	unit	plugin_install
+extract-plugin-no-descend	crates/mm-app/src/plugin_install.rs	        dir = dir.join(only.file_name());	        let _ = only;	api	plugin_statuses
+sync-no-removal	crates/mm-app/src/plugin_install.rs	        crate::plugins::join_all(removals.collect()).await;	        crate::plugins::join_all(removals.take(0).collect()).await;	api	plugin_statuses
+install-never-activates	crates/mm-app/src/plugin_install.rs	        if config.plugin_states.get(&manifest.id).copied() == Some(true) {	        if false {	api	plugin_statuses
+CONTROL-rename-dir-binding	crates/mm-app/src/plugin_install.rs	        let dir = go_path::dir(&path);\n        std::fs::DirBuilder::new()\n            .mode(0o744)\n            .recursive(true)\n            .create(&dir)\n            .map_err(io_err("mkdir", &dir))?;	        let parent = go_path::dir(&path);\n        std::fs::DirBuilder::new()\n            .mode(0o744)\n            .recursive(true)\n            .create(&parent)\n            .map_err(io_err("mkdir", &parent))?;	unit	plugin_install
+CONTROL-swap-store-paths	crates/mm-app/src/plugin_install.rs	pub fn bundle_store_path(id: &str) -> String {	pub fn bundle_store_path(id: &str) -> String {\n    let id = id;	unit	plugin_install

@@ -79,6 +79,7 @@ pub mod oauth;
 pub mod onboarding;
 pub mod password;
 pub mod peer_cache;
+pub mod plugin_install;
 pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;

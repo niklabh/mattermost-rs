@@ -167,60 +167,7 @@ pub enum EnvError {
 // Go's path helpers
 // ---------------------------------------------------------------------------------------------
 
-/// Go's `filepath.Clean` on Unix: the shortest lexically equivalent path.
-pub fn go_clean(path: &str) -> String {
-    if path.is_empty() {
-        return ".".into();
-    }
-    let rooted = path.starts_with('/');
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                if parts.last().is_some_and(|p| *p != "..") {
-                    parts.pop();
-                } else if !rooted {
-                    parts.push("..");
-                }
-            }
-            other => parts.push(other),
-        }
-    }
-    let joined = parts.join("/");
-    match (rooted, joined.is_empty()) {
-        (true, _) => format!("/{joined}"),
-        (false, true) => ".".into(),
-        (false, false) => joined,
-    }
-}
-
-/// Go's `filepath.Join`: the non-empty elements joined, then cleaned.
-fn go_join(parts: &[&str]) -> String {
-    let joined: Vec<&str> = parts.iter().copied().filter(|p| !p.is_empty()).collect();
-    if joined.is_empty() {
-        return String::new();
-    }
-    go_clean(&joined.join("/"))
-}
-
-/// Go's `filepath.Dir`.
-fn go_dir(path: &str) -> String {
-    let dir = match path.rfind('/') {
-        Some(i) => &path[..=i],
-        None => "",
-    };
-    go_clean(dir)
-}
-
-/// Go's `filepath.Base`.
-fn go_base(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return if path.is_empty() { "." } else { "/" }.into();
-    }
-    trimmed.rsplit('/').next().unwrap_or(trimmed).into()
-}
+use mm_model::go_path::{base as go_base, clean as go_clean, dir as go_dir, join as go_join};
 
 fn lossy(path: &Path) -> String {
     path.to_string_lossy().into_owned()
@@ -357,7 +304,7 @@ pub fn scan_search_path(path: &Path) -> Result<Vec<BundleInfo>, EnvError> {
 
 /// public/utils/file.go, `CopyDir`: `src` must be a directory and `dst` must not exist.
 /// Permissions are kept and symlinks skipped.
-fn copy_dir(src: &Path, dst: &Path) -> Result<(), EnvError> {
+pub fn copy_dir(src: &Path, dst: &Path) -> Result<(), EnvError> {
     let stat = std::fs::metadata(src).map_err(|e| GoIoError::new("stat", src, e))?;
     if !stat.is_dir() {
         return Err(EnvError::SourceNotDirectory);
@@ -943,34 +890,6 @@ async fn futures_join_all<F: Future<Output = bool>>(futures: impl Iterator<Item 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Go's `filepath.Clean`, `Join`, `Dir` and `Base` on the inputs the environment feeds them.
-    #[test]
-    fn go_path_helpers_match_go() {
-        for (input, want) in [
-            ("", "."),
-            (".", "."),
-            ("./main.js", "main.js"),
-            ("../main.js", "../main.js"),
-            ("a/../../b", "../b"),
-            ("/a/../..", "/"),
-            ("a//b/./c/", "a/b/c"),
-            ("/../x", "/x"),
-        ] {
-            assert_eq!(go_clean(input), want, "Clean({input:?})");
-        }
-        assert_eq!(go_join(&[".", "../../outside"]), "../../outside");
-        assert_eq!(go_join(&["", ""]), "");
-        assert_eq!(
-            go_join(&["/p", "id", "webapp/dist/main.js"]),
-            "/p/id/webapp/dist/main.js"
-        );
-        assert_eq!(go_dir("/p/plugin.json"), "/p");
-        assert_eq!(go_dir("plugin.json"), ".");
-        assert_eq!(go_dir(""), ".");
-        assert_eq!(go_base("/a/b.js"), "b.js");
-        assert_eq!(go_base(""), ".");
-    }
 
     /// Go's `hash/fnv` New64a over a known input.
     #[test]

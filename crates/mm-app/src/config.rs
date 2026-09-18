@@ -570,6 +570,10 @@ pub struct Config {
     /// dereferences it.
     pub plugin_states: std::collections::BTreeMap<String, bool>,
 
+    /// `PluginSettings.RequirePluginSignature` (config.go:3614, defaulted **`false`** at :3686):
+    /// a bundle synced from the file store must carry a signature that verifies.
+    pub plugin_require_signature: bool,
+
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
     ///
@@ -1471,6 +1475,7 @@ impl Default for Config {
             // config.go:269 — `PluginSettingsDefaultClientDirectory`.
             plugin_client_directory: "./client/plugins".to_owned(),
             plugin_states: default_plugin_states(true),
+            plugin_require_signature: false,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1947,6 +1952,11 @@ impl Config {
             plugin_client_directory: lookup("MM_PLUGINSETTINGS_CLIENTDIRECTORY")
                 .unwrap_or(default.plugin_client_directory),
             plugin_states: default.plugin_states,
+            plugin_require_signature: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
+                default.plugin_require_signature,
+            ),
             send_email_notifications: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS",
@@ -2670,6 +2680,9 @@ impl Config {
                 default.plugin_client_directory,
             ),
             plugin_states: plugin_states(plugin_settings.plugin_states, enable_diagnostics),
+            plugin_require_signature: plugin_settings
+                .require_plugin_signature
+                .unwrap_or(default.plugin_require_signature),
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3463,6 +3476,8 @@ struct PluginSettingsDocument {
     client_directory: Option<String>,
     #[serde(rename = "PluginStates")]
     plugin_states: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
+    #[serde(rename = "RequirePluginSignature")]
+    require_plugin_signature: Option<bool>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
     #[serde(rename = "EnableMarketplace")]
@@ -4342,8 +4357,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 117,
-            "the fixture covers {keys} settings and Config reads 117 from the document. \
+            keys, 118,
+            "the fixture covers {keys} settings and Config reads 118 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4398,6 +4413,7 @@ mod go_parity {
                 "Enable": false,
                 "EnableMarketplace": false,
                 "ClientDirectory": "/elsewhere",
+                "RequirePluginSignature": true,
                 "PluginStates": { "playbooks": { "Enable": false }, "x": { "Enable": true } }
             },
             "EmailSettings": {
@@ -4494,6 +4510,7 @@ mod go_parity {
         assert!(!config.send_email_notifications);
         // The plugin host's: a document entry wins over SetDefaults', which fills only the gaps.
         assert_eq!(config.plugin_client_directory, "/elsewhere");
+        assert!(config.plugin_require_signature);
         assert_eq!(config.plugin_states.get("playbooks"), Some(&false));
         assert_eq!(config.plugin_states.get("x"), Some(&true));
         assert_eq!(

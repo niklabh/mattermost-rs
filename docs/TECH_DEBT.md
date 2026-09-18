@@ -9182,10 +9182,9 @@ With `MMRS_PLUGIN_HOST=rust`, `mm_app::plugins` ports `initPlugins`, `syncPlugin
 `ShutDownPlugins` and the `PluginSettings` config listener, and `GET /plugins/statuses` answers from
 it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-in for Go's:
 
-- `syncPlugins`: Go wipes its local plugin directory and reinstalls every bundle the file store
-  holds under `plugins/`, checking signatures when `RequirePluginSignature` is on. Here the plugin
-  directory is used as it stands. Needs `installPluginLocally` (tar.gz extraction) and
-  `plugin_signature.go`.
+- Signatures (`plugin_signature.go`, OpenPGP): `syncPlugins` is ported (2026-09-18,
+  `mm_app::plugin_install`), but with `RequirePluginSignature` on it skips every bundle with an
+  error where Go would verify it, and an install stores no signature.
 - Prepackaged and transitionally prepackaged plugins (`processPrepackagedPlugins`,
   `persistTransitionallyPrepackagedPlugins`).
 - The health-check job (`health_check.go`, `EnableHealthCheck`).

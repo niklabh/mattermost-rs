@@ -109,7 +109,8 @@
       "playbooks": {
         "Enable": true
       }
-    }
+    },
+    "RequirePluginSignature": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
