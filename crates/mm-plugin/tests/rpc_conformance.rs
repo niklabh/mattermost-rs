@@ -109,6 +109,25 @@ macro_rules! fake_api {
             ) -> Result<mm_plugin::wire::plugin::Z_LogErrorReturns, NotImplemented> {
                 Ok(self.answer("LogError", "Z_LogErrorReturns", &args))
             }
+
+            async fn log_audit_rec(
+                &self,
+                args: mm_plugin::wire::plugin::Z_LogAuditRecArgs,
+            ) -> Result<mm_plugin::wire::plugin::Z_LogAuditRecReturns, NotImplemented> {
+                Ok(self.answer("LogAuditRec", "Z_LogAuditRecReturns", &args))
+            }
+
+            async fn log_audit_rec_with_level(
+                &self,
+                args: mm_plugin::wire::plugin::Z_LogAuditRecWithLevelArgs,
+            ) -> Result<mm_plugin::wire::plugin::Z_LogAuditRecWithLevelReturns, NotImplemented>
+            {
+                Ok(self.answer(
+                    "LogAuditRecWithLevel",
+                    "Z_LogAuditRecWithLevelReturns",
+                    &args,
+                ))
+            }
         }
     };
 }
@@ -166,13 +185,13 @@ fn logged_args() -> Json {
     })
 }
 
-/// Every API method this suite does not call, with the reason. A new hand-written method lands
-/// here as a failure until it is either called or listed.
+/// Every API method this suite does not call with its fixture arguments, and why. A new
+/// hand-written method lands here as a failure until it is either called or listed.
 const API_NOT_CALLED: [&str; 3] = [
-    // No Rust client yet: their client passes the record through a JSON round trip first.
+    // Called, but checked on their own: their arguments are the record after its JSON round trip.
     "LogAuditRec",
     "LogAuditRecWithLevel",
-    // Called, but checked on its own because its answer is not a fixture.
+    // Called, but its answer is not a fixture.
     "LoadPluginConfiguration",
 ];
 
@@ -359,6 +378,19 @@ async fn rpc_rust_host_drives_the_go_plugin() {
             other => failures.push(format!("api {name}: Rust received {other:?}")),
         }
     }
+    // The audit record crossed in its gob-safe form: the JSON round trip turned its integers
+    // into floats and its structs into objects keyed by their `json:` tags (audit.go).
+    for name in ["LogAuditRec", "LogAuditRecWithLevel"] {
+        let want = &expected[&format!("Z_{name}Args.safe")];
+        match received.get(name) {
+            Some(got) if got == want => {}
+            Some(got) => failures.push(format!(
+                "api {name}: Rust received\n{got}\nexpected\n{want}"
+            )),
+            None => failures.push(format!("api {name}: the Rust server never saw the call")),
+        }
+    }
+
     // The fake implements no LoadPluginConfiguration, so the host answers `null` rather than the
     // not-implemented error every other method answers with (client_rpc.go).
     assert_eq!(

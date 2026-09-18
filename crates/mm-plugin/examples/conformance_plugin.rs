@@ -119,6 +119,19 @@ impl Plugin for Conformance {
         api.log_info(LOG_MESSAGE, &pairs).await;
         api.log_warn(LOG_MESSAGE, &pairs).await;
         api.log_error(LOG_MESSAGE, &pairs).await;
+        // The audit record goes through the gob-safe JSON round trip inside the client.
+        // Each method sends its own fixture's record, which is what the test expects of it.
+        let logged: mm_plugin::wire::plugin::Z_LogAuditRecArgs = fixture("Z_LogAuditRecArgs");
+        api.log_audit_rec(*logged.a.expect("the fixture has a record"))
+            .await;
+        let with_level: mm_plugin::wire::plugin::Z_LogAuditRecWithLevelArgs =
+            fixture("Z_LogAuditRecWithLevelArgs");
+        api.log_audit_rec_with_level(
+            *with_level.a.expect("the fixture has a record"),
+            with_level.b,
+        )
+        .await;
+
         let config = api.load_plugin_configuration().await;
         self.record(json!({
             "api": "LoadPluginConfiguration",

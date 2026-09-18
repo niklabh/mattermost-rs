@@ -302,6 +302,19 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
             other => failures.push(format!("api {name}: Go received {other:?}")),
         }
     }
+    // The Rust plugin's audit record reached Go in its gob-safe form.
+    for name in ["LogAuditRec", "LogAuditRecWithLevel"] {
+        let want = &expected[&format!("Z_{name}Args.safe")];
+        match go_api.get(name) {
+            Some(e) if &e["args"] == want => {}
+            Some(e) => failures.push(format!(
+                "api {name}: Go received\n{}\nexpected\n{want}",
+                e["args"]
+            )),
+            None => failures.push(format!("api {name}: the Go host never saw the call")),
+        }
+    }
+
     // The host answered LoadPluginConfiguration with a value; the plugin must have it as JSON.
     let config = serde_json::json!({"enabled": true, "name": "conformance"});
     assert_eq!(

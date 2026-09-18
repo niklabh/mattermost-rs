@@ -19456,34 +19456,241 @@
     "ObjectType": "sba7e70",
     "Parameters": {
      "$map": {
-      "s27df64": {
+      "app_error": {
+       "$iface": "*model.AppError",
+       "value": {
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
+       }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
        "$iface": "float64",
        "value": {
-        "$f64": 4637493755354546176
+        "$f64": 4609434218613702656
        }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627776
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "int64",
+          "value": 9
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 0"
       }
      }
     },
     "PriorState": {
      "$map": {
-      "sad08ae": {
+      "app_error": {
+       "$iface": "*model.AppError",
+       "value": {
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
+       }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
        "$iface": "bool",
-       "value": true
+       "value": false
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627777
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "int64",
+          "value": 9
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 1"
       }
      }
     },
     "ResultState": {
      "$map": {
-      "sb1c5c5": {
+      "app_error": {
+       "$iface": "*model.AppError",
+       "value": {
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
+       }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627778
+      },
+      "list": {
        "$iface": "[]interface {}",
        "value": [
         {
-         "$iface": "float64",
-         "value": {
-          "$f64": 4635277139912949760
-         }
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
         }
        ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "int64",
+          "value": 9
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 2"
       }
      }
     }
@@ -19491,9 +19698,825 @@
    "EventName": "sb8e41a",
    "Meta": {
     "$map": {
-     "sffc6a3": {
+     "app_error": {
+      "$iface": "*model.AppError",
+      "value": {
+       "DetailedError": "detail",
+       "Id": "api.audit.error",
+       "Message": "audit message",
+       "StatusCode": 500,
+       "Where": "Audit"
+      }
+     },
+     "attachments": {
+      "$iface": "[]*model.SlackAttachment",
+      "value": [
+       {
+        "Fields": [
+         {
+          "Title": "title",
+          "Value": {
+           "$iface": "string",
+           "value": "field value"
+          }
+         }
+        ],
+        "Text": "attached"
+       }
+      ]
+     },
+     "bool": {
       "$iface": "bool",
-      "value": true
+      "value": false
+     },
+     "float": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4609434218613702656
+      }
+     },
+     "int": {
+      "$iface": "int64",
+      "value": 1099511627779
+     },
+     "list": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "int64",
+        "value": 7
+       },
+       {
+        "$iface": "string",
+        "value": "two"
+       },
+       {
+        "$iface": "bool",
+        "value": false
+       }
+      ]
+     },
+     "nested": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "inner": {
+         "$iface": "int64",
+         "value": 9
+        }
+       }
+      }
+     },
+     "nil": {
+      "$iface": ""
+     },
+     "string": {
+      "$iface": "string",
+      "value": "value 3"
+     }
+    }
+   },
+   "Status": "s529b39"
+  }
+ },
+ "Z_LogAuditRecArgs.safe": {
+  "A": {
+   "Actor": {
+    "Client": "sba6b77",
+    "IpAddress": "sb01da2",
+    "SessionId": "sae2802",
+    "UserId": "s4e9d68",
+    "XForwardedFor": "s4eeaaf"
+   },
+   "Error": {
+    "Code": -4611686018427387992,
+    "Description": "s507474"
+   },
+   "EventData": {
+    "ObjectType": "sba7e70",
+    "Parameters": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894837248
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 0"
+      }
+     }
+    },
+    "PriorState": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": false
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894841344
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 1"
+      }
+     }
+    },
+    "ResultState": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894845440
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 2"
+      }
+     }
+    }
+   },
+   "EventName": "sb8e41a",
+   "Meta": {
+    "$map": {
+     "app_error": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "detailed_error": {
+         "$iface": "string",
+         "value": "detail"
+        },
+        "id": {
+         "$iface": "string",
+         "value": "api.audit.error"
+        },
+        "message": {
+         "$iface": "string",
+         "value": "audit message"
+        },
+        "status_code": {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4647503709213818880
+         }
+        }
+       }
+      }
+     },
+     "attachments": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "map[string]interface {}",
+        "value": {
+         "$map": {
+          "author_icon": {
+           "$iface": "string",
+           "value": ""
+          },
+          "author_link": {
+           "$iface": "string",
+           "value": ""
+          },
+          "author_name": {
+           "$iface": "string",
+           "value": ""
+          },
+          "color": {
+           "$iface": "string",
+           "value": ""
+          },
+          "fallback": {
+           "$iface": "string",
+           "value": ""
+          },
+          "fields": {
+           "$iface": "[]interface {}",
+           "value": [
+            {
+             "$iface": "map[string]interface {}",
+             "value": {
+              "$map": {
+               "short": {
+                "$iface": "bool",
+                "value": false
+               },
+               "title": {
+                "$iface": "string",
+                "value": "title"
+               },
+               "value": {
+                "$iface": "string",
+                "value": "field value"
+               }
+              }
+             }
+            }
+           ]
+          },
+          "footer": {
+           "$iface": "string",
+           "value": ""
+          },
+          "footer_icon": {
+           "$iface": "string",
+           "value": ""
+          },
+          "id": {
+           "$iface": "float64",
+           "value": {
+            "$f64": 0
+           }
+          },
+          "image_url": {
+           "$iface": "string",
+           "value": ""
+          },
+          "pretext": {
+           "$iface": "string",
+           "value": ""
+          },
+          "text": {
+           "$iface": "string",
+           "value": "attached"
+          },
+          "thumb_url": {
+           "$iface": "string",
+           "value": ""
+          },
+          "title": {
+           "$iface": "string",
+           "value": ""
+          },
+          "title_link": {
+           "$iface": "string",
+           "value": ""
+          },
+          "ts": {
+           "$iface": ""
+          }
+         }
+        }
+       }
+      ]
+     },
+     "bool": {
+      "$iface": "bool",
+      "value": false
+     },
+     "float": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4609434218613702656
+      }
+     },
+     "int": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4787326403894849536
+      }
+     },
+     "list": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "float64",
+        "value": {
+         "$f64": 4619567317775286272
+        }
+       },
+       {
+        "$iface": "string",
+        "value": "two"
+       },
+       {
+        "$iface": "bool",
+        "value": false
+       }
+      ]
+     },
+     "nested": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "inner": {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4621256167635550208
+         }
+        }
+       }
+      }
+     },
+     "nil": {
+      "$iface": ""
+     },
+     "string": {
+      "$iface": "string",
+      "value": "value 3"
      }
     }
    },
@@ -19520,40 +20543,241 @@
     "ObjectType": "s1fac3d",
     "Parameters": {
      "$map": {
-      "s538c27": {
+      "app_error": {
+       "$iface": "*model.AppError",
+       "value": {
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
+       }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627776
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
        "$iface": "map[string]interface {}",
        "value": {
         "$map": {
-         "s63c928": {
-          "$iface": "string",
-          "value": "s83c22d"
+         "inner": {
+          "$iface": "int64",
+          "value": 9
          }
         }
        }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 0"
       }
      }
     },
     "PriorState": {
      "$map": {
-      "saeabdd": {
-       "$iface": "*model.AutocompleteStaticListArg",
+      "app_error": {
+       "$iface": "*model.AppError",
        "value": {
-        "PossibleArguments": [
-         {
-          "HelpText": "sd08bb2",
-          "Hint": "sed0e6f",
-          "Item": "s7af59d"
-         }
-        ]
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
        }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": false
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627777
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "int64",
+          "value": 9
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 1"
       }
      }
     },
     "ResultState": {
      "$map": {
-      "sa9046e": {
+      "app_error": {
+       "$iface": "*model.AppError",
+       "value": {
+        "DetailedError": "detail",
+        "Id": "api.audit.error",
+        "Message": "audit message",
+        "StatusCode": 500,
+        "Where": "Audit"
+       }
+      },
+      "attachments": {
+       "$iface": "[]*model.SlackAttachment",
+       "value": [
+        {
+         "Fields": [
+          {
+           "Title": "title",
+           "Value": {
+            "$iface": "string",
+            "value": "field value"
+           }
+          }
+         ],
+         "Text": "attached"
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "int64",
+       "value": 1099511627778
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "int64",
+         "value": 7
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "int64",
+          "value": 9
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
        "$iface": "string",
-       "value": "sde595a"
+       "value": "value 2"
       }
      }
     }
@@ -19561,17 +20785,831 @@
    "EventName": "s851b3f",
    "Meta": {
     "$map": {
-     "s4b8ff7": {
-      "$iface": "github.com/mattermost/mattermost/server/public/model.PropertyOptions[*github.com/mattermost/mattermost/server/public/model.PluginPropertyOption]",
+     "app_error": {
+      "$iface": "*model.AppError",
+      "value": {
+       "DetailedError": "detail",
+       "Id": "api.audit.error",
+       "Message": "audit message",
+       "StatusCode": 500,
+       "Where": "Audit"
+      }
+     },
+     "attachments": {
+      "$iface": "[]*model.SlackAttachment",
       "value": [
        {
-        "Data": {
+        "Fields": [
+         {
+          "Title": "title",
+          "Value": {
+           "$iface": "string",
+           "value": "field value"
+          }
+         }
+        ],
+        "Text": "attached"
+       }
+      ]
+     },
+     "bool": {
+      "$iface": "bool",
+      "value": false
+     },
+     "float": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4609434218613702656
+      }
+     },
+     "int": {
+      "$iface": "int64",
+      "value": 1099511627779
+     },
+     "list": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "int64",
+        "value": 7
+       },
+       {
+        "$iface": "string",
+        "value": "two"
+       },
+       {
+        "$iface": "bool",
+        "value": false
+       }
+      ]
+     },
+     "nested": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "inner": {
+         "$iface": "int64",
+         "value": 9
+        }
+       }
+      }
+     },
+     "nil": {
+      "$iface": ""
+     },
+     "string": {
+      "$iface": "string",
+      "value": "value 3"
+     }
+    }
+   },
+   "Status": "sa7f79b"
+  },
+  "B": {
+   "Color": 145,
+   "ID": 9223372036854775851,
+   "Name": "sc8e08f",
+   "Stacktrace": true
+  }
+ },
+ "Z_LogAuditRecWithLevelArgs.safe": {
+  "A": {
+   "Actor": {
+    "Client": "sebc233",
+    "IpAddress": "s60518c",
+    "SessionId": "s68589e",
+    "UserId": "sda2745",
+    "XForwardedFor": "s7e5fcd"
+   },
+   "Error": {
+    "Code": -4611686018427387948,
+    "Description": "s934247"
+   },
+   "EventData": {
+    "ObjectType": "s1fac3d",
+    "Parameters": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894837248
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 0"
+      }
+     }
+    },
+    "PriorState": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": false
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894841344
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 1"
+      }
+     }
+    },
+    "ResultState": {
+     "$map": {
+      "app_error": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "detailed_error": {
+          "$iface": "string",
+          "value": "detail"
+         },
+         "id": {
+          "$iface": "string",
+          "value": "api.audit.error"
+         },
+         "message": {
+          "$iface": "string",
+          "value": "audit message"
+         },
+         "status_code": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4647503709213818880
+          }
+         }
+        }
+       }
+      },
+      "attachments": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "map[string]interface {}",
+         "value": {
+          "$map": {
+           "author_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "author_name": {
+            "$iface": "string",
+            "value": ""
+           },
+           "color": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fallback": {
+            "$iface": "string",
+            "value": ""
+           },
+           "fields": {
+            "$iface": "[]interface {}",
+            "value": [
+             {
+              "$iface": "map[string]interface {}",
+              "value": {
+               "$map": {
+                "short": {
+                 "$iface": "bool",
+                 "value": false
+                },
+                "title": {
+                 "$iface": "string",
+                 "value": "title"
+                },
+                "value": {
+                 "$iface": "string",
+                 "value": "field value"
+                }
+               }
+              }
+             }
+            ]
+           },
+           "footer": {
+            "$iface": "string",
+            "value": ""
+           },
+           "footer_icon": {
+            "$iface": "string",
+            "value": ""
+           },
+           "id": {
+            "$iface": "float64",
+            "value": {
+             "$f64": 0
+            }
+           },
+           "image_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "pretext": {
+            "$iface": "string",
+            "value": ""
+           },
+           "text": {
+            "$iface": "string",
+            "value": "attached"
+           },
+           "thumb_url": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title": {
+            "$iface": "string",
+            "value": ""
+           },
+           "title_link": {
+            "$iface": "string",
+            "value": ""
+           },
+           "ts": {
+            "$iface": ""
+           }
+          }
+         }
+        }
+       ]
+      },
+      "bool": {
+       "$iface": "bool",
+       "value": true
+      },
+      "float": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4609434218613702656
+       }
+      },
+      "int": {
+       "$iface": "float64",
+       "value": {
+        "$f64": 4787326403894845440
+       }
+      },
+      "list": {
+       "$iface": "[]interface {}",
+       "value": [
+        {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4619567317775286272
+         }
+        },
+        {
+         "$iface": "string",
+         "value": "two"
+        },
+        {
+         "$iface": "bool",
+         "value": false
+        }
+       ]
+      },
+      "nested": {
+       "$iface": "map[string]interface {}",
+       "value": {
+        "$map": {
+         "inner": {
+          "$iface": "float64",
+          "value": {
+           "$f64": 4621256167635550208
+          }
+         }
+        }
+       }
+      },
+      "nil": {
+       "$iface": ""
+      },
+      "string": {
+       "$iface": "string",
+       "value": "value 2"
+      }
+     }
+    }
+   },
+   "EventName": "s851b3f",
+   "Meta": {
+    "$map": {
+     "app_error": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "detailed_error": {
+         "$iface": "string",
+         "value": "detail"
+        },
+        "id": {
+         "$iface": "string",
+         "value": "api.audit.error"
+        },
+        "message": {
+         "$iface": "string",
+         "value": "audit message"
+        },
+        "status_code": {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4647503709213818880
+         }
+        }
+       }
+      }
+     },
+     "attachments": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "map[string]interface {}",
+        "value": {
          "$map": {
-          "s866f71": "safb154"
+          "author_icon": {
+           "$iface": "string",
+           "value": ""
+          },
+          "author_link": {
+           "$iface": "string",
+           "value": ""
+          },
+          "author_name": {
+           "$iface": "string",
+           "value": ""
+          },
+          "color": {
+           "$iface": "string",
+           "value": ""
+          },
+          "fallback": {
+           "$iface": "string",
+           "value": ""
+          },
+          "fields": {
+           "$iface": "[]interface {}",
+           "value": [
+            {
+             "$iface": "map[string]interface {}",
+             "value": {
+              "$map": {
+               "short": {
+                "$iface": "bool",
+                "value": false
+               },
+               "title": {
+                "$iface": "string",
+                "value": "title"
+               },
+               "value": {
+                "$iface": "string",
+                "value": "field value"
+               }
+              }
+             }
+            }
+           ]
+          },
+          "footer": {
+           "$iface": "string",
+           "value": ""
+          },
+          "footer_icon": {
+           "$iface": "string",
+           "value": ""
+          },
+          "id": {
+           "$iface": "float64",
+           "value": {
+            "$f64": 0
+           }
+          },
+          "image_url": {
+           "$iface": "string",
+           "value": ""
+          },
+          "pretext": {
+           "$iface": "string",
+           "value": ""
+          },
+          "text": {
+           "$iface": "string",
+           "value": "attached"
+          },
+          "thumb_url": {
+           "$iface": "string",
+           "value": ""
+          },
+          "title": {
+           "$iface": "string",
+           "value": ""
+          },
+          "title_link": {
+           "$iface": "string",
+           "value": ""
+          },
+          "ts": {
+           "$iface": ""
+          }
          }
         }
        }
       ]
+     },
+     "bool": {
+      "$iface": "bool",
+      "value": false
+     },
+     "float": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4609434218613702656
+      }
+     },
+     "int": {
+      "$iface": "float64",
+      "value": {
+       "$f64": 4787326403894849536
+      }
+     },
+     "list": {
+      "$iface": "[]interface {}",
+      "value": [
+       {
+        "$iface": "float64",
+        "value": {
+         "$f64": 4619567317775286272
+        }
+       },
+       {
+        "$iface": "string",
+        "value": "two"
+       },
+       {
+        "$iface": "bool",
+        "value": false
+       }
+      ]
+     },
+     "nested": {
+      "$iface": "map[string]interface {}",
+      "value": {
+       "$map": {
+        "inner": {
+         "$iface": "float64",
+         "value": {
+          "$f64": 4621256167635550208
+         }
+        }
+       }
+      }
+     },
+     "nil": {
+      "$iface": ""
+     },
+     "string": {
+      "$iface": "string",
+      "value": "value 3"
      }
     }
    },

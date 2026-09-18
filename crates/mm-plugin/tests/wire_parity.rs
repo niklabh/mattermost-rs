@@ -52,6 +52,17 @@ static WIRE: &[(&str, RoundTrip)] = mm_plugin::for_each_wire_struct!(table);
 
 const VARIANTS: [&str; 2] = ["", ".sparse"];
 
+/// The oracle's streams for one wire struct: both variants, plus the gob-safe form of an audit
+/// record's arguments, which `LogAuditRec` sends (audit.go).
+fn variants_of(name: &str, expected: &Map<String, Json>) -> Vec<String> {
+    let mut out: Vec<String> = VARIANTS.iter().map(|v| format!("{name}{v}")).collect();
+    let safe = format!("{name}.safe");
+    if expected.contains_key(&safe) {
+        out.push(safe);
+    }
+    out
+}
+
 /// Downcast an interface value into the generated type for its registered name, and re-wrap it.
 fn interface_round_trip<T: Decode + Encode + Default>(
     i: &gobwire::Interface,
@@ -90,19 +101,15 @@ fn interfaces<'a>(v: &'a Value, out: &mut Vec<&'a gobwire::Interface>) {
 #[test]
 fn every_wire_struct_is_in_the_oracle() {
     let expected = expected();
+    let streams: usize = WIRE
+        .iter()
+        .map(|(name, _)| variants_of(name, &expected).len())
+        .sum();
     assert_eq!(
-        2 * WIRE.len(),
+        streams,
         expected.len(),
         "generated wire structs vs oracle streams"
     );
-    for (name, _) in WIRE {
-        for variant in VARIANTS {
-            assert!(
-                expected.contains_key(&format!("{name}{variant}")),
-                "{name}{variant} has no oracle stream"
-            );
-        }
-    }
 }
 
 #[test]
@@ -110,10 +117,11 @@ fn wire_structs_round_trip_through_rust_and_go() {
     let expected = expected();
     let written = scratch("plugin-wire-rust");
     let mut failures = Vec::new();
-    for (name, round_trip) in WIRE
+    let variants: Vec<(String, &RoundTrip)> = WIRE
         .iter()
-        .flat_map(|(n, rt)| VARIANTS.map(|v| (format!("{n}{v}"), rt)))
-    {
+        .flat_map(|(n, rt)| variants_of(n, &expected).into_iter().map(move |v| (v, rt)))
+        .collect();
+    for (name, round_trip) in variants {
         let want = &expected[&name];
         let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();
         match render_stream(&stream) {
@@ -272,7 +280,16 @@ fn fixtures_match_the_go_tree() {
         "fixtures/plugin/idl.json is stale: regenerate with `cd reference/dump && TZ=Asia/Kolkata go run ./plugingen idl ../../fixtures/plugin/idl.json`, then scripts/plugingen.py"
     );
 
+    // Regenerate **over a copy** of what is committed: a stream carrying a map with more than
+    // one key is encoded in Go's randomised map order, so the generator keeps a file that still
+    // decodes the same way (`writeStable`). The contract is that a run changes nothing, not that
+    // an empty directory comes out byte for byte the same.
     let gob = dir.join("gob");
+    std::fs::create_dir_all(&gob).unwrap();
+    for entry in std::fs::read_dir(fixtures().join("gob")).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), gob.join(entry.file_name())).unwrap();
+    }
     run_plugingen(&["gob".as_ref(), gob.as_os_str()]);
     let diffs = same_tree(&gob, &fixtures().join("gob"));
     assert!(diffs.is_empty(), "fixtures/plugin/gob is stale: {diffs:?}");

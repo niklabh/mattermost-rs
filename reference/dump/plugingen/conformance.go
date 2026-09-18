@@ -36,6 +36,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/plugin/plugintest"
+	"github.com/mattermost/mattermost/server/public/shared/mlog"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -120,6 +121,30 @@ func encodableError(err error) error {
 		ret.Code = 7
 	}
 	return ret
+}
+
+// makeAuditRecordGobSafe and makeMapGobSafe are audit.go's, copied: the JSON round trip a
+// record goes through before LogAuditRec sends it. The copy is the oracle crates/mm-plugin
+// checks against; the Go plugin's own calls go through the real one, so a wrong copy shows up
+// as a disagreement rather than as agreement on the wrong answer.
+func makeAuditRecordGobSafe(record model.AuditRecord) model.AuditRecord {
+	record.EventData.Parameters = makeMapGobSafe(record.EventData.Parameters)
+	record.EventData.PriorState = makeMapGobSafe(record.EventData.PriorState)
+	record.EventData.ResultState = makeMapGobSafe(record.EventData.ResultState)
+	record.Meta = makeMapGobSafe(record.Meta)
+	return record
+}
+
+func makeMapGobSafe(m map[string]any) map[string]any {
+	jsonBytes, err := json.Marshal(m)
+	if err != nil {
+		return map[string]any{"error": "failed to serialize audit data"}
+	}
+	var gobSafe map[string]any
+	if err := json.Unmarshal(jsonBytes, &gobSafe); err != nil {
+		return map[string]any{"error": "failed to deserialize audit data"}
+	}
+	return gobSafe
 }
 
 // partialPostMessage is the one field the plugin sets in its MessageWillBePosted answer.
@@ -222,6 +247,12 @@ func (c *conformance) tourHandWrittenAPI() {
 	c.API.LogInfo(LogMessage, LogPairs...)
 	c.API.LogWarn(LogMessage, LogPairs...)
 	c.API.LogError(LogMessage, LogPairs...)
+	// Each method sends its own fixture's record, which is what the test expects of it.
+	rec := c.auditRecord("Z_LogAuditRecArgs")
+	c.API.LogAuditRec(&rec)
+	withLevel := c.auditRecord("Z_LogAuditRecWithLevelArgs")
+	c.API.LogAuditRecWithLevel(&withLevel, c.auditLevel())
+
 	var config any
 	err := c.API.LoadPluginConfiguration(&config)
 	entry := map[string]any{"api": "LoadPluginConfiguration", "config": config}
@@ -229,6 +260,23 @@ func (c *conformance) tourHandWrittenAPI() {
 		entry["error"] = err.Error()
 	}
 	record(entry)
+}
+
+// auditRecord and auditLevel are the record both conformance plugins log, from the fixtures.
+func (c *conformance) auditRecord(fixture string) model.AuditRecord {
+	rec, ok := c.fixture(fixture).Field(0).Interface().(*model.AuditRecord)
+	if !ok || rec == nil {
+		panic(fixture + " has no record")
+	}
+	return *rec
+}
+
+func (c *conformance) auditLevel() mlog.Level {
+	level, ok := c.fixture("Z_LogAuditRecWithLevelArgs").Field(1).Interface().(mlog.Level)
+	if !ok {
+		panic("Z_LogAuditRecWithLevelArgs has no level")
+	}
+	return level
 }
 
 // LogMessage and LogPairs are what both conformance plugins send to the log methods. Go

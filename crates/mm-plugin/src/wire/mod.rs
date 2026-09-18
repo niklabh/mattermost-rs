@@ -25,6 +25,9 @@ pub mod url;
 pub mod x509;
 pub mod xml;
 
+mod gob_safe;
+pub use gob_safe::{interface_to_json, value_to_json};
+
 /// The names client_rpc.go's `init()` registers with gob, for interface values.
 pub mod registered {
     /// Go `*github.com/mattermost/mattermost/server/public/model.AppError`.

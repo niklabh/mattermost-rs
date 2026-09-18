@@ -2,25 +2,29 @@
 //! behaviour is not: the hooks that keep the caller's value as the default answer, the log
 //! methods, and `LoadPluginConfiguration`.
 //!
-//! Their servers are generated like any other, because only the client side differs. Missing
-//! from this file, and from the crate: `LogAuditRec` and `LogAuditRecWithLevel`, whose client
-//! passes the record through a JSON round trip first (audit.go, `makeAuditRecordGobSafe`).
+//! Their servers are generated like any other, because only the client side differs.
+
+use std::collections::HashMap;
 
 use go_netrpc::ServiceError;
 use gobwire::Interface;
+use serde_json::{Map, Value as Json};
 
 use super::{ApiClient, HooksClient, NotImplemented, PluginApi, hook_id};
-use crate::wire::model::{ChannelMember, Post, TeamMember};
+use crate::wire::logr::Level;
+use crate::wire::model::{AuditRecord, ChannelMember, Post, TeamMember};
 use crate::wire::plugin::{
     Z_ChannelMemberWillBeAddedArgs, Z_ChannelMemberWillBeAddedReturns,
-    Z_LoadPluginConfigurationArgsArgs, Z_LoadPluginConfigurationArgsReturns, Z_LogDebugArgs,
-    Z_LogDebugReturns, Z_LogErrorArgs, Z_LogErrorReturns, Z_LogInfoArgs, Z_LogInfoReturns,
-    Z_LogWarnArgs, Z_LogWarnReturns, Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns,
-    Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns, Z_MessagesWillBeConsumedArgs,
-    Z_MessagesWillBeConsumedReturns, Z_MessagesWillBeConsumedWithContextArgs,
-    Z_MessagesWillBeConsumedWithContextReturns, Z_TeamMemberWillBeAddedArgs,
-    Z_TeamMemberWillBeAddedReturns,
+    Z_LoadPluginConfigurationArgsArgs, Z_LoadPluginConfigurationArgsReturns, Z_LogAuditRecArgs,
+    Z_LogAuditRecReturns, Z_LogAuditRecWithLevelArgs, Z_LogAuditRecWithLevelReturns,
+    Z_LogDebugArgs, Z_LogDebugReturns, Z_LogErrorArgs, Z_LogErrorReturns, Z_LogInfoArgs,
+    Z_LogInfoReturns, Z_LogWarnArgs, Z_LogWarnReturns, Z_MessageWillBePostedArgs,
+    Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns,
+    Z_MessagesWillBeConsumedArgs, Z_MessagesWillBeConsumedReturns,
+    Z_MessagesWillBeConsumedWithContextArgs, Z_MessagesWillBeConsumedWithContextReturns,
+    Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns,
 };
+use crate::wire::{interface_to_json, registered};
 
 /// The four hooks whose answer defaults to what the caller passed in, so that a plugin which
 /// sends back a partial value does not silently drop the fields it left out.
@@ -234,4 +238,124 @@ pub(super) fn register_load_plugin_configuration<T: PluginApi>(
             }
         },
     );
+}
+
+/// Go's `makeAuditRecordGobSafe` (audit.go): the record's four `map[string]any` fields go through
+/// a JSON round trip, which drops the nil pointers inside interfaces that gob refuses to encode.
+///
+/// A map that cannot be marshalled becomes Go's one-key error map, as Go's does.
+fn make_audit_record_gob_safe(mut record: AuditRecord) -> AuditRecord {
+    record.event_data.parameters = make_map_gob_safe(&record.event_data.parameters);
+    record.event_data.prior_state = make_map_gob_safe(&record.event_data.prior_state);
+    record.event_data.result_state = make_map_gob_safe(&record.event_data.result_state);
+    record.meta = make_map_gob_safe(&record.meta);
+    record
+}
+
+type AnyMap = HashMap<String, Option<Interface>>;
+
+fn make_map_gob_safe(m: &AnyMap) -> AnyMap {
+    let failed = |what: &str| AnyMap::from([("error".into(), Some(Interface::string(what)))]);
+    let mut json = Map::new();
+    for (key, value) in m {
+        let Some(value) = (match value {
+            Some(i) => interface_to_json(i),
+            None => Some(Json::Null),
+        }) else {
+            return failed("failed to serialize audit data");
+        };
+        json.insert(key.clone(), value);
+    }
+    // Go unmarshals into a fresh `map[string]any`, which is what changes the types: every number
+    // becomes a float64, every object a map, every array a slice.
+    json.into_iter()
+        .map(|(k, v)| (k, json_to_interface(&v)))
+        .collect()
+}
+
+/// What Go's `json.Unmarshal` into an `any` leaves behind, as gob then sends it.
+fn json_to_interface(value: &Json) -> Option<Interface> {
+    Some(match value {
+        Json::Null => return None,
+        Json::Bool(b) => Interface::bool(*b),
+        // Every JSON number arrives as a float64, however it was written.
+        Json::Number(n) => Interface::float64(n.as_f64().unwrap_or(f64::NAN)),
+        Json::String(s) => Interface::string(s),
+        Json::Array(items) => {
+            let values: Vec<Option<Interface>> = items.iter().map(json_to_interface).collect();
+            Interface::new(registered::ANY_SLICE, &values).ok()?
+        }
+        Json::Object(fields) => {
+            let values: AnyMap = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), json_to_interface(v)))
+                .collect();
+            Interface::new(registered::STRING_ANY_MAP, &values).ok()?
+        }
+    })
+}
+
+impl ApiClient {
+    /// Go: `LogAuditRec(rec *model.AuditRecord)`. The record is made gob-safe first.
+    pub async fn log_audit_rec(&self, record: AuditRecord) {
+        let args = Z_LogAuditRecArgs {
+            a: Some(Box::new(make_audit_record_gob_safe(record))),
+        };
+        let _: Z_LogAuditRecReturns = self.call("LogAuditRec", &args).await;
+    }
+
+    /// Go: `LogAuditRecWithLevel(rec *model.AuditRecord, level mlog.Level)`.
+    pub async fn log_audit_rec_with_level(&self, record: AuditRecord, level: Level) {
+        let args = Z_LogAuditRecWithLevelArgs {
+            a: Some(Box::new(make_audit_record_gob_safe(record))),
+            b: level,
+        };
+        let _: Z_LogAuditRecWithLevelReturns = self.call("LogAuditRecWithLevel", &args).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gobwire::{Type, Value};
+
+    use super::*;
+
+    /// A value no JSON can be made of: Go's `json.Marshal` fails and the whole map becomes the
+    /// one-key error map (audit.go, `makeMapGobSafe`).
+    #[test]
+    fn a_map_that_cannot_be_marshalled_becomes_the_error_map() {
+        let unmarshalable = Interface {
+            name: "*model.Unknown".into(),
+            ty: Type::Marshaler(gobwire::MarshalKind::Binary, "unknown".into()),
+            value: Value::Marshaled(vec![1, 2, 3]),
+        };
+        let map = AnyMap::from([
+            ("fine".into(), Some(Interface::string("kept"))),
+            ("broken".into(), Some(unmarshalable)),
+        ]);
+
+        let safe = make_map_gob_safe(&map);
+        assert_eq!(
+            safe,
+            AnyMap::from([(
+                "error".into(),
+                Some(Interface::string("failed to serialize audit data"))
+            )])
+        );
+    }
+
+    /// The round trip changes types exactly as Go's does.
+    #[test]
+    fn the_round_trip_makes_numbers_floats_and_drops_nils() {
+        let map = AnyMap::from([
+            ("int".into(), Some(Interface::int(7))),
+            ("text".into(), Some(Interface::string("kept"))),
+            ("nil".into(), None),
+        ]);
+
+        let safe = make_map_gob_safe(&map);
+        assert_eq!(safe["int"], Some(Interface::float64(7.0)));
+        assert_eq!(safe["text"], Some(Interface::string("kept")));
+        assert_eq!(safe["nil"], None, "a nil stays nil through JSON's null");
+    }
 }

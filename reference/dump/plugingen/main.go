@@ -852,6 +852,9 @@ func (p *populator) fill(v reflect.Value, path string, depth int) {
 				p.fill(v.Field(i), path+"."+f.Name, depth+1)
 			}
 		}
+		if t == reflect.TypeFor[model.AuditRecord]() {
+			fillAuditMaps(v)
+		}
 	case reflect.String:
 		v.SetString(fmt.Sprintf("s%06x", s%0xffffff))
 	case reflect.Bool:
@@ -927,6 +930,41 @@ func (p *populator) fillInterface(v reflect.Value, path string, depth int, s uin
 	cv := reflect.New(ct).Elem()
 	p.fill(cv, path+"(i)", depth+1)
 	v.Set(cv)
+}
+
+// fillAuditMaps puts values in an audit record's `map[string]any` fields that the JSON round trip
+// of `makeAuditRecordGobSafe` visibly changes: an integer becomes a float, a struct becomes an
+// object keyed by its `json:` tags, a nil stays nil. Filled by kind, they would all survive it
+// unchanged and the oracle would prove nothing.
+func fillAuditMaps(record reflect.Value) {
+	maps := []reflect.Value{
+		record.FieldByName("EventData").FieldByName("Parameters"),
+		record.FieldByName("EventData").FieldByName("PriorState"),
+		record.FieldByName("EventData").FieldByName("ResultState"),
+		record.FieldByName("Meta"),
+	}
+	for i, m := range maps {
+		m.Set(reflect.ValueOf(map[string]any{
+			"int":    int64(1<<40) + int64(i),
+			"float":  1.5,
+			"string": fmt.Sprintf("value %d", i),
+			"bool":   i%2 == 0,
+			"nil":    nil,
+			"app_error": &model.AppError{
+				Id:            "api.audit.error",
+				Message:       "audit message",
+				DetailedError: "detail",
+				StatusCode:    500,
+				Where:         "Audit",
+			},
+			"attachments": []*model.MessageAttachment{{
+				Text:   "attached",
+				Fields: []*model.SlackAttachmentField{{Title: "title", Value: "field value"}},
+			}},
+			"list":   []any{int64(7), "two", false},
+			"nested": map[string]any{"inner": int64(9)},
+		}))
+	}
 }
 
 // render is the gob oracle's canonical form (reference/dump/gob, render): what a value transmits.
@@ -1054,6 +1092,26 @@ func decodeRender(name string, stream []byte) (any, error) {
 	return out, nil
 }
 
+// writeStable writes a stream unless the file already holds one that decodes the same way.
+//
+// Go encodes a map in its randomised iteration order, so a stream carrying a map with more than
+// one key differs on every run. Keeping a file that still renders identically leaves the
+// generator deterministic in git terms (reference/dump/gob does the same).
+func writeStable(path, name string, stream []byte) error {
+	if old, err := os.ReadFile(path); err == nil && !bytes.Equal(old, stream) {
+		want, errWant := decodeRender(name, stream)
+		got, errGot := decodeRender(name, old)
+		if errWant == nil && errGot == nil {
+			a, _ := json.Marshal(want)
+			b, _ := json.Marshal(got)
+			if bytes.Equal(a, b) {
+				return nil
+			}
+		}
+	}
+	return os.WriteFile(path, stream, 0o644)
+}
+
 // gobOracle writes <dir>/<Z_name>.gob and <dir>/<Z_name>.sparse.gob for every wire struct, and
 // <dir>/expected.json with how Go renders each after decoding it back.
 func gobOracle(dir string) error {
@@ -1078,14 +1136,47 @@ func gobOracle(dir string) error {
 			if err := gob.NewEncoder(&buf).Encode(v.Addr().Interface()); err != nil {
 				return fmt.Errorf("%s: %w", key, err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, key+".gob"), buf.Bytes(), 0o644); err != nil {
+			if err := writeStable(filepath.Join(dir, key+".gob"), name, buf.Bytes()); err != nil {
 				return err
 			}
-			r, err := decodeRender(name, buf.Bytes())
+			written, err := os.ReadFile(filepath.Join(dir, key+".gob"))
+			if err != nil {
+				return err
+			}
+			r, err := decodeRender(name, written)
 			if err != nil {
 				return err
 			}
 			expected[key] = r
+		}
+
+		// The audit arguments also get the form LogAuditRec sends: the record after its JSON
+		// round trip (audit.go, `makeAuditRecordGobSafe`).
+		if field, ok := wireTypes[name].FieldByName("A"); ok && field.Type == reflect.TypeFor[*model.AuditRecord]() {
+			v := reflect.New(wireTypes[name]).Elem()
+			(&populator{active: map[reflect.Type]int{}}).fill(v, name, 0)
+			rec, ok := v.Field(0).Interface().(*model.AuditRecord)
+			if !ok || rec == nil {
+				return fmt.Errorf("%s: no audit record to make gob-safe", name)
+			}
+			safe := makeAuditRecordGobSafe(*rec)
+			v.Field(0).Set(reflect.ValueOf(&safe))
+			var buf bytes.Buffer
+			if err := gob.NewEncoder(&buf).Encode(v.Addr().Interface()); err != nil {
+				return fmt.Errorf("%s.safe: %w", name, err)
+			}
+			if err := writeStable(filepath.Join(dir, name+".safe.gob"), name, buf.Bytes()); err != nil {
+				return err
+			}
+			written, err := os.ReadFile(filepath.Join(dir, name+".safe.gob"))
+			if err != nil {
+				return err
+			}
+			r, err := decodeRender(name, written)
+			if err != nil {
+				return err
+			}
+			expected[name+".safe"] = r
 		}
 	}
 	return writeJSON(filepath.Join(dir, "expected.json"), expected)
@@ -1108,7 +1199,7 @@ func echo(dir string) error {
 		if err != nil {
 			return err
 		}
-		r, err := decodeRender(strings.TrimSuffix(name, ".sparse"), stream)
+		r, err := decodeRender(strings.TrimSuffix(strings.TrimSuffix(name, ".sparse"), ".safe"), stream)
 		if err != nil {
 			out[name] = map[string]any{"$error": err.Error()}
 			continue

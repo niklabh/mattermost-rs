@@ -1,0 +1,22 @@
+# Mutation plan for the audit methods (plugin plan Phase 3): Go's json.Marshal for the types an
+# interface value can hold, and the gob-safe round trip LogAuditRec puts a record through.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-audit.plan
+#
+# The oracle is fixtures/plugin/gob/Z_LogAuditRec*Args.safe.gob, written by Go. Every line filters
+# to `sdk_` for the marshalling (only a Rust plugin's own record exercises it: in the rpc suite
+# the Go plugin sends its own, already converted) and `rpc_` for the rest. The decisions: the json: tags and their omitempty and "-" forms, that every
+# JSON number comes back a float64, that a null comes back a nil interface, and that all four of a
+# record's maps are converted. CONTROL- lines must SURVIVE: a JSON object's key order does not
+# reach the wire.
+
+json-tag-renamed	crates/mm-plugin/src/wire/gob_safe.rs	fn json_app_error(v: &super::model::AppError) -> Option<Json> {\n    let mut m = Map::new();\n    m.insert("id".into(), Json::String(ToOwned::to_owned(&v.id)));	fn json_app_error(v: &super::model::AppError) -> Option<Json> {\n    let mut m = Map::new();\n    m.insert("Id".into(), Json::String(ToOwned::to_owned(&v.id)));	pkg	sdk_
+json-omitempty-ignored	crates/mm-plugin/src/wire/gob_safe.rs	    if !((&v.request_id).is_empty()) {	    if true {	pkg	sdk_
+json-dash-field-sent	crates/mm-plugin/src/wire/gob_safe.rs	    // Where: `json:"-"`, never marshalled.	    m.insert("where".into(), Json::String(ToOwned::to_owned(&v.r#where)));	pkg	sdk_
+json-number-stays-integer	crates/mm-plugin/src/rpc/handwritten.rs	        Json::Number(n) => Interface::float64(n.as_f64().unwrap_or(f64::NAN)),	        Json::Number(n) => Interface::int(n.as_i64().unwrap_or_default()),	pkg	sdk_
+json-null-becomes-empty-string	crates/mm-plugin/src/rpc/handwritten.rs	        Json::Null => return None,	        Json::Null => Interface::string(""),	pkg	sdk_
+audit-meta-not-converted	crates/mm-plugin/src/rpc/handwritten.rs	    record.meta = make_map_gob_safe(&record.meta);	    record.meta = record.meta.clone();	pkg	sdk_
+audit-prior-state-not-converted	crates/mm-plugin/src/rpc/handwritten.rs	    record.event_data.prior_state = make_map_gob_safe(&record.event_data.prior_state);	    record.event_data.prior_state = record.event_data.prior_state.clone();	pkg	sdk_
+audit-failure-not-reported	crates/mm-plugin/src/rpc/handwritten.rs	            return failed("failed to serialize audit data");	            continue;	pkg	handwritten::tests
+CONTROL-reorder-json-fields	crates/mm-plugin/src/wire/gob_safe.rs	fn json_app_error(v: &super::model::AppError) -> Option<Json> {\n    let mut m = Map::new();\n    m.insert("id".into(), Json::String(ToOwned::to_owned(&v.id)));\n    m.insert(\n        "message".into(),\n        Json::String(ToOwned::to_owned(&v.message)),\n    );	fn json_app_error(v: &super::model::AppError) -> Option<Json> {\n    let mut m = Map::new();\n    m.insert(\n        "message".into(),\n        Json::String(ToOwned::to_owned(&v.message)),\n    );\n    m.insert("id".into(), Json::String(ToOwned::to_owned(&v.id)));	pkg	sdk_
+CONTROL-rename-binding	crates/mm-plugin/src/rpc/handwritten.rs	fn make_map_gob_safe(m: &AnyMap) -> AnyMap {\n    let failed = |what: &str| AnyMap::from([("error".into(), Some(Interface::string(what)))]);\n    let mut json = Map::new();\n    for (key, value) in m {	fn make_map_gob_safe(values: &AnyMap) -> AnyMap {\n    let failed = |what: &str| AnyMap::from([("error".into(), Some(Interface::string(what)))]);\n    let mut json = Map::new();\n    for (key, value) in values {	pkg	rpc_

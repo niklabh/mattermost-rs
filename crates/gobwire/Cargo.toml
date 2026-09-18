@@ -18,15 +18,12 @@ default = ["derive"]
 derive = ["dep:gobwire-derive"]
 # Conversions between `GoTime` and chrono's `DateTime<FixedOffset>`.
 chrono = ["dep:chrono"]
-# Conversions between dynamic `Value`s and `serde_json::Value`, the shape Go's `map[string]any`
-# takes when it came from JSON.
-json = ["dep:serde_json"]
+
 
 [dependencies]
 thiserror.workspace = true
 gobwire-derive = { path = "../gobwire-derive", version = "0.1.0", optional = true }
 chrono = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde.workspace = true

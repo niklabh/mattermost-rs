@@ -360,13 +360,28 @@ transcribed — and their clients are written by hand in `rpc/handwritten.rs`:
 
 Both conformance runs cover them in both directions. Mutations: 11 run, 9 caught, 2 controls survived.
 
-**Still unported**, and the reason: `LogAuditRec` and `LogAuditRecWithLevel`. Their client passes
-the record through a JSON round trip first (audit.go, `makeAuditRecordGobSafe`), and Go's JSON
-uses the `json:` tags, which the gob wire types do not carry. `gobwire`'s `json` feature is
-declared in its manifest and has no implementation behind it. That is the next unit.
+**The audit methods: DONE 2026-09-18 (fifth part of Phase 3).** `LogAuditRec` and
+`LogAuditRecWithLevel` put the record's four `map[string]any` fields through a JSON round trip
+first, which is how Go drops the nil pointers inside interfaces that gob refuses to encode
+(audit.go, `makeAuditRecordGobSafe`).
+
+That needs Go's `json.Marshal`, tags and all, for every type an interface value can hold — a
+closed set, because only a registered type crosses an interface: 87 types, 26 of them structs.
+`wire/gob_safe.rs` is generated from the same IDL, which already records every `json:` tag, and
+covers the tag name, `omitempty`, `-`, base64 for byte slices and `json.RawMessage`'s verbatim
+form. What comes back is what Go's `json.Unmarshal` into an `any` leaves: every number a float64,
+every object a map, every array a slice.
+
+The oracle is `Z_LogAuditRec*Args.safe.gob`, written by Go from a record whose maps the round
+trip visibly changes — an `*model.AppError` becomes an object keyed by its tags, an int64 becomes
+a float64. Filled by kind, as the populator does elsewhere, every value would have survived the
+round trip unchanged and the oracle would have proven nothing. Both conformance runs check it in
+their own direction. Mutations: 10 run, 8 caught, 2 controls survived.
+
+Also removed: `gobwire`'s `json` feature, declared in its manifest with no implementation behind
+it. The conversion that was wanted needs the `json:` tags, which a gob codec does not have.
 
 **Next in Phase 3:**
-- `gobwire`'s `json` feature, then the two audit methods;
 - the nine methods that carry brokered streams: ServeHTTP and ServeMetrics, PluginHTTP and its
   stream form, `FileWillBeUploaded`, `UploadData`, `InstallPlugin`,
   `ReceiveSharedChannelAttachmentSyncMsg`, and `io_rpc`'s varint pull behind them;

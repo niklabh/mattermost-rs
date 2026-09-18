@@ -290,6 +290,9 @@ class Generator:
         for module in sorted(self.modules):
             out.append(f"pub mod {module};")
         out.append("")
+        out.append("mod gob_safe;")
+        out.append("pub use gob_safe::{interface_to_json, value_to_json};")
+        out.append("")
         out.append("/// The names client_rpc.go's `init()` registers with gob, for interface values.")
         out.append("pub mod registered {")
         consts = []
@@ -355,10 +358,209 @@ class Generator:
             return "STRING_ANY_MAP"
         raise GenError(f"no constant name for registered {t}")
 
+    # ─── Go's json.Marshal, for the audit records a plugin logs ───────────────────────────
+
+    def registered_closure(self):
+        """Every type reachable from a registered one: what an interface value can hold."""
+        seen, stack = set(), [r["type"] for r in self.idl["registered"]]
+        while stack:
+            tid = stack.pop()
+            if tid in seen:
+                continue
+            seen.add(tid)
+            t = self.types[tid]
+            stack += [t[k] for k in ("elem", "key") if t.get(k)]
+            stack += [f["type"] for f in t.get("fields", [])]
+        return seen
+
+    def flattened(self, tid):
+        """The type a slice or map element has in Rust: a pointer to it is flattened away."""
+        t = self.types[tid]
+        return t["elem"] if t["kind"] == "pointer" else tid
+
+    def json_fn(self, tid):
+        return "json_" + snake(self.rust_names[tid]).removeprefix("r#")
+
+    def json_expr(self, tid, expr):
+        """A Rust expression turning `expr` into the `serde_json::Value` Go's json.Marshal makes."""
+        t = self.types[tid]
+        kind = t["kind"]
+        # `&v.field` needs brackets before a method call, a plain binding does not.
+        call = expr if expr.isidentifier() else f"({expr})"
+        if tid == "encoding/json.RawMessage":
+            # A RawMessage marshals verbatim, and fails the whole marshal if it is not JSON.
+            return f"serde_json::from_slice({expr}).ok()?"
+        if kind == "interface":
+            return f"match {expr} {{ Some(i) => interface_to_json(i)?, None => Json::Null }}"
+        if kind == "pointer":
+            # `rust_type` boxes a pointer to a struct and only that.
+            deref = "&**v" if self.types[t["elem"]]["kind"] == "struct" else "v"
+            inner = self.json_expr(t["elem"], "v")
+            return f"match {expr} {{ Some(v) => {{ let v = {deref}; {inner} }}, None => Json::Null }}"
+        if kind == "slice":
+            if self.types[t["elem"]]["kind"] == "uint8":
+                # Go marshals a byte slice as base64, and a nil one as null.
+                return f"if {call}.is_empty() {{ Json::Null }} else {{ Json::String(B64.encode({expr})) }}"
+            # A slice or map of pointers is a Vec/HashMap of values: gob cannot send a nil
+            # element, so `rust_type` flattens the pointer and so must this.
+            elem = self.json_expr(self.flattened(t["elem"]), "v")
+            return (
+                f"if {call}.is_empty() {{ Json::Null }} else {{ Json::Array({call}.iter()"
+                f".map(|v| -> Option<Json> {{ Some({elem}) }}).collect::<Option<Vec<_>>>()?) }}"
+            )
+        if kind == "map":
+            elem = self.json_expr(self.flattened(t["elem"]), "v")
+            return (
+                f"if {call}.is_empty() {{ Json::Null }} else {{ Json::Object({call}.iter()"
+                f".map(|(k, v)| -> Option<(String, Json)> {{ Some((k.clone(), {elem})) }})"
+                ".collect::<Option<Map<String, Json>>>()?) }"
+            )
+        if kind == "struct":
+            return f"{self.json_fn(tid)}({expr})?"
+        if kind == "string":
+            return f"Json::String(ToOwned::to_owned({expr}))"
+        if kind == "bool":
+            return f"Json::Bool(*{expr})"
+        if kind in ("int", "int8", "int16", "int32", "int64"):
+            return f"Json::from(*{expr} as i64)"
+        if kind in ("uint", "uint8", "uint16", "uint32", "uint64", "uintptr"):
+            return f"Json::from(u64::from(*{expr}))"
+        if kind in ("float32", "float64"):
+            return f"Json::from(f64::from(*{expr}))"
+        raise GenError(f"{tid}: no JSON mapping for kind {kind}")
+
+    def json_is_empty(self, tid, expr):
+        """Go's `isEmptyValue`, for a field tagged omitempty."""
+        kind = self.types[tid]["kind"]
+        call = expr if expr.isidentifier() else f"({expr})"
+        if kind in ("string", "slice", "map"):
+            return f"{call}.is_empty()"
+        if kind == "bool":
+            return f"!*{expr}"
+        if kind in ("pointer", "interface"):
+            return f"{call}.is_none()"
+        if kind == "struct":
+            return "false"  # Go never omits a struct: it has no zero test for one.
+        if kind in ("float32", "float64"):
+            return f"*{expr} == 0.0"
+        return f"*{expr} == 0"
+
+    def gob_safe_file(self):
+        closure = self.registered_closure()
+        structs = sorted(
+            (t for t in closure if self.types[t]["kind"] == "struct"),
+            key=lambda t: self.rust_names[t],
+        )
+        out = [
+            HEADER,
+            "",
+            "//! Go's `json.Marshal` for every type an interface value can hold, which is what",
+            "//! `makeAuditRecordGobSafe` puts an audit record through (audit.go).",
+            "//!",
+            "//! The gob wire types carry Go field names; JSON carries the `json:` tags, so this is",
+            "//! generated from the same IDL. `None` means the value cannot be marshalled, which is",
+            "//! Go's error return.",
+            "",
+            "#![allow(clippy::wildcard_imports, clippy::too_many_lines, clippy::match_same_arms)]",
+            "",
+            "use base64::Engine as _;",
+            "use base64::engine::general_purpose::STANDARD as B64;",
+            "use gobwire::{Interface, Value};",
+            "use serde_json::{Map, Value as Json};",
+            "",
+            "use super::registered;",
+            "#[allow(unused_imports)]",
+            "use super::{model, pq, plugin, json as json_pkg};",
+            "",
+        ]
+        # The interface dispatch: a registered name says which type the value has.
+        out.append("/// One interface value as JSON, by the name its type was registered under.")
+        out.append("pub fn interface_to_json(i: &Interface) -> Option<Json> {")
+        out.append("    Some(match i.name.as_str() {")
+        for r in self.idl["registered"]:
+            tid = r["type"]
+            t = self.types[tid]
+            const = f"registered::{self.registered_const(r)}"
+            if t["kind"] == "pointer":
+                inner = self.types[t["elem"]]
+                if inner["kind"] != "struct":
+                    raise GenError(f"{tid}: a registered pointer to a non-struct")
+                fn = self.json_fn(t["elem"])
+                ty = self.rust_type(t["elem"], "")
+                out.append(f"        {const} => {fn}(&i.downcast::<{ty}>().ok()?)?,")
+            elif t["kind"] == "struct":
+                out.append(
+                    f"        {const} => {self.json_fn(tid)}(&i.downcast::<{self.rust_type(tid, '')}>().ok()?)?,"
+                )
+            else:
+                ty = self.rust_type(tid, "")
+                expr = self.json_expr(tid, "&value")
+                out.append(f"        {const} => {{ let value = i.downcast::<{ty}>().ok()?; {expr} }}")
+        out.append("        // Everything else is one of gob's basic types, which carry no names.")
+        out.append("        _ => value_to_json(&i.value)?,")
+        out.append("    })")
+        out.append("}")
+        out.append("")
+        out.append("/// A dynamic value of a basic type as JSON: what Go's `any` holds when it is not a")
+        out.append("/// registered type. Numbers become JSON numbers, bytes base64, as `json.Marshal` does.")
+        out.append("pub fn value_to_json(v: &Value) -> Option<Json> {")
+        out.append("    Some(match v {")
+        out.append("        Value::Bool(b) => Json::Bool(*b),")
+        out.append("        Value::Int(i) => Json::from(*i),")
+        out.append("        Value::Uint(u) => Json::from(*u),")
+        out.append("        Value::Float(f) => Json::from(*f),")
+        out.append("        Value::String(s) => Json::String(s.clone()),")
+        out.append("        Value::Bytes(b) => Json::String(B64.encode(b)),")
+        out.append("        Value::Interface(None) => Json::Null,")
+        out.append("        Value::Interface(Some(i)) => interface_to_json(i)?,")
+        out.append("        Value::Slice(items) | Value::Array(items) => Json::Array(")
+        out.append("            items.iter().map(value_to_json).collect::<Option<Vec<_>>>()?,")
+        out.append("        ),")
+        out.append("        Value::Map(pairs) => Json::Object(")
+        out.append("            pairs")
+        out.append("                .iter()")
+        out.append("                .map(|(k, v)| match k {")
+        out.append("                    Value::String(k) => Some((k.clone(), value_to_json(v)?)),")
+        out.append("                    _ => None,")
+        out.append("                })")
+        out.append("                .collect::<Option<Map<String, Json>>>()?,")
+        out.append("        ),")
+        out.append("        // A struct only reaches this through a registered name, and a marshaler's")
+        out.append("        // bytes have no JSON form without its Go type.")
+        out.append("        Value::Struct(_) | Value::Marshaled(_) | Value::Complex(..) => return None,")
+        out.append("    })")
+        out.append("}")
+        out.append("")
+        for tid in structs:
+            t = self.types[tid]
+            out.append(f"/// Go `{t['package']}.{t['name']}`, as `json.Marshal` writes it.")
+            out.append(f"fn {self.json_fn(tid)}(v: &{self.rust_type(tid, '')}) -> Option<Json> {{")
+            out.append("    let mut m = Map::new();")
+            for f in t.get("fields", []):
+                tag = f.get("json", "")
+                name, _, opts = tag.partition(",")
+                if name == "-" and not opts:
+                    out.append(f"    // {f['name']}: `json:\"-\"`, never marshalled.")
+                    continue
+                key = name or f["name"]
+                field = f"v.{snake(f['name'])}"
+                value = self.json_expr(f["type"], f"&{field}")
+                if "omitempty" in opts.split(","):
+                    out.append(f"    if !({self.json_is_empty(f['type'], f'&{field}')}) {{")
+                    out.append(f'        m.insert("{key}".into(), {value});')
+                    out.append("    }")
+                else:
+                    out.append(f'    m.insert("{key}".into(), {value});')
+            out.append("    Some(Json::Object(m))")
+            out.append("}")
+            out.append("")
+        return "\n".join(out)
+
     def files(self):
         out = {OUT / "mod.rs": self.mod_file()}
         for module in self.modules:
             out[OUT / f"{module}.rs"] = self.module_file(module)
+        out[OUT / "gob_safe.rs"] = self.gob_safe_file()
         out[RPC / "hooks.rs"] = self.hooks_file()
         out[RPC / "api.rs"] = self.api_file()
         return out
