@@ -397,9 +397,26 @@ Both conformance runs carry a 70,000-byte payload, which is more than one 32 KiB
 check its length and SHA-256 at the far end. The varint corpus is checked against Go's own
 `PutVarint`. Mutations: 11 run, 9 caught, 2 controls survived.
 
+**ServeHTTP and ServeMetrics: DONE 2026-09-18 (seventh part of Phase 3).** A served request
+carries two connections: the response writer, which the host serves as a five-method net/rpc
+service (`Header`, `Write`, `WriteHeader`, `SyncHeader`, `Flush`), and the request body, lent as a
+reader. A request with no body sends the id `0`, which the plugin reads as "no body" rather than
+as a stream to dial, and the call itself answers nothing — what the plugin writes goes back over
+the writer connection while the call is outstanding.
+
+`crates/mm-plugin/src/http.rs` has both halves. The plugin's writer caches the header map and
+pushes it with `SyncHeader` before every write, which is how a header set through the local copy
+reaches the host. The status check is Go's: a code outside 100..=999 is refused rather than
+allowed to panic the server. So is the 404 — `http.NotFound`'s exact headers and body — which
+both sides answer for a request no plugin serves.
+
+Both conformance plugins answer the same request the same way, so either host can check it: a
+70,000-byte body read over one connection, a header, a status and a body written back over the
+other. Mutations: 11 run, 9 caught, 2 controls survived.
+
 **Next in Phase 3:**
-- the methods that carry a stream in each direction: ServeHTTP and ServeMetrics, PluginHTTP and
-  its stream form, and `FileWillBeUploaded`, which lends a reader and a writer at once;
+- `PluginHTTP` and its stream form, the calls a plugin makes *outward* through the host;
+- `FileWillBeUploaded`, which lends a reader and a writer at once;
 - the database driver's RPC, and the error helpers (`ErrorString` codes);
 - then the Rust conformance plugin under the real Go server on the stack.
 

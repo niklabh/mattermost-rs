@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/gob"
@@ -27,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -262,6 +264,47 @@ func (c *conformance) tourHandWrittenAPI() {
 		entry["error"] = err.Error()
 	}
 	record(entry)
+}
+
+// ServeHTTP and ServeMetrics answer by the rule crates/mm-plugin's tests expect: one header
+// naming the request and the digest of its body, status 203, and a body naming the byte count.
+func (c *conformance) ServeHTTP(_ *plugin.Context, w http.ResponseWriter, r *http.Request) {
+	c.echoHTTP("ServeHTTP", w, r)
+}
+
+func (c *conformance) ServeMetrics(_ *plugin.Context, w http.ResponseWriter, r *http.Request) {
+	c.echoHTTP("ServeMetrics", w, r)
+}
+
+func (c *conformance) echoHTTP(hook string, w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		panic(err)
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	subset := &plugin.HTTPRequestSubset{
+		Method:     r.Method,
+		URL:        r.URL,
+		Proto:      r.Proto,
+		ProtoMajor: r.ProtoMajor,
+		ProtoMinor: r.ProtoMinor,
+		Header:     r.Header,
+		Host:       r.Host,
+		RemoteAddr: r.RemoteAddr,
+		RequestURI: r.RequestURI,
+	}
+	rendered, _ := render(reflect.ValueOf(subset))
+	record(map[string]any{
+		"hook":   hook,
+		"args":   rendered,
+		"stream": map[string]any{"len": len(body), "sha256": digest},
+	})
+
+	w.Header().Set("X-Conformance", fmt.Sprintf("%s %s %s", r.Method, r.URL.String(), digest[:16]))
+	w.WriteHeader(203)
+	if _, err := fmt.Fprintf(w, "conformance: %d bytes", len(body)); err != nil {
+		panic(err)
+	}
 }
 
 // auditRecord and auditLevel are the record both conformance plugins log, from the fixtures.

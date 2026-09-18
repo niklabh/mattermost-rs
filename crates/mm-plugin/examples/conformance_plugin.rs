@@ -18,7 +18,7 @@
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 
-use mm_plugin::rpc::{ApiClient, Hooks, NotImplemented, Plugin, client_main};
+use mm_plugin::rpc::{ApiClient, Hooks, HooksHttp, NotImplemented, Plugin, client_main};
 use mm_plugin::wire::model::AppError;
 use mm_plugin::wire::plugin::Z_OnActivateReturns;
 use mm_plugin::wire::registered;
@@ -26,7 +26,7 @@ use serde_json::{Value as Json, json};
 
 #[path = "../tests/common/render.rs"]
 mod render;
-use render::{fixture, render_typed, stream_payload};
+use render::{fixture, render_typed, stream_digest, stream_payload};
 
 struct Conformance {
     api: OnceLock<ApiClient>,
@@ -67,7 +67,7 @@ macro_rules! hooks {
         impl Hooks for Conformance {
             fn implemented(&self) -> Vec<String> {
                 let mut names: Vec<String> = HOOKS.iter().map(|s| (*s).to_owned()).collect();
-                names.push("OnActivate".into());
+                names.extend(["OnActivate", "ServeHTTP", "ServeMetrics"].map(str::to_owned));
                 names
             }
             $(
@@ -79,6 +79,69 @@ macro_rules! hooks {
     };
 }
 mm_plugin::for_each_hook!(hooks);
+
+/// Answers the request by the rule in `http_response`, and records what it was asked.
+impl HooksHttp for Conformance {
+    async fn serve_http(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        self.echo_http("ServeHTTP", request, body, writer).await;
+        Ok(())
+    }
+
+    async fn serve_metrics(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        self.echo_http("ServeMetrics", request, body, writer).await;
+        Ok(())
+    }
+}
+
+impl Conformance {
+    async fn echo_http(
+        &self,
+        hook: &str,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        mut writer: mm_plugin::http::RemoteResponseWriter,
+    ) {
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncReadExt as _;
+
+        let request = request.expect("a request");
+        let mut bytes = Vec::new();
+        if let Some(mut body) = body {
+            body.read_to_end(&mut bytes)
+                .await
+                .expect("the request body");
+        }
+        let url = String::from_utf8(request.url.clone().unwrap_or_default().0).expect("the URL");
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        let echo = format!("{} {url} {}", request.method, &digest[..16]);
+
+        self.record(json!({
+            "hook": hook,
+            "args": render_typed(&*request),
+            "stream": stream_digest(&bytes),
+        }));
+
+        writer
+            .header()
+            .await
+            .insert("X-Conformance".into(), vec![echo]);
+        writer.write_header(203).await;
+        let answer = format!("conformance: {} bytes", bytes.len());
+        writer.write(answer.as_bytes()).await.expect("the answer");
+    }
+}
 
 impl Plugin for Conformance {
     fn set_api(&self, api: ApiClient, _driver: go_netrpc::Client) {

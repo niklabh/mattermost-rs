@@ -23,11 +23,13 @@ mod api;
 mod handwritten;
 mod hooks;
 mod plugin;
+mod serve_http;
 mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
+pub use serve_http::HooksHttp;
 pub use streams::PluginApiStreams;
 
 /// A [`Hooks`] or [`PluginApi`] method the implementation does not provide.

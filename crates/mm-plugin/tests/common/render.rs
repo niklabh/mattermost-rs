@@ -102,6 +102,108 @@ pub fn render(
     }
 }
 
+/// Records what a plugin wrote, as the Go host's `httptest.ResponseRecorder` does.
+#[derive(Clone, Default)]
+pub struct Recorder(pub std::sync::Arc<std::sync::Mutex<Recorded>>);
+
+#[derive(Default)]
+pub struct Recorded {
+    pub header: mm_plugin::wire::http::Header,
+    pub status: Option<i64>,
+    pub body: Vec<u8>,
+}
+
+impl Recorder {
+    /// What was written, in the shape `http_response` describes.
+    pub fn response(&self) -> Json {
+        let recorded = self.0.lock().unwrap();
+        let header: serde_json::Map<String, Json> = recorded
+            .header
+            .iter()
+            .map(|(k, v)| (k.clone(), json!(v)))
+            .collect();
+        json!({
+            "status": recorded.status.unwrap_or(200),
+            "header": header,
+            "body": String::from_utf8_lossy(&recorded.body),
+        })
+    }
+}
+
+impl mm_plugin::http::ResponseWriter for Recorder {
+    fn header(&mut self) -> mm_plugin::wire::http::Header {
+        self.0.lock().unwrap().header.clone()
+    }
+
+    fn sync_header(&mut self, header: mm_plugin::wire::http::Header) {
+        self.0.lock().unwrap().header = header;
+    }
+
+    fn write(&mut self, body: &[u8]) -> std::io::Result<()> {
+        self.0.lock().unwrap().body.extend_from_slice(body);
+        Ok(())
+    }
+
+    fn write_header(&mut self, status: i64) {
+        let mut recorded = self.0.lock().unwrap();
+        // Go's recorder keeps the first status written.
+        if recorded.status.is_none() {
+            recorded.status = Some(status);
+        }
+    }
+}
+
+/// The request both conformance plugins are asked to serve.
+pub fn http_request() -> mm_plugin::wire::plugin::HTTPRequestSubset {
+    use std::collections::HashMap;
+    mm_plugin::wire::plugin::HTTPRequestSubset {
+        method: "POST".into(),
+        // `url.URL` crosses as its `MarshalBinary`, which is the URL itself.
+        url: Some(gobwire::BinaryBytes(CONFORMANCE_URL.as_bytes().to_vec())),
+        proto: "HTTP/1.1".into(),
+        proto_major: 1,
+        proto_minor: 1,
+        header: HashMap::from([
+            (
+                "X-Request".to_owned(),
+                vec!["one".to_owned(), "two".to_owned()],
+            ),
+            ("Content-Type".to_owned(), vec!["text/plain".to_owned()]),
+        ]),
+        host: "example.test".into(),
+        remote_addr: "10.0.0.1:1234".into(),
+        request_uri: CONFORMANCE_URL.into(),
+        body: None,
+    }
+}
+
+/// The URL of that request.
+pub const CONFORMANCE_URL: &str = "/plugins/conformance/hello?q=1";
+
+/// Go's `http.NotFound`, which is what an unserved request answers with.
+pub fn http_not_found() -> Json {
+    json!({
+        "status": 404,
+        "header": {
+            "Content-Type": ["text/plain; charset=utf-8"],
+            "X-Content-Type-Options": ["nosniff"],
+        },
+        "body": "404 page not found\n",
+    })
+}
+
+/// What a conformance plugin answers it with: one header, a status, and a body naming the number
+/// of bytes it read. Both plugins follow this rule, so either side's host can check it.
+pub fn http_response(method: &str, url: &str, body: &[u8]) -> Json {
+    use sha2::{Digest, Sha256};
+    let digest = format!("{:x}", Sha256::digest(body));
+    json!({
+        "status": 203,
+        "header": { "X-Conformance": [format!("{method} {url} {}", &digest[..16])] },
+        "body": format!("conformance: {} bytes", body.len()),
+    })
+}
+
 /// What every conformance stream carries: more than one 32 KiB chunk of io_rpc.go's copy buffer,
 /// so the framing is exercised rather than a single read.
 pub fn stream_payload() -> Vec<u8> {

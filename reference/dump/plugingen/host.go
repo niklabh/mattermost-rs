@@ -18,10 +18,14 @@ package main
 //	{"shutdown": true}
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	neturl "net/url"
 	"os"
 	"reflect"
 
@@ -163,6 +167,53 @@ func callArgs(method reflect.Type, args mock.Arguments) []reflect.Value {
 	return values
 }
 
+// ConformanceURL is the request both conformance plugins are asked to serve.
+const ConformanceURL = "/plugins/conformance/hello?q=1"
+
+// serveHTTP asks the plugin to serve one request through the hooks client, and records what the
+// response writer received: the status, the headers, and the body.
+func serveHTTP(hooks plugin.Hooks) {
+	for _, hook := range []struct {
+		name string
+		call func(*plugin.Context, http.ResponseWriter, *http.Request)
+	}{
+		{"ServeHTTP", hooks.ServeHTTP},
+		{"ServeMetrics", hooks.ServeMetrics},
+	} {
+		url, err := neturl.Parse(ConformanceURL)
+		if err != nil {
+			panic(err)
+		}
+		request := &http.Request{
+			Method:     "POST",
+			URL:        url,
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header: http.Header{
+				"X-Request":    []string{"one", "two"},
+				"Content-Type": []string{"text/plain"},
+			},
+			Host:       "example.test",
+			RemoteAddr: "10.0.0.1:1234",
+			RequestURI: ConformanceURL,
+			Body:       io.NopCloser(bytes.NewReader(StreamPayload())),
+		}
+		recorder := httptest.NewRecorder()
+		hook.call(&plugin.Context{}, recorder, request)
+		header := map[string]any{}
+		for k, v := range recorder.Result().Header {
+			header[k] = v
+		}
+		record(map[string]any{
+			"http":   hook.name,
+			"status": recorder.Code,
+			"header": header,
+			"body":   recorder.Body.String(),
+		})
+	}
+}
+
 func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 	path := os.Getenv("PLUGINGEN_TRANSCRIPT")
 	if path == "" {
@@ -218,6 +269,7 @@ func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 		out := hooksV.MethodByName(m.Name).Call(in)
 		record(map[string]any{"hook": m.Name, "returns": structOf(m.Returns, out)})
 	}
+	serveHTTP(hooks)
 	env.Shutdown()
 	record(map[string]any{"shutdown": true})
 	return nil

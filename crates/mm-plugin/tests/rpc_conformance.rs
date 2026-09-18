@@ -367,6 +367,21 @@ async fn rpc_rust_host_drives_the_go_plugin() {
     let activated = within(hooks.on_activate(&api)).await;
     assert_eq!(activated.a, None, "OnActivate returned an error");
     let returned = within(call_every_hook(&hooks)).await;
+
+    // The hooks that serve HTTP: the plugin reads the body over one connection and answers over
+    // the other, while the call is outstanding.
+    let mut served = BTreeMap::new();
+    for name in ["ServeHTTP", "ServeMetrics"] {
+        let recorder = Recorder::default();
+        let request = Some(Box::new(http_request()));
+        let body = Some(std::io::Cursor::new(stream_payload()));
+        if name == "ServeHTTP" {
+            within(hooks.serve_http(None, request, body, recorder.clone())).await;
+        } else {
+            within(hooks.serve_metrics(None, request, body, recorder.clone())).await;
+        }
+        served.insert(name, recorder.response());
+    }
     within(plugin.kill()).await;
 
     let mut failures = Vec::new();
@@ -453,6 +468,24 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         match go_api.get(name) {
             Some(got) if got == want_returns => {}
             other => failures.push(format!("api {name}: the Go plugin recorded {other:?}")),
+        }
+    }
+
+    // What the Go plugin wrote back, and what it read of the request.
+    let want_response = http_response("POST", CONFORMANCE_URL, &stream_payload());
+    let want_stream = stream_digest(&stream_payload());
+    for name in ["ServeHTTP", "ServeMetrics"] {
+        assert_eq!(served[name], want_response, "{name}: what the plugin wrote");
+        match go_hooks.get(name) {
+            Some(e) => {
+                assert_eq!(e["stream"], want_stream, "{name}: the request body Go read");
+                assert_eq!(
+                    e["args"],
+                    render_typed(&http_request()),
+                    "{name}: the request Go received"
+                );
+            }
+            None => failures.push(format!("hook {name}: the Go plugin never saw the call")),
         }
     }
 
@@ -583,6 +616,197 @@ async fn rust_pair<H: Hooks>(hooks: Arc<H>) -> HooksClient {
         client: go_netrpc::Client::new(stream),
         broker: host_broker,
     })
+}
+
+/// A host and a plugin serving the full plugin server, which the HTTP hooks need: they reach
+/// back over the broker for the response writer and the request body.
+async fn rust_plugin_pair<P: mm_plugin::rpc::Plugin>(plugin: Arc<P>) -> HooksClient {
+    let (a, b) = tokio::io::duplex(1 << 20);
+    let host = Session::client(a, Config::default()).unwrap();
+    let served = Session::server(b, Config::default()).unwrap();
+
+    tokio::spawn(async move {
+        let stream = served.accept().await.unwrap();
+        let (broker, run) = MuxBroker::new(served.clone());
+        tokio::spawn(run);
+        let server = mm_plugin::rpc::plugin_server(&plugin, broker.clone());
+        let _ = Arc::new(server).serve(stream).await;
+        drop((served, broker));
+    });
+    let stream = host.open().await.unwrap();
+    let (host_broker, run) = MuxBroker::new(host.clone());
+    tokio::spawn(run);
+    HooksClient::new(Dispensed {
+        client: go_netrpc::Client::new(stream),
+        broker: host_broker,
+    })
+}
+
+/// A plugin that serves no HTTP: it reports what `implemented` says, and records whether the
+/// host called it in spite of that.
+#[derive(Default)]
+struct NoHttp {
+    implemented: Vec<String>,
+    called: std::sync::atomic::AtomicBool,
+}
+
+impl NoHttp {
+    fn new(implemented: &[&str]) -> Self {
+        Self {
+            implemented: implemented.iter().map(|s| (*s).to_owned()).collect(),
+            called: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn was_called(&self) -> bool {
+        self.called.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Hooks for NoHttp {
+    fn implemented(&self) -> Vec<String> {
+        self.implemented.clone()
+    }
+}
+impl mm_plugin::rpc::Plugin for NoHttp {}
+impl mm_plugin::rpc::HooksHttp for NoHttp {
+    async fn serve_http(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        _: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        _: Option<mm_plugin::io_rpc::RemoteReader>,
+        mut writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        // What the trait default does, with a note that the plugin was reached.
+        self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+        writer.not_found().await;
+        Ok(())
+    }
+}
+
+/// An unserved request answers `404 page not found`, from whichever side notices first: the host
+/// skips a hook the plugin never reported, and the plugin's own default answers the rest
+/// (client_rpc.go, `hooksRPCServer.ServeHTTP`).
+#[tokio::test]
+async fn rpc_http_an_unserved_request_is_404() {
+    // The host knows the plugin does not implement it, and never calls.
+    let plugin = Arc::new(NoHttp::new(&[]));
+    let client = rust_plugin_pair(Arc::clone(&plugin)).await;
+    within(client.implemented()).await.unwrap();
+    let recorder = Recorder::default();
+    within(client.serve_http(
+        None,
+        Some(Box::new(http_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+        recorder.clone(),
+    ))
+    .await;
+    assert_eq!(recorder.response(), http_not_found(), "the host's own 404");
+    assert!(
+        !plugin.was_called(),
+        "the host called an unimplemented hook"
+    );
+
+    // The plugin reports it but has no handler, so its own answer comes over the connection.
+    let plugin = Arc::new(NoHttp::new(&["ServeHTTP"]));
+    let client = rust_plugin_pair(Arc::clone(&plugin)).await;
+    within(client.implemented()).await.unwrap();
+    let recorder = Recorder::default();
+    within(client.serve_http(
+        None,
+        Some(Box::new(http_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+        recorder.clone(),
+    ))
+    .await;
+    assert_eq!(recorder.response(), http_not_found(), "the plugin's 404");
+    assert!(plugin.was_called(), "the plugin was not reached");
+}
+
+/// A header set without a status still reaches the host: every write pushes the plugin's copy of
+/// the map first (http.go, `Write`).
+#[tokio::test]
+async fn rpc_http_a_header_set_without_a_status_still_arrives() {
+    struct HeaderOnly;
+    impl Hooks for HeaderOnly {
+        fn implemented(&self) -> Vec<String> {
+            vec!["ServeHTTP".into()]
+        }
+    }
+    impl mm_plugin::rpc::Plugin for HeaderOnly {}
+    impl mm_plugin::rpc::HooksHttp for HeaderOnly {
+        async fn serve_http(
+            &self,
+            _: Option<Box<mm_plugin::wire::plugin::Context>>,
+            _: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+            _: Option<mm_plugin::io_rpc::RemoteReader>,
+            mut writer: mm_plugin::http::RemoteResponseWriter,
+        ) -> Result<(), NotImplemented> {
+            writer
+                .header()
+                .await
+                .insert("X-Set-Locally".into(), vec!["yes".into()]);
+            writer.write(b"no status").await.unwrap();
+            Ok(())
+        }
+    }
+
+    let client = rust_plugin_pair(Arc::new(HeaderOnly)).await;
+    within(client.implemented()).await.unwrap();
+    let recorder = Recorder::default();
+    within(client.serve_http(
+        None,
+        Some(Box::new(http_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+        recorder.clone(),
+    ))
+    .await;
+    let response = recorder.response();
+    assert_eq!(
+        response["header"]["X-Set-Locally"],
+        serde_json::json!(["yes"])
+    );
+    assert_eq!(response["body"], "no status");
+}
+
+/// A status Go's own server would panic on is refused, and the body still goes through
+/// (http.go, `WriteHeader`).
+#[tokio::test]
+async fn rpc_http_an_invalid_status_is_refused() {
+    struct Invalid;
+    impl Hooks for Invalid {
+        fn implemented(&self) -> Vec<String> {
+            vec!["ServeHTTP".into()]
+        }
+    }
+    impl mm_plugin::rpc::Plugin for Invalid {}
+    impl mm_plugin::rpc::HooksHttp for Invalid {
+        async fn serve_http(
+            &self,
+            _: Option<Box<mm_plugin::wire::plugin::Context>>,
+            _: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+            _: Option<mm_plugin::io_rpc::RemoteReader>,
+            mut writer: mm_plugin::http::RemoteResponseWriter,
+        ) -> Result<(), NotImplemented> {
+            writer.write_header(1000).await;
+            writer.write(b"body anyway").await.unwrap();
+            Ok(())
+        }
+    }
+
+    let client = rust_plugin_pair(Arc::new(Invalid)).await;
+    within(client.implemented()).await.unwrap();
+    let recorder = Recorder::default();
+    within(client.serve_http(
+        None,
+        Some(Box::new(http_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+        recorder.clone(),
+    ))
+    .await;
+    let response = recorder.response();
+    assert_eq!(response["status"], 200, "the invalid status was not kept");
+    assert_eq!(response["body"], "body anyway");
 }
 
 #[tokio::test]

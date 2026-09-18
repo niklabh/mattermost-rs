@@ -302,6 +302,39 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
             other => failures.push(format!("api {name}: Go received {other:?}")),
         }
     }
+    // The Go host asked the Rust plugin to serve HTTP: it read the body over one connection and
+    // answered over the other.
+    let want_response = http_response("POST", CONFORMANCE_URL, &stream_payload());
+    let served = by_name(&go, "http");
+    for name in ["ServeHTTP", "ServeMetrics"] {
+        match served.get(name) {
+            Some(e) => {
+                let got = serde_json::json!({
+                    "status": e["status"],
+                    "header": e["header"],
+                    "body": e["body"],
+                });
+                assert_eq!(got, want_response, "{name}: what Go's writer received");
+            }
+            None => failures.push(format!("{name}: the Go host recorded no response")),
+        }
+        match rust_hooks.get(name) {
+            Some(e) => {
+                assert_eq!(
+                    e["stream"],
+                    stream_digest(&stream_payload()),
+                    "{name}: the request body the plugin read"
+                );
+                assert_eq!(
+                    e["args"],
+                    render_typed(&http_request()),
+                    "{name}: the request the plugin received"
+                );
+            }
+            None => failures.push(format!("{name}: the Rust plugin never saw the call")),
+        }
+    }
+
     // Each stream the Rust plugin lent arrived whole at the Go host, and it answered with the
     // method's fixture.
     let want_stream = stream_digest(&stream_payload());

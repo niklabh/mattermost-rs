@@ -7,7 +7,8 @@ use std::sync::Arc;
 use go_netrpc::{Server, ServiceError};
 use goplugin::{HandshakeConfig, MuxBroker, ServeConfig, ServeError};
 
-use super::{ApiClient, Hooks, NotImplemented, hooks_server};
+use super::serve_http::register_hooks_http;
+use super::{ApiClient, Hooks, HooksHttp, NotImplemented, hooks_server};
 use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns, Z_OnConfigurationChangeArgs};
 
 /// api.go, `handshake`: what a Mattermost host and plugin must agree on.
@@ -26,7 +27,7 @@ pub fn handshake() -> HandshakeConfig {
 /// 1. It dials both connections and hands them to [`Plugin::set_api`].
 /// 2. It calls [`Hooks::on_configuration_change`].
 /// 3. It calls [`Plugin::on_activate`].
-pub trait Plugin: Hooks {
+pub trait Plugin: Hooks + HooksHttp {
     /// Go `MattermostPlugin.SetAPI` and `SetDriver`: the clients for this activation. `driver`
     /// is the raw net/rpc connection to the host's database driver, whose methods are not
     /// ported yet.
@@ -43,10 +44,11 @@ pub trait Plugin: Hooks {
     }
 }
 
-/// The net/rpc server for one dispense of the `"hooks"` plugin: [`hooks_server`] plus
-/// `Plugin.OnActivate`, which reaches back over `broker`.
+/// The net/rpc server for one dispense of the `"hooks"` plugin: [`hooks_server`], the HTTP hooks
+/// and `Plugin.OnActivate`, all of which reach back over `broker`.
 pub fn plugin_server<P: Plugin>(plugin: &Arc<P>, broker: MuxBroker) -> Server {
     let mut server = hooks_server(plugin);
+    register_hooks_http(&mut server, plugin, &broker);
     let plugin = Arc::clone(plugin);
     server.register("Plugin.OnActivate", move |args: Z_OnActivateArgs| {
         let plugin = Arc::clone(&plugin);
