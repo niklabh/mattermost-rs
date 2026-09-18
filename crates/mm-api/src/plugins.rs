@@ -111,6 +111,43 @@ pub async fn get_webapp_plugins(State(state): State<AppState>) -> Response {
     }
 }
 
+/// Port of `getWebappPlugins` (plugin.go:250) while the plugins run in **Go** — the default,
+/// `MMRS_PLUGIN_HOST` unset or `go` — when [`get_webapp_plugins`] is not registered.
+///
+/// The list is Go's running plugins, which only Go knows. Two answers do not need it: plugins off
+/// is the 501 whatever runs, and a Go plugin directory holding no bundle proves there is no
+/// running plugin, so the list is `[]` (`json.Marshal` of an empty slice, no newline) — the proof
+/// `commands::go_may_have_plugins` already gives the slash-command routes. Anything else, or not
+/// knowing the directory, forwards: that list depends on state only the Go process holds.
+#[tracing::instrument(skip_all)]
+pub async fn get_webapp_plugins_go_hosted(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+) -> Response {
+    if !state.app.config().plugin_enable {
+        return ApiError::from(AppError::new(
+            "getWebappPlugins",
+            "app.plugin.disabled.app_error",
+            None,
+            "",
+            501,
+        ))
+        .into_response();
+    }
+    if crate::commands::go_may_have_plugins() {
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        "[]",
+    )
+        .into_response()
+}
+
 fn serve_webapp_plugins(state: &AppState) -> Result<Response, ApiError> {
     if !state.app.config().plugin_enable {
         return Err(ApiError::from(AppError::new(

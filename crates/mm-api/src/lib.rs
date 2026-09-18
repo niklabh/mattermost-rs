@@ -500,7 +500,12 @@ pub fn router(state: AppState) -> Router {
                 partially_migrated_with_ids(&state, post(plugins::disable_plugin)),
             )
     } else {
-        Router::new()
+        // Plugins run in Go: only the webapp list is answered here, and only when Go provably
+        // runs none — see `plugins::get_webapp_plugins_go_hosted`.
+        Router::new().route(
+            "/api/v4/plugins/webapp",
+            partially_migrated(get(plugins::get_webapp_plugins_go_hosted)),
+        )
     };
     Router::new()
         .merge(plugin_routes)

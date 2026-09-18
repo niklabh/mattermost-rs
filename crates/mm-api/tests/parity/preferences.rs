@@ -420,7 +420,12 @@ async fn dm_visibility_is_served_here() {
         let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
         let (rs_status, rs_body, served) =
             put_for(&client, RUST, &user.token, &user.id, &batch).await;
-        assert_eq!(go_status, 200, "{category}: {}", String::from_utf8_lossy(&go_body));
+        assert_eq!(
+            go_status,
+            200,
+            "{category}: {}",
+            String::from_utf8_lossy(&go_body)
+        );
         assert_eq!((rs_status, &rs_body), (go_status, &go_body), "{category}");
         assert!(served, "{category} is no longer forwarded");
     }
@@ -515,9 +520,8 @@ async fn favourites_follow_favorite_channel_preferences_as_on_go() {
         for channel in [&one_ch, &two_ch, &three_ch, &four_ch] {
             common::add_user_to_channel(&client, &admin, channel, &user.id).await;
         }
-        let dm =
-            common::create_direct_channel(&client, &user.token, &user.id, logged_in_user_id())
-                .await;
+        let dm = common::create_direct_channel(&client, &user.token, &user.id, logged_in_user_id())
+            .await;
 
         let mut statuses = Vec::new();
         for (channel, value) in [
@@ -530,8 +534,14 @@ async fn favourites_follow_favorite_channel_preferences_as_on_go() {
             (four_ch.as_str(), ""),
         ] {
             let batch = one(&user.id, "favorite_channel", channel, value);
-            let (status, body, served) = put_for(&client, base, &user.token, &user.id, &batch).await;
-            assert_eq!(status, 200, "{base} {value}: {}", String::from_utf8_lossy(&body));
+            let (status, body, served) =
+                put_for(&client, base, &user.token, &user.id, &batch).await;
+            assert_eq!(
+                status,
+                200,
+                "{base} {value}: {}",
+                String::from_utf8_lossy(&body)
+            );
             assert_eq!(served, base == RUST, "{base}: who answered");
             statuses.push(status);
         }
@@ -577,7 +587,10 @@ async fn favourites_follow_favorite_channel_preferences_as_on_go() {
         vec!["a: four,three,dm,one", "b: dm"],
         "the fixture must discriminate: Go's own answer"
     );
-    assert_eq!(rust, go, "the same writes, the same sidebar and the same failure");
+    assert_eq!(
+        rust, go,
+        "the same writes, the same sidebar and the same failure"
+    );
     assert_eq!(go.1, 500);
     assert_eq!(
         go.2,
@@ -636,7 +649,12 @@ async fn flagged_post_checks_the_post_and_its_channel_as_go_does() {
         let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
         let (rs_status, rs_body, served) =
             put_for(&client, RUST, &user.token, &user.id, &batch).await;
-        assert_eq!(go_status, status, "{label}: {}", String::from_utf8_lossy(&go_body));
+        assert_eq!(
+            go_status,
+            status,
+            "{label}: {}",
+            String::from_utf8_lossy(&go_body)
+        );
         assert_eq!(rs_status, status, "{label}");
         assert!(served, "{label}: served here");
         let body = common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, label);
@@ -651,7 +669,11 @@ async fn flagged_post_checks_the_post_and_its_channel_as_go_does() {
         .send()
         .await
         .expect("Go answers");
-    assert_eq!(probe.status(), 400, "no refused batch wrote its first entry");
+    assert_eq!(
+        probe.status(),
+        400,
+        "no refused batch wrote its first entry"
+    );
 
     let batch = one(&user.id, "flagged_post", &readable, "true");
     let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;

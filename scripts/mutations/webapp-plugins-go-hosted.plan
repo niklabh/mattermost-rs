@@ -1,0 +1,8 @@
+# Mutation plan for GET /plugins/webapp while plugins run in Go (2026-09-19).
+#   scripts/mutate-batch.sh scripts/mutations/webapp-plugins-go-hosted.plan
+# The plugins-disabled 501 is not planned: the stack runs with plugins on and the suite does
+# not flip the setting. The directory proof and the body are.
+forwards-even-with-no-plugin	crates/mm-api/src/plugins.rs	    if crate::commands::go_may_have_plugins() {	    if !crate::commands::go_may_have_plugins() {	api	marketplace_visit
+a-different-empty-list	crates/mm-api/src/plugins.rs	        "[]",\n    )	        "[ ]",\n    )	api	marketplace_visit
+control-instrument-name	crates/mm-api/src/plugins.rs	#[tracing::instrument(skip_all)]\npub async fn get_webapp_plugins_go_hosted(	#[tracing::instrument(skip_all, name = "webapp_plugins_go")]\npub async fn get_webapp_plugins_go_hosted(	api	marketplace_visit
+control-header-order	crates/mm-api/src/plugins.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        "[]",	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),\n        ],\n        "[]",	api	marketplace_visit
