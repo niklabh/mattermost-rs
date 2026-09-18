@@ -316,9 +316,14 @@ async fn main() -> anyhow::Result<()> {
         "mm-api listening; unmigrated routes forward to the Go server"
     );
 
-    axum::serve(listener, router(state))
-        .await
-        .context("server error")?;
+    // `MM_API_TRAFFIC_LOG`: one line per request for `scripts/demo-traffic.sh`; see `mm_api::traffic`.
+    let app = if mm_api::traffic::enabled_from_env() {
+        tracing::info!("traffic log on (target mm_api::traffic)");
+        mm_api::traffic::wrap(router(state))
+    } else {
+        router(state)
+    };
+    axum::serve(listener, app).await.context("server error")?;
 
     Ok(())
 }

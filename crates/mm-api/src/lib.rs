@@ -105,6 +105,8 @@ pub mod terms_of_service;
 pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
+/// `MM_API_TRAFFIC_LOG`: a line per request, for measuring what share of a session Rust answers.
+pub mod traffic;
 pub mod typing;
 /// The two upload-session writes: `createUpload` and `uploadData`.
 pub mod upload_write;

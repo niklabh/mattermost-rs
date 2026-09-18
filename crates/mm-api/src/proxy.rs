@@ -62,8 +62,34 @@ fn forwardable(headers: &HeaderMap) -> HeaderMap {
 /// [`crate::local::forward_over_unix`] before anything here runs. The check is on the request
 /// and not on a parameter because the handlers that forward are written once for both routers;
 /// the transport is a property of where the request came from, not of who is answering it.
+///
+/// # The call site travels with the response
+///
+/// `#[track_caller]` on a plain `fn` that returns the future, because the attribute is not
+/// stable on an `async fn`. The caller's location is stamped on the response as a
+/// [`ForwardSite`], which is how `crate::traffic` names *which* branch of a served handler handed
+/// the request to Go. Through `Router::fallback` the location is inside axum, which is fine: that
+/// request matched no route at all, and the log says so separately.
+#[track_caller]
+pub fn forward_to_go(
+    State(state): State<AppState>,
+    request: Request,
+) -> impl std::future::Future<Output = Response> + Send + 'static {
+    let site = ForwardSite(std::panic::Location::caller());
+    async move {
+        let mut response = forward(state, request).await;
+        response.extensions_mut().insert(site);
+        response
+    }
+}
+
+/// The source line that called [`forward_to_go`], as a response extension. Read by
+/// `crate::traffic`; nothing on the wire carries it.
+#[derive(Clone, Copy, Debug)]
+pub struct ForwardSite(pub &'static std::panic::Location<'static>);
+
 #[tracing::instrument(skip_all, fields(method = %request.method(), path = request.uri().path(), upstream_status))]
-pub async fn forward_to_go(State(state): State<AppState>, request: Request) -> Response {
+async fn forward(state: AppState, request: Request) -> Response {
     if let Some(go) = request.extensions().get::<crate::local::GoLocalSocket>() {
         // Cloned because the path is borrowed from the request that is about to be moved.
         let socket = std::sync::Arc::clone(&go.0);
