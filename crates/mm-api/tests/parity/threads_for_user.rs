@@ -5,12 +5,12 @@
 //! scripts/parity.sh -p mm-api --test parity threads_for_user
 //! ```
 //!
-//! # What this port serves, and what it hands upstream
+//! # Every option is served (2026-09-19)
 //!
-//! The default request plus `?extended`. `since`, `before`, `after`, `unread`, `deleted`,
-//! `totalsOnly`, `threadsOnly` and `excludeDirect` each rewrite the store query, and each is
-//! **forwarded to Go** rather than guessed at — [`the_unsupported_parameters_are_forwarded`]
-//! pins that list, so adding one to the handler without a fixture makes this test fail.
+//! `since`, `before`, `after`, `unread`, `deleted`, `totalsOnly`, `threadsOnly` and
+//! `excludeDirect` each rewrite the store query; [`each_option_matches_go`] compares every one
+//! against Go and checks that it changed Go's answer, and [`the_option_refusals_match_go`] pins
+//! the three 400s.
 //!
 //! # The two things a reader would not predict
 //!
@@ -703,9 +703,186 @@ async fn per_page_limits_the_list_and_not_the_totals() {
     );
 }
 
-/// Every parameter this port does not serve is handed to Go rather than guessed at.
+/// Every `GetUserThreadsOpts` option, served since 2026-09-19 and compared byte for byte. Each
+/// query is chosen so the option changes Go's answer, and the test checks that it does — an
+/// option the handler dropped would otherwise compare equal to the default page.
 #[tokio::test]
-async fn the_unsupported_parameters_are_forwarded() {
+async fn each_option_matches_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _count_guard = PLAIN_THREAD_COUNT.lock().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = fixture(&client, &token).await;
+
+    let default = path(&f.plain_id, &f.team_id, "per_page=30");
+    let (baseline, _) = fetch_both_stable(&client, &f.plain_token, &default).await;
+    let parsed: serde_json::Value = serde_json::from_slice(&baseline).expect("JSON");
+    let older_reply = parsed["threads"][1]["last_reply_at"]
+        .as_i64()
+        .expect("a time");
+
+    let (extra_baseline, _) = fetch_both_stable(
+        &client,
+        &f.extra_token,
+        &path(&f.extra_id, &f.team_id, "per_page=30"),
+    )
+    .await;
+    let extra_ids = thread_ids(&extra_baseline);
+    let extra_oldest = extra_ids
+        .last()
+        .expect("the extra user follows threads")
+        .clone();
+
+    for (user, token, query, baseline) in [
+        (
+            &f.plain_id,
+            &f.plain_token,
+            "unread=true".to_owned(),
+            &baseline,
+        ),
+        // Past every timestamp: the list empties while the totals stay.
+        (
+            &f.plain_id,
+            &f.plain_token,
+            format!("since={}", older_reply + 86_400_000),
+            &baseline,
+        ),
+        (
+            &f.plain_id,
+            &f.plain_token,
+            format!("before={}", f.newer_root),
+            &baseline,
+        ),
+        (
+            &f.plain_id,
+            &f.plain_token,
+            format!("after={}", f.older_root),
+            &baseline,
+        ),
+        (
+            &f.plain_id,
+            &f.plain_token,
+            "totalsOnly=true".to_owned(),
+            &baseline,
+        ),
+        (
+            &f.plain_id,
+            &f.plain_token,
+            "threadsOnly=true".to_owned(),
+            &baseline,
+        ),
+        // Ascending, with more than one thread after the cursor: the order is the claim.
+        (
+            &f.extra_id,
+            &f.extra_token,
+            format!("after={extra_oldest}"),
+            &extra_baseline,
+        ),
+        // The deleted reply on the urgent thread becomes an unread reply.
+        (
+            &f.extra_id,
+            &f.extra_token,
+            "deleted=true".to_owned(),
+            &extra_baseline,
+        ),
+    ] {
+        let p = path(user, &f.team_id, &format!("per_page=30&{query}"));
+        let (go, rs) = fetch_both_stable(&client, token, &p).await;
+        assert_eq!(
+            String::from_utf8_lossy(&go),
+            String::from_utf8_lossy(&rs),
+            "{p} must be byte-identical"
+        );
+        assert_ne!(
+            String::from_utf8_lossy(&go),
+            String::from_utf8_lossy(baseline),
+            "{query} must change Go's answer, or it tests nothing"
+        );
+    }
+
+    // `since` at the older thread's last reply, with its membership's `LastUpdated` planted
+    // before it: only the `Threads.LastReplyAt >= since` arm keeps that thread. `LastUpdated` is
+    // on no response, so the plant moves nothing the other tests read.
+    if let Some(pool) = test_pool().await {
+        sqlx::query(
+            "UPDATE threadmemberships SET lastupdated = 1 WHERE userid = $1 AND postid = $2",
+        )
+        .bind(&f.plain_id)
+        .bind(&f.older_root)
+        .execute(&pool)
+        .await
+        .expect("the plant runs");
+    }
+    let p = path(
+        &f.plain_id,
+        &f.team_id,
+        &format!("per_page=30&since={older_reply}"),
+    );
+    let (go, rs) = fetch_both_stable(&client, &f.plain_token, &p).await;
+    assert_eq!(
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "{p}"
+    );
+    assert!(
+        thread_ids(&go).contains(&f.older_root),
+        "Go keeps the older thread through its reply time"
+    );
+
+    // `since=0` is no `since` at all (`opts.Since > 0`).
+    let p = path(&f.plain_id, &f.team_id, "per_page=30&since=0");
+    let (go, rs) = fetch_both_stable(&client, &f.plain_token, &p).await;
+    assert_eq!(go, rs);
+    assert_eq!(go, baseline);
+}
+
+/// `excludeDirect` needs a thread with no team — a DM — and a user of its own, so the exact
+/// counts the other tests assert for the fixture users do not move.
+#[tokio::test]
+async fn exclude_direct_drops_the_direct_message_threads() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let f = fixture(&client, &token).await;
+    let user = create_plain_user(&client, &token, &f.team_id, "thrdm").await;
+    let channel = create_channel_typed(&client, &token, &f.team_id, "thrdmteam", "O").await;
+    add_user_to_channel(&client, &token, &channel, &user.id).await;
+    let team_root = post_message(&client, &token, &channel, "team root", None).await;
+    post_message(&client, &user.token, &channel, "reply", Some(&team_root)).await;
+    let dm = common::create_direct_channel(&client, &token, logged_in_user_id(), &user.id).await;
+    let dm_root = post_message(&client, &token, &dm, "dm root", None).await;
+    post_message(&client, &user.token, &dm, "reply", Some(&dm_root)).await;
+
+    let (all, _) = fetch_both_stable(&client, &user.token, &path(&user.id, &f.team_id, "")).await;
+    assert_eq!(
+        thread_ids(&all).len(),
+        2,
+        "the DM thread is listed by default"
+    );
+    let p = path(&user.id, &f.team_id, "excludeDirect=true");
+    let (go, rs) = fetch_both_stable(&client, &user.token, &p).await;
+    assert_eq!(
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "{p}"
+    );
+    assert_eq!(
+        thread_ids(&go),
+        vec![team_root],
+        "and dropped with excludeDirect"
+    );
+
+    common::delete_plain_user(&client, &token, &user.id).await;
+}
+
+/// The three refusals, after both gates: `since` that `ParseUint` refuses (a sign, even `+`),
+/// both cursors, and both "only" modes.
+#[tokio::test]
+async fn the_option_refusals_match_go() {
     if !stack_enabled() {
         return;
     }
@@ -713,47 +890,26 @@ async fn the_unsupported_parameters_are_forwarded() {
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
 
-    for param in [
-        "since=1",
-        "before=abc",
-        "after=abc",
-        "unread=true",
-        "deleted=true",
-        "totalsOnly=true",
-        "threadsOnly=true",
-        "excludeDirect=true",
+    for (query, id) in [
+        ("since=-1", "api.context.invalid_body_param.app_error"),
+        ("since=%2B1", "api.context.invalid_body_param.app_error"),
+        ("since=soon", "api.context.invalid_body_param.app_error"),
+        ("before=a&after=b", "api.getThreadsForUser.bad_params"),
+        (
+            "totalsOnly=true&threadsOnly=1",
+            "api.getThreadsForUser.bad_only_params",
+        ),
     ] {
-        let p = path(&f.plain_id, &f.team_id, param);
-        let rs = client
-            .get(format!("{RUST}{p}"))
-            .header("Authorization", format!("Bearer {}", f.plain_token))
-            .send()
-            .await
-            .expect("we answer");
-        assert_eq!(
-            rs.headers()
-                .get("x-mmrs-served-by")
-                .and_then(|v| v.to_str().ok()),
-            Some("go"),
-            "{p} must be forwarded, not served"
-        );
+        let p = path(&f.plain_id, &f.team_id, query);
+        let (go_status, go_body, rs_status, rs_body) = {
+            let (go, rs) = fetch_both_raw(&client, &f.plain_token, &p).await;
+            (go.0, go.1, rs.0, rs.1)
+        };
+        assert_eq!(go_status, 400, "{p}");
+        assert_eq!(rs_status, 400, "{p}");
+        let body = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, &p);
+        assert_eq!(body["id"], id, "{p}");
     }
-
-    // And the served shapes really are served, or the list above would pass vacuously.
-    let served = path(&f.plain_id, &f.team_id, "per_page=5&extended=true");
-    let rs = client
-        .get(format!("{RUST}{served}"))
-        .header("Authorization", format!("Bearer {}", f.plain_token))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(
-        rs.headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("rust"),
-        "{served} must be served here"
-    );
 }
 
 /// Two gates, in Go's order: the user first, then the team.

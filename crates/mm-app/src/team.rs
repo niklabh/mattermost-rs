@@ -15,6 +15,7 @@ use mm_store::job_store::JobStore;
 use mm_store::post_store::PostStore;
 use mm_store::system_store::SystemStore;
 use mm_store::team_store::TeamMembersGetOptions;
+use mm_store::thread_store::ThreadStore;
 use mm_store::token_store::TokenStore;
 use mm_store::{AccessControlPolicyStore, TeamStore};
 
@@ -469,15 +470,22 @@ impl App {
         }
     }
 
-    /// Port of `app.App.GetTeamsUnreadForUser` (team.go:1980), **without** the collapsed-threads
-    /// half: the caller forwards `include_collapsed_threads=true` to Go, so the thread counters
-    /// here are always Go's zero values. Any store failure is `app.team.get_unread.app_error` at
-    /// 500; the folding is [`fold_team_unreads`].
+    /// Port of `app.App.GetTeamsUnreadForUser` (team.go:1980). Any store failure is
+    /// `app.team.get_unread.app_error` at 500; the folding is [`fold_team_unreads`].
+    ///
+    /// # The collapsed-threads half
+    ///
+    /// Asked for **and** `ServiceSettings.CollapsedThreads` not `disabled` (team.go:2021) — so a
+    /// server with CRT off answers zeros even to a client that asks. Then the three `thread_*`
+    /// counters come from the Threads store, for the teams the channel fold produced and no
+    /// others: a team with followed threads but no channel row is not added, and one with no
+    /// thread row keeps its zeros. Urgent mentions are counted only while post priority is on.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, exclude_team_id = %exclude_team_id, teams))]
     pub async fn get_teams_unread_for_user(
         &self,
         exclude_team_id: &str,
         user_id: &str,
+        include_collapsed_threads: bool,
     ) -> AppResult<Vec<TeamUnread>> {
         let data = self
             .store()
@@ -495,8 +503,37 @@ impl App {
                 )
             })?;
 
-        let members = fold_team_unreads(&data);
+        let mut members = fold_team_unreads(&data);
         tracing::Span::current().record("teams", members.len());
+
+        let config = self.config();
+        if include_collapsed_threads
+            && config.collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED
+        {
+            let team_ids: Vec<String> = members.iter().map(|m| m.team_id.clone()).collect();
+            let thread_unreads = self
+                .store()
+                .thread()
+                .get_teams_unread_for_user(user_id, &team_ids, config.post_priority)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "thread unreads lookup failed");
+                    AppError::boxed(
+                        "GetTeamsUnreadForUser",
+                        "app.team.get_unread.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+            for member in &mut members {
+                if let Some(threads) = thread_unreads.get(&member.team_id) {
+                    member.thread_count = threads.thread_count;
+                    member.thread_mention_count = threads.thread_mention_count;
+                    member.thread_urgent_mention_count = threads.thread_urgent_mention_count;
+                }
+            }
+        }
         Ok(members)
     }
 
@@ -1125,7 +1162,7 @@ mod tests {
     #[tokio::test]
     async fn an_unreads_lookup_failure_is_a_500_with_the_get_unread_id() {
         let err = unreachable_app()
-            .get_teams_unread_for_user("", "uuuuuuuuuuuuuuuuuuuuuuuuuu")
+            .get_teams_unread_for_user("", "uuuuuuuuuuuuuuuuuuuuuuuuuu", false)
             .await
             .expect_err("the store is unreachable");
         assert_eq!(err.status_code, 500);

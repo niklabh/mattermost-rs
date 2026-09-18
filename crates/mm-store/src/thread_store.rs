@@ -16,7 +16,7 @@
 //! rather than factored in Go, and repeated here for the same reason: sqlx needs one literal
 //! statement per query.
 
-use mm_model::thread::{Thread, ThreadMembership, ThreadResponse};
+use mm_model::thread::{GetUserThreadsOpts, Thread, ThreadMembership, ThreadResponse};
 use mm_model::user::User;
 use sqlx::PgPool;
 
@@ -34,14 +34,18 @@ pub trait ThreadStore {
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
-    /// Port of `SqlThreadStore.GetThreadsForUser` (thread_store.go:283), for the option set the
-    /// api4 handler serves: a team, no cursor, not deleted, not unread-only.
+    /// Port of `SqlThreadStore.GetThreadsForUser` (thread_store.go:283), every option: `since`
+    /// on either the membership's or the thread's timestamp, `unread`, `deleted` (which also
+    /// counts deleted replies as unread), `exclude_direct`, and the two cursors, where `after`
+    /// flips the order to ascending. A `page_size` of 0 is Go's 30.
+    ///
+    /// One static query with each option as a guard (`$n = '' OR …`), rather than Go's
+    /// squirrel builder: the predicates are Go's, and the planner drops a guard that is off.
     fn get_threads_for_user(
         &self,
         user_id: &str,
         team_id: &str,
-        page_size: i64,
-        include_is_urgent: bool,
+        opts: &GetUserThreadsOpts,
     ) -> impl std::future::Future<Output = Result<Vec<ThreadResponse>, StoreError>> + Send;
 
     /// Port of `SqlThreadStore.GetMembershipForUser` (thread_store.go:797).
@@ -58,33 +62,60 @@ pub trait ThreadStore {
         include_is_urgent: bool,
     ) -> impl std::future::Future<Output = Result<ThreadResponse, StoreError>> + Send;
 
-    /// Port of `SqlThreadStore.GetTotalThreads` (thread_store.go:184).
+    /// Port of `SqlThreadStore.GetTotalThreads` (thread_store.go:184). Reads `exclude_direct` and
+    /// `deleted` from `opts`, as Go's does.
     fn get_total_threads(
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
-    /// Port of `SqlThreadStore.GetTotalUnreadThreads` (thread_store.go:169).
+    /// Port of `SqlThreadStore.GetTotalUnreadThreads` (thread_store.go:169). Reads `exclude_direct` and
+    /// `deleted` from `opts`, as Go's does.
     fn get_total_unread_threads(
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
-    /// Port of `SqlThreadStore.GetTotalUnreadMentions` (thread_store.go:202).
+    /// Port of `SqlThreadStore.GetTotalUnreadMentions` (thread_store.go:202). Reads `exclude_direct` and
+    /// `deleted` from `opts`, as Go's does.
     fn get_total_unread_mentions(
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
-    /// Port of `SqlThreadStore.GetTotalUnreadUrgentMentions` (thread_store.go:242).
+    /// Port of `SqlThreadStore.GetTotalUnreadUrgentMentions` (thread_store.go:242). Reads `exclude_direct` and
+    /// `deleted` from `opts`, as Go's does.
     fn get_total_unread_urgent_mentions(
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.GetTeamsUnreadForUser` (thread_store.go:413): per team in
+    /// `team_ids`, the unread followed threads, their unread mentions and, when asked, the urgent
+    /// share of those mentions. Three grouped queries, merged by team.
+    ///
+    /// A team appears only when one of the queries has a row for it, and with only the counters
+    /// that query supplied — the caller copies the three onto its own list and leaves every other
+    /// team at zero, which is what Go's map lookup does.
+    fn get_teams_unread_for_user(
+        &self,
+        user_id: &str,
+        team_ids: &[String],
+        include_urgent_mention_count: bool,
+    ) -> impl std::future::Future<
+        Output = Result<
+            std::collections::HashMap<String, mm_model::team_member::TeamUnread>,
+            StoreError,
+        >,
+    > + Send;
 
     /// Port of `SqlThreadStore.MarkAllAsReadByChannels` (thread_store.go:634).
     fn mark_all_as_read_by_channels(
@@ -332,9 +363,18 @@ impl ThreadStore for SqlThreadStore {
         &self,
         user_id: &str,
         team_id: &str,
-        page_size: i64,
-        include_is_urgent: bool,
+        opts: &GetUserThreadsOpts,
     ) -> Result<Vec<ThreadResponse>, StoreError> {
+        // `pageSize := 30; if opts.PageSize != 0`. Both are `uint64` in Go; a value past
+        // `i64::MAX` is no limit and no timestamp at all, which saturating says as well.
+        let page_size = i64::try_from(if opts.page_size == 0 {
+            30
+        } else {
+            opts.page_size
+        })
+        .unwrap_or(i64::MAX);
+        let since = i64::try_from(opts.since).unwrap_or(i64::MAX);
+        tracing::Span::current().record("page_size", page_size);
         let rows = sqlx::query_as!(
             JoinedThreadRow,
             r#"
@@ -349,7 +389,7 @@ impl ThreadStore for SqlThreadStore {
                       FROM posts r
                      WHERE r.rootid = tm.postid
                        AND r.createat > tm.lastviewed
-                       AND r.deleteat = 0)           AS "unreadreplies!",
+                       AND ($5 OR r.deleteat = 0))  AS "unreadreplies!",
                    -- `pp` is left-joined, so `pp.priority = 'urgent'` is **NULL** for a thread
                    -- with no priority row and `TRUE AND NULL` is NULL, not false. Go's
                    -- `sq.Case().When(...).Else("false")` returns the literal `false` there; the
@@ -385,15 +425,26 @@ impl ThreadStore for SqlThreadStore {
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
                AND (COALESCE(t.threadteamid, '') = $2
-                    OR COALESCE(t.threadteamid, '') = '')
-               AND COALESCE(t.threaddeleteat, 0) = 0
-             ORDER BY t.lastreplyat DESC
+                    OR (NOT $6 AND COALESCE(t.threadteamid, '') = ''))
+               AND ($5 OR COALESCE(t.threaddeleteat, 0) = 0)
+               AND ($7::bigint = 0 OR tm.lastupdated >= $7 OR t.lastreplyat >= $7)
+               AND (NOT $8 OR tm.lastviewed < t.lastreplyat)
+               AND ($9 = '' OR t.lastreplyat < (SELECT lastreplyat FROM threads WHERE postid = $9))
+               AND ($10 = '' OR t.lastreplyat > (SELECT lastreplyat FROM threads WHERE postid = $10))
+             ORDER BY CASE WHEN $10 = '' THEN t.lastreplyat END DESC,
+                      CASE WHEN $10 <> '' THEN t.lastreplyat END ASC
              LIMIT $4
             "#,
             user_id,
             team_id,
-            include_is_urgent,
+            opts.include_is_urgent,
             page_size,
+            opts.deleted,
+            opts.exclude_direct,
+            since,
+            opts.unread,
+            opts.before,
+            opts.after,
         )
         .fetch_all(&self.pool)
         .await
@@ -602,7 +653,12 @@ impl ThreadStore for SqlThreadStore {
     }
 
     #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id))]
-    async fn get_total_threads(&self, user_id: &str, team_id: &str) -> Result<i64, StoreError> {
+    async fn get_total_threads(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        opts: &GetUserThreadsOpts,
+    ) -> Result<i64, StoreError> {
         let row = sqlx::query!(
             r#"
             SELECT COUNT(tm.postid) AS "count!"
@@ -616,11 +672,13 @@ impl ThreadStore for SqlThreadStore {
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
                AND (COALESCE(t.threadteamid, '') = $2
-                    OR COALESCE(t.threadteamid, '') = '')
-               AND COALESCE(t.threaddeleteat, 0) = 0
+                    OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
+               AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,
             user_id,
             team_id,
+            opts.exclude_direct,
+            opts.deleted,
         )
         .fetch_one(&self.pool)
         .await
@@ -636,6 +694,7 @@ impl ThreadStore for SqlThreadStore {
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> Result<i64, StoreError> {
         let row = sqlx::query!(
             r#"
@@ -650,12 +709,14 @@ impl ThreadStore for SqlThreadStore {
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
                AND (COALESCE(t.threadteamid, '') = $2
-                    OR COALESCE(t.threadteamid, '') = '')
-               AND COALESCE(t.threaddeleteat, 0) = 0
+                    OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
+               AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
                AND tm.lastviewed < t.lastreplyat
             "#,
             user_id,
             team_id,
+            opts.exclude_direct,
+            opts.deleted,
         )
         .fetch_one(&self.pool)
         .await
@@ -671,6 +732,7 @@ impl ThreadStore for SqlThreadStore {
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> Result<i64, StoreError> {
         let row = sqlx::query!(
             r#"
@@ -685,11 +747,13 @@ impl ThreadStore for SqlThreadStore {
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
                AND (COALESCE(t.threadteamid, '') = $2
-                    OR COALESCE(t.threadteamid, '') = '')
-               AND COALESCE(t.threaddeleteat, 0) = 0
+                    OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
+               AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,
             user_id,
             team_id,
+            opts.exclude_direct,
+            opts.deleted,
         )
         .fetch_one(&self.pool)
         .await
@@ -708,6 +772,7 @@ impl ThreadStore for SqlThreadStore {
         &self,
         user_id: &str,
         team_id: &str,
+        opts: &GetUserThreadsOpts,
     ) -> Result<i64, StoreError> {
         let row = sqlx::query!(
             r#"
@@ -724,11 +789,13 @@ impl ThreadStore for SqlThreadStore {
                                 WHERE cm.channelid = t.channelid
                                   AND cm.userid = tm.userid))
                AND (COALESCE(t.threadteamid, '') = $2
-                    OR COALESCE(t.threadteamid, '') = '')
-               AND COALESCE(t.threaddeleteat, 0) = 0
+                    OR (NOT $3 AND COALESCE(t.threadteamid, '') = ''))
+               AND ($4 OR COALESCE(t.threaddeleteat, 0) = 0)
             "#,
             user_id,
             team_id,
+            opts.exclude_direct,
+            opts.deleted,
         )
         .fetch_one(&self.pool)
         .await
@@ -737,6 +804,122 @@ impl ThreadStore for SqlThreadStore {
             source,
         })?;
         Ok(row.sum)
+    }
+
+    #[tracing::instrument(skip(self, team_ids), fields(user_id = %user_id, teams = team_ids.len()))]
+    async fn get_teams_unread_for_user(
+        &self,
+        user_id: &str,
+        team_ids: &[String],
+        include_urgent_mention_count: bool,
+    ) -> Result<std::collections::HashMap<String, mm_model::team_member::TeamUnread>, StoreError>
+    {
+        use mm_model::team_member::TeamUnread;
+        let db = |context: &'static str| {
+            move |source| StoreError::Db {
+                context: context.to_owned(),
+                source,
+            }
+        };
+
+        // `fetchConditions` (thread_store.go:414), shared by the three. `channelMembershipPredicate`
+        // keeps its `ThreadTeamId = ''` arm, though `ThreadTeamId = ANY(team ids)` already rules
+        // a DM out: the query is Go's.
+        let unread_threads = sqlx::query!(
+            r#"
+            SELECT COUNT(t.postid) AS "count!", t.threadteamid AS "team_id!"
+              FROM threads t
+              LEFT JOIN threadmemberships tm ON t.postid = tm.postid
+             WHERE tm.userid = $1
+               AND tm.following = TRUE
+               AND t.threadteamid = ANY($2)
+               AND COALESCE(t.threaddeleteat, 0) = 0
+               AND (t.threadteamid = ''
+                    OR EXISTS (SELECT 1
+                                 FROM channelmembers cm
+                                WHERE cm.channelid = t.channelid
+                                  AND cm.userid = tm.userid))
+               AND t.lastreplyat > tm.lastviewed
+             GROUP BY t.threadteamid
+            "#,
+            user_id,
+            team_ids,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db("failed to get total unread threads"))?;
+
+        let unread_mentions = sqlx::query!(
+            r#"
+            SELECT COALESCE(SUM(tm.unreadmentions), 0)::bigint AS "count!",
+                   t.threadteamid AS "team_id?"
+              FROM threadmemberships tm
+              LEFT JOIN threads t ON t.postid = tm.postid
+             WHERE tm.userid = $1
+               AND tm.following = TRUE
+               AND t.threadteamid = ANY($2)
+               AND COALESCE(t.threaddeleteat, 0) = 0
+               AND (t.threadteamid = ''
+                    OR EXISTS (SELECT 1
+                                 FROM channelmembers cm
+                                WHERE cm.channelid = t.channelid
+                                  AND cm.userid = tm.userid))
+             GROUP BY t.threadteamid
+            "#,
+            user_id,
+            team_ids,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db("failed to get total unread mentions"))?;
+
+        let urgent_mentions = if include_urgent_mention_count {
+            sqlx::query!(
+                r#"
+                SELECT COALESCE(SUM(tm.unreadmentions), 0)::bigint AS "count!",
+                       t.threadteamid AS "team_id?"
+                  FROM threadmemberships tm
+                  LEFT JOIN threads t ON t.postid = tm.postid
+                  JOIN postspriority pp ON pp.postid = tm.postid
+                 WHERE pp.priority = 'urgent'
+                   AND tm.userid = $1
+                   AND tm.following = TRUE
+                   AND t.threadteamid = ANY($2)
+                   AND COALESCE(t.threaddeleteat, 0) = 0
+                   AND (t.threadteamid = ''
+                        OR EXISTS (SELECT 1
+                                     FROM channelmembers cm
+                                    WHERE cm.channelid = t.channelid
+                                      AND cm.userid = tm.userid))
+                 GROUP BY t.threadteamid
+                "#,
+                user_id,
+                team_ids,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db("failed to get total unread urgent mentions"))?
+            .into_iter()
+            .map(|row| (row.team_id.unwrap_or_default(), row.count))
+            .collect()
+        } else {
+            Vec::new()
+        };
+
+        let mut out: std::collections::HashMap<String, TeamUnread> =
+            std::collections::HashMap::new();
+        for row in unread_threads {
+            out.entry(row.team_id).or_default().thread_count = row.count;
+        }
+        for row in unread_mentions {
+            out.entry(row.team_id.unwrap_or_default())
+                .or_default()
+                .thread_mention_count = row.count;
+        }
+        for (team_id, count) in urgent_mentions {
+            out.entry(team_id).or_default().thread_urgent_mention_count = count;
+        }
+        Ok(out)
     }
 
     /// **Three predicates and every one of them bounds the write.**
