@@ -1,0 +1,27 @@
+# Mutation plan for hijack.go (plugin plan Phase 3): crates/mm-plugin/src/hijack.rs.
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-hijack.plan
+#
+# Every line filters to `hijack`: the unit tests in hijack::tests and the three rpc_http_*hijack*
+# suites, whose Rust-with-Rust run exercises the same script both Go oracles do. Not planned: the
+# size a plugin-side RW read asks for, which changes how many calls cross but not one byte the
+# client sees; and `>=` made `>` in GoBufReader::read's bypass test, which survived its first run
+# as an equivalent mutant: at p.len() == buf.len() the direct read and the fill ask for the same
+# length and hand back the same bytes. CONTROL- lines must SURVIVE.
+#
+# First run, 2026-09-18: 13 run, 12 caught, the equivalent one above; both controls survived.
+
+hijack-host-flushes	crates/mm-plugin/src/hijack.rs	        bufw.write(conn, b).await\n	        let n = bufw.write(&mut *conn, b).await?;\n        bufw.flush(conn).await?;\n        Ok(n)\n	pkg	hijack
+hijack-write-never-bypasses	crates/mm-plugin/src/hijack.rs	            let n = if self.buf.is_empty() {	            let n = if false {	pkg	hijack
+hijack-read-ahead-dropped	crates/mm-plugin/src/hijack.rs	GoBufReader::new(BUF_SIZE, &hijacked.buffered),	GoBufReader::new(BUF_SIZE, &[]),	pkg	hijack
+hijack-fill-no-slide	crates/mm-plugin/src/hijack.rs	            self.w -= self.r;	            self.w -= 0;	pkg	hijack
+hijack-second-close-ok	crates/mm-plugin/src/hijack.rs	        if self.closed.send_replace(true) {	        if { self.closed.send_replace(true); false } {	pkg	hijack
+hijack-past-deadline-unchecked	crates/mm-plugin/src/hijack.rs	        if deadline.is_some_and(|d| d <= Instant::now()) {	        if deadline.is_some_and(|_| false) {	pkg	hijack
+hijack-zero-time-is-a-deadline	crates/mm-plugin/src/hijack.rs	    if t.sec == 0 && t.nsec == 0 {	    if t.sec == 0 && t.nsec == 1 {	pkg	hijack
+hijack-read-deadline-sets-write	crates/mm-plugin/src/hijack.rs	("Plugin.HjConnSetReadDeadline", true, false),	("Plugin.HjConnSetReadDeadline", false, true),	pkg	hijack
+hijack-eof-as-zero	crates/mm-plugin/src/hijack.rs	                        Ok(0) if !p.is_empty() => Err(eof()),	                        Ok(0) if p.is_empty() => Err(eof()),	pkg	hijack
+hijack-twice-allowed	crates/mm-plugin/src/hijack.rs	    if slot.is_some() {	    if slot.is_none() && false {	pkg	hijack
+hijack-raw-read-through-buffer	crates/mm-plugin/src/hijack.rs	        let n = side.conn.raw_read(&mut data).await?;	        let ReadSide { conn, bufr } = &mut *side;\n        let n = bufr.read(conn, &mut data).await?;	pkg	hijack
+hijack-writer-outlives-hook	crates/mm-plugin/src/rpc/serve_http.rs	                .serve_http(args.context, args.request, body, writer)\n                .await;\n            // Go's `defer w.Close()`: the writer, and a connection hijacked through it, end with\n            // the hook.\n            let _ = connection.close().await;	                .serve_http(args.context, args.request, body, writer)\n                .await;\n            let _ = connection;	pkg	hijack
+CONTROL-swap-watch-senders	crates/mm-plugin/src/hijack.rs	        let deadlines = watch::Sender::new(Deadlines::default());\n        let closed = watch::Sender::new(false);	        let closed = watch::Sender::new(false);\n        let deadlines = watch::Sender::new(Deadlines::default());	pkg	hijack
+CONTROL-rename-service-binding	crates/mm-plugin/src/hijack.rs	fn service(e: io::Error) -> ServiceError {\n    ServiceError(e.to_string())	fn service(err: io::Error) -> ServiceError {\n    ServiceError(err.to_string())	pkg	hijack

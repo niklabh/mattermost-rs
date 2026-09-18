@@ -517,6 +517,11 @@ async fn rpc_rust_host_drives_the_go_plugin() {
         }
         served.insert(name, recorder.response());
     }
+    // The hijack scenario (plugingen/hijack.go): refused by a recorder, then run on a real
+    // connection whose client records every byte.
+    let (refused, received) = within(serve_hijack(&hooks)).await;
+    assert_eq!(refused, hijack_refused(), "the recorder's answer");
+    assert_eq!(received, hijack_received(), "what the client received");
     // What the Go plugin asked the database, in order.
     let asked = driver.asked.lock().unwrap().clone();
     assert_eq!(
@@ -657,6 +662,13 @@ async fn rpc_rust_host_drives_the_go_plugin() {
             None => failures.push(format!("hook {name}: the Go plugin never saw the call")),
         }
     }
+
+    // The Go plugin's own view of the hijacked connection: the deadline, and the close.
+    assert_eq!(
+        go_hooks.get("hijack").cloned().map(Json::Object),
+        Some(hijack_recorded()),
+        "what the Go plugin saw of the hijacked connection"
+    );
 
     // The plugin's outward HTTP call reached the host's fake, and its answer came back whole.
     let (status, header, body) = outward_response();
@@ -1488,4 +1500,206 @@ async fn rpc_an_unprovided_api_method_fails_as_in_go() {
     let returns =
         within(api.get_user(mm_plugin::wire::plugin::Z_GetUserArgs { a: "u".into() })).await;
     assert_eq!(returns, Default::default());
+}
+
+/// A Rust plugin running the hijack script under a Rust host, which is the pairing neither Go
+/// oracle covers.
+#[tokio::test]
+async fn rpc_http_hijack_rust_with_rust() {
+    #[derive(Default)]
+    struct Hijacker(Mutex<Vec<Json>>);
+    impl Hooks for Hijacker {
+        fn implemented(&self) -> Vec<String> {
+            vec!["ServeHTTP".into()]
+        }
+    }
+    impl mm_plugin::rpc::HooksFileUpload for Hijacker {}
+    impl mm_plugin::rpc::Plugin for Hijacker {}
+    impl mm_plugin::rpc::HooksHttp for Hijacker {
+        async fn serve_http(
+            &self,
+            _: Option<Box<mm_plugin::wire::plugin::Context>>,
+            _: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+            _: Option<mm_plugin::io_rpc::RemoteReader>,
+            writer: mm_plugin::http::RemoteResponseWriter,
+        ) -> Result<(), NotImplemented> {
+            let entry = hijack_script(writer).await;
+            self.0.lock().unwrap().push(entry);
+            Ok(())
+        }
+    }
+
+    let plugin = Arc::new(Hijacker::default());
+    let client = rust_plugin_pair(Arc::clone(&plugin)).await;
+    within(client.implemented()).await.unwrap();
+    let (refused, received) = within(serve_hijack(&client)).await;
+    assert_eq!(refused, hijack_refused());
+    assert_eq!(received, hijack_received());
+    let recorded = plugin.0.lock().unwrap().clone();
+    assert_eq!(
+        recorded,
+        [
+            serde_json::json!({"hook": "hijack", "error": "response cannot be hijacked"}),
+            hijack_recorded(),
+        ]
+    );
+}
+
+/// Every connection method refuses before a hijack, with Go's `ErrNotHijacked` (hijack.go).
+#[tokio::test]
+async fn rpc_http_connection_methods_need_a_hijack() {
+    let (host, plugin) = tokio::io::duplex(1 << 16);
+    let server = mm_plugin::http::response_writer_server(Recorder::default());
+    tokio::spawn(Arc::new(server).serve(host));
+    let client = go_netrpc::Client::new(plugin);
+
+    let not_hijacked = |r: Result<(), go_netrpc::Error>| match r {
+        Err(go_netrpc::Error::Server(m)) => m == mm_plugin::hijack::ERR_NOT_HIJACKED,
+        _ => false,
+    };
+    let empty = goplugin::rpc::Empty {};
+    let zero = gobwire::GoTime::default();
+    let calls = [
+        (
+            "HjConnRWRead",
+            client
+                .call::<_, Vec<u8>>("Plugin.HjConnRWRead", &vec![0u8; 8])
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnRWWrite",
+            client
+                .call::<_, i64>("Plugin.HjConnRWWrite", &b"x".to_vec())
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnRead",
+            client
+                .call::<_, Vec<u8>>("Plugin.HjConnRead", &8i64)
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnWrite",
+            client
+                .call::<_, i64>("Plugin.HjConnWrite", &b"x".to_vec())
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnClose",
+            client
+                .call::<_, goplugin::rpc::Empty>("Plugin.HjConnClose", &empty)
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnSetDeadline",
+            client
+                .call::<_, goplugin::rpc::Empty>("Plugin.HjConnSetDeadline", &zero)
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnSetReadDeadline",
+            client
+                .call::<_, goplugin::rpc::Empty>("Plugin.HjConnSetReadDeadline", &zero)
+                .await
+                .map(drop),
+        ),
+        (
+            "HjConnSetWriteDeadline",
+            client
+                .call::<_, goplugin::rpc::Empty>("Plugin.HjConnSetWriteDeadline", &zero)
+                .await
+                .map(drop),
+        ),
+    ];
+    for (name, result) in calls {
+        assert!(not_hijacked(result), "{name} answered without a hijack");
+    }
+    // And a writer that cannot be hijacked says so.
+    let refused = client
+        .call::<_, goplugin::rpc::Empty>("Plugin.HijackResponse", &empty)
+        .await;
+    assert!(
+        matches!(&refused, Err(go_netrpc::Error::Server(m)) if m == mm_plugin::hijack::ERR_CANNOT_HIJACK),
+        "{refused:?}"
+    );
+}
+
+/// A hijacked connection ends with the hook, because the SDK closes the writer's connection as
+/// Go's `defer w.Close()` does (client_rpc.go, `hooksRPCServer.ServeHTTP`).
+#[tokio::test]
+async fn rpc_http_a_hijacked_connection_ends_with_the_hook() {
+    #[derive(Default)]
+    struct Keeper(Mutex<Option<mm_plugin::hijack::HijackedConn>>);
+    impl Hooks for Keeper {
+        fn implemented(&self) -> Vec<String> {
+            vec!["ServeHTTP".into()]
+        }
+    }
+    impl mm_plugin::rpc::HooksFileUpload for Keeper {}
+    impl mm_plugin::rpc::Plugin for Keeper {}
+    impl mm_plugin::rpc::HooksHttp for Keeper {
+        async fn serve_http(
+            &self,
+            _: Option<Box<mm_plugin::wire::plugin::Context>>,
+            _: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+            _: Option<mm_plugin::io_rpc::RemoteReader>,
+            writer: mm_plugin::http::RemoteResponseWriter,
+        ) -> Result<(), NotImplemented> {
+            let (conn, _) = writer.hijack().await.unwrap();
+            assert_eq!(conn.write(b"inside").await.unwrap(), 6);
+            *self.0.lock().unwrap() = Some(conn);
+            Ok(())
+        }
+    }
+
+    struct DuplexWriter(Option<tokio::io::DuplexStream>);
+    impl mm_plugin::http::ResponseWriter for DuplexWriter {
+        fn header(&mut self) -> mm_plugin::wire::http::Header {
+            Default::default()
+        }
+        fn sync_header(&mut self, _: mm_plugin::wire::http::Header) {}
+        fn write(&mut self, _: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn write_header(&mut self, _: i64) {}
+        fn hijack(&mut self) -> Option<std::io::Result<mm_plugin::hijack::Hijacked>> {
+            Some(Ok(mm_plugin::hijack::Hijacked {
+                conn: Box::new(self.0.take()?),
+                buffered: Vec::new(),
+            }))
+        }
+    }
+
+    let plugin = Arc::new(Keeper::default());
+    let client = rust_plugin_pair(Arc::clone(&plugin)).await;
+    within(client.implemented()).await.unwrap();
+    let (conn, mut peer) = tokio::io::duplex(64);
+    within(client.serve_http(
+        None,
+        Some(Box::new(hijack_request())),
+        None::<std::io::Cursor<Vec<u8>>>,
+        DuplexWriter(Some(conn)),
+    ))
+    .await;
+    let kept = plugin
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the plugin kept its connection");
+    assert!(
+        within(kept.write(b"after")).await.is_err(),
+        "the connection outlived the hook"
+    );
+    // And the host let go of the client's connection with it.
+    let mut received = Vec::new();
+    use tokio::io::AsyncReadExt as _;
+    within(peer.read_to_end(&mut received)).await.unwrap();
+    assert_eq!(received, b"inside");
 }

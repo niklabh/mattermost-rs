@@ -7,6 +7,7 @@
 pub mod wire;
 
 pub mod error;
+pub mod hijack;
 pub mod http;
 pub mod io_rpc;
 pub mod rpc;

@@ -6,8 +6,9 @@
 //!
 //! Arguments and returns are the generated wire structs (`Z_<Method>Args`, `Z_<Method>Returns`),
 //! field for field what Go sends, so nothing is converted on the way through. A plugin process
-//! runs [`client_main`]. The methods in `excludedPluginHooks` are not here yet, apart from
-//! `Implemented` and both halves of `OnActivate`.
+//! runs [`client_main`]. The methods in `excludedPluginHooks` are hand-written beside the
+//! generated ones: `handwritten`, `streams`, `serve_http`, `file_upload` and `driver`, with the
+//! hijacked connection in [`crate::hijack`].
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

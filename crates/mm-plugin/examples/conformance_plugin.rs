@@ -10,6 +10,7 @@
 //! {"hook": "<Name>", "args": <render>}
 //! {"api": "<Name>", "returns": <render>}
 //! {"activated": true}
+//! {"hook": "hijack", ...}       see plugingen/hijack.go
 //! ```
 //!
 //! With `$CONFORMANCE_REFUSE_ACTIVATION` set, `OnActivate` returns an `*model.AppError` instead
@@ -100,6 +101,10 @@ impl HooksHttp for Conformance {
         body: Option<mm_plugin::io_rpc::RemoteReader>,
         writer: mm_plugin::http::RemoteResponseWriter,
     ) -> Result<(), NotImplemented> {
+        if request.as_deref().is_some_and(render::is_hijack) {
+            self.record(render::hijack_script(writer).await);
+            return Ok(());
+        }
         self.echo_http("ServeHTTP", request, body, writer).await;
         Ok(())
     }

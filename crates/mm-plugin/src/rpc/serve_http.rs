@@ -75,9 +75,13 @@ pub(super) fn register_hooks_http<H: HooksHttp>(
                 args.request_body_stream,
             )
             .await?;
+            let connection = writer.client().clone();
             let _ = this
                 .serve_http(args.context, args.request, body, writer)
                 .await;
+            // Go's `defer w.Close()`: the writer, and a connection hijacked through it, end with
+            // the hook.
+            let _ = connection.close().await;
             Ok::<_, ServiceError>(Empty {})
         }
     });
@@ -93,9 +97,13 @@ pub(super) fn register_hooks_http<H: HooksHttp>(
                 args.request_body_stream,
             )
             .await?;
+            let connection = writer.client().clone();
             let _ = this
                 .serve_metrics(args.context, args.request, body, writer)
                 .await;
+            // Go's `defer w.Close()`: the writer, and a connection hijacked through it, end with
+            // the hook.
+            let _ = connection.close().await;
             Ok::<_, ServiceError>(Empty {})
         }
     });
