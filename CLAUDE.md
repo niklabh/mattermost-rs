@@ -90,8 +90,8 @@ five that circle it. What still holds:
 
 - **Never read `reference/mattermost/server/public/model/client4.go`** (8,526 lines, Go REST
   client, out of scope) or any `*_test.go` file in the Go tree. Never read `target/`,
-  `Cargo.lock`, `node_modules/`, or `reference/mattermost/webapp/`. These are scope and safety,
-  not budget — they hold unconditionally.
+  `Cargo.lock`, `node_modules/`, `reference/mattermost/webapp/`, or its copy at `webapp/`. These
+  are scope and safety, not budget — they hold unconditionally.
 - **Read whatever you need to avoid guessing.** Guessing at a field name, a `json:` tag or a
   validation branch is the failure this project exists to prevent. Reading a neighbouring file to
   get a type right needs no justification.

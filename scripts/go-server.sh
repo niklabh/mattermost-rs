@@ -22,8 +22,10 @@
 #
 # # What it is not
 #
-# Not the webapp. `client/` is empty, so the browser UI 404s — the API, the websocket and every
-# parity suite work, and nothing in this repository needs the bundle. The two `error` lines about
+# Not a webapp *builder*. `client/` stays empty until `webapp/` (the pinned SHA's, copied into
+# this repo) has been built; after that `layout` links the bundle in and the browser UI works,
+# through mm-api on :8066 as well as here. Without it the API, the websocket and every parity
+# suite still work — nothing in the test suite needs the bundle. The two `error` lines about
 # `root.html` and the SMTP server on boot are expected and harmless.
 #
 # # The migrations are one-way
@@ -70,6 +72,22 @@ layout() {
   for dir in i18n templates fonts; do
     [ -e "$RUN/$dir" ] || ln -s "$SRC/$dir" "$RUN/$dir"
   done
+  # The browser UI, when it has been built (`cd webapp && npm ci && npm run build`). Each entry
+  # of the bundle is linked into `client/` one by one rather than replacing the directory,
+  # because `client/plugins` must stay a real per-stack directory: the plugin host unpacks
+  # webapp bundles there and `parity::plugin_statuses` reads it. No bundle, no links — `client/`
+  # stays empty and `/` answers Go's `root.html` error, as it always has.
+  #
+  # Bundle names are content-hashed, so a rebuild leaves the previous build's links dangling and
+  # adds new ones only here: **restart this server after rebuilding the webapp.**
+  local dist="$ROOT/webapp/channels/dist"
+  find "$RUN/client" -maxdepth 1 -xtype l -delete
+  if [ -f "$dist/root.html" ]; then
+    for entry in "$dist"/*; do
+      [ "$(basename "$entry")" = plugins ] && continue
+      ln -sfn "$entry" "$RUN/client/$(basename "$entry")"
+    done
+  fi
 }
 
 env_for_server() {
