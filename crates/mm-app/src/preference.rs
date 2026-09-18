@@ -119,12 +119,20 @@ impl App {
     /// since the store's upsert keys on `(UserId, Category, Name)` and would happily accept it.
     /// The check is per entry, not per batch, so one foreign id poisons the request.
     ///
+    /// # The sidebar follows `favorite_channel`
+    ///
+    /// `UpdateSidebarChannelsByPreferences` (preference.go:62), after the save and in its own
+    /// transaction, moves a channel into or out of the user's Favorites categories. Only that
+    /// category: [D-091] once named `direct_channel_show` / `group_channel_show`, but Go's store
+    /// ignores both ("handled client side"), and forwarding them was forwarding for nothing. A
+    /// failure is a **500** `api.preference.update_preferences.update_sidebar.app_error`, with the
+    /// preferences already written.
+    ///
     /// # Not reproduced
     ///
-    /// * `UpdateSidebarChannelsByPreferences` — Go keeps sidebar categories in step with the
-    ///   `direct_channel_show` / `group_channel_show` preferences (preference.go:62). Needs the
-    ///   channel store. See [D-091]; a client that changes DM visibility through us gets a
-    ///   sidebar that does not follow.
+    /// The `PreferencesHaveChanged` plugin hook: plugins run in the Go process, and a write
+    /// served here fires no Go hook — the gap [D-402] records for posts.
+    ///
     /// # The two events
     ///
     /// `sidebar_category_updated` carries an **empty data map** — Go's own comment says "TODO this
@@ -185,6 +193,26 @@ impl App {
                         400,
                     )
                 }
+            })?;
+
+        let favourites: Vec<(&str, &str, bool)> = preferences
+            .iter()
+            .filter(|p| p.category == mm_model::preference::PREFERENCE_CATEGORY_FAVORITE_CHANNEL)
+            .map(|p| (p.user_id.as_str(), p.name.as_str(), p.value != "false"))
+            .collect();
+        self.store()
+            .channel()
+            .update_sidebar_channels_by_preferences(&favourites)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "sidebar sync after a preference save failed");
+                AppError::boxed(
+                    "UpdatePreferences",
+                    "api.preference.update_preferences.update_sidebar.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
             })?;
 
         self.publish(mm_model::websocket_message::WebSocketEvent::new(

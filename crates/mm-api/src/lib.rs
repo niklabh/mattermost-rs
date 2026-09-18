@@ -972,7 +972,10 @@ pub fn router(state: AppState) -> Router {
         // literal route, so it arrives here as a value the handler resolves.
         .route(
             "/api/v4/users/{user_id}/preferences",
-            partially_migrated_with_ids(&state, get(preferences::get_preferences)),
+            partially_migrated_with_ids(
+                &state,
+                get(preferences::get_preferences).put(preferences::update_preferences),
+            ),
         )
         // `{category}` and `{preference_name}` are not id-shaped, so the id-charset middleware
         // leaves them alone; the handlers carry Go's own `[A-Za-z0-9_]+` mux class instead.

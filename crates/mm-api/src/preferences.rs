@@ -1,21 +1,18 @@
 //! Port of `channels/api4/preference.go`: the three reads — `getPreferences` (:24),
 //! `getPreferencesByCategory` (:45), `getPreferenceByCategoryAndName` (:66) — under
 //! `GET /api/v4/users/{user_id}/preferences[/{category}[/name/{preference_name}]]`, and
-//! `updatePreferences` (:90) as `PUT /api/v4/users/me/preferences`.
+//! `updatePreferences` (:90) as `PUT /api/v4/users/{user_id}/preferences` and its `me` literal.
 //!
 //! `updatePreferences` was **the first write served from Rust.** Everything migrated before it
 //! read.
 
-use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::permission::{PERMISSION_EDIT_OTHER_USERS, make_permission_error};
-use mm_model::preference::Preferences;
-use mm_model::preference::{
-    PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW, PREFERENCE_CATEGORY_FLAGGED_POST,
-    PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW, Preference,
+use mm_model::permission::{
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_READ_CHANNEL_CONTENT, make_permission_error,
 };
+use mm_model::preference::{PREFERENCE_CATEGORY_FLAGGED_POST, Preference, Preferences};
 use mm_model::utils::is_valid_alpha_num_hyphen_underscore;
 
 use crate::AppState;
@@ -249,137 +246,78 @@ pub async fn get_preference_by_category_and_name(
 /// `maxUpdatePreferences` (preference.go:14).
 const MAX_UPDATE_PREFERENCES: usize = 100;
 
-/// Categories this handler must **not** serve, each for a different reason.
-///
-/// * `flagged_post` — Go loads the referenced post, loads that post's channel and checks
-///   `PermissionReadChannelContent` (preference.go:118-138). Serving it without that would let a
-///   caller learn whether a post exists in a channel they cannot read.
-/// * `direct_channel_show` / `group_channel_show` — Go's `UpdatePreferences` calls
-///   `UpdateSidebarChannelsByPreferences` (preference.go:62) to keep sidebar categories in step
-///   with DM and GM visibility. The channel store is unported, so serving these here would write
-///   a correct preference row and leave the sidebar permanently wrong — a **persisted**
-///   inconsistency a reload does not fix. Forwarding closes [D-091] without porting anything.
-const FORWARDED_CATEGORIES: &[&str] = &[
-    PREFERENCE_CATEGORY_FLAGGED_POST,
-    PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW,
-    PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW,
-];
-
-/// Port of `updatePreferences` for the `me` case.
-///
-/// # Partial migration, on purpose
-///
-/// Go's handler special-cases the `flagged_post` category: for each such preference it loads the
-/// referenced post, loads that post's channel, and checks `PermissionReadChannelContent`
-/// (preference.go:118-138). None of that machinery is ported. Serving those requests here
-/// **without** the check would let a user flag a post in a channel they cannot read, which is an
-/// information leak — flags are per-user, but the 400-vs-200 answer reveals whether the post
-/// exists.
-///
-/// So a batch containing any `flagged_post` entry is **forwarded to the Go server** instead. That
-/// is the Strangler Fig applied inside a single route rather than across routes: migrate the part
-/// that is verified, forward the rest, and let the client see no difference either way.
-///
-/// # Not reproduced
-///
-/// The audit record, the sidebar sync and the two WebSocket events — see [D-089], [D-091] and
-/// the note on `App::update_preferences`.
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count, forwarded))]
+/// Port of `updatePreferences` (api4/preference.go:90) for the literal `me` path, which axum
+/// routes separately from `{user_id}` (a literal wins over a parameter). Same handler body; see
+/// [`update_preferences_for`].
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
 pub async fn update_preferences_me(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    let (parts, body) = request.into_parts();
-
-    // The body is read once and kept, because it may have to be replayed to the Go server.
-    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            tracing::warn!(error = %err, "could not read the request body");
-            return ApiError::invalid_param("preferences").into_response();
-        }
-    };
-
-    match update_preferences_for(&state, &session, ME, &bytes).await {
-        Some(response) => response,
-        // The part we do not implement goes to the server that does.
-        None => {
-            let request = Request::from_parts(parts, Body::from(bytes));
-            crate::proxy::forward_to_go(State(state), request).await
-        }
+    match read_body(request).await {
+        Ok(bytes) => update_preferences_for(&state, &session, ME, &bytes).await,
+        Err(err) => err.into_response(),
     }
 }
 
+/// Port of `updatePreferences` (api4/preference.go:90) —
+/// `PUT /api/v4/users/{user_id}/preferences`, the spelling the webapp uses: it sends its own id,
+/// never `me`. Until 2026-09-19 only the `me` literal was served, so every preference a browser
+/// saved went to Go; `scripts/demo-traffic.sh` found it.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn update_preferences(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match read_body(request).await {
+        Ok(bytes) => update_preferences_for(&state, &session, &user_id, &bytes).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The body, or the 400 Go gives when it cannot be read.
+async fn read_body(request: Request) -> Result<axum::body::Bytes, ApiError> {
+    axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError::invalid_param("preferences")
+        })
+}
+
 /// Port of `updatePreferences` (api4/preference.go:90) past the body read, for any `{user_id}`
-/// — shared by [`update_preferences_me`] and the local router, which registers the explicit-id
-/// path.
+/// — shared by both HTTP spellings and the local router.
 ///
-/// Go's order, which the `me` handler used to skip because both steps are tautologies for a
-/// caller naming itself: `me` resolves to the session's user **before** `RequireUserId`
+/// Go's order: `me` resolves to the session's user **before** `RequireUserId`
 /// (web/context.go:301) — so on the local socket, where the session has no user, `me` is a 400
 /// naming `user_id` — then `SessionHasPermissionToUser`, the 403 naming `edit_other_users`, and
-/// only then the body. `None` is "hand this to Go" (a [`FORWARDED_CATEGORIES`] entry); the
-/// caller picks the transport, because a local request forwarded over the port would be refused
-/// by `APISessionRequired` where Go's socket answers it.
+/// only then the body.
+///
+/// # `flagged_post`: the post must be readable
+///
+/// For each `flagged_post` entry, in batch order and before anything is written, Go loads the
+/// post named by `Name` — **not deleted** (`GetSinglePost(.., false)`), and any failure, a miss or
+/// a broken database alike, is a 400 naming `preference.name` — then its channel, whose error is
+/// returned as it is, then `SessionHasPermissionToReadChannel`, a 403 naming
+/// `read_channel_content`. So saving a message reveals nothing about a post the caller cannot
+/// read. Go's `channelMap` is never written, so it caches nothing; each entry loads its channel.
+///
+/// Nothing is forwarded, since 2026-09-19. `direct_channel_show` and `group_channel_show` used to
+/// be ([D-091]), for a sidebar sync that Go's store in fact never runs for them; `flagged_post`
+/// was, for this check.
 pub(crate) async fn update_preferences_for(
     state: &AppState,
     session: &AuthenticatedSession,
     user_id: &str,
     bytes: &[u8],
-) -> Option<Response> {
-    let user_id = resolve_me(user_id, session);
-    if let Err(err) = require_id(user_id, "user_id") {
-        return Some(err.into_response());
-    }
-    if !state
-        .app
-        .session_has_permission_to_user(&session.0, user_id)
-        .await
-    {
-        return Some(
-            ApiError::from(*make_permission_error(
-                &session.0,
-                &[&PERMISSION_EDIT_OTHER_USERS],
-            ))
-            .into_response(),
-        );
-    }
-
-    let preferences: Vec<Preference> = match serde_json::from_slice(bytes) {
-        Ok(preferences) => preferences,
-        // Go answers `SetInvalidParamWithErr("preferences", ...)` for a body that will not decode.
-        Err(err) => {
-            tracing::debug!(error = %err, "preferences body did not decode");
-            return Some(ApiError::invalid_param("preferences").into_response());
-        }
-    };
-
-    // `len(preferences) == 0 || len(preferences) > maxUpdatePreferences` (preference.go:109).
-    // Both bounds are Go's, and the empty case is an error rather than a no-op.
-    if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {
-        return Some(ApiError::invalid_param("preferences").into_response());
-    }
-
-    if preferences
-        .iter()
-        .any(|p| FORWARDED_CATEGORIES.contains(&p.category.as_str()))
-    {
-        tracing::Span::current().record("forwarded", true);
-        return None;
-    }
-    tracing::Span::current().record("forwarded", false);
-    tracing::Span::current().record("count", preferences.len());
-
-    let preferences = Preferences(preferences);
-    if let Err(app_error) = state.app.update_preferences(user_id, &preferences).await {
-        return Some(ApiError::from(app_error).into_response());
-    }
-
-    // `ReturnStatusOK` — `{"status":"OK"}` written with `w.Write`, so no trailing newline
-    // (web.go:127). Not an encoder call site; see [D-086].
-    Some(
-        (
+) -> Response {
+    match update_preferences_checked(state, session, user_id, bytes).await {
+        // `ReturnStatusOK` — `{"status":"OK"}` written with `w.Write`, so no trailing newline
+        // (web.go:127). Not an encoder call site; see [D-086].
+        Ok(()) => (
             StatusCode::OK,
             [
                 ("Content-Type", "application/json"),
@@ -388,7 +326,72 @@ pub(crate) async fn update_preferences_for(
             r#"{"status":"OK"}"#,
         )
             .into_response(),
-    )
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn update_preferences_checked(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    user_id: &str,
+    bytes: &[u8],
+) -> Result<(), ApiError> {
+    let user_id = resolve_me(user_id, session);
+    require_id(user_id, "user_id")?;
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let preferences: Vec<Preference> = serde_json::from_slice(bytes).map_err(|err| {
+        // Go answers `SetInvalidParamWithErr("preferences", ...)` for a body that will not decode.
+        tracing::debug!(error = %err, "preferences body did not decode");
+        ApiError::invalid_param("preferences")
+    })?;
+
+    // `len(preferences) == 0 || len(preferences) > maxUpdatePreferences` (preference.go:109).
+    // Both bounds are Go's, and the empty case is an error rather than a no-op.
+    if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {
+        return Err(ApiError::invalid_param("preferences"));
+    }
+
+    for preference in &preferences {
+        if preference.category != PREFERENCE_CATEGORY_FLAGGED_POST {
+            continue;
+        }
+        let post = state
+            .app
+            .get_single_post(&preference.name, false)
+            .await
+            .map_err(|_| ApiError::invalid_param("preference.name"))?;
+        let channel = state
+            .app
+            .get_channel(&post.channel_id)
+            .await
+            .map_err(|err| ApiError::from(*err))?;
+        let (can_read, _) = state
+            .app
+            .session_has_permission_to_read_channel(&session.0, &channel)
+            .await;
+        if !can_read {
+            return Err(ApiError::from(*make_permission_error(
+                &session.0,
+                &[&PERMISSION_READ_CHANNEL_CONTENT],
+            )));
+        }
+    }
+
+    state
+        .app
+        .update_preferences(user_id, &Preferences(preferences))
+        .await
+        .map_err(|err| ApiError::from(*err))
 }
 
 /// `GET /api/v4/users/{user_id}/preferences/delete`, which is **not a route Go registers**.
@@ -516,47 +519,6 @@ mod tests {
             name: "use_military_time".to_owned(),
             value: "true".to_owned(),
         }
-    }
-
-    fn needs_forwarding(preferences: &[Preference]) -> bool {
-        preferences
-            .iter()
-            .any(|p| FORWARDED_CATEGORIES.contains(&p.category.as_str()))
-    }
-
-    /// The safety property of the partial migration: anything touching `flagged_post` must reach
-    /// the server that performs the channel-read permission check.
-    #[test]
-    fn a_flagged_post_entry_forces_the_batch_to_go() {
-        assert!(needs_forwarding(&[preference(
-            PREFERENCE_CATEGORY_FLAGGED_POST
-        )]));
-
-        // Mixed batches too — the check is per entry, so one flagged post sends the whole batch.
-        assert!(needs_forwarding(&[
-            preference("display_settings"),
-            preference(PREFERENCE_CATEGORY_FLAGGED_POST),
-        ]));
-    }
-
-    /// The sidebar-bearing categories go to Go as well, because the sidebar sync behind them is
-    /// unported and skipping it would persist an inconsistency rather than merely miss an event.
-    #[test]
-    fn the_sidebar_categories_are_forwarded_too() {
-        assert!(needs_forwarding(&[preference(
-            PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW
-        )]));
-        assert!(needs_forwarding(&[preference(
-            PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW
-        )]));
-    }
-
-    #[test]
-    fn ordinary_categories_are_served_here() {
-        assert!(!needs_forwarding(&[
-            preference("display_settings"),
-            preference("advanced_settings"),
-        ]));
     }
 
     /// Both of Go's bounds, including the one that is easy to read as a no-op: an empty batch is

@@ -1,0 +1,22 @@
+# Mutation plan for PUT /users/{user_id}/preferences (2026-09-19): the handler's flagged_post
+# checks, the app's favourite filter, and the store's UpdateSidebarChannelsByPreferences.
+#
+#   scripts/mutate-batch.sh scripts/mutations/preferences-put.plan
+#
+# Every line runs the parity::preferences module. Parameter names are not on the wire (D-092),
+# so no line renames one. The two controls are a log-message edit and a binding rename.
+favourite-only-exact-true	crates/mm-app/src/preference.rs	p.value != "false"	p.value == "true"	api	preferences::
+sync-reads-the-wrong-category	crates/mm-app/src/preference.rs	.filter(|p| p.category == mm_model::preference::PREFERENCE_CATEGORY_FAVORITE_CHANNEL)	.filter(|p| p.category == mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST)	api	preferences::
+sync-failure-is-a-400	crates/mm-app/src/preference.rs	"api.preference.update_preferences.update_sidebar.app_error",\n                    None,\n                    String::new(),\n                    500,	"api.preference.update_preferences.update_sidebar.app_error",\n                    None,\n                    String::new(),\n                    400,	api	preferences::
+unfavourite-never-removes	crates/mm-store/src/channel_store.rs	            if !favourite {	            if !favourite && false {	api	preferences::
+favourite-sorts-last	crates/mm-store/src/channel_store.rs	COALESCE(MIN(sidebarchannels.sortorder) - 10, 0)	COALESCE(MAX(sidebarchannels.sortorder) + 10, 0)	api	preferences::
+dm-joins-no-team	crates/mm-store/src/channel_store.rs	AND ($4 = '' OR sidebarcategories.teamid = $4)	AND sidebarcategories.teamid = $4	api	preferences::
+team-channel-joins-every-team	crates/mm-store/src/channel_store.rs	AND ($4 = '' OR sidebarcategories.teamid = $4)	AND ($4 = $4 OR sidebarcategories.teamid = $4)	api	preferences::
+repeat-favourite-not-skipped	crates/mm-store/src/channel_store.rs	                   AND sidebarchannels.channelid IS NULL	                   AND TRUE	api	preferences::
+flag-accepts-a-deleted-post	crates/mm-api/src/preferences.rs	.get_single_post(&preference.name, false)	.get_single_post(&preference.name, true)	api	preferences::
+flag-skips-the-read-check	crates/mm-api/src/preferences.rs	        if !can_read {	        if false {	api	preferences::
+flag-check-on-the-wrong-entries	crates/mm-api/src/preferences.rs	if preference.category != PREFERENCE_CATEGORY_FLAGGED_POST {	if preference.category == PREFERENCE_CATEGORY_FLAGGED_POST {	api	preferences::
+explicit-id-put-unregistered	crates/mm-api/src/lib.rs	get(preferences::get_preferences).put(preferences::update_preferences),	get(preferences::get_preferences),	api	preferences::
+sync-skipped-entirely	crates/mm-app/src/preference.rs	.update_sidebar_channels_by_preferences(&favourites)	.update_sidebar_channels_by_preferences(&[])	api	preferences::
+control-log-message	crates/mm-app/src/preference.rs	"sidebar sync after a preference save failed"	"sidebar sync failed after a preference save"	api	preferences::
+control-binding-rename	crates/mm-api/src/preferences.rs	let (can_read, _) = state	let (can_read, _is_member) = state	api	preferences::

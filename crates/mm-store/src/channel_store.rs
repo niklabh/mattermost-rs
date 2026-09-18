@@ -166,6 +166,26 @@ pub trait ChannelStore {
         preferences: &[(String, String)],
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.UpdateSidebarChannelsByPreferences`
+    /// (channel_store_categories.go:822).
+    ///
+    /// `favourites` is the batch's `favorite_channel` entries as `(user_id, channel_id,
+    /// favourite)`, where `favourite` is Go's `Value != "false"` — **anything but the exact string
+    /// `false` favourites**, including `""` and `False`. Go's loop skips every other category, so
+    /// the caller filters; as in [`Self::delete_sidebar_channels_by_preferences`], nothing else of
+    /// the preference is read.
+    ///
+    /// Despite Go's name, **only favourites**: its own comment says DMs and GMs are "handled
+    /// client side", so `direct_channel_show` and `group_channel_show` touch no sidebar row.
+    ///
+    /// One transaction for the batch. A favourited channel that does not exist fails it whole
+    /// (Go's `transaction.Get` on no rows), after the preferences were already saved in their own
+    /// transaction — the partial write is Go's.
+    fn update_sidebar_channels_by_preferences(
+        &self,
+        favourites: &[(&str, &str, bool)],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlChannelStore.Get` (channel_store.go:985).
     fn get(
         &self,
@@ -983,6 +1003,117 @@ impl ChannelStore for SqlChannelStore {
 
         tx.commit().await.map_err(|source| StoreError::Db {
             context: "DeleteSidebarChannelsByPreferences: commit_transaction".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip_all, fields(favourites = favourites.len()))]
+    async fn update_sidebar_channels_by_preferences(
+        &self,
+        favourites: &[(&str, &str, bool)],
+    ) -> Result<(), StoreError> {
+        if favourites.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "UpdateSidebarChannelsByPreferences: begin_transaction".to_owned(),
+            source,
+        })?;
+
+        for &(user_id, channel_id, favourite) in favourites {
+            if !favourite {
+                // `removeSidebarEntriesForPreferenceT`: the Favorites category only, as on delete.
+                sqlx::query!(
+                    r#"
+                    DELETE FROM sidebarchannels
+                     USING sidebarcategories
+                     WHERE sidebarchannels.categoryid = sidebarcategories.id
+                       AND sidebarchannels.userid = $1
+                       AND sidebarchannels.channelid = $2
+                       AND sidebarcategories.type = $3
+                    "#,
+                    user_id,
+                    channel_id,
+                    mm_model::sidebar_category::SIDEBAR_CATEGORY_FAVORITES,
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: "Failed to remove sidebar entries for preference".to_owned(),
+                    source,
+                })?;
+                continue;
+            }
+
+            // `addChannelToFavoritesCategoryT`. The channel's team scopes the categories: a team
+            // channel joins only that team's Favorites, a DM or GM (`TeamId = ''`) joins every
+            // team's. `fetch_one`, so a missing channel is an error, as Go's `Get` is.
+            let team_id = sqlx::query_scalar!(
+                r#"SELECT teamid AS "team_id!" FROM channels WHERE id = $1"#,
+                channel_id,
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("Failed to get favorited channel with id={channel_id}"),
+                source,
+            })?;
+
+            // Favorites categories of the user's that do not already hold the channel.
+            let category_ids: Vec<String> = sqlx::query_scalar!(
+                r#"
+                SELECT sidebarcategories.id AS "id!"
+                  FROM sidebarcategories
+                  LEFT JOIN sidebarchannels
+                    ON sidebarcategories.id = sidebarchannels.categoryid
+                   AND sidebarchannels.channelid = $1
+                 WHERE sidebarcategories.userid = $2
+                   AND sidebarcategories.type = $3
+                   AND sidebarchannels.channelid IS NULL
+                   AND ($4 = '' OR sidebarcategories.teamid = $4)
+                "#,
+                channel_id,
+                user_id,
+                mm_model::sidebar_category::SIDEBAR_CATEGORY_FAVORITES,
+                team_id,
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "Failed to get Favorites sidebar categories".to_owned(),
+                source,
+            })?;
+            if category_ids.is_empty() {
+                continue;
+            }
+
+            // First in each category: ten below the smallest sort order there, or 0 when empty.
+            sqlx::query!(
+                r#"
+                INSERT INTO sidebarchannels (channelid, categoryid, userid, sortorder)
+                SELECT $1, sidebarcategories.id, $2,
+                       COALESCE(MIN(sidebarchannels.sortorder) - 10, 0)
+                  FROM sidebarcategories
+                  LEFT JOIN sidebarchannels
+                    ON sidebarcategories.id = sidebarchannels.categoryid
+                 WHERE sidebarcategories.id = ANY($3)
+                 GROUP BY sidebarcategories.id
+                "#,
+                channel_id,
+                user_id,
+                &category_ids,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "Failed to add sidebar entries for favorited channel".to_owned(),
+                source,
+            })?;
+        }
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "UpdateSidebarChannelsByPreferences: commit_transaction".to_owned(),
             source,
         })
     }
