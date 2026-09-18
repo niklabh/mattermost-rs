@@ -16,7 +16,6 @@
 //! The drift checks at the bottom fail when the Go tree, the IDL, the fixtures or the generated
 //! Rust fall out of step.
 
-use std::path::Path;
 use std::process::Command;
 
 use gobwire::{Decode, Dynamic, Encode, Encoder, Value};
@@ -123,7 +122,7 @@ fn wire_structs_round_trip_through_rust_and_go() {
         .collect();
     for (name, round_trip) in variants {
         let want = &expected[&name];
-        let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();
+        let stream = std::fs::read(oracle_dir().join(format!("{name}.gob"))).unwrap();
         match render_stream(&stream) {
             Ok(got) if &got == want => {}
             Ok(got) => failures.push(format!(
@@ -208,8 +207,7 @@ fn registered_types_round_trip_through_their_generated_types() {
     let mut seen = std::collections::BTreeMap::<&str, usize>::new();
     for (name, _) in WIRE {
         for variant in VARIANTS {
-            let stream =
-                std::fs::read(fixtures().join(format!("gob/{name}{variant}.gob"))).unwrap();
+            let stream = std::fs::read(oracle_dir().join(format!("{name}{variant}.gob"))).unwrap();
             let d: Dynamic = first_value(&stream, |dec| dec.decode()).unwrap();
             let mut found = Vec::new();
             interfaces(&d.value, &mut found);
@@ -239,29 +237,8 @@ fn registered_types_round_trip_through_their_generated_types() {
     }
 }
 
-fn same_tree(a: &Path, b: &Path) -> Vec<String> {
-    let mut diffs = Vec::new();
-    let names = |d: &Path| {
-        let mut v: Vec<_> = std::fs::read_dir(d)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
-        v.sort();
-        v
-    };
-    let (na, nb) = (names(a), names(b));
-    if na != nb {
-        diffs.push(format!("file lists differ: {} vs {}", na.len(), nb.len()));
-    }
-    for n in na.iter().filter(|n| nb.contains(n)) {
-        if std::fs::read(a.join(n)).unwrap() != std::fs::read(b.join(n)).unwrap() {
-            diffs.push(format!("{} differs", n.to_string_lossy()));
-        }
-    }
-    diffs
-}
-
-/// The IDL and the gob oracle match what the pinned Go tree produces now.
+/// The committed IDL matches what the pinned Go tree produces now. The gob oracle is not
+/// committed: it is generated from the same tree for every run (`common::oracle_dir`).
 #[test]
 fn fixtures_match_the_go_tree() {
     let dir = scratch("plugin-idl");
@@ -279,20 +256,6 @@ fn fixtures_match_the_go_tree() {
         strip(fresh) == strip(committed),
         "fixtures/plugin/idl.json is stale: regenerate with `cd reference/dump && TZ=Asia/Kolkata go run ./plugingen idl ../../fixtures/plugin/idl.json`, then scripts/plugingen.py"
     );
-
-    // Regenerate **over a copy** of what is committed: a stream carrying a map with more than
-    // one key is encoded in Go's randomised map order, so the generator keeps a file that still
-    // decodes the same way (`writeStable`). The contract is that a run changes nothing, not that
-    // an empty directory comes out byte for byte the same.
-    let gob = dir.join("gob");
-    std::fs::create_dir_all(&gob).unwrap();
-    for entry in std::fs::read_dir(fixtures().join("gob")).unwrap() {
-        let entry = entry.unwrap();
-        std::fs::copy(entry.path(), gob.join(entry.file_name())).unwrap();
-    }
-    run_plugingen(&["gob".as_ref(), gob.as_os_str()]);
-    let diffs = same_tree(&gob, &fixtures().join("gob"));
-    assert!(diffs.is_empty(), "fixtures/plugin/gob is stale: {diffs:?}");
 }
 
 /// io_rpc's framing is Go's `binary.PutVarint`, byte for byte.

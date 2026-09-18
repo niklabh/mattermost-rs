@@ -167,12 +167,14 @@ fn run_go_host(name: &str, env: &[(&str, &str)]) -> (Transcript, Transcript) {
 
     let mut cmd = Command::new(plugingen());
     cmd.arg("host")
-        .arg(fixtures().join("gob"))
+        .arg(oracle_dir())
         .arg(dir.join("plugins"))
         .arg("conformance")
         .current_dir(root().join("reference/dump"))
         .env("TZ", "Asia/Kolkata")
         .env("PLUGINGEN_TRANSCRIPT", &go_transcript)
+        // Inherited by the plugin process, which reads the same oracle.
+        .env("MM_PLUGIN_GOB_DIR", oracle_dir())
         // Inherited by the plugin process, which the host launches.
         .env("CONFORMANCE_TRANSCRIPT", &rust_transcript);
     for (k, v) in env {

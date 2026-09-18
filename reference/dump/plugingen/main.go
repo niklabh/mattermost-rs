@@ -2,7 +2,8 @@
 // the gob oracle its generated types are tested against.
 //
 //	plugingen idl <out.json>   every hook and API method, every wire struct, every type they reach
-//	plugingen gob <dir>        two gob streams per wire struct (full, sparse), plus expected.json
+//	plugingen gob <dir>        two gob streams per wire struct (full, sparse), plus expected.json.
+//	                           Not committed: crates/mm-plugin's tests generate it into target/.
 //	plugingen echo <dir>       decode every <Z_name>[.sparse].gob in dir as that struct; print renders
 //	plugingen plugin <dir>     serve the RPC conformance plugin (conformance.go) from those fixtures
 //	plugingen host <dir> <plugins> <id>   drive a plugin through plugin.Environment (host.go)
@@ -1190,26 +1191,6 @@ func varints() map[string]string {
 	return out
 }
 
-// writeStable writes a stream unless the file already holds one that decodes the same way.
-//
-// Go encodes a map in its randomised iteration order, so a stream carrying a map with more than
-// one key differs on every run. Keeping a file that still renders identically leaves the
-// generator deterministic in git terms (reference/dump/gob does the same).
-func writeStable(path, name string, stream []byte) error {
-	if old, err := os.ReadFile(path); err == nil && !bytes.Equal(old, stream) {
-		want, errWant := decodeRender(name, stream)
-		got, errGot := decodeRender(name, old)
-		if errWant == nil && errGot == nil {
-			a, _ := json.Marshal(want)
-			b, _ := json.Marshal(got)
-			if bytes.Equal(a, b) {
-				return nil
-			}
-		}
-	}
-	return os.WriteFile(path, stream, 0o644)
-}
-
 // gobOracle writes <dir>/<Z_name>.gob and <dir>/<Z_name>.sparse.gob for every wire struct, and
 // <dir>/expected.json with how Go renders each after decoding it back.
 func gobOracle(dir string) error {
@@ -1234,14 +1215,10 @@ func gobOracle(dir string) error {
 			if err := gob.NewEncoder(&buf).Encode(v.Addr().Interface()); err != nil {
 				return fmt.Errorf("%s: %w", key, err)
 			}
-			if err := writeStable(filepath.Join(dir, key+".gob"), name, buf.Bytes()); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, key+".gob"), buf.Bytes(), 0o644); err != nil {
 				return err
 			}
-			written, err := os.ReadFile(filepath.Join(dir, key+".gob"))
-			if err != nil {
-				return err
-			}
-			r, err := decodeRender(name, written)
+			r, err := decodeRender(name, buf.Bytes())
 			if err != nil {
 				return err
 			}
@@ -1263,14 +1240,10 @@ func gobOracle(dir string) error {
 			if err := gob.NewEncoder(&buf).Encode(v.Addr().Interface()); err != nil {
 				return fmt.Errorf("%s.safe: %w", name, err)
 			}
-			if err := writeStable(filepath.Join(dir, name+".safe.gob"), name, buf.Bytes()); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, name+".safe.gob"), buf.Bytes(), 0o644); err != nil {
 				return err
 			}
-			written, err := os.ReadFile(filepath.Join(dir, name+".safe.gob"))
-			if err != nil {
-				return err
-			}
-			r, err := decodeRender(name, written)
+			r, err := decodeRender(name, buf.Bytes())
 			if err != nil {
 				return err
 			}

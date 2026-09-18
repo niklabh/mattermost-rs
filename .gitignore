@@ -42,3 +42,9 @@ __pycache__/
 
 # A worktree pins itself to a stack with this file; see scripts/worktree.sh.
 .mmrs-stack
+
+# The plugin RPC's gob oracle: two Go-written streams per wire struct plus their renders, about
+# 6 MB. Generated from the committed fixtures/plugin/idl.json by `plugingen gob`, which
+# crates/mm-plugin's tests run into target/ themselves. A copy here is stale output from a manual
+# run, not a fixture. (fixtures/gob/, gobwire's hand-picked cases, stays committed.)
+/fixtures/plugin/gob/

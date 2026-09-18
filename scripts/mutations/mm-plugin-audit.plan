@@ -3,7 +3,7 @@
 #
 #   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-audit.plan
 #
-# The oracle is fixtures/plugin/gob/Z_LogAuditRec*Args.safe.gob, written by Go. Every line filters
+# The oracle is Z_LogAuditRec*Args.safe.gob, which `plugingen gob` writes into target/ per run. Every line filters
 # to `sdk_` for the marshalling (only a Rust plugin's own record exercises it: in the rpc suite
 # the Go plugin sends its own, already converted) and `rpc_` for the rest. The decisions: the json: tags and their omitempty and "-" forms, that every
 # JSON number comes back a float64, that a null comes back a nil interface, and that all four of a

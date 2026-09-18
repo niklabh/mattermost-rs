@@ -26,6 +26,13 @@ use serde_json::{Value as Json, json};
 
 #[path = "../tests/common/render.rs"]
 mod render;
+
+/// The gob oracle the test that launched this plugin generated.
+fn oracle_dir() -> std::path::PathBuf {
+    std::env::var_os("MM_PLUGIN_GOB_DIR")
+        .expect("MM_PLUGIN_GOB_DIR is not set: the conformance plugin reads the test's oracle")
+        .into()
+}
 use render::{fixture, render_typed, replacement_file, stream_digest, stream_payload};
 
 struct Conformance {

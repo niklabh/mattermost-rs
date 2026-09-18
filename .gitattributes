@@ -1,0 +1,2 @@
+# Go gob streams are binary: no text diffs, no line-ending conversion.
+*.gob binary

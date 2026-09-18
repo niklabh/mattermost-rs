@@ -50,10 +50,32 @@ pub fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// The gob oracle, generated once per test binary: two streams per wire struct and
+/// `expected.json`, all written by `plugingen gob` from the pinned Go tree.
+///
+/// It is not committed. Every stream is a deterministic function of the IDL, which is committed
+/// and checked against the Go tree, so the bytes would add nothing a reviewer could read — and
+/// every suite that reads them builds the Go oracle anyway.
+pub fn oracle_dir() -> PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        // One directory per suite, reused across rebuilds: cargo's binary name ends in a hash that
+        // changes with every build, which would leave a 6 MB copy behind each time.
+        let binary = std::env::current_exe().unwrap();
+        let stem = binary.file_stem().unwrap().to_string_lossy().into_owned();
+        let suite = stem
+            .rsplit_once('-')
+            .map_or(stem.as_str(), |(suite, _)| suite);
+        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("plugin-gob-{suite}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        run_plugingen(&["gob".as_ref(), dir.as_os_str()]);
+        dir
+    })
+    .clone()
+}
+
 pub fn expected() -> Map<String, Json> {
-    let text = std::fs::read_to_string(fixtures().join("gob/expected.json")).unwrap_or_else(|e| {
-        panic!("{e}; regenerate with `cd reference/dump && TZ=Asia/Kolkata go run ./plugingen gob ../../fixtures/plugin/gob`")
-    });
+    let text = std::fs::read_to_string(oracle_dir().join("expected.json")).unwrap();
     serde_json::from_str(&text).unwrap()
 }
 

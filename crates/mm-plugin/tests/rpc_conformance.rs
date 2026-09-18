@@ -480,7 +480,7 @@ async fn rpc_rust_host_drives_the_go_plugin() {
 
     let mut cmd = PluginCommand::new(plugingen())
         .arg("plugin")
-        .arg(fixtures().join("gob"));
+        .arg(oracle_dir());
     cmd.env
         .push(("PLUGINGEN_TRANSCRIPT".into(), transcript.clone().into()));
     cmd.current_dir = Some(root().join("reference/dump"));

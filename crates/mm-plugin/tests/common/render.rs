@@ -18,6 +18,13 @@ pub fn fixtures() -> PathBuf {
     root().join("fixtures/plugin")
 }
 
+/// Where the Go-written gob oracle is: generated, never committed. The module that includes this
+/// file says where — the test suites generate it into `target/`, and the example plugin is told
+/// by the test that launched it.
+pub fn gob_dir() -> PathBuf {
+    super::oracle_dir()
+}
+
 /// The first complete value of a stream.
 pub fn first_value<T>(
     stream: &[u8],
@@ -245,7 +252,7 @@ pub fn render_typed<T: Encode + ?Sized>(value: &T) -> Json {
 /// Decode a fixture stream **into** `seed`, as a merging client does: a field the stream omits
 /// keeps the seed's value.
 pub fn fixture_into<T: gobwire::Decode + Send + 'static>(name: &str, seed: T) -> T {
-    let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();
+    let stream = std::fs::read(gob_dir().join(format!("{name}.gob"))).unwrap();
     let mut value = Some(seed);
     first_value(&stream, |dec| {
         let mut taken = value.take().expect("one value");
@@ -262,8 +269,8 @@ pub fn merged<T: gobwire::Decode + Encode + Send + 'static>(name: &str, seed: T)
     render_typed(&fixture_into(name, seed))
 }
 
-/// Decode a fixture stream (`fixtures/plugin/gob/<name>.gob`) into `T`.
+/// Decode an oracle stream (`<gob_dir>/<name>.gob`) into `T`.
 pub fn fixture<T: gobwire::Decode + Default + Send + 'static>(name: &str) -> T {
-    let stream = std::fs::read(fixtures().join(format!("gob/{name}.gob"))).unwrap();
+    let stream = std::fs::read(gob_dir().join(format!("{name}.gob"))).unwrap();
     first_value(&stream, |dec| dec.decode()).unwrap()
 }

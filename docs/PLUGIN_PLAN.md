@@ -305,8 +305,14 @@ streams per wire struct. The full one sets all 2,951 reachable fields; only the 
 `io.ReadCloser` bodies stay nil, because they are never sent. The sparse one leaves pointers
 nil. Every stream decodes into its generated type, re-encodes, and Go decodes it back the same.
 Every registered interface value also downcasts into its generated type. Drift checks
-regenerate the IDL, the streams and the Rust. Mutations: 11 of 11 caught, and 2 controls
-survived. The first run found a gap: `ErrorString` only crosses inside an interface, so no test
+regenerate the IDL and the Rust against what is committed. Mutations: 11 of 11 caught, and 2
+controls survived.
+
+*Revised 2026-09-18: the gob streams are no longer committed.* Only `fixtures/plugin/idl.json`
+is. Every stream is a deterministic function of it, so 1,268 binary files (about 6 MB, most of
+the PR by file count) added nothing a reviewer could read, and every suite that reads them builds
+the Go oracle anyway. The tests run `plugingen gob` into `target/` once per suite
+(`common::oracle_dir`). The API surface still drifts visibly, as a diff to the committed IDL. The first run found a gap: `ErrorString` only crosses inside an interface, so no test
 exercised its generated type.
 
 **`mm-plugin` RPC layer: DONE 2026-09-17 (second part of Phase 3).** Generated from the same IDL:
