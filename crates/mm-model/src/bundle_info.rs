@@ -2,9 +2,8 @@
 //!
 //! # Not ported
 //!
-//! `WrapLogger` belongs to the logging layer, and `BundleInfoForPath` calls `FindManifest`, which
-//! reads YAML off disk — see the note in `manifest.rs`. What remains is the struct, which is what
-//! the plugin environment passes around.
+//! `WrapLogger` belongs to the logging layer. `BundleInfoForPath` reads the disk, so it lives with
+//! the plugin environment as `mm_plugin::environment::bundle_info_for_path`.
 
 use crate::manifest::Manifest;
 

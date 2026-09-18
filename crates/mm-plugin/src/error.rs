@@ -87,6 +87,39 @@ impl Sentinel {
     }
 }
 
+impl PluginError {
+    /// The error's `Error()` text as Go renders it, which is what a status or a log shows.
+    ///
+    /// `*model.AppError` joins `Where`, `Message` and `DetailedError` (utils.go, `Error`), leaving
+    /// out a message that is `<untranslated>`; `*pq.Error` prefixes `pq: `.
+    pub fn go_error(&self) -> String {
+        match self {
+            PluginError::App(e) => {
+                let untranslated = e.message == "<untranslated>";
+                let mut text = String::new();
+                if !e.r#where.is_empty() {
+                    text.push_str(&e.r#where);
+                    text.push_str(": ");
+                }
+                if !untranslated {
+                    text.push_str(&e.message);
+                }
+                if !e.detailed_error.is_empty() {
+                    if !untranslated {
+                        text.push_str(", ");
+                    }
+                    text.push_str(&e.detailed_error);
+                }
+                text
+            }
+            PluginError::Postgres(e) => format!("pq: {}", e.message),
+            PluginError::Sentinel(s) => s.message().to_owned(),
+            PluginError::Message(m) => m.clone(),
+            PluginError::Other(v) => v.name.clone(),
+        }
+    }
+}
+
 /// What the far side made of an error field (client_rpc.go, `decodableError`).
 ///
 /// `None` is a nil error. An `ErrorString` whose code names a sentinel comes back as that
@@ -136,6 +169,26 @@ pub fn encodable_error(error: Option<&PluginError>) -> Option<Interface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// utils.go, `AppError.Error`: each part only when present, and an untranslated message
+    /// drops out with its separator.
+    #[test]
+    fn go_error_renders_an_app_error_as_go_does() {
+        let app = |r#where: &str, message: &str, detailed: &str| {
+            PluginError::App(Box::new(AppError {
+                r#where: r#where.into(),
+                message: message.into(),
+                detailed_error: detailed.into(),
+                ..Default::default()
+            }))
+            .go_error()
+        };
+        assert_eq!(app("W", "m", "d"), "W: m, d");
+        assert_eq!(app("", "m", ""), "m");
+        assert_eq!(app("W", "<untranslated>", "d"), "W: d");
+        assert_eq!(app("", "<untranslated>", ""), "");
+        assert_eq!(PluginError::Message("x".into()).go_error(), "x");
+    }
 
     #[test]
     fn a_sentinel_survives_the_round_trip() {

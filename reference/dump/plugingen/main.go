@@ -1282,7 +1282,7 @@ func echo(dir string) error {
 
 func main() {
 	if len(os.Args) < 3 || (os.Args[1] == "host") != (len(os.Args) == 5) {
-		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | gob <dir> | echo <dir> | plugin <fixtures> | host <fixtures> <plugin-dir> <plugin-id>")
+		fmt.Fprintln(os.Stderr, "usage: plugingen idl <out.json> | gob <dir> | echo <dir> | plugin <fixtures> | host <fixtures> <plugin-dir> <plugin-id> | env <root>")
 		os.Exit(2)
 	}
 	idl, err := buildIDL()
@@ -1302,6 +1302,8 @@ func main() {
 			err = servePlugin(os.Args[2], idl)
 		case "host":
 			err = runHost(os.Args[2], os.Args[3], os.Args[4], idl)
+		case "env":
+			err = runEnv(os.Args[2])
 		default:
 			err = fmt.Errorf("unknown mode %q", os.Args[1])
 		}

@@ -5,8 +5,8 @@
 //! - **`PluginSetting.Hosting` and `PluginSetting.Secret` have no `yaml:` tag.** Every other
 //!   field in the file carries a `yaml:` tag mirroring its `json:` tag; these two do not, so a
 //!   `plugin.yaml` reaches them only through goccy's default (lowercased field name), not through
-//!   `hosting`/`secret` as the JSON side would suggest. Nothing here parses YAML, but the JSON
-//!   tags are what this port pins.
+//!   `hosting`/`secret` as the JSON side would suggest. `mm_plugin::environment::find_manifest` parses
+//!   YAML into this type through its JSON names, which agree for every field.
 //! - **`isValid` is a *lenient* validator with one strict half.** `Version` and
 //!   `MinServerVersion` are parsed with `semver.StrictNewVersion` when non-empty — which rejects
 //!   `1.2`, `v1.2.3` and `01.2.3` — while `MeetMinServerVersion` parses the *server's* version
@@ -15,10 +15,9 @@
 //!
 //! # Not ported
 //!
-//! `FindManifest` reads `plugin.yml`/`plugin.yaml`/`plugin.json` off disk and needs a YAML
-//! parser; it is filesystem plumbing rather than a wire format, and `mm-model` has neither a YAML
-//! dependency nor any other filesystem access. `BundleInfoForPath` in `bundle_info.rs` is
-//! deferred with it.
+//! `FindManifest` reads `plugin.yml`/`plugin.yaml`/`plugin.json` off disk; it is filesystem
+//! plumbing rather than a wire format, so it lives with the plugin environment in
+//! `mm_plugin::environment::find_manifest`, as does `BundleInfoForPath`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -424,8 +423,9 @@ impl Manifest {
     /// library code is forbidden here, so an unparseable `server_version` is an `Err` instead —
     /// every input Go survives answers identically.
     pub fn meet_min_server_version(&self, server_version: &str) -> Result<bool, ManifestError> {
+        // Go answers a bare `errors.New` here, unlike `IsValid`, which wraps the parser's cause.
         let min_server_version = StrictVersion::parse_detailed(&self.min_server_version)
-            .map_err(ManifestError::UnparseableMinServerVersion)?;
+            .map_err(|_| ManifestError::MinServerVersionUnparseable)?;
         let sv = StrictVersion::parse_lenient(server_version)
             .ok_or_else(|| ManifestError::UnparseableServerVersion(server_version.to_string()))?;
         Ok(sv >= min_server_version)
@@ -499,6 +499,9 @@ pub enum ManifestError {
     UnparseableVersion(VersionParseError),
     #[error("failed to parse MinServerVersion: {0}")]
     UnparseableMinServerVersion(VersionParseError),
+    /// `MeetMinServerVersion`'s own failure, which carries no cause (manifest.go:304).
+    #[error("failed to parse MinServerVersion")]
+    MinServerVersionUnparseable,
     /// Not reachable in Go: `semver.MustParse` panics instead. See
     /// [`Manifest::meet_min_server_version`].
     #[error("failed to parse server version: {0}")]
@@ -1173,13 +1176,8 @@ mod sweep_go_parity {
                 (Ok(_), Some(e)) => panic!("{name}: Go failed with {e}, the port succeeded"),
                 (Err(e), None) => panic!("{name}: Go succeeded, the port failed with {e}"),
                 (Err(e), Some(expected)) => {
-                    // Go wraps with `errors.Wrap`, so its message has the cause appended; the
-                    // port's message is the prefix Go's starts with.
-                    let expected = expected.as_str().unwrap();
-                    assert!(
-                        e.to_string().starts_with(expected),
-                        "{name}: {e:?} should start with {expected:?}"
-                    );
+                    // A bare `errors.New`: the parser's cause is not in Go's message.
+                    assert_eq!(e.to_string(), expected.as_str().unwrap(), "{name}");
                 }
             }
         }
