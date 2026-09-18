@@ -23,7 +23,15 @@ up:
   what `mmctl --local` talks to. It is a *second* router with its own proxy leg, so an unmigrated
   local route still reaches the Go server's socket rather than a 404;
 - **`GET /api/v4/websocket`** — the upgrade, both pumps, and the fan-out hub in
-  `crates/mm-app/src/hub.rs`, `ShouldSendEvent`'s addressing rules included.
+  `crates/mm-app/src/hub.rs`, `ShouldSendEvent`'s addressing rules included;
+- **the plugin host**, opt-in with `MMRS_PLUGIN_HOST=rust` — Go plugins run as child processes of
+  `mm-api`, spoken to over HashiCorp go-plugin's net/rpc and `encoding/gob`, reimplemented in
+  `crates/{gobwire,go-netrpc,goplugin,mm-plugin}` (plan: [`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)).
+  With the default `go`, plugins stay in the Go server and their routes forward.
+
+And the **stock Mattermost webapp**, copied into [`webapp/`](webapp/) from the same pinned commit
+as the Go reference, drives all of it from a browser: see
+[Running the whole stack](#running-the-whole-stack-browser-included).
 
 **No progress count lives in this file.** A README carrying counts is a README that is quietly
 wrong most of the time, and every merged route would otherwise drag an unrelated edit along with
@@ -37,8 +45,13 @@ scripts/routes.py --todo --local   # ... including the unix-socket routes
 ```
 
 The denominator is **every** api4 route+method pair, the local-mode socket API and the
-licensed/enterprise handlers included. A route no client calls is deferred, not dropped: the
-strangler proxy is test apparatus, and the end state is a Go server that is not running.
+licensed/enterprise handlers included. A route no client calls is deferred, not dropped.
+
+**The end state is everything portable in Rust, and Go only where the code is private.** The
+Enterprise implementations (SAML, LDAP, the access-control policy engine, the cluster bus, message
+export…) are not in the public tree, so the calls that need them forward to Go permanently. Each
+such forward is named in the handler's doc comment and in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md);
+everything public around it, gates and checks in Go's order included, is ported.
 
 **[`MIGRATION.md`](MIGRATION.md) is the authoritative ledger** — per-route status, test counts,
 and the non-obvious Go semantics each translation turned up. Progress is tracked there and only
@@ -129,8 +142,14 @@ surviving mutations in their own header, so a later reader does not re-litigate 
 
 ## Getting started
 
-Requires Rust 1.85+ (edition 2024). Go 1.26+ is needed to regenerate fixtures **and** to build the
-forward target — the Go server is compiled from the pinned source, not pulled as an image.
+| Tool | Version | Needed for |
+|---|---|---|
+| Rust | 1.85+ (edition 2024) | everything |
+| Go | 1.26+ | building the Go server (the forward target) and regenerating fixtures |
+| Docker + Compose | any recent | Postgres |
+| Node.js / npm | 24 / 11 (`webapp/package.json` `engines`) | building the browser UI only |
+
+The Go server is compiled from the pinned source, not pulled as an image.
 
 ```sh
 # The Go source is a read-only reference, pinned to a fixed commit and never vendored.
@@ -148,11 +167,64 @@ cargo test --workspace
 tests with no database and no Go clone at all. The suite runs in well under a minute; the handful
 of tests ignored for wall clock run under `scripts/slow-tests.sh`.
 
+### Running the whole stack, browser included
+
+Four processes: Postgres in Docker, the pinned Go server, `mm-api` in front of it, and the webapp
+bundle, which the Go server serves as static files. **Browse to `mm-api`, not to Go** — that is
+the point of the strangler: every request enters through Rust, which serves what it has migrated
+and forwards the rest.
+
+```
+browser ──► mm-api :8066 ──(unmigrated routes, /, /static/*)──► Go :8065 ──► Postgres :5432
+               │                                                                ▲
+               └──────────── migrated routes, the websocket ────────────────────┘
+```
+
+```sh
+# 0. Once: the Go reference at the pinned SHA (see above) — the Go server is built from it.
+
+# 1. Build the webapp (once, and after any change under webapp/). A few minutes cold.
+(cd webapp && npm ci && npm run build)          # → webapp/channels/dist/
+
+# 2. Postgres, then the Go server. go-server.sh builds Go on first run, lets it migrate the
+#    schema, and links webapp/channels/dist into its client/ directory if it has been built.
+docker compose up -d
+scripts/go-server.sh start                      # :8065, log in reference/.build/server.log
+
+# 3. mm-api, with the environment the parity harness gives it (scripts/mm-api-env.sh).
+scripts/mm-api.sh start                         # :8066, log in /tmp/mmrs-mm-api.log
+
+# 4. Open http://localhost:8066 — "View in Browser", then create an account.
+#    The first account created becomes the system admin.
+```
+
+To stop: `scripts/mm-api.sh stop && scripts/go-server.sh stop && docker compose down`. After
+rebuilding the webapp, run `scripts/go-server.sh start` again — the bundle's file names are
+content-hashed, and the links into `client/` are refreshed only at start.
+
+Things worth knowing:
+
+- **`cargo run -p mm-api` on its own is not enough.** Go's server gets several settings as
+  environment overrides, which never reach the shared configuration document that `mm-api`
+  reads, so a bare `mm-api` disagrees with its Go peer. `scripts/mm-api.sh` launches it through
+  `scripts/mm-api-env.sh`, the one list of those settings.
+- **`SiteURL` is Go's address** (`http://localhost:8065`), not `mm-api`'s. The webapp talks to the
+  origin it was loaded from, so browsing and the websocket go through :8066 regardless; only
+  generated links (permalinks, e-mails) name :8065.
+- **Rust's plugin host is opt-in.** With the default, plugins run inside the Go server. To host
+  them in `mm-api` instead, start it with `MMRS_PLUGIN_HOST=rust` in the environment.
+- **Which server answered** is on every response, as `x-mmrs-served-by: rust|go` — in the
+  browser's network tab as well as from `curl`.
+- **The webapp is a verbatim copy**, never edited here: the client is the parity oracle's other
+  half, and a patched client could hide a wire-format regression. Update it only by re-copying at
+  a new pinned SHA, together with `reference/mattermost/`:
+  `git -C reference/mattermost archive <sha> webapp | tar -x -C .`
+
 ### Running the stack
 
-Porting a route means asking both servers the same question and diffing the answers, so unlike the
-model-only sessions this repo started with, you want the stack up most of the time. It is there
-for three things:
+The section above is for using the port. For *developing* it, the same stack is the test
+apparatus. Porting a route means asking both servers the same question and diffing the answers,
+so you want the stack up most of the time. It is there for three things:
 
 - **the schema** — this repo contains no DDL and never will; the Go server's migrations create
   every table `mm-store` reads
@@ -163,12 +235,14 @@ for three things:
 ```sh
 docker compose up -d          # postgres :5432 — and postgres only
 scripts/go-server.sh start    # the pinned Go server, built from source, on :8065
-export DATABASE_URL=postgres://mmuser:mmuser_password@localhost:5432/mattermost
-cargo run -p mm-api           # :8066 — serves what is migrated, forwards the rest
+scripts/mm-api.sh start       # :8066 — serves what is migrated, forwards the rest
 ```
 
-Or `scripts/stack.sh up 0`, which does the first two and then seeds the fixture user, team and
-channel every parity suite needs. Seeding is idempotent — it does nothing when the login already
+Or `scripts/stack.sh up 0`, which does the first two, starts the secondary Go **oracles** —
+servers with one setting flipped (boards, discoverable channels, edit limit, a licence, plugin
+uploads) that the parity suites need for branches the main server cannot reach — and then seeds
+the fixture user, team and channel every parity suite needs. `scripts/parity.sh` starts `mm-api`
+itself. Seeding is idempotent — it does nothing when the login already
 works — so `up` and `seed` are safe to re-run. The first user created becomes the system admin,
 and no id is hardcoded anywhere, so that user, team and channel are the only fixture state the
 suites assume.
@@ -303,18 +377,27 @@ the generator.
 
 ```
 crates/
-  mm-model/      phase 1  wire types; zero internal dependencies
-  mm-store/      phase 2  persistence (sqlx, Postgres); depends on mm-model
-  mm-app/        phase 3  business logic; depends on mm-store; knows nothing about HTTP
-  mm-api/        phase 4  REST + the Strangler Fig proxy; depends on mm-app
-  mm-ws/         phase 5  empty stub; the hub is in mm-app and the socket in mm-api for now
+  mm-model/        phase 1  wire types; zero internal dependencies
+  mm-markdown/              port of server/public/shared/markdown; zero internal dependencies
+  mm-store/        phase 2  persistence (sqlx, Postgres); depends on mm-model
+  mm-app/          phase 3  business logic; depends on mm-store; knows nothing about HTTP
+  mm-api/          phase 4  REST, websocket, local-mode socket + the Strangler Fig proxy
+  mm-ws/           phase 5  empty stub; the hub is in mm-app and the socket in mm-api for now
+  mm-plugin/                the plugin RPC surface, generated from the Go server
+  gobwire/, gobwire-derive/ Go's encoding/gob; no Mattermost code
+  go-netrpc/                Go's net/rpc over gob; no Mattermost code
+  goplugin/                 HashiCorp go-plugin's host and plugin sides, plus yamux
+webapp/          the upstream browser client at the pinned SHA, verbatim (Apache-2.0)
 fixtures/        generated parity fixtures — never edit by hand
-scripts/         the harness: stacks, worktrees, parity runs, mutation plans
+scripts/         the harness: stacks, servers, worktrees, parity runs, mutation plans
 reference/
   mattermost/    pinned Go source, read-only, gitignored
   dump/          the fixture generator and behavioural oracles
+  licensed/      the pinned Go server trusting a test licence key (scripts/go-licensed.sh)
+spikes/          throwaway proofs (plugin Phase 0), kept for the record
 docs/
   MIGRATION_STRATEGY.md   the plan: phases, sequencing, proxy cutover
+  PLUGIN_PLAN.md          the Rust plugin host, phase by phase
   TECH_DEBT.md            what we owe — deferred work and known divergences
   PROMPTS.md              per-phase execution prompts
 MIGRATION.md     THE LEDGER: per-route status and hard-won semantics
@@ -367,7 +450,12 @@ statement.
 | Path | License | Derived from |
 |---|---|---|
 | `crates/mm-model/` | **Apache-2.0** ([text](crates/mm-model/LICENSE)) | `server/public/model/` |
+| `crates/mm-markdown/` | **Apache-2.0** ([text](crates/mm-markdown/LICENSE)) | `server/public/shared/markdown/` |
+| `crates/mm-plugin/` | **Apache-2.0** ([text](crates/mm-plugin/LICENSE)) | generated from `server/public/{plugin,model}/` |
 | `crates/mm-store/`, `mm-app/`, `mm-api/`, `mm-ws/` | **AGPL-3.0-only** ([text](LICENSE)) | `server/channels/{store,app,api4}/` |
+| `crates/gobwire/`, `gobwire-derive/`, `go-netrpc/` | **MIT OR Apache-2.0** | Go's documented gob and net/rpc protocols; no Mattermost code |
+| `crates/goplugin/` | **MPL-2.0** ([text](crates/goplugin/LICENSE)) | HashiCorp go-plugin and yamux's protocols; no Mattermost code |
+| `webapp/` | **Apache-2.0** | upstream `webapp/`, copied verbatim |
 | everything else | **AGPL-3.0-only** | — |
 
 Upstream Mattermost is licensed in two parts: `server/public/`, `server/templates/`,
@@ -390,8 +478,10 @@ that was the point — the label is a precondition for the first commit of code 
 `server/channels/`, not a consequence of it. Resolved as **D-031** in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).
 
-This is a translation, not a copy: no file here is copied from upstream, and a few functions
-deliberately diverge. `NOTICE` records that, as Apache-2.0 §4(b) requires.
+The server is a translation, not a copy: no file outside `webapp/` is copied from upstream, and a
+few functions deliberately diverge. `webapp/` is the exception — upstream's client, unmodified,
+under the Apache-2.0 grant upstream's `LICENSE.txt` gives it. `NOTICE` records both, as
+Apache-2.0 §4(b) requires.
 
 "Mattermost" is a trademark of Mattermost, Inc. This is an unofficial port, not affiliated with,
 endorsed by, or supported by Mattermost, Inc.
