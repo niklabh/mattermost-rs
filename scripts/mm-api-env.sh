@@ -76,6 +76,9 @@
 # document Go replaced on its own, from the one-second default, so
 # `parity::config_reload`'s timer test sleeps 600ms rather than three seconds. A write made through
 # mm-api is visible on the next request whatever this says.
+# `MMRS_API_HOST` (2026-09-18) is the address mm-api binds, loopback unless set. `0.0.0.0` makes
+# the stack reachable from another machine on the network — the browser UI through mm-api, as
+# `scripts/mm-api.sh` documents. The parity harness never sets it.
 mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
@@ -83,7 +86,7 @@ mmrs_launch_mm_api() {
   (
     cd "$root/reference/.build/mmroot$MMRS_RUN_SUFFIX" || exit 1
     DATABASE_URL="$DATABASE_URL" \
-    MM_API_LISTEN="127.0.0.1:$MMRS_API_PORT" \
+    MM_API_LISTEN="${MMRS_API_HOST:-127.0.0.1}:$MMRS_API_PORT" \
     MM_GO_UPSTREAM="$MMRS_GO_BASE" \
     MM_FILESETTINGS_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/data/" \
     MM_TEAMSETTINGS_ENABLEOPENSERVER=true \

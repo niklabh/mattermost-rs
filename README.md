@@ -213,6 +213,8 @@ Things worth knowing:
   generated links (permalinks, e-mails) name :8065.
 - **Rust's plugin host is opt-in.** With the default, plugins run inside the Go server. To host
   them in `mm-api` instead, start it with `MMRS_PLUGIN_HOST=rust` in the environment.
+- **From another machine**, start `mm-api` with `MMRS_API_HOST=0.0.0.0 scripts/mm-api.sh start`
+  and browse to `http://<host-ip>:8066`. It binds loopback by default.
 - **Which server answered** is on every response, as `x-mmrs-served-by: rust|go` — in the
   browser's network tab as well as from `curl`.
 - **The webapp is a verbatim copy**, never edited here: the client is the parity oracle's other
