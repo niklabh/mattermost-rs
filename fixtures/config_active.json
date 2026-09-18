@@ -96,6 +96,7 @@
     "Directory": "./plugins",
     "Enable": true,
     "EnableMarketplace": true,
+    "EnableUploads": false,
     "PluginStates": {
       "com.mattermost.calls": {
         "Enable": true

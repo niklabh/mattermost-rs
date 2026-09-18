@@ -468,7 +468,7 @@ pub fn router(state: AppState) -> Router {
         Router::new()
             .route(
                 "/api/v4/plugins",
-                partially_migrated(get(plugins::get_plugins)),
+                partially_migrated(get(plugins::get_plugins).post(plugins::upload_plugin)),
             )
             .route(
                 "/api/v4/plugins/statuses",

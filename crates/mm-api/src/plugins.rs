@@ -1,6 +1,7 @@
 //! The plugin routes of `api4/plugin.go` this server answers from its own plugin host.
 //!
 //! ```text
+//! POST /api/v4/plugins           uploadPlugin (plugin.go:45), then installPlugin (:412)
 //! GET /api/v4/plugins            getPlugins (plugin.go:176)
 //! GET /api/v4/plugins/statuses   getPluginStatuses (plugin.go:198)
 //! GET /api/v4/plugins/webapp     getWebappPlugins (plugin.go:250), with no session required
@@ -146,4 +147,155 @@ fn serve_webapp_plugins(state: &AppState) -> Result<Response, ApiError> {
         body,
     )
         .into_response())
+}
+
+/// Port of `uploadPlugin` (plugin.go:45) and `installPlugin` (plugin.go:412).
+///
+/// The gates in Go's order: plugins, uploads and no signature requirement (one 501 for all
+/// three); `sysconsole_write_plugins`; the body. The body is capped at `MaxFileSize + 512`
+/// (`FileAPI`, web/handlers.go:217): over it is the 413
+/// `api.plugin.upload.file_too_large.app_error`; any other parse failure is written with
+/// `http.Error`, as plain text carrying Go's error, not as an `AppError`. Then the `plugin` file
+/// part, `force` (the literal `"true"`), the plugin-directory/import-directory conflict, and the
+/// install, which answers 201 with the manifest.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, force, plugin_id))]
+pub async fn upload_plugin(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    match serve_upload(&state, &session.0, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+const UPLOAD: &str = "uploadPlugin";
+
+async fn serve_upload(
+    state: &AppState,
+    session: &Session,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let config = state.app.config();
+    if !config.plugin_enable || !config.plugin_enable_uploads || config.plugin_require_signature {
+        return Err(ApiError::from(AppError::new(
+            UPLOAD,
+            "app.plugin.upload_disabled.app_error",
+            None,
+            "",
+            501,
+        )));
+    }
+    if !state
+        .app
+        .session_has_permission_to(
+            session,
+            &mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS,
+        )
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            session,
+            &[&mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS],
+        )));
+    }
+
+    let (parts, body) = request.into_parts();
+    let cap = config
+        .file_max_file_size
+        .saturating_add(crate::images::BYTES_MIN_READ);
+    let limit = usize::try_from(cap).unwrap_or(usize::MAX);
+    let bytes = match axum::body::to_bytes(body, limit.saturating_add(1)).await {
+        Ok(bytes) if bytes.len() <= limit => bytes,
+        // `http: request body too large` from the `MaxBytesReader`.
+        _ => {
+            return Err(ApiError::from(AppError::new(
+                UPLOAD,
+                "api.plugin.upload.file_too_large.app_error",
+                None,
+                "",
+                413,
+            )));
+        }
+    };
+    let content_type = parts
+        .headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    let form = match crate::multipart::parse_form(content_type, &bytes) {
+        Ok(form) => form,
+        Err(err) => return Ok(http_error(err.go_text(), StatusCode::BAD_REQUEST)),
+    };
+
+    let Some(files) = form.file.get("plugin") else {
+        return Err(ApiError::from(AppError::new(
+            UPLOAD,
+            "api.plugin.upload.no_file.app_error",
+            None,
+            "",
+            400,
+        )));
+    };
+    let Some(file) = files.first() else {
+        return Err(ApiError::from(AppError::new(
+            UPLOAD,
+            "api.plugin.upload.array.app_error",
+            None,
+            "",
+            400,
+        )));
+    };
+    let force = form
+        .value
+        .get("force")
+        .and_then(|v| v.first())
+        .is_some_and(|v| v == "true");
+    tracing::Span::current().record("force", force);
+
+    match mm_app::App::check_directory_conflict(&config.plugin_directory, &config.import_directory)
+    {
+        Err(err) => {
+            return Err(ApiError::from(
+                AppError::new(
+                    "installPlugin",
+                    "api.plugin.install.check_directory.app_error",
+                    None,
+                    "",
+                    500,
+                )
+                .wrap(err),
+            ));
+        }
+        Ok(true) => {
+            return Err(ApiError::from(AppError::new(
+                "installPlugin",
+                "api.plugin.install.directory_conflict.app_error",
+                None,
+                "",
+                403,
+            )));
+        }
+        Ok(false) => {}
+    }
+
+    let manifest = state.app.install_plugin(&file.data, force).await?;
+    if let Some(manifest) = &manifest {
+        tracing::Span::current().record("plugin_id", manifest.id.as_str());
+    }
+    crate::commands::encoded(StatusCode::CREATED, &manifest, UPLOAD)
+}
+
+/// Go's `http.Error`: a plain-text body with a newline, `nosniff`, and no `AppError`.
+fn http_error(message: &str, status: StatusCode) -> Response {
+    (
+        status,
+        [
+            ("Content-Type", "text/plain; charset=utf-8"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        format!("{message}\n"),
+    )
+        .into_response()
 }

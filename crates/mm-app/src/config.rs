@@ -574,6 +574,11 @@ pub struct Config {
     /// a bundle synced from the file store must carry a signature that verifies.
     pub plugin_require_signature: bool,
 
+    /// `PluginSettings.EnableUploads` (config.go:3604, defaulted **`false`** at :3626): off,
+    /// `POST /plugins` is the 501 `app.plugin.upload_disabled.app_error`. The API cannot change it
+    /// (`patchConfig` refuses), so the environment is how a server gets it on.
+    pub plugin_enable_uploads: bool,
+
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
     ///
@@ -1476,6 +1481,7 @@ impl Default for Config {
             plugin_client_directory: "./client/plugins".to_owned(),
             plugin_states: default_plugin_states(true),
             plugin_require_signature: false,
+            plugin_enable_uploads: false,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1956,6 +1962,11 @@ impl Config {
                 lookup,
                 "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
                 default.plugin_require_signature,
+            ),
+            plugin_enable_uploads: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEUPLOADS",
+                default.plugin_enable_uploads,
             ),
             send_email_notifications: lookup_bool(
                 lookup,
@@ -2683,6 +2694,9 @@ impl Config {
             plugin_require_signature: plugin_settings
                 .require_plugin_signature
                 .unwrap_or(default.plugin_require_signature),
+            plugin_enable_uploads: plugin_settings
+                .enable_uploads
+                .unwrap_or(default.plugin_enable_uploads),
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3478,6 +3492,8 @@ struct PluginSettingsDocument {
     plugin_states: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
     #[serde(rename = "RequirePluginSignature")]
     require_plugin_signature: Option<bool>,
+    #[serde(rename = "EnableUploads")]
+    enable_uploads: Option<bool>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
     #[serde(rename = "EnableMarketplace")]
@@ -4357,8 +4373,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 118,
-            "the fixture covers {keys} settings and Config reads 118 from the document. \
+            keys, 119,
+            "the fixture covers {keys} settings and Config reads 119 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4414,6 +4430,7 @@ mod go_parity {
                 "EnableMarketplace": false,
                 "ClientDirectory": "/elsewhere",
                 "RequirePluginSignature": true,
+                "EnableUploads": true,
                 "PluginStates": { "playbooks": { "Enable": false }, "x": { "Enable": true } }
             },
             "EmailSettings": {
@@ -4511,6 +4528,7 @@ mod go_parity {
         // The plugin host's: a document entry wins over SetDefaults', which fills only the gaps.
         assert_eq!(config.plugin_client_directory, "/elsewhere");
         assert!(config.plugin_require_signature);
+        assert!(config.plugin_enable_uploads);
         assert_eq!(config.plugin_states.get("playbooks"), Some(&false));
         assert_eq!(config.plugin_states.get("x"), Some(&true));
         assert_eq!(

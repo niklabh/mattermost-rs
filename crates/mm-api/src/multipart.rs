@@ -53,6 +53,27 @@ pub enum MultipartError {
     TooManyParts,
 }
 
+impl MultipartError {
+    /// The error's text as `ParseMultipartForm` returns it, for the handlers that write it to the
+    /// client (`uploadPlugin`'s `http.Error`). The first three are Go's exact values
+    /// (net/http/request.go:74-78, mime/multipart/formdata.go:20). A malformed body has many texts
+    /// in Go, one per place the reader gives up. Two are pinned against Go: a part whose data runs
+    /// off the end of the body (`io.ErrUnexpectedEOF`, measured by `parity::plugin_upload`) and a
+    /// body that ends where the next delimiter line should be (`nextPart`'s wrapped `io.EOF`). The
+    /// others quote the offending line in Go (`expecting a new Part; got line …`,
+    /// `malformed MIME header line: …`) and are answered with the nearest fixed text — a known
+    /// divergence, on bodies no client sends.
+    pub fn go_text(&self) -> &'static str {
+        match self {
+            MultipartError::NotMultipart => "request Content-Type isn't multipart/form-data",
+            MultipartError::MissingBoundary => "no multipart boundary param in Content-Type",
+            MultipartError::TooManyParts => "multipart: message too large",
+            MultipartError::Malformed("a part is not terminated by a boundary") => "unexpected EOF",
+            MultipartError::Malformed(_) => "multipart: NextPart: EOF",
+        }
+    }
+}
+
 /// Go's `maxParts` default (mime/multipart/formdata.go:83). Settable there through a GODEBUG; the
 /// server does not set it.
 const MAX_PARTS: usize = 1000;

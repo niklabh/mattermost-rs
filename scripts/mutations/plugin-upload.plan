@@ -1,0 +1,23 @@
+# Mutation plan for POST /plugins (uploadPlugin, installPlugin) against the uploads-on Go oracle.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-upload.plan
+#
+# install-never-activates is owed from plugin-install.plan: only an install after start-up sees it.
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-18: 11 run, 10 caught, the control survived. The first run left two survivors (no server
+# required signatures; no caller held the read permission without the write one) and two harness
+# faults (a match guard that left the match non-exhaustive, and an unchanged anchor); the suite
+# gained a signature-required host and a read-only admin, and the four lines were caught on re-run.
+
+upload-signature-gate-dropped	crates/mm-api/src/plugins.rs	    if !config.plugin_enable || !config.plugin_enable_uploads || config.plugin_require_signature {	    if !config.plugin_enable || !config.plugin_enable_uploads {	api	plugin_upload
+upload-wrong-permission	crates/mm-api/src/plugins.rs	        .session_has_permission_to(\n            session,\n            &mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS,\n        )	        .session_has_permission_to(\n            session,\n            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_PLUGINS,\n        )	api	plugin_upload
+upload-parse-error-as-app-error	crates/mm-api/src/plugins.rs	        Err(err) => return Ok(http_error(err.go_text(), StatusCode::BAD_REQUEST)),	        Err(_) => return Err(ApiError::invalid_param("plugin")),	api	plugin_upload
+upload-force-any-value	crates/mm-api/src/plugins.rs	        .is_some_and(|v| v == "true");	        .is_some();	api	plugin_upload
+upload-status-ok	crates/mm-api/src/plugins.rs	    crate::commands::encoded(StatusCode::CREATED, &manifest, UPLOAD)	    crate::commands::encoded(StatusCode::OK, &manifest, UPLOAD)	api	plugin_upload
+upload-no-file-wrong-id	crates/mm-api/src/plugins.rs	            "api.plugin.upload.no_file.app_error",	            "api.plugin.upload.array.app_error",	api	plugin_upload
+install-never-activates	crates/mm-app/src/plugin_install.rs	        if config.plugin_states.get(&manifest.id).copied() == Some(true) {	        if false {	api	plugin_upload
+install-only-if-new-ignored	crates/mm-app/src/plugin_install.rs	        } else {\n            InstallStrategy::OnlyIfNew\n        };	        } else {\n            InstallStrategy::Always\n        };	api	plugin_upload
+install-not-stored	crates/mm-app/src/plugin_install.rs	        self.install_plugin_to_filestore(&manifest, bundle, signature)\n            .await?;	        let _ = (bundle, signature);	api	plugin_upload
+multipart-unexpected-eof-text	crates/mm-api/src/multipart.rs	MultipartError::Malformed("a part is not terminated by a boundary") => "unexpected EOF",	MultipartError::Malformed("a part is not terminated by a boundary") => "multipart: NextPart: EOF",	api	plugin_upload
+CONTROL-swap-http-error-headers	crates/mm-api/src/plugins.rs	            ("Content-Type", "text/plain; charset=utf-8"),\n            ("X-Content-Type-Options", "nosniff"),	            ("X-Content-Type-Options", "nosniff"),\n            ("Content-Type", "text/plain; charset=utf-8"),	api	plugin_upload

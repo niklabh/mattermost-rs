@@ -88,10 +88,10 @@ fn no_two_second_servers_share_a_port() {
     );
 
     // The stack's own servers, which a second server would free and so kill: Go and mm-api, and
-    // the oracles `scripts/go-*.sh` start at Go's port + 30 to + 35 (boards, discoverable, the
-    // licensed three, edit limit). Measured 2026-09-18: a plugin suite on :8095 took the boards
+    // the oracles `scripts/go-*.sh` start at Go's port + 30 to + 36 (boards, discoverable, the
+    // licensed three, edit limit, plugins). Measured 2026-09-18: a plugin suite on :8095 took the boards
     // oracle down, and twenty tests in six other suites failed for it.
-    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8100).collect();
+    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8101).collect();
     let taken: Vec<_> = claims
         .iter()
         .filter(|(port, _)| reserved.contains(port))
