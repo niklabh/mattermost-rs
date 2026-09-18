@@ -6,7 +6,9 @@
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod wire;
 
+pub mod environment;
 pub mod error;
+pub mod hijack;
 pub mod http;
 pub mod io_rpc;
 pub mod rpc;

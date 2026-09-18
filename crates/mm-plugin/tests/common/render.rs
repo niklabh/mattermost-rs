@@ -274,3 +274,123 @@ pub fn fixture<T: gobwire::Decode + Default + Send + 'static>(name: &str) -> T {
     let stream = std::fs::read(gob_dir().join(format!("{name}.gob"))).unwrap();
     first_value(&stream, |dec| dec.decode()).unwrap()
 }
+
+/// The request both conformance plugins answer by hijacking it (plugingen/hijack.go).
+pub const HIJACK_URL: &str = "/plugins/conformance/hijack";
+
+/// The response head both plugins write on the hijacked connection.
+pub const HIJACK_UPGRADE: &str =
+    "HTTP/1.1 101 Switching Protocols\r\nUpgrade: conformance\r\nConnection: Upgrade\r\n\r\n";
+
+/// What both plugins write through the buffered writer: more than its 4096-byte buffer.
+pub fn hijack_payload() -> Vec<u8> {
+    (0..5000u32).map(|i| b'a' + (i % 26) as u8).collect()
+}
+
+/// Every byte the client of a hijacked request receives, from either plugin under either host.
+/// The `tail` the plugin wrote last through the buffered writer is not among them: only the
+/// plugin's buffer is flushed, and the host's never is.
+pub fn hijack_received() -> String {
+    format!(
+        "{HIJACK_UPGRADE}pong: ping\nalready: response was already hijacked\ntimeout: true\nraw: raw\n{}",
+        String::from_utf8(hijack_payload()).unwrap()
+    )
+}
+
+/// What a plugin answers when its writer cannot be hijacked.
+pub fn hijack_refused() -> Json {
+    json!({
+        "status": 409,
+        "header": {},
+        "body": "hijack: response cannot be hijacked",
+    })
+}
+
+/// What a plugin records after running the script on a hijackable writer.
+pub fn hijack_recorded() -> Json {
+    json!({
+        "hook": "hijack",
+        "close_again": true,
+        "read_closed": true,
+        "read_timeout": true,
+    })
+}
+
+/// The hijack request, as a host sends it to the plugin.
+pub fn hijack_request() -> mm_plugin::wire::plugin::HTTPRequestSubset {
+    mm_plugin::wire::plugin::HTTPRequestSubset {
+        method: "GET".into(),
+        url: Some(gobwire::BinaryBytes(HIJACK_URL.as_bytes().to_vec())),
+        proto: "HTTP/1.1".into(),
+        proto_major: 1,
+        proto_minor: 1,
+        host: "example.test".into(),
+        request_uri: HIJACK_URL.into(),
+        ..Default::default()
+    }
+}
+
+/// Whether a request is the hijack one: its URL's path is [`HIJACK_URL`].
+pub fn is_hijack(request: &mm_plugin::wire::plugin::HTTPRequestSubset) -> bool {
+    request
+        .url
+        .as_ref()
+        .is_some_and(|url| url.0.split(|&b| b == b'?').next() == Some(HIJACK_URL.as_bytes()))
+}
+
+/// The plugin half, as `plugingen/hijack.go` runs it: take over the connection and run the
+/// script. Answers the entry the plugin records.
+pub async fn hijack_script(mut writer: mm_plugin::http::RemoteResponseWriter) -> Json {
+    use gobwire::{GoTime, Zone};
+
+    let (conn, mut rw) = match writer.hijack().await {
+        Ok(hijacked) => hijacked,
+        Err(e) => {
+            writer.write_header(409).await;
+            writer
+                .write(format!("hijack: {e}").as_bytes())
+                .await
+                .unwrap();
+            return json!({ "hook": "hijack", "error": e.to_string() });
+        }
+    };
+    let again = writer.hijack().await.err().unwrap().to_string();
+
+    let line = String::from_utf8(rw.read_until(b'\n').await.unwrap()).unwrap();
+    conn.set_read_deadline(GoTime::from_unix(1, 0, Zone::Utc))
+        .await
+        .unwrap();
+    let read = conn.read(&mut [0; 1]).await;
+    let timed_out = read.is_err_and(|e| e.to_string().ends_with("i/o timeout"));
+    let hour_ahead = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 3600;
+    conn.set_read_deadline(GoTime::default()).await.unwrap();
+    conn.set_write_deadline(GoTime::from_unix(hour_ahead, 0, Zone::Utc))
+        .await
+        .unwrap();
+    conn.set_deadline(GoTime::default()).await.unwrap();
+    let head = format!("{HIJACK_UPGRADE}pong: {line}already: {again}\ntimeout: {timed_out}\n");
+    conn.write(head.as_bytes()).await.unwrap();
+
+    let mut raw = [0; 64];
+    let n = conn.read(&mut raw).await.unwrap();
+    let echo = format!("raw: {}", String::from_utf8_lossy(&raw[..n]));
+    conn.write(echo.as_bytes()).await.unwrap();
+
+    rw.write(&hijack_payload()).await.unwrap();
+    rw.write(b"tail\n").await.unwrap();
+    rw.flush().await.unwrap();
+    conn.close().await.unwrap();
+    let closed = |e: std::io::Error| e.to_string().contains("use of closed network connection");
+    let close_again = conn.close().await.err().is_some_and(closed);
+    let read_closed = conn.read(&mut raw).await.err().is_some_and(closed);
+    json!({
+        "hook": "hijack",
+        "close_again": close_again,
+        "read_closed": read_closed,
+        "read_timeout": timed_out,
+    })
+}

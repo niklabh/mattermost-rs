@@ -9173,3 +9173,23 @@ query-string token too and answer `auth::token_provided_rejection`, shared with 
 (web/handlers.go:281). Only `OptionalSession` reproduced it: `POST /users/login/type` answered 404
 here where Go answered 401, and the PR #30 review found `AuthenticatedSession` accepted it too —
 both extractors now refuse it.
+
+## D-811 · The Rust plugin host starts from the plugin directory alone
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-18 (app/plugin.go:172-259) · **Owner** the plugin host
+
+With `MMRS_PLUGIN_HOST=rust`, `mm_app::plugins` ports `initPlugins`, `syncPluginsActiveState`,
+`ShutDownPlugins` and the `PluginSettings` config listener, and `GET /plugins/statuses` answers from
+it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-in for Go's:
+
+- Signatures (`plugin_signature.go`, OpenPGP): `syncPlugins` is ported (2026-09-18,
+  `mm_app::plugin_install`), but with `RequirePluginSignature` on it skips every bundle with an
+  error where Go would verify it, and an install stores no signature.
+- Prepackaged and transitionally prepackaged plugins (`processPrepackagedPlugins`,
+  `persistTransitionallyPrepackagedPlugins`).
+- The health-check job (`health_check.go`, `EnableHealthCheck`).
+- The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
+  not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
+
+`MMRS_PLUGIN_HOST` stays `go` by default until these land and D-402, D-471 and D-542's hook call
+sites fire from Rust write paths (plugin plan Phase 5).

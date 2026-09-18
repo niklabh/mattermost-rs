@@ -1,0 +1,34 @@
+# Mutation plan for the plugin environment (environment.go, supervisor.go, FindManifest).
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/mm-plugin-environment.plan
+#
+# Every line filters to `environment`: the Go-vs-Rust script in tests/environment.rs and the unit
+# tests in environment::tests. Not planned: the state set to running before OnActivate, which no
+# plugin here observes, and `activate`'s error reset, which a fresh registration already makes.
+# Also not planned: the status path taken from the bundle rather than from Dir(ManifestPath),
+# which survived the first run as an equivalent mutant: FindManifest only reads <bundle>/plugin.*,
+# so the two are always the same path. CONTROL- lines must SURVIVE.
+#
+# env-activate-keeps-old-registration survived its first full run: nothing showed which bundle a
+# re-activation registered. The script now rewrites ok's manifest before the restart and records
+# the version Active() reports, and the line is caught.
+#
+# 2026-09-18: 17 run, 16 caught (the one above on its re-run); both controls survived.
+
+env-deactivate-clears-error	crates/mm-plugin/src/environment.rs	            _ => {\n                self.set_plugin_state(&id, PLUGIN_STATE_NOT_RUNNING);\n                return false;	            _ => {\n                self.set_plugin_state(&id, PLUGIN_STATE_NOT_RUNNING);\n                self.set_plugin_error(&id, "");\n                return false;	pkg	environment
+env-unpack-from-bundle-dir	crates/mm-plugin/src/environment.rs	let bundle_path = go_join(&[&lossy(&self.plugin_dir), id, &bundle_path]);	let bundle_path = go_join(&[&bundle.path, &bundle_path]);	pkg	environment
+env-fnv-prime	crates/mm-plugin/src/environment.rs	hash = hash.wrapping_mul(0x0000_0100_0000_01b3);	hash = hash.wrapping_mul(0x0000_0100_0000_01b5);	pkg	environment
+env-min-version-inverted	crates/mm-plugin/src/environment.rs	    if !met {	    if met {	pkg	environment
+env-escape-check-dropped	crates/mm-plugin/src/environment.rs	if executable.starts_with("..") {	if executable.starts_with("...") {	pkg	environment
+env-shutdown-keeps-registrations	crates/mm-plugin/src/environment.rs	        futures_join_all(teardowns).await;\n        self.map().clear();	        futures_join_all(teardowns).await;	pkg	environment
+env-deactivate-ignores-state	crates/mm-plugin/src/environment.rs	            Some(s) if self.is_active(&id) => s,	            Some(s) => s,	pkg	environment
+env-hooks-for-inactive	crates/mm-plugin/src/environment.rs	            }) if self.is_active(id) => Ok(Arc::clone(&s.hooks)),	            }) => Ok(Arc::clone(&s.hooks)),	pkg	environment
+env-json-rejects-trailing	crates/mm-plugin/src/environment.rs	    let first = serde_json::Deserializer::from_slice(&bytes)\n        .into_iter::<Manifest>()\n        .next();	    let first = Some(serde_json::from_slice::<Manifest>(&bytes));	pkg	environment
+env-yaml-order	crates/mm-plugin/src/environment.rs	for name in ["plugin.yml", "plugin.yaml"] {	for name in ["plugin.yaml", "plugin.yml"] {	pkg	environment
+env-scan-keeps-hidden	crates/mm-plugin/src/environment.rs	if !is_dir || name.to_string_lossy().starts_with('.') {	if !is_dir {	pkg	environment
+env-scan-unsorted	crates/mm-plugin/src/environment.rs	    entries.sort_by_key(std::fs::DirEntry::file_name);\n    let mut infos	    entries.reverse();\n    let mut infos	pkg	environment
+env-id-not-lowercased-json	crates/mm-plugin/src/environment.rs	        Some(Ok(mut manifest)) => {\n            manifest.id = manifest.id.to_lowercase();	        Some(Ok(manifest)) => {	pkg	environment
+env-duplicate-accepted	crates/mm-plugin/src/environment.rs	            if p.manifest.as_ref().is_some_and(|m| m.id == id) {\n                if found.is_some() {\n                    return Err(EnvError::Multiple(id.to_owned()));\n                }	            if p.manifest.as_ref().is_some_and(|m| m.id == id) {	pkg	environment
+env-activate-keeps-old-registration	crates/mm-plugin/src/environment.rs	        self.map().insert(\n            id.to_owned(),\n            Registered {	        self.map().entry(id.to_owned()).or_insert(\n            Registered {	pkg	environment
+CONTROL-swap-timeouts	crates/mm-plugin/src/environment.rs	const DEACTIVATE_TIMEOUT: Duration = Duration::from_secs(10);\n\n/// supervisor.go: `StartTimeout: time.Second * 3`.\nconst START_TIMEOUT: Duration = Duration::from_secs(3);	/// supervisor.go: `StartTimeout: time.Second * 3`.\nconst START_TIMEOUT: Duration = Duration::from_secs(3);\n\nconst DEACTIVATE_TIMEOUT: Duration = Duration::from_secs(10);	pkg	environment
+CONTROL-rename-hex	crates/mm-plugin/src/environment.rs	        let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();\n        let renamed = go_join(&[&destination, &format!("{id}_{hex}_bundle.js")]);	        let hexed: String = hash.iter().map(|b| format!("{b:02x}")).collect();\n        let renamed = go_join(&[&destination, &format!("{id}_{hexed}_bundle.js")]);	pkg	environment

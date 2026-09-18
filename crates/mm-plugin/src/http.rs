@@ -3,7 +3,8 @@
 //! The host keeps the real writer and serves it as a net/rpc service on a brokered connection:
 //! `Header`, `Write`, `WriteHeader`, `SyncHeader` and `Flush`. The plugin holds a client that
 //! caches the header map locally and pushes it with `SyncHeader` before every write, so a header
-//! set through the map reaches the host even though the map itself is a copy.
+//! set through the map reaches the host even though the map itself is a copy. The same service
+//! carries a hijacked connection ([`crate::hijack`]).
 
 use std::sync::{Arc, Mutex};
 
@@ -35,6 +36,13 @@ pub trait ResponseWriter: Send + 'static {
 
     /// Go flushes when the writer is an `http.Flusher` and does nothing when it is not.
     fn flush(&mut self) {}
+
+    /// Go's `http.Hijacker`: hand the client's connection to the plugin (hijack.go,
+    /// `HijackResponse`). `None` is a writer that cannot be hijacked, which the plugin sees as
+    /// `response cannot be hijacked`; the default, as for Go's recorders.
+    fn hijack(&mut self) -> Option<std::io::Result<crate::hijack::Hijacked>> {
+        None
+    }
 }
 
 /// Serve `writer` to the plugin on one brokered connection (http.go,
@@ -98,6 +106,7 @@ pub fn response_writer_server<W: ResponseWriter>(writer: W) -> Server {
         }
     });
 
+    crate::hijack::register(&mut server, &writer);
     server
 }
 
@@ -187,5 +196,9 @@ impl RemoteResponseWriter {
 
     pub async fn close(&self) -> Result<(), go_netrpc::Error> {
         self.client.close().await
+    }
+
+    pub(crate) fn client(&self) -> &go_netrpc::Client {
+        &self.client
     }
 }

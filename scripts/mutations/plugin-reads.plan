@@ -1,0 +1,16 @@
+# Mutation plan for GET /plugins and GET /plugins/webapp from the Rust plugin host.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-reads.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-18: 7 run, 6 caught (webapp-schema-kept on its re-run: the probe bundles had no settings
+# schema until playbooks was given one); the control survived.
+
+webapp-schema-kept	crates/mm-api/src/plugins.rs	            manifest.settings_schema = None;\n	        // (the schema is kept)\n	api	plugin_statuses
+webapp-not-client-manifest	crates/mm-api/src/plugins.rs	            let mut manifest = m.client_manifest();	            let mut manifest = m.clone();	api	plugin_statuses
+webapp-trailing-newline	crates/mm-api/src/plugins.rs	        body,\n    )\n        .into_response())	        body + "\n",\n    )\n        .into_response())	api	plugin_statuses
+plugins-active-inactive-swapped	crates/mm-app/src/plugins.rs	            if running {\n                active.push(info);	            if !running {\n                active.push(info);	api	plugin_statuses
+plugins-disabled-check-dropped	crates/mm-api/src/plugins.rs	async fn serve_plugins(state: &AppState, session: &Session) -> Result<Response, ApiError> {\n    if !state.app.config().plugin_enable {	async fn serve_plugins(state: &AppState, session: &Session) -> Result<Response, ApiError> {\n    if false {	api	plugin_statuses
+webapp-inactive-included	crates/mm-app/src/plugins.rs	        Ok(environment\n            .active()	        Ok(environment\n            .available().unwrap_or_default()	api	plugin_statuses
+CONTROL-webapp-where-renamed	crates/mm-api/src/plugins.rs	        tracing::error!(error = %err, "failed to serialise the webapp plugins");	        tracing::error!(error = %err, "could not serialise the webapp plugins");	api	plugin_statuses

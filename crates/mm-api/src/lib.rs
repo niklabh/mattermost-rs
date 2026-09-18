@@ -140,6 +140,9 @@ pub mod local_teams;
 /// The two `first_admin_visit` pairs of `api4/plugin.go` — the only `/plugins` routes served.
 /// Appended for the same reason as `config`.
 pub mod marketplace_visit;
+/// `GET /plugins/statuses` (2026-09-18), served from this server's plugin host when
+/// `MMRS_PLUGIN_HOST=rust`. Appended for the same reason as `config`.
+pub mod plugins;
 /// Port of the five `RemoteClusterTokenRequired` routes of `api4/remote_cluster.go`.
 pub mod remote_cluster;
 
@@ -279,6 +282,13 @@ fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
                 && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         }
         "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),
+        // `{plugin_id:[A-Za-z0-9\\_\\-\\.]+}` (api4/api.go:252): the dot is in it.
+        "plugin_id" => {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+        }
         // `{action_id:[A-Za-z0-9_-]+}` (api4/integration_action.go:17) — the one `_id`
         // parameter besides `plugin_id` with a wider class: `_` and `-` are in it.
         "action_id" => {
@@ -460,7 +470,38 @@ async fn invalid_post_id_param(_session: auth::AuthenticatedSession) -> axum::re
 /// both unregistered paths (`Router::fallback`) and unmigrated methods on registered paths
 /// (`partially_migrated`).
 pub fn router(state: AppState) -> Router {
+    // `api4/plugin.go:34`, only when this process hosts plugins; see `plugins`.
+    let plugin_routes = if state.app.plugin_host().hosted() {
+        Router::new()
+            .route(
+                "/api/v4/plugins",
+                partially_migrated(get(plugins::get_plugins).post(plugins::upload_plugin)),
+            )
+            .route(
+                "/api/v4/plugins/statuses",
+                partially_migrated(get(plugins::get_plugin_statuses)),
+            )
+            .route(
+                "/api/v4/plugins/webapp",
+                partially_migrated(get(plugins::get_webapp_plugins)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}",
+                partially_migrated_with_ids(&state, delete(plugins::remove_plugin)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}/enable",
+                partially_migrated_with_ids(&state, post(plugins::enable_plugin)),
+            )
+            .route(
+                "/api/v4/plugins/{plugin_id}/disable",
+                partially_migrated_with_ids(&state, post(plugins::disable_plugin)),
+            )
+    } else {
+        Router::new()
+    };
     Router::new()
+        .merge(plugin_routes)
         // `api.BaseRoutes.APIRoot.Handle("/{websocket:websocket(?:\\/)?}")` (api4/websocket.go:52)
         // — the gorilla pattern accepts a trailing slash, so both spellings are registered. This
         // is the one route the proxy could never forward: `forward_to_go` strips `Connection` and

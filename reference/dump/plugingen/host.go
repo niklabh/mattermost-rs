@@ -15,6 +15,7 @@ package main
 //	{"api": "<Name>", "args": <render>, "returns": <render>}
 //	{"activated": <bool>, "error": "<activation error>"}
 //	{"hook": "<Name>", "returns": <render>}
+//	{"http": "<Name>", ...}      what a served request answered (see hijack.go for the hijack ones)
 //	{"shutdown": true}
 
 import (
@@ -348,6 +349,7 @@ func runHost(fixtures, pluginDir, pluginID string, idl *IDL) error {
 		record(map[string]any{"hook": m.Name, "returns": structOf(m.Returns, out)})
 	}
 	serveHTTP(hooks)
+	serveHijack(hooks)
 	fileWillBeUploaded(hooks)
 	env.Shutdown()
 	record(map[string]any{"shutdown": true})

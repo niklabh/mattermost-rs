@@ -15,8 +15,11 @@ serde_json.workspace = true
 base64.workspace = true
 go-netrpc = { path = "../go-netrpc" }
 goplugin = { path = "../goplugin" }
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", features = ["rt", "sync", "io-util", "time", "macros"] }
 tracing.workspace = true
+mm-model.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

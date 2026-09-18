@@ -78,6 +78,7 @@
     "DefaultClientLocale": "en"
   },
   "LogSettings": {
+    "EnableDiagnostics": true,
     "EnableFile": true,
     "FileLocation": ""
   },
@@ -91,9 +92,26 @@
     "Enable": false
   },
   "PluginSettings": {
+    "ClientDirectory": "./client/plugins",
     "Directory": "./plugins",
     "Enable": true,
-    "EnableMarketplace": true
+    "EnableMarketplace": true,
+    "EnableUploads": false,
+    "PluginStates": {
+      "com.mattermost.calls": {
+        "Enable": true
+      },
+      "com.mattermost.nps": {
+        "Enable": true
+      },
+      "mattermost-ai": {
+        "Enable": true
+      },
+      "playbooks": {
+        "Enable": true
+      }
+    },
+    "RequirePluginSignature": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,

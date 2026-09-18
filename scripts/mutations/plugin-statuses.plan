@@ -1,0 +1,24 @@
+# Mutation plan for the plugin host in mm-app and GET /plugins/statuses.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-statuses.plan
+#
+# The api lines rebuild mm-api each, so this is a slow plan. CONTROL- lines must SURVIVE.
+#
+# api-wrong-permission survived the first run: the only refused caller held neither permission.
+# The suite now admits a system_read_only_admin, who holds sysconsole_read_plugins and not
+# manage_system, and the line is caught.
+#
+# 2026-09-18: 10 run, 8 caught (that one on its re-run); both controls survived. A failed run leaves
+# the probe bundles in Go's plugin directory and may leave playbooks disabled; the next run's NPS
+# toggle restores the default states, and its start removes the bundles.
+
+api-disabled-check-dropped	crates/mm-api/src/plugins.rs	    if !state.app.config().plugin_enable {	    if false {	api	plugin_statuses
+api-wrong-permission	crates/mm-api/src/plugins.rs	        .session_has_permission_to(session, &PERMISSION_SYSCONSOLE_READ_PLUGINS)	        .session_has_permission_to(session, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)	api	plugin_statuses
+app-absent-state-enabled	crates/mm-app/src/plugins.rs	                .copied()\n                .unwrap_or(false);	                .copied()\n                .unwrap_or(true);	api	plugin_statuses
+app-refresh-hook-dropped	crates/mm-app/src/lib.rs	        self.plugins_config_changed(&previous, &config).await;\n	        let _ = (&previous, &config);\n	api	plugin_statuses
+app-deactivations-skipped	crates/mm-app/src/plugins.rs	            futures_join(deactivations.collect()),	            futures_join(deactivations.take(0).collect()),	api	plugin_statuses
+config-client-dir-env	crates/mm-app/src/config.rs	lookup("MM_PLUGINSETTINGS_CLIENTDIRECTORY")	lookup("MM_PLUGINSETTINGS_CLIENT_DIRECTORY")	api	plugin_statuses
+api-route-always-registered	crates/mm-api/src/lib.rs	    let plugin_routes = if state.app.plugin_host().hosted() {	    let plugin_routes = if true {	api	marketplace_visit
+config-default-playbooks-off	crates/mm-app/src/config.rs	        ("playbooks", true),	        ("playbooks", false),	unit	config::
+CONTROL-swap-uses	crates/mm-api/src/plugins.rs	use mm_model::session::Session;\nuse mm_model::utils::AppError;	use mm_model::utils::AppError;\nuse mm_model::session::Session;	api	plugin_statuses
+CONTROL-reorder-changed-fields	crates/mm-app/src/plugins.rs	        || old.plugin_directory != new.plugin_directory\n        || old.plugin_client_directory != new.plugin_client_directory	        || old.plugin_client_directory != new.plugin_client_directory\n        || old.plugin_directory != new.plugin_directory	api	plugin_statuses

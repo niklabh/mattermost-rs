@@ -92,3 +92,100 @@ pub fn report(failures: &[String]) {
             .join("\n\n")
     );
 }
+
+/// The client half of the hijack scenario (plugingen/hijack.go, `HijackClient`): send the request
+/// with a line after it, answer the `timeout:` line with `raw\n`, and read until the close.
+pub async fn hijack_client(addr: std::net::SocketAddr) -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let request = format!("GET {HIJACK_URL} HTTP/1.1\r\nHost: example.test\r\n\r\nping\n");
+    conn.write_all(request.as_bytes()).await.unwrap();
+    let mut received = Vec::new();
+    let mut buf = [0; 4096];
+    let mut answered = false;
+    loop {
+        let n = conn.read(&mut buf).await.unwrap();
+        if n == 0 {
+            return String::from_utf8(received).unwrap();
+        }
+        received.extend_from_slice(&buf[..n]);
+        let text = String::from_utf8_lossy(&received);
+        if !answered
+            && text
+                .find("timeout: ")
+                .is_some_and(|i| text[i..].contains('\n'))
+        {
+            conn.write_all(b"raw\n").await.unwrap();
+            answered = true;
+        }
+    }
+}
+
+/// A host's writer over a real connection, as Go's server hands one to a handler: its hijack
+/// answers the stream and the bytes read past the request head.
+pub struct TcpWriter {
+    conn: Option<(tokio::net::TcpStream, Vec<u8>)>,
+}
+
+impl mm_plugin::http::ResponseWriter for TcpWriter {
+    fn header(&mut self) -> mm_plugin::wire::http::Header {
+        Default::default()
+    }
+    fn sync_header(&mut self, _: mm_plugin::wire::http::Header) {}
+    fn write(&mut self, _: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::other(
+            "the hijack scenario writes nothing unhijacked",
+        ))
+    }
+    fn write_header(&mut self, _: i64) {}
+    fn hijack(&mut self) -> Option<std::io::Result<mm_plugin::hijack::Hijacked>> {
+        let (conn, buffered) = self.conn.take()?;
+        Some(Ok(mm_plugin::hijack::Hijacked {
+            conn: Box::new(conn),
+            buffered,
+        }))
+    }
+}
+
+/// The host half: serve the hijack request through a recorder, then through a real connection.
+/// Answers what the recorder got and every byte the client received.
+pub async fn serve_hijack(hooks: &mm_plugin::rpc::HooksClient) -> (Json, String) {
+    use tokio::io::AsyncBufReadExt as _;
+
+    let recorder = Recorder::default();
+    hooks
+        .serve_http(
+            None,
+            Some(Box::new(hijack_request())),
+            None::<std::io::Cursor<Vec<u8>>>,
+            recorder.clone(),
+        )
+        .await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = tokio::spawn(hijack_client(listener.local_addr().unwrap()));
+    let (conn, _) = listener.accept().await.unwrap();
+    // Read the head as a server does, through a buffer that may hold the line after it.
+    let mut reader = tokio::io::BufReader::new(conn);
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        if line == "\r\n" {
+            break;
+        }
+    }
+    let buffered = reader.buffer().to_vec();
+    let writer = TcpWriter {
+        conn: Some((reader.into_inner(), buffered)),
+    };
+    hooks
+        .serve_http(
+            None,
+            Some(Box::new(hijack_request())),
+            None::<std::io::Cursor<Vec<u8>>>,
+            writer,
+        )
+        .await;
+    (recorder.response(), client.await.unwrap())
+}

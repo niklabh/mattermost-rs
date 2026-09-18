@@ -337,6 +337,37 @@ fn sdk_rust_plugin_runs_under_the_go_environment() {
         }
     }
 
+    // The hijack scenario (plugingen/hijack.go) under Go's real server: a recorder refuses, and
+    // the client of a real connection receives exactly what the script sends through Go's
+    // buffers.
+    match served.get("hijack-recorder") {
+        Some(e) => {
+            let got = serde_json::json!({
+                "status": e["status"],
+                "header": e["header"],
+                "body": e["body"],
+            });
+            assert_eq!(got, hijack_refused(), "what Go's recorder received");
+        }
+        None => failures.push("hijack: the Go host recorded no recorder answer".into()),
+    }
+    match served.get("hijack") {
+        Some(e) => {
+            assert_eq!(e.get("error"), None, "the Go client failed");
+            assert_eq!(
+                e["received"],
+                hijack_received(),
+                "what Go's client received"
+            );
+        }
+        None => failures.push("hijack: the Go host recorded no client".into()),
+    }
+    assert_eq!(
+        rust_hooks.get("hijack").cloned().map(Json::Object),
+        Some(hijack_recorded()),
+        "what the Rust plugin saw of the hijacked connection"
+    );
+
     // The database: the Go host answered the plugin's four questions, and the sentinel it sent
     // was still a sentinel when the plugin read it.
     let asked: Vec<&Json> = go.iter().filter_map(|e| e.get("driver")).collect();

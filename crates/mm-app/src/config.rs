@@ -487,6 +487,11 @@ pub struct Config {
     /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
     pub feature_flag_mm_blocks_enabled: bool,
 
+    /// `FeatureFlags.AppsEnabled` (feature_flags.go:26), defaulted **`false`** at :165,
+    /// environment-only. Off, the Apps plugin (`com.mattermost.apps`) is disabled whatever its
+    /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
+    pub feature_flag_apps_enabled: bool,
+
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
     ///
@@ -552,6 +557,27 @@ pub struct Config {
     /// `PluginSettingsDefaultEnableMarketplace` — at :3674). The other half of the `/marketplace`
     /// command's `AutoComplete`; see [`Config::plugin_enable`].
     pub plugin_enable_marketplace: bool,
+
+    /// `PluginSettings.ClientDirectory` (config.go:3608, defaulted **`"./client/plugins"`**;
+    /// an empty value takes the default too): where a webapp bundle is unpacked.
+    pub plugin_client_directory: String,
+
+    /// `PluginSettings.PluginStates` (config.go:3610): whether each plugin id is enabled.
+    ///
+    /// `SetDefaults` fills four ids when absent (config.go:3653-3671): the NPS plugin follows
+    /// `LogSettings.EnableDiagnostics`; Calls, Playbooks and the AI plugin are on. A JSON `null`
+    /// entry is read as disabled here; Go keeps the nil pointer and `syncPluginsActiveState`
+    /// dereferences it.
+    pub plugin_states: std::collections::BTreeMap<String, bool>,
+
+    /// `PluginSettings.RequirePluginSignature` (config.go:3614, defaulted **`false`** at :3686):
+    /// a bundle synced from the file store must carry a signature that verifies.
+    pub plugin_require_signature: bool,
+
+    /// `PluginSettings.EnableUploads` (config.go:3604, defaulted **`false`** at :3626): off,
+    /// `POST /plugins` is the 501 `app.plugin.upload_disabled.app_error`. The API cannot change it
+    /// (`patchConfig` refuses), so the environment is how a server gets it on.
+    pub plugin_enable_uploads: bool,
 
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
@@ -1438,6 +1464,7 @@ impl Default for Config {
             feature_flag_mobile_sso_code_exchange: false,
             feature_flag_move_threads_enabled: false,
             feature_flag_mm_blocks_enabled: true,
+            feature_flag_apps_enabled: false,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1450,6 +1477,11 @@ impl Default for Config {
             plugin_directory: "./plugins".to_owned(),
             plugin_enable: true,
             plugin_enable_marketplace: true,
+            // config.go:269 — `PluginSettingsDefaultClientDirectory`.
+            plugin_client_directory: "./client/plugins".to_owned(),
+            plugin_states: default_plugin_states(true),
+            plugin_require_signature: false,
+            plugin_enable_uploads: false,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1890,6 +1922,11 @@ impl Config {
                 "MM_FEATUREFLAGS_MMBLOCKSENABLED",
                 default.feature_flag_mm_blocks_enabled,
             ),
+            feature_flag_apps_enabled: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_APPSENABLED",
+                default.feature_flag_apps_enabled,
+            ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
@@ -1917,6 +1954,19 @@ impl Config {
                 lookup,
                 "MM_PLUGINSETTINGS_ENABLEMARKETPLACE",
                 default.plugin_enable_marketplace,
+            ),
+            plugin_client_directory: lookup("MM_PLUGINSETTINGS_CLIENTDIRECTORY")
+                .unwrap_or(default.plugin_client_directory),
+            plugin_states: default.plugin_states,
+            plugin_require_signature: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
+                default.plugin_require_signature,
+            ),
+            plugin_enable_uploads: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEUPLOADS",
+                default.plugin_enable_uploads,
             ),
             send_email_notifications: lookup_bool(
                 lookup,
@@ -2359,6 +2409,12 @@ impl Config {
         let announcement = parsed.announcement_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
         let plugin_settings = parsed.plugin_settings.unwrap_or_default();
+        // `ls.EnableDiagnostics == nil || *ls.EnableDiagnostics` (config.go:3655).
+        let enable_diagnostics = parsed
+            .log_settings
+            .as_ref()
+            .and_then(|l| l.enable_diagnostics)
+            .unwrap_or(true);
         let password_settings = parsed.password_settings.unwrap_or_default();
         let ldap_settings = parsed.ldap_settings.unwrap_or_default();
         let saml_settings = parsed.saml_settings.unwrap_or_default();
@@ -2608,6 +2664,7 @@ impl Config {
             feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
             feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
             feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
+            feature_flag_apps_enabled: default.feature_flag_apps_enabled,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2629,6 +2686,17 @@ impl Config {
             plugin_enable_marketplace: plugin_settings
                 .enable_marketplace
                 .unwrap_or(default.plugin_enable_marketplace),
+            plugin_client_directory: non_empty_or(
+                plugin_settings.client_directory,
+                default.plugin_client_directory,
+            ),
+            plugin_states: plugin_states(plugin_settings.plugin_states, enable_diagnostics),
+            plugin_require_signature: plugin_settings
+                .require_plugin_signature
+                .unwrap_or(default.plugin_require_signature),
+            plugin_enable_uploads: plugin_settings
+                .enable_uploads
+                .unwrap_or(default.plugin_enable_uploads),
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3024,6 +3092,9 @@ struct AnalyticsSettingsDocument {
 struct LogSettingsDocument {
     #[serde(rename = "EnableFile")]
     enable_file: Option<bool>,
+    /// Read only to default the NPS plugin's `PluginStates` entry (config.go:3655).
+    #[serde(rename = "EnableDiagnostics")]
+    enable_diagnostics: Option<bool>,
     #[serde(rename = "FileLocation")]
     file_location: Option<String>,
 }
@@ -3409,15 +3480,62 @@ struct ImportSettingsDocument {
     directory: Option<String>,
 }
 
-/// `PluginSettings` — the one key `createUpload`'s import branch reads.
+/// `PluginSettings`: the directory `createUpload`'s import branch reads, and what the plugin
+/// host reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct PluginSettingsDocument {
     #[serde(rename = "Directory")]
     directory: Option<String>,
+    #[serde(rename = "ClientDirectory")]
+    client_directory: Option<String>,
+    #[serde(rename = "PluginStates")]
+    plugin_states: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
+    #[serde(rename = "RequirePluginSignature")]
+    require_plugin_signature: Option<bool>,
+    #[serde(rename = "EnableUploads")]
+    enable_uploads: Option<bool>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
     #[serde(rename = "EnableMarketplace")]
     enable_marketplace: Option<bool>,
+}
+
+/// `model.PluginState`: one untagged field.
+#[derive(Debug, Default, serde::Deserialize)]
+struct PluginStateDocument {
+    #[serde(rename = "Enable", default)]
+    enable: bool,
+}
+
+/// `SetDefaults`' four default entries (config.go:3653-3671), each only where the id is absent.
+fn default_plugin_states(enable_diagnostics: bool) -> std::collections::BTreeMap<String, bool> {
+    [
+        ("com.mattermost.nps", enable_diagnostics),
+        ("com.mattermost.calls", true),
+        ("playbooks", true),
+        ("mattermost-ai", true),
+    ]
+    .into_iter()
+    .map(|(id, on)| (id.to_owned(), on))
+    .collect()
+}
+
+/// The document's `PluginStates` with `SetDefaults`' entries under it. A `null` entry counts as
+/// present for the defaults (Go's `== nil` is true of it, so it *is* replaced for the four ids)
+/// and as disabled otherwise.
+fn plugin_states(
+    document: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
+    enable_diagnostics: bool,
+) -> std::collections::BTreeMap<String, bool> {
+    let mut states: std::collections::BTreeMap<String, bool> = document
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(id, state)| state.map(|s| (id, s.enable)))
+        .collect();
+    for (id, on) in default_plugin_states(enable_diagnostics) {
+        states.entry(id).or_insert(on);
+    }
+    states
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -4255,8 +4373,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 114,
-            "the fixture covers {keys} settings and Config reads 114 from the document. \
+            keys, 119,
+            "the fixture covers {keys} settings and Config reads 119 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4307,7 +4425,14 @@ mod go_parity {
             "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true, "EnforceMultifactorAuthentication": true },
             "AccessControlSettings": { "EnableAttributeBasedAccessControl": true },
             "ConnectedWorkspacesSettings": { "EnableSharedChannels": true },
-            "PluginSettings": { "Enable": false, "EnableMarketplace": false },
+            "PluginSettings": {
+                "Enable": false,
+                "EnableMarketplace": false,
+                "ClientDirectory": "/elsewhere",
+                "RequirePluginSignature": true,
+                "EnableUploads": true,
+                "PluginStates": { "playbooks": { "Enable": false }, "x": { "Enable": true } }
+            },
             "EmailSettings": {
                 "EnableSignInWithEmail": false,
                 "EnableSignInWithUsername": false,
@@ -4400,6 +4525,46 @@ mod go_parity {
         assert!(!config.plugin_enable);
         assert!(!config.plugin_enable_marketplace);
         assert!(!config.send_email_notifications);
+        // The plugin host's: a document entry wins over SetDefaults', which fills only the gaps.
+        assert_eq!(config.plugin_client_directory, "/elsewhere");
+        assert!(config.plugin_require_signature);
+        assert!(config.plugin_enable_uploads);
+        assert_eq!(config.plugin_states.get("playbooks"), Some(&false));
+        assert_eq!(config.plugin_states.get("x"), Some(&true));
+        assert_eq!(
+            config.plugin_states.get("com.mattermost.calls"),
+            Some(&true)
+        );
+    }
+
+    /// `SetDefaults` fills the four plugin ids only where they are absent or `null`, and the NPS
+    /// plugin follows `LogSettings.EnableDiagnostics` (config.go:3653-3671).
+    #[test]
+    fn plugin_states_take_go_defaults_under_the_document() {
+        let config = Config::from_document(
+            r#"{
+                "LogSettings": { "EnableDiagnostics": false },
+                "PluginSettings": { "ClientDirectory": "", "PluginStates": { "playbooks": null, "y": null } }
+            }"#,
+        )
+        .expect("a document");
+        assert_eq!(config.plugin_states.get("com.mattermost.nps"), Some(&false));
+        assert_eq!(
+            config.plugin_states.get("playbooks"),
+            Some(&true),
+            "null takes the default"
+        );
+        assert_eq!(
+            config.plugin_states.get("y"),
+            None,
+            "null elsewhere is no entry"
+        );
+        assert_eq!(
+            config.plugin_client_directory, "./client/plugins",
+            "empty takes the default"
+        );
+        let config = Config::from_document("{}").expect("a document");
+        assert_eq!(config.plugin_states.get("com.mattermost.nps"), Some(&true));
     }
 
     /// The five SSO flags the error mask reads are five **different** keys.

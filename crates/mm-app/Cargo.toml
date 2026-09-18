@@ -9,6 +9,9 @@ repository.workspace = true
 [dependencies]
 mm-store.workspace = true
 mm-model.workspace = true
+mm-plugin.workspace = true
+tar.workspace = true
+flate2.workspace = true
 mm-markdown.workspace = true
 
 serde.workspace = true

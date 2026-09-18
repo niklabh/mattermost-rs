@@ -300,6 +300,54 @@ impl GoCacheInvalidator {
     }
 }
 
+impl GoCacheInvalidator {
+    /// `PUT {go}/api/v4/config/patch` as the minted administrator: `Ok` on a 2xx, otherwise the
+    /// status and body. Retried once on a 401, as [`GoCacheInvalidator::post`] is.
+    async fn patch_config_impl(
+        &self,
+        patch: &serde_json::Value,
+    ) -> Result<(), mm_app::peer_config::PeerConfigError> {
+        use mm_app::peer_config::PeerConfigError;
+        for attempt in 0..2 {
+            let current = self
+                .current_token()
+                .await
+                .ok_or_else(|| PeerConfigError("no administrator session".into()))?;
+            let response = self
+                .http
+                .put(format!("{}/api/v4/config/patch", self.base))
+                .bearer_auth(&current)
+                .json(patch)
+                .timeout(REQUEST_TIMEOUT)
+                .send()
+                .await
+                .map_err(|e| PeerConfigError(e.to_string()))?;
+            let status = response.status();
+            if status.is_success() {
+                return Ok(());
+            }
+            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
+                self.discard(&current).await;
+                continue;
+            }
+            let body = response.text().await.unwrap_or_default();
+            return Err(PeerConfigError(format!("{status}: {body}")));
+        }
+        Err(PeerConfigError(
+            "the administrator session was refused".into(),
+        ))
+    }
+}
+
+impl mm_app::peer_config::PeerConfig for GoCacheInvalidator {
+    fn patch_config<'a>(
+        &'a self,
+        patch: &'a serde_json::Value,
+    ) -> mm_app::peer_config::PeerConfigFuture<'a> {
+        Box::pin(self.patch_config_impl(patch))
+    }
+}
+
 impl PeerCache for GoCacheInvalidator {
     fn clear_user_sessions<'a>(&'a self, user_id: &'a str) -> PeerFuture<'a> {
         Box::pin(self.clear_user_sessions_impl(user_id))

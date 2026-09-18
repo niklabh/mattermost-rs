@@ -272,6 +272,10 @@ func (c *conformance) tourHandWrittenAPI() {
 // ServeHTTP and ServeMetrics answer by the rule crates/mm-plugin's tests expect: one header
 // naming the request and the digest of its body, status 203, and a body naming the byte count.
 func (c *conformance) ServeHTTP(_ *plugin.Context, w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == HijackURL {
+		c.hijack(w)
+		return
+	}
 	c.echoHTTP("ServeHTTP", w, r)
 }
 
