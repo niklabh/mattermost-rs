@@ -465,10 +465,19 @@ async fn invalid_post_id_param(_session: auth::AuthenticatedSession) -> axum::re
 pub fn router(state: AppState) -> Router {
     // `api4/plugin.go:34`, only when this process hosts plugins; see `plugins`.
     let plugin_routes = if state.app.plugin_host().hosted() {
-        Router::new().route(
-            "/api/v4/plugins/statuses",
-            partially_migrated(get(plugins::get_plugin_statuses)),
-        )
+        Router::new()
+            .route(
+                "/api/v4/plugins",
+                partially_migrated(get(plugins::get_plugins)),
+            )
+            .route(
+                "/api/v4/plugins/statuses",
+                partially_migrated(get(plugins::get_plugin_statuses)),
+            )
+            .route(
+                "/api/v4/plugins/webapp",
+                partially_migrated(get(plugins::get_webapp_plugins)),
+            )
     } else {
         Router::new()
     };

@@ -1,5 +1,6 @@
-//! Cross-server parity for `GET /api/v4/plugins/statuses` (api4/plugin.go:198) with this server
-//! hosting plugins (`MMRS_PLUGIN_HOST=rust`).
+//! Cross-server parity for the plugin reads with this server hosting plugins
+//! (`MMRS_PLUGIN_HOST=rust`): `GET /api/v4/plugins/statuses` (api4/plugin.go:198), and beside it
+//! `GET /plugins` and `GET /plugins/webapp`.
 //!
 //! ```sh
 //! scripts/parity.sh --test parity plugin_statuses
@@ -43,7 +44,7 @@ const DISABLED_PORT: u16 = 8076;
 const BUNDLES: [(&str, &str); 3] = [
     (
         "playbooks",
-        r#"{"id":"playbooks","name":"MMRS status probe","description":"runs","version":"9.9.9","webapp":{"bundle_path":"dist/main.js"}}"#,
+        r#"{"id":"playbooks","name":"MMRS status probe","description":"runs","version":"9.9.9","webapp":{"bundle_path":"dist/main.js"},"settings_schema":{"header":"probe","settings":[{"key":"Probe","display_name":"Probe","type":"bool","help_text":"","default":true}]}}"#,
     ),
     (
         "com.mattermost.calls",
@@ -259,6 +260,9 @@ async fn statuses_from_this_host_match_go() {
         "{unpacked:?}"
     );
 
+    // The two other reads from the same environment.
+    compare_reads(&client, &admin, &hosting.base, "with playbooks running").await;
+
     // The refusals: a plain user is 403 on sysconsole_read_plugins, an anonymous caller 401.
     let team = common::create_team(&client, &admin, "plst").await;
     let user = create_plain_user(&client, &admin, &team, "plst").await;
@@ -328,10 +332,35 @@ async fn statuses_from_this_host_match_go() {
     let go = settled(&client, &admin, GO, 0).await;
     let rust = settled(&client, &admin, &hosting.base, 0).await;
     assert_eq!(go, rust, "the statuses after playbooks was disabled");
+    compare_reads(&client, &admin, &hosting.base, "with playbooks disabled").await;
 
     drop(hosting);
     uninstall(&go_plugins, &go_client);
     set_state(&client, &admin, "playbooks", true).await;
+}
+
+/// `GET /plugins` (admin) and `GET /plugins/webapp` (admin and anonymous) from Go and this host.
+/// The webapp list names each bundle by its FNV hash, so equal lists mean the same bytes were
+/// unpacked; it has at most one entry, so Go's unordered `sync.Map` cannot reorder it.
+async fn compare_reads(client: &reqwest::Client, admin: &str, rust: &str, when: &str) {
+    for (path, token) in [
+        ("/api/v4/plugins", Some(admin)),
+        ("/api/v4/plugins/webapp", Some(admin)),
+        ("/api/v4/plugins/webapp", None),
+    ] {
+        let (go_status, go_body, _) =
+            request_raw(client, GO, reqwest::Method::GET, token, path, None).await;
+        let (rs_status, rs_body, served_by) =
+            request_raw(client, rust, reqwest::Method::GET, token, path, None).await;
+        assert_eq!(served_by.as_deref(), Some("rust"), "{path} {when}");
+        assert_eq!((go_status, rs_status), (200, 200), "{path} {when}");
+        assert_eq!(
+            String::from_utf8_lossy(&go_body),
+            String::from_utf8_lossy(&rs_body),
+            "{path} {when}, anonymous={}",
+            token.is_none()
+        );
+    }
 }
 
 /// One server's statuses once `playbooks` is in `state`.
@@ -409,6 +438,20 @@ async fn disabled_plugins_are_501_before_the_permission_check() {
         let error: serde_json::Value = serde_json::from_slice(&body).expect("an error body");
         assert_eq!(error["id"], "app.plugin.disabled.app_error");
         assert_eq!(error["status_code"], 501);
+        for other in ["/api/v4/plugins", "/api/v4/plugins/webapp"] {
+            let (status, body, _) = request_raw(
+                &client,
+                &server.base,
+                reqwest::Method::GET,
+                Some(token),
+                other,
+                None,
+            )
+            .await;
+            assert_eq!(status, 501, "{other}");
+            let error: serde_json::Value = serde_json::from_slice(&body).expect("an error body");
+            assert_eq!(error["id"], "app.plugin.disabled.app_error", "{other}");
+        }
     }
     delete_plain_user(&client, &admin, &user.id).await;
 }

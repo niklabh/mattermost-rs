@@ -427,6 +427,69 @@ impl App {
         self.publish(message).await;
     }
 
+    /// Port of `App.GetPlugins` (app/plugin.go:506): every available plugin's manifest, split
+    /// by whether it is running, in plugin-directory order.
+    pub fn get_plugins(&self) -> Result<mm_model::manifest::PluginsResponse, Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "GetPlugins",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        let available = environment.available().map_err(|err| {
+            Box::new(
+                AppError::new(
+                    "GetPlugins",
+                    "app.plugin.get_plugins.app_error",
+                    None,
+                    "",
+                    500,
+                )
+                .wrap(err),
+            )
+        })?;
+        let (mut active, mut inactive) = (Vec::new(), Vec::new());
+        for plugin in available {
+            let Some(manifest) = plugin.manifest else {
+                continue;
+            };
+            let running = environment.is_active(&manifest.id);
+            let info = mm_model::manifest::PluginInfo { manifest };
+            if running {
+                active.push(info);
+            } else {
+                inactive.push(info);
+            }
+        }
+        Ok(mm_model::manifest::PluginsResponse {
+            active: Some(active),
+            inactive: Some(inactive),
+        })
+    }
+
+    /// Port of `App.GetActivePluginManifests` (app/plugin.go:394): the running plugins'
+    /// manifests as they were registered, so a webapp's carries its bundle hash. Go ranges a
+    /// `sync.Map`, whose order is unspecified; here it is by id.
+    pub fn get_active_plugin_manifests(&self) -> Result<Vec<Manifest>, Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "GetActivePluginManifests",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        Ok(environment
+            .active()
+            .into_iter()
+            .filter_map(|b| b.manifest)
+            .collect())
+    }
+
     /// Whether a plugin is running, by its status (app/plugin.go:1259).
     pub fn is_plugin_active(&self, id: &str) -> Result<bool, Box<AppError>> {
         Ok(self.get_plugin_status(id)?.state == PLUGIN_STATE_RUNNING)
