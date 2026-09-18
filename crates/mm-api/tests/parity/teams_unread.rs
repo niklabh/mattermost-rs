@@ -496,44 +496,110 @@ async fn asking_about_another_user_needs_manage_system() {
     delete_plain_user(&client, &admin_token, &reader.id).await;
 }
 
-/// `include_collapsed_threads=true` is **forwarded** — the Threads store is not ported — and
-/// only the literal `true` is: `=1` is served from Rust, as Go's string compare would ignore it.
+/// `include_collapsed_threads=true` is served since 2026-09-19, and adds the Threads store's three
+/// counters to the fixture team — made pairwise distinct so no counter can stand in for another:
+/// two unread followed threads, three unread mentions in them, two of those in an **urgent**
+/// thread. Only the literal `true` asks: `=1` answers the zeros, as Go's string compare does.
 #[tokio::test]
-async fn the_collapsed_threads_variant_is_forwarded_and_only_for_the_literal_true() {
+async fn the_collapsed_threads_counters_match_go() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
     }
-    purge_api_fixtures().await;
-
     let client = client();
-    let token = go_minted_token(&client).await;
+    let admin_token = go_minted_token(&client).await;
+    let f = fixture(&client, &admin_token, "unreadcrt").await;
+    let username = username_of(&client, &admin_token, &f.user_id).await;
 
-    let forwarded = client
-        .get(format!(
-            "{RUST}/api/v4/users/me/teams/unread?include_collapsed_threads=true"
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("the Rust server answers");
-    assert_eq!(
-        forwarded
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "the threads half is Go's"
-    );
-    assert_eq!(forwarded.status(), 200);
-
-    let (go_one, rs_one, _) = fetch_both_sorted(
+    // Thread one: the reader replies (and so follows), then is mentioned in a later reply.
+    let one = post_message(&client, &admin_token, &f.loud, "crt one", None).await;
+    post_message(&client, &f.token, &f.loud, "mine", Some(&one)).await;
+    post_message(
         &client,
-        &token,
-        "/api/v4/users/me/teams/unread?include_collapsed_threads=1",
+        &admin_token,
+        &f.loud,
+        &format!("@{username} back"),
+        Some(&one),
     )
     .await;
-    assert_eq!(rs_one, go_one);
+
+    // Thread three: followed and unread, with no mention — so the thread count and the mention
+    // count cannot come out equal.
+    let three = post_message(&client, &admin_token, &f.loud, "crt three", None).await;
+    post_message(&client, &f.token, &f.loud, "mine too", Some(&three)).await;
+    post_message(&client, &admin_token, &f.loud, "no mention", Some(&three)).await;
+
+    // Thread four: followed and **read** — the reader's own reply is the last one — so the
+    // unread predicate is what keeps it out of the thread count.
+    let four = post_message(&client, &admin_token, &f.loud, "crt four", None).await;
+    post_message(&client, &f.token, &f.loud, "last word", Some(&four)).await;
+
+    // Thread two: an urgent root, and two replies that mention the reader (a mention follows).
+    let urgent = client
+        .post(format!("{GO}/api/v4/posts"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .json(&serde_json::json!({
+            "channel_id": f.quiet,
+            "message": "crt urgent",
+            "metadata": { "priority": { "priority": "urgent" } },
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(urgent.status().is_success(), "the urgent root was refused");
+    let two = urgent.json::<serde_json::Value>().await.expect("a post")["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    for text in ["first", "second"] {
+        post_message(
+            &client,
+            &admin_token,
+            &f.quiet,
+            &format!("@{username} {text}"),
+            Some(&two),
+        )
+        .await;
+    }
+
+    let path = format!(
+        "/api/v4/users/{}/teams/unread?include_collapsed_threads=true",
+        f.user_id
+    );
+    let (go, rust, raw) = fetch_both_sorted(&client, &f.token, &path).await;
+    assert_eq!(rust, go);
+    assert_ne!(raw.last(), Some(&b'\n'));
+    let team = entry(&go, &f.team_id);
+    // The shared fixture follows a thread of its own (a mention in a reply), so the counts are
+    // asserted as distinct and non-zero rather than as exact numbers.
+    let counters = [
+        team["thread_count"].as_i64().expect("a count"),
+        team["thread_mention_count"].as_i64().expect("a count"),
+        team["thread_urgent_mention_count"]
+            .as_i64()
+            .expect("a count"),
+    ];
+    assert!(
+        counters.iter().all(|&c| c > 0)
+            && counters[0] != counters[1]
+            && counters[1] != counters[2]
+            && counters[0] != counters[2],
+        "the fixture must discriminate: Go's own counters are {counters:?}"
+    );
+
+    let path = format!(
+        "/api/v4/users/{}/teams/unread?include_collapsed_threads=1",
+        f.user_id
+    );
+    let (go, rust, _) = fetch_both_sorted(&client, &f.token, &path).await;
+    assert_eq!(rust, go);
+    assert_eq!(
+        entry(&go, &f.team_id)["thread_count"],
+        0,
+        "only the literal true asks"
+    );
+
+    unwind(&client, &admin_token, &f).await;
 }
 
 /// A well-formed id that matches no user is, for an admin, an **empty list** — no user lookup.

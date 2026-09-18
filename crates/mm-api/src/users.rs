@@ -3448,25 +3448,6 @@ fn group_channels_parse_error() -> ApiError {
     ))
 }
 
-/// The query parameters `getThreadsForUser` accepts that this port does **not** serve.
-///
-/// Each one changes the store query in a way that needs its own fixture to verify — a cursor, a
-/// `Since` window, an unread-only filter, the deleted variant, or one of the two "only" modes —
-/// and a port that guessed at any of them would be wrong invisibly. A request carrying one is
-/// handed to Go, which is the same mechanism `getPost` uses for a post it cannot reproduce.
-///
-/// `extended`, `per_page` and `page` are served; `page` because Go ignores it on this route.
-const THREADS_FORWARDED_PARAMS: &[&str] = &[
-    "since",
-    "before",
-    "after",
-    "unread",
-    "deleted",
-    "totalsOnly",
-    "threadsOnly",
-    "excludeDirect",
-];
-
 /// Port of `getThreadsForUser` (api4/user.go:3976), reached as
 /// `GET /api/v4/users/{user_id}/teams/{team_id}/threads` — the Threads view.
 ///
@@ -3475,13 +3456,15 @@ const THREADS_FORWARDED_PARAMS: &[&str] = &[
 /// `SessionHasPermissionToUser` naming `edit_other_users`, then `SessionHasPermissionToTeam`
 /// naming `view_team`. Both answer the same 403 over HTTP.
 ///
-/// # What is served, and what is handed upstream
+/// # The options, after both gates
 ///
-/// The default request — the one the Threads view makes on load — plus `?extended`. Every other
-/// parameter in [`THREADS_FORWARDED_PARAMS`] forwards, because each rewrites the store query and
-/// deserves a fixture of its own before it is claimed. The two mutually-exclusive checks Go makes
-/// (`before` with `after`, `totalsOnly` with `threadsOnly`) live entirely inside that forwarded
-/// space, so this handler never has to make them.
+/// Every `GetUserThreadsOpts` field, since 2026-09-19 (the webapp's Threads view sends `since`,
+/// `unread` and `deleted`, and they all used to forward). In Go's order: `since` must be an
+/// unsigned decimal (`strconv.ParseUint`, so no sign, not even `+`) or it is the 400 naming
+/// `since`; `before` with `after` is `api.getThreadsForUser.bad_params`; `totalsOnly` with
+/// `threadsOnly` is `api.getThreadsForUser.bad_only_params`. The flags are `strconv.ParseBool`
+/// with its error dropped, and `before`/`after` are not validated as ids — an unknown one
+/// matches no thread.
 ///
 /// # `page` is read and thrown away
 ///
@@ -3501,15 +3484,6 @@ pub async fn get_threads_for_user(
     request: axum::extract::Request,
 ) -> Response {
     let query = request.uri().query().map(str::to_owned);
-
-    if THREADS_FORWARDED_PARAMS
-        .iter()
-        .any(|name| query_first(query.as_deref(), name).is_some())
-    {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
 
     // `me` before `serve_threads` validates it, as `RequireUserId` does (web/context.go:301).
     let user_id = resolve_me(&user_id, &session);
@@ -3567,12 +3541,10 @@ async fn serve_threads(
         )));
     }
 
-    let extended = query_flag_is_true(query, "extended");
-    let per_page = parse_per_page(query);
-
+    let opts = user_threads_opts(query)?;
     let mut threads = state
         .app
-        .get_threads_for_user(user_id, team_id, per_page, extended)
+        .get_threads_for_user(user_id, team_id, opts)
         .await?;
 
     // **A root post carrying `attachments` is forwarded, page and all.**
@@ -3626,6 +3598,60 @@ async fn serve_threads(
         )
             .into_response(),
     ))
+}
+
+/// `getThreadsForUser`'s option parsing and its three refusals (api4/user.go:3991-4038), in
+/// Go's order. `page` is parsed by the framework and never read here.
+fn user_threads_opts(
+    query: Option<&str>,
+) -> Result<mm_model::thread::GetUserThreadsOpts, ApiError> {
+    let since = match query_first(query, "since").filter(|value| !value.is_empty()) {
+        None => 0,
+        // `strconv.ParseUint(s, 10, 64)`: digits only. `u64::from_str` also takes a leading
+        // `+`, which Go refuses.
+        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => value
+            .parse::<u64>()
+            .map_err(|_| ApiError::invalid_param("since"))?,
+        Some(_) => return Err(ApiError::invalid_param("since")),
+    };
+    let before = query_first(query, "before").unwrap_or_default();
+    let after = query_first(query, "after").unwrap_or_default();
+    let totals_only = query_flag_is_true(query, "totalsOnly");
+    let threads_only = query_flag_is_true(query, "threadsOnly");
+    let exclude_direct = query_flag_is_true(query, "excludeDirect");
+
+    let refuse = |id: &str| {
+        ApiError::from(AppError::new(
+            "api.getThreadsForUser",
+            id,
+            None,
+            String::new(),
+            400,
+        ))
+    };
+    if !before.is_empty() && !after.is_empty() {
+        return Err(refuse("api.getThreadsForUser.bad_params"));
+    }
+    if totals_only && threads_only {
+        return Err(refuse("api.getThreadsForUser.bad_only_params"));
+    }
+
+    Ok(mm_model::thread::GetUserThreadsOpts {
+        // `uint64(c.Params.PerPage)`: never negative, and 0 only when asked for — which the
+        // store turns into 30.
+        page_size: u64::try_from(parse_per_page(query)).unwrap_or_default(),
+        extended: query_flag_is_true(query, "extended"),
+        deleted: query_flag_is_true(query, "deleted"),
+        since,
+        before,
+        after,
+        unread: query_flag_is_true(query, "unread"),
+        totals_only,
+        threads_only,
+        team_only: false,
+        include_is_urgent: false,
+        exclude_direct,
+    })
 }
 
 /// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.

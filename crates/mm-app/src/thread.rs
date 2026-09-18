@@ -1,6 +1,6 @@
 //! Port of the thread reads and the thread-write family in `server/channels/app/user.go`.
 
-use mm_model::thread::Threads;
+use mm_model::thread::{GetUserThreadsOpts, Threads};
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::thread_store::{ThreadMembershipOpts, ThreadStore};
@@ -9,23 +9,20 @@ use mm_store::user_store::UserStore;
 use crate::App;
 
 impl App {
-    /// Port of `app.App.GetThreadsForUser` (app/user.go:2984), for the option set the api4
-    /// handler serves — a team, the default page, and `?extended` — with everything else
-    /// forwarded upstream. See `mm_api::users::get_threads_for_user`.
+    /// Port of `app.App.GetThreadsForUser` (app/user.go:2984), every option of
+    /// [`GetUserThreadsOpts`]. The handler validates them; see `mm_api::users::get_threads_for_user`.
     ///
-    /// # Four counters and a list, and Go runs all five at once
+    /// # Four counters and a list, and which of them run
     ///
-    /// `errgroup` fans them out and the first failure collapses the lot into **one** error id,
-    /// `app.user.get_threads_for_user.app_error` / 500 — so a client cannot tell which query
-    /// broke. Run sequentially here: the concurrency is a latency decision, not a wire one, and
-    /// five borrowed futures over one pool is a complication with nothing to show for it on this
-    /// deployment's data. Recorded rather than hidden.
+    /// `threads_only` skips all four counters, which stay zero; `totals_only` skips the list,
+    /// which stays **nil** and is written `"threads":null`. `unread` skips `GetTotalThreads`
+    /// (the store refuses it) and copies the unread count into `total` — "a legacy flag", in Go's
+    /// words. `TotalUnreadUrgentMentions` and the per-thread `is_urgent` are asked for only when
+    /// post priority is on (app/user.go:2987); with it off both answer Go's zero value.
     ///
-    /// # `TotalUnreadUrgentMentions` is asked for only when post priority is on
-    ///
-    /// And `IncludeIsUrgent` — the per-thread `is_urgent` column — is set from the same config
-    /// flag (app/user.go:2987). With the feature off, Go asks neither, and both answer Go's zero
-    /// value; that is reproduced by passing the flag down rather than by always joining.
+    /// Go runs the five queries in an `errgroup` and folds the first failure into one error,
+    /// `app.user.get_threads_for_user.app_error` / 500, so a client cannot tell which broke. Run
+    /// sequentially here: the concurrency is a latency decision, not a wire one.
     ///
     /// # Participants are sanitised as a **non-admin**, whoever asks
     ///
@@ -33,15 +30,14 @@ impl App {
     /// literal `false`, not `c.IsSystemAdmin()`. So a system admin reading their own threads
     /// sees participants sanitised exactly as an ordinary user would, which is the opposite of
     /// every other route that hydrates users.
-    #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id, extended))]
+    #[tracing::instrument(skip(self, opts), fields(user_id = %user_id, team_id = %team_id))]
     pub async fn get_threads_for_user(
         &self,
         user_id: &str,
         team_id: &str,
-        page_size: i64,
-        extended: bool,
+        mut opts: GetUserThreadsOpts,
     ) -> AppResult<Threads> {
-        let include_is_urgent = self.config().post_priority;
+        opts.include_is_urgent = self.config().post_priority;
 
         let wrap = |err: mm_store::error::StoreError| {
             tracing::error!(error = %err, "threads lookup failed");
@@ -54,42 +50,46 @@ impl App {
             )
         };
 
-        let total_unread_threads = self
-            .store()
-            .thread()
-            .get_total_unread_threads(user_id, team_id)
-            .await
-            .map_err(wrap)?;
-        let total = self
-            .store()
-            .thread()
-            .get_total_threads(user_id, team_id)
-            .await
-            .map_err(wrap)?;
-        let total_unread_mentions = self
-            .store()
-            .thread()
-            .get_total_unread_mentions(user_id, team_id)
-            .await
-            .map_err(wrap)?;
-        let total_unread_urgent_mentions = if include_is_urgent {
-            self.store()
-                .thread()
-                .get_total_unread_urgent_mentions(user_id, team_id)
+        let mut result = Threads::default();
+        if !opts.threads_only {
+            let store = self.store();
+            let threads = store.thread();
+            result.total_unread_threads = threads
+                .get_total_unread_threads(user_id, team_id, &opts)
                 .await
-                .map_err(wrap)?
-        } else {
-            0
-        };
+                .map_err(wrap)?;
+            if !opts.unread {
+                result.total = threads
+                    .get_total_threads(user_id, team_id, &opts)
+                    .await
+                    .map_err(wrap)?;
+            }
+            result.total_unread_mentions = threads
+                .get_total_unread_mentions(user_id, team_id, &opts)
+                .await
+                .map_err(wrap)?;
+            if opts.include_is_urgent {
+                result.total_unread_urgent_mentions = threads
+                    .get_total_unread_urgent_mentions(user_id, team_id, &opts)
+                    .await
+                    .map_err(wrap)?;
+            }
+        }
+        if opts.unread {
+            result.total = result.total_unread_threads;
+        }
+        if opts.totals_only {
+            return Ok(result);
+        }
 
         let mut threads = self
             .store()
             .thread()
-            .get_threads_for_user(user_id, team_id, page_size, include_is_urgent)
+            .get_threads_for_user(user_id, team_id, &opts)
             .await
             .map_err(wrap)?;
 
-        if extended {
+        if opts.extended {
             self.hydrate_thread_participants(&mut threads).await?;
         }
 
@@ -103,13 +103,8 @@ impl App {
             }
         }
 
-        Ok(Threads {
-            total,
-            total_unread_threads,
-            total_unread_mentions,
-            total_unread_urgent_mentions,
-            threads: Some(threads),
-        })
+        result.threads = Some(threads);
+        Ok(result)
     }
 
     /// Port of `app.App.GetThreadMembershipForUser` (app/user.go:3073).

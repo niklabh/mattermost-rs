@@ -1,0 +1,4 @@
+# Third try at the two guards whose mutations must keep a typed bind parameter: an unused
+# $n, and $n IS NOT NULL, both leave Postgres unable to type it, so query! cannot compile.
+exclude-direct-ignored	crates/mm-store/src/thread_store.rs	                    OR (NOT $6 AND COALESCE(t.threadteamid, '') = ''))	                    OR (($6 OR NOT $6) AND COALESCE(t.threadteamid, '') = ''))	api	threads_for_user
+unread-ignored	crates/mm-store/src/thread_store.rs	AND (NOT $8 OR tm.lastviewed < t.lastreplyat)	AND ($8 OR NOT $8 OR tm.lastviewed < t.lastreplyat)	api	threads_for_user

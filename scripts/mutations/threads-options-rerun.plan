@@ -1,0 +1,8 @@
+# Follow-up to threads-options.plan: its exclude-direct and unread lines dropped a bind
+# parameter from a query! macro, which cannot compile (Postgres cannot type an unused $n).
+# These keep the parameter and make the guard constant.
+# And the two survivors of the first run, after their fixtures were fixed.
+exclude-direct-ignored	crates/mm-store/src/thread_store.rs	                    OR (NOT $6 AND COALESCE(t.threadteamid, '') = ''))	                    OR ($6 IS NOT NULL AND COALESCE(t.threadteamid, '') = ''))	api	threads_for_user
+unread-ignored	crates/mm-store/src/thread_store.rs	AND (NOT $8 OR tm.lastviewed < t.lastreplyat)	AND ($8 IS NOT NULL OR tm.lastviewed < t.lastreplyat)	api	threads_for_user
+since-only-on-the-membership	crates/mm-store/src/thread_store.rs	OR tm.lastupdated >= $7 OR t.lastreplyat >= $7)	OR tm.lastupdated >= $7)	api	threads_for_user
+team-unread-threads-need-no-unread-reply	crates/mm-store/src/thread_store.rs	               AND t.lastreplyat > tm.lastviewed	               AND TRUE	api	teams_unread

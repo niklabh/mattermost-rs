@@ -1,0 +1,25 @@
+# Mutation plan for getThreadsForUser's options and getTeamsUnreadForUser's collapsed-threads
+# half (2026-09-19): the store guards, the app's which-queries-run decisions, the handler's
+# refusals, and the grouped team counters.
+#
+#   scripts/mutate-batch.sh scripts/mutations/threads-options.plan
+list-deleted-replies-never-unread	crates/mm-store/src/thread_store.rs	AND ($5 OR r.deleteat = 0))	AND r.deleteat = 0)	api	threads_for_user
+exclude-direct-ignored	crates/mm-store/src/thread_store.rs	                    OR (NOT $6 AND COALESCE(t.threadteamid, '') = ''))	                    OR COALESCE(t.threadteamid, '') = '')	api	threads_for_user
+since-ignored	crates/mm-store/src/thread_store.rs	AND ($7::bigint = 0 OR tm.lastupdated	AND (TRUE OR tm.lastupdated	api	threads_for_user
+since-only-on-the-membership	crates/mm-store/src/thread_store.rs	OR tm.lastupdated >= $7 OR t.lastreplyat >= $7)	OR tm.lastupdated >= $7)	api	threads_for_user
+unread-ignored	crates/mm-store/src/thread_store.rs	AND (NOT $8 OR tm.lastviewed < t.lastreplyat)	AND (TRUE OR tm.lastviewed < t.lastreplyat)	api	threads_for_user
+before-ignored	crates/mm-store/src/thread_store.rs	AND ($9 = '' OR t.lastreplyat <	AND (TRUE OR t.lastreplyat <	api	threads_for_user
+after-keeps-descending	crates/mm-store/src/thread_store.rs	ORDER BY CASE WHEN $10 = '' THEN t.lastreplyat END DESC,	ORDER BY CASE WHEN TRUE THEN t.lastreplyat END DESC,	api	threads_for_user
+threads-only-still-counts	crates/mm-app/src/thread.rs	        if !opts.threads_only {	        if true {	api	threads_for_user
+unread-keeps-the-real-total	crates/mm-app/src/thread.rs	        if opts.unread {	        if false {	api	threads_for_user
+totals-only-still-lists	crates/mm-app/src/thread.rs	        if opts.totals_only {	        if false {	api	threads_for_user
+since-accepts-a-plus-sign	crates/mm-api/src/users.rs	Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => value	Some(value) if true => value	api	threads_for_user
+both-cursors-accepted	crates/mm-api/src/users.rs	    if !before.is_empty() && !after.is_empty() {	    if false {	api	threads_for_user
+both-only-modes-accepted	crates/mm-api/src/users.rs	    if totals_only && threads_only {	    if false {	api	threads_for_user
+crt-gate-inverted	crates/mm-app/src/team.rs	&& config.collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED	&& config.collapsed_threads == mm_model::config::COLLAPSED_THREADS_DISABLED	api	teams_unread
+thread-count-takes-the-mentions	crates/mm-app/src/team.rs	member.thread_count = threads.thread_count;	member.thread_count = threads.thread_mention_count;	api	teams_unread
+team-unread-threads-need-no-unread-reply	crates/mm-store/src/thread_store.rs	               AND t.lastreplyat > tm.lastviewed	               AND TRUE	api	teams_unread
+urgent-counts-the-other-priorities	crates/mm-store/src/thread_store.rs	WHERE pp.priority = 'urgent'	WHERE pp.priority <> 'urgent'	api	teams_unread
+crt-literal-true-only	crates/mm-api/src/teams.rs	let include_collapsed_threads = wants_collapsed_threads(query.as_deref());	let include_collapsed_threads = query.as_deref().is_some_and(|q| q.contains("include_collapsed_threads"));	api	teams_unread
+control-log-message	crates/mm-app/src/team.rs	"thread unreads lookup failed"	"thread unread lookup failed"	api	teams_unread
+control-binding-rename	crates/mm-app/src/team.rs	if let Some(threads) = thread_unreads.get(&member.team_id) {\n                    member.thread_count = threads.thread_count;\n                    member.thread_mention_count = threads.thread_mention_count;\n                    member.thread_urgent_mention_count = threads.thread_urgent_mention_count;	if let Some(t) = thread_unreads.get(&member.team_id) {\n                    member.thread_count = t.thread_count;\n                    member.thread_mention_count = t.thread_mention_count;\n                    member.thread_urgent_mention_count = t.thread_urgent_mention_count;	api	teams_unread
