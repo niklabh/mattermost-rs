@@ -46,11 +46,16 @@ fn bare_session(token: &str, session_type: &str) -> Session {
 }
 
 /// `NewAppError(where, "api.context.invalid_token.error", {"Token": token, "Error": ""},
-/// "The provided token is invalid", 401)`. The token is left out of the params map, as
-/// `session.rs`'s `invalid_token` does: the map reaches loggers, and the client never sees it
-/// (Rust's `message` is the id, [D-092]).
-fn invalid_token(where_: &str) -> Box<AppError> {
+/// "The provided token is invalid", 401)` (app/session.go:68, :83).
+///
+/// The token is carried for the same reason `session.rs`'s twin carries it: the sentence is
+/// `Invalid session token={{.Token}}, err={{.Error}}` and the client reads it. See [D-079].
+fn invalid_token(where_: &str, token: &str) -> Box<AppError> {
     let mut params: HashMap<String, serde_json::Value> = HashMap::new();
+    params.insert(
+        "Token".to_owned(),
+        serde_json::Value::String(token.to_owned()),
+    );
     params.insert("Error".to_owned(), serde_json::Value::String(String::new()));
     AppError::boxed(
         where_,
@@ -106,10 +111,10 @@ impl App {
             Ok(rc) if constant_time_equal(&rc.token, token) => {
                 Ok(bare_session(token, SESSION_TYPE_REMOTECLUSTER_TOKEN))
             }
-            Ok(_) => Err(invalid_token("GetRemoteClusterSession")),
+            Ok(_) => Err(invalid_token("GetRemoteClusterSession", token)),
             Err(err) => {
                 tracing::debug!(error = %err, "the remote cluster lookup failed");
-                Err(invalid_token("GetRemoteClusterSession"))
+                Err(invalid_token("GetRemoteClusterSession", token))
             }
         }
     }
@@ -131,7 +136,7 @@ fn cloud_session(api_key: Option<&str>, token: &str) -> AppResult<Session> {
         Some(api_key) if !api_key.is_empty() && constant_time_equal(api_key, token) => {
             Ok(bare_session(token, SESSION_TYPE_CLOUD_KEY))
         }
-        _ => Err(invalid_token("GetCloudSession")),
+        _ => Err(invalid_token("GetCloudSession", token)),
     }
 }
 
@@ -162,14 +167,17 @@ mod tests {
     }
 
     #[test]
-    fn invalid_token_is_gos_401_and_keeps_the_token_out_of_params() {
-        let err = invalid_token("GetRemoteClusterSession");
+    fn invalid_token_is_gos_401_and_carries_the_token_its_sentence_names() {
+        let err = invalid_token("GetRemoteClusterSession", "tok");
         assert_eq!(err.id, INVALID_TOKEN);
         assert_eq!(err.status_code, 401);
         assert_eq!(err.where_, "GetRemoteClusterSession");
         assert_eq!(err.detailed_error, "The provided token is invalid");
         let params = err.params.expect("params are set");
-        assert!(!params.contains_key("Token"));
+        assert_eq!(
+            params.get("Token"),
+            Some(&serde_json::Value::String("tok".to_owned()))
+        );
     }
 
     /// `apiKey != "" && ConstantTimeCompare(...) == 1` — both halves, each branch.

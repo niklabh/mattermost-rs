@@ -144,7 +144,7 @@ pub(crate) struct ErrorContext<'a> {
 /// else. `headers` are what `ServeHTTP` had already set; the page replaces the content type.
 ///
 /// `None` hands the request to Go: no translation bundle, no usable signing key, an error whose
-/// message would need a template rendered, or a redirect status.
+/// sentence uses a template construct this port skips, or a redirect status.
 pub(crate) async fn handle_context_error(
     state: &crate::AppState,
     context: &ErrorContext<'_>,
@@ -156,19 +156,19 @@ pub(crate) async fn handle_context_error(
     }
     err.request_id = context.request_id.to_owned();
 
-    // `c.Err.Translate(c.AppContext.T)`: `T(id)`, or `T(id, params)`, which renders a template
-    // this port does not have.
+    // `c.Err.Translate(c.AppContext.T)`. The message ends up inside a **signed** URL, so an
+    // approximation here is a different document rather than a cosmetic divergence: an id whose
+    // sentence uses a construct `mm_app::i18n` skips is forwarded to Go instead.
     if !err.skip_translation {
-        if err.params.is_some() {
-            return None;
-        }
         let bundle = mm_app::i18n::translations().await?;
         let config = state.app.config();
-        err.message = bundle.translate_for_request(
-            context.accept_language,
-            &config.default_client_locale,
-            &err.id,
-        );
+        let locale = bundle
+            .request_locale(context.accept_language, &config.default_client_locale)
+            .to_owned();
+        if !bundle.can_render(&locale, &err.id) {
+            return None;
+        }
+        bundle.translate_app_error(&locale, &mut err);
     }
 
     let config = state.app.config();

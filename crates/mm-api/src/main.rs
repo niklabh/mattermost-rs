@@ -59,6 +59,17 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => DEFAULT_MAX_DB_CONNECTIONS,
     };
 
+    // `utils.TranslationsPreInit` (cmd/mattermost/commands/init.go:41), and fatal for the same
+    // reason it is in Go: `handleContextError` translates every error body it writes, so a server
+    // without the bundle answers an id where the Go server beside it answers a sentence — on
+    // every route at once, with nothing in the response to say why. `FindDirRelBinary` looks
+    // beside the working directory first, which is the Go server's run directory
+    // (`scripts/mm-api-env.sh`), so both processes read the same `i18n/`.
+    mm_app::i18n::init().await.context(
+        "could not load the translations. This process must run from the same directory as the \
+         Go server, which is where its `i18n/` lives — see scripts/mm-api-env.sh",
+    )?;
+
     let store = SqlStore::connect(&database_url, max_connections)
         .await
         .context("could not connect to the shared Postgres")?;

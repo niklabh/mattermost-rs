@@ -56,6 +56,26 @@ fn app_error(where_: &'static str, id: &str, status: i32) -> Box<AppError> {
     AppError::boxed(where_, id, None, String::new(), status)
 }
 
+/// [`app_error`] with the one-entry params map Go's `map[string]any{key: value}` is. The
+/// sentences for the dialog refusals interpolate it (`Maximum allowed is {{.Max}}.`,
+/// `File {{.FileId}} …`), so an error raised without it renders `<no value>` where Go names the
+/// number or the id.
+fn app_error_with(
+    where_: &'static str,
+    id: &str,
+    status: i32,
+    key: &str,
+    value: serde_json::Value,
+) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        id,
+        Some(std::collections::HashMap::from([(key.to_owned(), value)])),
+        String::new(),
+        status,
+    )
+}
+
 /// `time.RFC822` in UTC: `02 Jan 06 15:04 UTC`. `time.Unix(targetTime, 0)` takes any `int64`;
 /// chrono refuses one outside its range, and Go's formatting of such a year is not reproduced.
 fn rfc822_utc(seconds: i64) -> String {
@@ -992,10 +1012,12 @@ impl App {
     ) -> AppResult<OutboundDisposition> {
         let file_ids = remove_duplicate_strings_non_sort(&request.file_ids);
         if file_ids.len() > MAX_DIALOG_FILE_IDS {
-            return Err(app_error(
+            return Err(app_error_with(
                 "SubmitInteractiveDialog",
                 "app.submit_interactive_dialog.too_many_file_ids",
                 400,
+                "Max",
+                MAX_DIALOG_FILE_IDS.into(),
             ));
         }
         if !file_ids.is_empty() {
@@ -1014,19 +1036,23 @@ impl App {
                 })?;
             for info in &declared {
                 if info.creator_id != request.user_id {
-                    return Err(app_error(
+                    return Err(app_error_with(
                         "SubmitInteractiveDialog",
                         "app.submit_interactive_dialog.file_not_owned",
                         403,
+                        "FileId",
+                        info.id.as_str().into(),
                     ));
                 }
             }
             for id in &file_ids {
                 if !declared.iter().any(|info| &info.id == id) {
-                    return Err(app_error(
+                    return Err(app_error_with(
                         "SubmitInteractiveDialog",
                         "app.submit_interactive_dialog.invalid_file_id",
                         400,
+                        "FileId",
+                        id.as_str().into(),
                     ));
                 }
             }
@@ -1049,10 +1075,12 @@ impl App {
             }
         }
         if scan_limit_exceeded {
-            return Err(app_error(
+            return Err(app_error_with(
                 "SubmitInteractiveDialog",
                 "app.submit_interactive_dialog.too_many_submission_ids",
                 400,
+                "Max",
+                MAX_DIALOG_SUBMISSION_ID_SHAPED_TOKEN_SCAN.into(),
             ));
         }
         if !candidates.is_empty() {
@@ -1068,18 +1096,22 @@ impl App {
                 Ok(found) => {
                     for info in &found {
                         if info.creator_id != request.user_id {
-                            return Err(app_error(
+                            return Err(app_error_with(
                                 "SubmitInteractiveDialog",
                                 "app.submit_interactive_dialog.file_not_owned",
                                 403,
+                                "FileId",
+                                info.id.as_str().into(),
                             ));
                         }
                     }
                     if file_ids.len() + found.len() > MAX_DIALOG_FILE_IDS {
-                        return Err(app_error(
+                        return Err(app_error_with(
                             "SubmitInteractiveDialog",
                             "app.submit_interactive_dialog.too_many_file_ids",
                             400,
+                            "Max",
+                            MAX_DIALOG_FILE_IDS.into(),
                         ));
                     }
                 }

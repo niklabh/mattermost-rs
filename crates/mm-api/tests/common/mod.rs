@@ -394,16 +394,18 @@ pub async fn set_active_licence_id(id: Option<&str>) {
     }
 }
 
-/// Compare two error bodies and assert they differ in **exactly** the two keys that are known to,
+/// Compare two error bodies and assert they differ in **exactly** the one key that is known to,
 /// returning the parsed Go body for further assertions.
 ///
-/// `request_id` is per-request and can never match. `message` is Go's *translated* prose where
-/// ours is the raw error id — the one remaining third of [D-092], which needs the i18n bundle.
+/// `request_id` is per-request and can never match. Everything else must be equal, `message`
+/// included: since [D-092] closed, this server translates the id through the same bundle Go does,
+/// so every caller of this helper is also a check that the sentence — and the params rendered
+/// into it — is Go's. That is most of the breadth behind the i18n work; `parity::error_i18n`
+/// covers the locales a default-locale request never reaches.
 ///
 /// Written as a difference-set assertion rather than as "compare these three fields" on purpose:
 /// a field added to `AppError` upstream, or a value we get wrong in some *other* key, fails this
-/// immediately instead of slipping through a hand-listed comparison. When i18n lands, `message`
-/// comes out of the tolerated set and this gets stricter with a one-word edit.
+/// immediately instead of slipping through a hand-listed comparison.
 pub fn assert_error_bodies_match_except_known_gaps(
     go_body: &[u8],
     rs_body: &[u8],
@@ -433,28 +435,16 @@ pub fn assert_error_bodies_match_except_known_gaps(
         .map(|(key, _)| key.as_str())
         .collect();
 
-    // A **subset**, not an equality. `request_id` always differs and `message` almost always
-    // does — but not when the id is `model.NoTranslation`, whose "translation" is the sentinel
-    // itself, so both servers write `<untranslated>` and the two messages agree. Requiring the
-    // message to differ failed `getUsersWithInvalidEmails` for agreeing with Go *more* closely
-    // than the helper expected.
+    // A **subset**, not an equality: `request_id` always differs, nothing else may.
     let unexpected: Vec<&str> = differing
         .iter()
         .copied()
-        .filter(|key| !matches!(*key, "message" | "request_id"))
+        .filter(|key| *key != "request_id")
         .collect();
     assert!(
         unexpected.is_empty(),
-        "{context}: only `message` (D-092, i18n) and `request_id` may differ, but {unexpected:?} \
-         also did.\n  go:   {go}\n  rust: {rs}"
-    );
-
-    // And pin what our `message` actually is, so the divergence stays the documented one rather
-    // than becoming some third value nobody chose.
-    assert_eq!(
-        rs_obj.get("message"),
-        rs_obj.get("id"),
-        "{context}: until i18n lands our message is the raw id (D-092)"
+        "{context}: only `request_id` may differ, but {unexpected:?} also did.\n  \
+         go:   {go}\n  rust: {rs}"
     );
 
     go
@@ -2473,6 +2463,20 @@ pub fn stack_data_dir() -> String {
         .into_owned()
 }
 
+/// The **run directory** `scripts/go-server.sh` builds for this stack, and the one
+/// `scripts/mm-api-env.sh` launches the stack's own mm-api from.
+///
+/// `i18n/`, `templates/`, `fonts/`, `logs/` and `client/` are found relative to the working
+/// directory (`fileutils.FindDir`), so a server started anywhere else is a different server. That
+/// was invisible until the translations became mandatory at start-up: every `SecondServer` ran in
+/// the test binary's own directory, found no `i18n`, and simply refused to boot.
+pub fn stack_run_dir() -> std::path::PathBuf {
+    let data = std::path::PathBuf::from(stack_data_dir());
+    data.parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or(data)
+}
+
 impl SecondServer {
     /// Start one on `port` with `env` overlaid, and wait for it to answer.
     ///
@@ -2550,10 +2554,13 @@ impl SecondServer {
         for (key, value) in env {
             command.env(key, value);
         }
-        if let Some(dir) = dir {
-            // `PWD` goes with it: Go's `os.Getwd` (and the port's) prefers it when it names `.`.
-            command.current_dir(dir).env("PWD", dir);
-        }
+        // The stack's run directory unless the caller named one: that is where the stack's own
+        // mm-api runs (`scripts/mm-api-env.sh`), and it is where `i18n/` — which the process now
+        // refuses to start without — actually is.
+        let run_dir = stack_run_dir();
+        let dir = dir.unwrap_or(run_dir.as_path());
+        // `PWD` goes with it: Go's `os.Getwd` (and the port's) prefers it when it names `.`.
+        command.current_dir(dir).env("PWD", dir);
         let child = command.spawn().ok()?;
 
         let base = format!("http://127.0.0.1:{port}");

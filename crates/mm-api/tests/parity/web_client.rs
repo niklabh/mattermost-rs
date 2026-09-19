@@ -492,6 +492,13 @@ async fn with_no_client_directory_the_page_is_gos_500() {
     }
     let dir = std::env::temp_dir().join(format!("mmrs-web-noclient-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    // No `client/` is the subject; no `i18n/` would merely stop the server booting, and
+    // `start_in` would then answer `None` and this test would pass having asserted nothing.
+    let _ = std::os::unix::fs::symlink(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../reference/mattermost/server/i18n"),
+        dir.join("i18n"),
+    );
     let Some(server) = SecondServer::start_in(8117, &dir, &[]).await else {
         return;
     };

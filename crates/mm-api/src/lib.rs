@@ -431,6 +431,41 @@ pub(crate) async fn refresh_config_after_write(
 ///
 /// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
 /// defaults to `false` and is not modelled in [`mm_app::config::Config`].
+/// Port of the translation half of `web.Handler.ServeHTTP`: pick this request's `T` before the
+/// handler runs (handlers.go:191) so that `handleContextError` can apply it to whatever error
+/// comes back (handlers.go:431).
+///
+/// Go keeps the function on `c.AppContext`; here it goes into a task-local
+/// ([`error::RequestTranslator`]) because the conversion that needs it — `IntoResponse` for
+/// `ApiError` — is synchronous and never sees the request. Resolving the bundle and the locale
+/// *here*, where awaiting is allowed, is what makes that possible.
+///
+/// **Not the user's locale.** `GetTranslationsAndLocaleFromRequest` reads only `Accept-Language`
+/// and `LocalizationSettings.DefaultClientLocale`; nothing later replaces `AppContext.T` with the
+/// session user's `Locale`, so an error body is in the *client's* language and a user who set
+/// `fr` in their profile still gets English from a browser that asks for English.
+pub(crate) async fn translate_error_messages(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let accept_language = request
+        .headers()
+        .get(axum::http::header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let translator = mm_app::i18n::loaded().map(|bundle| {
+        let locale = bundle
+            .request_locale(&accept_language, &state.app.config().default_client_locale)
+            .to_owned();
+        error::RequestTranslator { bundle, locale }
+    });
+    error::REQUEST_TRANSLATOR
+        .scope(translator, next.run(request))
+        .await
+}
+
 pub(crate) async fn go_global_headers(
     State(state): State<AppState>,
     request: Request,
@@ -3731,6 +3766,13 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             refresh_config_after_write,
+        ))
+        // Outermost of all: `ServeHTTP` picks the request's `T` before anything else it does, and
+        // every error below here — a handler's, the fallback's, a rejection's — is written with
+        // it. See [`translate_error_messages`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            translate_error_messages,
         ))
         .with_state(state)
 }

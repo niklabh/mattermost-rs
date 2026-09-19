@@ -1,0 +1,28 @@
+# error-i18n.plan — AppError.Translate and the go-i18n bundle (D-092), 2026-09-20.
+#
+# The `unit` lines run mm-app's `i18n::` tests, whose oracle is `fixtures/behaviour_i18n.json`
+# (4360 request rows, 304 server-locale rows, 26 raw template rows). The `api` lines need the
+# stack: they change how the *request's* locale is picked, which only a live Accept-Language
+# shows, and `parity::error_i18n` drives eight of them.
+#
+# Not planned, deliberately: swapping `default_client_locale` for `default_server_locale` in the
+# middleware is wire-equivalent on this stack, where both are `en` — the inverse of
+# [[param-name-mutations-are-wire-equivalent]], and a line that could only ever survive.
+trim-dropped-from-action	crates/mm-app/src/i18n.rs	    let name = body.trim().strip_prefix('.')?;	    let name = body.strip_prefix('.')?;	unit	i18n::
+template-detected-by-closer	crates/mm-app/src/i18n.rs	        if !src.contains("{{") {	        if src.contains("{{") {	unit	i18n::
+missing-key-renders-empty	crates/mm-app/src/i18n.rs	        None | Some(serde_json::Value::Null) => Cow::Borrowed("<no value>"),	        None | Some(serde_json::Value::Null) => Cow::Borrowed(""),	unit	i18n::
+no-english-fallback	crates/mm-app/src/i18n.rs	                .translate_once(FALLBACK_LOCALE, id, params)	                .translate_once(pref, id, params)	unit	i18n::
+empty-rendering-is-a-translation	crates/mm-app/src/i18n.rs	        (!rendered.is_empty()).then(|| rendered.into_owned())	        Some(rendered.into_owned())	unit	i18n::
+skip-translation-ignored	crates/mm-app/src/i18n.rs	        if err.skip_translation {	        if false {	unit	i18n::
+params-dropped-on-the-way-in	crates/mm-app/src/i18n.rs	        err.message = self.translate_with(pref, &err.id, err.params.as_ref());	        err.message = self.translate_with(pref, &err.id, None);	unit	i18n::
+server-locale-inverted	crates/mm-app/src/i18n.rs	        if self.locales.contains(default_server_locale) {	        if !self.locales.contains(default_server_locale) {	unit	i18n::
+action-close-off-by-one	crates/mm-app/src/i18n.rs	            rest = &after[close + 2..];	            rest = &after[close + 1..];	unit	i18n::
+integer-through-the-float-path	crates/mm-app/src/i18n.rs	        return signed.to_string();	        return mm_model::utils::go_format_float(signed as f64);	unit	i18n::
+can-render-defaults-to-no	crates/mm-app/src/i18n.rs	            .unwrap_or(true)	            .unwrap_or(false)	unit	i18n::
+full-tag-checked-second	crates/mm-app/src/i18n.rs	        if self.locales.contains(full) {	        if self.locales.contains(short) {	unit	i18n::
+array-body-accepted-for-a-struct	crates/mm-model/src/utils.rs	        .is_some_and(|byte| *byte == b'[')	        .is_some_and(|byte| *byte == b'{')	api	channel_creates
+accept-language-ignored	crates/mm-api/src/lib.rs	        .get(axum::http::header::ACCEPT_LANGUAGE)	        .get(axum::http::header::ACCEPT_CHARSET)	api	error_i18n
+errors-left-untranslated	crates/mm-api/src/error.rs	        translate(&mut self.0);	        let _ = &mut self.0;	api	error_i18n
+# Controls: must survive.
+control-rename-number-bindings	crates/mm-app/src/i18n.rs	    if let Some(signed) = number.as_i64() {\n        return signed.to_string();\n    }\n    if let Some(unsigned) = number.as_u64() {\n        return unsigned.to_string();\n    }	    if let Some(whole) = number.as_i64() {\n        return whole.to_string();\n    }\n    if let Some(nonneg) = number.as_u64() {\n        return nonneg.to_string();\n    }	unit	i18n::
+control-reorder-scalar-arms	crates/mm-app/src/i18n.rs	        Some(serde_json::Value::Bool(flag)) => Cow::Borrowed(if *flag { "true" } else { "false" }),\n        Some(serde_json::Value::String(text)) => Cow::Borrowed(text.as_str()),	        Some(serde_json::Value::String(text)) => Cow::Borrowed(text.as_str()),\n        Some(serde_json::Value::Bool(flag)) => Cow::Borrowed(if *flag { "true" } else { "false" }),	unit	i18n::

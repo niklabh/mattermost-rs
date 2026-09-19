@@ -212,9 +212,9 @@ async fn a_foreign_user_id_is_rejected_identically() {
         "every error carries a request id, as Go's does"
     );
 
-    // The one field that legitimately differs: Go translates the id through its i18n bundle and
-    // we emit the id itself. See D-092.
-    assert_eq!(rs_body["message"], rs_body["id"]);
+    // Since D-092 closed, the message is Go's sentence on both sides — and it is a sentence, not
+    // the id, which is what the second assertion pins.
+    assert_eq!(rs_body["message"], go_body["message"]);
     assert_ne!(go_body["message"], go_body["id"]);
 }
 

@@ -58,6 +58,14 @@ fn lay_out(run: &Path) {
     for dir in ["data/plugins", "plugins", "client", "prepackaged_plugins"] {
         std::fs::create_dir_all(run.join(dir)).unwrap();
     }
+    // Both servers refuse to start without their translations, and both find them relative to
+    // this directory — `start_go` links them for Go; this links them for whoever runs here.
+    for dir in ["i18n", "templates", "fonts"] {
+        let _ = std::os::unix::fs::symlink(
+            repo().join("reference/mattermost/server").join(dir),
+            run.join(dir),
+        );
+    }
     let b64 = base64::engine::general_purpose::STANDARD;
     for bundle in fixture()["bundles"].as_array().expect("bundles") {
         let place = bundle["place"].as_str().unwrap();
