@@ -26,6 +26,7 @@ pub mod bufio;
 pub mod exif;
 pub mod flate;
 pub mod fma;
+pub mod format;
 pub mod gomath;
 pub mod goread;
 pub mod hash;

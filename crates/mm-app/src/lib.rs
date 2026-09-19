@@ -58,6 +58,7 @@ pub mod http_guard;
 pub mod hub;
 pub mod i18n;
 /// The format-detection half of Go's `image.DecodeConfig`.
+pub mod image_pipeline;
 pub mod imaging;
 pub mod imaging_orientation;
 /// Port of the file-backend half of `app/import.go`.
