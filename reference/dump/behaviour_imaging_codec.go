@@ -62,6 +62,17 @@ func (s streamSpec) build() []byte {
 			}
 		}
 		out = out[:s.Len]
+	case "records":
+		// A fixed 4-byte prefix and one noise byte per 5-byte record: every prefix hashes alike,
+		// so the hash chain is longer than level 9's 4096 candidates and no match ever reaches
+		// "nice" — the chain limit is what decides which match wins.
+		for i := 0; i < s.Len; i++ {
+			if i%5 == 4 {
+				out = append(out, uint8(hash4(s.Seed, i, 0, 0)>>56))
+			} else {
+				out = append(out, "mmrs"[i%5])
+			}
+		}
 	case "rows":
 		for i := 0; i < s.Len; i++ {
 			out = append(out, sample("blocks", s.Seed, (i/3)%97, i/291, i%3, 97, 1000))
@@ -311,6 +322,13 @@ func imagingFlateStage() (map[string]any, error) {
 				add(streamSpec{k, n, seed}, level, "flate", 0)
 				seed++
 			}
+		}
+	}
+	// Chain-limited streams: level 8's 1024 and level 9's 4096 candidates are both exhausted.
+	for _, level := range []int{4, 6, 8, 9} {
+		for _, n := range []int{70000, 200000} {
+			add(streamSpec{"records", n, seed}, level, "flate", 0)
+			seed++
 		}
 	}
 	// Chunked writes, which is how the PNG encoder feeds the deflater (one row per Write).

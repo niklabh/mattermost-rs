@@ -22,11 +22,15 @@
 //! This crate contains no Mattermost code. The Mattermost call sequences (`GenerateThumbnail`,
 //! `postprocessImage`, `AdjustImage`, …) are in `mm-app`.
 
+pub mod bufio;
+pub mod flate;
 pub mod fma;
 pub mod hash;
 pub mod image;
 pub mod jpeg;
+pub mod png;
 pub mod sink;
+pub mod zlib;
 
 #[cfg(test)]
 mod testsupport;
