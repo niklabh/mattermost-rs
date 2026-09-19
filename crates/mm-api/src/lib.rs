@@ -1010,12 +1010,11 @@ pub fn router(state: AppState) -> Router {
             ),
         )
         .route(
-            "/api/v4/users/me/teams/members",
-            partially_migrated(get(teams::get_team_members_for_user_me)),
+            "/api/v4/users/{user_id}/teams/members",
+            partially_migrated_with_ids(&state, get(teams::get_team_members_for_user)),
         )
-        // The parameterised sibling of the literal `me` routes above. axum matches literals
-        // first, so `/users/me/teams/members` keeps hitting the route above while `me` here is
-        // an ordinary value the handler resolves — the same alias rule as everywhere else.
+        // `me` is an ordinary `{user_id}` value both handlers resolve — the same alias rule as
+        // everywhere else; neither registers a literal `me` path of its own.
         .route(
             "/api/v4/users/{user_id}/teams",
             partially_migrated_with_ids(&state, get(teams::get_teams_for_user)),

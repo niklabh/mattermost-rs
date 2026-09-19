@@ -1,7 +1,7 @@
 //! Ported handlers from `channels/api4/team.go`:
 //!
 //! - `getTeamsForUser` — `GET /api/v4/users/{user_id}/teams`
-//! - `getTeamMembersForUser` — `GET /api/v4/users/me/teams/members` (`me` only)
+//! - `getTeamMembersForUser` — `GET /api/v4/users/{user_id}/teams/members`
 //! - `getTeam` — `GET /api/v4/teams/{team_id}`
 //! - `getTeamByName` — `GET /api/v4/teams/name/{team_name}`
 //! - `getTeamStats` — `GET /api/v4/teams/{team_id}/stats`
@@ -28,8 +28,10 @@ use mm_model::permission::{
 };
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
-    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
+    PERMISSION_MANAGE_SYSTEM, PERMISSION_MANAGE_TEAM_ROLES, PERMISSION_READ_OTHER_USERS_TEAMS,
+    PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_MEMBERS,
+    PERMISSION_VIEW_TEAM, make_permission_error,
 };
 use mm_model::team::{Team, TeamPatch};
 
@@ -41,54 +43,116 @@ use crate::system::refuse_when_busy;
 use mm_model::utils::decode_one_from_json;
 use mm_store::team_store::TeamMembersGetOptions;
 
-/// Port of `getTeamMembersForUser` for the `me` case.
+/// Go's permission gate for [`get_team_members_for_user`] (api4/team.go:886): the target must be
+/// one `SessionHasPermissionToUser` admits, **or** the session must hold the system-scoped
+/// `read_other_users_teams`.
 ///
-/// # Why this route is portable when its neighbours are not
+/// Unlike [`teams_for_user_denied`] the self test is *not* a bare string comparison here: it is
+/// `SessionHasPermissionToUser`, whose `edit_other_users` arm admits a user manager for any
+/// non-admin target and whose admin-target rule denies. The `||` is lazy in Go, so the second
+/// permission is polled only when the first check refused — pinned by a test that panics if it
+/// is polled for self.
+async fn team_members_for_user_denied<U, UFut, R, RFut>(
+    has_permission_to_user: U,
+    has_read_other_users_teams: R,
+) -> bool
+where
+    U: FnOnce() -> UFut,
+    UFut: std::future::Future<Output = bool>,
+    R: FnOnce() -> RFut,
+    RFut: std::future::Future<Output = bool>,
+{
+    !has_permission_to_user().await && !has_read_other_users_teams().await
+}
+
+/// Port of `getTeamMembersForUser` (api4/team.go:880), reached as
+/// `GET /api/v4/users/{user_id}/teams/members` — `me` included, which resolves like everywhere
+/// else rather than holding a literal registration of its own.
 ///
-/// Go guards a sanitiser with a permission check:
+/// # Order of operations
 ///
-/// ```go
-/// if !c.App.SessionHasPermissionToTeam(session, m.TeamId, model.PermissionManageTeamRoles) {
-///     m.SanitizeRoleData(currentUserId)
-/// }
-/// ```
-///
-/// and `SessionHasPermissionToTeam` needs the roles-and-permissions system, which is unported.
-/// But `SanitizeRoleData` is a **no-op when `o.UserId == currentUserId`** (team_member.go:147),
-/// and this route returns the caller's *own* memberships — so every element satisfies that, and
-/// the permission check's outcome cannot change the response.
-///
-/// The sanitiser is therefore called **unconditionally** here. For `me` that is provably
-/// identical to Go; if the route were ever widened to `/users/{id}/teams/members` it would be
-/// stricter than Go rather than looser, which is the safe direction to be wrong in. The two
-/// preceding permission checks (`SessionHasPermissionToUser`, `UserCanSeeOtherUser`) both
-/// short-circuit to `true` for self (authorization.go:258, user.go:2711), so they are true by
-/// construction rather than skipped.
-///
-/// Contrast [`get_teams_for_user`], which was *not* portable this way and stayed forwarded until
-/// `SessionHasPermissionToTeam` landed: its `SanitizeTeam` strips `email` and `invite_id` based
-/// on two team-scoped permissions with no self-shortcut. See [D-094] for the distinction.
+/// 1. **`me` resolves before validation** (web/context.go:301); then `RequireUserId`.
+/// 2. [`team_members_for_user_denied`] → 403 naming `read_other_users_teams`.
+/// 3. `UserCanSeeOtherUser` — a store failure is its own 500; `false` is a 403 naming
+///    `view_members`. Reachable only for a restricted (guest) caller who passed step 2, which a
+///    guest does only for itself — and self is always visible — so on a stock role set this 403
+///    needs a custom role granting `read_other_users_teams` to a guest.
+/// 4. `GetTeamMembersForUser(userId, "", true)` — no team excluded, **deleted memberships
+///    included**; the handler does not filter afterwards.
+/// 5. Per element, `SanitizeRoleData(currentUserId)` unless the session holds
+///    `manage_team_roles` **on that element's team**. A no-op for one's own rows
+///    (team_member.go:147), so `me` is unchanged by the per-team check; for another user's rows
+///    the answer can differ team by team — a team admin sees that team's row whole and the
+///    others blanked with `delete_at: -1`.
 ///
 /// # Wire format
 ///
 /// `json.Marshal` + `w.Write` (team.go:914), so no trailing newline — same call-site rule as
-/// `/users/me/sessions`, not `/users/me` ([D-086]).
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
-pub async fn get_team_members_for_user_me(
+/// `/users/me/sessions`, not `/users/me` ([D-086]). An empty list is `[]`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+pub async fn get_team_members_for_user(
     State(state): State<AppState>,
+    Path(user_id): Path<String>,
     session: AuthenticatedSession,
 ) -> Result<Response, ApiError> {
-    // `GetTeamMembersForUser(ctx, userId, "", true)` — no team excluded, deleted included. The
-    // handler does not filter afterwards, so a deleted membership *is* returned here, unlike in
-    // `SessionStore::Get` where Go drops them. Same store call, different post-processing.
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    require_id(&user_id, "user_id")?;
+
+    let denied = team_members_for_user_denied(
+        || {
+            state
+                .app
+                .session_has_permission_to_user(&session.0, &user_id)
+        },
+        || {
+            state
+                .app
+                .session_has_permission_to(&session.0, &PERMISSION_READ_OTHER_USERS_TEAMS)
+        },
+    )
+    .await;
+    if denied {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_OTHER_USERS_TEAMS],
+        )));
+    }
+
+    let can_see = state
+        .app
+        .user_can_see_other_user(&session.0.user_id, &user_id)
+        .await
+        .map_err(|err| ApiError::from(*err))?;
+    if !can_see {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_MEMBERS],
+        )));
+    }
+
     let mut members = state
         .app
-        .get_team_members_for_user(&session.0.user_id, "", true)
+        .get_team_members_for_user(&user_id, "", true)
         .await?;
 
     let current_user_id = &session.0.user_id;
     for member in &mut members {
-        member.sanitize_role_data(current_user_id);
+        if !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &member.team_id,
+                &PERMISSION_MANAGE_TEAM_ROLES,
+            )
+            .await
+        {
+            member.sanitize_role_data(current_user_id);
+        }
     }
 
     tracing::Span::current().record("count", members.len());
@@ -3224,6 +3288,25 @@ mod tests {
         })
         .await;
         assert!(!denied);
+    }
+
+    /// `getTeamMembersForUser`'s `||` is lazy: a caller `SessionHasPermissionToUser` admits
+    /// never has `read_other_users_teams` polled.
+    #[tokio::test]
+    async fn team_members_gate_skips_the_fallback_when_the_user_check_admits() {
+        let denied = super::team_members_for_user_denied(
+            || async { true },
+            || async { panic!("read_other_users_teams must not be polled") },
+        )
+        .await;
+        assert!(!denied);
+    }
+
+    /// Either permission admits; only both refusing denies.
+    #[tokio::test]
+    async fn team_members_gate_denies_only_when_both_checks_refuse() {
+        assert!(!super::team_members_for_user_denied(|| async { false }, || async { true }).await);
+        assert!(super::team_members_for_user_denied(|| async { false }, || async { false }).await);
     }
 
     /// Anyone else needs the sysconsole permission, in both directions.

@@ -176,6 +176,7 @@ mod parity {
     pub mod team_icon_writes;
     pub mod team_invite_join;
     pub mod team_member_writes;
+    pub mod team_members_for_user;
     pub mod team_members_route;
     pub mod team_name_members;
     pub mod team_stats;
