@@ -8,10 +8,9 @@
 //! a per-process operation means while two processes serve one API, and each records it on its
 //! own doc comment: [`invalidate_caches`] and [`restart`].
 //!
-//! Two routes of the family are not here. `POST /api/v4/notifications/test` is `CreatePost` with
-//! `ForceNotification` — a flag the post family's `CreatePostFlags` does not yet carry — and
-//! forwards whole ([D-680]). `GET /api/v4/system/notices/{team_id}` is served from this
-//! process's own copy of the notice feed ([`get_product_notices`]).
+//! `POST /api/v4/notifications/test` is here too ([`test_notifications`]), and
+//! `GET /api/v4/system/notices/{team_id}` is served from this process's own copy of the notice
+//! feed ([`get_product_notices`]).
 
 use std::collections::BTreeMap;
 
@@ -193,6 +192,41 @@ pub async fn get_analytics(
     })?;
     body.push('\n');
     Ok(json_response(StatusCode::OK, body.into_bytes()))
+}
+
+// ------------------------------------------------------------------------------------------
+// POST /api/v4/notifications/test
+// ------------------------------------------------------------------------------------------
+
+/// Port of `testNotifications` (api4/system.go:233) — `POST /api/v4/notifications/test`.
+///
+/// No permission check: any session may send itself the test message. The work is
+/// [`mm_app::test_notification`]'s — the system bot's DM to the caller, in the caller's locale,
+/// with `force_notification` set — and the answer is `ReturnStatusOK`.
+///
+/// # Forwarded
+///
+/// Only when `CreatePost` reaches a stage this server does not reproduce, or the DM would need
+/// `RestrictDirectMessage = "team"`; nothing has been posted then, and Go's own get-or-create
+/// finds the bot and channel this call may already have made. On a stock server neither
+/// happens: the post is plain text in a two-member DM.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn test_notifications(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    match state.app.send_test_message(&session.0).await? {
+        mm_app::test_notification::SendTestMessage::Sent(_) => {
+            tracing::Span::current().record("forwarded", false);
+            Ok(json_response(StatusCode::OK, STATUS_OK.as_bytes().to_vec()))
+        }
+        mm_app::test_notification::SendTestMessage::Forward(reason) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason, "forwarding the test notification");
+            Ok(proxy::forward_to_go(State(state), request).await)
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------------

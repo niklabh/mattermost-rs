@@ -188,6 +188,7 @@ mod parity {
     pub mod terms_of_service;
     pub mod terms_of_service_licensed;
     pub mod terms_of_service_writes;
+    pub mod test_notifications;
     pub mod thread_for_user;
     pub mod thread_read;
     pub mod thread_writes;

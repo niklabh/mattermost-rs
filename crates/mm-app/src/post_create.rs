@@ -39,11 +39,12 @@
 use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_OPEN, Channel};
 use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
-    POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_FROM_BOT,
-    POST_PROPS_FROM_OAUTH_APP, POST_PROPS_FROM_PLUGIN, POST_PROPS_FROM_WEBHOOK,
-    POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_OVERRIDE_ICON_EMOJI, POST_PROPS_OVERRIDE_ICON_URL,
-    POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_SILENT_NOTIFICATION, POST_PROPS_WEBHOOK_DISPLAY_NAME,
-    POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ, POST_TYPE_EPHEMERAL, Post,
+    POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_FORCE_NOTIFICATION,
+    POST_PROPS_FROM_BOT, POST_PROPS_FROM_OAUTH_APP, POST_PROPS_FROM_PLUGIN,
+    POST_PROPS_FROM_WEBHOOK, POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_OVERRIDE_ICON_EMOJI,
+    POST_PROPS_OVERRIDE_ICON_URL, POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_SILENT_NOTIFICATION,
+    POST_PROPS_WEBHOOK_DISPLAY_NAME, POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ,
+    POST_TYPE_EPHEMERAL, Post,
 };
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostMetadata;
@@ -58,16 +59,20 @@ use crate::App;
 use crate::channel::RestrictedDm;
 use crate::post::{PrepareError, PreparePostForClientOpts, message_may_contain_a_link};
 
-/// Port of `model.CreatePostFlags` (post.go:414), restricted to the two fields
-/// `POST /api/v4/posts` can set.
+/// Port of `model.CreatePostFlags` (post.go:414), restricted to the fields a served entry point
+/// sets: `POST /api/v4/posts` sets the first two, `App::send_test_message` the third.
 ///
 /// `TriggerWebhooks` is not modelled: `CreatePostAsUserWithFlags` assigns it `true`
-/// unconditionally (app/post.go:69), so on this route it is a constant. The four remaining fields
+/// unconditionally (app/post.go:69), so on this route it is a constant. The three remaining fields
 /// belong to the webhook, plugin and scheduled-post entry points, none of which reach here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CreatePostFlags {
     pub set_online: bool,
     pub silent_notification: bool,
+    /// Server-set only. `CreatePost` adds a `force_notification` prop holding a **fresh id** —
+    /// a string, although `Post.IsValid`'s props check wants a bool; the store save does not run
+    /// that check, and the Go row reads `"force_notification": "<26 chars>"` (measured).
+    pub force_notification: bool,
 }
 
 /// How long a pending post id stays in the deduplication cache.
@@ -593,6 +598,15 @@ impl App {
             post.add_prop(
                 POST_PROPS_FROM_BOT,
                 serde_json::Value::String("true".to_owned()),
+            );
+        }
+
+        // Go's order: `from_bot`, `from_webhook`, `from_plugin` (neither entry point), then this,
+        // then `silent_notification`. `HasForceNotification` accepts any non-empty string.
+        if flags.force_notification {
+            post.add_prop(
+                POST_PROPS_FORCE_NOTIFICATION,
+                serde_json::Value::String(new_id()),
             );
         }
 

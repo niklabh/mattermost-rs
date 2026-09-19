@@ -2826,6 +2826,11 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/database/recycle",
             partially_migrated(post(sysops::database_recycle)),
         )
+        // `("/notifications/test")` (system.go:47).
+        .route(
+            "/api/v4/notifications/test",
+            partially_migrated(post(sysops::test_notifications)),
+        )
         .route(
             "/api/v4/caches/invalidate",
             partially_migrated(post(sysops::invalidate_caches)),
