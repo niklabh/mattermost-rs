@@ -7333,9 +7333,14 @@ and the mux's refusal of a third syncable type. One arm still hands over: a grou
 
 ---
 
-## D-380 · `createEmoji` forwards every image it does not measure, and every resize
+## D-380 · `createEmoji` forwards the GIF branch and the formats it does not decode
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+**Narrowed** 2026-09-20 — every PNG and JPEG header is measured, and the resize (`image.Decode`,
+`imaging.Fit`, `EncodePNG`) is served byte for byte for a `.png` filename
+(`parity::emoji_writes::a_gif_filename_is_go_and_a_resize_is_served_byte_for_byte`). What still
+forwards: a GIF/BMP/TIFF/WebP header ([D-650]) and any non-`.png` filename (the GIF branch below).
+The table that follows is the 2026-09-12 state.
 
 `POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
 400, the permission 403, the model's name errors, the duplicate, the missing image part, the
@@ -7354,11 +7359,9 @@ the file backend is touched, so a forwarded create leaves nothing behind:
 both directions: 128×128 and 1028×1028 sit on the near side of their thresholds and are handled
 here and by Go respectively, which is what makes an off-by-one in either limit visible.
 
-**What is owed:** the GIF frame walk (`imgutils.CountGIFFrames`, an LZW decode per frame) and a
-resize whose output is byte-identical to `imaging.Fit` + Go's PNG encoder. The second is the hard
-one and may never be worth it; if it is not, the honest end state is that this route keeps a
-forward for the resize path and the strangler does not fully retire here. Recorded now rather than
-discovered later.
+**What is owed:** the GIF branch — `imgutils.CountGIFFrames`, `gif.DecodeAll`, `resizeEmojiGif`'s
+per-frame redraw and Floyd–Steinberg dither, `gif.EncodeAll` — and with it the host-dependent
+`mime.TypeByExtension` question that decides whether a filename takes that branch.
 
 ---
 
@@ -7595,9 +7598,14 @@ divergence at the one call site that would show it, before a route echoes a file
 
 ---
 
-## D-411 · every write on the four image routes is Go's; only the refusals are served
+## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Narrowed** 2026-09-20 — items 1 and 3 are served for PNG and JPEG: `SetProfileImage` (including
+`UpdateLastPictureUpdate`, the identical-bytes early return and `invalidateUserCacheAndPublish`)
+and `SaveBrandImage` (including the archive `MoveFile`), byte for byte
+(`parity::image_writes`). A GIF/BMP/TIFF/WebP upload still forwards before the write ([D-650]).
+Item 2 is unchanged. The text below is the 2026-09-13 state.
 
 `POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
 `GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
@@ -7623,11 +7631,8 @@ refusal passes and Go's own decode then rejects, and checks `LastPictureUpdate` 
 `the_brand_upload_forwards_before_it_writes` does the same against `GET /api/v4/brand/image`, so
 the archive `MoveFile` and the `WriteFile` are both provably past the forward.
 
-**What is owed:** a decision about pixel-exact image work, which is the same decision [D-380]
-deferred. Until it is taken these four are refusal-only, and the `Go server that is not running`
-end state is not reached for them. The profile POST additionally needs `SetProfileImage`'s
-`Users.UpdateAt` bump, its `LastPictureUpdate` write and its `user_updated` websocket event; the
-DELETE needs `ResetLastPictureUpdate` and the same event.
+**What is owed:** item 2 only — the freetype rasteriser of [D-204] (and the embedded bot PNG);
+the DELETE also needs `ResetLastPictureUpdate` and the `user_updated` event.
 
 ---
 
@@ -8702,26 +8707,21 @@ so a Greek hashtag ending in one of those letters would compare differently here
 rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
 lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
 
-## D-650 · The image write-through for the upload routes is Go's
+## D-650 · GIF, BMP, TIFF and WebP uploads are Go's
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
+**Narrowed** 2026-09-20 — PNG and JPEG are served byte for byte (`crates/goimage`,
+`mm_app::image_pipeline`; `parity::image_uploads`).
 
-`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve every
-refusal and the write for a **non-image** file, and forward a raster image to Go before writing —
-`mm_app::App::upload_file_x` and `mm_app::App::upload_data` return
-`PrepareError::Unreproducible` the moment `decode_config` measures an image inside the resolution
-limit. The reason is exactly [D-380]/[D-411]'s: `postprocessImage`/`HandleImages` resize the
-original to a `_thumb` and a `_preview` and encode a 16×16 `mini_preview`, and `imaging.Fit` plus
-Go's PNG/JPEG encoders do not reproduce byte-for-byte from a second implementation.
+`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve the raster
+branch — `preprocessImage`/`postprocessImage` and `HandleImages`, the `_thumb`, `_preview` and
+`mini_preview` — for every file whose header `image.Decode`'s registry hands to the PNG or JPEG
+decoder. A header it hands to `image/gif`, `x/image/bmp`, `x/image/tiff` or `x/image/webp` is still
+forwarded before any write (`goimage::format::DecodeError::NotPorted`).
 
-The forward is taken from the file's head **before** the write, so a forwarded `uploadData` chunk
-reaches Go with the session's `FileOffset` still behind and is written there, not double-written.
-An SVG is not forwarded (it has no raster preview); a raster image Go cannot decode is served here
-(Go's own `preprocessImage` returns "as is").
-
-**What is owed:** the same decision [D-380] deferred — pixel-exact `imaging.Fit` and the two
-encoders — after which the completing image chunk and the multipart image upload are served rather
-than forwarded. Until then these two routes are write-through only for non-images.
+**What is owed:** ports of those four decoders against the oracle (GIF also needs its LZW and the
+whole-file decode `preprocessImage` does for an `image/gif` mime), plus the TIFF and WebP EXIF walks
+`GetImageOrientation` supports (`mm_app::imaging_orientation` answers `Unreproducible` for them).
 
 ---
 
@@ -9277,3 +9277,82 @@ cache administrator — that the same operation through Go does not. Measured by
 `parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
 route that Go does not audit, or deleting the row after the call.
 
+
+---
+
+## D-890 · `setTeamIcon`'s write forwards: its orientation read has no seek
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-20 (the image pipeline)
+
+Everything `SetTeamIconFromFile` does is now ported (`mm_app::image_pipeline`: decode, orientation,
+`FillCenter` 128×128, `EncodePNG`) except one input: unlike `AdjustImage`, it calls
+`GetImageOrientation(file, format)` **without seeking back** after `imgDecoder.Decode`
+(app/team.go:2377-2382), so the walk starts wherever `image.Decode`'s `bufio.Reader` left the
+multipart file — a position set by each decoder's read pattern, not by the image. **What is owed:**
+modelling that position (a corpus of Go's `file.Seek(0, io.SeekCurrent)` after `Decode`), then
+serving the write, `LastTeamIconUpdate` and `update_team`.
+
+---
+
+## D-891 · the mini-preview repair on reads and `createPost` still forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-20 (the image pipeline)
+
+`App::mini_preview_would_be_generated` still hands `GET /files/{id}/info`, the post file-info reads,
+drafts and `createPost` to Go when an image row has a NULL `MiniPreview` — which the uploads route
+now produces from Rust, as it did from Go. The pixels are ported
+(`image_pipeline::generate_mini_preview`); what is not is the side effect after
+`FileInfo().Upsert`: `InvalidateFileInfosForPostCache` in the **Go** process, whose
+`localcachelayer` serves `GetForPost`/`GetByIds` from memory, and no REST call purges it
+(`crate::peer_cache` has no file-info method). **What is owed:** a purge path Go honours, then the
+repair.
+
+---
+
+## D-892 · no oracle input for a progressive JPEG with padding MCUs
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the JPEG decoder)
+
+The JPEG decoder's non-interleaved progressive scan skips padding blocks with a `>=` whose `>`
+mutant survives (hand mutation, F4): no corpus file is progressive with a width or height that
+needs padding MCUs. Go cannot encode progressive JPEGs, so the input has to be a committed file fed
+through `reference/dump`. **What is owed:** that file in the JPEG corpus.
+
+---
+
+## D-893 · nothing checks the brand image's archive name
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (`SaveBrandImage`)
+
+`App::save_brand_image` moves the old image to `brand/<2006-01-02T15:04:05>.png` in the server's
+local time before writing the new one. `parity::image_writes` checks the stored image and the 201,
+not the archive, so the name format is transcribed, not measured. **What is owed:** a test that
+lists `brand/` in the shared file store after an upload over an existing image, on each server.
+
+---
+
+## D-894 · two reader shapes of Go's the EXIF oracle does not separate
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the EXIF walk)
+
+1. `preprocessImage` hands `GetImageOrientation` an `io.MultiReader(buffered head, tee of the
+   body)`; the oracle and `imaging_orientation::Input::Stream` model it as one reader. The two can
+   differ only after a failing seek past the 10 MiB scan limit (bufio's read-ahead meets the
+   MultiReader's short read at the seam).
+2. Go's `imgDecoder` captures `MaxImageResolution` once, at server start (channels.go:224); the
+   Rust pipeline reads the current config, so the two disagree after a runtime change of that
+   setting until Go restarts.
+
+**What is owed:** a two-part-reader oracle case over 10 MiB, and a startup snapshot of the limit.
+
+---
+
+## D-895 · the resampler's arithmetic is proven on arm64 only
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the image pipeline)
+
+Go fuses `a + x*y` on arm64 and not on amd64 (`GOAMD64=v1`), so the Lanczos bytes are an
+architecture property; `goimage::fma` mirrors Go per target and the oracle was generated on arm64.
+The unfused (amd64) branch compiles and is the same code with the fusion removed, but no amd64
+oracle has measured it. **What is owed:** the imaging oracle regenerated on an amd64 host and the
+suite run there.

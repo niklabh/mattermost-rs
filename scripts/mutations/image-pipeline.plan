@@ -11,7 +11,9 @@ deflate-lazy-min	crates/goimage/src/flate/deflate.rs	                    && prev
 huff-stored-tie	crates/goimage/src/flate/huffman_bit_writer.rs	            if storable && stored_size < size {	            if storable && stored_size <= size {	unit	flate::deflate
 png-filter-paletted	crates/goimage/src/png/writer.rs	        if level != ZLIB_NO_COMPRESSION && !cb.is_paletted() {	        if level != ZLIB_NO_COMPRESSION {	unit	png::writer
 jpeg-div-round	crates/goimage/src/jpeg/writer.rs	        a.wrapping_add(b >> 1) / b	        a.wrapping_add(b >> 2) / b	unit	jpeg::writer
-jpeg-quality-scale	crates/goimage/src/jpeg/writer.rs	        5000 / quality	        5001 / quality	unit	jpeg::writer
+# jpeg-quality-scale (5000/q -> 5001/q) was run and survived twice: it is equivalent — for every
+# quality 1..49 the scaled tables come out identical (checked over all 128 entries). Replaced by:
+jpeg-quality-clamp	crates/goimage/src/jpeg/writer.rs	|o| o.quality.clamp(1, 100));	|o| o.quality.clamp(1, 99));	unit	jpeg::writer
 inflate-dist-far	crates/goimage/src/flate/inflate.rs	                if dist > self.dict.hist_size() {	                if dist > self.dict.hist_size() + 1 {	unit	inflate
 resize-alpha-unfused	crates/goimage/src/imaging/resize.rs	        a = madd(a, s3, weight);	        a += s3 * weight;	unit	imaging
 resize-centre-unfused	crates/goimage/src/imaging/resize.rs	        let fu = nmsub(v as f64 + 0.5, du, 0.5);	        let fu = (v as f64 + 0.5) * du - 0.5;	unit	imaging

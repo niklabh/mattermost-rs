@@ -11387,8 +11387,8 @@ input the suite never sent**, so the right answer and the wrong answer coincided
 |---|---|---|
 | app | `crates/mm-app/src/config.rs` — `file_max_file_size`, `ldap_picture_attribute`, `saml_enable_sync_with_ldap`, `lock_profile_fields_for_email_users` | DONE |
 | app | `crates/mm-app/src/user.rs` — `is_profile_image_locked_for_user` | PARTIAL (licensed forwards, [D-413]) |
-| app | `crates/mm-app/src/brand.rs` — `save_brand_image` | PARTIAL (the 501 only, [D-411]) |
-| api | `crates/mm-api/src/images.rs` — `set_profile_image`, `set_default_profile_image`, `get_default_profile_image`, `upload_brand_image` | PARTIAL (refusals only, [D-411]) |
+| app | `crates/mm-app/src/brand.rs` — `save_brand_image` | DONE for PNG/JPEG since 2026-09-20 (see *The image pipeline*) |
+| api | `crates/mm-api/src/images.rs` — `set_profile_image`, `set_default_profile_image`, `get_default_profile_image`, `upload_brand_image` | PARTIAL (the two POSTs served for PNG/JPEG since 2026-09-20; the default avatar forwards, [D-411]) |
 | test | `crates/mm-api/tests/parity/image_writes.rs` — 13 tests | DONE |
 | test | `crates/mm-app/tests/db_profile_image_lock.rs` — 3 tests | DONE |
 
@@ -13374,7 +13374,8 @@ and still only as `me` on the HTTP router. `me` is nobody on five pairs and both
 for every attachment: `createUpload`/`uploadData` (the resumable session and its data leg) and
 `uploadFileStream` (the classic simple-body and multipart upload). The write path is served —
 offset/size checks, the 5 MiB first-part floor, the local-backend write, the `FileInfo` the
-completing chunk mints — but a **raster image** is handed to Go before the write, because its
+completing chunk mints — but a **raster image** is handed to Go before the write (since
+2026-09-20 only GIF/BMP/TIFF/WebP — see *The image pipeline*), because its
 `_preview`/`_thumb`/`mini_preview` are the pixel work [D-380]/[D-411] defer; `uploadData` decides
 that from the file's head *before* writing the chunk, so the forward replays the request Go would
 have handled. Two new oracles underpin the wire format: `mime.TypeByExtension` with its host
@@ -13392,8 +13393,8 @@ table loader (`behaviour_mime.json`) for `FileInfo.mime_type`, and `imaging.Pars
 | mutation | `scripts/mutations/uploads.plan` — see report tally | DONE |
 
 - **The completed `FileInfo` from `uploadData` sets neither `has_preview_image` nor
-  `mini_preview`**, unlike `UploadFileX` — a resumable upload's image answer is Go's (forwarded);
-  a resumable text file's row is this server's. See the doc comment on `App::upload_data`.
+  `mini_preview`**, unlike `UploadFileX` (`HandleImages` writes the derived files only); since
+  2026-09-20 a PNG or JPEG completion is this server's too. See the doc comment on `App::upload_data`.
 - Content extraction (`ExtractContentFromFileInfo`) is skipped on both new write paths — [D-651].
 - The multipart `uploadFileStream` parses the whole body rather than reproducing Go's
   streaming-vs-legacy split — observably identical for a well-formed request — [D-652].
@@ -14163,3 +14164,23 @@ Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run,
 | `App.PermanentDeleteUser`, `App.PermanentDeleteAllUsers`, `deleteUser`/`localDeleteUser` `?permanent=true`, `localPermanentDeleteAllUsers`, 16 store methods | `mm-app/src/user_delete.rs`, `mm-api/src/{user_deletes,local_users}.rs`, `mm-store/src/*` (+ `scheduled_post_store.rs`) | DONE (bot owners forward, D-472) | 3 unit + 3 parity (stack 4) + 1 wipe parity (`scripts/wipe-parity.sh`, spare stack) | Served only when no erasure would reach the bot cascade; for the wipe that is a question of `Username` order, not ownership (`App::permanent_delete_all_needs_go`). A profile directory that cannot be checked answers **202 with an error body** after every table is gone. |
 
 Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 controls survived; `permanent-delete-all.plan` (spare stack 6) 5 run, 3 caught, 2 controls survived. A first user-plan run had one harness fault (an untyped `$1`), re-expressed and re-run whole.
+
+## The image pipeline — D-650 and D-411 narrowed, D-380 narrowed, D-890–D-895 opened (2026-09-20)
+
+No route+method pair is added (763 of 764 are registered); five forwarded branches become served.
+`crates/goimage` (BSD-3-Clause AND MIT, no Mattermost code) ports Go's `image/png` and `image/jpeg`
+both ways, `compress/flate` and `zlib`, `image/color`, `math.Sin`, `boxes-ltd/imaging` and
+`bep/imagemeta`'s EXIF walk; every stage is checked against `reference/dump/behaviour_imaging*.go`
+on arm64, whose Lanczos output depends on Go fusing `a + x*y` (see `goimage::fma`).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `image/png`, `image/jpeg`, `compress/flate`, `compress/zlib`, `image.Decode` registry, `math.Sin`, `boxes-ltd/imaging` (Lanczos, Fit, Fill, transforms), `bep/imagemeta` (JPEG/PNG EXIF) | `crates/goimage` | DONE (PNG, JPEG) | 63 unit, every oracle case | GIF, BMP, TIFF, WebP are recognised and answered `NotPorted` ([D-650]); deflate level 1 is not ported (no caller). |
+| `channels/app/imaging` (`Decoder`, `Encoder`, `Fit`, `FillCenter`, `GenerateThumbnail`/`Preview`/`MiniPreviewImage`, `MakeImageUpright`, `GetImageOrientation`) | `mm-app/src/image_pipeline.rs`, `imaging_orientation.rs` | DONE | 3 + 4 unit over the end-to-end oracle | `GetImageOrientation` answers differently through a seekable reader and a stream; the two callers are kept apart. |
+| `POST /files` raster branch (`preprocessImage`, `postprocessImage`); `POST /uploads/{id}` completion (`HandleImages`) | `mm-app/src/file_upload.rs`, `upload.rs` | DONE (PNG, JPEG) | 4 parity (`image_uploads`, 21 files, both routes) | `_thumb`/`_preview` are PNG when the decoder said `png` and JPEG q90 otherwise, whatever the name; a PNG named `.gif` keeps its derived files but loses `has_preview_image`. |
+| `createEmoji` resize | `mm-app/src/emoji.rs` | DONE (`.png` names) | `emoji_writes` 1 rewritten | Byte-identical resized emoji; a non-`.png` name is still the GIF branch's ([D-380]). |
+| `SetProfileImage`, `SaveBrandImage` | `mm-app/src/user_image.rs`, `brand.rs`; `mm-store` `update_last_picture_update` | DONE (PNG, JPEG) | `image_writes` 2 new, 3 rewritten | An identical re-upload writes nothing and does not move `LastPictureUpdate`; `setTeamIcon` stays forwarded ([D-890]). |
+
+Mutation tally (`image-pipeline.plan`): 20 run, 19 caught, 2 controls survived; the six first-run
+survivors each exposed a corpus gap and five are caught since the oracle grew, the sixth
+(`5000/q`→`5001/q`) is equivalent over every quality and was replaced by the clamp, caught.
