@@ -25,6 +25,7 @@
 pub mod fma;
 pub mod hash;
 pub mod image;
+pub mod jpeg;
 pub mod sink;
 
 #[cfg(test)]
