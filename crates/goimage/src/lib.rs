@@ -26,6 +26,7 @@ pub mod bufio;
 pub mod flate;
 pub mod fma;
 pub mod gomath;
+pub mod goread;
 pub mod hash;
 pub mod image;
 pub mod imaging;

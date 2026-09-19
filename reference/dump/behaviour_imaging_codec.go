@@ -9,6 +9,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"hash/adler32"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -528,6 +529,32 @@ func zlibOf(raw []byte) []byte {
 	return b.Bytes()
 }
 
+// storedZlib wraps raw in a zlib stream of one final stored block, so the IDAT payload is exactly
+// the bytes a test says it is.
+func storedZlib(raw []byte) []byte {
+	n := uint16(len(raw))
+	out := []byte{0x78, 0x01, 0x01, byte(n), byte(n >> 8), byte(^n), byte(^n >> 8)}
+	out = append(out, raw...)
+	return binary.BigEndian.AppendUint32(out, adler32.Checksum(raw))
+}
+
+// rawPNGWithIDAT is assemblePNG with the IDAT payload given verbatim rather than compressed.
+func rawPNGWithIDAT(w, h uint32, depth, ct byte, before [][2]string, idat []byte) []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], w)
+	binary.BigEndian.PutUint32(ihdr[4:8], h)
+	ihdr[8], ihdr[9] = depth, ct
+	var b bytes.Buffer
+	b.WriteString("\x89PNG\r\n\x1a\n")
+	b.Write(pngChunkBytes("IHDR", ihdr))
+	for _, c := range before {
+		b.Write(pngChunkBytes(c[0], []byte(c[1])))
+	}
+	b.Write(pngChunkBytes("IDAT", idat))
+	b.Write(pngChunkBytes("IEND", nil))
+	return b.Bytes()
+}
+
 // assemblePNG builds a PNG from an IHDR and a raw (already filtered) scanline stream plus extra
 // chunks placed before IDAT.
 func assemblePNG(w, h uint32, depth, ct, interlace byte, before [][2]string, raw []byte, after [][2]string) []byte {
@@ -592,6 +619,15 @@ func craftedPNGs() []namedFile {
 	add("ancillary_before", assemblePNG(4, 2, 8, 2, 0, [][2]string{{"tEXt", "k\x00v"}, {"gAMA", "\x00\x00\xb1\x8f"}}, rows(1, 12, 2), nil))
 	add("unknown_critical", assemblePNG(4, 2, 8, 2, 0, [][2]string{{"ABCD", "x"}}, rows(1, 12, 2), nil))
 	add("exif_chunk", assemblePNG(4, 2, 8, 2, 0, [][2]string{{"eXIf", "MM\x00\x2a\x00\x00\x00\x08\x00\x00"}}, rows(2, 12, 2), nil))
+	// Low-depth gray with tRNS: the transparent level is in the sample's own depth and is scaled
+	// like the samples.
+	add("gray1_trns", rawPNGWithIDAT(3, 1, 1, 0, [][2]string{{"tRNS", "\x00\x01"}}, storedZlib([]byte{0, 0xa0})))
+	add("gray2_trns", rawPNGWithIDAT(3, 1, 2, 0, [][2]string{{"tRNS", "\x00\x02"}}, storedZlib([]byte{0, 0x9c})))
+	add("gray4_trns_stored", rawPNGWithIDAT(3, 1, 4, 0, [][2]string{{"tRNS", "\x00\x07"}}, storedZlib([]byte{0, 0x71, 0x70})))
+	// Bytes after the zlib stream inside IDAT: what zlib's 4096-byte read-ahead already took is
+	// swallowed; anything left in the chunk is "too much pixel data".
+	add("idat_trailing_100", rawPNGWithIDAT(2, 1, 8, 0, nil, append(storedZlib([]byte{0, 1, 2}), make([]byte, 100)...)))
+	add("idat_trailing_5000", rawPNGWithIDAT(2, 1, 8, 0, nil, append(storedZlib([]byte{0, 1, 2}), make([]byte, 5000)...)))
 	// Interlaced (Adam7) 8-bit RGB, 9x9, built by the reference algorithm: each pass's rows,
 	// filter 0.
 	{
