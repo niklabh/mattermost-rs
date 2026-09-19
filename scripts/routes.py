@@ -254,6 +254,21 @@ def served_through_merges(router):
 def served_in(text):
     """`served`, over source text rather than a file — see `merged_local_sources`."""
     out = set()
+    # A method router bound first and registered by name — `let root = if hosted { get(a) }
+    # else { get(b) };` then `.route("/api/v4/plugins", partially_migrated(root))`, as
+    # `local_plugins.rs` does because the handler depends on the plugin host. The verbs live in
+    # the `let`, so a route body naming a bound identifier is read together with its binding.
+    # Without this, eight served local pairs were reported unserved (2026-09-19).
+    bindings = {}
+    for b in re.finditer(r'\blet\s+([a-z_0-9]+)\s*=', text):
+        depth, i = 0, b.end()
+        while i < len(text) and not (depth == 0 and text[i] == ";"):
+            if text[i] in "({[":
+                depth += 1
+            elif text[i] in ")}]":
+                depth -= 1
+            i += 1
+        bindings[b.group(1)] = text[b.end():i]
     for m in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
         depth, i = 1, m.end()
         while depth and i < len(text):
@@ -265,6 +280,8 @@ def served_in(text):
         body = text[m.end():i]
         # Strip comments so a verb named in prose is not counted as a registration.
         body = re.sub(r'//[^\n]*', '', body)
+        body += "".join(re.sub(r'//[^\n]*', '', bindings[name])
+                        for name in set(re.findall(r'\b[a-z_0-9]+\b', body)) & bindings.keys())
         path = m.group(1).replace("{*", "{")
         # `get(system::get_system_ping)` in lib.rs, but `get(local_get_system_ping)` in local.rs:
         # the local router's handlers are module-private and therefore unqualified. Requiring the
