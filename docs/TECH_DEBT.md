@@ -2933,6 +2933,11 @@ rest, and separately asserts our prefix is `CURRENT_VERSION` so the exemption ca
 `?access_token=`. Two are not: `X-Cloud-Token` (`TokenLocationCloudHeader`) and the
 remote-cluster token header.
 
+**Narrowed 2026-09-19:** both are parsed by `auth::parse_service_token` and honoured by the five
+`RemoteClusterTokenRequired` routes. Still owed: any other handler, where a cloud licence would
+make a wrong `X-Cloud-Token` Go's `invalid_token` 401 rather than our `session_expired` (no cloud
+licence can be signed here, so unobservable).
+
 Neither is reachable by a normal client, and both authenticate a *different kind* of principal
 than a session — mishandling them is worse than not handling them. A request carrying only one
 of these gets 401 here and would be served by Go.
@@ -8979,20 +8984,18 @@ answered as a `channel_id → name` map. **What is owed:** a Go process with the
 `go-licensed.sh` variant with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true`, as the guest
 variant does for its setting), then the handler with the flag, licence and team-id gates, the
 group/field-id lookup by name, and a parity suite against that process.
-## D-780 · The five RemoteClusterTokenRequired routes are served as their gate; the licensed session path forwards
+## D-780 · Four RemoteClusterTokenRequired handlers forward once a remote passes the gate
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go)
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go) · **Narrowed**
+2026-09-19
 
-`ping`, `msg`, `confirm_invite`, `upload/{upload_id}` and `{user_id}/image`
-(`crates/mm-api/src/remote_cluster.rs`) are gated by `RemoteClusterTokenRequired`, which needs a
-licence carrying `HasRemoteClusterService` **and** a session whose type is `RemoteClusterToken`.
-On this unlicensed build every request is the 401 `api.context.session_expired.app_error` before
-any handler runs, which is served and proven by parity. A licence with the remote-cluster service
-present would make the answer turn on resolving an `X-RemoteCluster-Token` against the
-`RemoteClusters` table (`GetRemoteClusterSession`); that session path and its store are unported,
-so a licensed request forwards. Owed: the remote-cluster session and the five handler bodies
-(`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`, `doUploadData`, `SetProfileImage`), which need
-the `RemoteClusterService`, nil on this build.
+The gate and the remote-cluster session behind it (`X-RemoteCluster-Token` against the
+`RemoteClusters` row, `GetRemoteClusterSession`) are served on all five routes
+(`crates/mm-api/src/remote_cluster.rs`), and `{user_id}/image` serves its handler's refusals too.
+A remote past the gate on `ping`, `msg`, `confirm_invite` or `upload/{upload_id}` forwards: those
+bodies drive the `RemoteClusterService` (`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`,
+`doUploadData`), Go process state that is nil on the stack's builds. The image write forwards
+under [D-411], not here.
 
 ## D-781 · Slash commands that would run, and suggestions that fetch a list, are forwarded
 

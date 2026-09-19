@@ -398,7 +398,7 @@ pub async fn delete_brand_image(
 
 /// `model.NewAppError("uploadProfileImage", …)` — every refusal in `setProfileImage` names
 /// `uploadProfileImage` as its `where`, including the ones raised by `setDefaultProfileImage`.
-fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
+pub(crate) fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
     ApiError::from(*mm_model::utils::AppError::boxed(
         where_,
         id,
@@ -414,7 +414,7 @@ fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
 /// The `where` differs between them and the id does not: `setDefaultProfileImage` raises
 /// `api.user.upload_profile_user.storage.app_error` under its own name (api4/user.go:706) while
 /// `setProfileImage` raises the same id under `uploadProfileImage` (api4/user.go:619).
-fn storage_not_configured(state: &AppState, where_: &'static str) -> Option<ApiError> {
+pub(crate) fn storage_not_configured(state: &AppState, where_: &'static str) -> Option<ApiError> {
     state.app.config().file_driver_name.is_empty().then(|| {
         profile_image_error(
             where_,
@@ -460,7 +460,7 @@ pub(crate) fn declared_content_length(headers: &HeaderMap) -> Option<i64> {
 ///
 /// One config value, two limits, and the same over-long body is a 413 on one route and a 400 on
 /// the other.
-enum BodyRefusal {
+pub(crate) enum BodyRefusal {
     /// `r.ContentLength` exceeded `MaxFileSize`; the caller's own `too_large` error id.
     DeclaredTooLarge,
     /// The `MaxBytesReader` cap was hit — `MaxFileSize + 512`. `setProfileImage` turns this into
@@ -474,7 +474,7 @@ enum BodyRefusal {
 /// that "file sizes close to max file size do not get cut off".
 pub(crate) const BYTES_MIN_READ: i64 = 512;
 
-async fn read_multipart_body(
+pub(crate) async fn read_multipart_body(
     state: &AppState,
     parts: &axum::http::request::Parts,
     body: axum::body::Body,
@@ -510,7 +510,7 @@ async fn read_multipart_body(
 
 /// `handleContextError`'s rewrite of a `MaxBytesError` (web/handlers.go:406) — global, and
 /// reached only by a handler that **wrapped** the read failure into its `AppError`.
-fn request_body_too_large(where_: &str) -> ApiError {
+pub(crate) fn request_body_too_large(where_: &str) -> ApiError {
     ApiError::from(*mm_model::utils::AppError::boxed(
         where_,
         "api.context.request_body_too_large.app_error",

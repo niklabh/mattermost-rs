@@ -14130,3 +14130,11 @@ first survived; it is caught by the `posted`-event test added for it.
 
 Mutation tally (`managed-categories.plan`): 15 run, 15 caught, 2 controls survived.
 
+
+## `POST /api/v4/remotecluster/{user_id}/image` and the remote-cluster session — D-780 narrowed (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `remoteSetProfileImage`, `ServeHTTP`'s cloud/remote-cluster branches, `GetRemoteClusterSession`, `GetCloudSession`, `sqlRemoteClusterStore.Get` | `mm-api/src/remote_cluster.rs`, `mm-api/src/auth.rs` (`parse_service_token`), `mm-app/src/remote_cluster.rs`, `mm-store/src/remote_cluster_store.rs` | PARTIAL | 6 unit + 4 new parity | The session is served on all five token routes, and every refusal on `/image` is served against the licensed oracle. The write forwards ([D-411]), as do the other four bodies past the gate ([D-780]). A `RemoteClusters` row with a NULL column or a negative `Options` is refused like a wrong token, because Go's scan fails. |
+
+Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls survived.

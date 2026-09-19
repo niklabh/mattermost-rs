@@ -41,6 +41,7 @@ pub mod product_notices_store;
 pub mod property_store;
 pub mod reaction_store;
 pub mod read_receipt_store;
+pub mod remote_cluster_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
@@ -88,6 +89,7 @@ pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
+pub use remote_cluster_store::{RemoteClusterStore, SqlRemoteClusterStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
@@ -143,6 +145,7 @@ pub struct SqlStore {
     oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
+    remote_cluster: SqlRemoteClusterStore,
     terms_of_service: SqlTermsOfServiceStore,
     thread: SqlThreadStore,
     preference: SqlPreferenceStore,
@@ -213,6 +216,7 @@ impl SqlStore {
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
+            remote_cluster: SqlRemoteClusterStore::new(pool.clone()),
             terms_of_service: SqlTermsOfServiceStore::new(pool.clone()),
             thread: SqlThreadStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
@@ -497,6 +501,11 @@ impl SqlStore {
     /// Port of `store.Store.DesktopTokens()`.
     pub fn desktop_tokens(&self) -> &SqlDesktopTokensStore {
         &self.desktop_tokens
+    }
+
+    /// Port of `SqlStore.RemoteCluster()`.
+    pub fn remote_cluster(&self) -> &SqlRemoteClusterStore {
+        &self.remote_cluster
     }
 
     /// Port of `store.Store.ReadReceipt()`.

@@ -25,8 +25,8 @@ const HEADER_REQUESTED_WITH_XML: &[u8] = b"XMLHttpRequest";
 /// Go truncates the returned token at 50 bytes in a deferred block. See [`parse_auth_token`].
 const MAX_TOKEN_LEN: usize = 50;
 
-/// Where the token was found. Port of `app.TokenLocation`, restricted to the locations parsed
-/// here — the cloud and remote-cluster headers are not (D-081).
+/// Where the token was found. Port of `app.TokenLocation`, restricted to the four session
+/// locations — the cloud and remote-cluster headers are [`ServiceTokenLocation`]'s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenLocation {
     Cookie,
@@ -52,14 +52,81 @@ pub enum TokenLocation {
 /// reproduced rather than tidied away.
 pub fn parse_auth_token(parts: &Parts) -> Option<(String, TokenLocation)> {
     let (token, location) = parse_auth_token_untruncated(parts)?;
-    let token = match token.char_indices().nth(MAX_TOKEN_LEN) {
+    Some((truncate_token(token), location))
+}
+
+/// Go's deferred `token = token[:50]`, applied to every location.
+fn truncate_token(token: String) -> String {
+    match token.char_indices().nth(MAX_TOKEN_LEN) {
         // Go slices bytes; slicing a multi-byte character mid-way would panic in Rust, so the cut
         // is made at the nearest character boundary at or before the limit. No reachable token is
         // non-ASCII, and a token that long is already guaranteed not to match.
         Some((byte_idx, _)) => token[..byte_idx].to_owned(),
         None => token,
+    }
+}
+
+/// `model.HeaderCloudToken`.
+pub(crate) const HEADER_CLOUD_TOKEN: &str = "X-Cloud-Token";
+/// `model.HeaderRemoteclusterToken`.
+pub(crate) const HEADER_REMOTECLUSTER_TOKEN: &str = "X-RemoteCluster-Token";
+/// `model.HeaderRemoteclusterId`, read by `(*Context).GetRemoteID` (web/context.go:881).
+pub(crate) const HEADER_REMOTECLUSTER_ID: &str = "X-RemoteCluster-Id";
+
+/// The last two of `ParseAuthTokenFromRequest`'s six locations (authentication.go:522-531),
+/// which [`parse_auth_token`] leaves out ([D-081]): `TokenLocationCloudHeader` and
+/// `TokenLocationRemoteClusterHeader`.
+///
+/// They authenticate a different principal — a bare in-memory session built by
+/// `GetCloudSession`/`GetRemoteClusterSession`, never a `Sessions` row — so they are a separate
+/// function a caller opts into rather than extra variants every [`parse_auth_token`] caller would
+/// then treat as a session token. Only the `RemoteClusterTokenRequired` handlers call this.
+///
+/// **They are the last resort.** A cookie, an `Authorization` header or an `?access_token=`
+/// anywhere on the request wins and this answers `None`, and the cloud header wins over the
+/// remote-cluster one — measured on the licensed oracle: a valid remote token next to a junk
+/// `Bearer` or any `X-Cloud-Token` is the plain `session_expired` 401. Header values are read as
+/// Go's `Header.Get` reads them (the first value, any bytes); a non-UTF-8 value is kept lossily
+/// rather than treated as absent, since Go would see a non-empty token that matches nothing.
+pub fn parse_service_token(parts: &Parts) -> Option<(String, ServiceTokenLocation)> {
+    if parse_auth_token_untruncated(parts).is_some() {
+        return None;
+    }
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+            .filter(|value| !value.is_empty())
     };
-    Some((token, location))
+    let (token, location) = if let Some(token) = header(HEADER_CLOUD_TOKEN) {
+        (token, ServiceTokenLocation::CloudHeader)
+    } else {
+        (
+            header(HEADER_REMOTECLUSTER_TOKEN)?,
+            ServiceTokenLocation::RemoteClusterHeader,
+        )
+    };
+    Some((truncate_token(token), location))
+}
+
+/// `(*Context).GetRemoteID` (web/context.go:881): `r.Header.Get("X-RemoteCluster-Id")`, `""` when
+/// absent.
+pub fn remote_id_header(parts: &Parts) -> String {
+    parts
+        .headers
+        .get(HEADER_REMOTECLUSTER_ID)
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+        .unwrap_or_default()
+}
+
+/// The two `TokenLocation`s [`parse_service_token`] returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceTokenLocation {
+    /// `TokenLocationCloudHeader` — `X-Cloud-Token`.
+    CloudHeader,
+    /// `TokenLocationRemoteClusterHeader` — `X-RemoteCluster-Token`.
+    RemoteClusterHeader,
 }
 
 fn parse_auth_token_untruncated(parts: &Parts) -> Option<(String, TokenLocation)> {
@@ -556,6 +623,58 @@ mod tests {
             builder = builder.header(*name, *value);
         }
         builder.body(()).expect("request builds").into_parts().0
+    }
+
+    /// `ParseAuthTokenFromRequest`'s last two locations, each branch: the four session locations
+    /// win, the cloud header beats the remote one, an empty header is absent, and the 50-byte
+    /// truncation applies.
+    #[test]
+    fn the_service_headers_are_the_last_resort() {
+        let remote = ("X-RemoteCluster-Token", "remotetoken");
+        let cloud = ("X-Cloud-Token", "cloudtoken");
+        let remote_only = parse_service_token(&parts_with(&[remote], "/x"));
+        assert_eq!(
+            remote_only,
+            Some((
+                "remotetoken".to_owned(),
+                ServiceTokenLocation::RemoteClusterHeader
+            ))
+        );
+        assert_eq!(
+            parse_service_token(&parts_with(&[remote, cloud], "/x")),
+            Some(("cloudtoken".to_owned(), ServiceTokenLocation::CloudHeader))
+        );
+        for winner in [
+            parts_with(&[remote, ("Cookie", "MMAUTHTOKEN=abc")], "/x"),
+            parts_with(&[remote, ("Authorization", "Bearer abc")], "/x"),
+            parts_with(&[remote, ("Authorization", "token abc")], "/x"),
+            parts_with(&[remote], "/x?access_token=abc"),
+        ] {
+            assert_eq!(parse_service_token(&winner), None);
+        }
+        assert_eq!(
+            parse_service_token(&parts_with(&[("X-Cloud-Token", ""), remote], "/x")),
+            remote_only,
+            "an empty cloud header is no cloud header"
+        );
+        assert_eq!(
+            parse_service_token(&parts_with(&[("X-RemoteCluster-Token", "")], "/x")),
+            None
+        );
+        let long = "a".repeat(60);
+        let (token, _) =
+            parse_service_token(&parts_with(&[("X-RemoteCluster-Token", &long)], "/x"))
+                .expect("a long token parses");
+        assert_eq!(token.len(), MAX_TOKEN_LEN);
+    }
+
+    #[test]
+    fn the_remote_id_header_is_empty_when_absent() {
+        assert_eq!(remote_id_header(&parts_with(&[], "/x")), "");
+        assert_eq!(
+            remote_id_header(&parts_with(&[("X-RemoteCluster-Id", "rid")], "/x")),
+            "rid"
+        );
     }
 
     /// The 500 arm: the store failed, so the error propagates unchanged and **no cookie is
