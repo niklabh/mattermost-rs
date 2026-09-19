@@ -130,6 +130,7 @@ pub mod user_auth;
 pub mod user_convert;
 pub mod user_create;
 pub mod user_delete;
+pub mod user_image;
 pub mod user_terms_of_service;
 pub mod user_update;
 pub mod utils;

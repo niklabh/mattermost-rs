@@ -587,80 +587,198 @@ async fn last_picture_update(client: &reqwest::Client, token: &str, user_id: &st
         .unwrap_or(0)
 }
 
-/// The hand-over, and the proof that nothing was written before it.
-///
-/// A body whose `image` part is not an image passes all ten of this port's refusals — the id is
-/// valid, the caller owns the account, storage is configured, the length is under the cap, the
-/// body parses, `image` is a file, the user exists, LDAP owns nothing and the lock does not
-/// apply. So the request is forwarded, and it is **Go** that refuses it, on bytes this port never
-/// looked at.
-///
-/// That makes it the cleanest available measurement of "the forward precedes the write":
-/// `SetProfileImage` fails at its own decode, so the file is not replaced and
-/// `LastPictureUpdate` does not move — on either server. If this port wrote before forwarding,
-/// the value would move on ours and not on Go's.
+/// A decoder input from the imaging oracle's corpus.
+fn corpus_image(stage: &str, name: &str) -> Vec<u8> {
+    use base64::Engine as _;
+    let path = format!(
+        "{}/../../fixtures/behaviour_imaging_{stage}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("fixture")).expect("JSON");
+    let list = if stage == "pipeline" || stage == "exif" {
+        &value["cases"]
+    } else {
+        &value["decode"]
+    };
+    let case = list
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("{stage}: {name}"));
+    base64::engine::general_purpose::STANDARD
+        .decode(case["b64"].as_str().expect("bytes"))
+        .expect("base64")
+}
+
+/// `GET /users/{id}/image` from Go: the stored `profile.png` bytes.
+async fn stored_profile_image(client: &reqwest::Client, token: &str, user_id: &str) -> Vec<u8> {
+    let response = client
+        .get(format!("{GO}/api/v4/users/{user_id}/image"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(response.status(), 200, "the profile image reads back");
+    response.bytes().await.expect("bytes").to_vec()
+}
+
+/// Past the ten refusals the write is served: decoded, turned upright by EXIF, `FillCenter`ed to
+/// 128×128 and re-encoded as PNG — and the stored `profile.png` is byte-identical to the one Go
+/// stores for the same upload. `LastPictureUpdate` moves on both. An upload that re-encodes to
+/// the bytes already stored is Go's early return: nothing is written and `LastPictureUpdate`
+/// stays where it was.
 #[tokio::test]
-async fn a_profile_upload_that_go_refuses_is_forwarded_without_writing() {
+async fn a_profile_upload_is_re_encoded_byte_for_byte() {
     if !stack_enabled() {
         return;
     }
     let client = client();
     let admin = go_minted_token(&client).await;
     let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
-    let plain = create_plain_user(&client, &admin, &team_id, "imgfwd").await;
+    let go_user = create_plain_user(&client, &admin, &team_id, "imggo").await;
+    let rs_user = create_plain_user(&client, &admin, &team_id, "imgrs").await;
 
-    let before = last_picture_update(&client, &admin, &plain.id).await;
-    assert_eq!(before, 0, "a fresh user has never had a picture");
+    for (label, filename, bytes) in [
+        ("tiny png", "p.png", TINY_PNG.to_vec()),
+        (
+            "photo rotated by EXIF",
+            "p.jpg",
+            corpus_image("pipeline", "photo_2400x1600_o006"),
+        ),
+        (
+            "alpha png",
+            "p.png",
+            corpus_image("pipeline", "alpha_1000x300"),
+        ),
+        (
+            "16-bit gray+alpha",
+            "p.png",
+            corpus_image("png", "basn4a16.png"),
+        ),
+        (
+            "cmyk jpeg",
+            "p.jpg",
+            corpus_image("jpeg", "video-001.cmyk.jpeg"),
+        ),
+    ] {
+        let body = multipart_body(&[("image", Some(filename), &bytes)]);
+        let mut stored = Vec::new();
+        for (base, user) in [(GO, &go_user), (RUST, &rs_user)] {
+            let path = format!("/api/v4/users/{}/image", user.id);
+            let (status, reply, served_by) = send(
+                &client,
+                reqwest::Method::POST,
+                base,
+                &path,
+                &user.token,
+                Some(&multipart()),
+                body.clone(),
+            )
+            .await;
+            assert_eq!(
+                status,
+                200,
+                "{label} {base}: {}",
+                String::from_utf8_lossy(&reply)
+            );
+            if base == RUST {
+                assert_eq!(served_by.as_deref(), Some("rust"), "{label}: served");
+                assert_eq!(reply, br#"{"status":"OK"}"#, "{label}: ReturnStatusOK");
+            }
+            assert!(
+                last_picture_update(&client, &admin, &user.id).await > 0,
+                "{label} {base}: LastPictureUpdate moved"
+            );
+            stored.push(stored_profile_image(&client, &admin, &user.id).await);
+        }
+        assert!(
+            stored[0].starts_with(b"\x89PNG"),
+            "{label}: Go stored a PNG"
+        );
+        assert_eq!(
+            stored[0], stored[1],
+            "{label}: the stored profile images differ"
+        );
+    }
 
-    let path = format!("/api/v4/users/{}/image", plain.id);
-    let body = multipart_body(&[("image", Some("p.png"), b"not an image at all")]);
-
-    let (go_status, go_body, _) = send(
-        &client,
-        reqwest::Method::POST,
-        GO,
-        &path,
-        &plain.token,
-        Some(&multipart()),
-        body.clone(),
-    )
-    .await;
-    let (rs_status, rs_body, served_by) = send(
+    // The same bytes again: `SetProfileImageFromFile` returns before the write.
+    let before = last_picture_update(&client, &admin, &rs_user.id).await;
+    let body = multipart_body(&[(
+        "image",
+        Some("p.jpg"),
+        &corpus_image("jpeg", "video-001.cmyk.jpeg"),
+    )]);
+    let path = format!("/api/v4/users/{}/image", rs_user.id);
+    let (status, _, served_by) = send(
         &client,
         reqwest::Method::POST,
         RUST,
         &path,
-        &plain.token,
+        &rs_user.token,
         Some(&multipart()),
         body,
     )
     .await;
-
+    assert_eq!((status, served_by.as_deref()), (200, Some("rust")));
     assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
-        "past the tenth refusal the route is Go's: {}",
-        String::from_utf8_lossy(&rs_body)
-    );
-    assert_eq!(
-        rs_status,
-        go_status,
-        "the forwarded answer is Go's own\n  go:   {}\n  rust: {}",
-        String::from_utf8_lossy(&go_body),
-        String::from_utf8_lossy(&rs_body)
-    );
-    let refused: serde_json::Value = serde_json::from_slice(&rs_body).expect("JSON");
-    assert_eq!(
-        refused["status_code"], 400,
-        "Go's own decode refuses it: {refused}"
+        last_picture_update(&client, &admin, &rs_user.id).await,
+        before,
+        "an identical re-upload writes nothing"
     );
 
+    delete_plain_user(&client, &admin, &go_user.id).await;
+    delete_plain_user(&client, &admin, &rs_user.id).await;
+}
+
+/// A body whose `image` part is not an image passes all ten refusals and fails
+/// `checkImageLimits` — the same 400 from both servers, served here — and writes nothing.
+#[tokio::test]
+async fn a_profile_upload_neither_server_decodes_writes_nothing() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = a_team_and_channel_the_user_is_in(&client, &admin).await;
+    let plain = create_plain_user(&client, &admin, &team_id, "imgbad").await;
+
+    let path = format!("/api/v4/users/{}/image", plain.id);
+    let body = multipart_body(&[("image", Some("p.png"), b"not an image at all")]);
+    let mut answers = Vec::new();
+    for base in [GO, RUST] {
+        let (status, reply, served_by) = send(
+            &client,
+            reqwest::Method::POST,
+            base,
+            &path,
+            &plain.token,
+            Some(&multipart()),
+            body.clone(),
+        )
+        .await;
+        if base == RUST {
+            assert_eq!(served_by.as_deref(), Some("rust"), "served here");
+        }
+        answers.push((status, reply));
+    }
+    assert_eq!(answers[0].0, answers[1].0, "status");
+    assert_error_bodies_match_except_known_gaps(
+        &answers[0].1,
+        &answers[1].1,
+        "undecodable profile image",
+    );
+    let refused: serde_json::Value = serde_json::from_slice(&answers[1].1).expect("JSON");
+    assert_eq!(
+        refused["id"],
+        "api.user.upload_profile_user.check_image_limits.app_error"
+    );
     assert_eq!(
         last_picture_update(&client, &admin, &plain.id).await,
         0,
         "neither server wrote a picture for a body neither could decode"
     );
-
     delete_plain_user(&client, &admin, &plain.id).await;
 }
 
@@ -920,20 +1038,17 @@ async fn the_brand_permission_check_comes_after_the_body() {
     delete_plain_user(&client, &admin, &plain.id).await;
 }
 
-/// The admin's path through the same route: past the permission, into `SaveBrandImage`, and out
-/// to Go — with nothing written on the way.
+/// The admin's path through the same route: past the permission and into `SaveBrandImage`, all
+/// served here.
 ///
-/// The first half sends bytes that are not an image. This port answers none of the five refusals,
-/// so it forwards, and Go's `checkImageLimits` refuses. The brand image is a single file for the
-/// whole installation, so the assertion that it is still absent afterwards is the measurement
-/// that the hand-over happened before the `MoveFile` and the `WriteFile`.
-///
-/// The second half sends a real PNG and lets it land, because the **201** is the one thing about
-/// this route a reader would get wrong: `w.WriteHeader(StatusCreated)` followed by
-/// `ReturnStatusOK(w)` is a 201 that still carries `{"status":"OK"}`. It is cleaned up with the
-/// already-migrated DELETE.
+/// The first half sends bytes that are not an image: `checkImageLimits` refuses, and the brand
+/// image — one file for the whole installation — is still absent afterwards, so nothing was
+/// archived or written. The second half uploads a PNG and a JPEG on each server and requires the
+/// stored brand images to be byte-identical (both re-encoded by `EncodePNG`) and the answer to be
+/// the **201** that still carries `{"status":"OK"}` — `w.WriteHeader(StatusCreated)` followed by
+/// `ReturnStatusOK(w)`. It is cleaned up with the already-migrated DELETE.
 #[tokio::test]
-async fn the_brand_upload_forwards_before_it_writes() {
+async fn the_brand_upload_refuses_and_re_encodes_byte_for_byte() {
     if !stack_enabled() {
         return;
     }
@@ -983,8 +1098,8 @@ async fn the_brand_upload_forwards_before_it_writes() {
     .await;
     assert_eq!(
         served_by.as_deref(),
-        Some("go"),
-        "the re-encode is Go's: {}",
+        Some("rust"),
+        "the refusal inside SaveBrandImage is answered here: {}",
         String::from_utf8_lossy(&body)
     );
     assert_eq!(status, 400, "{}", String::from_utf8_lossy(&body));
@@ -995,37 +1110,73 @@ async fn the_brand_upload_forwards_before_it_writes() {
     );
     assert!(
         !brand_exists().await,
-        "a forwarded upload Go then refused must have written nothing"
+        "a refused upload must have written nothing"
     );
 
-    // Now the accepted shape, for the 201.
-    let (status, body, served_by) = send(
-        &client,
-        reqwest::Method::POST,
-        RUST,
-        "/api/v4/brand/image",
-        &token,
-        Some(&multipart()),
-        an_image_part(),
-    )
-    .await;
-    assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
-        "the PNG re-encode is Go's too"
-    );
-    assert_eq!(
-        status,
-        201,
-        "uploadBrandImage is the one ReturnStatusOK route that is a 201: {}",
-        String::from_utf8_lossy(&body)
-    );
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
-        serde_json::json!({ "status": "OK" }),
-        "and it still carries the status body"
-    );
-    assert!(brand_exists().await, "the forwarded upload did land");
+    // Now accepted shapes on both servers, for the 201 and the re-encoded bytes.
+    let brand_bytes = async || {
+        client
+            .get(format!("{GO}/api/v4/brand/image"))
+            .send()
+            .await
+            .expect("Go answers")
+            .bytes()
+            .await
+            .expect("bytes")
+            .to_vec()
+    };
+    for (label, part) in [
+        ("tiny png", an_image_part()),
+        (
+            "photo jpeg",
+            multipart_body(&[(
+                "image",
+                Some("b.jpg"),
+                &corpus_image("pipeline", "portrait_900x1950"),
+            )]),
+        ),
+    ] {
+        let mut stored = Vec::new();
+        for base in [GO, RUST] {
+            let (status, body, served_by) = send(
+                &client,
+                reqwest::Method::POST,
+                base,
+                "/api/v4/brand/image",
+                &token,
+                Some(&multipart()),
+                part.clone(),
+            )
+            .await;
+            if base == RUST {
+                assert_eq!(
+                    served_by.as_deref(),
+                    Some("rust"),
+                    "{label}: the re-encode is served"
+                );
+            }
+            assert_eq!(
+                status,
+                201,
+                "{label} {base}: uploadBrandImage is the one ReturnStatusOK route that is a 201: {}",
+                String::from_utf8_lossy(&body)
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).expect("JSON"),
+                serde_json::json!({ "status": "OK" }),
+                "{label}: and it still carries the status body"
+            );
+            stored.push(brand_bytes().await);
+        }
+        assert!(
+            stored[0].starts_with(b"\x89PNG"),
+            "{label}: Go stored a PNG"
+        );
+        assert_eq!(
+            stored[0], stored[1],
+            "{label}: the stored brand images differ"
+        );
+    }
 
     // Put the installation back the way `file_bytes` expects to find it.
     let (status, body, served_by) = send(
@@ -1239,11 +1390,11 @@ async fn both_size_limits_are_where_go_puts_them() {
     let profile = format!("/api/v4/users/{me}/image");
 
     // A body of exactly the cap passes: the comparison is `>`, not `>=`. It is a well-formed
-    // multipart with an `image` part, so every refusal is passed and the request is handed to Go
-    // — which has the ordinary 100 MiB cap and refuses it on its own decode instead.
+    // multipart whose `image` part is a real PNG, so every refusal is passed and the write is
+    // served — the same 1x1 picture Go wrote when this route forwarded.
     let at_the_cap = padded_image_part(1024);
     assert_eq!(at_the_cap.len(), 1024);
-    let (_, body, served_by) = raw_post(
+    let (status, body, served_by) = raw_post(
         &server.base,
         &profile,
         &token,
@@ -1251,9 +1402,10 @@ async fn both_size_limits_are_where_go_puts_them() {
         &at_the_cap,
     )
     .await;
+    assert_eq!(served_by.as_deref(), Some("rust"));
     assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
+        status,
+        200,
         "a body of exactly MaxFileSize is not too large: {}",
         String::from_utf8_lossy(&body)
     );
@@ -1281,7 +1433,7 @@ async fn both_size_limits_are_where_go_puts_them() {
     // A chunked body of 1536 bytes — exactly `MaxFileSize + bytes.MinRead` — still fits the read
     // cap, so it reaches the parser and, with an `image` part in it, is forwarded.
     let at_the_read_cap = padded_image_part(1536);
-    let (_, body, served_by) = raw_post(
+    let (status, body, served_by) = raw_post(
         &server.base,
         &profile,
         &token,
@@ -1289,9 +1441,10 @@ async fn both_size_limits_are_where_go_puts_them() {
         &at_the_read_cap,
     )
     .await;
+    assert_eq!(served_by.as_deref(), Some("rust"));
     assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
+        status,
+        200,
         "MaxFileSize + 512 is the cap, not one below it: {}",
         String::from_utf8_lossy(&body)
     );
@@ -1471,35 +1624,35 @@ async fn ldap_owns_the_picture_only_when_an_attribute_names_it() {
         .await
     };
 
-    for (auth_service, base, expected_served_by, note) in [
+    for (auth_service, base, refused, note) in [
         (
             "ldap",
             syncing.base.as_str(),
-            "rust",
+            true,
             "an LDAP user is refused outright",
         ),
         (
             "saml",
             syncing.base.as_str(),
-            "rust",
+            true,
             "and a SAML user is, when the server syncs",
         ),
         (
             "saml",
             unsynced.base.as_str(),
-            "go",
+            false,
             "but not when it does not — the inner && is not an ||",
         ),
         (
             "",
             syncing.base.as_str(),
-            "go",
+            false,
             "and an email user is never refused, whatever the attribute says",
         ),
         (
             "ldap",
             RUST,
-            "go",
+            false,
             "nor is an LDAP user on a server that names no attribute — the outer && is not an ||",
         ),
     ] {
@@ -1508,13 +1661,17 @@ async fn ldap_owns_the_picture_only_when_an_attribute_names_it() {
             "the fixture needs a database"
         );
         let (status, body, served_by) = ask(base).await;
+        // Served either way now: a refusal is the 409, anything else is the write itself.
         assert_eq!(
             served_by.as_deref(),
-            Some(expected_served_by),
+            Some("rust"),
             "auth_service={auth_service:?}: {note}\n  {}",
             String::from_utf8_lossy(&body)
         );
-        if expected_served_by == "rust" {
+        if !refused {
+            assert_eq!(status, 200, "{note}: {}", String::from_utf8_lossy(&body));
+        }
+        if refused {
             assert_eq!(status, 409, "{}", String::from_utf8_lossy(&body));
             let parsed: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
             assert_eq!(
