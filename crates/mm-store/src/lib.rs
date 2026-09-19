@@ -31,6 +31,8 @@ pub mod group_store;
 pub mod group_syncable_store;
 pub mod job_store;
 pub mod license_store;
+/// Port of `SqlLinkMetadataStore` — the link-preview cache table.
+pub mod link_metadata_store;
 pub mod notify_admin_store;
 pub mod oauth_store;
 pub mod post_acknowledgement_store;
@@ -80,6 +82,7 @@ pub use group_store::{GroupStore, SqlGroupStore};
 pub use group_syncable_store::GroupSyncableStore;
 pub use job_store::{JobStore, SqlJobStore};
 pub use license_store::{LicenseStore, SqlLicenseStore};
+pub use link_metadata_store::{LinkMetadataStore, SqlLinkMetadataStore};
 pub use notify_admin_store::{NotifyAdminStore, SqlNotifyAdminStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
@@ -136,6 +139,7 @@ pub struct SqlStore {
     desktop_tokens: SqlDesktopTokensStore,
     read_receipt: SqlReadReceiptStore,
     temporary_post: SqlTemporaryPostStore,
+    link_metadata: SqlLinkMetadataStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -207,6 +211,7 @@ impl SqlStore {
             desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
             read_receipt: SqlReadReceiptStore::new(pool.clone()),
             temporary_post: SqlTemporaryPostStore::new(pool.clone()),
+            link_metadata: SqlLinkMetadataStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -516,6 +521,11 @@ impl SqlStore {
     /// Port of `store.Store.TemporaryPost()`.
     pub fn temporary_post(&self) -> &SqlTemporaryPostStore {
         &self.temporary_post
+    }
+
+    /// Port of `store.Store.LinkMetadata()`.
+    pub fn link_metadata(&self) -> &SqlLinkMetadataStore {
+        &self.link_metadata
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {

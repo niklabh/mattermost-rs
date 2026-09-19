@@ -1,10 +1,11 @@
-//! Port of `server/public/model/link_metadata.go` — the half that does not need OpenGraph.
+//! Port of `server/public/model/link_metadata.go`.
 //!
 //! `LinkMetadata` "stores arbitrary data about a link posted in a message", and roughly half the
-//! file manipulates `github.com/dyatlov/go-opengraph` types. That half is deferred ([D-105]);
-//! what is here is everything that does not touch it.
+//! file manipulates `github.com/dyatlov/go-opengraph` types, which [`crate::opengraph`] ports:
+//! [`truncate_open_graph`], [`filter_svg_images`] and their two helpers are pinned against Go's
+//! own output in `fixtures/behaviour_opengraph.json`.
 //!
-//! Two traps in this half, both pinned against Go:
+//! Two traps in the hashing half, both pinned against Go:
 //!
 //! * [`generate_link_metadata_hash`] is **FNV-1, not FNV-1a** — and it is the table's primary key;
 //! * [`floor_to_nearest_hour`] floors **downward**, so a pre-epoch timestamp rounds away from
@@ -13,7 +14,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::go_url;
-use crate::utils::go_to_lower;
+use crate::opengraph;
+use crate::utils::{AppError, go_to_lower};
 
 /// link_metadata.go:22
 pub const LINK_METADATA_TYPE_IMAGE: &str = "image";
@@ -143,10 +145,133 @@ pub fn is_svg_image_url(image_url: &str) -> bool {
     path.ends_with(".svg") || path.ends_with(".svgz")
 }
 
+/// Port of the unexported `truncateText` (link_metadata.go:48): more than 300 **runes** becomes
+/// the first 300 and `[...]`. Go's `%.300s` measures its precision in runes, not bytes, so a
+/// title of multi-byte characters is cut at the same character here as there.
+pub fn truncate_text(original: &str) -> String {
+    match original.char_indices().nth(300) {
+        Some((cut, _)) => format!("{}[...]", &original[..cut]),
+        None => original.to_owned(),
+    }
+}
+
+/// Port of the unexported `firstNImages` (link_metadata.go:55). A negative limit means
+/// [`LINK_METADATA_MAX_IMAGES`]; nil stays nil and a short list is returned as it is.
+pub fn first_n_images(
+    images: Option<Vec<opengraph::Image>>,
+    max_images: i64,
+) -> Option<Vec<opengraph::Image>> {
+    let max = usize::try_from(max_images).unwrap_or(LINK_METADATA_MAX_IMAGES);
+    images.map(|mut images| {
+        images.truncate(max);
+        images
+    })
+}
+
+/// Port of `FilterSVGImages` (link_metadata.go:91) — "removes SVG images", by the extension of
+/// either URL or by a declared `image/svg+xml` type. An empty or nil list is returned as it is;
+/// any other comes back as a new, **non-nil** list, so a list whose every image was an SVG
+/// marshals as `[]`, not `null`.
+pub fn filter_svg_images(images: Option<Vec<opengraph::Image>>) -> Option<Vec<opengraph::Image>> {
+    match images {
+        Some(images) if !images.is_empty() => Some(
+            images
+                .into_iter()
+                .filter(|img| {
+                    !(is_svg_image_url(&img.url)
+                        || is_svg_image_url(&img.secure_url)
+                        || img.type_.starts_with("image/svg+xml"))
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// Port of `TruncateOpenGraph` (link_metadata.go:69) — "ensure OpenGraph metadata doesn't grow
+/// too big". Three strings are truncated, the article, book and profile, the determiner, the
+/// locales, the audios and the videos are blanked, and the images are cut to five and filtered
+/// for SVG. **`type`, `url` and `music` are left alone**, so a `music` object survives into an
+/// embed while a `video` does not.
+pub fn truncate_open_graph(og: Option<opengraph::OpenGraph>) -> Option<opengraph::OpenGraph> {
+    og.map(|mut og| {
+        og.title = truncate_text(&og.title);
+        og.description = truncate_text(&og.description);
+        og.site_name = truncate_text(&og.site_name);
+        og.article = None;
+        og.book = None;
+        og.profile = None;
+        og.determiner = String::new();
+        og.locale = String::new();
+        og.locales_alternate = None;
+        og.images = filter_svg_images(first_n_images(
+            og.images.take(),
+            LINK_METADATA_MAX_IMAGES as i64,
+        ));
+        og.audios = None;
+        og.videos = None;
+        og
+    })
+}
+
 impl LinkMetadata {
     /// Port of `(*LinkMetadata).PreSave` (link_metadata.go:125). Sets the hash and nothing else.
     pub fn pre_save(&mut self) {
         self.hash = generate_link_metadata_hash(&self.url, self.timestamp);
+    }
+
+    /// Port of `(*LinkMetadata).IsValid` (link_metadata.go:129), which `LinkMetadataStore.Save`
+    /// runs before anything else.
+    ///
+    /// Go's two `data_type` branches are **type assertions** — `o.Data.(*PostImage)` and
+    /// `o.Data.(*opengraph.OpenGraph)` — which a `Value` cannot answer ([D-106]). The one writer
+    /// in this port, `saveLinkMetadataToDatabase`, derives `Type` *from* the concrete value it
+    /// holds, exactly as Go's does, so the assertion cannot fail there; what is checked here is
+    /// the nil half, which the writer can reach. A `none` row with data is the `data_type` error,
+    /// as in Go, since that one needs no assertion.
+    pub fn is_valid(&self) -> Result<(), Box<AppError>> {
+        let error =
+            |id: &str, params: Option<std::collections::HashMap<String, serde_json::Value>>| {
+                AppError::boxed(
+                    "LinkMetadata.IsValid",
+                    format!("model.link_metadata.is_valid.{id}.app_error"),
+                    params,
+                    String::new(),
+                    400,
+                )
+            };
+        if self.url.is_empty() {
+            return Err(error("url", None));
+        }
+        if self.url.len() > LINK_METADATA_MAX_URL_LENGTH {
+            return Err(error(
+                "url_length",
+                Some(std::collections::HashMap::from([
+                    (
+                        "MaxLength".to_owned(),
+                        serde_json::json!(LINK_METADATA_MAX_URL_LENGTH),
+                    ),
+                    ("Length".to_owned(), serde_json::json!(self.url.len())),
+                ])),
+            ));
+        }
+        if self.timestamp == 0 || !is_rounded_to_nearest_hour(self.timestamp) {
+            return Err(error("timestamp", None));
+        }
+        match self.link_type.as_str() {
+            LINK_METADATA_TYPE_IMAGE | LINK_METADATA_TYPE_OPENGRAPH => {
+                if self.data.is_none() {
+                    return Err(error("data", None));
+                }
+            }
+            LINK_METADATA_TYPE_NONE => {
+                if self.data.is_some() {
+                    return Err(error("data_type", None));
+                }
+            }
+            _ => return Err(error("type", None)),
+        }
+        Ok(())
     }
 }
 
@@ -343,5 +468,136 @@ mod go_parity {
         assert_eq!(m.url, case["url"].as_str().unwrap());
         assert_eq!(m.timestamp, case["timestamp"].as_i64().unwrap());
         assert!(case["matches_generate"].as_bool().unwrap());
+    }
+}
+
+/// [`LinkMetadata::is_valid`] against Go's `IsValid` over `behaviour_link_metadata.json`'s
+/// `is_valid` corpus, rebuilt case by case. The two cases whose `Data` is the wrong *Go type*
+/// (`type_image_with_wrong_data`, `type_image_with_value_not_pointer`) are the type assertion a
+/// `Value` cannot express; they are asserted to be the only cases skipped.
+#[cfg(test)]
+mod is_valid_parity {
+    use super::*;
+
+    fn case(name: &str) -> Option<LinkMetadata> {
+        let mut m = LinkMetadata {
+            url: "https://example.com/page".to_owned(),
+            timestamp: floor_to_nearest_hour(1_700_000_000_000),
+            link_type: LINK_METADATA_TYPE_NONE.to_owned(),
+            ..Default::default()
+        };
+        let image = || serde_json::json!({"width": 1, "height": 1, "format": "", "frame_count": 0});
+        match name {
+            "valid_none" => {}
+            "empty_url" => m.url.clear(),
+            "url_at_cap" => {
+                m.url = format!(
+                    "https://e.com/{}",
+                    "a".repeat(LINK_METADATA_MAX_URL_LENGTH - "https://e.com/".len())
+                );
+            }
+            "url_over_cap" => {
+                m.url = format!("https://e.com/{}", "a".repeat(LINK_METADATA_MAX_URL_LENGTH));
+            }
+            "zero_timestamp" => m.timestamp = 0,
+            "unrounded_timestamp" => m.timestamp = 1_700_000_000_001,
+            "type_none_with_data" => m.data = Some(image()),
+            "type_image_without_data" => m.link_type = LINK_METADATA_TYPE_IMAGE.to_owned(),
+            "type_image_with_post_image" => {
+                m.link_type = LINK_METADATA_TYPE_IMAGE.to_owned();
+                m.data = Some(image());
+            }
+            "unknown_type" => m.link_type = "something-else".to_owned(),
+            "empty_type" => m.link_type.clear(),
+            _ => return None,
+        }
+        Some(m)
+    }
+
+    #[test]
+    fn is_valid_matches_go() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_link_metadata.json"
+        ))
+        .unwrap();
+        let mut skipped = Vec::new();
+        for c in oracle["is_valid"].as_array().unwrap() {
+            let name = c["name"].as_str().unwrap();
+            let Some(m) = case(name) else {
+                skipped.push(name.to_owned());
+                continue;
+            };
+            match m.is_valid() {
+                Ok(()) => assert_eq!(c["ok"], true, "{name}"),
+                Err(err) => {
+                    assert_eq!(c["ok"], false, "{name}");
+                    assert_eq!(c["id"], err.id.as_str(), "{name}");
+                    assert_eq!(c["where"], err.where_.as_str(), "{name}");
+                    assert_eq!(c["status"], err.status_code, "{name}");
+                }
+            }
+        }
+        assert_eq!(
+            skipped,
+            vec![
+                "type_image_with_wrong_data",
+                "type_image_with_value_not_pointer"
+            ]
+        );
+    }
+    /// `FilterSVGImages` tests both URLs and the declared type; an all-SVG list becomes `[]`.
+    #[test]
+    fn filter_svg_images_checks_both_urls_and_the_type() {
+        let img = |url: &str, secure: &str, t: &str| opengraph::Image {
+            url: url.into(),
+            secure_url: secure.into(),
+            type_: t.into(),
+            ..opengraph::Image::default()
+        };
+        let kept = filter_svg_images(Some(vec![
+            img("a.png", "", ""),
+            img("b.png", "https://x/b.svgz", ""),
+            img("c.png", "", "image/svg+xml; q=1"),
+            img("d.SVG", "", ""),
+        ]));
+        assert_eq!(kept, Some(vec![img("a.png", "", "")]));
+        assert_eq!(
+            filter_svg_images(Some(vec![img("x.svg", "", "")])),
+            Some(vec![])
+        );
+        assert_eq!(filter_svg_images(None), None);
+    }
+
+    /// Every parse in `fixtures/behaviour_opengraph.json`, read back from Go's JSON as the DB
+    /// read path would, must re-marshal to the same bytes — and truncate to Go's truncation.
+    #[test]
+    fn open_graph_round_trips_and_truncates_like_go() {
+        let o: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_opengraph.json"))
+                .unwrap();
+        let mut n = 0;
+        for case in o["opengraph"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            // Go wrote that page's raw invalid bytes as the escape `\ufffd`; read back, they are
+            // the character, which Go too would then write as itself. Not a round trip in Go.
+            if case["parsed_err"].as_bool().unwrap() || name == "invalid_utf8_raw_absolute" {
+                continue;
+            }
+            let parsed = case["parsed"].as_str().unwrap();
+            let og: opengraph::OpenGraph = serde_json::from_str(parsed).unwrap();
+            assert_eq!(
+                crate::utils::go_json_marshal(&og).unwrap(),
+                parsed,
+                "{name}"
+            );
+            assert_eq!(
+                crate::utils::go_json_marshal(&truncate_open_graph(Some(og))).unwrap(),
+                case["truncated"].as_str().unwrap(),
+                "{name}"
+            );
+            n += 1;
+        }
+        assert!(n > 450);
+        assert_eq!(truncate_open_graph(None), None);
     }
 }

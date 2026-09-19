@@ -99,6 +99,40 @@
             "out": "JTAwJTAxJTAyJTAzJTA0JTA1JTA2JTA3JTA4JTA5JTBBJTBCJTBDJTBEJTBFJTBGJTEwJTExJTEyJTEzJTE0JTE1JTE2JTE3JTE4JTE5JTFBJTFCJTFDJTFEJTFFJTFGJTIwISUyMiUyMyQlMjUmJTI3KCkqKywtLi8wMTIzNDU2Nzg5OjslM0M9JTNFP0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWiU1QiU1QyU1RCU1RV8lNjBhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5eiU3QiU3QyU3RH4lN0YlODAlODElODIlODMlODQlODUlODYlODclODglODklOEElOEIlOEMlOEQlOEUlOEYlOTAlOTElOTIlOTMlOTQlOTUlOTYlOTclOTglOTklOUElOUIlOUMlOUQlOUUlOUYlQTAlQTElQTIlQTMlQTQlQTUlQTYlQTclQTglQTklQUElQUIlQUMlQUQlQUUlQUYlQjAlQjElQjIlQjMlQjQlQjUlQjYlQjclQjglQjklQkElQkIlQkMlQkQlQkUlQkYlQzAlQzElQzIlQzMlQzQlQzUlQzYlQzclQzglQzklQ0ElQ0IlQ0MlQ0QlQ0UlQ0YlRDAlRDElRDIlRDMlRDQlRDUlRDYlRDclRDglRDklREElREIlREMlREQlREUlREYlRTAlRTElRTIlRTMlRTQlRTUlRTYlRTclRTglRTklRUElRUIlRUMlRUQlRUUlRUYlRjAlRjElRjIlRjMlRjQlRjUlRjYlRjclRjglRjklRkElRkIlRkMlRkQlRkUlRkY="
         }
     ],
+    "hostname": [
+        {
+            "url": "http://example.com",
+            "hostname": "example.com"
+        },
+        {
+            "url": "http://example.com:80",
+            "hostname": "example.com"
+        },
+        {
+            "url": "http://example.com:",
+            "hostname": "example.com"
+        },
+        {
+            "url": "http://[::1]:8080",
+            "hostname": "::1"
+        },
+        {
+            "url": "http://[::1]",
+            "hostname": "::1"
+        },
+        {
+            "url": "http://[fe80::1%25en0]:1/",
+            "hostname": "fe80::1%en0"
+        },
+        {
+            "url": "http://user@host:9/",
+            "hostname": "host"
+        },
+        {
+            "url": "/path",
+            "hostname": ""
+        }
+    ],
     "is_valid_http_url": [
         {
             "name": "http://example.com",
@@ -5391,6 +5425,3128 @@
             "string": "",
             "escaped_path": null,
             "escaped_fragment": null
+        }
+    ],
+    "resolve": [
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g",
+            "err": false,
+            "out": "http://a/b/c/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "./g",
+            "err": false,
+            "out": "http://a/b/c/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g/",
+            "err": false,
+            "out": "http://a/b/c/g/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "/g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "//g",
+            "err": false,
+            "out": "http://g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "?y",
+            "err": false,
+            "out": "http://a/b/c/d;p?y"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g?y",
+            "err": false,
+            "out": "http://a/b/c/g?y"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "#s",
+            "err": false,
+            "out": "http://a/b/c/d;p?q#s"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g#s",
+            "err": false,
+            "out": "http://a/b/c/g#s"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "http://a/b/c/g?y#s"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": ";x",
+            "err": false,
+            "out": "http://a/b/c/;x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g;x",
+            "err": false,
+            "out": "http://a/b/c/g;x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "http://a/b/c/g;x?y#s"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "",
+            "err": false,
+            "out": "http://a/b/c/d;p?q"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": ".",
+            "err": false,
+            "out": "http://a/b/c/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "./",
+            "err": false,
+            "out": "http://a/b/c/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "..",
+            "err": false,
+            "out": "http://a/b/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../",
+            "err": false,
+            "out": "http://a/b/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../g",
+            "err": false,
+            "out": "http://a/b/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../..",
+            "err": false,
+            "out": "http://a/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../../",
+            "err": false,
+            "out": "http://a/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../../g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../../../g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "/./g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "/../g",
+            "err": false,
+            "out": "http://a/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g.",
+            "err": false,
+            "out": "http://a/b/c/g."
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": ".g",
+            "err": false,
+            "out": "http://a/b/c/.g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g..",
+            "err": false,
+            "out": "http://a/b/c/g.."
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "..g",
+            "err": false,
+            "out": "http://a/b/c/..g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "./../g",
+            "err": false,
+            "out": "http://a/b/g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "./g/.",
+            "err": false,
+            "out": "http://a/b/c/g/"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g/./h",
+            "err": false,
+            "out": "http://a/b/c/g/h"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g/../h",
+            "err": false,
+            "out": "http://a/b/c/h"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "http://a/b/c/g;x=1/y"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "http://a/b/c/y"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "http://a/b/c/g?y/./x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "http://a/b/c/g?y/../x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "http://a/b/c/g#s/./x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "http://a/b/c/g#s/../x"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "http://cdn.example/i.png"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "http://a/b/c/img%20x.png"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "http://a/b/c/a%2Fb"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "?",
+            "err": false,
+            "out": "http://a/b/c/d;p?"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "#",
+            "err": false,
+            "out": "http://a/b/c/d;p?q"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "é.png",
+            "err": false,
+            "out": "http://a/b/c/%C3%A9.png"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "http://a/b/c/d;p?q",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g",
+            "err": false,
+            "out": "https://example.com/dir/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "./g",
+            "err": false,
+            "out": "https://example.com/dir/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g/",
+            "err": false,
+            "out": "https://example.com/dir/g/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "/g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "//g",
+            "err": false,
+            "out": "https://g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "?y",
+            "err": false,
+            "out": "https://example.com/dir/page.html?y"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g?y",
+            "err": false,
+            "out": "https://example.com/dir/g?y"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "#s",
+            "err": false,
+            "out": "https://example.com/dir/page.html#s"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g#s",
+            "err": false,
+            "out": "https://example.com/dir/g#s"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "https://example.com/dir/g?y#s"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": ";x",
+            "err": false,
+            "out": "https://example.com/dir/;x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g;x",
+            "err": false,
+            "out": "https://example.com/dir/g;x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "https://example.com/dir/g;x?y#s"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "",
+            "err": false,
+            "out": "https://example.com/dir/page.html"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": ".",
+            "err": false,
+            "out": "https://example.com/dir/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "./",
+            "err": false,
+            "out": "https://example.com/dir/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "/./g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "/../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g.",
+            "err": false,
+            "out": "https://example.com/dir/g."
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": ".g",
+            "err": false,
+            "out": "https://example.com/dir/.g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g..",
+            "err": false,
+            "out": "https://example.com/dir/g.."
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "..g",
+            "err": false,
+            "out": "https://example.com/dir/..g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "./../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "./g/.",
+            "err": false,
+            "out": "https://example.com/dir/g/"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g/./h",
+            "err": false,
+            "out": "https://example.com/dir/g/h"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g/../h",
+            "err": false,
+            "out": "https://example.com/dir/h"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "https://example.com/dir/g;x=1/y"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "https://example.com/dir/y"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "https://example.com/dir/g?y/./x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "https://example.com/dir/g?y/../x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "https://example.com/dir/g#s/./x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "https://example.com/dir/g#s/../x"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "https://cdn.example/i.png"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "https://example.com/dir/img%20x.png"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "https://example.com/dir/a%2Fb"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "?",
+            "err": false,
+            "out": "https://example.com/dir/page.html?"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "#",
+            "err": false,
+            "out": "https://example.com/dir/page.html"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "é.png",
+            "err": false,
+            "out": "https://example.com/dir/%C3%A9.png"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "https://example.com/dir/page.html",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "./g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g/",
+            "err": false,
+            "out": "https://example.com/g/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "/g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "//g",
+            "err": false,
+            "out": "https://g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "?y",
+            "err": false,
+            "out": "https://example.com?y"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g?y",
+            "err": false,
+            "out": "https://example.com/g?y"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "#s",
+            "err": false,
+            "out": "https://example.com#s"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g#s",
+            "err": false,
+            "out": "https://example.com/g#s"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "https://example.com/g?y#s"
+        },
+        {
+            "base": "https://example.com",
+            "ref": ";x",
+            "err": false,
+            "out": "https://example.com/;x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g;x",
+            "err": false,
+            "out": "https://example.com/g;x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "https://example.com/g;x?y#s"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "",
+            "err": false,
+            "out": "https://example.com"
+        },
+        {
+            "base": "https://example.com",
+            "ref": ".",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "./",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "/./g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "/../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g.",
+            "err": false,
+            "out": "https://example.com/g."
+        },
+        {
+            "base": "https://example.com",
+            "ref": ".g",
+            "err": false,
+            "out": "https://example.com/.g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g..",
+            "err": false,
+            "out": "https://example.com/g.."
+        },
+        {
+            "base": "https://example.com",
+            "ref": "..g",
+            "err": false,
+            "out": "https://example.com/..g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "./../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "./g/.",
+            "err": false,
+            "out": "https://example.com/g/"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g/./h",
+            "err": false,
+            "out": "https://example.com/g/h"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g/../h",
+            "err": false,
+            "out": "https://example.com/h"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "https://example.com/g;x=1/y"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "https://example.com/y"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "https://example.com/g?y/./x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "https://example.com/g?y/../x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "https://example.com/g#s/./x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "https://example.com/g#s/../x"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "https://cdn.example/i.png"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "https://example.com/img%20x.png"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "https://example.com/a%2Fb"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com",
+            "ref": "?",
+            "err": false,
+            "out": "https://example.com?"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "#",
+            "err": false,
+            "out": "https://example.com"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "é.png",
+            "err": false,
+            "out": "https://example.com/%C3%A9.png"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "https://example.com",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "./g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g/",
+            "err": false,
+            "out": "https://example.com/g/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "/g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "//g",
+            "err": false,
+            "out": "https://g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "?y",
+            "err": false,
+            "out": "https://example.com/?y"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g?y",
+            "err": false,
+            "out": "https://example.com/g?y"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "#s",
+            "err": false,
+            "out": "https://example.com/#s"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g#s",
+            "err": false,
+            "out": "https://example.com/g#s"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "https://example.com/g?y#s"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": ";x",
+            "err": false,
+            "out": "https://example.com/;x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g;x",
+            "err": false,
+            "out": "https://example.com/g;x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "https://example.com/g;x?y#s"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": ".",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "./",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../..",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../../",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "/./g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "/../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g.",
+            "err": false,
+            "out": "https://example.com/g."
+        },
+        {
+            "base": "https://example.com/",
+            "ref": ".g",
+            "err": false,
+            "out": "https://example.com/.g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g..",
+            "err": false,
+            "out": "https://example.com/g.."
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "..g",
+            "err": false,
+            "out": "https://example.com/..g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "./../g",
+            "err": false,
+            "out": "https://example.com/g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "./g/.",
+            "err": false,
+            "out": "https://example.com/g/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g/./h",
+            "err": false,
+            "out": "https://example.com/g/h"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g/../h",
+            "err": false,
+            "out": "https://example.com/h"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "https://example.com/g;x=1/y"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "https://example.com/y"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "https://example.com/g?y/./x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "https://example.com/g?y/../x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "https://example.com/g#s/./x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "https://example.com/g#s/../x"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "https://cdn.example/i.png"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "https://example.com/img%20x.png"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "https://example.com/a%2Fb"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "?",
+            "err": false,
+            "out": "https://example.com/?"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "#",
+            "err": false,
+            "out": "https://example.com/"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "é.png",
+            "err": false,
+            "out": "https://example.com/%C3%A9.png"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "https://example.com/",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g",
+            "err": false,
+            "out": "http://h/a%2Fb/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "./g",
+            "err": false,
+            "out": "http://h/a%2Fb/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g/",
+            "err": false,
+            "out": "http://h/a%2Fb/g/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "/g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "//g",
+            "err": false,
+            "out": "http://g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "?y",
+            "err": false,
+            "out": "http://h/a%2Fb/c?y"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g?y",
+            "err": false,
+            "out": "http://h/a%2Fb/g?y"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "#s",
+            "err": false,
+            "out": "http://h/a%2Fb/c?x=1#s"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g#s",
+            "err": false,
+            "out": "http://h/a%2Fb/g#s"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "http://h/a%2Fb/g?y#s"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": ";x",
+            "err": false,
+            "out": "http://h/a%2Fb/;x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g;x",
+            "err": false,
+            "out": "http://h/a%2Fb/g;x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "http://h/a%2Fb/g;x?y#s"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "",
+            "err": false,
+            "out": "http://h/a%2Fb/c?x=1#f"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": ".",
+            "err": false,
+            "out": "http://h/a%2Fb/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "./",
+            "err": false,
+            "out": "http://h/a%2Fb/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "..",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../..",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../../",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "/./g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "/../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g.",
+            "err": false,
+            "out": "http://h/a%2Fb/g."
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": ".g",
+            "err": false,
+            "out": "http://h/a%2Fb/.g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g..",
+            "err": false,
+            "out": "http://h/a%2Fb/g.."
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "..g",
+            "err": false,
+            "out": "http://h/a%2Fb/..g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "./../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "./g/.",
+            "err": false,
+            "out": "http://h/a%2Fb/g/"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g/./h",
+            "err": false,
+            "out": "http://h/a%2Fb/g/h"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g/../h",
+            "err": false,
+            "out": "http://h/a%2Fb/h"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "http://h/a%2Fb/g;x=1/y"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "http://h/a%2Fb/y"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "http://h/a%2Fb/g?y/./x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "http://h/a%2Fb/g?y/../x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "http://h/a%2Fb/g#s/./x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "http://h/a%2Fb/g#s/../x"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "http://cdn.example/i.png"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "http://h/a%2Fb/img%20x.png"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "http://h/a%2Fb/a%2Fb"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "?",
+            "err": false,
+            "out": "http://h/a%2Fb/c?"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "#",
+            "err": false,
+            "out": "http://h/a%2Fb/c?x=1#f"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "é.png",
+            "err": false,
+            "out": "http://h/a%2Fb/%C3%A9.png"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "http://h/a%2Fb/c?x=1#f",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "./g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g/",
+            "err": false,
+            "out": "mailto:///g/"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "/g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "//g",
+            "err": false,
+            "out": "mailto://g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "?y",
+            "err": false,
+            "out": "mailto:x@y?y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g?y",
+            "err": false,
+            "out": "mailto:///g?y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "#s",
+            "err": false,
+            "out": "mailto:x@y#s"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g#s",
+            "err": false,
+            "out": "mailto:///g#s"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "mailto:///g?y#s"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": ";x",
+            "err": false,
+            "out": "mailto:///;x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g;x",
+            "err": false,
+            "out": "mailto:///g;x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "mailto:///g;x?y#s"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "",
+            "err": false,
+            "out": "mailto:x@y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": ".",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "./",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "..",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../..",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../../",
+            "err": false,
+            "out": "mailto:///"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../../../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "/./g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "/../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g.",
+            "err": false,
+            "out": "mailto:///g."
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": ".g",
+            "err": false,
+            "out": "mailto:///.g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g..",
+            "err": false,
+            "out": "mailto:///g.."
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "..g",
+            "err": false,
+            "out": "mailto:///..g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "./../g",
+            "err": false,
+            "out": "mailto:///g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "./g/.",
+            "err": false,
+            "out": "mailto:///g/"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g/./h",
+            "err": false,
+            "out": "mailto:///g/h"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g/../h",
+            "err": false,
+            "out": "mailto:///h"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "mailto:///g;x=1/y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "mailto:///y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "mailto:///g?y/./x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "mailto:///g?y/../x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "mailto:///g#s/./x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "mailto:///g#s/../x"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "mailto://cdn.example/i.png"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "mailto:///img%20x.png"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "mailto:///a%2Fb"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "?",
+            "err": false,
+            "out": "mailto:x@y?"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "#",
+            "err": false,
+            "out": "mailto:x@y"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "é.png",
+            "err": false,
+            "out": "mailto:///%C3%A9.png"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "mailto:x@y",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g",
+            "err": false,
+            "out": "/relative/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "./g",
+            "err": false,
+            "out": "/relative/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g/",
+            "err": false,
+            "out": "/relative/g/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "/g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "//g",
+            "err": false,
+            "out": "//g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "?y",
+            "err": false,
+            "out": "/relative/base?y"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g?y",
+            "err": false,
+            "out": "/relative/g?y"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "#s",
+            "err": false,
+            "out": "/relative/base#s"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g#s",
+            "err": false,
+            "out": "/relative/g#s"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "/relative/g?y#s"
+        },
+        {
+            "base": "/relative/base",
+            "ref": ";x",
+            "err": false,
+            "out": "/relative/;x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g;x",
+            "err": false,
+            "out": "/relative/g;x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "/relative/g;x?y#s"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "",
+            "err": false,
+            "out": "/relative/base"
+        },
+        {
+            "base": "/relative/base",
+            "ref": ".",
+            "err": false,
+            "out": "/relative/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "./",
+            "err": false,
+            "out": "/relative/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "..",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../..",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../../",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "/./g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "/../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g.",
+            "err": false,
+            "out": "/relative/g."
+        },
+        {
+            "base": "/relative/base",
+            "ref": ".g",
+            "err": false,
+            "out": "/relative/.g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g..",
+            "err": false,
+            "out": "/relative/g.."
+        },
+        {
+            "base": "/relative/base",
+            "ref": "..g",
+            "err": false,
+            "out": "/relative/..g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "./../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "./g/.",
+            "err": false,
+            "out": "/relative/g/"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g/./h",
+            "err": false,
+            "out": "/relative/g/h"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g/../h",
+            "err": false,
+            "out": "/relative/h"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "/relative/g;x=1/y"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "/relative/y"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "/relative/g?y/./x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "/relative/g?y/../x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "/relative/g#s/./x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "/relative/g#s/../x"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "//cdn.example/i.png"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "/relative/img%20x.png"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "/relative/a%2Fb"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "/relative/base",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "/relative/base",
+            "ref": "?",
+            "err": false,
+            "out": "/relative/base?"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "#",
+            "err": false,
+            "out": "/relative/base"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "é.png",
+            "err": false,
+            "out": "/relative/%C3%A9.png"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "/relative/base",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "",
+            "ref": "g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "./g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "g/",
+            "err": false,
+            "out": "/g/"
+        },
+        {
+            "base": "",
+            "ref": "/g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "//g",
+            "err": false,
+            "out": "//g"
+        },
+        {
+            "base": "",
+            "ref": "?y",
+            "err": false,
+            "out": "?y"
+        },
+        {
+            "base": "",
+            "ref": "g?y",
+            "err": false,
+            "out": "/g?y"
+        },
+        {
+            "base": "",
+            "ref": "#s",
+            "err": false,
+            "out": "#s"
+        },
+        {
+            "base": "",
+            "ref": "g#s",
+            "err": false,
+            "out": "/g#s"
+        },
+        {
+            "base": "",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "/g?y#s"
+        },
+        {
+            "base": "",
+            "ref": ";x",
+            "err": false,
+            "out": "/;x"
+        },
+        {
+            "base": "",
+            "ref": "g;x",
+            "err": false,
+            "out": "/g;x"
+        },
+        {
+            "base": "",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "/g;x?y#s"
+        },
+        {
+            "base": "",
+            "ref": "",
+            "err": false,
+            "out": ""
+        },
+        {
+            "base": "",
+            "ref": ".",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "./",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "..",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "../",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "../..",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "../../",
+            "err": false,
+            "out": "/"
+        },
+        {
+            "base": "",
+            "ref": "../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "../../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "/./g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "/../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "g.",
+            "err": false,
+            "out": "/g."
+        },
+        {
+            "base": "",
+            "ref": ".g",
+            "err": false,
+            "out": "/.g"
+        },
+        {
+            "base": "",
+            "ref": "g..",
+            "err": false,
+            "out": "/g.."
+        },
+        {
+            "base": "",
+            "ref": "..g",
+            "err": false,
+            "out": "/..g"
+        },
+        {
+            "base": "",
+            "ref": "./../g",
+            "err": false,
+            "out": "/g"
+        },
+        {
+            "base": "",
+            "ref": "./g/.",
+            "err": false,
+            "out": "/g/"
+        },
+        {
+            "base": "",
+            "ref": "g/./h",
+            "err": false,
+            "out": "/g/h"
+        },
+        {
+            "base": "",
+            "ref": "g/../h",
+            "err": false,
+            "out": "/h"
+        },
+        {
+            "base": "",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "/g;x=1/y"
+        },
+        {
+            "base": "",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "/y"
+        },
+        {
+            "base": "",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "/g?y/./x"
+        },
+        {
+            "base": "",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "/g?y/../x"
+        },
+        {
+            "base": "",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "/g#s/./x"
+        },
+        {
+            "base": "",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "/g#s/../x"
+        },
+        {
+            "base": "",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "//cdn.example/i.png"
+        },
+        {
+            "base": "",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "/img%20x.png"
+        },
+        {
+            "base": "",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "/a%2Fb"
+        },
+        {
+            "base": "",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "",
+            "ref": "?",
+            "err": false,
+            "out": "?"
+        },
+        {
+            "base": "",
+            "ref": "#",
+            "err": false,
+            "out": ""
+        },
+        {
+            "base": "",
+            "ref": "é.png",
+            "err": false,
+            "out": "/%C3%A9.png"
+        },
+        {
+            "base": "",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "./g",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g/",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "/g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "//g",
+            "err": false,
+            "out": "http://g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "?y",
+            "err": false,
+            "out": "http://u:p@h:8080/p/?y"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g?y",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g?y"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "#s",
+            "err": false,
+            "out": "http://u:p@h:8080/p/#s"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g#s",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g#s"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g?y#s"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": ";x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/;x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g;x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g;x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g;x?y#s"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "",
+            "err": false,
+            "out": "http://u:p@h:8080/p/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": ".",
+            "err": false,
+            "out": "http://u:p@h:8080/p/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "./",
+            "err": false,
+            "out": "http://u:p@h:8080/p/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "..",
+            "err": false,
+            "out": "http://u:p@h:8080/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../",
+            "err": false,
+            "out": "http://u:p@h:8080/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../..",
+            "err": false,
+            "out": "http://u:p@h:8080/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../../",
+            "err": false,
+            "out": "http://u:p@h:8080/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../../../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "/./g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "/../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g.",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g."
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": ".g",
+            "err": false,
+            "out": "http://u:p@h:8080/p/.g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g..",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g.."
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "..g",
+            "err": false,
+            "out": "http://u:p@h:8080/p/..g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "./../g",
+            "err": false,
+            "out": "http://u:p@h:8080/g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "./g/.",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g/./h",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g/h"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g/../h",
+            "err": false,
+            "out": "http://u:p@h:8080/p/h"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g;x=1/y"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "http://u:p@h:8080/p/y"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g?y/./x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g?y/../x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g#s/./x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "http://u:p@h:8080/p/g#s/../x"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "http://cdn.example/i.png"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "http://u:p@h:8080/p/img%20x.png"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "http://u:p@h:8080/p/a%2Fb"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "?",
+            "err": false,
+            "out": "http://u:p@h:8080/p/?"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "#",
+            "err": false,
+            "out": "http://u:p@h:8080/p/"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "é.png",
+            "err": false,
+            "out": "http://u:p@h:8080/p/%C3%A9.png"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "http://u:p@h:8080/p/",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g:h",
+            "err": false,
+            "out": "g:h"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "./g",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g/",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "/g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "//g",
+            "err": false,
+            "out": "http://g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "?y",
+            "err": false,
+            "out": "http://h/%E2%82%AC/x?y"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g?y",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g?y"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "#s",
+            "err": false,
+            "out": "http://h/%E2%82%AC/x#s"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g#s",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g#s"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g?y#s",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g?y#s"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": ";x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/;x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g;x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g;x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g;x?y#s",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g;x?y#s"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "",
+            "err": false,
+            "out": "http://h/%E2%82%AC/x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": ".",
+            "err": false,
+            "out": "http://h/%E2%82%AC/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "./",
+            "err": false,
+            "out": "http://h/%E2%82%AC/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "..",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../..",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../../",
+            "err": false,
+            "out": "http://h/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "../../../../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "/./g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "/../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g.",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g."
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": ".g",
+            "err": false,
+            "out": "http://h/%E2%82%AC/.g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g..",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g.."
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "..g",
+            "err": false,
+            "out": "http://h/%E2%82%AC/..g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "./../g",
+            "err": false,
+            "out": "http://h/g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "./g/.",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g/"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g/./h",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g/h"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g/../h",
+            "err": false,
+            "out": "http://h/%E2%82%AC/h"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g;x=1/./y",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g;x=1/y"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g;x=1/../y",
+            "err": false,
+            "out": "http://h/%E2%82%AC/y"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g?y/./x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g?y/./x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g?y/../x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g?y/../x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g#s/./x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g#s/./x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "g#s/../x",
+            "err": false,
+            "out": "http://h/%E2%82%AC/g#s/../x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "http:g",
+            "err": false,
+            "out": "http:g"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "//cdn.example/i.png",
+            "err": false,
+            "out": "http://cdn.example/i.png"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "img%20x.png",
+            "err": false,
+            "out": "http://h/%E2%82%AC/img%20x.png"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "a%2Fb",
+            "err": false,
+            "out": "http://h/%E2%82%AC/a%2Fb"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "%zz",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "http://[bad",
+            "err": true,
+            "out": ""
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "?",
+            "err": false,
+            "out": "http://h/%E2%82%AC/x?"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "#",
+            "err": false,
+            "out": "http://h/%E2%82%AC/x"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "é.png",
+            "err": false,
+            "out": "http://h/%E2%82%AC/%C3%A9.png"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "https://other/x?y#z",
+            "err": false,
+            "out": "https://other/x?y#z"
+        },
+        {
+            "base": "http://h/%E2%82%AC/x",
+            "ref": "HTTP://UPPER/Path",
+            "err": false,
+            "out": "http://UPPER/Path"
         }
     ],
     "unescape": [

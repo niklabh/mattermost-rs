@@ -45,6 +45,7 @@
   },
   "ExperimentalSettings": {
     "EnableSharedChannels": false,
+    "LinkMetadataTimeoutMilliseconds": 5000,
     "RestrictSystemAdmin": false
   },
   "FileSettings": {
@@ -75,7 +76,8 @@
     "ReAddRemovedMembers": false
   },
   "LocalizationSettings": {
-    "DefaultClientLocale": "en"
+    "DefaultClientLocale": "en",
+    "DefaultServerLocale": "en"
   },
   "LogSettings": {
     "EnableDiagnostics": true,
@@ -167,6 +169,7 @@
     "OutgoingIntegrationRequestsTimeout": 30,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
+    "RestrictLinkPreviews": "",
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
     "SessionLengthMobileInDays": 180,

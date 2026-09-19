@@ -50,6 +50,8 @@ func writeGoURLBehaviourFixture(outDir string) error {
 		"encode":               goURLEncodeAll(),
 		"merge_query_into_url": goURLMergeAll(),
 		"is_valid_http_url":    goURLIsValidHTTPURLAll(),
+		"resolve":              goURLResolveAll(),
+		"hostname":             goURLHostnameAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -545,3 +547,72 @@ func goURLIsValidHTTPURLAll() []goURLIsValidCase {
 }
 
 var _ = fmt.Sprintf
+
+// --- (*URL).Parse / ResolveReference / Hostname -----------------------------------------------
+
+// goURLResolveBases and goURLResolveRefs are crossed: every reference against every base. The
+// references are RFC 3986 §5.4's examples plus the shapes a link preview meets — a relative
+// image path, a protocol-relative CDN URL, a bare query or fragment, escapes that must survive.
+var goURLResolveBases = []string{
+	"http://a/b/c/d;p?q", "https://example.com/dir/page.html", "https://example.com",
+	"https://example.com/", "http://h/a%2Fb/c?x=1#f", "mailto:x@y", "/relative/base", "",
+	"http://u:p@h:8080/p/", "http://h/%E2%82%AC/x",
+}
+
+var goURLResolveRefs = []string{
+	"g:h", "g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s", "g#s", "g?y#s", ";x", "g;x",
+	"g;x?y#s", "", ".", "./", "..", "../", "../g", "../..", "../../", "../../g", "../../../g",
+	"../../../../g", "/./g", "/../g", "g.", ".g", "g..", "..g", "./../g", "./g/.", "g/./h",
+	"g/../h", "g;x=1/./y", "g;x=1/../y", "g?y/./x", "g?y/../x", "g#s/./x", "g#s/../x", "http:g",
+	"//cdn.example/i.png", "img%20x.png", "a%2Fb", "%zz", "http://[bad", "?", "#", "\u00e9.png",
+	"https://other/x?y#z", "HTTP://UPPER/Path",
+}
+
+type goURLResolveCase struct {
+	Base string `json:"base"`
+	Ref  string `json:"ref"`
+	Err  bool   `json:"err"`
+	Out  string `json:"out"`
+}
+
+func goURLResolveAll() []goURLResolveCase {
+	res := []goURLResolveCase{}
+	for _, b := range goURLResolveBases {
+		base, err := url.Parse(b)
+		if err != nil {
+			continue
+		}
+		for _, r := range goURLResolveRefs {
+			c := goURLResolveCase{Base: b, Ref: r}
+			u, err := base.Parse(r)
+			if err != nil {
+				c.Err = true
+			} else {
+				c.Out = u.String()
+			}
+			res = append(res, c)
+		}
+	}
+	return res
+}
+
+type goURLHostnameCase struct {
+	URL      string `json:"url"`
+	Hostname string `json:"hostname"`
+}
+
+func goURLHostnameAll() []goURLHostnameCase {
+	res := []goURLHostnameCase{}
+	for _, raw := range []string{
+		"http://example.com", "http://example.com:80", "http://example.com:", "http://[::1]:8080",
+		"http://[::1]", "http://[fe80::1%25en0]:1/", "http://a:b:c", "http://user@host:9/", "/path",
+		"http://EXAMPLE.com:x",
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			continue
+		}
+		res = append(res, goURLHostnameCase{URL: raw, Hostname: u.Hostname()})
+	}
+	return res
+}

@@ -800,6 +800,18 @@ impl Post {
         copy
     }
 
+    /// Port of `(*Post).GetPreviewPost` (post.go:1364): the first `permalink` embed whose data is
+    /// a `*PreviewPost`. Go's type assertion succeeds only on data the server put there, never on
+    /// a document decoded from JSON — [`crate::post_embed::PostEmbedData::decode_typed`].
+    pub fn get_preview_post(&self) -> Option<crate::permalink::PreviewPost> {
+        self.metadata.as_ref()?.embeds.iter().find_map(|embed| {
+            if embed.type_ != crate::post_embed::POST_EMBED_PERMALINK {
+                return None;
+            }
+            embed.data.as_ref()?.decode_typed()
+        })
+    }
+
     /// Port of `(*Post).GetPreviewedPostProp` (post.go:1378). A non-string value yields `""`.
     pub fn get_previewed_post_prop(&self) -> &str {
         self.get_prop(POST_PROPS_PREVIEWED_POST)

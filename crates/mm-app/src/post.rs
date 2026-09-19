@@ -352,6 +352,31 @@ impl App {
         original: &Post,
         opts: PreparePostForClientOpts,
     ) -> Result<Post, PrepareError> {
+        self.prepare_post_for_client_inner(original, opts, PreviewedPostProp::Refuse)
+            .await
+    }
+
+    /// [`App::prepare_post_for_client`] for the post `CreatePost` has just saved, whose
+    /// `previewed_post` prop this server set itself a moment earlier.
+    ///
+    /// `PreparePostForClient` never reads that prop — `getEmbedsAndImages` does, and on the
+    /// create path it has already run on the pre-save post — so the refusal every other caller
+    /// keeps would only forward a post that is already written.
+    pub(crate) async fn prepare_created_post_for_client(
+        &self,
+        original: &Post,
+        opts: PreparePostForClientOpts,
+    ) -> Result<Post, PrepareError> {
+        self.prepare_post_for_client_inner(original, opts, PreviewedPostProp::Allow)
+            .await
+    }
+
+    async fn prepare_post_for_client_inner(
+        &self,
+        original: &Post,
+        opts: PreparePostForClientOpts,
+        previewed_post: PreviewedPostProp,
+    ) -> Result<Post, PrepareError> {
         // The plugin `MessageWillBeConsumed` hook can rewrite any post; the shapes where that
         // is observable on this deployment are the plugins' own, which all carry a custom type.
         if original.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
@@ -392,7 +417,7 @@ impl App {
             return Err(PrepareError::Unreproducible("icon override is enabled"));
         }
 
-        refuse_on_props(&post)?;
+        refuse_on_props_with(&post, previewed_post)?;
 
         // 3. Metadata always exists from here on, which is why a plain post serialises
         //    `"metadata":{}` rather than omitting the key.
@@ -667,15 +692,16 @@ impl App {
                 .link_metadata_for_permalink(&referenced_post_id)
                 .await?
             {
-                let data = serde_json::to_value(&preview).map_err(|err| {
-                    PrepareError::App(AppError::boxed(
-                        "getEmbedsAndImages",
-                        "api.marshal_error",
-                        None,
-                        err.to_string(),
-                        500,
-                    ))
-                })?;
+                let data =
+                    mm_model::post_embed::PostEmbedData::encode(&preview).map_err(|err| {
+                        PrepareError::App(AppError::boxed(
+                            "getEmbedsAndImages",
+                            "api.marshal_error",
+                            None,
+                            err.to_string(),
+                            500,
+                        ))
+                    })?;
                 if let Some(metadata) = post.metadata.as_mut() {
                     metadata.embeds.push(mm_model::post_embed::PostEmbed {
                         type_: mm_model::post_embed::POST_EMBED_PERMALINK.to_owned(),
@@ -798,6 +824,57 @@ impl App {
         self.sanitize_channel_mentions_for_user(&mut post, user_id)
             .await;
         Ok((post, true))
+    }
+
+    /// Port of `app.App.SanitizePostMetadataForUser` (post_metadata.go:332) whole, for the post
+    /// `CreatePost` answers with — the one caller whose embeds this server computed on the path
+    /// Go takes ([`App::get_embeds_and_images_for_new_post`]).
+    ///
+    /// A permalink embed is checked against the **viewer**: `HasPermissionToReadChannel` on the
+    /// previewed post's channel, and without it the embed and the `previewed_post` prop go
+    /// (`removePermalinkMetadataFromPost`) and the member flag is reset to `true`. With it, the
+    /// flag is the viewer's membership of that channel — `false` for a public channel read
+    /// through the team fallback. The channel lookup's error fails the request, after the post
+    /// is written, as Go's does.
+    ///
+    /// **On the create path the permission half is unreachable**: `publishWebsocketEventForPost`
+    /// has already taken the preview off and put it back only for an author who may read it
+    /// ([`crate::notification::PermalinkFate`]), so a preview that survives to here is one the
+    /// author may read. It is kept because it is Go's, and because `SendNotifications` returning
+    /// before the publish would leave it the only check; the mutation that drops it survives
+    /// `parity::post_create_links` for exactly this reason.
+    pub(crate) async fn sanitize_created_post_metadata_for_user(
+        &self,
+        mut post: Post,
+        user_id: &str,
+    ) -> Result<(Post, bool), PrepareError> {
+        refuse_on_props_with(&post, PreviewedPostProp::Allow)?;
+        let mut is_member_for_previews = true;
+        if post
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| !metadata.embeds.is_empty())
+        {
+            if let Some(preview) = post.get_preview_post() {
+                let channel_id = preview
+                    .post
+                    .as_ref()
+                    .map(|previewed| previewed.channel_id.as_str())
+                    .unwrap_or_default();
+                let channel = self.get_channel(channel_id).await?;
+                let (has_permission, is_member) =
+                    self.has_permission_to_read_channel(user_id, &channel).await;
+                is_member_for_previews = is_member;
+                if !has_permission {
+                    remove_permalink_metadata_from_post(&mut post);
+                    // "Since we remove the permalink metadata, we return true for isMember"
+                    is_member_for_previews = true;
+                }
+            }
+        }
+        self.sanitize_channel_mentions_for_user(&mut post, user_id)
+            .await;
+        Ok((post, is_member_for_previews))
     }
 
     /// Port of `app.App.sanitizeChannelMentionsForUser` (post_metadata.go:370) — the **read**
@@ -1574,16 +1651,47 @@ impl App {
     }
 }
 
+/// Port of `removePermalinkMetadataFromPost` (post_metadata.go:306): every `permalink` embed
+/// goes ("we always have only one permalink embed even if the post contains multiple
+/// permalinks") and so does the `previewed_post` prop.
+pub(crate) fn remove_permalink_metadata_from_post(post: &mut Post) {
+    if let Some(metadata) = post.metadata.as_mut() {
+        metadata
+            .embeds
+            .retain(|embed| embed.type_ != mm_model::post_embed::POST_EMBED_PERMALINK);
+    }
+    post.del_prop(POST_PROPS_PREVIEWED_POST);
+}
+
 /// The [`REFUSED_PROPS`] check, applied wherever Go would branch on one of them.
 ///
 /// Go tests key **presence** (`if _, ok := props[...]; ok`), not the value, so a prop explicitly
 /// set to `null` still takes the branch. The refusal carries the prop name, which is what a log
 /// reader needs to know which branch stopped us.
 pub(crate) fn refuse_on_props(post: &Post) -> Result<(), PrepareError> {
+    refuse_on_props_with(post, PreviewedPostProp::Refuse)
+}
+
+/// Whether a `previewed_post` prop is among the [`REFUSED_PROPS`] for this call. It is on every
+/// path but the created post's own, whose prop this server wrote — see
+/// [`App::prepare_created_post_for_client`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviewedPostProp {
+    Refuse,
+    Allow,
+}
+
+fn refuse_on_props_with(
+    post: &Post,
+    previewed_post: PreviewedPostProp,
+) -> Result<(), PrepareError> {
     let Some(props) = post.props.as_ref() else {
         return Ok(());
     };
     for refused in REFUSED_PROPS {
+        if previewed_post == PreviewedPostProp::Allow && refused == POST_PROPS_PREVIEWED_POST {
+            continue;
+        }
         if props.contains_key(refused) {
             return Err(PrepareError::Unreproducible(refused));
         }

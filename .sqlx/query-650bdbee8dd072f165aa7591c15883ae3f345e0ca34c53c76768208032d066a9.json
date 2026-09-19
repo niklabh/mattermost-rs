@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT hash AS \"hash!\", url AS \"url?\", \"timestamp\" AS \"timestamp?\",\n                      type AS \"type_?\", data AS \"data?\"\n                 FROM linkmetadata\n                WHERE url = $1 AND \"timestamp\" = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hash!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "url?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "timestamp?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "data?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "650bdbee8dd072f165aa7591c15883ae3f345e0ca34c53c76768208032d066a9"
+}
