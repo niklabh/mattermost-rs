@@ -15,6 +15,10 @@ members = [
     "crates/goplugin",
     # Mattermost plugin RPC surface (Apache-2.0, generated from server/public/plugin).
     "crates/mm-plugin",
+    # Byte-exact ports of Go's image codecs, deflate and the imaging libraries Mattermost uses
+    # (BSD-3-Clause AND MIT, from the Go standard library, boxes-ltd/imaging and bep/imagemeta);
+    # forbidden from depending on any mm-* crate. mm-app drives it.
+    "crates/goimage",
 ]
 
 [workspace.package]
@@ -41,6 +45,7 @@ mm-plugin = { path = "crates/mm-plugin" }
 mm-markdown = { path = "crates/mm-markdown" }
 mm-store = { path = "crates/mm-store" }
 mm-app = { path = "crates/mm-app" }
+goimage = { path = "crates/goimage" }
 
 # Runtime
 tokio = { version = "1", features = ["full"] }
@@ -215,4 +220,14 @@ opt-level = 3
 # PBKDF2 is 600,000 SHA-256 rounds per hash by design, and that cost is paid at debug speed.
 # Optimizing dependencies only; our own crates keep debug builds and fast incremental rebuilds.
 [profile.test.package."*"]
+opt-level = 3
+
+# goimage is the one workspace member that is optimised in dev and test builds too. Its oracle
+# replays deflate at level 9, Lanczos resampling and both JPEG codecs over photo-sized images; at
+# opt-level 0 that corpus takes minutes, and a dev server resizing an upload would take seconds.
+# The float semantics do not change with the level: Rust never fuses or reorders float operations
+# on its own, and every FMA this crate performs is an explicit `mul_add` (see `goimage::fma`).
+[profile.dev.package.goimage]
+opt-level = 3
+[profile.test.package.goimage]
 opt-level = 3

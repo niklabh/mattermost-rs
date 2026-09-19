@@ -4,14 +4,13 @@
 //! # Where the port stops, and why it stops *before* writing
 //!
 //! `UploadData`'s completion step for an image runs `HandleImages` (app/file.go:1161): it decodes
-//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. That is the
-//! pixel work [D-380] and [D-411] defer, so an upload whose last chunk would reach it is handed
-//! to Go as [`PrepareError::Unreproducible`] — and the decision is taken from the file's first
-//! bytes **before the chunk is written**, because a request forwarded after the write would find
+//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. PNG and JPEG are
+//! served, byte for byte, through [`crate::image_pipeline`]. GIF, BMP, TIFF and WebP are not
+//! decoded here ([D-650]), so an upload whose last chunk would reach one of them is handed to Go
+//! as [`PrepareError::Unreproducible`] — and the decision is taken from the file's first bytes
+//! **before the chunk is written**, because a request forwarded after the write would find
 //! `FileOffset == FileSize` on Go's side and be refused as over-long
-//! (`api.upload.upload_data.invalid_content_length`). Nothing else in the flow needs a decoder:
-//! an image Go cannot decode is a 500 here and there, and one past `MaxImageResolution` is a 400
-//! here and there, both from the header alone.
+//! (`api.upload.upload_data.invalid_content_length`).
 //!
 //! The `FileWillBeUploaded` plugin hook (`runPluginsHook`) is not applicable: there is no plugin
 //! host, so the hook list is empty and Go's own early return (`hookHasRunCh` closed unread) is the
@@ -29,7 +28,7 @@ use mm_store::file_info_store::FileInfoStore;
 
 use crate::App;
 use crate::channel::RestrictedDm;
-use crate::imaging::{ImageConfig, decode_config};
+use crate::image_pipeline::{self, PipelineError};
 use crate::post::PrepareError;
 
 /// Port of `minFirstPartSize` (app/upload.go:23) — 5 MiB. A first chunk shorter than this that
@@ -37,7 +36,8 @@ use crate::post::PrepareError;
 pub const MIN_FIRST_PART_SIZE: i64 = 5 * 1024 * 1024;
 
 /// How much of the stored file the completion step reads to classify an image: enough for every
-/// magic prefix in [`crate::imaging`] and for a PNG's `IHDR`.
+/// magic prefix `image.Decode`'s registry matches (`goimage::format::sniff`; WebP's is the
+/// longest, at 15).
 const IMAGE_HEAD_BYTES: usize = 64;
 
 impl App {
@@ -327,7 +327,7 @@ impl App {
             Err(GenFileInfoError::App(err)) => return Err(PrepareError::App(err)),
             Err(GenFileInfoError::Decode(reason)) => {
                 tracing::debug!(
-                    reason,
+                    reason = %reason,
                     "the completed upload's image header does not decode"
                 );
                 return Err(PrepareError::App(AppError::boxed(
@@ -379,11 +379,16 @@ impl App {
                     400,
                 )));
             }
-            // Past the limit check Go derives `_preview` and `_thumb`; that is the case the
-            // pre-write decision handed to Go.
-            return Err(PrepareError::Unreproducible(
-                "an image upload's preview and thumbnail are Go's",
-            ));
+            // `info.Name[:strings.LastIndex(info.Name, ".")]`, beside the stored file.
+            let stem = info
+                .name
+                .rsplit_once('.')
+                .map_or(info.name.as_str(), |(stem, _)| stem);
+            let ext = crate::imaging::file_ext_from_mime_type(&info.mime_type);
+            let dir = go_path::dir(&info.path);
+            info.preview_path = format!("{dir}/{stem}_preview.{ext}");
+            info.thumbnail_path = format!("{dir}/{stem}_thumb.{ext}");
+            self.handle_images(&info, file).await?;
         }
 
         if is_import {
@@ -429,9 +434,9 @@ impl App {
     ///
     /// Only a name whose mime type says image matters. A first chunk carries its own head; a
     /// later one reads the head of what is already on disk (chunks are at least 5 MiB, so the
-    /// header is there). Three verdicts: no magic matched is Go's 500 and is served; a PNG this
-    /// port measures that is past the limit is Go's 400 and is served; everything else Go would
-    /// resize, and is forwarded.
+    /// header is there). A format `image.Decode` would hand to a decoder this port does not
+    /// have — GIF, BMP, TIFF, WebP — is forwarded; PNG, JPEG and bytes no decoder claims are
+    /// served (the last is `genFileInfoFromReader`'s 500).
     async fn refuse_if_completion_needs_derived_images(
         &self,
         us: &UploadSession,
@@ -455,23 +460,55 @@ impl App {
             self.read_file_head(upload_path, IMAGE_HEAD_BYTES).await?
         };
 
-        match decode_config(&head) {
-            ImageConfig::NoFormat => Ok(()),
-            ImageConfig::Known { width, height, .. }
-                if crate::imaging::check_image_resolution_limit(
-                    width,
-                    height,
-                    self.config().file_max_image_resolution,
-                )
-                .is_err() =>
-            {
-                Ok(())
-            }
-            ImageConfig::Known { .. } => Err(PrepareError::Unreproducible(
-                "an image upload's preview and thumbnail are Go's",
+        match goimage::format::sniff(&head) {
+            Some("png" | "jpeg") | None => Ok(()),
+            Some(_) => Err(PrepareError::Unreproducible(
+                "GIF, BMP, TIFF and WebP uploads are decoded by Go",
             )),
-            ImageConfig::Undecidable(reason) => Err(PrepareError::Unreproducible(reason)),
         }
+    }
+
+    /// Port of `App.HandleImages` (app/file.go:1161) for the one file `UploadData` passes:
+    /// decode (a failure is a debug log and nothing written), orientation through a seekable
+    /// reader, and the `_thumb` and `_preview` writes — each failure logged and skipped.
+    async fn handle_images(&self, info: &FileInfo, data: Vec<u8>) -> Result<(), PrepareError> {
+        let max_res = self.config().file_max_image_resolution;
+        let derived =
+            tokio::task::spawn_blocking(move || image_pipeline::handle_image(&data, max_res))
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "image processing panicked");
+                    PrepareError::App(AppError::boxed(
+                        "UploadData",
+                        "app.upload.upload_data.gen_info.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    ))
+                })?
+                // The head was sniffed before the write; a format reaching here is decoded.
+                .map_err(|_| {
+                    PrepareError::Unreproducible(
+                        "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                    )
+                })?;
+        let Some(derived) = derived else {
+            return Ok(());
+        };
+        for (bytes, path) in [
+            (derived.thumbnail, &info.thumbnail_path),
+            (derived.preview, &info.preview_path),
+        ] {
+            match bytes {
+                Ok(bytes) => {
+                    if let Err(err) = self.write_file(&bytes, path).await {
+                        tracing::error!(error = ?err, path, "Unable to upload derived image");
+                    }
+                }
+                Err(err) => tracing::error!(error = %err, path, "Unable to encode image"),
+            }
+        }
+        Ok(())
     }
 
     /// The first `n` bytes of a stored file, or fewer if it is shorter.
@@ -574,7 +611,7 @@ pub enum GenFileInfoError {
     App(Box<AppError>),
     /// The name says image and `DecodeConfig` refused the bytes — Go returns the decoder's
     /// error, which the caller turns into a 500.
-    Decode(&'static str),
+    Decode(String),
     /// The name says image and this port does not measure the format.
     Unreproducible(&'static str),
 }
@@ -614,14 +651,16 @@ pub fn gen_file_info_from_reader(
     // already stripped it; an empty extension is empty either way.
 
     if info.is_image() {
-        match decode_config(file) {
-            ImageConfig::NoFormat => return Err(GenFileInfoError::Decode("image: unknown format")),
-            ImageConfig::Known { width, height, .. } => {
-                info.width = width;
-                info.height = height;
+        match image_pipeline::decode_config(file) {
+            Ok(config) => {
+                info.width = config.width;
+                info.height = config.height;
             }
-            ImageConfig::Undecidable(reason) => {
-                return Err(GenFileInfoError::Unreproducible(reason));
+            Err(PipelineError::Go(text)) => return Err(GenFileInfoError::Decode(text)),
+            Err(PipelineError::NotPorted(_)) => {
+                return Err(GenFileInfoError::Unreproducible(
+                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                ));
             }
         }
     }

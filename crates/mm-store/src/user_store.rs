@@ -393,6 +393,13 @@ pub trait UserStore {
         restricted_domains: &str,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateLastPictureUpdate` (user_store.go:380): `LastPictureUpdate` and
+    /// `UpdateAt` both set to one `GetMillis()`. A miss writes nothing and is not an error.
+    fn update_last_picture_update(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdatePassword` (user_store.go:410).
     ///
     /// **Six columns, not one.** The statement is
@@ -3194,6 +3201,24 @@ impl UserStore for SqlUserStore {
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, updated))]
+    #[tracing::instrument(skip(self), fields(updated))]
+    async fn update_last_picture_update(&self, user_id: &str) -> Result<(), StoreError> {
+        let cur_time = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastpictureupdate = $1, updateat = $1 WHERE id = $2",
+            cur_time,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
     async fn update_password(
         &self,
         user_id: &str,

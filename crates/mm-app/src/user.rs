@@ -1164,7 +1164,7 @@ impl App {
 }
 
 /// Port of `app.getProfileImagePath` (app/user.go:3302) — `filepath.Join("users", id, "profile.png")`.
-fn profile_image_path(user_id: &str) -> String {
+pub(crate) fn profile_image_path(user_id: &str) -> String {
     mm_model::go_path::join(&["users", user_id, "profile.png"])
 }
 

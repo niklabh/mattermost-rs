@@ -13,6 +13,8 @@ mm-plugin.workspace = true
 tar.workspace = true
 flate2.workspace = true
 mm-markdown.workspace = true
+# Byte-exact ports of Go's image codecs and the imaging libraries (BSD-3-Clause AND MIT).
+goimage.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true

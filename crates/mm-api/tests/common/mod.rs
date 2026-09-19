@@ -2455,6 +2455,24 @@ pub struct SecondServer {
     pub base: String,
 }
 
+/// This stack's Go file store, `reference/.build/mmroot<-k>/data/` — the directory every server
+/// on the stack, Go and mm-api alike, reads and writes files under.
+pub fn stack_data_dir() -> String {
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let suffix = if offset == 0 {
+        String::new()
+    } else {
+        format!("-{}", offset / 100)
+    };
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../reference/.build/mmroot{suffix}/data/"))
+        .to_string_lossy()
+        .into_owned()
+}
+
 impl SecondServer {
     /// Start one on `port` with `env` overlaid, and wait for it to answer.
     ///
@@ -2507,6 +2525,11 @@ impl SecondServer {
             .env("MM_GO_UPSTREAM", GO)
             // Required at startup; the stack's first account, as `scripts/mm-api-env.sh` sets it.
             .env("MM_API_GO_CACHE_USER", "sliceuser")
+            // The stack's shared file store, as `scripts/mm-api-env.sh` gives the main mm-api. A
+            // second server that writes a file (a profile picture, since that write is served)
+            // otherwise resolves the default `./data/` against the test's working directory and
+            // leaves the file inside the crate. `env` below can still override it.
+            .env("MM_FILESETTINGS_DIRECTORY", stack_data_dir())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         for (key, value) in env {
@@ -2640,20 +2663,7 @@ async fn start_licensed_rust(
     key_file: &str,
     extra: &[(&str, &str)],
 ) -> SecondServer {
-    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let suffix = if offset == 0 {
-        String::new()
-    } else {
-        format!("-{}", offset / 100)
-    };
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let data_dir = root
-        .join(format!("reference/.build/mmroot{suffix}/data/"))
-        .to_string_lossy()
-        .into_owned();
+    let data_dir = stack_data_dir();
     let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
     let listen = format!(":{go_port}");
     let mut env: Vec<(&str, &str)> = vec![

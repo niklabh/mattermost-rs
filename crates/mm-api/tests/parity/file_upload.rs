@@ -5,9 +5,8 @@
 //! scripts/parity.sh --test parity file_upload
 //! ```
 //!
-//! A text (non-image) upload is served here end to end and compared to Go; a raster image is
-//! handed to Go before the write ([D-380]/[D-411]), so its assertion is that the request forwards
-//! and Go's own `has_preview_image`/`width`/`height` come back. Both servers share one file-store
+//! A text (non-image) upload is served here end to end and compared to Go; so is a PNG or JPEG
+//! (its derived files are compared byte for byte in `image_uploads`). Both servers share one file-store
 //! directory, and every upload targets an `mmrs-parity-` channel the purge collects.
 
 use crate::common;
@@ -205,11 +204,10 @@ async fn a_multipart_text_upload_matches_go() {
     );
 }
 
-/// A PNG is handed to Go, which fills in `has_preview_image`, `width` and `height` — the pixel
-/// work this port defers. The assertion is that the request forwards and Go's dimensions come
-/// back.
+/// A PNG is served here now, `has_preview_image`, `width`, `height` and the mini preview
+/// included; the byte-for-byte comparison of the derived files is `image_uploads`'.
 #[tokio::test]
-async fn an_image_upload_forwards_and_go_measures_it() {
+async fn an_image_upload_is_served_and_measured() {
     if !stack_enabled() {
         return;
     }
@@ -227,16 +225,17 @@ async fn an_image_upload_forwards_and_go_measures_it() {
         "image upload: {}",
         String::from_utf8_lossy(&body)
     );
-    assert_ne!(
+    assert_eq!(
         served_by.as_deref(),
         Some("rust"),
-        "an image upload must forward to Go, not be served here"
+        "an image upload is served here"
     );
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let info = &value["file_infos"][0];
-    assert_eq!(info["width"], 1, "Go measured the width");
-    assert_eq!(info["height"], 1, "Go measured the height");
-    assert_eq!(info["has_preview_image"], true, "Go set has_preview_image");
+    assert_eq!(info["width"], 1);
+    assert_eq!(info["height"], 1);
+    assert_eq!(info["has_preview_image"], true);
+    assert!(info["mini_preview"].is_string(), "{info}");
 }
 
 /// A simple upload with no `channel_id` is the 400 invalid-url-param on both servers.

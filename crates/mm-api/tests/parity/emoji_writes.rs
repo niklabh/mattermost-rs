@@ -568,13 +568,37 @@ async fn an_oversized_upload_is_a_413() {
     assert_eq!(rs["id"], "api.emoji.create.too_large.app_error");
 }
 
-/// The forwarding boundary: a filename that is not `.png`, and an image that needs resizing.
-///
-/// Both are answered by **Go**, and both still work — a forward is not a degradation, it is the
-/// strangler doing its job. The assertion is on `x-mmrs-served-by`, because the body is Go's
-/// either way and would tell us nothing about which server produced it.
+/// A PNG or JPEG decoded from the imaging oracle's corpus, for the resize path.
+fn corpus_image(stage: &str, name: &str) -> Vec<u8> {
+    use base64::Engine as _;
+    let path = format!(
+        "{}/../../fixtures/behaviour_imaging_{stage}.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("fixture")).expect("JSON");
+    let list = if stage == "pipeline" {
+        &value["cases"]
+    } else {
+        &value["decode"]
+    };
+    let case = list
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|c| c["name"] == name)
+        .unwrap_or_else(|| panic!("{stage}: {name}"));
+    base64::engine::general_purpose::STANDARD
+        .decode(case["b64"].as_str().expect("bytes"))
+        .expect("base64")
+}
+
+/// The forwarding boundary: only a filename that is not `.png` (the GIF branch is read off the
+/// name) is Go's. An image between 128 and 1028 is resized **here** — `image.Decode`,
+/// `imaging.Fit`, `EncodePNG` — and the stored emoji is byte-identical to the one Go stores for
+/// the same upload; one whose header parses and whose pixels do not is the same 400 on both.
 #[tokio::test]
-async fn a_resize_and_a_gif_filename_are_answered_by_go() {
+async fn a_gif_filename_is_go_and_a_resize_is_served_byte_for_byte() {
     if !stack_enabled() {
         return;
     }
@@ -585,18 +609,27 @@ async fn a_resize_and_a_gif_filename_are_answered_by_go() {
     const BOUNDARY: &str = "mmrsparitywriteboundary";
     let creator = logged_in_user_id();
     let content_type = format!("multipart/form-data; boundary={BOUNDARY}");
+    let emoji_body = |tag: &str, filename: &str, bytes: &[u8]| {
+        multipart_body(
+            BOUNDARY,
+            Some(&format!(
+                r#"{{"name":"{}","creator_id":"{creator}"}}"#,
+                write_name(tag)
+            )),
+            Some((filename, bytes)),
+        )
+    };
 
     // 1. A `.gif` filename. The bytes are a PNG, so Go's `CountGIFFrames` fails and answers 400 —
     //    the point is that the *decision* was Go's, not that the upload succeeded.
-    let body = multipart_body(
-        BOUNDARY,
-        Some(&format!(
-            r#"{{"name":"{}","creator_id":"{creator}"}}"#,
-            write_name("giffn")
-        )),
-        Some(("e.gif", TINY_PNG)),
-    );
-    let (status, body, served_by) = post_emoji(&client, RUST, &token, &content_type, body).await;
+    let (status, body, served_by) = post_emoji(
+        &client,
+        RUST,
+        &token,
+        &content_type,
+        emoji_body("giffn", "e.gif", TINY_PNG),
+    )
+    .await;
     assert_eq!(
         served_by.as_deref(),
         Some("go"),
@@ -606,63 +639,95 @@ async fn a_resize_and_a_gif_filename_are_answered_by_go() {
     let forwarded: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
     assert_eq!(forwarded["id"], "api.emoji.upload.image.app_error");
 
-    // 2. An image between 128 and 1028: the resize path, whose output bytes are Go's to produce.
-    //    A header-only PNG is enough to get past `DecodeConfig` and reach the resize, where Go
-    //    then fails to decode the (absent) pixels — again, the assertion is who decided.
-    let body = multipart_body(
-        BOUNDARY,
-        Some(&format!(
-            r#"{{"name":"{}","creator_id":"{creator}"}}"#,
-            write_name("resize")
-        )),
-        Some(("e.png", &png_header(200, 200))),
-    );
-    let (_, body, served_by) = post_emoji(&client, RUST, &token, &content_type, body).await;
-    assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
-        "an image needing a resize is handed over"
-    );
-    // Whatever Go makes of it, it is Go's answer and not a 502 from a broken forward.
-    let forwarded: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
-    assert!(
-        forwarded.get("id").is_some(),
-        "the forward produced a real AppError: {}",
-        String::from_utf8_lossy(&body)
-    );
+    // 2. Real images that need resizing: a PNG with alpha, an opaque PNG, and a JPEG named .png
+    //    (the name decides the GIF branch; the bytes decide the decoder). Each is resized on
+    //    both servers and the stored images must be the same bytes.
+    for (tag, bytes) in [
+        ("rsalpha", corpus_image("pipeline", "alpha_1000x300")),
+        ("rsopaque", corpus_image("pipeline", "blocks_400x300")),
+        ("rsjpeg", corpus_image("jpeg", "video-001.q50.420.jpeg")),
+    ] {
+        let mut stored = Vec::new();
+        for base in [GO, RUST] {
+            let (status, body, served_by) = post_emoji(
+                &client,
+                base,
+                &token,
+                &content_type,
+                emoji_body(tag, "e.png", &bytes),
+            )
+            .await;
+            assert_eq!(
+                status,
+                200,
+                "{tag} {base}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            if base == RUST {
+                assert_eq!(
+                    served_by.as_deref(),
+                    Some("rust"),
+                    "{tag}: the resize is served"
+                );
+            }
+            let created: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+            let id = created["id"].as_str().expect("an id");
+            let image = client
+                .get(format!("{GO}/api/v4/emoji/{id}/image"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("Go answers");
+            assert_eq!(image.status(), 200, "{tag} {base}: the image reads back");
+            stored.push(image.bytes().await.expect("bytes").to_vec());
+        }
+        assert!(stored[0].starts_with(b"\x89PNG"), "{tag}: Go stored a PNG");
+        assert_eq!(
+            stored[0], stored[1],
+            "{tag}: the resized emoji differs from Go's"
+        );
+    }
 
-    // 3. Exactly 128 is **not** a resize — the check is `>`, not `>=` — so this one is ours.
-    let body = multipart_body(
-        BOUNDARY,
-        Some(&format!(
-            r#"{{"name":"{}","creator_id":"{creator}"}}"#,
-            write_name("edge")
-        )),
-        Some(("e.png", &png_header(128, 128))),
-    );
-    let (_, _, served_by) = post_emoji(&client, RUST, &token, &content_type, body).await;
+    // 3. A header-only PNG between the limits parses, reaches the resize, and fails to decode:
+    //    the same 400 `decode_error` on both, served here. Exactly 1028 is inside the limit —
+    //    the check is `>`, not `>=` — so it takes this path too; 1029 would be `too_large`.
+    for (tag, side) in [("hdr200", 200), ("atlimit", 1028)] {
+        let mut answers = Vec::new();
+        for base in [GO, RUST] {
+            let (status, body, served_by) = post_emoji(
+                &client,
+                base,
+                &token,
+                &content_type,
+                emoji_body(tag, "e.png", &png_header(side, side)),
+            )
+            .await;
+            if base == RUST {
+                assert_eq!(served_by.as_deref(), Some("rust"), "{tag}: served");
+            }
+            let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+            answers.push((status, value["id"].clone()));
+        }
+        assert_eq!(answers[0], answers[1], "{tag}");
+        assert_eq!(
+            answers[1].1, "api.emoji.upload.large_image.decode_error",
+            "{tag}"
+        );
+    }
+
+    // 4. Exactly 128 is **not** a resize, so it is the write-through path.
+    let (_, _, served_by) = post_emoji(
+        &client,
+        RUST,
+        &token,
+        &content_type,
+        emoji_body("edge", "e.png", &png_header(128, 128)),
+    )
+    .await;
     assert_eq!(
         served_by.as_deref(),
         Some("rust"),
         "128 x 128 is the write-through path"
-    );
-
-    // 4. And exactly 1028 is **not** too large, for the same reason — so it reaches the resize
-    //    and is handed over rather than refused here. Without this row an off-by-one in the
-    //    refusal threshold is invisible: 1029 is refused either way.
-    let body = multipart_body(
-        BOUNDARY,
-        Some(&format!(
-            r#"{{"name":"{}","creator_id":"{creator}"}}"#,
-            write_name("atlimit")
-        )),
-        Some(("e.png", &png_header(1028, 1028))),
-    );
-    let (_, _, served_by) = post_emoji(&client, RUST, &token, &content_type, body).await;
-    assert_eq!(
-        served_by.as_deref(),
-        Some("go"),
-        "1028 x 1028 is inside the limit and needs resizing, so it is Go's"
     );
 }
 

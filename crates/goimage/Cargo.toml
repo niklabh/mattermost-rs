@@ -1,0 +1,23 @@
+[package]
+name = "goimage"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# DELIBERATELY NOT `license.workspace = true`. This crate is a port of Go's standard library
+# (`image`, `image/color`, `image/png`, `image/jpeg`, `compress/flate`, `compress/zlib`,
+# `hash/crc32`, `hash/adler32`, `bufio`, `math.Sin`; BSD-3-Clause, LICENSE-GO) and of two MIT
+# libraries Mattermost builds on (`github.com/boxes-ltd/imaging`, LICENSE-IMAGING;
+# `github.com/bep/imagemeta`, LICENSE-IMAGEMETA). It contains no Mattermost code and must never
+# depend on an `mm-*` crate; the Mattermost call sequences live in `mm-app` (AGPL).
+license = "BSD-3-Clause AND MIT"
+repository.workspace = true
+description = "Byte-exact ports of Go's image codecs, deflate, and the imaging/imagemeta libraries"
+include = ["src/**/*.rs", "LICENSE*"]
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true
