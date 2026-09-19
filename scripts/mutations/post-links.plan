@@ -1,0 +1,34 @@
+# Mutation plan for createPost with a link: `crates/mm-app/src/link_metadata.rs` (link selection,
+# getLinkMetadata, getEmbedForPost, getImagesForPost, the link cache), the permalink branch of
+# `publishWebsocketEventForPost` and its hook, `SanitizePostMetadataForUser`, and the outbound
+# headers. Unit lines are caught by `link_metadata::` against fixtures/behaviour_link_preview.json;
+# api lines by `parity::post_create_links` against scripts/go-links.sh and a mock website.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-links.plan
+#
+# The last two lines are no-op controls. `sanitize-keeps-a-hidden-preview` survives by design: on
+# the create path the publish has already removed a preview the author may not read — see the doc
+# comment on `App::sanitize_created_post_metadata_for_user`. First run 2026-09-19: 22 run, 18
+# caught; `cached-image-not-svg-filtered` then caught by the test added for it.
+first-link-takes-the-last	crates/mm-app/src/link_metadata.rs	if first_link.is_empty() && failure.is_none() {	if failure.is_none() {	unit	link_metadata::
+restrict-is-a-prefix-test	crates/mm-app/src/link_metadata.rs	if cleaned.contains(domain.as_str()) {	if cleaned.starts_with(domain.as_str()) {	unit	link_metadata::
+permalink-team-cap-63	crates/mm-app/src/link_metadata.rs	(1..=64).contains(&team.len())	(1..=63).contains(&team.len())	unit	link_metadata::
+lru-evicts-the-newest	crates/mm-app/src/link_metadata.rs	.min_by_key(|(_, (_, used, _))| *used)	.max_by_key(|(_, (_, used, _))| *used)	unit	link_metadata::
+cached-image-not-svg-filtered	crates/mm-app/src/link_metadata.rs	post_image: filter_svg_image(cached.post_image, &request_url),	post_image: cached.post_image,	unit	link_metadata::
+svg-content-type-measured	crates/mm-app/src/link_metadata.rs	if content_type.starts_with("image/svg+xml") {	if content_type.starts_with("image/svg+xmlx") {	unit	link_metadata::
+og-kept-only-with-a-title	crates/mm-app/src/link_metadata.rs	if !open_graph.title.is_empty()\n            || !open_graph.type_.is_empty()	if !open_graph.title.is_empty()\n            && !open_graph.type_.is_empty()	unit	link_metadata::
+no-row-after-a-fetch	crates/mm-app/src/link_metadata.rs	            self.save_link_metadata_to_database(\n                &request_url,	            self.save_link_metadata_to_database(\n                "",	api	post_create_links
+none-row-mistyped	crates/mm-app/src/link_metadata.rs	(mm_model::link_metadata::LINK_METADATA_TYPE_NONE, None)	(mm_model::link_metadata::LINK_METADATA_TYPE_IMAGE, None)	api	post_create_links
+svg-url-image-embed-kept	crates/mm-app/src/link_metadata.rs	if image.format == "svg" || mm_model::link_metadata::is_svg_image_url(first_link) {	if image.format == "svg" {	api	post_create_links
+og-image-url-before-secure	crates/mm-app/src/link_metadata.rs	let image_url = if !image.secure_url.is_empty() {	let image_url = if image.secure_url.is_empty() {	api	post_create_links
+images-fetched-unsorted	crates/mm-app/src/link_metadata.rs	mm_model::utils::remove_duplicate_strings(&mut image_urls);	image_urls.dedup();	api	post_create_links
+accept-order-swapped	crates/mm-app/src/link_metadata.rs	("Accept", "image/*"),\n                    ("Accept", "text/html;q=0.8"),	("Accept", "text/html;q=0.8"),\n                    ("Accept", "image/*"),	api	post_create_links
+no-user-agent	crates/mm-app/src/http_guard.rs	let response = request\n                .header(reqwest::header::USER_AGENT, USER_AGENT)	let response = request	api	post_create_links
+previewed-post-prop-not-saved	crates/mm-app/src/post_create.rs	if let Some(preview) = post.get_preview_post() {	if let Some(preview) = post.get_preview_post().filter(|_| false) {	api	post_create_links
+permalink-never-restored	crates/mm-app/src/post_create.rs	Some(PermalinkFate::Restored) => restore_permalink_metadata(&mut prepared),	Some(PermalinkFate::Restored) => crate::post::remove_permalink_metadata_from_post(&mut prepared),	api	post_create_links
+author-permission-inverted	crates/mm-app/src/notification.rs	Ok(if author_may_read {	Ok(if !author_may_read {	api	post_create_links
+frame-keeps-the-preview	crates/mm-app/src/notification.rs	crate::post::remove_permalink_metadata_from_post(&mut stripped);	stripped.del_prop("none");	api	post_create_links
+hook-permission-inverted	crates/mm-app/src/broadcast_hooks.rs	if !may_read {	if may_read {	api	post_create_links
+sanitize-keeps-a-hidden-preview	crates/mm-app/src/post.rs	                if !has_permission {\n                    remove_permalink_metadata_from_post(&mut post);	                if false {\n                    remove_permalink_metadata_from_post(&mut post);	api	post_create_links
+control-rename-binding	crates/mm-app/src/link_metadata.rs	let replaced = domains.replace(['@', ','], " ");\n    go_to_lower(&replaced)	let spaced = domains.replace(['@', ','], " ");\n    go_to_lower(&spaced)	unit	link_metadata::
+control-reorder-independent-lets	crates/mm-app/src/notification.rs	let permalink_previewed_post = post.get_preview_post();\n        let preview_prop = post.get_previewed_post_prop();	let preview_prop = post.get_previewed_post_prop();\n        let permalink_previewed_post = post.get_preview_post();	api	post_create_links

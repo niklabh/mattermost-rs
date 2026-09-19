@@ -17,6 +17,7 @@ thiserror.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 regex.workspace = true
+encoding_rs.workspace = true
 rand.workspace = true
 subtle.workspace = true
 # PKCE's S256 challenge is BASE64URL(SHA256(verifier)) — authorize.go:232.

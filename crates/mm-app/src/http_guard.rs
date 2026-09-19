@@ -26,6 +26,10 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// `RequestTimeout` (client.go:23), the whole request.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// `defaultUserAgent` (client.go:119), which `MattermostTransport.RoundTrip` **sets** on every
+/// request the client makes, replacing whatever the caller put there (transport.go:18).
+pub const USER_AGENT: &str = "Mattermost-Bot/1.1";
+
 /// The thirty reserved ranges of `client.go`'s `init`, in its order, as `(network, prefix)`.
 const RESERVED_V4: &[(Ipv4Addr, u32)] = &[
     (Ipv4Addr::new(10, 0, 0, 0), 8),
@@ -254,6 +258,7 @@ impl GuardedClient {
             .map_err(|err| GuardError::Transport(err.to_string()))?;
         client
             .head(parsed)
+            .header(reqwest::header::USER_AGENT, USER_AGENT)
             .send()
             .await
             .map_err(|err| GuardError::Transport(err.to_string()))
@@ -266,6 +271,20 @@ impl GuardedClient {
     /// a redirect is exactly how an allowed host would hand the request to a forbidden one.
     #[tracing::instrument(skip(self), fields(hops))]
     pub async fn get(&self, url: &str, timeout: Duration) -> Result<reqwest::Response, GuardError> {
+        self.get_with_headers(url, timeout, &[]).await
+    }
+
+    /// [`GuardedClient::get`] with request headers, sent on **every hop**: Go's client copies a
+    /// request's headers onto each redirect it follows (dropping only `Authorization`,
+    /// `Cookie` and `WWW-Authenticate` on a cross-domain hop, none of which a caller here sets).
+    /// A header named twice is sent twice, as `Header.Add` does.
+    #[tracing::instrument(skip(self, headers), fields(hops))]
+    pub async fn get_with_headers(
+        &self,
+        url: &str,
+        timeout: Duration,
+        headers: &[(&str, &str)],
+    ) -> Result<reqwest::Response, GuardError> {
         let mut current =
             reqwest::Url::parse(url).map_err(|err| GuardError::Url(err.to_string()))?;
         for hop in 0..=10 {
@@ -288,8 +307,12 @@ impl GuardedClient {
             let client = builder
                 .build()
                 .map_err(|err| GuardError::Transport(err.to_string()))?;
-            let response = client
-                .get(current.clone())
+            let mut request = client.get(current.clone());
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            let response = request
+                .header(reqwest::header::USER_AGENT, USER_AGENT)
                 .send()
                 .await
                 .map_err(|err| GuardError::Transport(err.to_string()))?;

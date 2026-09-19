@@ -258,6 +258,21 @@ pub struct Config {
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
     pub allowed_untrusted_internal_connections: String,
 
+    /// `ServiceSettings.RestrictLinkPreviews` (config.go:398). Go default `""`. The comma-,
+    /// space- or `@`-separated domains `isLinkAllowedForPreview` (post_metadata.go:735) refuses
+    /// to preview — a **substring** test on the IDNA-mapped host, so `example.com` also blocks
+    /// `notexample.com`. Read by [`crate::link_metadata`].
+    pub restrict_link_previews: String,
+
+    /// `ExperimentalSettings.LinkMetadataTimeoutMilliseconds` (config.go:1246). Go default
+    /// **5000**. The whole-request timeout of a link-preview fetch (`getLinkMetadataForURL`,
+    /// `getLinkMetadataFromOEmbed`); `Config.IsValid` refuses a value `<= 0`, so one never loads.
+    pub link_metadata_timeout_milliseconds: i64,
+
+    /// `LocalizationSettings.DefaultServerLocale` (config.go:2892). Go default `"en"`. Sent as
+    /// the `Accept-Language` of a link-preview fetch.
+    pub default_server_locale: String,
+
     /// `ServiceSettings.EnableInsecureOutgoingConnections` (config.go). Go default **`false`**.
     /// On, the guard's client accepts any TLS certificate.
     pub enable_insecure_outgoing_connections: bool,
@@ -1449,6 +1464,9 @@ impl Default for Config {
             enable_permalink_previews: true,
             enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
+            restrict_link_previews: String::new(),
+            link_metadata_timeout_milliseconds: 5000,
+            default_server_locale: "en".to_owned(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
@@ -1807,6 +1825,15 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
             .unwrap_or(default.allowed_untrusted_internal_connections),
+            restrict_link_previews: lookup("MM_SERVICESETTINGS_RESTRICTLINKPREVIEWS")
+                .unwrap_or(default.restrict_link_previews),
+            link_metadata_timeout_milliseconds: lookup_int(
+                lookup,
+                "MM_EXPERIMENTALSETTINGS_LINKMETADATATIMEOUTMILLISECONDS",
+                default.link_metadata_timeout_milliseconds,
+            ),
+            default_server_locale: lookup("MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE")
+                .unwrap_or(default.default_server_locale),
             enable_insecure_outgoing_connections: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEINSECUREOUTGOINGCONNECTIONS",
@@ -2615,6 +2642,17 @@ impl Config {
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
+            restrict_link_previews: service
+                .restrict_link_previews
+                .unwrap_or(default.restrict_link_previews),
+            link_metadata_timeout_milliseconds: parsed
+                .experimental_settings
+                .as_ref()
+                .and_then(|s| s.link_metadata_timeout_milliseconds)
+                .unwrap_or(default.link_metadata_timeout_milliseconds),
+            default_server_locale: localization_settings
+                .default_server_locale
+                .unwrap_or(default.default_server_locale),
             enable_insecure_outgoing_connections: service
                 .enable_insecure_outgoing_connections
                 .unwrap_or(default.enable_insecure_outgoing_connections),
@@ -3288,6 +3326,8 @@ struct EmailSettingsDocument {
 struct LocalizationSettingsDocument {
     #[serde(rename = "DefaultClientLocale")]
     default_client_locale: Option<String>,
+    #[serde(rename = "DefaultServerLocale")]
+    default_server_locale: Option<String>,
 }
 
 /// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
@@ -3400,6 +3440,8 @@ struct ServiceSettingsDocument {
     enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
+    #[serde(rename = "RestrictLinkPreviews")]
+    restrict_link_previews: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
     enable_insecure_outgoing_connections: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
@@ -3501,6 +3543,8 @@ struct ExperimentalSettingsDocument {
     /// `ConnectedWorkspacesSettings.EnableSharedChannels`.
     #[serde(rename = "EnableSharedChannels")]
     enable_shared_channels: Option<bool>,
+    #[serde(rename = "LinkMetadataTimeoutMilliseconds")]
+    link_metadata_timeout_milliseconds: Option<i64>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -4448,8 +4492,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 123,
-            "the fixture covers {keys} settings and Config reads 123 from the document. \
+            keys, 126,
+            "the fixture covers {keys} settings and Config reads 126 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4482,12 +4526,14 @@ mod go_parity {
                 "EnablePostSearch": false,
                 "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
+                "RestrictLinkPreviews": "example.com",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true,
                 "EnforceMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
-            "ExperimentalSettings": { "RestrictSystemAdmin": true },
+            "ExperimentalSettings": { "RestrictSystemAdmin": true, "LinkMetadataTimeoutMilliseconds": 250 },
+            "LocalizationSettings": { "DefaultServerLocale": "de" },
             "ImageProxySettings": { "Enable": true },
             "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
             "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
@@ -4549,6 +4595,9 @@ mod go_parity {
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
         );
+        assert_eq!(config.restrict_link_previews, "example.com");
+        assert_eq!(config.link_metadata_timeout_milliseconds, 250);
+        assert_eq!(config.default_server_locale, "de");
         assert!(config.enable_insecure_outgoing_connections);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);

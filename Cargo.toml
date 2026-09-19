@@ -115,6 +115,13 @@ chrono-tz = { version = "0.10", default-features = false }
 # parity bugs come from, so match Go's RE2 with the regex crate instead.
 regex = "1"
 
+# The WHATWG encodings behind `golang.org/x/net/html/charset`, which a link preview decodes a
+# fetched page through before reading its OpenGraph tags (`mm_model::go_charset`). x/text's
+# `htmlindex` and encoding_rs implement the same specification; where their decoders disagree the
+# port refuses rather than guessing, and `fixtures/behaviour_opengraph.json` sweeps every
+# single-byte table against Go's.
+encoding_rs = "0.8"
+
 # CSPRNG for NewId / NewRandomString.
 rand = "0.9"
 

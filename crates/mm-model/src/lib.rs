@@ -68,6 +68,11 @@ pub mod fips;
 pub mod github_release;
 pub mod gitlab;
 pub mod go_bytes;
+pub mod go_charset;
+pub mod go_html;
+/// The x/net entity table and the htmlindex label table, emitted from the Go module cache by
+/// `scripts/gen-go-html-tables.py`. Private: `go_html` and `go_charset` wrap them.
+mod go_html_tables;
 pub mod go_json;
 pub mod go_path;
 /// Go's `unicode.IsPrint`, `IsLetter` and `IsNumber` as range tables, emitted from the Go
@@ -108,6 +113,7 @@ pub mod oauth;
 pub mod oauth_dcr;
 pub mod oauth_metadata;
 pub mod onboarding;
+pub mod opengraph;
 pub mod outgoing_oauth_connection;
 pub mod outgoing_webhook;
 pub mod packet_metadata;

@@ -14148,11 +14148,18 @@ Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls surv
 
 Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.
 
+## `POST /api/v4/posts` with a link — D-401 narrowed, D-105 and D-106 closed, D-860 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages`, `getLinkMetadata` and everything under it, `dyatlov/go-opengraph`, `x/net/html` tokenizer and `charset`, `parseImages`, `http.DetectContentType`, `LinkMetadataStore`, the `permalink` broadcast hook, `SanitizePostMetadataForUser` | `mm-app/src/link_metadata.rs`, `opengraph.rs`, `link_image.rs`, `broadcast_hooks.rs`, `notification.rs`, `post_create.rs`; `mm-model/src/opengraph.rs`, `go_html.rs`, `go_charset.rs`, `post_embed.rs`; `mm-store/src/link_metadata_store.rs` | DONE (create) | 6 parity; unit oracles: link selection 7, OpenGraph/HTML/charset/URL (mm-model + `opengraph` 6), images and sniffing 12 | A link's preview is fetched through the outbound guard on the pre-save post (OpenGraph, image, plain link, or a permalink with its `previewed_post` prop) and the permalink is taken off the `posted` frame and put back per recipient; compared with `scripts/go-links.sh` (Go + 50, allowed to reach a mock on 127.0.0.1). Reads of such posts still forward ([D-860]). |
+
+Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run, 74 caught, 7 survived — the six controls and `sanitize-keeps-a-hidden-preview`, unreachable on the create path (see `App::sanitize_created_post_metadata_for_user`); two first-run survivors were caught after a test was added for each.
+
 ## `PermanentDeleteUser` / `PermanentDeleteAllUsers` — D-470, D-600 (2026-09-19)
 
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `App.PermanentDeleteUser`, `App.PermanentDeleteAllUsers`, `deleteUser`/`localDeleteUser` `?permanent=true`, `localPermanentDeleteAllUsers`, 16 store methods | `mm-app/src/user_delete.rs`, `mm-api/src/{user_deletes,local_users}.rs`, `mm-store/src/*` (+ `scheduled_post_store.rs`) | DONE (bot owners forward, D-472) | 3 unit + 3 parity (stack 4) + 1 wipe parity (`scripts/wipe-parity.sh`, spare stack) | Served only when no erasure would reach the bot cascade; for the wipe that is a question of `Username` order, not ownership (`App::permanent_delete_all_needs_go`). A profile directory that cannot be checked answers **202 with an error body** after every table is gone. |
-
 
 Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 controls survived; `permanent-delete-all.plan` (spare stack 6) 5 run, 3 caught, 2 controls survived. A first user-plan run had one harness fault (an untyped `$1`), re-expressed and re-run whole.

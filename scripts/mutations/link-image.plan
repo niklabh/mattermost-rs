@@ -1,0 +1,34 @@
+# Mutation plan for `crates/mm-app/src/link_image.rs` — `parseImages`, the six
+# `image.DecodeConfig` decoders, the JPEG EXIF orientation walk, `CountGIFFrames` and
+# `http.DetectContentType`, all asserted by `link_image::go_parity` against
+# fixtures/behaviour_link_image.json.
+#
+#   scripts/mutate-batch.sh scripts/mutations/link-image.plan
+#
+# Unit suite only (no stack). Each line moves a branch the Go oracle has a case for; the last two
+# are no-op controls (a parenthesised mask and a flipped comparison).
+png-dimension-overflow-unchecked	crates/mm-app/src/link_image.rs	if n_pixels != n_pixels.wrapping_mul(8) / 8 {	if false {	unit	link_image
+png-paletted-stops-at-ihdr	crates/mm-app/src/link_image.rs	stage >= PNG_STAGE_TRNS	stage >= PNG_STAGE_IHDR	unit	link_image
+png-paletted-idat-before-plte-accepted	crates/mm-app/src/link_image.rs	|| (stage == PNG_STAGE_IHDR && cb == PngCb::Paletted)	|| false	unit	link_image
+png-plte-depth-bound-dropped	crates/mm-app/src/link_image.rs	|| np > (1_u32 << depth)	|| np > 256	unit	link_image
+jpeg-sos-drops-cmyk	crates/mm-app/src/link_image.rs	1 | 3 | 4 => Ok((width, height)),	1 | 3 => Ok((width, height)),	unit	link_image
+jpeg-jfif-early-return-ignored	crates/mm-app/src/link_image.rs	if jfif {	if false {	unit	link_image
+jpeg-orientation-swaps-4	crates/mm-app/src/link_image.rs	Ok(Some(orientation)) if (5..=8).contains(&orientation) => {	Ok(Some(orientation)) if (4..=8).contains(&orientation) => {	unit	link_image
+exif-tag-limit-off-by-one	crates/mm-app/src/link_image.rs	const EXIF_LIMIT_NUM_TAGS: u32 = 5000;	const EXIF_LIMIT_NUM_TAGS: u32 = 5001;	unit	link_image
+exif-tag-size-limit-raised	crates/mm-app/src/link_image.rs	const EXIF_LIMIT_TAG_SIZE: u32 = 10000;	const EXIF_LIMIT_TAG_SIZE: u32 = 20000;	unit	link_image
+exif-seen-pointer-followed	crates/mm-app/src/link_image.rs	if e.seen_ifds.contains(&tag_id) {	if false {	unit	link_image
+exif-first-eof-panics	crates/mm-app/src/link_image.rs	if !self.is_eof {	if false {	unit	link_image
+gif-close-allows-two-byte-slack	crates/mm-app/src/link_image.rs	if self.buf.len() > 1 {	if self.buf.len() > 2 {	unit	link_image
+gif-frame-bounds-inclusive	crates/mm-app/src/link_image.rs	if left + width > screen_w	if left + width >= screen_w	unit	link_image
+gif-early-end-code-rejected	crates/mm-app/src/link_image.rs	Err(LzwError::Eof) => break,	Err(LzwError::Eof) => return Err("x".to_owned()),	unit	link_image
+tiff-duplicate-tag-accepted	crates/mm-app/src/link_image.rs	if i64::from(tag) <= prev_tag {	if i64::from(tag) < prev_tag {	unit	link_image
+tiff-default-bits-8	crates/mm-app/src/link_image.rs	let default_bits = [1_u64];	let default_bits = [8_u64];	unit	link_image
+bmp-bitfields-blue-mask	crates/mm-app/src/link_image.rs	&& u32le(&b, 62) == 0xff	&& u32le(&b, 62) == 0xfe	unit	link_image
+bmp-top-down-not-negated	crates/mm-app/src/link_image.rs	height = -height;	height = height;	unit	link_image
+webp-vp8x-size-cap	crates/mm-app/src/link_image.rs	if w * h > (1 << 31) - 1 {	if w * h > (1 << 48) {	unit	link_image
+webp-padding-ignored	crates/mm-app/src/link_image.rs	self.padded = self.chunk_len & 1 == 1;	self.padded = false;	unit	link_image
+sniff-html-terminator	crates/mm-app/src/link_image.rs	if matches && matches!(ws_skipped[sig.len()], b' ' | b'>') {	if matches && matches!(ws_skipped[sig.len()], b' ' | b'<') {	unit	link_image
+sniff-text-vt-allowed	crates/mm-app/src/link_image.rs	|| b == 0x0b	|| b == 0x0c	unit	link_image
+sniff-mp4-skips-16	crates/mm-app/src/link_image.rs	if st != 12 &&	if st != 16 &&	unit	link_image
+control-parenthesised-mask	crates/mm-app/src/link_image.rs	let global = fields & 0x80 != 0;	let global = (fields & 0x80) != 0;	unit	link_image
+control-flipped-comparison	crates/mm-app/src/link_image.rs	if data.len() < 12 {	if 12 > data.len() {	unit	link_image
