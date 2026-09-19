@@ -81,7 +81,8 @@ layout() {
   # Bundle names are content-hashed, so a rebuild leaves the previous build's links dangling and
   # adds new ones only here: **restart this server after rebuilding the webapp.**
   local dist="$ROOT/webapp/channels/dist"
-  find "$RUN/client" -maxdepth 1 -xtype l -delete
+  # Dangling links only. Not `-xtype l`: that is GNU find, and macOS ships BSD find.
+  find "$RUN/client" -maxdepth 1 -type l ! -exec test -e {} \; -delete
   if [ -f "$dist/root.html" ]; then
     for entry in "$dist"/*; do
       [ "$(basename "$entry")" = plugins ] && continue

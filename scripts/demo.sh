@@ -39,6 +39,9 @@ lan_host() {
   local ip
   ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' | head -1)
   [ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  # macOS has neither: the address of the interface the default route leaves by.
+  [ -n "$ip" ] || ip=$(ipconfig getifaddr \
+    "$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')" 2>/dev/null)
   print -r -- "${ip:-127.0.0.1}"
 }
 
@@ -46,14 +49,14 @@ SITE_URL="http://$(lan_host):$MMRS_API_PORT"
 
 listener_env() { mmrs_listener_env "$@"; }
 
-listener_addr() {
-  ss -ltnH "sport = :$1" 2>/dev/null | awk '{print $4}' | head -1
-}
+listener_addr() { mmrs_listener_addr "$@"; }
 
 check_prerequisites() {
   say "checking prerequisites"
-  local missing=0
-  for tool in cargo go docker curl python3 ss; do
+  local missing=0 sockets=ss
+  # What `stack-env.sh` asks who holds a port: `ss` on Linux, `lsof` on macOS.
+  [ "$(uname -s)" = Linux ] || sockets=lsof
+  for tool in cargo go docker curl python3 $sockets; do
     if command -v "$tool" >/dev/null; then
       print "    $tool: $(command -v "$tool")"
     else

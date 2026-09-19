@@ -63,16 +63,45 @@ fi
 
 export MMRS_LOCK="/tmp/mmrs-stack$MMRS_STACK_SUFFIX.lock"
 
-# `docker compose` for this stack, project flag included when there is one.
-# The value of one environment variable of the process listening on a port of this machine, or
-# nothing. Linux-only (`/proc`); elsewhere it prints nothing and the caller keeps its default.
-mmrs_listener_env() {
-  local port="$1" name="$2" pid
-  pid=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
-  [ -n "$pid" ] || return 0
-  tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n "s/^$name=//p" | head -1
+# Who listens on a TCP port of this machine: pid, address and launch environment. `ss` and
+# `/proc` on Linux; `lsof` and `ps -E` on macOS, which has neither. Both sets ship with their OS,
+# so neither is a prerequisite to install. Each prints nothing when nobody listens, and always
+# succeeds, so a caller under `set -e -o pipefail` can take an empty answer as "not running".
+mmrs_listener_pids() {
+  if [ "$(uname -s)" = Linux ]; then
+    { ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u; } || true
+  else
+    { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | sort -u; } || true
+  fi
 }
 
+# `ADDRESS:PORT` as `ss` prints it. lsof writes a wildcard bind as `*:PORT`, which `ss` writes as
+# `0.0.0.0:PORT` — `demo.sh` compares against the latter.
+mmrs_listener_addr() {
+  if [ "$(uname -s)" = Linux ]; then
+    { ss -ltnH "sport = :$1" 2>/dev/null | awk '{print $4}' | head -1; } || true
+  else
+    { lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 \
+      | sed 's/^\*:/0.0.0.0:/'; } || true
+  fi
+}
+
+# The value of one environment variable of the process listening on a port, or nothing.
+# macOS's `ps -E` appends the environment the process was *launched* with to its command line,
+# space-separated, so a value containing a space would be cut short. The values read here (a URL,
+# a `1`) never have one.
+mmrs_listener_env() {
+  local port="$1" name="$2" pid
+  pid=$(mmrs_listener_pids "$port" | head -1)
+  [ -n "$pid" ] || return 0
+  if [ -r "/proc/$pid/environ" ]; then
+    { tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n "s/^$name=//p" | head -1; } || true
+  else
+    { ps -E -ww -o command= -p "$pid" 2>/dev/null | tr ' ' '\n' | sed -n "s/^$name=//p" | head -1; } || true
+  fi
+}
+
+# `docker compose` for this stack, project flag included when there is one.
 mmrs_compose() {
   if [ -n "$MMRS_COMPOSE_PROJECT" ]; then
     docker compose -p "$MMRS_COMPOSE_PROJECT" "$@"
@@ -100,13 +129,11 @@ mmrs_compose() {
 # touched. A false *pass* is just as available.
 #
 # Killing by port is safe because `scripts/worktree.sh` enforces one stack per worktree: the port
-# belongs to the stack, and the stack belongs to exactly one checkout. `ss -ltnp` is Linux-only,
-# which is what this harness runs on.
+# belongs to the stack, and the stack belongs to exactly one checkout.
 mmrs_free_port() {
-  for pid in $(ss -ltnp 2>/dev/null \
-    | awk -v port=":$1" '$4 ~ port"$" {print $0}' \
-    | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
-    echo "  freeing :$1 from pid $pid ($(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -c1-70))"
+  local pid
+  for pid in $(mmrs_listener_pids "$1"); do
+    echo "  freeing :$1 from pid $pid ($(ps -o command= -p "$pid" 2>/dev/null | cut -c1-70))"
     kill -9 "$pid" 2>/dev/null || true
   done
 }

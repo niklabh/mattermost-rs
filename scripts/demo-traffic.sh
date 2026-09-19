@@ -24,11 +24,11 @@ fi
 curl -sf -o /dev/null "$MMRS_GO_BASE/api/v4/system/ping" \
   || { echo "the Go server on $MMRS_GO_BASE is not answering: start the stack first"; exit 1; }
 
-pid=$(ss -ltnpH "sport = :$MMRS_API_PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)
-if [ -n "$pid" ] && tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'MM_API_TRAFFIC_LOG=1'; then
+pid=$(mmrs_listener_pids "$MMRS_API_PORT" | head -1)
+if [ -n "$pid" ] && [ "$(mmrs_listener_env "$MMRS_API_PORT" MM_API_TRAFFIC_LOG)" = 1 ]; then
   echo "mm-api (pid $pid) is already logging traffic"
 else
-  host=$(ss -ltnH "sport = :$MMRS_API_PORT" 2>/dev/null | awk '{print $4}' | head -1 | sed 's/:[0-9]*$//')
+  host=$(mmrs_listener_addr "$MMRS_API_PORT" | sed 's/:[0-9]*$//')
   echo "restarting mm-api with MM_API_TRAFFIC_LOG=1 on ${host:-127.0.0.1}"
   MMRS_API_HOST="${host:-127.0.0.1}" MM_API_TRAFFIC_LOG=1 zsh "$ROOT/scripts/mm-api.sh" start
 fi
