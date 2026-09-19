@@ -1,12 +1,16 @@
 //! A go-plugin plugin written in Rust, runnable by a Go host (or a Rust one).
 //!
-//! It serves the `kv` plugin of `reference/dump/goplugin`, method for method, and is the plugin
-//! half of goplugin's interop tests. As an example of the API it shows the three things a real
-//! plugin does: answer calls, reach back to a server the host offers on the broker, and offer a
-//! server of its own.
+//! It serves the same `kv` plugin as the Go program goplugin's interop tests run against
+//! (`reference/dump/goplugin` in the [repository](https://github.com/niklabh/mattermost-rs)),
+//! method for method. As an example of the API it shows the three things a real plugin does:
+//! answer calls, reach back to a server the host offers on the broker, and offer a server of its
+//! own.
+//!
+//! A plugin is started by its host, not by hand; run by hand it refuses. `kv_host` starts it:
 //!
 //! ```text
-//! GOPLUGIN_ORACLE=hello kv_plugin     # what a host does; run by hand it refuses
+//! cargo build --examples
+//! cargo run --example kv_host -- target/debug/examples/kv_plugin
 //! ```
 
 use std::collections::HashMap;

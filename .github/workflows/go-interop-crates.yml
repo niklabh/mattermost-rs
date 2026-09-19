@@ -1,0 +1,86 @@
+# The four publishable Go-interop crates: gobwire, gobwire-derive, go-netrpc, goplugin.
+# Everything runs through scripts/crates-preflight.sh, so a local run and CI check the same things.
+name: go-interop crates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/gobwire/**
+      - crates/gobwire-derive/**
+      - crates/go-netrpc/**
+      - crates/goplugin/**
+      - fixtures/gob/**
+      - reference/dump/go.mod
+      - reference/dump/go.sum
+      - reference/dump/gob/**
+      - reference/dump/netrpc/**
+      - reference/dump/yamux/**
+      - reference/dump/goplugin/**
+      - scripts/crates-preflight.sh
+      - .github/workflows/go-interop-crates.yml
+  pull_request:
+    paths:
+      - crates/gobwire/**
+      - crates/gobwire-derive/**
+      - crates/go-netrpc/**
+      - crates/goplugin/**
+      - fixtures/gob/**
+      - reference/dump/go.mod
+      - reference/dump/go.sum
+      - reference/dump/gob/**
+      - reference/dump/netrpc/**
+      - reference/dump/yamux/**
+      - reference/dump/goplugin/**
+      - scripts/crates-preflight.sh
+      - .github/workflows/go-interop-crates.yml
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The Mattermost commit reference/dump/go.mod's replace directives point at.
+  PINNED_SHA: 9dfbaeca99f4096388fd1c048a9e6d1d0a86743e
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Go oracles import nothing from Mattermost, but Go resolves the whole module graph, so
+      # the replace targets' go.mod and go.sum must exist. Those four files are all it reads.
+      - name: Fetch the pinned Mattermost go.mod files
+        run: |
+          git init -q reference/mattermost
+          cd reference/mattermost
+          git remote add origin https://github.com/mattermost/mattermost.git
+          git sparse-checkout set --no-cone /server/go.mod /server/go.sum /server/public/go.mod /server/public/go.sum
+          git fetch -q --depth 1 --filter=blob:none origin "$PINNED_SHA"
+          git checkout -q FETCH_HEAD
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: reference/dump/go.mod
+          cache-dependency-path: reference/dump/go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # The crates' declared rust-version, and nightly for cargo-fuzz.
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: rustup default stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz,cargo-semver-checks
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            crates/gobwire/fuzz
+
+      - name: Preflight, MSRV and a short fuzz
+        run: scripts/crates-preflight.sh --msrv --fuzz 60

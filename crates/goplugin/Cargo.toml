@@ -2,7 +2,8 @@
 name = "goplugin"
 version = "0.1.0"
 edition.workspace = true
-rust-version.workspace = true
+# Not the workspace value: `let` chains need 1.88, and `scripts/crates-preflight.sh --msrv` checks it.
+rust-version = "1.88"
 # MPL-2.0, matching HashiCorp go-plugin, whose protocol this reimplements (docs/PLUGIN_PLAN.md,
 # D3). Not the workspace licence; must never depend on an mm-* crate.
 license = "MPL-2.0"
@@ -10,6 +11,10 @@ repository.workspace = true
 description = "HashiCorp go-plugin's net/rpc protocol for Rust: host and plugin sides, with a hashicorp/yamux-compatible multiplexer"
 keywords = ["go", "plugin", "rpc", "yamux", "hashicorp"]
 categories = ["network-programming", "asynchronous"]
+readme = "README.md"
+# The integration tests are left out: they drive the Go oracle under reference/dump/ and the corpus
+# under fixtures/, neither of which ships in the package. They run in the repository.
+include = ["src/**/*.rs", "examples/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [dependencies]
 gobwire = { path = "../gobwire", version = "0.1.0" }

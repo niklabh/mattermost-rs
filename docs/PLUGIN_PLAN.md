@@ -268,8 +268,8 @@ What the oracle found, all now in the code where each applies:
   slice merges by Go capacity, and `Vec` length stands in for it. Both are divergences stated in
   the crate docs and asserted in the suite.
 
-Not done, and owed before publishing (Phase 7): a `cargo fuzz` target. The suite's
-corrupt-input sweep covers panics on malformed bytes, but not coverage-guided input.
+Coverage-guided fuzzing lives in `crates/gobwire/fuzz/`: three targets (dynamic decode, typed
+decode, re-encode stability), seeded with `fixtures/gob/`. Run by `scripts/crates-preflight.sh --fuzz`.
 
 ### Phase 2 · `go-netrpc` + `goplugin` (net/rpc protocol, both sides)
 
@@ -536,9 +536,12 @@ succeeding. **Exit:** those plugins' own e2e flows pass under the Rust host.
 
 ### Phase 7 · Publish
 
-`gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. They need a docs pass,
-examples (a Rust host driving a Go plugin, and a Rust plugin for a Go host), MSRV CI and semver
-checks. `mm-plugin`'s SDK is published as a separate crate once Phase 3's Go-server test has
+`gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,
+not yet published:** `scripts/crates-preflight.sh` (run by `.github/workflows/go-interop-crates.yml`)
+checks the mm-* boundary, lint, docs, tests, package contents, a publish dry run, semver once a
+release exists, the declared rust-version (1.88, not the workspace's 1.85, which `let` chains
+already broke), and fuzzes. The packages leave out `tests/`, which need the Go oracles and the
+corpus. `goplugin/examples/` has both directions: `kv_host` and `kv_plugin`. `mm-plugin`'s SDK is published as a separate crate once Phase 3's Go-server test has
 stayed green for a release.
 
 ### Phase 8 · gRPC in `goplugin` (generic value, not needed by Mattermost)

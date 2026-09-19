@@ -1,8 +1,9 @@
 //! Malformed input never panics: every Go-written stream in the corpus, corrupted byte by byte
 //! and truncated at every length, either decodes or returns an error.
 //!
-//! Not a substitute for coverage-guided fuzzing (owed before publishing, docs/PLUGIN_PLAN.md
-//! Phase 7), but it walks every parser branch the corpus reaches with values it did not expect.
+//! Not a substitute for coverage-guided fuzzing (`fuzz/`, run by `scripts/crates-preflight.sh
+//! --fuzz`), but it walks every parser branch the corpus reaches with values it did not expect,
+//! on every `cargo test`.
 
 mod common;
 
