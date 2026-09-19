@@ -3209,6 +3209,93 @@ pub async fn get_recommended_channels_for_team(
         .into_response()
 }
 
+/// Port of `getManagedCategories` (api4/channel.go:3302) —
+/// `GET /api/v4/teams/{team_id}/channels/managed_categories`, the webapp's map of channel id →
+/// admin-assigned sidebar category.
+///
+/// # The route exists only while `FeatureFlags.ManagedChannelCategories` is on
+///
+/// `InitChannel` registers it inside `if …FeatureFlags.ManagedChannelCategories` (api4/
+/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) and is
+/// environment-only (see [`mm_app::config::Config::feature_flag_integrated_boards`]). With it off
+/// gorilla has never heard of the path and answers its own 404 `api.context.404.app_error`,
+/// *before* any session check. [`managed_categories_flag_or_forward`] reproduces that by
+/// forwarding ahead of the session extractor, so an unauthenticated request gets Go's 404 and
+/// not our 401.
+///
+/// # Behind the flag
+///
+/// Three gates in Go's order: the session (`APISessionRequired`), `RequireTeamId` (400
+/// `team_id`), then `MinimumEnterpriseLicense` — **501** `api.license_error`, not the 403 most
+/// licence refusals carry. There is **no permission check** and no team-membership check: the
+/// answer is scoped by the caller's channel memberships alone, so any valid team id — one the
+/// caller is not in, or none at all — returns the caller's DMs and GMs that carry a value, or
+/// `{}`. Behind the gate see [`mm_app::App::get_visible_managed_category_mappings`]; nothing
+/// here is private, so both sides of the gate are served.
+///
+/// `map[string]string` through `json.NewEncoder(w).Encode`: keys sorted, HTML-escaped, a
+/// trailing newline, and `{}` — never `null` — when empty.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, licensed))]
+pub async fn get_managed_categories(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    if !is_valid_id(&team_id) {
+        return ApiError::invalid_url_param("team_id").into_response();
+    }
+
+    let enterprise = match state.app.license().await {
+        Ok(license) => mm_model::license::minimum_enterprise_license(license.as_deref()),
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("licensed", enterprise);
+    if !enterprise {
+        return ApiError::from(mm_model::utils::AppError::new(
+            "Api4.getManagedCategories",
+            "api.license_error",
+            None,
+            String::new(),
+            501,
+        ))
+        .into_response();
+    }
+
+    let mappings = match state
+        .app
+        .get_visible_managed_category_mappings(&team_id, &session.0.user_id)
+        .await
+    {
+        Ok(mappings) => mappings,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let mut body = mm_model::utils::go_json_marshal_string_map(Some(&mappings)).into_bytes();
+    body.push(b'\n');
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// The registration `if` of [`get_managed_categories`], as a route layer: with
+/// `FeatureFlags.ManagedChannelCategories` off the request is forwarded **before** the session
+/// extractor runs, which is where gorilla's mux 404 sits relative to `APISessionRequired`.
+pub(crate) async fn managed_categories_flag_or_forward(
+    State(state): State<AppState>,
+    request: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if !state.app.config().feature_flag_managed_channel_categories {
+        return proxy::forward_to_go(State(state), request).await;
+    }
+    next.run(request).await
+}
+
 /// Port of `getChannelModerations` (api4/channel.go:2972) —
 /// `GET /api/v4/channels/{channel_id}/moderations`, the System Console's per-channel moderation
 /// panel.

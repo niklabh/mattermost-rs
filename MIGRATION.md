@@ -14121,3 +14121,12 @@ Mutation tally (`join-update-at-and-edit-limit.plan`): 7 run, 5 caught, 2 contro
 
 Mutation tally (`test-notifications.plan`): 8 run, 6 caught, 2 controls survived. `set-online-passed`
 first survived; it is caught by the `posted`-event test added for it.
+
+## `GET /api/v4/teams/{team_id}/channels/managed_categories` — D-440, D-740 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getManagedCategories`, `App.GetVisibleManagedCategoryMappings` | `mm-api/src/channels.rs`, `mm-app/src/sidebar.rs` | DONE | 1 unit + 5 parity | Served only while the env-only `ManagedChannelCategories` flag is on (a route layer forwards before the session check otherwise), against two new flag-on oracles from `go-licensed.sh`. No team check: the caller's DMs answer on any team id, and a `null` value maps to `""` rather than being skipped. |
+
+Mutation tally (`managed-categories.plan`): 15 run, 15 caught, 2 controls survived.
+
