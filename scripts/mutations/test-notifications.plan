@@ -1,0 +1,12 @@
+# Mutation plan for POST /api/v4/notifications/test (2026-09-19): the ForceNotification flag,
+# the locale lookup, the author, the flags Go passes, and the handler's serve/forward split.
+#
+#   scripts/mutate-batch.sh scripts/mutations/test-notifications.plan
+force-flag-ignored	crates/mm-app/src/post_create.rs	if flags.force_notification {	if false {	api	test_notifications
+force-prop-is-a-bool	crates/mm-app/src/post_create.rs	serde_json::Value::String(new_id()),	serde_json::Value::Bool(true),	api	test_notifications
+locale-ignored	crates/mm-app/src/test_notification.rs	message: test_message_body(&user.locale).to_owned(),	message: test_message_body("").to_owned(),	api	test_notifications
+caller-is-the-author	crates/mm-app/src/test_notification.rs	            user_id: bot.user_id,	            user_id: session.user_id.clone(),	api	test_notifications
+set-online-passed	crates/mm-app/src/test_notification.rs	                    force_notification: true,\n                    ..CreatePostFlags::default()	                    force_notification: true,\n                    set_online: true,\n                    ..CreatePostFlags::default()	api	test_notifications
+served-post-forwarded-too	crates/mm-api/src/sysops.rs	            tracing::Span::current().record("forwarded", false);\n            Ok(json_response(StatusCode::OK, STATUS_OK.as_bytes().to_vec()))	            tracing::Span::current().record("forwarded", false);\n            Ok(proxy::forward_to_go(State(state), request).await)	api	test_notifications
+control-debug-text	crates/mm-api/src/sysops.rs	"forwarding the test notification"	"forwarding the test message"	api	test_notifications
+control-binding-rename	crates/mm-app/src/test_notification.rs	        let user = self.get_user(&session.user_id).await.map_err(|err| {\n            send_test_message_error("app.notifications.send_test_message.errors.no_user", *err)\n        })?;\n\n        let post = Post {\n            channel_id: channel.id.clone(),\n            message: test_message_body(&user.locale).to_owned(),	        let caller = self.get_user(&session.user_id).await.map_err(|err| {\n            send_test_message_error("app.notifications.send_test_message.errors.no_user", *err)\n        })?;\n\n        let post = Post {\n            channel_id: channel.id.clone(),\n            message: test_message_body(&caller.locale).to_owned(),	api	test_notifications

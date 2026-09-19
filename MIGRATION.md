@@ -14112,3 +14112,12 @@ reported SURVIVED because its filter named `config::tests`, which matches no tes
   `parity::post_edit_time_limit`, 1 test over five cases.
 
 Mutation tally (`join-update-at-and-edit-limit.plan`): 7 run, 5 caught, 2 controls survived.
+
+## `POST /api/v4/notifications/test` — D-680 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `testNotifications`, `App.SendTestMessage`, `CreatePostFlags.ForceNotification` | `mm-api/src/sysops.rs`, `mm-app/src/test_notification.rs`, `mm-app/src/post_create.rs` | DONE | 3 unit + 6 parity | The prop is a fresh **string** id, not a bool (measured on Go's row). The message follows the caller's locale through a 11-entry table checked against Go's bundle; push and email delivery are not ported, so the flag only feeds `IsNotificationSuppressed`. |
+
+Mutation tally (`test-notifications.plan`): 8 run, 6 caught, 2 controls survived. `set-online-passed`
+first survived; it is caught by the `posted`-event test added for it.

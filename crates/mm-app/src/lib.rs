@@ -107,6 +107,7 @@ pub mod system;
 pub mod team;
 pub mod team_member;
 pub mod terms_of_service;
+pub mod test_notification;
 pub mod thread;
 pub mod thread_read;
 pub mod typing;

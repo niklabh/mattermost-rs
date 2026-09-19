@@ -935,6 +935,8 @@ async fn serve_create(
             CreatePostFlags {
                 set_online,
                 silent_notification: silent,
+                // Server-set only; `SanitizeProps` strips a client's prop.
+                force_notification: false,
             },
         )
         .await?;

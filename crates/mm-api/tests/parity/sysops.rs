@@ -784,34 +784,6 @@ async fn the_elasticsearch_routes_check_the_body_before_the_gate() {
     delete_plain_user(&client, &admin, &plain.id).await;
 }
 
-#[tokio::test]
-async fn the_forwarded_route_is_still_gos() {
-    if !stack_enabled() {
-        return;
-    }
-    let client = client();
-    let admin = go_minted_token(&client).await;
-    let team = a_team(&client, &admin).await;
-
-    let _ = &team;
-
-    let (status, _, served) = request_raw(
-        &client,
-        RUST,
-        Method::POST,
-        Some(&admin),
-        "/api/v4/notifications/test",
-        None,
-    )
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        served.as_deref(),
-        Some("go"),
-        "the test notification forwards on ForceNotification ([D-680])"
-    );
-}
-
 /// Sort each check's records so a tie in `ORDER BY parent id` cannot fail the comparison.
 fn normalise_integrity(mut results: serde_json::Value) -> serde_json::Value {
     if let Some(list) = results.as_array_mut() {

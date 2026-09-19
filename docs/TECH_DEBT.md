@@ -9014,7 +9014,9 @@ REST client against its own listen address to seed users and teams. Neither is a
 server can reproduce without porting the static webapp handler, so both forward.
 ## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (system.go)
+**Closed** 2026-09-19 — `CreatePostFlags::force_notification`, `mm_app::test_notification`, and
+`mm_api::sysops::test_notifications`; parity in `tests/parity/test_notifications.rs`.
 
 `testNotifications` (api4/system.go:233) is `App.SendTestMessage` (app/post.go:3422) and nothing
 else: the system bot, `GetOrCreateDirectChannel(user, bot)`, the user's locale for the one
