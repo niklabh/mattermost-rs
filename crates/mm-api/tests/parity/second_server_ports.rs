@@ -91,7 +91,8 @@ fn no_two_second_servers_share_a_port() {
     // the oracles `scripts/go-*.sh` start at Go's port + 30 to + 36 (boards, discoverable, the
     // licensed three, edit limit, plugins). Measured 2026-09-18: a plugin suite on :8095 took the boards
     // oracle down, and twenty tests in six other suites failed for it.
-    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8101).collect();
+    // + 37 is the mock Marketplace `parity::marketplace` serves for the plugins oracle.
+    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8102).collect();
     let taken: Vec<_> = claims
         .iter()
         .filter(|(port, _)| reserved.contains(port))

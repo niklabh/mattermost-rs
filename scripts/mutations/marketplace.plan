@@ -1,0 +1,35 @@
+# Mutation plan for GET/POST /plugins/marketplace and POST /plugins/install_from_url against the
+# plugins oracle and its mock Marketplace (parity::marketplace), plus the signature and icon
+# corpora (mm-app unit tests).
+#
+#   scripts/mutate-batch.sh scripts/mutations/marketplace.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-19: 23 run, 21 caught, both controls survived. svg-binary-threshold survived the first
+# run: its only 0x08 case sat before the <svg>, where the pattern refuses it anyway. The corpus
+# gained a 0x08 inside the element, and the line was caught on re-run.
+
+get-remote-only-needs-permission	crates/mm-api/src/plugins.rs	    if !filter.remote_only\n        && !state	    if true\n        && !state	api	marketplace::
+get-local-and-remote-allowed	crates/mm-api/src/plugins.rs	    if local_only && remote_only {	    if false {	api	marketplace::
+get-empty-is-empty-array	crates/mm-api/src/plugins.rs	    let body = if plugins.is_empty() {	    let body = if false {	api	marketplace::
+gate-marketplace-off-dropped	crates/mm-api/src/plugins.rs	    if !config.plugin_enable_marketplace {	    if false {	api	marketplace::
+install-bad-body-400	crates/mm-api/src/plugins.rs	                "app.plugin.marketplace_plugin_request.app_error",\n                None,\n                "",\n                501,	                "app.plugin.marketplace_plugin_request.app_error",\n                None,\n                "",\n                400,	api	marketplace::
+install-version-kept	crates/mm-api/src/plugins.rs	        request.version.clear();	        let _ = &request.version;	api	marketplace::
+install-keys-case-sensitive	crates/mm-api/src/plugins.rs	    mm_model::go_json::remap_object_keys(&mut value, &INSTALL_REQUEST_FIELDS);	    let _ = &INSTALL_REQUEST_FIELDS;	api	marketplace::
+from-url-force-literal-true	crates/mm-api/src/plugins.rs	        let force = query_bool(&values, "force");	        let force = query_get(&values, "force") == "true";	api	marketplace::
+download-insecure-allowed	crates/mm-app/src/marketplace.rs	        if !config.plugin_allow_insecure_download_url && parsed.scheme != "https" {	        if false {	api	marketplace::
+download-no-retry	crates/mm-app/src/marketplace.rs	        for backoff in SHORT_BACKOFF {	        for backoff in SHORT_BACKOFF.into_iter().take(1) {	api	marketplace::
+install-signature-unchecked	crates/mm-app/src/marketplace.rs	        self.verify_plugin(&plugin_file, &signature_file).await?;	        let _ = &signature_file;	api	marketplace::
+local-label-inverted	crates/mm-app/src/marketplace.rs	        let labels = enable_remote_marketplace.then(|| {	        let labels = (!enable_remote_marketplace).then(|| {	api	marketplace::
+installed-version-not-set	crates/mm-app/src/marketplace.rs	            existing.installed_version = manifest.version;	            let _ = manifest.version;	api	marketplace::
+local-only-still-asks-remote	crates/mm-app/src/marketplace.rs	        if config.plugin_enable_remote_marketplace && !filter.local_only {	        if config.plugin_enable_remote_marketplace {	api	marketplace::
+sort-case-sensitive	crates/mm-app/src/marketplace.rs	            .map(|m| mm_model::utils::go_to_lower(&m.name))	            .map(|m| m.name.clone())	api	marketplace::
+filter-id-prefix	crates/mm-app/src/marketplace.rs	        || go_to_lower(&manifest.id) == filter	        || go_to_lower(&manifest.id).starts_with(filter)	api	marketplace::
+trusted-only-localhost	crates/mm-app/src/marketplace.rs	            "localhost" | "127.0.0.1" => Http::Trusted(	            "localhost" => Http::Trusted(	api	marketplace::
+prepackaged-replaces-equal	crates/mm-app/src/marketplace.rs	        if prepackaged_version > marketplace_version {	        if prepackaged_version >= marketplace_version {	unit	marketplace::
+svg-binary-threshold	crates/mm-app/src/marketplace.rs	any(|b| *b <= 8);	any(|b| *b < 8);	unit	marketplace::
+signature-first-issuer-only	crates/mm-app/src/plugin_signature.rs	        if keys.is_empty() {\n            continue;\n        }	        if keys.is_empty() {\n            return Err(check(String::new()));\n        }	unit	plugin_signature::
+signature-any-usage	crates/mm-app/src/plugin_signature.rs	    !flags_valid || sig.key_flags().sign()	    true	unit	plugin_signature::
+CONTROL-timeout-spelling	crates/mm-app/src/marketplace.rs	const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(3600);	const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);	api	marketplace::
+CONTROL-rename-binding	crates/mm-app/src/plugin_signature.rs	                Err(err) => last = err.to_string(),	                Err(e) => last = e.to_string(),	unit	plugin_signature::

@@ -484,6 +484,16 @@ pub fn router(state: AppState) -> Router {
                 partially_migrated(get(plugins::get_plugin_statuses)),
             )
             .route(
+                "/api/v4/plugins/install_from_url",
+                partially_migrated(post(plugins::install_plugin_from_url)),
+            )
+            .route(
+                "/api/v4/plugins/marketplace",
+                partially_migrated(
+                    get(plugins::get_marketplace_plugins).post(plugins::install_marketplace_plugin),
+                ),
+            )
+            .route(
                 "/api/v4/plugins/webapp",
                 partially_migrated(get(plugins::get_webapp_plugins)),
             )

@@ -168,6 +168,13 @@ rsa = { version = "0.9", features = ["getrandom"] }
 # cannot check the signature would open a dialog for anyone who can base64.
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
+# Plugin signatures: `verifyPlugin` checks a detached OpenPGP signature over the bundle with
+# golang.org/x/crypto/openpgp (plugin_signature.go:121). A marketplace install is refused without
+# one, so the route cannot be served without an OpenPGP reader. rpgp is pure Rust (MIT OR
+# Apache-2.0); only packet parsing and signature verification are used, and
+# `fixtures/behaviour_plugin_signature.json` pins its verdicts to Go's.
+pgp = { version = "0.20", default-features = false }
+
 # `bcrypt` is the LEGACY hasher, kept because rows written before Mattermost's PBKDF2 migration
 # are still bcrypt and `GetHasherFromPHCString` still routes to it. Chosen over rolling blowfish
 # by hand, and over `rust-crypto`, because it exposes `hash_with_salt` — which is what makes the

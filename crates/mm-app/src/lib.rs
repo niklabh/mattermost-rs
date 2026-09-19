@@ -68,6 +68,7 @@ pub mod license;
 pub mod limits;
 pub mod login;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
+pub mod marketplace;
 pub mod marketplace_visit;
 pub mod mention;
 pub mod mfa;
@@ -81,6 +82,7 @@ pub mod password;
 pub mod peer_cache;
 pub mod peer_config;
 pub mod plugin_install;
+pub mod plugin_signature;
 pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;
