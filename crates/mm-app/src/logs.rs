@@ -653,7 +653,11 @@ mod tests {
     /// child passes, a sibling whose name merely extends the root's does not.
     #[test]
     fn the_root_check_is_a_string_prefix_with_a_separator() {
-        let dir = std::env::temp_dir().join(format!("mmrs-logs-{}", std::process::id()));
+        // Canonicalised because only the file side is resolved: on macOS `$TMPDIR` is under
+        // `/var`, a symlink to `/private/var`, so an unresolved root would fail every case.
+        let dir = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("mmrs-logs-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("logs")).unwrap();
         std::fs::create_dir_all(dir.join("logs2")).unwrap();
         let root = dir.join("logs");
