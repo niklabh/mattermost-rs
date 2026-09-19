@@ -2794,6 +2794,81 @@ pub async fn licensed_mfa() -> LicensedPair {
     }
 }
 
+/// The mm-api port for the licensed managed-categories pair: 8094 on stack 0.
+const MANAGED_CATEGORIES_LICENSED_RUST_PORT: u16 = 8094;
+/// The mm-api port for the **unlicensed** managed-categories pair: 8068 on stack 0.
+const MANAGED_CATEGORIES_UNLICENSED_RUST_PORT: u16 = 8068;
+
+static MANAGED_CATEGORIES_LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+static MANAGED_CATEGORIES_UNLICENSED: tokio::sync::OnceCell<SecondServer> =
+    tokio::sync::OnceCell::const_new();
+
+/// The two Go servers with `FeatureFlags.ManagedChannelCategories` on —
+/// `MMRS_LICENSED_VARIANT=managedcat` (+37, licensed) and `managedcat-unlicensed` (+38, the stock
+/// binary) of `scripts/go-licensed.sh` — each with an mm-api carrying the same flag beside it.
+/// `(licensed, unlicensed)`; the unlicensed pair reuses [`LicensedPair`] with an empty licence.
+///
+/// **Panics** when either oracle is absent, for the reason [`licensed`] gives.
+pub async fn managed_categories() -> (LicensedPair, LicensedPair) {
+    const FLAG: (&str, &str) = ("MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES", "true");
+    let licensed_go = format!("http://localhost:{}", go_port() + 37);
+    let unlicensed_go = format!("http://localhost:{}", go_port() + 38);
+
+    let (server, signed, key_file) = MANAGED_CATEGORIES_LICENSED
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            require_licensed_go(&licensed_go, "managed-categories licensed").await;
+            let server = start_licensed_rust(
+                MANAGED_CATEGORIES_LICENSED_RUST_PORT,
+                &licensed_go,
+                go_port() + 37,
+                &signed,
+                &key_file,
+                &[FLAG],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    let unlicensed = MANAGED_CATEGORIES_UNLICENSED
+        .get_or_init(|| async {
+            let alive = client()
+                .get(format!("{unlicensed_go}/api/v4/system/ping"))
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success());
+            assert!(
+                alive,
+                "no unlicensed managed-categories Go oracle at {unlicensed_go}: run \
+                 `MMRS_LICENSED_VARIANT=managedcat-unlicensed scripts/go-licensed.sh start`"
+            );
+            SecondServer::start(
+                MANAGED_CATEGORIES_UNLICENSED_RUST_PORT,
+                &[FLAG, ("MM_GO_UPSTREAM", unlicensed_go.as_str())],
+            )
+            .await
+            .expect(
+                "the unlicensed managed-categories mm-api starts — is target/debug/mm-api built?",
+            )
+        })
+        .await;
+    (
+        LicensedPair {
+            go: licensed_go,
+            rust: server.base.clone(),
+            signed: signed.clone(),
+            key_file: key_file.clone(),
+        },
+        LicensedPair {
+            go: unlicensed_go,
+            rust: unlicensed.base.clone(),
+            signed: String::new(),
+            key_file: String::new(),
+        },
+    )
+}
+
 /// One request to one base: `(status, body, x-mmrs-served-by)`. The general-purpose sibling of
 /// [`fetch_licensed_pair`] for the writes — a caller names the base, so the same helper drives
 /// `GO`, `RUST` and both halves of the licensed pair.

@@ -11,9 +11,10 @@
 //! `GET /api/v4/teams/{team_id}/channels/managed_categories` is registered by Go **only when
 //! `FeatureFlags.ManagedChannelCategories` is set** (api4/channel.go:72), and that flag defaults
 //! to false (feature_flags.go:202). So on this stack the path is not a route at all: gorilla's
-//! `NotFoundHandler` answers `api.context.404.app_error`, not the handler's 501. Registering it
-//! here would replace a 404 with a 501 and *break* parity, so it stays forwarded and
-//! [`the_managed_categories_route_is_a_404_on_both`] pins that.
+//! `NotFoundHandler` answers `api.context.404.app_error`, not the handler's 501. The port serves
+//! it only while the same flag is on and forwards otherwise;
+//! [`the_managed_categories_route_is_a_404_on_both`] pins the flag-off half, and
+//! `parity/managed_categories.rs` the rest against two flag-on oracles.
 //!
 //! # What the fixture has to discriminate
 //!
@@ -1302,7 +1303,7 @@ async fn the_managed_categories_route_is_a_404_on_both() {
     assert_eq!(
         rust.1.as_deref(),
         Some("go"),
-        "this route must still forward; registering it would answer 501 where Go answers 404"
+        "with the flag off this route must still forward, or it would answer 501 where Go answers 404"
     );
     let body: serde_json::Value = serde_json::from_slice(&rust.2).expect("JSON");
     assert_eq!(body["id"], serde_json::json!("api.context.404.app_error"));
