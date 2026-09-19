@@ -154,6 +154,7 @@ pub mod remote_cluster;
 pub mod auth_certs;
 pub mod local_auth_certs;
 // Appended 2026-09-15: the system-operations family.
+pub mod local_plugins;
 pub mod local_sysops;
 pub mod sysops;
 

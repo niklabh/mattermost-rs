@@ -14129,7 +14129,7 @@ first survived; it is caught by the `posted`-event test added for it.
 |---|---|---|---|---|
 | `getManagedCategories`, `App.GetVisibleManagedCategoryMappings` | `mm-api/src/channels.rs`, `mm-app/src/sidebar.rs` | DONE | 1 unit + 5 parity | Served only while the env-only `ManagedChannelCategories` flag is on (a route layer forwards before the session check otherwise), against two new flag-on oracles from `go-licensed.sh`. No team check: the caller's DMs answer on any team id, and a `null` value maps to `""` rather than being skipped. |
 
-Mutation tally (`managed-categories.plan`): 15 run, 15 caught, 2 controls survived.
+Mutation tally (`managed-categories.plan`): 17 run, 15 caught, 2 controls survived.
 
 
 ## `POST /api/v4/remotecluster/{user_id}/image` and the remote-cluster session — D-780 narrowed (2026-09-19)
@@ -14139,3 +14139,11 @@ Mutation tally (`managed-categories.plan`): 15 run, 15 caught, 2 controls surviv
 | `remoteSetProfileImage`, `ServeHTTP`'s cloud/remote-cluster branches, `GetRemoteClusterSession`, `GetCloudSession`, `sqlRemoteClusterStore.Get` | `mm-api/src/remote_cluster.rs`, `mm-api/src/auth.rs` (`parse_service_token`), `mm-app/src/remote_cluster.rs`, `mm-store/src/remote_cluster_store.rs` | PARTIAL | 6 unit + 4 new parity | The session is served on all five token routes, and every refusal on `/image` is served against the licensed oracle. The write forwards ([D-411]), as do the other four bodies past the gate ([D-780]). A `RemoteClusters` row with a NULL column or a negative `Options` is refused like a wrong token, because Go's scan fails. |
 
 Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls survived.
+
+## `plugin_local.go` — the ten local plugin pairs, D-850 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitPluginLocal`, `reattachPlugin`, `detachPlugin`, `App.ReattachPlugin`/`DetachPlugin`, `Environment.Reattach` | `mm-api/src/local_plugins.rs`, `mm-app/src/plugins.rs`, `mm-plugin/src/environment.rs`, `mm-model/src/plugin_reattach.rs` | DONE (Go host: gates only, D-850) | 2 unit + 1 oracle (`plugingen reattach`) + 3 parity | Under a Rust host all ten are served; under Go's the gates are answered and the rest forwarded. `Reattach` only errors on a manifest with no server: a failed version check or start answers 200 and leaves the plugin "running" with no supervisor, as in Go. |
+
+Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.

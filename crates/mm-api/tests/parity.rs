@@ -271,6 +271,7 @@ mod parity {
     // the socket, first_admin_visit).
     pub mod boards;
     pub mod command_dispatch;
+    pub mod local_plugins;
     pub mod local_uploads;
     pub mod managed_categories;
     pub mod marketplace;

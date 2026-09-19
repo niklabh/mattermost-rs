@@ -285,6 +285,8 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .merge(crate::local_access_control::routes(&state))
         // ---- `system_local.go`: the integrity check and the log page, 2026-09-15.
         .merge(crate::local_sysops::routes())
+        // `plugin_local.go`, all ten pairs; see `local_plugins` for what a Go plugin host forwards.
+        .merge(crate::local_plugins::routes(&state))
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
         // process rather than 404'd by this one.

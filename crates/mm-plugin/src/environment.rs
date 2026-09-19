@@ -19,8 +19,11 @@
 //! Errors carry Go's text, since a status shows it. I/O errors use Go's `op path: errno` form
 //! ([`GoIoError`]); the errno wording covers the common cases and otherwise falls back to Rust's.
 //!
-//! Not ported yet: `Reattach` (the local-mode route that needs it), the health-check job,
-//! prepackaged plugins, and the per-plugin database connections Go's `AppDriver` tracks
+//! `Reattach` ([`Environment::reattach`]) keeps Go's leniency: only a manifest without a server
+//! component is an error. A plugin whose version check or start fails is still recorded as
+//! **running**, with no supervisor behind it, and the caller is told it succeeded.
+//!
+//! Not ported yet: the health-check job, prepackaged plugins, and the per-plugin database connections Go's `AppDriver` tracks
 //! (`ConnWithPluginID`, `ShutdownConns`), which belong to the app's driver.
 //!
 //! Divergences: Go decodes `plugin.json` with case-insensitive keys ([D-040]) and YAML with
@@ -35,9 +38,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use goplugin::{Client, ClientConfig, PluginCommand};
+use goplugin::{Client, ClientConfig, PluginAddr, PluginCommand, ReattachConfig};
 use mm_model::bundle_info::BundleInfo;
 use mm_model::manifest::Manifest;
+use mm_model::plugin_reattach::PluginReattachConfig;
 use mm_model::plugin_status::{
     PLUGIN_STATE_FAILED_TO_START, PLUGIN_STATE_NOT_RUNNING, PLUGIN_STATE_RUNNING, PluginStatus,
     PluginStatuses,
@@ -161,6 +165,11 @@ pub enum EnvError {
     /// What the plugin's `OnActivate` answered, as Go prints it.
     #[error("{0}")]
     Activate(String),
+    #[error("cannot reattach plugin without server component")]
+    ReattachWithoutServer,
+    /// A reattach configuration go-plugin could not dial. Never shown: `Reattach` swallows it.
+    #[error("{0}")]
+    ReattachConfig(String),
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -356,18 +365,68 @@ fn fnv64a(data: &[u8]) -> [u8; 8] {
 pub struct Supervisor {
     client: Client,
     hooks: Arc<HooksClient>,
+    /// supervisor.go's `isReattached`: bound to a process launched elsewhere.
+    reattached: bool,
+}
+
+/// How [`Supervisor::start`] reaches its plugin: the two options `newSupervisor` is given.
+enum Start<'a> {
+    /// `WithExecutableFromManifest`: launch the bundle's executable.
+    Executable(&'a BundleInfo),
+    /// `WithReattachConfig`: bind to a process that is already running.
+    Reattach(&'a PluginReattachConfig),
+}
+
+/// `PluginReattachConfig.ToHashicorpPluginReattachmentConfig` (model/plugin_reattach.go:32).
+///
+/// Go dials `Addr.Net` at `Addr.Name` whatever the network, so `tcp` works there too. A network
+/// go-plugin cannot dial, a negative pid or an unknown protocol fails the start, which `Reattach`
+/// then swallows exactly as it swallows Go's dial error.
+fn reattach_config(config: &PluginReattachConfig) -> Result<ReattachConfig, EnvError> {
+    let invalid = |what: String| EnvError::ApplyOption(Box::new(EnvError::ReattachConfig(what)));
+    let addr = match config.addr.net.as_str() {
+        "unix" | "unixgram" | "unixpacket" => PluginAddr::Unix(PathBuf::from(&config.addr.name)),
+        "tcp" | "tcp4" | "tcp6" => PluginAddr::Tcp(
+            config
+                .addr
+                .name
+                .parse()
+                .map_err(|_| invalid(format!("invalid address {}", config.addr.name)))?,
+        ),
+        other => return Err(invalid(format!("unknown network {other}"))),
+    };
+    if !matches!(config.protocol.as_str(), "" | "netrpc") {
+        return Err(invalid(format!("unsupported protocol {}", config.protocol)));
+    }
+    Ok(ReattachConfig {
+        protocol: "netrpc".into(),
+        protocol_version: u32::try_from(config.protocol_version).unwrap_or(0),
+        addr,
+        pid: u32::try_from(config.pid)
+            .map_err(|_| invalid(format!("invalid pid {}", config.pid)))?,
+        test: config.test,
+    })
 }
 
 impl Supervisor {
-    /// supervisor.go, `newSupervisor` with `WithExecutableFromManifest`: launch the executable the
-    /// manifest names for this platform, checked against its SHA-256, dispense the hooks and ask
-    /// which are implemented.
-    async fn start(bundle: &BundleInfo, manifest: &Manifest) -> Result<Self, EnvError> {
-        let command =
-            executable_command(bundle, manifest).map_err(|e| EnvError::ApplyOption(Box::new(e)))?;
+    /// supervisor.go, `newSupervisor`: launch or reattach per `start`, dispense the hooks and ask
+    /// which are implemented. A launch runs the executable the manifest names for this platform,
+    /// checked against its SHA-256; a reattach has no executable and no checksum.
+    async fn start(start: Start<'_>, manifest: &Manifest) -> Result<Self, EnvError> {
         let mut config = ClientConfig::new(handshake());
-        config.checksum = Some(command.1);
-        config.cmd = Some(PluginCommand::new(command.0));
+        let reattached = match start {
+            Start::Executable(bundle) => {
+                let command = executable_command(bundle, manifest)
+                    .map_err(|e| EnvError::ApplyOption(Box::new(e)))?;
+                config.checksum = Some(command.1);
+                config.cmd = Some(PluginCommand::new(command.0));
+                false
+            }
+            Start::Reattach(reattach) => {
+                config.reattach = Some(reattach_config(reattach)?);
+                true
+            }
+        };
         config.start_timeout = START_TIMEOUT;
         config.name = manifest.id.clone();
         let client = Client::start(config).await?;
@@ -383,15 +442,26 @@ impl Supervisor {
             client.kill().await;
             return Err(e.into());
         }
-        Ok(Self { client, hooks })
+        Ok(Self {
+            client,
+            hooks,
+            reattached,
+        })
     }
 
     pub fn hooks(&self) -> &Arc<HooksClient> {
         &self.hooks
     }
 
-    /// supervisor.go, `Shutdown`.
+    /// supervisor.go, `Shutdown`. A reattached plugin's connection is closed first — Go's
+    /// workaround for `Kill` being "mostly a no-op" there — so the `Kill` that follows finds the
+    /// quit already sent, fails it, and ends the process at once rather than waiting two seconds.
     pub async fn shutdown(&self) {
+        if self.reattached
+            && let Err(err) = self.client.rpc().close().await
+        {
+            tracing::warn!(error = %err, "Failed to close rpcClient on Shutdown");
+        }
         self.client.kill().await;
     }
 
@@ -648,7 +718,8 @@ where
 
         if manifest.has_server() {
             bundle.manifest = Some(manifest.clone());
-            self.start_plugin_server(&bundle, &manifest).await?;
+            self.start_plugin_server(Start::Executable(&bundle), &manifest)
+                .await?;
             component = true;
         }
 
@@ -663,11 +734,11 @@ where
     /// that reconfigures itself from there does not start twice.
     async fn start_plugin_server(
         &self,
-        bundle: &BundleInfo,
+        start: Start<'_>,
         manifest: &Manifest,
     ) -> Result<(), EnvError> {
         let supervisor =
-            Supervisor::start(bundle, manifest)
+            Supervisor::start(start, manifest)
                 .await
                 .map_err(|e| EnvError::StartPlugin {
                     id: manifest.id.clone(),
@@ -683,6 +754,88 @@ where
         }
         let supervisor = Arc::new(supervisor);
         self.update(&manifest.id, |r| r.supervisor = Some(supervisor));
+        Ok(())
+    }
+
+    /// environment.go, `Reattach`: bind to a plugin process launched elsewhere, under `manifest`.
+    ///
+    /// Go's answers, kept: an already running plugin is left alone; otherwise the manifest is
+    /// registered with no bundle path, replacing any registration. A manifest without a server
+    /// component is the one error, and leaves the plugin failed to start. A failed version check
+    /// or start is **not** an error — the plugin is recorded as running with no supervisor, so
+    /// no hook reaches it and `Deactivate` only resets its state. The error is set to the outcome
+    /// either way.
+    pub async fn reattach(
+        &self,
+        manifest: &Manifest,
+        config: &PluginReattachConfig,
+    ) -> Result<(), EnvError> {
+        let result = self.try_reattach(manifest, config).await;
+        let error = result.as_ref().err().map(ToString::to_string);
+        self.set_plugin_error(&manifest.id, error.as_deref().unwrap_or(""));
+        result
+    }
+
+    async fn try_reattach(
+        &self,
+        manifest: &Manifest,
+        config: &PluginReattachConfig,
+    ) -> Result<(), EnvError> {
+        let id = manifest.id.as_str();
+        if self.is_active(id) {
+            return Ok(());
+        }
+        self.map().insert(
+            id.to_owned(),
+            Registered {
+                bundle: BundleInfo {
+                    path: String::new(),
+                    manifest: Some(manifest.clone()),
+                    manifest_path: String::new(),
+                    manifest_error: None,
+                },
+                state: PLUGIN_STATE_NOT_RUNNING,
+                error: String::new(),
+                supervisor: None,
+            },
+        );
+        let result = self.reattach_registered(manifest, config).await;
+        self.set_plugin_state(
+            id,
+            if result.is_ok() {
+                PLUGIN_STATE_RUNNING
+            } else {
+                PLUGIN_STATE_FAILED_TO_START
+            },
+        );
+        result
+    }
+
+    async fn reattach_registered(
+        &self,
+        manifest: &Manifest,
+        config: &PluginReattachConfig,
+    ) -> Result<(), EnvError> {
+        if let Err(err) = check_min_server_version(manifest) {
+            // `return nil` in Go: the plugin is then marked running.
+            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: version check failed");
+            return Ok(());
+        }
+        if !manifest.has_server() {
+            return Err(EnvError::ReattachWithoutServer);
+        }
+        if manifest.has_webapp() {
+            tracing::warn!(plugin_id = %manifest.id, "Ignoring webapp for reattached plugin");
+        }
+        if let Err(err) = self
+            .start_plugin_server(Start::Reattach(config), manifest)
+            .await
+        {
+            // `return nil` in Go as well.
+            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: start failed");
+            return Ok(());
+        }
+        tracing::debug!(plugin_id = %manifest.id, version = %manifest.version, "Plugin reattached");
         Ok(())
     }
 

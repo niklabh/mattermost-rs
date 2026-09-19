@@ -9206,3 +9206,14 @@ it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-
 
 `MMRS_PLUGIN_HOST` stays `go` by default until these land and D-402, D-471 and D-542's hook call
 sites fire from Rust write paths (plugin plan Phase 5).
+
+## D-850 · Under a Go plugin host, the local plugin routes forward past their gates
+
+**Status** OPEN · **Severity** forward · **Raised** 2026-09-19 (api4/plugin_local.go) · **Owner** the plugin host
+
+`crate::local_plugins` serves all ten `plugin_local.go` pairs when `MMRS_PLUGIN_HOST=rust`. Under
+the default Go host it answers only what needs no plugin environment — each config 501, the
+marketplace filter's 500 and body's 501, reattach's decoder and `IsValid` 400s — and forwards the
+rest over Go's socket: the list, install, enable/disable/remove, reattach and detach all read or
+change plugins that run inside the Go process. The HTTP router forwards the same family whole
+under a Go host. Closes when the Rust host becomes the default (D-811).

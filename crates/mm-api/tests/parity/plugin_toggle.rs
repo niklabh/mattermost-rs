@@ -336,7 +336,7 @@ async fn enable_disable_and_remove_match_go() {
 }
 
 /// The main Go server's plugin directory on this stack.
-fn go_plugin_dir() -> PathBuf {
+pub(crate) fn go_plugin_dir() -> PathBuf {
     let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
