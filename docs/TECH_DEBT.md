@@ -9191,9 +9191,12 @@ it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-
 
 - Signatures (`plugin_signature.go`, OpenPGP): `syncPlugins` is ported (2026-09-18,
   `mm_app::plugin_install`), but with `RequirePluginSignature` on it skips every bundle with an
-  error where Go would verify it, and an install stores no signature.
+  error where Go would verify it. `verifyPlugin` itself is ported since 2026-09-19
+  (`mm_app::plugin_signature`, used by marketplace installs, which also store the signature);
+  what is owed is calling it from the sync.
 - Prepackaged and transitionally prepackaged plugins (`processPrepackagedPlugins`,
-  `persistTransitionallyPrepackagedPlugins`).
+  `persistTransitionallyPrepackagedPlugins`). The marketplace list and install consult the
+  environment's prepackaged list, which is empty here (`mm_app::marketplace`).
 - The health-check job (`health_check.go`, `EnableHealthCheck`).
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.

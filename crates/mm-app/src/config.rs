@@ -579,6 +579,32 @@ pub struct Config {
     /// (`patchConfig` refuses), so the environment is how a server gets it on.
     pub plugin_enable_uploads: bool,
 
+    /// `PluginSettings.EnableRemoteMarketplace` (config.go:3612, defaulted **`true`** at :3678):
+    /// whether `GET`/`POST /plugins/marketplace` ask the Marketplace server at all, and whether a
+    /// locally installed plugin the Marketplace does not list carries the `Local` label.
+    pub plugin_enable_remote_marketplace: bool,
+
+    /// `PluginSettings.MarketplaceURL` (config.go:3615). `SetDefaults` (:3685) replaces an absent
+    /// value, `""`, **and the old** `PluginSettingsOldMarketplaceURL` with
+    /// `PluginSettingsDefaultMarketplaceURL`. `patchConfig` refuses to change it while uploads are
+    /// off, so on a stock server the environment is how a test points it elsewhere.
+    pub plugin_marketplace_url: String,
+
+    /// `PluginSettings.AllowInsecureDownloadURL` (config.go:3605, defaulted **`false`** at
+    /// :3630): off, `downloadFromURL` refuses any scheme but `https`.
+    pub plugin_allow_insecure_download_url: bool,
+
+    /// `PluginSettings.SignaturePublicKeyFiles` (config.go:3616, defaulted to an empty list at
+    /// :3690): the names of configuration files (`ConfigurationFiles`) holding the extra public
+    /// keys `verifyPlugin` accepts. Go's environment decoder splits a `[]string` on **spaces**
+    /// (config/environment.go:80).
+    pub plugin_signature_public_key_files: Vec<String>,
+
+    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
+    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key. Environment-only, like
+    /// every feature flag.
+    pub feature_flag_enable_mfi_plugin_signature_public_key: bool,
+
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
     ///
@@ -1482,6 +1508,11 @@ impl Default for Config {
             plugin_states: default_plugin_states(true),
             plugin_require_signature: false,
             plugin_enable_uploads: false,
+            plugin_enable_remote_marketplace: true,
+            plugin_marketplace_url: DEFAULT_MARKETPLACE_URL.to_owned(),
+            plugin_allow_insecure_download_url: false,
+            plugin_signature_public_key_files: Vec::new(),
+            feature_flag_enable_mfi_plugin_signature_public_key: true,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1967,6 +1998,27 @@ impl Config {
                 lookup,
                 "MM_PLUGINSETTINGS_ENABLEUPLOADS",
                 default.plugin_enable_uploads,
+            ),
+            plugin_enable_remote_marketplace: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEREMOTEMARKETPLACE",
+                default.plugin_enable_remote_marketplace,
+            ),
+            plugin_marketplace_url: lookup("MM_PLUGINSETTINGS_MARKETPLACEURL")
+                .unwrap_or(default.plugin_marketplace_url),
+            plugin_allow_insecure_download_url: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL",
+                default.plugin_allow_insecure_download_url,
+            ),
+            // `strings.Split(value, " ")`: unlike `split_list`, an empty value is one empty name.
+            plugin_signature_public_key_files: lookup("MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES")
+                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .unwrap_or(default.plugin_signature_public_key_files),
+            feature_flag_enable_mfi_plugin_signature_public_key: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_ENABLEMFIPLUGINSIGNATUREPUBLICKEY",
+                default.feature_flag_enable_mfi_plugin_signature_public_key,
             ),
             send_email_notifications: lookup_bool(
                 lookup,
@@ -2697,6 +2749,21 @@ impl Config {
             plugin_enable_uploads: plugin_settings
                 .enable_uploads
                 .unwrap_or(default.plugin_enable_uploads),
+            plugin_enable_remote_marketplace: plugin_settings
+                .enable_remote_marketplace
+                .unwrap_or(default.plugin_enable_remote_marketplace),
+            plugin_marketplace_url: match plugin_settings.marketplace_url {
+                Some(url) if !url.is_empty() && url != OLD_MARKETPLACE_URL => url,
+                _ => default.plugin_marketplace_url,
+            },
+            plugin_allow_insecure_download_url: plugin_settings
+                .allow_insecure_download_url
+                .unwrap_or(default.plugin_allow_insecure_download_url),
+            plugin_signature_public_key_files: plugin_settings
+                .signature_public_key_files
+                .unwrap_or(default.plugin_signature_public_key_files),
+            feature_flag_enable_mfi_plugin_signature_public_key: default
+                .feature_flag_enable_mfi_plugin_signature_public_key,
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3498,6 +3565,14 @@ struct PluginSettingsDocument {
     enable: Option<bool>,
     #[serde(rename = "EnableMarketplace")]
     enable_marketplace: Option<bool>,
+    #[serde(rename = "EnableRemoteMarketplace")]
+    enable_remote_marketplace: Option<bool>,
+    #[serde(rename = "MarketplaceURL")]
+    marketplace_url: Option<String>,
+    #[serde(rename = "AllowInsecureDownloadURL")]
+    allow_insecure_download_url: Option<bool>,
+    #[serde(rename = "SignaturePublicKeyFiles")]
+    signature_public_key_files: Option<Vec<String>>,
 }
 
 /// `model.PluginState`: one untagged field.
@@ -4373,8 +4448,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 119,
-            "the fixture covers {keys} settings and Config reads 119 from the document. \
+            keys, 123,
+            "the fixture covers {keys} settings and Config reads 123 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4431,6 +4506,10 @@ mod go_parity {
                 "ClientDirectory": "/elsewhere",
                 "RequirePluginSignature": true,
                 "EnableUploads": true,
+                "EnableRemoteMarketplace": false,
+                "MarketplaceURL": "http://marketplace.invalid",
+                "AllowInsecureDownloadURL": true,
+                "SignaturePublicKeyFiles": ["a.asc", "b.asc"],
                 "PluginStates": { "playbooks": { "Enable": false }, "x": { "Enable": true } }
             },
             "EmailSettings": {
@@ -4529,6 +4608,10 @@ mod go_parity {
         assert_eq!(config.plugin_client_directory, "/elsewhere");
         assert!(config.plugin_require_signature);
         assert!(config.plugin_enable_uploads);
+        assert!(!config.plugin_enable_remote_marketplace);
+        assert_eq!(config.plugin_marketplace_url, "http://marketplace.invalid");
+        assert!(config.plugin_allow_insecure_download_url);
+        assert_eq!(config.plugin_signature_public_key_files, ["a.asc", "b.asc"]);
         assert_eq!(config.plugin_states.get("playbooks"), Some(&false));
         assert_eq!(config.plugin_states.get("x"), Some(&true));
         assert_eq!(
@@ -4865,6 +4948,10 @@ mod go_parity {
 
         async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
             Ok(false)
+        }
+
+        async fn get_file(&self, _name: &str) -> Result<Option<Vec<u8>>, mm_store::StoreError> {
+            Ok(None)
         }
     }
 
@@ -5491,6 +5578,8 @@ const GIPHY_SDK_KEY_TEST: &str = "s0glxvzVg9azvPipKxcPLpXV0q1x1fVP";
 const LOCK_PROFILE_FIELDS_NONE: &str = "none";
 /// `model.PluginSettingsDefaultMarketplaceURL` (config.go:271).
 const DEFAULT_MARKETPLACE_URL: &str = "https://api.integrations.mattermost.com";
+/// `model.PluginSettingsOldMarketplaceURL` (config.go:272), which `SetDefaults` replaces.
+const OLD_MARKETPLACE_URL: &str = "https://marketplace.integrations.mattermost.com";
 /// `model.PluginIdApps` (plugin_constants.go:9).
 const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 

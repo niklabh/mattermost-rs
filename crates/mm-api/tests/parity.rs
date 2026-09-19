@@ -273,6 +273,7 @@ mod parity {
     pub mod command_dispatch;
     pub mod local_uploads;
     pub mod managed_categories;
+    pub mod marketplace;
     pub mod marketplace_visit;
     pub mod plugin_statuses;
     pub mod plugin_toggle;

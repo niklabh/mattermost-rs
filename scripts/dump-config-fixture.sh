@@ -123,7 +123,11 @@ MODELLED = {
     # Directory is read by createUpload for an import upload. Enable and EnableMarketplace
     # decide the marketplace slash command AutoComplete flag in the built-in command registry.
     # ClientDirectory and PluginStates are what the plugin host reads.
-    "PluginSettings": ["Directory", "Enable", "EnableMarketplace", "ClientDirectory", "PluginStates", "RequirePluginSignature", "EnableUploads"],
+    "PluginSettings": [
+        "Directory", "Enable", "EnableMarketplace", "ClientDirectory", "PluginStates", "RequirePluginSignature", "EnableUploads",
+        # What GET and POST /plugins/marketplace and POST /plugins/install_from_url read.
+        "EnableRemoteMarketplace", "MarketplaceURL", "AllowInsecureDownloadURL", "SignaturePublicKeyFiles",
+    ],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",

@@ -260,6 +260,59 @@ impl GuardedClient {
     }
 }
 
+impl GuardedClient {
+    /// A `GET` through the guard that follows redirects as Go's client does: `301`, `302`, `303`,
+    /// `307` and `308` with a `Location`, at most ten, and every hop dialled through the guard —
+    /// a redirect is exactly how an allowed host would hand the request to a forbidden one.
+    #[tracing::instrument(skip(self), fields(hops))]
+    pub async fn get(&self, url: &str, timeout: Duration) -> Result<reqwest::Response, GuardError> {
+        let mut current =
+            reqwest::Url::parse(url).map_err(|err| GuardError::Url(err.to_string()))?;
+        for hop in 0..=10 {
+            tracing::Span::current().record("hops", hop);
+            let host = current
+                .host_str()
+                .ok_or_else(|| GuardError::Url("no host".to_owned()))?
+                .to_owned();
+            let port = current
+                .port_or_known_default()
+                .ok_or_else(|| GuardError::Url("no port".to_owned()))?;
+            let mut builder = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(CONNECT_TIMEOUT)
+                .timeout(timeout)
+                .danger_accept_invalid_certs(self.insecure);
+            if let Some(addrs) = self.resolve(&host, port).await? {
+                builder = builder.resolve_to_addrs(&host, &addrs);
+            }
+            let client = builder
+                .build()
+                .map_err(|err| GuardError::Transport(err.to_string()))?;
+            let response = client
+                .get(current.clone())
+                .send()
+                .await
+                .map_err(|err| GuardError::Transport(err.to_string()))?;
+            let redirect = matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308);
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok());
+            match (redirect, location) {
+                (true, Some(location)) => {
+                    current = current
+                        .join(location)
+                        .map_err(|err| GuardError::Url(err.to_string()))?;
+                }
+                _ => return Ok(response),
+            }
+        }
+        Err(GuardError::Transport(
+            "stopped after 10 redirects".to_owned(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod go_parity {
     use super::*;

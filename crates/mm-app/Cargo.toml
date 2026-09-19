@@ -37,6 +37,10 @@ rsa.workspace = true
 # Trigger-id signature verification for `openDialog` — see the workspace manifest.
 p256.workspace = true
 subtle.workspace = true
+# Plugin signature verification — see the workspace manifest.
+pgp.workspace = true
+# go-is-svg's two patterns, for a local plugin's Marketplace icon (`marketplace::is_svg`).
+regex.workspace = true
 # `getpwuid_r`, for the upgrader's port of `os/user.LookupId` — the username of the binary's
 # owner and of this process, which `CanIUpgradeToE0`'s three permission errors carry.
 libc = "0.2"
