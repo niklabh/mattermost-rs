@@ -173,6 +173,7 @@ impl App {
     pub async fn save_reaction_for_post(
         &self,
         reaction: &Reaction,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<ReactionWrite<Reaction>> {
         let mut reaction = reaction.clone();
         // `go_to_lower`, not `str::to_lowercase` — see the note on the delete path below.
@@ -280,6 +281,10 @@ impl App {
             .await
             .map_err(|err| save_store_error("reaction save", err))?;
 
+        // `InvalidateLastPostTimeCache` has no counterpart here, so this is where Go's
+        // `ReactionHasBeenAdded` sits: after the row, before the websocket event.
+        self.reaction_has_been_added(hook_ctx, &reaction);
+
         self.send_reaction_event(
             mm_model::websocket_message::WEBSOCKET_EVENT_REACTION_ADDED,
             &reaction,
@@ -299,6 +304,7 @@ impl App {
     pub async fn delete_reaction_for_post(
         &self,
         reaction: &Reaction,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<ReactionWrite<()>> {
         let mut reaction = reaction.clone();
         // **`go_to_lower`, not `str::to_lowercase`.** Go's `strings.ToLower` is the *simple*
@@ -358,6 +364,9 @@ impl App {
                     500,
                 )
             })?;
+
+        // `ReactionHasBeenRemoved`, in Go's place: after the row, before the websocket event.
+        self.reaction_has_been_removed(hook_ctx, &reaction);
 
         self.send_reaction_event(
             mm_model::websocket_message::WEBSOCKET_EVENT_REACTION_REMOVED,

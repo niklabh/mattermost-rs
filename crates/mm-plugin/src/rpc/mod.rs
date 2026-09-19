@@ -32,6 +32,7 @@ mod streams;
 pub use api::{PluginApi, register_api as register_generated_api};
 pub use driver::{Driver, register_driver};
 pub use file_upload::HooksFileUpload;
+pub use handwritten::json_to_interface;
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
 pub use plugin::{Plugin, client_main, handshake, plugin_server};
 pub use serve_http::HooksHttp;

@@ -1,0 +1,233 @@
+//! A Mattermost plugin that writes down every hook it is handed, for
+//! `mm-api`'s `parity::plugin_hooks`.
+//!
+//! One binary runs under **both** hosts — Go's `plugin.Environment` and `mm_app`'s — because a
+//! plugin built on this SDK speaks exactly what a Go plugin speaks (docs/PLUGIN_PLAN.md, D1). So
+//! the same client action can be sent to each server and the two transcripts diffed, and a
+//! difference is the host's, never the plugin's.
+//!
+//! Each observation is one JSON line appended to `$HOOK_RECORDER_TRANSCRIPT`:
+//!
+//! ```text
+//! {"hook": "MessageWillBePosted", "args": <render>}
+//! ```
+//!
+//! `args` is `render_typed`, the canonical rendering of `reference/dump/plugingen`: the value is
+//! gob-encoded and then rendered from the stream, so what is written down is exactly what gob
+//! carried, omissions and all — not what a struct happens to hold.
+//!
+//! # The rejecting hooks are driven by the post's own message
+//!
+//! Both hosts must be able to provoke the same branch with the same request, so the behaviour is
+//! a function of the input and nothing else:
+//!
+//! | message starts with | `MessageWillBePosted` answers |
+//! |---|---|
+//! | `!reject ` | no post, the rest of the message as the rejection reason |
+//! | `!dismiss` | no post, `plugin.message_will_be_posted.dismiss_post` |
+//! | `!rewrite ` | a post carrying **only** `Message`, which the merge fills back in |
+//! | anything else | no post, no reason — "no opinion" |
+//!
+//! `MessageWillBeUpdated` reads the same prefixes on the *new* post: `!reject-edit <reason>` and
+//! `!dismiss-edit` answer no post (which is what rejects an edit — the reason alone does not),
+//! `!rewrite-edit <text>` answers the whole new post with its message replaced, and anything else
+//! echoes the new post back unchanged, because answering nothing would reject it.
+
+use std::io::Write;
+use std::sync::Mutex;
+
+use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
+use mm_plugin::wire::model::Post;
+use mm_plugin::wire::plugin::{
+    Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns, Z_MessageHasBeenPostedArgs,
+    Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs, Z_MessageHasBeenUpdatedReturns,
+    Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs,
+    Z_MessageWillBeUpdatedReturns, Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns,
+    Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns,
+};
+use serde_json::{Value as Json, json};
+
+/// `render.rs` reads a gob oracle for its fixture helpers; this plugin loads no fixture, so the
+/// directory is never asked for. Panicking says so rather than reading somewhere arbitrary.
+fn oracle_dir() -> std::path::PathBuf {
+    panic!("hook_recorder loads no gob fixtures")
+}
+
+#[path = "../tests/common/render.rs"]
+mod render;
+
+use render::render_typed;
+
+/// `plugin.DismissPostError` (public/plugin/hooks.go:82).
+const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
+
+/// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
+/// what each host's `Implements` gate lets through.
+const IMPLEMENTED: [&str; 7] = [
+    "MessageWillBePosted",
+    "MessageHasBeenPosted",
+    "MessageWillBeUpdated",
+    "MessageHasBeenUpdated",
+    "MessageHasBeenDeleted",
+    "ReactionHasBeenAdded",
+    "ReactionHasBeenRemoved",
+];
+
+struct Recorder {
+    transcript: Mutex<std::fs::File>,
+}
+
+impl Recorder {
+    fn record(&self, entry: &Json) {
+        let mut f = self
+            .transcript
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _ = writeln!(f, "{entry}");
+        let _ = f.flush();
+    }
+
+    fn saw<A: gobwire::Encode>(&self, name: &str, args: &A) {
+        self.record(&json!({ "hook": name, "args": render_typed(args) }));
+    }
+}
+
+/// The message with `prefix` taken off, when it starts with it.
+fn after<'a>(message: &'a str, prefix: &str) -> Option<&'a str> {
+    message.strip_prefix(prefix)
+}
+
+impl Hooks for Recorder {
+    fn implemented(&self) -> Vec<String> {
+        IMPLEMENTED.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    async fn message_will_be_posted(
+        &self,
+        args: Z_MessageWillBePostedArgs,
+    ) -> Result<Z_MessageWillBePostedReturns, NotImplemented> {
+        self.saw("MessageWillBePosted", &args);
+        let message = args.b.as_deref().map_or("", |p| p.message.as_str());
+        let answer = if let Some(reason) = after(message, "!reject ") {
+            Z_MessageWillBePostedReturns {
+                a: None,
+                b: reason.to_owned(),
+            }
+        } else if message == "!dismiss" {
+            Z_MessageWillBePostedReturns {
+                a: None,
+                b: DISMISS.to_owned(),
+            }
+        } else if let Some(text) = after(message, "!rewrite ") {
+            // Only `Message`: everything else is omitted by gob, and the host's merge is what
+            // puts the other 25 fields back. A replacement that carried the whole post would
+            // pass whether or not the merge worked.
+            Z_MessageWillBePostedReturns {
+                a: Some(Box::new(Post {
+                    message: text.to_owned(),
+                    ..Post::default()
+                })),
+                b: String::new(),
+            }
+        } else {
+            Z_MessageWillBePostedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn message_has_been_posted(
+        &self,
+        args: Z_MessageHasBeenPostedArgs,
+    ) -> Result<Z_MessageHasBeenPostedReturns, NotImplemented> {
+        self.saw("MessageHasBeenPosted", &args);
+        Ok(Z_MessageHasBeenPostedReturns::default())
+    }
+
+    async fn message_will_be_updated(
+        &self,
+        args: Z_MessageWillBeUpdatedArgs,
+    ) -> Result<Z_MessageWillBeUpdatedReturns, NotImplemented> {
+        self.saw("MessageWillBeUpdated", &args);
+        let new_post = args.b.as_deref();
+        let message = new_post.map_or("", |p| p.message.as_str());
+        let answer = if let Some(reason) = after(message, "!reject-edit ") {
+            Z_MessageWillBeUpdatedReturns {
+                a: None,
+                b: reason.to_owned(),
+            }
+        } else if message == "!dismiss-edit" {
+            Z_MessageWillBeUpdatedReturns {
+                a: None,
+                b: DISMISS.to_owned(),
+            }
+        } else if let Some(text) = after(message, "!rewrite-edit ") {
+            // The whole post, because this hook **replaces** rather than merges.
+            let mut post = new_post.cloned().unwrap_or_default();
+            post.message = text.to_owned();
+            Z_MessageWillBeUpdatedReturns {
+                a: Some(Box::new(post)),
+                b: String::new(),
+            }
+        } else {
+            Z_MessageWillBeUpdatedReturns {
+                a: new_post.cloned().map(Box::new),
+                b: String::new(),
+            }
+        };
+        Ok(answer)
+    }
+
+    async fn message_has_been_updated(
+        &self,
+        args: Z_MessageHasBeenUpdatedArgs,
+    ) -> Result<Z_MessageHasBeenUpdatedReturns, NotImplemented> {
+        self.saw("MessageHasBeenUpdated", &args);
+        Ok(Z_MessageHasBeenUpdatedReturns::default())
+    }
+
+    async fn message_has_been_deleted(
+        &self,
+        args: Z_MessageHasBeenDeletedArgs,
+    ) -> Result<Z_MessageHasBeenDeletedReturns, NotImplemented> {
+        self.saw("MessageHasBeenDeleted", &args);
+        Ok(Z_MessageHasBeenDeletedReturns::default())
+    }
+
+    async fn reaction_has_been_added(
+        &self,
+        args: Z_ReactionHasBeenAddedArgs,
+    ) -> Result<Z_ReactionHasBeenAddedReturns, NotImplemented> {
+        self.saw("ReactionHasBeenAdded", &args);
+        Ok(Z_ReactionHasBeenAddedReturns::default())
+    }
+
+    async fn reaction_has_been_removed(
+        &self,
+        args: Z_ReactionHasBeenRemovedArgs,
+    ) -> Result<Z_ReactionHasBeenRemovedReturns, NotImplemented> {
+        self.saw("ReactionHasBeenRemoved", &args);
+        Ok(Z_ReactionHasBeenRemovedReturns::default())
+    }
+}
+
+impl mm_plugin::rpc::HooksHttp for Recorder {}
+impl mm_plugin::rpc::HooksFileUpload for Recorder {}
+impl Plugin for Recorder {}
+
+#[tokio::main]
+async fn main() {
+    let path =
+        std::env::var_os("HOOK_RECORDER_TRANSCRIPT").expect("HOOK_RECORDER_TRANSCRIPT is not set");
+    let transcript = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("open the transcript");
+    let plugin = Recorder {
+        transcript: Mutex::new(transcript),
+    };
+    if let Err(e) = client_main(plugin).await {
+        eprintln!("hook recorder: {e}");
+        std::process::exit(1);
+    }
+}

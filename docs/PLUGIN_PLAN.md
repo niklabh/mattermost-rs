@@ -519,12 +519,37 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites
+### Phase 5 · Hook call sites — IN PROGRESS, 7 of 35 (2026-09-20)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
-traffic. This closes D-402, D-471 and D-542. Each site's parity test runs the conformance plugin
-under `MMRS_PLUGIN_HOST=go` and then `=rust`, and diffs what the plugin observed. **Exit:** every
-hook site on a Rust-served write path fires, and D6's switch defaults to `rust`.
+traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
+diffs what the plugin observed. **Exit:** every hook site on a Rust-served write path fires, and
+D6's switch defaults to `rust`.
+
+**Done, the highest-traffic family first:** `MessageWillBePosted`, `MessageHasBeenPosted`,
+`MessageWillBeUpdated`, `MessageHasBeenUpdated`, `MessageHasBeenDeleted`, `ReactionHasBeenAdded`
+and `ReactionHasBeenRemoved` — 7 of the 35 hooks, 9 of the 46 invocations. With them:
+`mm_app::plugin_hooks` (the `plugin.Context`, the model↔wire conversion, `RunMultiHook` and
+`guarded_hooks.go`'s two-phase dispatcher), `mm_api::plugin_context`, and the read half of
+`ChannelGuardStore`. D-402's plugin half is closed; the other 28 sites are D-932.
+
+The oracle is `mm-plugin`'s `examples/hook_recorder`: **one** Rust SDK plugin binary run under
+both hosts, which is what D1 bought. It writes each hook's arguments rendered from the gob stream,
+so the two transcripts are the same function of what each host sent.
+`parity::plugin_hooks` diffs them entry for entry.
+
+Three findings, each now in the code where it applies:
+
+- **The two `MessageWillBe*` hooks disagree on what a rejection is.** `WillBePosted` rejects on a
+  non-empty reason and treats a nil post as "no replacement"; `WillBeUpdated`'s phase A rejects on
+  a **nil post** and its phase B goes back to the reason. Unifying them changes what a client sees.
+- **The rejection reason is concatenated into the error `id`**, not passed as a parameter, so it
+  reaches the client untranslated — except `DismissPostError`, which stands alone.
+- **`MessageHasBeenUpdated`'s old post is the edit-history row.** Go's store mutates its `oldPost`
+  argument (`OriginalId`, a minted `Id`, `DeleteAt`) and the hook runs after; `PostStore::update`
+  had been cloning, and the parity suite is what found it.
+
+Still to decide nothing; the remaining sites are ordinary route-sized work.
 
 ### Phase 6 · The 258 API methods
 

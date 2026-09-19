@@ -82,6 +82,7 @@ impl App {
         post_id: &str,
         patch: &PostPatch,
         session: &Session,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         let mut post = self.get_single_post(post_id, false).await?;
 
@@ -133,7 +134,7 @@ impl App {
 
         post.patch(&patch);
 
-        self.update_post(&post, session).await
+        self.update_post(&post, session, hook_ctx).await
     }
 
     /// Port of `app.App.UpdatePost` (app/post.go:851) for `UpdatePostOptions{SafeUpdate: false}`,
@@ -164,6 +165,7 @@ impl App {
         &self,
         received: &Post,
         session: &Session,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         let mut received = received.clone();
         received.sanitize_props();
@@ -334,7 +336,18 @@ impl App {
             old_post_for_history.remote_id = received.remote_id.clone();
         }
 
-        // `runGuardedMessageWillBeUpdated` is the identity with no plugin environment.
+        // `runGuardedMessageWillBeUpdated`: `MessageWillBeUpdated`, which can refuse the edit or
+        // replace the post outright. The metadata below is Go's own restore, and it runs after
+        // the hook precisely because the hook was handed a metadata-less copy.
+        //
+        // The burn-on-read gate is Go's and is unreachable: an old post of that type is a 400
+        // several hundred lines above, and `new_post` is a clone of it.
+        if new_post.post_type != POST_TYPE_BURN_ON_READ {
+            new_post = self
+                .run_guarded_message_will_be_updated(hook_ctx, new_post, &old_post)
+                .await
+                .map_err(PrepareError::App)?;
+        }
 
         // Always the incoming metadata when there is one, with `Embeds` stripped —
         // server-generated, never client-supplied. Otherwise the old post's, which the store
@@ -366,7 +379,7 @@ impl App {
         let saved = self
             .store()
             .post()
-            .update(&new_post, &old_post_for_history)
+            .update(&mut new_post, &mut old_post_for_history)
             .await
             .map_err(|err| match err {
                 // `errors.As(nErr, &appErr)` — `IsValid`'s refusal reaches the client with its own
@@ -384,7 +397,11 @@ impl App {
                 }
             })?;
 
-        // `MessageHasBeenUpdated` is a plugin hook; there is no plugin environment.
+        // Go's `newPost` and `oldPost` are the values the store just mutated: the new post now
+        // carries the `UpdateAt` the row was written with, and the old one **is** the history
+        // row — minted id, `OriginalId` the post's own, `DeleteAt` the same `UpdateAt`. Passing
+        // the pre-store values instead is a divergence `parity::plugin_hooks` catches.
+        self.message_has_been_updated(hook_ctx, &new_post, &old_post_for_history);
 
         let mut prepared = self
             .prepare_post_for_client_with_embeds_and_images(
@@ -456,6 +473,7 @@ impl App {
         &self,
         post_id: &str,
         delete_by_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<Post, PrepareError> {
         // `sqlstore.RequestContextWithMaster` — the writer connection, which this port has only
         // one of.
@@ -539,7 +557,7 @@ impl App {
             self.delete_persistent_notification(&post).await?;
         }
 
-        self.clean_up_after_post_deletion(&post, &channel, delete_by_id)
+        self.clean_up_after_post_deletion(&post, &channel, delete_by_id, hook_ctx)
             .await?;
 
         // `a.Srv().Go(func() { RemoveNotifications })` — after the `post_deleted` events, and
@@ -588,6 +606,7 @@ impl App {
         &self,
         post_id: &str,
         delete_by_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), PrepareError> {
         let post = self
             .store()
@@ -638,7 +657,7 @@ impl App {
         // `CleanUpAfterPostDeletion` broadcasts to the post's channel, which the row still
         // names; the channel row outlives its posts.
         let channel = self.get_channel(&post.channel_id).await?;
-        self.clean_up_after_post_deletion(&post, &channel, delete_by_id)
+        self.clean_up_after_post_deletion(&post, &channel, delete_by_id, hook_ctx)
             .await?;
 
         tracing::Span::current().record("forwarded", false);
@@ -694,6 +713,7 @@ impl App {
         post: &Post,
         channel: &Channel,
         delete_by_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), PrepareError> {
         let sanitized_json = post.to_json().map_err(marshal_error)?;
         let plain_json = mm_model::utils::go_json_marshal(post).map_err(marshal_error)?;
@@ -749,8 +769,10 @@ impl App {
                 "Unable to delete flagged post preference when deleting post.");
         }
 
-        // `MessageHasBeenDeleted` is a plugin hook, and `RemoveNotifications` is a no-op for the
-        // root post this function is reachable with — see [`App::delete_post`].
+        // `MessageHasBeenDeleted`, in Go's place: after `deleteFlaggedPosts` and before
+        // `RemoveNotifications`, which is a no-op for the root post this function is reachable
+        // with — see [`App::delete_post`]. There is **no** burn-on-read gate on this hook.
+        self.message_has_been_deleted(hook_ctx, post);
 
         // `deleteDraftsAssociatedWithPost` — every user's reply draft in this thread, keyed on
         // `(ChannelId, RootId)`. Go logs and returns on failure.
