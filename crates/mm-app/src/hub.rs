@@ -1639,10 +1639,24 @@ fn verdict(send: bool) -> Verdict {
 
 /// `os.Hostname()`. Go logs a warning and omits `server_hostname` when it fails, which is
 /// reproduced by the `Result` here.
+///
+/// Go reads `/proc/sys/kernel/hostname` on Linux and falls back to `uname` (os/sys_linux.go); on
+/// macOS, which has no `/proc`, it asks the kernel (`kern.hostname`, os/sys_bsd.go).
+/// `gethostname(3)` returns the same name on both, so it is the fallback here.
 fn hostname() -> Result<String, std::io::Error> {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|s| s.trim_end().to_owned())
-        .or_else(|_| std::env::var("HOSTNAME").map_err(std::io::Error::other))
+        .or_else(|_| gethostname())
+}
+
+fn gethostname() -> Result<String, std::io::Error> {
+    let mut buf = [0u8; 256];
+    // SAFETY: `buf` is writable for the length passed alongside it.
+    if unsafe { libc::gethostname(buf.as_mut_ptr().cast::<libc::c_char>(), buf.len()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
 }
 
 /// Build a fresh connection id. Port of the `cfg.ConnectionID = model.NewId()` arm of
@@ -1680,6 +1694,18 @@ mod tests {
     const CHANNEL: &str = "abcdefghijklmnopqrstuvwxyz";
     const TEAM: &str = "zyxwvutsrqponmlkjihgfedcba";
     const CONN: &str = "cccccccccccccccccccccccccc";
+
+    /// The macOS path (`gethostname`) must name the host exactly as the Linux path (`/proc`) does,
+    /// or `server_hostname` would differ between the two for one machine.
+    #[test]
+    fn gethostname_agrees_with_proc() {
+        let name = gethostname().unwrap();
+        assert!(!name.is_empty());
+        if let Ok(proc) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
+            assert_eq!(name, proc.trim_end());
+        }
+        assert_eq!(hostname().unwrap(), name);
+    }
 
     fn session(user_id: &str) -> Session {
         Session {
