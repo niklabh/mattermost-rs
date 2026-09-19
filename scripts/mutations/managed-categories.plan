@@ -1,0 +1,25 @@
+# Mutation plan for GET /teams/{team_id}/channels/managed_categories (2026-09-19).
+#
+#   scripts/mutate-batch.sh scripts/mutations/managed-categories.plan
+#
+# The flag registration gate, the gate order (team id before licence), the 501, the encoder,
+# the 404 swallow, the default channel opts, the three search predicates, the page size and the
+# Unmarshal-into-string decode. The empty-list guard is unreachable (the store 404s on zero rows)
+# and not planned. The last two lines are no-op controls and must SURVIVE.
+flag-off-serves	crates/mm-api/src/channels.rs	    if !state.app.config().feature_flag_managed_channel_categories {	    if false && !state.app.config().feature_flag_managed_channel_categories {	api	managed_categories
+flag-inverted	crates/mm-api/src/channels.rs	    if !state.app.config().feature_flag_managed_channel_categories {	    if state.app.config().feature_flag_managed_channel_categories {	api	managed_categories
+team-id-unchecked	crates/mm-api/src/channels.rs	    if !is_valid_id(&team_id) {\n        return ApiError::invalid_url_param("team_id").into_response();\n    }\n\n    let enterprise	    if team_id.is_empty() {\n        return ApiError::invalid_url_param("team_id").into_response();\n    }\n\n    let enterprise	api	managed_categories
+licence-gate-dropped	crates/mm-api/src/channels.rs	    if !enterprise {\n        return ApiError::from(mm_model::utils::AppError::new(\n            "Api4.getManagedCategories",	    if enterprise && !enterprise {\n        return ApiError::from(mm_model::utils::AppError::new(\n            "Api4.getManagedCategories",	api	managed_categories
+licence-status-403	crates/mm-api/src/channels.rs	            "api.license_error",\n            None,\n            String::new(),\n            501,	            "api.license_error",\n            None,\n            String::new(),\n            403,	api	managed_categories
+no-html-escape	crates/mm-api/src/channels.rs	    let mut body = mm_model::utils::go_json_marshal_string_map(Some(&mappings)).into_bytes();	    let mut body = serde_json::to_vec(&mappings).unwrap_or_default();	api	managed_categories
+no-trailing-newline	crates/mm-api/src/channels.rs	    let mut body = mm_model::utils::go_json_marshal_string_map(Some(&mappings)).into_bytes();\n    body.push(b'\\n');	    let mut body = mm_model::utils::go_json_marshal_string_map(Some(&mappings)).into_bytes();\n    body.push(b' ');	api	managed_categories
+404-not-swallowed	crates/mm-app/src/sidebar.rs	            Err(err) if err.status_code == 404 => return Ok(result),	            Err(err) if err.status_code == 999 => return Ok(result),	api	managed_categories
+archived-included	crates/mm-app/src/sidebar.rs	                &mm_model::channel::ChannelSearchOpts::default(),	                &mm_model::channel::ChannelSearchOpts {\n                    include_deleted: true,\n                    ..Default::default()\n                },	api	managed_categories
+field-object-type-post	crates/mm-app/src/sidebar.rs	                mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL,\n                mm_model::sidebar_category::MANAGED_CATEGORY_PROPERTY_FIELD_NAME,	                "post",\n                mm_model::sidebar_category::MANAGED_CATEGORY_PROPERTY_FIELD_NAME,	api	managed_categories
+group-filter-dropped	crates/mm-app/src/sidebar.rs	            group_id: group.id,\n            field_id: field.id,	            group_id: String::new(),\n            field_id: field.id,	api	managed_categories
+field-filter-dropped	crates/mm-app/src/sidebar.rs	            group_id: group.id,\n            field_id: field.id,	            group_id: group.id,\n            field_id: String::new(),	api	managed_categories
+per-page-one	crates/mm-app/src/sidebar.rs	            per_page: i64::try_from(target_ids.len()).unwrap_or(i64::MAX),	            per_page: 1,	api	managed_categories
+null-skipped	crates/mm-app/src/sidebar.rs	        serde_json::Value::Null => Some(String::new()),	        serde_json::Value::Null => None,	api	managed_categories
+number-accepted	crates/mm-app/src/sidebar.rs	        serde_json::Value::String(name) => Some(name),\n        serde_json::Value::Null => Some(String::new()),\n        _ => None,	        serde_json::Value::String(name) => Some(name),\n        serde_json::Value::Null => Some(String::new()),\n        other => Some(other.to_string()),	api	managed_categories
+control-rename-closure-binding	crates/mm-app/src/sidebar.rs	        let target_ids: Vec<String> = channels.0.into_iter().map(|channel| channel.id).collect();	        let target_ids: Vec<String> = channels.0.into_iter().map(|ch| ch.id).collect();	api	managed_categories
+control-reorder-opts-fields	crates/mm-app/src/sidebar.rs	            group_id: group.id,\n            field_id: field.id,	            field_id: field.id,\n            group_id: group.id,	api	managed_categories

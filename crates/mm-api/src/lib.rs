@@ -1470,11 +1470,10 @@ pub fn router(state: AppState) -> Router {
         // `BaseRoutes.ChannelsForTeam` (api.go:212) — the browse-channels list and its two
         // siblings. Unlike `/teams/name/{team_name}` above there is **no precedence puzzle
         // here**: every route gorilla registers under `/teams/{team_id}/channels/` is a static
-        // literal, so neither router has a parameter to prefer over one. The literals we do not
-        // serve (`/recommended`, `/ids`, `/search`, `/autocomplete`, `/search_autocomplete`,
-        // `/managed_categories`) are simply unregistered and fall to `Router::fallback` whole —
-        // asserted over HTTP in `tests/parity_team_channel_lists.rs`, because "still forwarded"
-        // is a claim about the router, not about a handler.
+        // literal, so neither router has a parameter to prefer over one. Since
+        // `/managed_categories` (2026-09-19) every literal gorilla registers here is registered
+        // on this router too; an unserved *method* on one still falls to
+        // `partially_migrated`'s fallback.
         //
         // `/channels/name/{channel_name}` (registered above) is one segment deeper and cannot
         // collide with the two literals below.
@@ -1633,6 +1632,22 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/channels/recommended",
             partially_migrated_with_ids(&state, get(channels::get_recommended_channels_for_team)),
+        )
+        // `BaseRoutes.ChannelsForTeam.Handle("/managed_categories")` (api4/channel.go:72) — GET
+        // only, a static literal beside `/recommended`; no `{param}` sibling at this depth. The
+        // route layer is Go's registration `if` on the feature flag: off, it forwards before the
+        // session extractor runs.
+        .route(
+            "/api/v4/teams/{team_id}/channels/managed_categories",
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_managed_categories).route_layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        channels::managed_categories_flag_or_forward,
+                    ),
+                ),
+            ),
         )
         .route(
             "/api/v4/channels/{channel_id}/common_teams",

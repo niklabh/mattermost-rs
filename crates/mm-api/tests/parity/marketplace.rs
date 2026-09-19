@@ -7,7 +7,7 @@
 //! ```
 //!
 //! The Marketplace is an outbound service, so this suite **is** the Marketplace: a mock served
-//! from the test process on Go's port + 37, which `scripts/go-plugins.sh` points the plugins
+//! from the test process on Go's port + 39, which `scripts/go-plugins.sh` points the plugins
 //! oracle at (`MarketplaceURL`, with `AllowInsecureDownloadURL` so bundles come over plain http,
 //! and `SignaturePublicKeyFiles` naming the test key this suite plants in `ConfigurationFiles`).
 //! The Rust host is a second `mm-api` given the same three settings. The bundles, their
@@ -32,18 +32,18 @@ use common::{
     delete_plain_user, go_minted_token, stack_enabled,
 };
 
-/// The Rust host compared with the plugins oracle; see `second_server_ports`. 8067-8094 are
-/// nearly all taken, so two of these sit above the stack's oracles (+30..+37), below the next
-/// stack's Go (+100).
+/// The Rust host compared with the plugins oracle; see `second_server_ports`. 8067-8094 are all
+/// taken but this one, so the rest sit above the stack's oracles and the mock (+30..+39), below
+/// the next stack's Go (+100).
 const HOST_PORT: u16 = 8067;
 /// Remote Marketplace off, uploads on, insecure downloads off.
-const REMOTE_OFF_PORT: u16 = 8068;
+const REMOTE_OFF_PORT: u16 = 8105;
 /// Marketplace off, uploads on, a signature requirement.
-const MARKETPLACE_OFF_PORT: u16 = 8094;
+const MARKETPLACE_OFF_PORT: u16 = 8106;
 /// Plugins off.
-const PLUGINS_OFF_PORT: u16 = 8103;
+const PLUGINS_OFF_PORT: u16 = 8107;
 /// Every setting at its default: uploads off.
-const DEFAULTS_PORT: u16 = 8104;
+const DEFAULTS_PORT: u16 = 8108;
 
 /// The configuration file `go-plugins.sh` names in `SignaturePublicKeyFiles`.
 const KEY_FILE: &str = "mmrs-marketplace-test.plugin.asc";
@@ -392,7 +392,7 @@ async fn the_marketplace_answers_as_it_does_on_go() {
     plant_key(&fixture).await;
     let admin = go_minted_token(&client).await;
 
-    let (mock, market) = start_mock(go_port() + 37).await;
+    let (mock, market) = start_mock(go_port() + 39).await;
     {
         let mut m = mock.lock().unwrap();
         m.bundles

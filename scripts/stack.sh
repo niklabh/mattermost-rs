@@ -179,6 +179,10 @@ up_stack() {
   # And its MFA-enforced variant, which `parity_rest_mfa` panics without.
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=mfa "$ROOT/scripts/go-licensed.sh" start >/dev/null
   echo "  licensed mfa oracle up"
+  # The managed-categories pair: the only Go servers that register `/channels/managed_categories`.
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=managedcat "$ROOT/scripts/go-licensed.sh" start >/dev/null
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=managedcat-unlicensed "$ROOT/scripts/go-licensed.sh" start >/dev/null
+  echo "  managed-categories oracles up"
   # The uploads-on oracle, the only Go server that answers `POST /plugins`; see go-plugins.sh.
   MMRS_STACK="$k" "$ROOT/scripts/go-plugins.sh" start >/dev/null
   echo "  plugins oracle up"
@@ -197,6 +201,8 @@ down_stack() {
   MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=guest "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=mfa "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=managedcat "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" MMRS_LICENSED_VARIANT=managedcat-unlicensed "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-plugins.sh" stop >/dev/null 2>&1 || true
   pkill -f "MM_API_LISTEN=127.0.0.1:$MMRS_API_PORT" 2>/dev/null || true
   mmrs_compose down -v

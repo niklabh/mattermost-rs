@@ -57,11 +57,11 @@ case "${1:-start}" in
     export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
     # The one difference that matters.
     export MM_PLUGINSETTINGS_ENABLEUPLOADS=true
-    # `parity::marketplace`: the Marketplace is the mock that suite serves on Go's port + 37,
+    # `parity::marketplace`: the Marketplace is the mock that suite serves on Go's port + 39,
     # bundles may come over plain http from it, and its signatures verify with the test key the
     # suite plants as this configuration file. `patchConfig` refuses the URL while uploads are
     # off on the main server, so the environment is the only way to set it.
-    export MM_PLUGINSETTINGS_MARKETPLACEURL="http://127.0.0.1:$((MMRS_GO_PORT + 37))"
+    export MM_PLUGINSETTINGS_MARKETPLACEURL="http://127.0.0.1:$((MMRS_GO_PORT + 39))"
     export MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL=true
     export MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES=mmrs-marketplace-test.plugin.asc
     mmrs_free_port "$PORT"

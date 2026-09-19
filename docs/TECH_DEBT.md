@@ -7984,7 +7984,9 @@ it is in the same position about.
 
 ## D-440 · `managed_categories` is not a route on an unlicensed, flag-off server
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+**Closed** 2026-09-19 — the flag is read from the environment, the route layer forwards while it
+is off, and the handler is served behind it; see D-740 and `tests/parity/managed_categories.rs`.
 
 `GET /api/v4/teams/{team_id}/channels/managed_categories` is registered by Go **only inside**
 `if api.srv.Config().FeatureFlags.ManagedChannelCategories` (api4/channel.go:72), and that flag is
@@ -8958,7 +8960,10 @@ host's inter-plugin request path, then the prompt builders (`getRewritePromptFor
 `buildThreadContextForRewrite`, `buildRewriteSystemPrompt`).
 ## D-740 · `GET /teams/{team_id}/channels/managed_categories` is forwarded: no oracle registers it
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+**Closed** 2026-09-19 — `go-licensed.sh` variants `managedcat` (+37) and `managedcat-unlicensed`
+(+38), `mm_api::channels::get_managed_categories`, `App::get_visible_managed_category_mappings`;
+parity in `tests/parity/managed_categories.rs` against both.
 
 `getManagedCategories` (api4/channel.go:3302) is registered only when
 `FeatureFlags.ManagedChannelCategories` is on (channel.go:71), and the flag is off on the stack's

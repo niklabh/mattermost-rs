@@ -23,7 +23,7 @@ use mm_model::websocket_message::{
     WEBSOCKET_EVENT_SIDEBAR_CATEGORY_ORDER_UPDATED, WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,
     WebSocketEvent,
 };
-use mm_store::{SidebarCategoryStore, StoreError};
+use mm_store::{PropertyStore, SidebarCategoryStore, StoreError};
 
 use crate::App;
 
@@ -622,6 +622,142 @@ fn diff_channels_between_categories(
     diff
 }
 
+/// `app.managed_category.get_mappings.app_error` — the one error
+/// [`App::get_visible_managed_category_mappings`] raises itself.
+const MANAGED_CATEGORY_MAPPINGS_ERROR: &str = "app.managed_category.get_mappings.app_error";
+
+impl App {
+    /// Port of `App.GetVisibleManagedCategoryMappings` (channel_category.go:342): channel id →
+    /// managed category name, for every channel `user_id` is a member of in `team_id` that has
+    /// one.
+    ///
+    /// # Where the group and field ids come from
+    ///
+    /// Go reads `a.Channels().managedCategoryGroupID` / `…FieldID`, cached once at startup by
+    /// `cacheManagedCategoryIDs` (migrations.go:1150) from the `managed_channel_categories`
+    /// `PropertyGroups` row and its `category_name` field (target `""`, object type `channel`)
+    /// that `doSetupManagedCategoryProperties` created. That migration is `mlog.Fatal` on
+    /// failure, so on a database Go has started against both rows exist. This side reads the
+    /// same two rows **per request** — the `create_board_channel` precedent. The answers differ
+    /// only if the field row is deleted or renamed after Go started, which no REST route can do
+    /// (the field is `protected`); a missing row here is the 500 below rather than Go's
+    /// never-started server.
+    ///
+    /// # Branches, in Go's order
+    ///
+    /// 1. `GetChannelsForTeamForUser` with **default** `ChannelSearchOpts` — no archived
+    ///    channels, and the store's `TeamId = ? OR TeamId = ''` puts the user's DMs and GMs in
+    ///    the list whatever the team. Its **404** (the user is in no channel there) is `{}`,
+    ///    not an error; any other failure propagates as-is.
+    /// 2. An empty list is `{}` too (unreachable: the store answers 404 for zero rows).
+    /// 3. `SearchPropertyValues` over those ids, `PerPage = len(ids)`; the managed group has no
+    ///    post-get hook ([`crate::custom_profile_attributes::is_managed_group`] is
+    ///    `access_control` only). Its failure is re-raised as 500
+    ///    `app.managed_category.get_mappings.app_error`.
+    /// 4. Each value is `json.Unmarshal`led into a `string`; a value that is not one is logged
+    ///    and **skipped** — see [`managed_category_name`] for which values those are.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, channels, values))]
+    pub async fn get_visible_managed_category_mappings(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> AppResult<std::collections::BTreeMap<String, String>> {
+        let mut result = std::collections::BTreeMap::new();
+        let channels = match self
+            .get_channels_for_team_for_user(
+                team_id,
+                user_id,
+                &mm_model::channel::ChannelSearchOpts::default(),
+            )
+            .await
+        {
+            Ok(channels) => channels,
+            Err(err) if err.status_code == 404 => return Ok(result),
+            Err(err) => return Err(err),
+        };
+        tracing::Span::current().record("channels", channels.0.len());
+        if channels.0.is_empty() {
+            return Ok(result);
+        }
+
+        let mappings_error = || {
+            AppError::boxed(
+                "GetVisibleManagedCategoryMappings",
+                MANAGED_CATEGORY_MAPPINGS_ERROR,
+                None,
+                String::new(),
+                500,
+            )
+        };
+        let group = self
+            .get_property_group(mm_model::sidebar_category::MANAGED_CATEGORY_PROPERTY_GROUP_NAME)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = ?err, "the managed category group is missing");
+                mappings_error()
+            })?;
+        let field = self
+            .store()
+            .property()
+            .get_field_by_name_for_object_type(
+                &group.id,
+                "",
+                mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL,
+                mm_model::sidebar_category::MANAGED_CATEGORY_PROPERTY_FIELD_NAME,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = ?err, "the managed category field is missing");
+                mappings_error()
+            })?;
+
+        let target_ids: Vec<String> = channels.0.into_iter().map(|channel| channel.id).collect();
+        let opts = mm_model::property_value::PropertyValueSearchOpts {
+            group_id: group.id,
+            field_id: field.id,
+            per_page: i64::try_from(target_ids.len()).unwrap_or(i64::MAX),
+            target_ids,
+            ..Default::default()
+        };
+        let values = self
+            .store()
+            .property()
+            .search_values(&opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = ?err, "the managed category value search failed");
+                mappings_error()
+            })?;
+        tracing::Span::current().record("values", values.len());
+
+        for value in values {
+            match managed_category_name(value.value) {
+                Some(name) => {
+                    result.insert(value.target_id, name);
+                }
+                None => {
+                    tracing::warn!(channel_id = %value.target_id, "Failed to unmarshal managed category name");
+                }
+            }
+        }
+        Ok(result)
+    }
+}
+
+/// `json.Unmarshal(v.Value, &name)` into a Go `string` (channel_category.go:369).
+///
+/// A JSON string decodes to itself. **A JSON `null` also succeeds** — `Unmarshal` leaves the
+/// zero value in place for a null — so it maps the channel to `""` rather than skipping it.
+/// Everything else (number, bool, array, object) is an `UnmarshalTypeError` and `None`, which the
+/// caller skips.
+pub fn managed_category_name(value: serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(name) => Some(name),
+        serde_json::Value::Null => Some(String::new()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,6 +1002,26 @@ mod tests {
                     .is_none_or(|categories| categories.is_empty()),
                 "both shapes are empty for Go's len() test"
             );
+        }
+    }
+
+    /// `json.Unmarshal(v.Value, &name)` into a `string`: a string and `null` decode (the latter to
+    /// `""`), every other JSON type is the error the caller skips.
+    #[test]
+    fn a_managed_category_value_decodes_only_from_a_string_or_null() {
+        use serde_json::json;
+        assert_eq!(
+            managed_category_name(json!("Zeta <&> Team")),
+            Some("Zeta <&> Team".to_owned())
+        );
+        assert_eq!(managed_category_name(json!("")), Some(String::new()));
+        assert_eq!(
+            managed_category_name(serde_json::Value::Null),
+            Some(String::new()),
+            "Unmarshal of null into a string is not an error"
+        );
+        for skipped in [json!(42), json!(true), json!(["a"]), json!({"name": "a"})] {
+            assert_eq!(managed_category_name(skipped.clone()), None, "{skipped}");
         }
     }
 }
