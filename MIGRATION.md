@@ -14192,3 +14192,9 @@ on arm64, whose Lanczos output depends on Go fusing `a + x*y` (see `goimage::fma
 Mutation tally (`image-pipeline.plan`): 20 run, 19 caught, 2 controls survived; the six first-run
 survivors each exposed a corpus gap and five are caught since the oracle grew, the sixth
 (`5000/q`→`5001/q`) is equivalent over every quality and was replaced by the clamp, caught.
+
+## The web client — `channels/web/static.go`, D-782 narrowed, D-900..D-903 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitStatic`, `root`, `staticFilesHandler`, `robotsHandler`, `unsupportedBrowserScriptHandler`, `getOpenGraphMetaTags`, the `IsStatic` arm of `Handler.ServeHTTP`, `Handle404`/`IsAPICall`, gorilla's clean-path redirect, `http.FileServer`, `gzhttp.GzipHandler`, `GetStaticScriptHashes`, `ClientConfigHash`, `GetDesktopAppVersion` | `mm-api/src/{web_static,gzhttp}.rs` (the TCP router's fallback), `serve_content.rs`, `mm-app/src/{config,user_agent}.rs` | DONE (template pages and `RenderWebAppError` forward, D-900/D-901) | `parity::web_client` (8), `behaviour_web_static.json` oracle | A compressed asset's bytes and its small-body `Content-Length` differ from Go's (another compressor; zstd preferred as in Go); `X-Version-Id` matches to the byte. The proxy now forwards redirects instead of following them, and `go_global_headers` stopped stamping `Expires`/`Vary` on forwarded answers. |

@@ -1236,6 +1236,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeWebStaticBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: web static behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_web_static.json"))
+
 	if err := writeJSONFoldBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: json fold behaviour fixture: %v\n", err)
 		os.Exit(1)

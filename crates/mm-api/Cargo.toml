@@ -32,15 +32,20 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # main.rs only — CLAUDE.md permits anyhow there and nowhere else.
 anyhow.workspace = true
+# The web client's compression (`gzhttp`): Go's default wrapper answers `zstd` when a browser
+# offers it — every current one does — and gzip otherwise. `futures-util` makes a body of hidden
+# length, so hyper chunks it where `net/http` would. `sha2`/`base64` are the CSP script hashes.
+flate2.workspace = true
+zstd.workspace = true
+futures-util = "0.3"
+sha2.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 # `ServiceExt::oneshot` drives the assembled `Router` in-process, which is how the route table's
 # *shape* is tested without a stack: adding a literal path segment can take a `{param}` route out
 # of service for every method, and that has cost this project a served route before.
 tower = { workspace = true, features = ["util"] }
-# The `write_file_response` corpus records bodies base64-encoded, since a range response is not
-# necessarily valid UTF-8.
-base64.workspace = true
 # The parity test reads the users row directly, to prove our value is the row's and not merely
 # different from Go's cached one.
 sqlx.workspace = true
@@ -52,4 +57,3 @@ p256.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 # The parity suite connects a real websocket to both servers and compares the frames.
 tokio-tungstenite.workspace = true
-futures-util = "0.3"

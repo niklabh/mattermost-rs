@@ -49,6 +49,8 @@ pub mod file_upload;
 pub mod files;
 pub mod go_cache;
 pub mod groups;
+/// Port of `gzhttp.GzipHandler` — the compression in front of the static file servers.
+pub mod gzhttp;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
 pub mod image_proxy;
 pub mod images;
@@ -120,6 +122,8 @@ pub mod user_deletes;
 pub mod user_updates;
 pub mod users;
 pub mod views;
+/// The web client — the static half of Go's `channels/web`, mounted as the router's fallback.
+pub mod web_static;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
@@ -171,8 +175,17 @@ use mm_app::App;
 pub struct AppState {
     pub app: App,
     pub http: reqwest::Client,
+    /// The forward leg's client: [`AppState::http`] with **redirects off**. reqwest follows up to
+    /// ten by default, so a forwarded `302` — SAML's `/login/sso/saml`, every OAuth `…/login` —
+    /// reached the browser as the page at the far end of the chain, fetched by this server.
+    /// `http` keeps following, because its other callers port Go code that uses `http.Get`,
+    /// which follows too.
+    pub forward_http: reqwest::Client,
     /// Base URL of the Go server, without a trailing slash.
     pub go_upstream: String,
+    /// What Go's `InitStatic` reads once — see [`web_static::StaticSetup`]. Shared by every clone
+    /// of the state, filled on the first request that reaches the web client.
+    pub web_setup: std::sync::Arc<tokio::sync::OnceCell<web_static::StaticSetup>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -192,7 +205,17 @@ impl AppState {
         Self {
             app,
             http: reqwest::Client::new(),
+            forward_http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_else(|err| {
+                    // Only a TLS backend that fails to initialise gets here, and then the default
+                    // client (which would fail the same way on first use) is all there is.
+                    tracing::error!(error = %err, "could not build the forwarding client");
+                    reqwest::Client::new()
+                }),
             go_upstream: go_upstream.trim_end_matches('/').to_owned(),
+            web_setup: std::sync::Arc::default(),
         }
     }
 
@@ -388,9 +411,9 @@ pub(crate) async fn refresh_config_after_write(
 ///
 /// # Only our own responses
 ///
-/// Guarded on `x-mmrs-served-by`, which every locally-served response carries and no proxied one
-/// does. A forwarded response already has Go's own headers, including the two per-request ones
-/// this cannot mint (`X-Request-Id`, `X-Version-Id`).
+/// Guarded on `x-mmrs-served-by: rust`, which every locally-served response carries; a proxied
+/// one carries `go`. A forwarded response already has Go's own headers, including the two
+/// per-request ones this cannot mint (`X-Request-Id`, `X-Version-Id`).
 ///
 /// # Three details
 ///
@@ -416,8 +439,24 @@ pub(crate) async fn go_global_headers(
 
     let mut response = next.run(request).await;
 
-    // A forwarded response already carries Go's own headers.
-    if !response.headers().contains_key("x-mmrs-served-by") {
+    // A forwarded response already carries Go's own headers, and so does one the web client
+    // module built: its handlers are not API handlers and set their own (or none at all).
+    //
+    // **The value, not the presence.** The proxy marks what it forwards `x-mmrs-served-by: go`,
+    // so a presence check let this layer add `Expires: 0` and `Vary` to every forwarded answer.
+    // On a forwarded API `GET` that was invisible — Go's own handler had set both — but a
+    // forwarded static asset, SPA page or `/api/v5` 404 left here carrying two headers Go never
+    // sent. Found by the web-client parity run (2026-09-19).
+    let served_here = response
+        .headers()
+        .get(error::SERVED_BY)
+        .is_some_and(|v| v.as_bytes() == b"rust");
+    if !served_here
+        || response
+            .extensions()
+            .get::<web_static::WebOwnHeaders>()
+            .is_some()
+    {
         return response;
     }
 
@@ -3677,7 +3716,9 @@ pub fn router(state: AppState) -> Router {
                 get(commands::list_command_autocomplete_suggestions),
             ),
         )
-        .fallback(proxy::forward_to_go)
+        // Every path no route claimed: the web client's handlers, which forward whatever is not
+        // theirs — see `web_static::fallback`.
+        .fallback(web_static::fallback)
         // Outermost, so it sees every response this server produces — including the proxy's,
         // which it then leaves alone. See [`go_global_headers`].
         .layer(axum::middleware::from_fn_with_state(

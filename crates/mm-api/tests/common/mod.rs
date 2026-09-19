@@ -2483,6 +2483,21 @@ impl SecondServer {
     /// callers and each names a literal — so two stacks never race for :8071 while the call sites
     /// keep saying one number.
     pub async fn start(port: u16, env: &[(&str, &str)]) -> Option<Self> {
+        Self::start_with(port, None, env).await
+    }
+
+    /// [`SecondServer::start`] with the child's working directory set — for a suite whose subject
+    /// is what the server finds relative to it (`fileutils.FindDir`: the web client's `client/`,
+    /// `templates/`, `logs/`).
+    pub async fn start_in(port: u16, dir: &std::path::Path, env: &[(&str, &str)]) -> Option<Self> {
+        Self::start_with(port, Some(dir), env).await
+    }
+
+    async fn start_with(
+        port: u16,
+        dir: Option<&std::path::Path>,
+        env: &[(&str, &str)],
+    ) -> Option<Self> {
         let port = port
             + std::env::var("MMRS_PORT_OFFSET")
                 .ok()
@@ -2534,6 +2549,10 @@ impl SecondServer {
             .stderr(std::process::Stdio::null());
         for (key, value) in env {
             command.env(key, value);
+        }
+        if let Some(dir) = dir {
+            // `PWD` goes with it: Go's `os.Getwd` (and the port's) prefers it when it names `.`.
+            command.current_dir(dir).env("PWD", dir);
         }
         let child = command.spawn().ok()?;
 

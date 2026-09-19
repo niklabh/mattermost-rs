@@ -258,6 +258,8 @@ mod parity {
     pub mod configlic;
     // Appended 2026-09-15: no two SecondServers share a port (needs no stack).
     pub mod second_server_ports;
+    // Appended 2026-09-19: the web client — `/static/*`, the SPA page, robots, the UB script.
+    pub mod web_client;
     // Appended 2026-09-15: the SAML/LDAP/audit certificate and enterprise-gate routes.
     pub mod auth_certs;
     pub mod local_auth_certs;

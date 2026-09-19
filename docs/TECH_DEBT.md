@@ -6344,6 +6344,9 @@ browser would see it.
 
 **What is owed:** a `tower-http` `CompressionLayer` on the locally-served routes, matched to
 gzhttp's content-type and minimum-size rules. The rules are the work, not the compression.
+*2026-09-19:* the rules exist now — `mm_api::gzhttp::wrap`, pinned by `behaviour_web_static.json`
+and wrapped around the web client's static handlers (zstd preferred, as Go's default wrapper
+does). The API routes still owe the wrap.
 
 ---
 
@@ -9049,6 +9052,10 @@ value — the path is not an api4 route at all and falls to the webapp's static 
 answer is a 500 naming Go's own `client/root.html` path; on, `manualtesting.ManualTest` drives Go's
 REST client against its own listen address to seed users and teams. Neither is an API handler this
 server can reproduce without porting the static webapp handler, so both forward.
+
+**Narrowed 2026-09-19:** the off-branch is served — `mm_api::web_static`'s `root` answers it like
+any other page path (the SPA, or the same 500 naming `root.html` when no build is linked;
+`parity::web_client`). **What is still owed:** the `EnableTesting` branch, which forwards.
 ## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
 
 **Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (system.go)
@@ -9362,3 +9369,48 @@ architecture property; `goimage::fma` mirrors Go per target and the oracle was g
 The unfused (amd64) branch compiles and is the same code with the fusion removed, but no amd64
 oracle has measured it. **What is owed:** the imaging oracle regenerated on an amd64 host and the
 suite run there.
+
+## D-900 · The unsupported-browser and unsupported-desktop-app pages forward
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (web client)
+
+`root` (web/static.go:61) renders `templates/unsupported_browser.html` for an IE or Safari older
+than 12 and `unsupported_desktop_app.html` for a desktop app older than
+`MinimumDesktopAppVersion`: Go `html/template` renders with translated strings, neither of which
+this server has. `mm_api::web_static` ports the decisions and forwards the pages — the browser
+check exactly (`CheckClientCompatibility` over the uasurfer port), the desktop one whenever the
+setting is set and the agent is the desktop app, because the Masterminds `semver` comparison is not
+ported either. **What is owed:** the two renders (template engine + i18n) and `semver`.
+
+## D-901 · The static handler's error pages forward: `RenderWebAppError`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (web client)
+
+On the page handler, `handleContextError` answers a request URI over `MaximumURLLength`, a valid
+non-OAuth session token in `?access_token=`, a `GetSession` 500 and the cloud/remote-cluster token
+headers with `utils.RenderWebAppError` (utils/api.go:50): a redirect page to `/error?…&s=<ECDSA
+signature by the server's key>`. `mm_api::web_static::root` forwards all four before it writes
+anything, and so does a session under `FeatureFlags.SessionAttributes`
+(`ProcessSessionAttributesRequest`, Enterprise Advanced). **What is owed:** `RenderWebError` with
+the `AsymmetricSigningKey` (the verifying half is already in `mm_app::config`), then the four
+branches.
+
+## D-902 · `UpdateAssetsSubpathFromConfig` is not ported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-19 (web client)
+
+`InitStatic` (web/static.go:30) **rewrites** `root.html`, `manifest.json` and every `*.css` in the
+client directory at startup so a subpath deployment's `/static/` URLs and CSP hashes are right
+(utils/subpath.go:71). The Go server sharing the directory does it at its own start, and every
+numbered stack links one shared webapp build, so a second writer here would race it for nothing.
+`mm_api::web_static` computes the same CSP hashes (`get_static_script_hashes`, oracle-pinned) and
+serves whatever is on disk. **What is owed:** the rewrite, once mm-api can be the only server.
+
+## D-903 · A forwarded `HEAD` loses its `Content-Length`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (web client)
+
+`proxy::forward` drops the upstream `Content-Length` as hop-by-hop and rebuilds the body from the
+bytes it read — which for a `HEAD` is none, so hyper writes `Content-Length: 0` where Go sent the
+entity's length (`HEAD /api/v5/x`: Go 248, forwarded 0). Found by `parity::web_client`, pre-existing
+for every forwarded `HEAD`. **What is owed:** keep Go's `Content-Length` on a `HEAD` answer.
