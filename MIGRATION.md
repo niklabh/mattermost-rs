@@ -14200,3 +14200,13 @@ survivors each exposed a corpus gap and five are caught since the oracle grew, t
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `InitStatic`, `root`, `staticFilesHandler`, `robotsHandler`, `unsupportedBrowserScriptHandler`, `getOpenGraphMetaTags`, the `IsStatic` arm of `Handler.ServeHTTP`, `Handle404`/`IsAPICall`, gorilla's clean-path redirect, `http.FileServer`, `gzhttp.GzipHandler`, `GetStaticScriptHashes`, `ClientConfigHash`, `GetDesktopAppVersion` | `mm-api/src/{web_static,gzhttp}.rs` (the TCP router's fallback), `serve_content.rs`, `mm-app/src/{config,user_agent}.rs` | DONE (template pages and `RenderWebAppError` forward, D-900/D-901) | `parity::web_client` (8), `behaviour_web_static.json` oracle | A compressed asset's bytes and its small-body `Content-Length` differ from Go's (another compressor; zstd preferred as in Go); `X-Version-Id` matches to the byte. The proxy now forwards redirects instead of following them, and `go_global_headers` stopped stamping `Expires`/`Vary` on forwarded answers. |
+
+## `GET /manualtest` under `EnableTesting` — D-782 closed, D-901 narrowed (2026-09-20)
+
+764 of 764 route+method pairs are now registered (`scripts/routes.py`; this one dispatched from `web_static::classify`).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `manualtesting.ManualTest`, `testAutoLink`, `getChannelID`; `handleContextError`'s non-API tail, `utils.RenderWebError`, `i18n.GetTranslationsAndLocaleFromRequest` + go-i18n lookup, the signing key's private half | `mm-api/src/{manualtest,web_error}.rs`, `web_static.rs` (`session_preamble`, `serve_http_headers`), `mm-app/src/{manualtest,i18n}.rs`, `team.rs` (`save_team`), `config.rs` | DONE | `parity::manualtest` (31 compared answers + the `HEAD` and header checks), `behaviour_web_error.json` oracle, 13 unit | At the pinned SHA the team email has no `@`, so `username`+`teamname` is always the email 400 and `rand.Seed` is a Go 1.24+ no-op — see `mm_api::manualtest`'s doc. Error pages are compared after verifying both signatures. |
+
+Mutation tally (`manualtest.plan`): 38 run, 35 caught, 3 controls survived.

@@ -140,6 +140,7 @@ pub mod view;
 pub mod webhook;
 // Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
 pub mod logs;
+pub mod manualtest;
 pub mod searchengine;
 pub mod upgrader;
 

@@ -67,6 +67,7 @@ pub mod local_channels;
 pub mod local_misc;
 pub mod local_users;
 pub mod login;
+pub mod manualtest;
 pub mod migrate_auth;
 pub mod multipart;
 pub mod notify_admin;
@@ -123,6 +124,7 @@ pub mod user_updates;
 pub mod users;
 pub mod views;
 /// The web client — the static half of Go's `channels/web`, mounted as the router's fallback.
+pub mod web_error;
 pub mod web_static;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.

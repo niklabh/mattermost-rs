@@ -9045,7 +9045,12 @@ the custom-command webhook path, then the providers one file at a time, then i18
 
 ## D-782 · `GET /manualtest` is forwarded
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+**Status** CLOSED 2026-09-20 · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+
+**Closed:** the `EnableTesting` branch is served by `mm_api::manualtest` (dispatched from
+`web_static::classify`), errors as `mm_api::web_error`'s signed page; `parity::manualtest` against
+the testing oracle (`MMRS_EDITLIMIT_VARIANT=testing scripts/go-edit-limit.sh`, +70). What it
+forwards is in the module doc.
 
 Registered only when `ServiceSettings.EnableTesting` is on (api4/api.go:414). Off — the stack's
 value — the path is not an api4 route at all and falls to the webapp's static root handler, whose
@@ -9389,6 +9394,12 @@ anything, and so does a session under `FeatureFlags.SessionAttributes`
 (`ProcessSessionAttributesRequest`, Enterprise Advanced). **What is owed:** `RenderWebError` with
 the `AsymmetricSigningKey` (the verifying half is already in `mm_app::config`), then the four
 branches.
+
+**Narrowed 2026-09-20:** `RenderWebError`, the request translation and the signing key are ported
+(`mm_api::web_error`, `mm_app::i18n::Translations`) and serve `/manualtest`'s errors, and
+`web_static::session_preamble` now returns the `token_provided` and `GetSession` errors instead of
+dropping them. **What is still owed:** `root` renders them instead of forwarding, and the
+over-long-URL page.
 
 ## D-902 · `UpdateAssetsSubpathFromConfig` is not ported
 

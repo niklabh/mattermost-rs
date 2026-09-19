@@ -123,18 +123,23 @@ fn go_abs(path: &Path) -> std::io::Result<PathBuf> {
     Ok(go_clean(&cwd.join(path)))
 }
 
-/// Port of `fileutils.findPath` with `workingDirFirst = true` and the `IsDir` filter
-/// (fileutils.go:36): an absolute `path` is answered by its own existence, filter or no filter;
-/// a relative one is tried under each base path from the working directory, then under each
-/// base path from the (symlink-resolved) executable's directory.
-fn find_dir_path(path: &str) -> Option<PathBuf> {
+/// Port of `fileutils.findPath` with the `IsDir` filter (fileutils.go:36): an absolute `path` is
+/// answered by its own existence, filter or no filter; a relative one is tried under each base
+/// path from the working directory and under each base path from the (symlink-resolved)
+/// executable's directory — the working directory first when `working_dir_first`
+/// (`FindDir`), the executable's first otherwise (`FindDirRelBinary`).
+fn find_dir_path(path: &str, working_dir_first: bool) -> Option<PathBuf> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
         return std::fs::metadata(candidate)
             .ok()
             .map(|_| candidate.to_path_buf());
     }
-    let mut search: Vec<PathBuf> = COMMON_BASE_SEARCH_PATHS.iter().map(PathBuf::from).collect();
+    let working = || COMMON_BASE_SEARCH_PATHS.iter().map(PathBuf::from);
+    let mut search: Vec<PathBuf> = Vec::new();
+    if working_dir_first {
+        search.extend(working());
+    }
     if let Some(binary_dir) = std::env::current_exe()
         .ok()
         .and_then(|exe| std::fs::canonicalize(exe).ok())
@@ -145,6 +150,9 @@ fn find_dir_path(path: &str) -> Option<PathBuf> {
                 .iter()
                 .map(|base| binary_dir.join(base)),
         );
+    }
+    if !working_dir_first {
+        search.extend(working());
     }
     for parent in search {
         let Ok(found) = go_abs(&parent.join(candidate)) else {
@@ -159,7 +167,17 @@ fn find_dir_path(path: &str) -> Option<PathBuf> {
 
 /// Port of `fileutils.FindDir` (fileutils.go:98): the directory, or `./` and `false`.
 pub fn find_dir(dir: &str) -> (PathBuf, bool) {
-    match find_dir_path(dir) {
+    match find_dir_path(dir, true) {
+        Some(found) => (found, true),
+        None => (PathBuf::from("./"), false),
+    }
+}
+
+/// Port of `fileutils.FindDirRelBinary` (fileutils.go:111): [`find_dir`] with the executable's
+/// directory searched **before** the working directory. `utils.TranslationsPreInit` finds `i18n`
+/// this way.
+pub fn find_dir_rel_binary(dir: &str) -> (PathBuf, bool) {
+    match find_dir_path(dir, false) {
         Some(found) => (found, true),
         None => (PathBuf::from("./"), false),
     }

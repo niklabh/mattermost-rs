@@ -1332,6 +1332,15 @@ impl App {
             .await?;
         crate::config::asymmetric_signing_verifying_key(&row)
     }
+
+    /// The private half of the same row, as `utils.RenderWebError` signs with it. See
+    /// [`crate::config::asymmetric_signing_key`] for when it is `None`.
+    pub async fn asymmetric_signing_key(&self) -> Option<p256::ecdsa::SigningKey> {
+        let row = self
+            .system_value(crate::config::SYSTEM_ASYMMETRIC_SIGNING_KEY)
+            .await?;
+        crate::config::asymmetric_signing_key(&row)
+    }
 }
 
 /// Port of `model.DecodeAndVerifyTriggerId` (integration_action.go:664): base64 (standard,

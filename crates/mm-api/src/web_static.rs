@@ -114,6 +114,12 @@ pub struct StaticSetup {
 }
 
 impl StaticSetup {
+    /// `ServiceSettings.WebserverMode` as read at start — `gzip` means every handler Go registered
+    /// through `APIHandler` or `NewStaticHandler` is wrapped in `gzhttp`.
+    pub(crate) fn webserver_mode(&self) -> &str {
+        &self.webserver_mode
+    }
+
     fn from_config(config: &mm_model::config::Config, subpath: String) -> Self {
         let service = &config.service_settings;
         let enable_concurrent_react = config
@@ -219,6 +225,9 @@ enum Route {
     },
     Robots,
     UnsupportedBrowserScript,
+    /// `GET /manualtest` under `EnableTesting` — `crate::manualtest`. A `HEAD` is `Root`'s:
+    /// gorilla's route is `Methods(GET)`.
+    ManualTest,
     Root,
 }
 
@@ -280,8 +289,8 @@ fn classify(setup: &StaticSetup, method: &Method, path: &str, raw_query: &str) -
     {
         return Route::Forward;
     }
-    if setup.enable_testing && rel == "/manualtest" {
-        return Route::Forward;
+    if setup.enable_testing && rel == "/manualtest" && *method == Method::GET {
+        return Route::ManualTest;
     }
     if rel.starts_with("/static/plugins/") {
         return Route::Static { plugins: true };
@@ -376,6 +385,9 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
         Route::Static { plugins } => static_files(setup, plugins, &url, &path, &parts).await,
         Route::Robots => Some(robots()),
         Route::UnsupportedBrowserScript => unsupported_browser_script(&parts).await,
+        Route::ManualTest => {
+            crate::manualtest::manual_test(&state, setup, &raw_target, &url.raw_query, &parts).await
+        }
         Route::Root => root(&state, setup, &raw_target, &path, &parts).await,
     };
     match answer {
@@ -827,63 +839,20 @@ async fn root(
     // — but `GetSession` on a good one still runs, with its side effects, and three outcomes are
     // Go's error page rather than the SPA. The cloud and remote-cluster headers take branches
     // that depend on a licence this port leaves to Go.
-    if crate::auth::parse_service_token(parts).is_some() {
+    // A query-string token: a valid non-OAuth session there is `token_provided`, an error page
+    // this handler still leaves to Go ([D-901]).
+    if crate::auth::parse_auth_token(parts)
+        .is_some_and(|(_, location)| location == crate::auth::TokenLocation::QueryString)
+    {
         return None;
     }
-    if let Some((token, location)) = crate::auth::parse_auth_token(parts) {
-        if location == crate::auth::TokenLocation::QueryString {
-            // A valid non-OAuth session here is `api.context.token_provided.app_error`.
-            return None;
-        }
-        match state.app.get_session(&token).await {
-            // `ProcessSessionAttributesRequest` writes session attributes when the flag and an
-            // Enterprise Advanced licence both allow it; not ported.
-            Ok(_) if state.app.config().feature_flag_session_attributes => return None,
-            Ok(_) => {}
-            Err(err) if err.status_code == 500 => return None,
-            Err(_) => {}
-        }
+    match session_preamble(state, parts).await {
+        Preamble::Continue => {}
+        // Every error here is `RenderWebAppError`'s page ([D-901]).
+        Preamble::Forward | Preamble::Error(_) => return None,
     }
 
-    let license = state
-        .app
-        .license()
-        .await
-        .map_err(|err| tracing::warn!(error = %err.id, "could not read the licence"))
-        .ok()?;
-    let hash = state
-        .app
-        .client_config_hash(&config)
-        .await
-        .map_err(|err| tracing::warn!(error = %err, "could not hash the client config"))
-        .ok()?;
-
-    let mut headers = HeaderMap::new();
-    set_header(&mut headers, "x-request-id", &mm_model::utils::new_id());
-    set_header(
-        &mut headers,
-        "x-version-id",
-        &format!(
-            "{}.{}.{}.{}",
-            mm_model::version::CURRENT_VERSION,
-            mm_model::version::BUILD_NUMBER,
-            hash,
-            license.is_some()
-        ),
-    );
-    if service.tls_strict_transport.unwrap_or(false) {
-        set_header(
-            &mut headers,
-            "strict-transport-security",
-            &format!(
-                "max-age={}",
-                service.tls_strict_transport_max_age.unwrap_or(63_072_000)
-            ),
-        );
-    }
-    set_header(&mut headers, "permissions-policy", "");
-    set_header(&mut headers, "x-content-type-options", "nosniff");
-    set_header(&mut headers, "referrer-policy", "no-referrer");
+    let mut headers = serve_http_headers(state, &config, &mm_model::utils::new_id()).await?;
     set_header(&mut headers, "x-frame-options", "SAMEORIGIN");
     set_header(
         &mut headers,
@@ -955,6 +924,100 @@ async fn root(
         headers,
         gzhttp::go_framed_body(Bytes::from(contents)),
     ))
+}
+
+/// What the session half of `ServeHTTP` (web/handlers.go:268-315) decides for a handler with
+/// `RequireSession: false` — the page handler and `/manualtest` — before the handler runs.
+pub(crate) enum Preamble {
+    /// No token, a token that resolves to no session, or a session the handler may use.
+    Continue,
+    /// A branch this port leaves to Go: the cloud and remote-cluster token headers (licence-gated
+    /// sessions), and a resolved session under `FeatureFlags.SessionAttributes`, whose
+    /// `ProcessSessionAttributesRequest` (Enterprise Advanced) is not ported.
+    Forward,
+    /// `c.Err`: `GetSession`'s 500, or `api.context.token_provided.app_error` for a valid
+    /// non-OAuth session presented as `?access_token=`.
+    Error(Box<mm_model::utils::AppError>),
+}
+
+/// The session half of `ServeHTTP` for a handler that needs no session. A token that does not
+/// resolve is not an error — `RequireSession` is false — but `GetSession` on one that does still
+/// runs, with its side effects. No CSRF check: it applies only to a non-`GET` request of a
+/// session-required handler.
+pub(crate) async fn session_preamble(state: &AppState, parts: &Parts) -> Preamble {
+    if crate::auth::parse_service_token(parts).is_some() {
+        return Preamble::Forward;
+    }
+    let Some((token, location)) = crate::auth::parse_auth_token(parts) else {
+        return Preamble::Continue;
+    };
+    match state.app.get_session(&token).await {
+        Err(err) if err.status_code == 500 => Preamble::Error(err),
+        Err(_) => Preamble::Continue,
+        Ok(_) if state.app.config().feature_flag_session_attributes => Preamble::Forward,
+        Ok(session) if !session.is_oauth && location == crate::auth::TokenLocation::QueryString => {
+            Preamble::Error(mm_model::utils::AppError::boxed(
+                "ServeHTTP",
+                "api.context.token_provided.app_error",
+                None,
+                format!("token={token}"),
+                401,
+            ))
+        }
+        Ok(_) => Preamble::Continue,
+    }
+}
+
+/// The headers `ServeHTTP` sets on every response once `basicSecurityChecks` has passed
+/// (web/handlers.go:234-244): the request id, the version id — which carries the client-config
+/// hash and whether a licence is loaded — `Strict-Transport-Security` when configured, and the
+/// three fixed security headers. `None` when the licence or the hash cannot be read.
+pub(crate) async fn serve_http_headers(
+    state: &AppState,
+    config: &mm_model::config::Config,
+    request_id: &str,
+) -> Option<HeaderMap> {
+    let service = &config.service_settings;
+    let license = state
+        .app
+        .license()
+        .await
+        .map_err(|err| tracing::warn!(error = %err.id, "could not read the licence"))
+        .ok()?;
+    let hash = state
+        .app
+        .client_config_hash(config)
+        .await
+        .map_err(|err| tracing::warn!(error = %err, "could not hash the client config"))
+        .ok()?;
+
+    let mut headers = HeaderMap::new();
+    set_header(&mut headers, "x-request-id", request_id);
+    set_header(
+        &mut headers,
+        "x-version-id",
+        &format!(
+            "{}.{}.{}.{}",
+            mm_model::version::CURRENT_VERSION,
+            mm_model::version::BUILD_NUMBER,
+            hash,
+            license.is_some()
+        ),
+    );
+    if service.tls_strict_transport.unwrap_or(false) {
+        set_header(
+            &mut headers,
+            "strict-transport-security",
+            &format!(
+                "max-age={}",
+                service.tls_strict_transport_max_age.unwrap_or(63_072_000)
+            ),
+        );
+    }
+    set_header(&mut headers, "permissions-policy", "");
+    set_header(&mut headers, "x-content-type-options", "nosniff");
+    set_header(&mut headers, "referrer-policy", "no-referrer");
+    Some(headers)
 }
 
 /// `bytes.ReplaceAll`.
@@ -1144,7 +1207,27 @@ mod tests {
             enable_testing: true,
             ..setup("/")
         };
-        assert_eq!(classify(&testing, &get, "/manualtest", ""), Route::Forward);
+        assert_eq!(
+            classify(&testing, &get, "/manualtest", ""),
+            Route::ManualTest
+        );
+        assert_eq!(
+            classify(&testing, &Method::HEAD, "/manualtest", ""),
+            Route::Root
+        );
+        assert_eq!(classify(&testing, &get, "/manualtest/", ""), Route::Root);
+        assert_eq!(
+            classify(&testing, &Method::POST, "/manualtest", ""),
+            Route::Forward
+        );
+        let testing_sub = StaticSetup {
+            enable_testing: true,
+            ..setup("/chat")
+        };
+        assert_eq!(
+            classify(&testing_sub, &get, "/chat/manualtest", ""),
+            Route::ManualTest
+        );
     }
 
     #[test]
