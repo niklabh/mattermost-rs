@@ -100,10 +100,13 @@ fi
 if [[ $FUZZ_SECS != 0 ]]; then
     step "fuzz gobwire, ${FUZZ_SECS}s per target, seeded with the Go-written corpus"
     cd crates/gobwire/fuzz
+    # cargo-fuzz defaults to the triple it was built for. A prebuilt binary (CI installs one) is
+    # musl, whose static libc the sanitizer refuses, so name the toolchain's own host.
+    host=$(rustc +nightly -vV | sed -n 's/^host: //p')
     for t in decode_dynamic decode_typed reencode; do
         mkdir -p "corpus/$t"
         # A capped allocation is a finding, not an OOM for the whole machine.
-        cargo +nightly fuzz run "$t" "corpus/$t" ../../../fixtures/gob -- \
+        cargo +nightly fuzz run --target "$host" "$t" "corpus/$t" ../../../fixtures/gob -- \
             -max_total_time="$FUZZ_SECS" -rss_limit_mb=2048 -malloc_limit_mb=1024 -timeout=10
     done
 fi
