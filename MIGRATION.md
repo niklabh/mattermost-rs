@@ -14147,3 +14147,12 @@ Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls surv
 | `InitPluginLocal`, `reattachPlugin`, `detachPlugin`, `App.ReattachPlugin`/`DetachPlugin`, `Environment.Reattach` | `mm-api/src/local_plugins.rs`, `mm-app/src/plugins.rs`, `mm-plugin/src/environment.rs`, `mm-model/src/plugin_reattach.rs` | DONE (Go host: gates only, D-850) | 2 unit + 1 oracle (`plugingen reattach`) + 3 parity | Under a Rust host all ten are served; under Go's the gates are answered and the rest forwarded. `Reattach` only errors on a manifest with no server: a failed version check or start answers 200 and leaves the plugin "running" with no supervisor, as in Go. |
 
 Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.
+
+## `PermanentDeleteUser` / `PermanentDeleteAllUsers` — D-470, D-600 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `App.PermanentDeleteUser`, `App.PermanentDeleteAllUsers`, `deleteUser`/`localDeleteUser` `?permanent=true`, `localPermanentDeleteAllUsers`, 16 store methods | `mm-app/src/user_delete.rs`, `mm-api/src/{user_deletes,local_users}.rs`, `mm-store/src/*` (+ `scheduled_post_store.rs`) | DONE (bot owners forward, D-472) | 3 unit + 3 parity (stack 4) + 1 wipe parity (`scripts/wipe-parity.sh`, spare stack) | Served only when no erasure would reach the bot cascade; for the wipe that is a question of `Username` order, not ownership (`App::permanent_delete_all_needs_go`). A profile directory that cannot be checked answers **202 with an error body** after every table is gone. |
+
+
+Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 controls survived; `permanent-delete-all.plan` (spare stack 6) 5 run, 3 caught, 2 controls survived. A first user-plan run had one harness fault (an untyped `$1`), re-expressed and re-run whole.

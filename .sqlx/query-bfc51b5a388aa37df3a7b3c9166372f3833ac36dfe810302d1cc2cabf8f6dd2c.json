@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT postid FROM reactions WHERE userid = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "postid",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bfc51b5a388aa37df3a7b3c9166372f3833ac36dfe810302d1cc2cabf8f6dd2c"
+}

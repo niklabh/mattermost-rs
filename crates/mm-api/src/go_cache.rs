@@ -9,7 +9,9 @@
 //! - **`clear_user_sessions`** inserts a throwaway session row for the user and has Go revoke it
 //!   (`POST /users/{id}/sessions/revoke`). `PlatformService.RevokeSession` deletes the row and
 //!   calls `ClearUserSessionCache(session.UserId)` — the very function being reproduced. If Go
-//!   does not answer 200 the row is deleted here instead, so it never outlives the call.
+//!   does not answer 200 the row is deleted here instead, so it never outlives the call. Go
+//!   audits that request, so each call leaves an `Audits` row attributed to the cache
+//!   administrator that the same operation through Go would not ([D-870]).
 //! - **`invalidate_user`** calls `POST /users/{id}/reset_failed_attempts`, whose
 //!   `UpdateFailedPasswordAttempts(id, 0)` goes through the local-cache layer's
 //!   `InvalidateProfileCacheForUser`. It **writes the counter**, so it is sent only when the

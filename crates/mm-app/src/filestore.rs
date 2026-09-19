@@ -205,6 +205,19 @@ impl FileBackend {
         self.local()?.remove_file(path).await
     }
 
+    /// Port of `FileBackend.RemoveDirectory`.
+    pub async fn remove_directory(&self, path: &str) -> Result<(), FileStoreError> {
+        self.local()?.remove_directory(path).await
+    }
+
+    /// Whether this process can act on the configured backend at all — `false` for the S3 and
+    /// Azure drivers, which only the Go server implements. A route whose file-store step comes
+    /// after a database write asks this *before* the write and forwards, because there is no
+    /// half of such a request that can be handed over.
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Self::Local(_))
+    }
+
     /// Port of `FileBackend.MoveFile`.
     pub async fn move_file(&self, old_path: &str, new_path: &str) -> Result<(), FileStoreError> {
         self.local()?.move_file(old_path, new_path).await
@@ -355,6 +368,24 @@ impl LocalFileBackend {
         tokio::fs::remove_file(&full)
             .await
             .map_err(|err| FileStoreError::io("remove", path, err))
+    }
+
+    /// Port of `LocalFileBackend.RemoveDirectory` (localstore.go:255): `os.RemoveAll`.
+    ///
+    /// `RemoveAll` succeeds on a path that does not exist and removes a plain file as readily as
+    /// a tree; `remove_dir_all` does neither, so both cases are spelled out.
+    async fn remove_directory(&self, path: &str) -> Result<(), FileStoreError> {
+        let full = self.resolve(path);
+        let removed = match tokio::fs::symlink_metadata(&full).await {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => Err(err),
+            Ok(meta) if meta.is_dir() => tokio::fs::remove_dir_all(&full).await,
+            Ok(_) => tokio::fs::remove_file(&full).await,
+        };
+        match removed {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(|err| FileStoreError::io("remove", path, err)),
+        }
     }
 
     /// Port of `LocalFileBackend.MoveFile` (localstore.go:139): `MkdirAll(Dir(new), 0750)` then
@@ -849,6 +880,47 @@ mod go_parity {
 
         let not_a_dir = backend.read_file("brand/image/deeper").await.unwrap_err();
         assert!(!not_a_dir.is_not_found());
+    }
+
+    /// `RemoveDirectory` is `os.RemoveAll`: a tree goes, a plain file goes, a missing path is
+    /// success. Transcribed from `os.RemoveAll`'s contract rather than an oracle case; the three
+    /// branches are the ones `remove_dir_all` alone gets wrong.
+    #[tokio::test]
+    async fn remove_directory_is_remove_all() {
+        let root = tempdir::TempDir::new();
+        let backend = FileBackend::new(&FileBackendSettings::from_file_settings(
+            DRIVER_LOCAL,
+            &root.path().to_string_lossy(),
+        ));
+        backend
+            .write_file(b"x", "users/a/profile.png")
+            .await
+            .unwrap();
+        backend
+            .write_file(b"x", "users/a/deeper/more.png")
+            .await
+            .unwrap();
+        backend.write_file(b"x", "users/b").await.unwrap();
+
+        backend.remove_directory("users/a").await.unwrap();
+        assert!(!root.path().join("users/a").exists(), "the tree is gone");
+        backend.remove_directory("users/b").await.unwrap();
+        assert!(
+            !root.path().join("users/b").exists(),
+            "a plain file is removed too"
+        );
+        backend.remove_directory("users/missing").await.unwrap();
+        assert!(root.path().join("users").exists(), "and nothing else moved");
+
+        let s3 = FileBackend::new(&FileBackendSettings::from_file_settings("amazons3", ""));
+        assert!(!s3.is_supported());
+        assert!(backend.is_supported());
+        assert!(
+            s3.remove_directory("users/a")
+                .await
+                .unwrap_err()
+                .is_unsupported_driver()
+        );
     }
 
     /// A minimal scoped temporary directory. `tempfile` is not in the tree and this needs six

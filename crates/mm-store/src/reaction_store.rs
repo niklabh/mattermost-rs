@@ -78,6 +78,24 @@ pub trait ReactionStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
+
+    /// Port of `SqlReactionStore.PermanentDeleteByUser` (reaction_store.go:284).
+    ///
+    /// Two transactions. The first (`permanentDeleteReactions`) reads the `PostId` of every
+    /// reaction the user left — **one entry per reaction**, so a post reacted to twice appears
+    /// twice — and hard-deletes those rows, soft-deleted ones included. The second rewrites each
+    /// listed post's `HasReactions` from what is left (`COALESCE(DeleteAt, 0) = 0`) and stamps its
+    /// `UpdateAt` with one `now` taken **before** the first transaction, so every touched post
+    /// gets the same value.
+    ///
+    /// A failing `UPDATE` is a warning in Go and the loop goes on — but it has aborted the
+    /// transaction, every later statement fails too, and `Commit` then reports the failure. So one
+    /// failed update fails the whole call; see the impl. Go sleeps 10 ms between updates to spread
+    /// the load, and so does this.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -489,5 +507,87 @@ impl ReactionStore for SqlReactionStore {
             context: "failed while getting channelId from Posts".to_owned(),
             source,
         })
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, posts))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let now = mm_model::utils::get_millis();
+
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+        let post_ids: Vec<String> =
+            sqlx::query_scalar!("SELECT postid FROM reactions WHERE userid = $1", user_id)
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: format!("failed to get Reactions with userId={user_id}"),
+                    source,
+                })?;
+        // `sq.Eq{"PostId": postIds}` — an empty list renders `(1=0)`, and `= ANY('{}')` is false.
+        sqlx::query!(
+            "DELETE FROM reactions WHERE postid = ANY($1) AND userid = $2",
+            &post_ids,
+            user_id
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete reactions with userId={user_id}"),
+            source,
+        })?;
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+        tracing::Span::current().record("posts", post_ids.len());
+
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+        // The first failure is kept: it aborts the transaction, so Go's `Commit` fails and the
+        // call returns an error even though each `Exec` error was only logged. Postgres answers a
+        // `COMMIT` in an aborted transaction with a silent rollback, which sqlx reports as
+        // success — so the failure is carried here rather than read back from the commit.
+        let mut failed: Option<sqlx::Error> = None;
+        for post_id in &post_ids {
+            if let Err(source) = sqlx::query!(
+                r#"
+                UPDATE posts
+                   SET updateat = $1,
+                       hasreactions = (SELECT count(0) > 0 FROM reactions
+                                        WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)
+                 WHERE id = $2
+                "#,
+                now,
+                post_id
+            )
+            .execute(&mut *transaction)
+            .await
+            {
+                tracing::warn!(post_id, error = %source, "Unable to update Post.HasReactions while removing reactions");
+                failed.get_or_insert(source);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            })?;
+        match failed {
+            Some(source) => Err(StoreError::Db {
+                context: "commit_transaction".to_owned(),
+                source,
+            }),
+            None => Ok(()),
+        }
     }
 }

@@ -64,6 +64,16 @@ pub trait DraftStore {
         channel_id: &str,
         root_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlDraftStore.PermanentDeleteByUser` (draft_store.go:191).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// A hard delete, soft-deleted drafts included.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -358,6 +368,21 @@ impl DraftStore for SqlDraftStore {
                 })
             })
             .collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM drafts WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!(
+                    "PermanentDeleteByUser: failed to delete drafts for user: {user_id}"
+                ),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

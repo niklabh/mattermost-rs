@@ -132,6 +132,17 @@ pub trait UserAccessTokenStore {
         max_expires_at: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
+    /// Port of `SqlUserAccessTokenStore.DeleteAllForUser` (user_access_token_store.go:99).
+    ///
+    /// One transaction, two statements, in this order: every `Sessions` row minted by one of the
+    /// user's tokens (joined on the **secret**, `Sessions.Token = UserAccessTokens.Token`), then
+    /// the tokens. Reversed, the join would find nothing and the token sessions would outlive
+    /// their tokens.
+    fn delete_all_for_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -544,6 +555,39 @@ impl UserAccessTokenStore for SqlUserAccessTokenStore {
 
         tracing::Span::current().record("deleted", user_ids.len());
         Ok(user_ids)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    async fn delete_all_for_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let mut transaction = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // `deleteSessionsandTokensByUser`. A failure drops the transaction, which rolls back —
+        // Go's `finalizeTransactionX`.
+        sqlx::query!(
+            "DELETE FROM sessions s USING useraccesstokens o WHERE o.token = s.token AND o.userid = $1",
+            user_id
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Sessions with UserAccessToken userId={user_id}"),
+            source,
+        })?;
+        sqlx::query!("DELETE FROM useraccesstokens WHERE userid = $1", user_id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete UserAccessToken userId={user_id}"),
+                source,
+            })?;
+
+        transaction.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
     }
 }
 

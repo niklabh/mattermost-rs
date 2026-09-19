@@ -8087,7 +8087,11 @@ team**, then `channel_id` matching the URL.
 
 ## D-470 · `?permanent=true` forwards, because `PermanentDeleteUser` is eighteen store families
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+**Closed** 2026-09-19 — `mm_app::App::permanent_delete_user` ports every store call in Go's order
+with Go's per-call error ids, plus the file sweep and the 202 arm; served on both routes for an
+owner of no live bot (the rest is [D-472]'s forward). Pinned row-for-row by
+`parity::user_permanent_delete`. What remains is [D-472] and Go's cached profile ([D-190]).
 
 `App.PermanentDeleteUser` (app/user.go:2134) erases a user from `Sessions`, `UserAccessTokens`,
 `OAuthAccessData`, both `Webhooks` tables, `Commands`, `Preferences`, `ChannelMembers`,
@@ -8745,7 +8749,10 @@ names, if a client is ever found that depends on one of these edges. Until then 
 stands, pinned by `parity::file_upload::a_multipart_text_upload_matches_go`.
 ## D-600 · `DELETE /api/v4/users` (localPermanentDeleteAllUsers) needs an isolated database to test
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (user_local.go)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-14 (user_local.go)
+**Closed** 2026-09-19 — served (`mm_api::local_users::local_permanent_delete_all_users`), and
+tested by `parity::users_wipe` through `scripts/wipe-parity.sh`, which recreates a spare stack,
+erases it through Go and through us from one copied database, and compares every table.
 
 `localPermanentDeleteAllUsers` (api4/user_local.go) wipes **every** user in the database. The
 parity stacks share one Postgres between the two servers and every other suite, so exercising it
@@ -9217,3 +9224,18 @@ marketplace filter's 500 and body's 501, reattach's decoder and `IsValid` 400s �
 rest over Go's socket: the list, install, enable/disable/remove, reattach and detach all read or
 change plugins that run inside the Go process. The HTTP router forwards the same family whole
 under a Go host. Closes when the Rust host becomes the default (D-811).
+
+---
+
+## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
+
+`mm_api::go_cache::clear_user_sessions` makes Go forget a user's sessions by having it revoke a
+probe session through `POST /users/{id}/sessions/revoke`, authenticated as
+`MM_API_GO_CACHE_USER`. Go audits that request, so every deactivation (and permanent delete)
+served here adds an `Audits` row — action `/api/v4/users/<id>/sessions/revoke`, attributed to the
+cache administrator — that the same operation through Go does not. Measured by
+`parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
+route that Go does not audit, or deleting the row after the call.
+

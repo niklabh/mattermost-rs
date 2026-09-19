@@ -702,8 +702,8 @@ async fn a_local_account_lifecycle_matches_over_the_socket() {
     );
 
     // The permanent delete: no `EnableAPIUserDeletion` check on the socket (the flag is off on
-    // this stack, and the HTTP route refuses), and the erase is Go's — forwarded over the
-    // socket after our `GetUser`.
+    // this stack, and the HTTP route refuses). Served: the account owns no bot. Row-by-row
+    // parity of what it erases is `parity::user_permanent_delete`.
     let ((go_status, go_body), (rs_status, rs_body), served_here) = each_on_its_own(
         "DELETE",
         &format!("/api/v4/users/{go_id}?permanent=true"),
@@ -711,7 +711,7 @@ async fn a_local_account_lifecycle_matches_over_the_socket() {
         "",
     )
     .await;
-    assert!(!served_here, "the permanent delete is forwarded");
+    assert!(served_here, "the permanent delete is served here");
     assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
     assert_eq!(rs_status, 200, "{}", String::from_utf8_lossy(&rs_body));
     assert_eq!(go_body, rs_body);

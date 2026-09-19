@@ -15,7 +15,7 @@
 //! | `localGetUserByEmail` | no restrictions |
 //! | `localGetUserByAuthData` | no `IsSystemAdmin` gate, no `UserCanSeeOtherUser` |
 //! | `localGetUploadsForUser` | no `RequireUserId`, no self check — `me` is used as sent |
-//! | `localPermanentDeleteAllUsers` | *not served*: see [D-600] |
+//! | `localPermanentDeleteAllUsers` | nothing — it is local-only, and erases every account |
 //!
 //! "Removed" is the whole story: none of them adds a branch. Every one reuses the tail of its
 //! HTTP twin (`users::respond_with_user`, `users::serve_users`, …) so that the parts the two
@@ -63,15 +63,17 @@ use crate::{
 /// The registrations of `InitUserLocal` (api4/user_local.go:20), merged into
 /// [`crate::local::router`].
 ///
-/// `DELETE /api/v4/users` is deliberately absent: the `GET`/`POST` method router on that path
-/// falls through [`partially_migrated`] to the socket, so Go answers it — see [D-600].
 pub(crate) fn routes(state: &AppState) -> Router<AppState> {
     Router::new()
-        // `Users.Handle("", localGetUsers)` GET, `("", createUser)` POST; the DELETE
-        // (`localPermanentDeleteAllUsers`) is the method fallback's.
+        // `Users.Handle("", localGetUsers)` GET, `("", createUser)` POST and
+        // `("", localPermanentDeleteAllUsers)` DELETE.
         .route(
             "/api/v4/users",
-            partially_migrated(get(local_get_users).post(local_create_user)),
+            partially_migrated(
+                get(local_get_users)
+                    .post(local_create_user)
+                    .delete(local_permanent_delete_all_users),
+            ),
         )
         .route(
             "/api/v4/users/password/reset/send",
@@ -389,9 +391,9 @@ async fn local_get_user(
 ///
 /// `RequireUserId`, `GetUser`, then `PermanentDeleteUser` or `UpdateActive(user, false)` —
 /// **no** `EnableAPIUserDeletion` check on the permanent arm, unlike `deleteUser`: the socket
-/// erases accounts whether or not the API is allowed to. `PermanentDeleteUser` is not ported
-/// ([D-470]) and is forwarded after the `GetUser`, which Go repeats. The soft arm is
-/// `deleteUser`'s own tail: the bot-owner forward ([D-461]) and then the deactivation.
+/// erases accounts whether or not the API is allowed to. Both arms share `deleteUser`'s tails:
+/// the bot-owner forward ([D-472]) and then [`mm_app::App::permanent_delete_user`] or the
+/// deactivation.
 #[tracing::instrument(skip_all, fields(user_id, permanent, forwarded = false))]
 async fn local_delete_user(
     State(state): State<AppState>,
@@ -416,8 +418,18 @@ async fn local_delete_user(
     };
 
     if permanent {
-        tracing::Span::current().record("forwarded", true);
-        return forward_over_unix(&go.0, request).await;
+        match state.app.permanent_delete_needs_go(user_id).await {
+            Ok(true) => {
+                tracing::Span::current().record("forwarded", true);
+                return forward_over_unix(&go.0, request).await;
+            }
+            Ok(false) => {}
+            Err(err) => return ApiError::from(err).into_response(),
+        }
+        if let Err(err) = state.app.permanent_delete_user(&user).await {
+            return ApiError::from(err).into_response();
+        }
+        return user_updates::status_ok();
     }
 
     match state.app.owns_bots(user_id).await {
@@ -431,6 +443,41 @@ async fn local_delete_user(
     if let Err(err) = state.app.deactivate_user(&user).await {
         return ApiError::from(err).into_response();
     }
+    user_updates::status_ok()
+}
+
+/// Port of `localPermanentDeleteAllUsers` (api4/user_local.go:351): `App.PermanentDeleteAllUsers`
+/// and `{"status":"OK"}`.
+///
+/// **Every account in the database, the caller's administrators included**, and the answer is
+/// `OK` however many erasures failed — Go only logs them. The one refusal is `GetAll` failing.
+///
+/// Forwarded whole when any erasure in the sequence would reach the bot cascade; the list is read
+/// first and the decision taken from it, before the first write. See
+/// [`mm_app::App::permanent_delete_all_needs_go`] for why that is a question about order.
+///
+/// Tested only against a disposable stack (`scripts/wipe-parity.sh`): run against a shared one it
+/// would erase every suite's fixtures.
+#[tracing::instrument(skip_all, fields(users, forwarded = false))]
+async fn local_permanent_delete_all_users(
+    State(state): State<AppState>,
+    Extension(go): Extension<GoLocalSocket>,
+    request: Request,
+) -> Response {
+    let users = match state.app.get_all_users().await {
+        Ok(users) => users,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("users", users.len());
+    match state.app.permanent_delete_all_needs_go(&users).await {
+        Ok(true) => {
+            tracing::Span::current().record("forwarded", true);
+            return forward_over_unix(&go.0, request).await;
+        }
+        Ok(false) => {}
+        Err(err) => return ApiError::from(err).into_response(),
+    }
+    state.app.permanent_delete_users(&users).await;
     user_updates::status_ok()
 }
 

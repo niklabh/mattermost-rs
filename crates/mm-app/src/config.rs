@@ -208,7 +208,7 @@ pub struct Config {
     /// The single gate on `DELETE /api/v4/users/{user_id}?permanent=true`. Off — which is the
     /// default and what this deployment runs — the route answers 401 with one of two ids
     /// depending on whether the *caller* is a system admin, and writes nothing. On, it runs
-    /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
+    /// `App.PermanentDeleteUser` (`mm_app::App::permanent_delete_user`).
     pub enable_api_user_deletion: bool,
 
     /// `ServiceSettings.EnableAPITriggerAdminNotifications` (config.go:889). Go default

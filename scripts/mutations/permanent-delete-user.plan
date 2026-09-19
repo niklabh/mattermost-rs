@@ -1,0 +1,26 @@
+# Mutation plan for App.PermanentDeleteUser on the served routes — D-470 (2026-09-19).
+#
+#   scripts/mutate-batch.sh scripts/mutations/permanent-delete-user.plan
+#
+# The decisions a reader could get wrong: which replies go and whether their threads are
+# recounted, the by-anyone reply sweep under a deleted root, whose reactions go and how
+# HasReactions/UpdateAt are rewritten, the live-only file list, the preview sweep, the profile
+# directory and its 202, hard-vs-soft deletes, and the bot-owner forward. Not planned: the
+# token-session join (every session is already revoked by the deactivation), the ten-batch
+# fail-safe (10k posts), and the 500 arms (unit-tested; no route can fail a DELETE). The last
+# two lines are no-op controls and must SURVIVE.
+comments-take-roots-instead	crates/mm-store/src/post_store.rs	DELETE FROM posts WHERE userid = $1 AND rootid != ''	DELETE FROM posts WHERE userid = $1 AND rootid = ''	api	user_permanent_delete
+threads-not-recounted	crates/mm-store/src/post_store.rs	        update_thread_after_reply_deletion(&mut tx, &reply.root_id, user_id).await?;\n	        let _ = (&reply.root_id, user_id);\n	api	user_permanent_delete
+root-replies-by-others-kept	crates/mm-store/src/post_store.rs	sqlx::query!("DELETE FROM posts WHERE rootid = ANY($1)", ids)	sqlx::query!("DELETE FROM posts WHERE rootid = ANY($1) AND false", ids)	api	user_permanent_delete
+reactions-of-everyone	crates/mm-store/src/reaction_store.rs	"DELETE FROM reactions WHERE postid = ANY($1) AND userid = $2",	"DELETE FROM reactions WHERE postid = ANY($1) AND $2 = $2",	api	user_permanent_delete
+hasreactions-counts-deleted	crates/mm-store/src/reaction_store.rs	WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)\n                 WHERE id = $2\n                "#,\n                now,\n                post_id\n            )	WHERE postid = $2)\n                 WHERE id = $2\n                "#,\n                now,\n                post_id\n            )	api	user_permanent_delete
+updateat-not-stamped	crates/mm-store/src/reaction_store.rs	                   SET updateat = $1,\n                       hasreactions	                   SET updateat = COALESCE(updateat, $1),\n                       hasreactions	api	user_permanent_delete
+files-include-deleted	crates/mm-store/src/file_info_store.rs	             WHERE fileinfo.creatorid = $1\n               AND fileinfo.deleteat = 0	             WHERE fileinfo.creatorid = $1	api	user_permanent_delete
+preview-skipped	crates/mm-app/src/user_delete.rs	            if !info.preview_path.is_empty() {	            if info.preview_path.is_empty() {	api	user_permanent_delete
+profile-dir-kept	crates/mm-app/src/user_delete.rs	        if exists {\n	        if !exists {\n	api	user_permanent_delete
+stat-error-not-202	crates/mm-app/src/user_delete.rs	                file_handling_errors_found = true;\n                tracing::warn!(path = %profile_image_path	                tracing::warn!(path = %profile_image_path	api	user_permanent_delete
+team-members-soft-kept	crates/mm-store/src/team_store.rs	"DELETE FROM teammembers WHERE userid = $1"	"DELETE FROM teammembers WHERE userid = $1 AND deleteat = 0"	api	user_permanent_delete
+group-members-soft-kept	crates/mm-store/src/group_store.rs	"DELETE FROM groupmembers WHERE userid = $1"	"DELETE FROM groupmembers WHERE userid = $1 AND deleteat = 0"	api	user_permanent_delete
+bot-owner-served	crates/mm-app/src/user_delete.rs	        self.owns_bots(user_id).await\n	        let _ = self.owns_bots(user_id).await;\n        Ok(false)\n	api	user_permanent_delete
+CONTROL-rename-binding	crates/mm-app/src/user_delete.rs	        let profile_image_directory = format!("users/{id}");\n	        let profile_image_dir_renamed = format!("users/{id}");\n        let profile_image_directory = profile_image_dir_renamed;\n	api	user_permanent_delete
+CONTROL-reorder-selects	crates/mm-store/src/post_store.rs	r#"SELECT id AS "id!", rootid AS "root_id!" FROM posts WHERE userid = $1 AND rootid != ''"#	r#"SELECT rootid AS "root_id!", id AS "id!" FROM posts WHERE userid = $1 AND rootid != ''"#	api	user_permanent_delete

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM threads WHERE postid = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a96bf0d3ced1a1eb3ea9d2bfd8958d997156ba8d8534cd6c5c20c0e3916d7b3a"
+}

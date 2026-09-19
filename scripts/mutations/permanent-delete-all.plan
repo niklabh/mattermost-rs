@@ -1,0 +1,15 @@
+# Mutation plan for App.PermanentDeleteAllUsers — D-600 (2026-09-19). Runs on a spare stack:
+#
+#   scripts/wipe-parity.sh 6 (MMRS_WIPE_KEEP=1) once, then
+#   MMRS_STACK=6 MMRS_WIPE_PARITY=6 scripts/mutate-batch.sh scripts/mutations/permanent-delete-all.plan
+#
+# `users_wipe` restores its copied database however it ends, so the stack survives every line.
+# The decisions: the direction and strictness of the order test that decides the forward, the
+# order `GetAll` gives, and the forward itself. Not planned: `>=` against `>`, which only a
+# self-owned bot tells apart, and Go never finishes erasing one (users_wipe says why). The
+# last two lines are no-op controls.
+order-test-inverted	crates/mm-app/src/user_delete.rs	                ) && own >= owner	                ) && owner >= own	api	users_wipe
+getall-descending	crates/mm-store/src/user_store.rs	              LEFT JOIN bots b ON b.userid = u.id\n             ORDER BY u.username ASC\n            "#\n        )	              LEFT JOIN bots b ON b.userid = u.id\n             ORDER BY u.username DESC\n            "#\n        )	api	users_wipe
+cascade-never-forwards	crates/mm-app/src/user_delete.rs	                    tracing::Span::current().record("cascade", true);\n                    return Ok(true);	                    tracing::Span::current().record("cascade", true);	api	users_wipe
+CONTROL-extra-binding	crates/mm-app/src/user_delete.rs	        let position: HashMap<&str, usize> = users	        let control_count = users.len();\n        let _ = control_count;\n        let position: HashMap<&str, usize> = users	api	users_wipe
+CONTROL-reorder-selects	crates/mm-store/src/post_store.rs	r#"SELECT id AS "id!", rootid AS "root_id!" FROM posts WHERE userid = $1 AND rootid != ''"#	r#"SELECT rootid AS "root_id!", id AS "id!" FROM posts WHERE userid = $1 AND rootid != ''"#	api	users_wipe

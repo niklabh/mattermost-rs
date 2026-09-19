@@ -148,6 +148,24 @@ pub trait FileInfoStore {
         team_id: &str,
         page: i64,
     ) -> impl std::future::Future<Output = Result<FileInfoList, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.GetForUser` (file_info_store.go:384): the user's live files
+    /// (`CreatorId`, `DeleteAt = 0`), oldest first.
+    ///
+    /// Only `PermanentDeleteUser` calls it, for the paths it removes from the file store, so a
+    /// soft-deleted file keeps its bytes on disk while its row is deleted a moment later by
+    /// [`FileInfoStore::permanent_delete_by_user`] — Go's own orphan.
+    fn get_for_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<FileInfo>, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.PermanentDeleteByUser` (file_info_store.go:521): every row the
+    /// user created, soft-deleted or not, and the number removed.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -813,6 +831,88 @@ impl FileInfoStore for SqlFileInfoStore {
         }
         list.make_non_nil();
         Ok(list)
+    }
+
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, found))]
+    async fn get_for_user(&self, user_id: &str) -> Result<Vec<FileInfo>, StoreError> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT fileinfo.id                            AS "id!",
+                   fileinfo.creatorid                     AS "creator_id!",
+                   fileinfo.postid                        AS "post_id!",
+                   COALESCE(fileinfo.channelid, '')       AS "channel_id!",
+                   fileinfo.createat                      AS "create_at!",
+                   fileinfo.updateat                      AS "update_at!",
+                   fileinfo.deleteat                      AS "delete_at!",
+                   fileinfo.path                          AS "path!",
+                   fileinfo.thumbnailpath                 AS "thumbnail_path!",
+                   fileinfo.previewpath                   AS "preview_path!",
+                   fileinfo.name                          AS "name!",
+                   fileinfo.extension                     AS "extension!",
+                   fileinfo.size                          AS "size!",
+                   fileinfo.mimetype                      AS "mime_type!",
+                   fileinfo.width                         AS "width!",
+                   fileinfo.height                        AS "height!",
+                   fileinfo.haspreviewimage               AS "has_preview_image!",
+                   fileinfo.minipreview                   AS "mini_preview?",
+                   COALESCE(fileinfo.content, '')         AS "content!",
+                   COALESCE(fileinfo.remoteid, '')        AS "remote_id!",
+                   fileinfo.archived                      AS "archived!"
+              FROM fileinfo
+             WHERE fileinfo.creatorid = $1
+               AND fileinfo.deleteat = 0
+             ORDER BY fileinfo.createat
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find FileInfos with creatorId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        Ok(rows
+            .into_iter()
+            .map(|row| FileInfo {
+                id: row.id,
+                creator_id: row.creator_id,
+                post_id: row.post_id,
+                channel_id: row.channel_id,
+                create_at: row.create_at,
+                update_at: row.update_at,
+                delete_at: row.delete_at,
+                path: row.path,
+                thumbnail_path: row.thumbnail_path,
+                preview_path: row.preview_path,
+                name: row.name,
+                extension: row.extension,
+                size: row.size,
+                mime_type: row.mime_type,
+                width: i64::from(row.width),
+                height: i64::from(row.height),
+                has_preview_image: row.has_preview_image,
+                mini_preview: row.mini_preview,
+                content: row.content,
+                remote_id: Some(row.remote_id),
+                archived: row.archived,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<i64, StoreError> {
+        let result = sqlx::query!("DELETE FROM fileinfo WHERE creatorid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete FileInfo with creatorId={user_id}"),
+                source,
+            })?;
+        let deleted = result.rows_affected();
+        tracing::Span::current().record("deleted", deleted);
+        Ok(i64::try_from(deleted).unwrap_or(i64::MAX))
     }
 }
 

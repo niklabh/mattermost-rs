@@ -152,6 +152,18 @@ pub trait SessionStore {
     fn analytics_session_count(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.PermanentDeleteSessionsByUser` (session_store.go:306).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// Nothing here clears a cache. `PermanentDeleteUser` calls it right after `UpdateActive`,
+    /// whose `RevokeAllSessions` already told Go to forget every session of the user, so this only
+    /// sweeps a row written since.
+    fn permanent_delete_sessions_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of `me.sessionSelectQuery`, named so both queries share a mapping.
@@ -619,6 +631,19 @@ impl SessionStore for SqlSessionStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_sessions_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM sessions WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete Session with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 
