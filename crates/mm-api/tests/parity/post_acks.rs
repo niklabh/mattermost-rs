@@ -880,13 +880,11 @@ async fn me_resolves_to_the_caller_on_set_unread() {
     unwind(&client, &token, fixture).await;
 }
 
-/// `POST …/reminder` is forwarded whole — the one route of the four this server does not answer.
-///
-/// Pinned so that registering it by accident, or "finishing" it without the permalink-embed
-/// machinery its ephemeral confirmation needs, fails a test rather than shipping a websocket
-/// event with a missing preview. See [D-420].
+/// `POST …/reminder` on the fixture's DM post is served: its team-less permalink is fetched as an
+/// ordinary URL, as Go fetches it ([D-720], closed 2026-09-19). `parity::postrest` compares the
+/// confirmation itself.
 #[tokio::test]
-async fn the_reminder_route_is_forwarded_whole() {
+async fn the_reminder_route_is_served_on_a_dm_post() {
     if !stack_enabled() {
         return;
     }
@@ -904,11 +902,7 @@ async fn the_reminder_route_is_forwarded_whole() {
     let (go, ours) =
         post_both_allowing_forward(&client, &fixture.reader.token, &path, body.as_bytes()).await;
 
-    assert!(
-        !ours.2,
-        "the reminder route must still be forwarded; its ephemeral confirmation needs the \
-         permalink-embed path this port does not have"
-    );
+    assert!(ours.2, "the reminder on a DM post is served here");
     assert_eq!(go.0, 200, "Go sets the reminder");
     assert_eq!(
         (ours.0, String::from_utf8_lossy(&ours.1).into_owned()),

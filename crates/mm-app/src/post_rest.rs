@@ -194,12 +194,13 @@ impl App {
     ///
     /// The row is written, then the confirmation goes down the user's websocket as an
     /// `ephemeral_message` carrying a `reminder`-typed ephemeral post whose text embeds a
-    /// permalink to the reminded post. `PreparePostForClientWithEmbedsAndImages` turns that
-    /// permalink into a `permalink` embed — reproduced for a post in a **team** channel, whose
-    /// link is `{SiteURL}/{team}/pl/{id}`. A DM or group-channel post gets `{SiteURL}/pl/{id}`,
-    /// which `looksLikeAPermalink` rejects, so Go fetches it as an ordinary URL through the
-    /// outbound guard and records a `LinkMetadata` row — neither reproduced, and that branch
-    /// is refused **before** the reminder row is written so the caller can forward it whole.
+    /// permalink to the reminded post. `PreparePostForClientWithEmbedsAndImages` (`IsNewPost`)
+    /// turns a team channel's `{SiteURL}/{team}/pl/{id}` into a `permalink` embed. A DM or
+    /// group-channel post gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so it is
+    /// fetched as an ordinary URL through the outbound guard and leaves a `LinkMetadata` row —
+    /// served since 2026-09-19 ([D-720] closed). What the fetch can still refuse (a page the
+    /// parsers cannot reproduce) is decided **after** the reminder row is written, and the
+    /// forwarded request then writes the same upsert again, which changes nothing.
     ///
     /// Both store failures are the 500 `<untranslated>` (`model.NoTranslation`), a 404 from
     /// the existence check included: `SetPostReminder`'s `ErrNotFound` is wrapped like any
@@ -229,13 +230,6 @@ impl App {
                 app_error("SetPostReminder", NO_TRANSLATION, 500)
             })?;
 
-        // Decided before the write: see the doc comment.
-        if metadata.team_name.is_empty() {
-            return Err(PrepareError::Unreproducible(
-                "a DM or group-channel permalink is fetched, not previewed",
-            ));
-        }
-
         self.store()
             .post()
             .set_post_reminder(post_id, user_id, target_time)
@@ -247,7 +241,11 @@ impl App {
 
         let parsed_time = rfc822_utc(target_time);
         let site_url = self.config().site_url.clone().unwrap_or_default();
-        let permalink = format!("{site_url}/{}/pl/{post_id}", metadata.team_name);
+        let permalink = if metadata.team_name.is_empty() {
+            format!("{site_url}/pl/{post_id}")
+        } else {
+            format!("{site_url}/{}/pl/{post_id}", metadata.team_name)
+        };
 
         let mut props = StringInterface::new();
         props.insert("target_time".to_owned(), serde_json::json!(target_time));
@@ -413,7 +411,8 @@ impl App {
             )));
         }
 
-        // The forward decision, ahead of the write. A missing row is not decided here: Go
+        // The forward decision, ahead of the write ([D-881]): a link the read path could still
+        // refuse after the receipt exists would hand Go a reveal that is no longer the first. A missing row is not decided here: Go
         // reaches its 500 after the receipt exists, and so does this.
         let temporary = self.store().temporary_post().get(&post.id).await;
         if let Ok(temporary) = &temporary {

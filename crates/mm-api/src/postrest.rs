@@ -134,8 +134,8 @@ fn app_error(where_: &'static str, id: &str, status: i32) -> ApiError {
 ///
 /// `RequirePostId().RequireUserId()`: the post id is checked first and `me` is the session's
 /// user. Then the two permissions — the caller may act for the user, and may read the post —
-/// then the body, whose only field is `target_time` in **seconds**. Forwards a reminder on a DM
-/// or group-channel post; see [`mm_app::App::set_post_reminder`].
+/// then the body, whose only field is `target_time` in **seconds**. Forwards only what the
+/// confirmation's link preview cannot reproduce; see [`mm_app::App::set_post_reminder`].
 #[tracing::instrument(skip_all, fields(post_id = %post_id, user_id = %user_id, forwarded))]
 pub async fn set_post_reminder(
     State(state): State<AppState>,

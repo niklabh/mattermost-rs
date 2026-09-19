@@ -14155,3 +14155,11 @@ Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `
 | `getEmbedsAndImages`, `getLinkMetadata` and everything under it, `dyatlov/go-opengraph`, `x/net/html` tokenizer and `charset`, `parseImages`, `http.DetectContentType`, `LinkMetadataStore`, the `permalink` broadcast hook, `SanitizePostMetadataForUser` | `mm-app/src/link_metadata.rs`, `opengraph.rs`, `link_image.rs`, `broadcast_hooks.rs`, `notification.rs`, `post_create.rs`; `mm-model/src/opengraph.rs`, `go_html.rs`, `go_charset.rs`, `post_embed.rs`; `mm-store/src/link_metadata_store.rs` | DONE (create) | 6 parity; unit oracles: link selection 7, OpenGraph/HTML/charset/URL (mm-model + `opengraph` 6), images and sniffing 12 | A link's preview is fetched through the outbound guard on the pre-save post (OpenGraph, image, plain link, or a permalink with its `previewed_post` prop) and the permalink is taken off the `posted` frame and put back per recipient; compared with `scripts/go-links.sh` (Go + 50, allowed to reach a mock on 127.0.0.1). Reads of such posts still forward ([D-860]). |
 
 Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run, 74 caught, 7 survived — the six controls and `sanitize-keeps-a-hidden-preview`, unreachable on the create path (see `App::sanitize_created_post_metadata_for_user`); two first-run survivors were caught after a test was added for each.
+
+## Post reads with a link — D-860 and D-720 closed (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages(post, false)` on every read, edit and ephemeral path; `SetPostReminder`'s team-less permalink; `createEphemeralPost`'s second prepare; `getPostsByIds`' embed-less prepare | `mm-app/src/link_metadata.rs`, `post.rs`, `post_write.rs`, `post_rest.rs`; `mm-api/src/posts.rs`, `post_writes.rs` | DONE (reads) | 7 parity (`post_link_reads`) + guards moved in `post_get`, `channel_posts`, `postrest`, `post_acks` | Every read answers a link from the creating process's cache or the `LinkMetadata` row, never a fetch, except a URL past 2,048 bytes (the cache decision is on `LinkCache`); `getPostsByIds` runs `PreparePostForClient` alone and an ephemeral answer carries its embed twice — both were wrong here and hidden by the old forward. |
+
+Mutation tally (`post-link-reads.plan`): 18 run, 16 caught, 2 controls survived.

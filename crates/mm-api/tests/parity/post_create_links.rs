@@ -45,7 +45,7 @@ fn go_port() -> u16 {
 }
 
 /// `scripts/go-links.sh port` — Go's port + 50.
-fn links_go() -> String {
+pub(super) fn links_go() -> String {
     format!("http://localhost:{}", go_port() + 50)
 }
 
@@ -55,8 +55,8 @@ fn links_go() -> String {
 
 /// One request the website saw: the path and the headers a preview fetch sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Seen {
-    path: String,
+pub(super) struct Seen {
+    pub(super) path: String,
     accept: Vec<String>,
     accept_language: String,
     user_agent: String,
@@ -118,9 +118,9 @@ async fn serve(
     response
 }
 
-struct Website {
+pub(super) struct Website {
     site: Shared,
-    base: String,
+    pub(super) base: String,
 }
 
 impl Website {
@@ -150,14 +150,14 @@ impl Website {
         Website { site, base }
     }
 
-    fn page(&self, path: &str, status: u16, content_type: Option<&str>, body: &[u8]) {
+    pub(super) fn page(&self, path: &str, status: u16, content_type: Option<&str>, body: &[u8]) {
         self.site.lock().unwrap().pages.insert(
             path.to_owned(),
             (status, content_type.map(str::to_owned), body.to_vec()),
         );
     }
 
-    fn take_seen(&self) -> Vec<Seen> {
+    pub(super) fn take_seen(&self) -> Vec<Seen> {
         std::mem::take(&mut self.site.lock().unwrap().seen)
     }
 }
@@ -166,27 +166,27 @@ impl Website {
 // The pair and the fixture
 // ---------------------------------------------------------------------------------------------
 
-struct Fixture {
-    rust: String,
+pub(super) struct Fixture {
+    pub(super) rust: String,
     _server: SecondServer,
-    site: Website,
-    team_name: String,
+    pub(super) site: Website,
+    pub(super) team_name: String,
     /// A public channel the admin posts into.
-    channel_id: String,
+    pub(super) channel_id: String,
     /// A private channel `reader` is **not** in, holding a post to preview.
-    private_id: String,
-    reader: common::PlainUser,
+    pub(super) private_id: String,
+    pub(super) reader: common::PlainUser,
 }
 
 static FIXTURE: tokio::sync::OnceCell<Fixture> = tokio::sync::OnceCell::const_new();
 
 /// The website's request log is one list, so the tests of this suite take turns: two cases
 /// fetching at once would interleave their requests and neither comparison would hold.
-static WEBSITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(super) static WEBSITE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Panics rather than skips when the oracle is missing, for the reason `common::licensed` gives:
 /// a suite whose oracle is absent passes every test while asserting nothing.
-async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
+pub(super) async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
     FIXTURE
         .get_or_init(|| async {
             let go = links_go();
@@ -238,7 +238,7 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
 }
 
 /// A fresh nonce per call, so neither server's link cache has seen the URL.
-fn nonce() -> String {
+pub(super) fn nonce() -> String {
     format!(
         "{}{}",
         std::process::id(),
@@ -251,7 +251,7 @@ fn nonce() -> String {
 
 /// A `create_at` both servers accept from the admin, well inside one hour: the start of the
 /// current hour plus a minute, so the two posts and the one `LinkMetadata` row share an hour.
-fn create_at() -> i64 {
+pub(super) fn create_at() -> i64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -259,7 +259,7 @@ fn create_at() -> i64 {
     now - now.rem_euclid(3_600_000) + 60_000
 }
 
-async fn create(
+pub(super) async fn create(
     client: &reqwest::Client,
     base: &str,
     token: &str,
@@ -283,7 +283,7 @@ async fn create(
 
 /// The body **text** with the post's id and clocks blanked. Text, not a parsed value, because an
 /// OpenGraph embed's key order is Go's struct order, which a `serde_json::Value` would sort away.
-fn normalised_text(body: &str) -> String {
+pub(super) fn normalised_text(body: &str) -> String {
     let value: serde_json::Value = serde_json::from_str(body).expect("a JSON body");
     let mut text = body.to_owned();
     if let Some(id) = value["id"].as_str() {
@@ -297,10 +297,10 @@ fn normalised_text(body: &str) -> String {
     text
 }
 
-type LinkRow = (String, i64, String, Option<serde_json::Value>);
+pub(super) type LinkRow = (String, i64, String, Option<serde_json::Value>);
 
 /// The `LinkMetadata` row for `url` at `hour`, if any.
-async fn link_row(url: &str, hour: i64) -> Option<LinkRow> {
+pub(super) async fn link_row(url: &str, hour: i64) -> Option<LinkRow> {
     let pool = fixture_pool().await.expect("DATABASE_URL");
     sqlx::query_as(
         r#"SELECT url, "timestamp", type, data FROM linkmetadata WHERE url = $1 AND "timestamp" = $2"#,
@@ -312,7 +312,7 @@ async fn link_row(url: &str, hour: i64) -> Option<LinkRow> {
     .expect("the link metadata query")
 }
 
-async fn delete_link_rows(urls: &[String]) {
+pub(super) async fn delete_link_rows(urls: &[String]) {
     let pool = fixture_pool().await.expect("DATABASE_URL");
     sqlx::query("DELETE FROM linkmetadata WHERE url = ANY($1)")
         .bind(urls)
@@ -322,7 +322,7 @@ async fn delete_link_rows(urls: &[String]) {
 }
 
 /// The `Props` column of a saved post.
-async fn saved_props(post_id: &str) -> serde_json::Value {
+pub(super) async fn saved_props(post_id: &str) -> serde_json::Value {
     let pool = fixture_pool().await.expect("DATABASE_URL");
     let props: Option<serde_json::Value> =
         sqlx::query_scalar("SELECT props FROM posts WHERE id = $1")
@@ -336,7 +336,7 @@ async fn saved_props(post_id: &str) -> serde_json::Value {
 /// Post `message` to both servers as the admin with a fixed `create_at`, and assert the two
 /// answers, the requests each made of the website, and the `LinkMetadata` rows they left for
 /// `fetched` agree. Returns Go's body.
-async fn compare(
+pub(super) async fn compare(
     client: &reqwest::Client,
     token: &str,
     f: &Fixture,
@@ -401,7 +401,7 @@ async fn compare(
 // ---------------------------------------------------------------------------------------------
 
 /// A 3×2 RGB PNG.
-fn png() -> Vec<u8> {
+pub(super) fn png() -> Vec<u8> {
     fn chunk(out: &mut Vec<u8>, kind: &[u8], data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_be_bytes());
         let mut crc_input = kind.to_vec();
@@ -447,7 +447,7 @@ fn png() -> Vec<u8> {
 }
 
 /// A 5×4 GIF of two frames, each an empty 1×1 image.
-fn animated_gif() -> Vec<u8> {
+pub(super) fn animated_gif() -> Vec<u8> {
     let mut out = b"GIF89a".to_vec();
     out.extend_from_slice(&5u16.to_le_bytes());
     out.extend_from_slice(&4u16.to_le_bytes());
@@ -485,7 +485,7 @@ fn rotated_jpeg() -> (Vec<u8>, i64, i64) {
     )
 }
 
-fn og_page(n: &str) -> String {
+pub(super) fn og_page(n: &str) -> String {
     let long = "é".repeat(310);
     format!(
         r#"<!DOCTYPE html><html><head>

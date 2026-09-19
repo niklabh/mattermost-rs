@@ -1663,11 +1663,11 @@ async fn serve_posts_by_ids(
             continue;
         }
 
-        let mut prepared = match state
-            .app
-            .prepare_post_for_client_with_embeds_and_images(post, opts)
-            .await
-        {
+        // `PreparePostForClient`, **not** the embeds-and-images variant: this route never
+        // previews a link, so a post with one comes back with its emojis, files, reactions and
+        // priority and no `embeds` or `images`, where `getPost` answers the same post with its
+        // preview. Hidden until 2026-09-19 because any post with a link was forwarded.
+        let mut prepared = match state.app.prepare_post_for_client(post, opts).await {
             Ok(prepared) => prepared,
             Err(PrepareError::Unreproducible(reason)) => {
                 tracing::debug!(reason, post_id = %post.id, "forwarding to Go");

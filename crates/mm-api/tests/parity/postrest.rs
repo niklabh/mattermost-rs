@@ -344,10 +344,11 @@ async fn unwind(client: &reqwest::Client, admin: &str, fixture: Fixture) {
 // ---------------------------------------------------------------------------------------------
 
 /// A reminder on a team-channel post is served, its row written, and the confirmation on the
-/// reader's socket — permalink embed included — is Go's; a reminder on a DM post is forwarded;
+/// reader's socket — permalink embed included — is Go's; so is a reminder on a DM post, whose
+/// permalink is fetched;
 /// and the five refusals ahead of the write are served.
 #[tokio::test]
-async fn reminder_on_a_team_channel_post_is_served_and_a_dm_one_forwarded() {
+async fn reminders_on_a_team_channel_post_and_a_dm_post_are_served() {
     if !stack_enabled() {
         return;
     }
@@ -456,18 +457,62 @@ async fn reminder_on_a_team_channel_post_is_served_and_a_dm_one_forwarded() {
         "addressed to the reader"
     );
 
-    // A DM post's permalink has no team segment: Go fetches it, and we hand it to Go.
-    let (go, ours) = both(
+    // A DM post's permalink has no team segment, so `looksLikeAPermalink` rejects it and it is
+    // fetched as an ordinary URL — served since 2026-09-19 ([D-720]). The site URL is loopback,
+    // which the outbound guard refuses on both servers, so the confirmation carries no embed.
+    let mut go_probe = SocketProbe::connect(GO, &reader.token).await;
+    let mut rs_probe = SocketProbe::connect(RUST, &reader.token).await;
+    let go = ask(
         &client,
+        GO,
         reqwest::Method::POST,
         Some(&reader.token),
         &path(&reader.id, &dm_post),
         Some(body(4_102_444_800).as_bytes()),
     )
     .await;
-    assert_eq!((go.0, text(&go.1)), (200, r#"{"status":"OK"}"#.to_owned()));
-    assert_eq!(ours.0, 200);
-    assert!(!ours.2, "the DM reminder is forwarded");
+    let ours = ask(
+        &client,
+        RUST,
+        reqwest::Method::POST,
+        Some(&reader.token),
+        &path("me", &dm_post),
+        Some(body(4_102_448_400).as_bytes()),
+    )
+    .await;
+    assert_status_ok(&go, &ours, "reminder on a DM post");
+    assert!(ours.2, "the DM reminder is served");
+    let go_events = events(&mut go_probe, "ephemeral_message").await;
+    let rs_events = events(&mut rs_probe, "ephemeral_message").await;
+    assert_eq!(
+        (go_events.len(), rs_events.len()),
+        (1, 1),
+        "one confirmation each"
+    );
+    let mut confirmations = Vec::new();
+    for event in [&go_events[0], &rs_events[0]] {
+        let mut value: serde_json::Value =
+            serde_json::from_str(event["data"]["post"].as_str().expect("a post string"))
+                .expect("the post decodes");
+        value["id"] = serde_json::Value::String(String::new());
+        value["create_at"] = serde_json::json!(0);
+        value["props"]["target_time"] = serde_json::json!(0);
+        let message = value["message"].as_str().unwrap_or_default().to_owned();
+        let trimmed = message.split(" at ").next().unwrap_or_default().to_owned();
+        value["message"] = serde_json::Value::String(trimmed);
+        confirmations.push(value);
+    }
+    assert_eq!(
+        confirmations[0], confirmations[1],
+        "the DM confirmation differs"
+    );
+    assert!(
+        confirmations[0]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains(&format!("/pl/{dm_post}"))),
+        "the team-less permalink: {}",
+        confirmations[0]
+    );
 
     // The refusals, in the handler's order.
     let (go, ours) = both(

@@ -1024,11 +1024,15 @@ pub async fn create_ephemeral_post(
         .into_response();
     }
 
-    match state
+    let answered = match state
         .app
         .send_ephemeral_post(&ephemeral.user_id, post)
         .await
     {
+        Ok(sent) => prepare_ephemeral_answer(&state, &session, sent).await,
+        Err(err) => Err(err),
+    };
+    match answered {
         Ok(sent) => match created_post(sent) {
             Ok(response) => response,
             Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
@@ -1045,6 +1049,39 @@ pub async fn create_ephemeral_post(
             proxy::forward_to_go(State(state), Request::from_parts(parts, bytes.into())).await
         }
     }
+}
+
+/// The handler's own second pass over what `SendEphemeralPost` returned (api4/post.go:247):
+/// `PreparePostForClientWithEmbedsAndImages` again, then `SanitizePostMetadataForUser` for the
+/// **caller** rather than the recipient.
+///
+/// The second prepare starts from a post that already carries its metadata, and
+/// `getEmbedsAndImages` **appends**: a post with a link comes back with its embed twice, the
+/// second from the link cache the first pass filled. A post with no link comes back as it went
+/// in. Nothing here can fetch — the first pass fetched and cached every link — so the forward
+/// this function can still return is the one `PreparePostForClient` makes on shape, which the
+/// first pass would already have made.
+async fn prepare_ephemeral_answer(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    sent: mm_model::post::Post,
+) -> Result<mm_model::post::Post, PrepareError> {
+    let prepared = state
+        .app
+        .prepare_post_for_client_with_embeds_and_images(
+            &sent,
+            mm_app::post::PreparePostForClientOpts {
+                is_new_post: true,
+                include_priority: true,
+                ..mm_app::post::PreparePostForClientOpts::default()
+            },
+        )
+        .await?;
+    let (sanitized, _is_member_for_previews) = state
+        .app
+        .sanitize_post_metadata_for_user(prepared, &session.0.user_id)
+        .await?;
+    Ok(sanitized)
 }
 
 /// Port of `c.RequirePostId().RequireUserId()` (web/context.go:411, :296) — **in that order**,

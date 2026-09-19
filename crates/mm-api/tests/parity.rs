@@ -136,6 +136,7 @@ mod parity {
     pub mod post_edit_history;
     pub mod post_get;
     pub mod post_info;
+    pub mod post_link_reads;
     pub mod post_reactions;
     pub mod post_thread;
     pub mod post_writes;
