@@ -169,6 +169,9 @@ up_stack() {
   # The PostEditTimeLimit=0 oracle, for the edit-limit branch nothing else can reach (D-222).
   MMRS_STACK="$k" "$ROOT/scripts/go-edit-limit.sh" start >/dev/null
   echo "  edit-limit oracle up"
+  # The EnableTesting=true oracle: the only Go server that registers `GET /manualtest`.
+  MMRS_STACK="$k" MMRS_EDITLIMIT_VARIANT=testing "$ROOT/scripts/go-edit-limit.sh" start >/dev/null
+  echo "  testing oracle up"
   # The licensed oracle — the one that gives the licensed half of a route a Go answer at all.
   # `common::licensed` panics rather than skips when it is missing, for the reason above.
   MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" start >/dev/null
@@ -201,6 +204,7 @@ down_stack() {
   MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-discoverable.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-edit-limit.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" MMRS_EDITLIMIT_VARIANT=testing "$ROOT/scripts/go-edit-limit.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=guest "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true
   MMRS_STACK="$k" MMRS_LICENSED_VARIANT=mfa "$ROOT/scripts/go-licensed.sh" stop >/dev/null 2>&1 || true

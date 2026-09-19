@@ -11,6 +11,8 @@ hand. This produces it from the two sources of truth:
     routers, so the same path+method can legitimately appear in both.
   * `crates/mm-api/src/lib.rs` — the axum chain, parsed by matching parentheses rather than by
     line, since a `.route(...)` call spans as many lines as its comment needs.
+  * `crates/mm-api/src/web_static.rs` — the HTTP router's fallback, for the one api4 route it
+    dispatches (`FALLBACK_SERVED`).
   * `crates/mm-api/src/local.rs` — the **second** axum chain. The local-mode routes land on a
     different router bound to a unix socket, so a local route served there is invisible to a
     parse of `lib.rs` alone; before 2026-09-11 this script hardcoded every local pair as
@@ -305,10 +307,28 @@ def served_in(text):
     return out
 
 
+# Pairs the HTTP router serves through its **fallback**, `web_static::fallback`, rather than a
+# `.route(...)`: Go registers `GET /manualtest` only when `EnableTesting` is on at start
+# (api4/api.go:414), and on the root router, under the subpath — so the port decides it where it
+# decides the web client's routes (`web_static::classify`) and not in the axum table. Each pair
+# counts only while the pattern that sends it to its handler is present in `web_static.rs`.
+WEBSTATIC = ROOT / "crates/mm-api/src/web_static.rs"
+FALLBACK_SERVED = [
+    ("GET", "/manualtest",
+     r'rel == "/manualtest" && \*method == Method::GET \{\s*return Route::ManualTest;'),
+]
+
+
+def served_through_fallback():
+    text = WEBSTATIC.read_text() if WEBSTATIC.exists() else ""
+    return {(method, path) for method, path, pattern in FALLBACK_SERVED
+            if re.search(pattern, text)}
+
+
 def main():
     args = set(sys.argv[1:])
     routes = collect()
-    have = served() | served_through_merges(LIBRS)
+    have = served() | served_through_merges(LIBRS) | served_through_fallback()
     # The local router is `local.rs` plus the `local_<family>.rs` modules it `.merge`s — a family
     # ports as its own module (see `local::router`), so a parse of `local.rs` alone would miss
     # every merged family. Union them all.

@@ -544,6 +544,29 @@ pub fn new_random_string(length: usize) -> String {
     encoded.chars().take(length).collect()
 }
 
+/// `utils.LOWERCASE` (channels/utils/textgeneration.go:15).
+pub const LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
+
+/// Port of `utils.RandString` (channels/utils/textgeneration.go:470): `length` bytes, each drawn
+/// uniformly from `charset`.
+///
+/// Go draws from `math/rand`'s **global** source, which is randomly seeded and — since Go 1.24 —
+/// cannot be re-seeded by `rand.Seed`, so no caller can observe which generator produced the
+/// bytes. This one is `rand`'s thread generator. An empty `charset` yields an empty string where
+/// Go's `rand.Intn(0)` panics. Go indexes bytes, so the charset is meant to be ASCII, as every
+/// one in `textgeneration.go` is.
+pub fn rand_string(length: usize, charset: &str) -> String {
+    use rand::Rng as _;
+    let bytes = charset.as_bytes();
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let mut rng = rand::rng();
+    (0..length)
+        .map(|_| char::from(bytes[rng.random_range(0..bytes.len())]))
+        .collect()
+}
+
 /// z-base-32, no padding — the encoding half of `base32.NewEncoding(...)` at utils.go:378.
 fn zbase32_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(input.len().div_ceil(5) * 8);
@@ -2035,6 +2058,16 @@ pub fn parse_hashtags(text: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rand_string_draws_length_bytes_from_the_charset() {
+        let name = super::rand_string(20, super::LOWERCASE);
+        assert_eq!(name.len(), 20);
+        assert!(name.bytes().all(|b| b.is_ascii_lowercase()), "{name}");
+        assert_eq!(super::rand_string(3, "x"), "xxx");
+        assert_eq!(super::rand_string(0, super::LOWERCASE), "");
+        assert_eq!(super::rand_string(5, ""), "");
+    }
+
     use super::*;
 
     // -- encoding / IDs ----------------------------------------------------
@@ -3186,7 +3219,7 @@ pub fn go_quote(s: &str) -> String {
 /// ranges `reference/dump/quote_gen.go` emits from the linked Go toolchain, and the corpus probes
 /// **both sides of every one of those boundaries**, so a range that moves fails at the code point
 /// that moved.
-fn go_is_print(c: char) -> bool {
+pub fn go_is_print(c: char) -> bool {
     in_ranges(crate::go_unicode_generated::IS_PRINT_RANGES, c)
 }
 

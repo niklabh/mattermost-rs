@@ -1656,10 +1656,8 @@ impl App {
     ///
     /// # The id guard runs **before** `PreSave`
     ///
-    /// `Save` refuses a non-empty `Id` first, then pre-saves. `PreSave` *assigns* an id when the
-    /// field is empty, so validating after it could never see a client-supplied one. The order is
-    /// reproduced here rather than in the store, for the reason [`mm_store::team_store::save`]
-    /// sets out.
+    /// That is [`App::save_team`]'s, which is `SqlTeamStore.Save` and is all of this but the
+    /// invite-id clear and the default channels.
     ///
     /// # The default channels are part of the create, and their failures are not swallowed
     ///
@@ -1672,26 +1670,47 @@ impl App {
     pub async fn create_team(&self, team: &mut Team) -> AppResult<Team> {
         team.invite_id = String::new();
 
-        if !team.id.is_empty() {
-            return Err(create_team_error(mm_store::StoreError::InvalidInput {
-                entity: "Team",
-                field: "id",
-                value: team.id.clone(),
-            }));
-        }
-
-        team.pre_save();
-        team.is_valid()?;
-
-        let saved = self
-            .store()
-            .team()
-            .save(team)
-            .await
-            .map_err(create_team_error)?;
+        let saved = self.save_team(team).await.map_err(create_team_error)?;
         tracing::Span::current().record("team_id", &saved.id);
 
         self.create_default_channels(&saved.id).await?;
+        Ok(saved)
+    }
+
+    /// Port of `SqlTeamStore.Save` (sqlstore/team_store.go:280) — what `c.App.Srv().Store().Team()
+    /// .Save(team)` does, for a caller that goes to the store directly (`manualtesting`).
+    ///
+    /// # The id guard runs **before** `PreSave`
+    ///
+    /// `Save` refuses a non-empty `Id` first, then pre-saves. `PreSave` *assigns* an id when the
+    /// field is empty, so validating after it could never see a client-supplied one. The order is
+    /// reproduced here rather than in the store, for the reason [`mm_store::team_store::save`]
+    /// sets out: the model's `IsValid` is in `mm-model`, which the store does not validate with.
+    ///
+    /// # Errors, as Go's `Save` returns them
+    ///
+    /// The refused id is `store.ErrInvalidInput` on `("Team", "id")`, an `IsValid` failure the
+    /// model's `*AppError` ([`mm_store::StoreError::Invalid`]), and the insert's own errors are the
+    /// store's. Each caller maps them itself, as each Go caller does.
+    #[tracing::instrument(skip_all, fields(team_id))]
+    pub async fn save_team(&self, team: &mut Team) -> Result<Team, mm_store::StoreError> {
+        if !team.id.is_empty() {
+            return Err(mm_store::StoreError::InvalidInput {
+                entity: "Team",
+                field: "id",
+                value: team.id.clone(),
+            });
+        }
+
+        team.pre_save();
+        team.is_valid()
+            .map_err(|app_error| mm_store::StoreError::Invalid {
+                entity: "Team",
+                app_error,
+            })?;
+
+        let saved = self.store().team().save(team).await?;
+        tracing::Span::current().record("team_id", &saved.id);
         Ok(saved)
     }
 

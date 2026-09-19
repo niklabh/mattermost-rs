@@ -291,4 +291,6 @@ mod parity {
     pub mod sysops;
     // Appended 2026-09-16: PostEditTimeLimit against its own Go oracle (D-222).
     pub mod post_edit_time_limit;
+    // Appended 2026-09-20: GET /manualtest against the EnableTesting oracle (D-782).
+    pub mod manualtest;
 }
