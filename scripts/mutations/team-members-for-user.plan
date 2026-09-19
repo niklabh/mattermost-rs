@@ -1,0 +1,14 @@
+# Mutation plan for getTeamMembersForUser over any user id (2026-09-19): the two-permission
+# gate, the visibility refusal, the deleted-rows flag and the per-team sanitiser guard.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-members-for-user.plan
+gate-either-refusal-denies	crates/mm-api/src/teams.rs	!has_permission_to_user().await && !has_read_other_users_teams().await	!has_permission_to_user().await || !has_read_other_users_teams().await	api	team_members_for_user
+gate-fallback-dropped	crates/mm-api/src/teams.rs	!has_permission_to_user().await && !has_read_other_users_teams().await	!has_permission_to_user().await	api	team_members_for_user
+gate-user-check-dropped	crates/mm-api/src/teams.rs	!has_permission_to_user().await && !has_read_other_users_teams().await	!has_read_other_users_teams().await	api	team_members_for_user
+visibility-ignored	crates/mm-api/src/teams.rs	    if !can_see {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_VIEW_MEMBERS],	    if false {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_VIEW_MEMBERS],	api	team_members_for_user
+deleted-excluded	crates/mm-api/src/teams.rs	.get_team_members_for_user(&user_id, "", true)	.get_team_members_for_user(&user_id, "", false)	api	team_members_for_user
+sanitiser-guard-wrong-permission	crates/mm-api/src/teams.rs	                &PERMISSION_MANAGE_TEAM_ROLES,\n	                &PERMISSION_MANAGE_SYSTEM,\n	api	team_members_for_user
+sanitiser-guard-wrong-team	crates/mm-api/src/teams.rs	                &member.team_id,\n                &PERMISSION_MANAGE_TEAM_ROLES,	                &member.user_id,\n                &PERMISSION_MANAGE_TEAM_ROLES,	api	team_members_for_user
+sanitiser-never-runs	crates/mm-api/src/teams.rs	            member.sanitize_role_data(current_user_id);\n        }\n    }\n\n    tracing::Span::current().record("count", members.len());	            let _ = current_user_id;\n        }\n    }\n\n    tracing::Span::current().record("count", members.len());	api	team_members_for_user
+control-binding-rename	crates/mm-api/src/teams.rs	    let can_see = state\n        .app\n        .user_can_see_other_user(&session.0.user_id, &user_id)\n        .await\n        .map_err(|err| ApiError::from(*err))?;\n    if !can_see {	    let visible = state\n        .app\n        .user_can_see_other_user(&session.0.user_id, &user_id)\n        .await\n        .map_err(|err| ApiError::from(*err))?;\n    if !visible {	api	team_members_for_user
+control-log-message	crates/mm-api/src/teams.rs	"failed to serialise team members"	"failed to serialize team members"	api	team_members_for_user
