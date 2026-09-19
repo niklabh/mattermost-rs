@@ -206,6 +206,38 @@ fn normalise(mut info: serde_json::Value) -> serde_json::Value {
     info
 }
 
+/// The three stored paths of a FileInfo row — `json:"-"` in Go, so never on the wire and only
+/// readable from the table — reduced to what two uploads can share: the thumbnail's and preview's
+/// file names, and whether each sits in the original's directory.
+async fn stored_paths(file_id: &str) -> serde_json::Value {
+    let url = std::env::var("DATABASE_URL").expect("the parity stack's database");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("the database answers");
+    let (path, thumb, preview): (String, String, String) =
+        sqlx::query_as("SELECT path, thumbnailpath, previewpath FROM fileinfo WHERE id = $1")
+            .bind(file_id)
+            .fetch_one(&pool)
+            .await
+            .expect("the row exists");
+    let dir = |p: &str| {
+        p.rsplit_once('/')
+            .map_or(String::new(), |(d, _)| d.to_owned())
+    };
+    let base = |p: &str| {
+        p.rsplit_once('/')
+            .map_or(p.to_owned(), |(_, b)| b.to_owned())
+    };
+    serde_json::json!({
+        "thumb_name": base(&thumb),
+        "preview_name": base(&preview),
+        "thumb_beside_original": !thumb.is_empty() && dir(&thumb) == dir(&path),
+        "preview_beside_original": !preview.is_empty() && dir(&preview) == dir(&path),
+    })
+}
+
 /// `GET /files/{id}/thumbnail` and `/preview` from one server: the status and bytes of each.
 async fn derived(
     client: &reqwest::Client,
@@ -279,7 +311,9 @@ async fn every_corpus_image_uploads_identically() {
             let info = first_info(&body);
             let file_id = info["id"].as_str().expect("a file id").to_owned();
             let files = derived(&client, base, &token, &file_id).await;
-            seen.push((normalise(info), files));
+            let mut row = normalise(info);
+            row["stored_paths"] = stored_paths(&file_id).await;
+            seen.push((row, files));
         }
         assert_eq!(seen[0].0, seen[1].0, "{label}: the FileInfo rows differ");
         assert_eq!(
@@ -433,7 +467,9 @@ async fn the_uploads_route_completes_images_identically() {
             let info: serde_json::Value = serde_json::from_slice(&reply).expect("a FileInfo");
             let file_id = info["id"].as_str().unwrap().to_owned();
             let files = derived(&client, base, &token, &file_id).await;
-            seen.push((normalise(info), files));
+            let mut row = normalise(info);
+            row["stored_paths"] = stored_paths(&file_id).await;
+            seen.push((row, files));
         }
         assert_eq!(seen[0].0, seen[1].0, "{label}: the FileInfo rows differ");
         assert_eq!(seen[0].1, seen[1].1, "{label}: the derived files differ");

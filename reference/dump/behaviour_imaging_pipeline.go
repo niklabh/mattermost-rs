@@ -217,6 +217,11 @@ func imagingPipelineStage() (map[string]any, error) {
 			return (&png.Encoder{}).Encode(b, imgSpec{"nrgba", sz[0], sz[1], "gradient", "opaque", 8006, 0, ""}.build())
 		}))
 	}
+	// A 1920-wide JPEG: GeneratePreview hands back the decoded Y'CbCr image itself, which the
+	// JPEG encoder converts differently from the NRGBA a resize would produce.
+	inline("edge_1920x40_jpeg", mustEncode(func(b *bytes.Buffer) error {
+		return jpeg.Encode(b, imgSpec{"ycbcr", 1920, 40, "smooth", "opaque", 8007, 0, "420"}.build(), &jpeg.Options{Quality: 85})
+	}))
 	// The 1×1 PNG every parity suite uploads.
 	inline("parity_1x1", []byte{
 		137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,

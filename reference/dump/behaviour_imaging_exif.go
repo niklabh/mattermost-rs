@@ -211,6 +211,9 @@ func imagingEXIFStage() (map[string]any, error) {
 	add("count_2", "jpeg", withJPEGSegments(exifAPP1(simple(true, ifdEntry{tag: 0x112, typ: 3, count: 2, value: append(u16(le, 6), u16(le, 3)...)}))))
 	add("count_3_offset", "jpeg", withJPEGSegments(exifAPP1(simple(true, ifdEntry{tag: 0x112, typ: 3, count: 3, value: append(append(u16(le, 6), u16(le, 3)...), u16(le, 3)...)}))))
 	add("count_0", "jpeg", withJPEGSegments(exifAPP1(simple(true, ifdEntry{tag: 0x112, typ: 3, count: 0, value: u16(le, 6)}))))
+	// A count over 0x10000 is skipped before its type is checked: an unknown type there is not
+	// an error.
+	add("count_huge_unknown_type", "jpeg", withJPEGSegments(exifAPP1(simple(true, ifdEntry{tag: 0x0110, typ: 99, count: 0x10001, value: u16(le, 6)}, orientationEntry(le, 3, 6)))))
 	add("count_huge", "jpeg", withJPEGSegments(exifAPP1(simple(true, ifdEntry{tag: 0x112, typ: 3, count: 0x10001, value: u16(le, 6)}, orientationEntry(le, 3, 3)))))
 	// Order and neighbours.
 	add("first_wins", "jpeg", withJPEGSegments(exifAPP1(simple(true, orientationEntry(le, 3, 6), orientationEntry(le, 3, 8)))))

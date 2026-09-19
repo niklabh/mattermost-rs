@@ -225,6 +225,17 @@ func handMadeInflateCorpus() []namedFile {
 		b.fixedLit(256)
 		add("fixed_distance_too_far", b.done())
 	}
+	// A copy reaching back exactly one byte further than was written: distance 2 after one byte.
+	{
+		var b bitWriter
+		b.bits(1, 1)
+		b.bits(1, 2)
+		b.fixedLit('a')
+		b.fixedLit(257)
+		b.huff(1, 5) // distance code 1 = distance 2
+		b.fixedLit(256)
+		add("fixed_distance_one_too_far", b.done())
+	}
 	// Distance codes 30 and 31 are reserved.
 	{
 		var b bitWriter
@@ -324,6 +335,11 @@ func imagingFlateStage() (map[string]any, error) {
 				seed++
 			}
 		}
+	}
+	// Blocks whose stored and fixed-Huffman sizes tie exactly: Go keeps the Huffman encoding
+	// (`storedSize < size`, strict). Found by searching seeds; ties are common this small.
+	for _, t := range []streamSpec{{"noise", 60, 0}, {"noise", 60, 2}, {"noise", 50, 3}} {
+		add(t, 9, "flate", 0)
 	}
 	// Chain-limited streams: level 8's 1024 and level 9's 4096 candidates are both exhausted.
 	for _, level := range []int{4, 6, 8, 9} {
@@ -855,7 +871,7 @@ func imagingJPEGStage() (map[string]any, error) {
 		m := spec.build()
 		qs := []int{90}
 		if spec.W < 1000 {
-			qs = []int{90, 75, 50, 100, 1, 0, 101, -5}
+			qs = []int{90, 75, 50, 49, 25, 10, 100, 1, 0, 101, -5}
 		}
 		for _, q := range qs {
 			q := q
