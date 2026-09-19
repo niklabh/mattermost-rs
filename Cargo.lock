@@ -1132,6 +1132,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "goimage"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "goplugin"
 version = "0.1.0"
 dependencies = [

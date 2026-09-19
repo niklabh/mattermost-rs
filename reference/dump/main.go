@@ -768,7 +768,25 @@ func main() {
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
+	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
+	// iterating on one oracle should not.
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging) and exit")
 	flag.Parse()
+
+	if *only == "imaging" {
+		if err := os.MkdirAll(*out, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "dump: cannot create %s: %v\n", *out, err)
+			os.Exit(1)
+		}
+		if err := writeImagingBehaviourFixtures(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: imaging behaviour fixtures: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only != "" {
+		fmt.Fprintf(os.Stderr, "dump: unknown -only %q\n", *only)
+		os.Exit(2)
+	}
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "dump: cannot create %s: %v\n", *out, err)
@@ -1359,6 +1377,11 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_email.json"))
+
+	if err := writeImagingBehaviourFixtures(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: imaging behaviour fixtures: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := writeTeamPrivacyBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: team privacy behaviour fixture: %v\n", err)
