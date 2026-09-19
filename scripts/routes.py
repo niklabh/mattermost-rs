@@ -190,6 +190,9 @@ def collect():
 ALIASES = {
     "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}":
         "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category_id}",
+    # Go's `{user_id}`; axum's tree position is already `{remote_id}` (the CRUD routes).
+    "/api/v4/remotecluster/{remote_id}/image":
+        "/api/v4/remotecluster/{user_id}/image",
 }
 ME_LITERALS = {"/api/v4/users/me", "/api/v4/users/me/preferences",
                "/api/v4/users/me/teams/members"}
