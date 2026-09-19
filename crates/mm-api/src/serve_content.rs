@@ -114,7 +114,7 @@ pub async fn write_file_response(
 
     serve_content(
         headers,
-        spec.filename,
+        None,
         spec.modtime_millis,
         method,
         request_headers,
@@ -221,7 +221,7 @@ fn should_escape_in_path_segment(byte: u8) -> bool {
 /// nothing but the `Range` handling.
 pub async fn serve_content_with_headers(
     headers: HeaderMap,
-    name: &str,
+    _name: &str,
     modtime_millis: Option<i64>,
     method: &Method,
     request_headers: &HeaderMap,
@@ -230,7 +230,35 @@ pub async fn serve_content_with_headers(
 ) -> FileResponse {
     serve_content(
         headers,
-        name,
+        None,
+        modtime_millis,
+        method,
+        request_headers,
+        file,
+        size,
+    )
+    .await
+}
+
+/// Port of `http.ServeContent` for a caller that had **not** set `Content-Type` — the
+/// `http.FileServer` path (`serveFile`, fs.go:679), where `serveContent` picks the type itself.
+///
+/// The type is passed in already chosen (`mime.TypeByExtension`, then `DetectContentType` over the
+/// first 512 bytes — the caller's job, see `crate::web_static`), because *when* it lands on the
+/// headers is the observable part: `serveContent` sets it **after** `checkPreconditions`, so a
+/// `304` or a `412` carries no `Content-Type` while a `200`, `206` or `416` does.
+pub async fn serve_content_typed_late(
+    headers: HeaderMap,
+    content_type: &str,
+    modtime_millis: Option<i64>,
+    method: &Method,
+    request_headers: &HeaderMap,
+    file: tokio::fs::File,
+    size: u64,
+) -> FileResponse {
+    serve_content(
+        headers,
+        Some(content_type),
         modtime_millis,
         method,
         request_headers,
@@ -241,10 +269,13 @@ pub async fn serve_content_with_headers(
 }
 
 /// Port of `http.serveContent` (net/http/fs.go), for a seekable file of known size.
+///
+/// `late_content_type` is `Some` only for the `http.FileServer` caller; see
+/// [`serve_content_typed_late`].
 #[allow(clippy::too_many_arguments)]
 async fn serve_content(
     mut headers: HeaderMap,
-    _name: &str,
+    late_content_type: Option<&str>,
     modtime_millis: Option<i64>,
     method: &Method,
     request_headers: &HeaderMap,
@@ -260,9 +291,11 @@ async fn serve_content(
     }
     let range_header = effective_range_header(method, request_headers, modtime_millis);
 
-    // Go's content-type sniffing block is unreachable here: `setHeaders` has already set
-    // `Content-Type` unconditionally, so `haveType` is always true and the `mime.TypeByExtension`
-    // / `DetectContentType` path — the only use of the `name` argument — never runs.
+    // Go's content-type block. For `WriteFileResponse` it is unreachable — `setHeaders` has
+    // already set `Content-Type`, so `haveType` is true — and `late_content_type` is `None`.
+    if let Some(content_type) = late_content_type {
+        set_header(&mut headers, "content-type", content_type);
+    }
 
     let size = i64::try_from(size).unwrap_or(i64::MAX);
     let mut send_size = size;
@@ -359,7 +392,7 @@ async fn serve_content(
 /// Four headers are deleted and two are reset. `Content-Encoding` and `Etag` are in the deleted
 /// set and are never present here; `Cache-Control` and `Last-Modified` are, which is why a 416
 /// response has neither.
-fn serve_error(mut headers: HeaderMap, text: &str, code: StatusCode) -> Response {
+pub(crate) fn serve_error(mut headers: HeaderMap, text: &str, code: StatusCode) -> Response {
     headers.remove("cache-control");
     headers.remove("content-encoding");
     headers.remove("etag");
@@ -774,7 +807,7 @@ fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
 /// here is either a constant or a percent-escaped filename, so this cannot fire for a name, and
 /// for a value only if a filename contained a control character that `path_escape` somehow let
 /// through.
-fn set_header(headers: &mut HeaderMap, name: &str, value: &str) {
+pub(crate) fn set_header(headers: &mut HeaderMap, name: &str, value: &str) {
     match (
         HeaderName::from_bytes(name.as_bytes()),
         HeaderValue::from_str(value),
@@ -786,7 +819,7 @@ fn set_header(headers: &mut HeaderMap, name: &str, value: &str) {
     }
 }
 
-fn build_response(code: StatusCode, headers: HeaderMap, body: Body) -> Response {
+pub(crate) fn build_response(code: StatusCode, headers: HeaderMap, body: Body) -> Response {
     let mut response = Response::new(body);
     *response.status_mut() = code;
     *response.headers_mut() = headers;

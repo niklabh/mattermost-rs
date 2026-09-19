@@ -14171,3 +14171,9 @@ Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 cont
 | `getEmbedsAndImages(post, false)` on every read, edit and ephemeral path; `SetPostReminder`'s team-less permalink; `createEphemeralPost`'s second prepare; `getPostsByIds`' embed-less prepare | `mm-app/src/link_metadata.rs`, `post.rs`, `post_write.rs`, `post_rest.rs`; `mm-api/src/posts.rs`, `post_writes.rs` | DONE (reads) | 7 parity (`post_link_reads`) + guards moved in `post_get`, `channel_posts`, `postrest`, `post_acks` | Every read answers a link from the creating process's cache or the `LinkMetadata` row, never a fetch, except a URL past 2,048 bytes (the cache decision is on `LinkCache`); `getPostsByIds` runs `PreparePostForClient` alone and an ephemeral answer carries its embed twice — both were wrong here and hidden by the old forward. |
 
 Mutation tally (`post-link-reads.plan`): 18 run, 16 caught, 2 controls survived.
+
+## The web client — `channels/web/static.go`, D-782 narrowed, D-900..D-903 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitStatic`, `root`, `staticFilesHandler`, `robotsHandler`, `unsupportedBrowserScriptHandler`, `getOpenGraphMetaTags`, the `IsStatic` arm of `Handler.ServeHTTP`, `Handle404`/`IsAPICall`, gorilla's clean-path redirect, `http.FileServer`, `gzhttp.GzipHandler`, `GetStaticScriptHashes`, `ClientConfigHash`, `GetDesktopAppVersion` | `mm-api/src/{web_static,gzhttp}.rs` (the TCP router's fallback), `serve_content.rs`, `mm-app/src/{config,user_agent}.rs` | DONE (template pages and `RenderWebAppError` forward, D-900/D-901) | `parity::web_client` (8), `behaviour_web_static.json` oracle | A compressed asset's bytes and its small-body `Content-Length` differ from Go's (another compressor; zstd preferred as in Go); `X-Version-Id` matches to the byte. The proxy now forwards redirects instead of following them, and `go_global_headers` stopped stamping `Expires`/`Vary` on forwarded answers. |

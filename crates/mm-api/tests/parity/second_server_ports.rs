@@ -59,9 +59,11 @@ fn no_two_second_servers_share_a_port() {
         let name = file.strip_prefix(&tests).unwrap().display().to_string();
         // The start sites. `start(` followed by a literal; a call passing a named constant is
         // covered by the constant's own declaration below.
-        for (at, _) in text.match_indices("SecondServer::start(") {
-            if let Some(port) = leading_port(&text[at + "SecondServer::start(".len()..]) {
-                claims.entry(port).or_default().push(name.clone());
+        for call in ["SecondServer::start(", "SecondServer::start_in("] {
+            for (at, _) in text.match_indices(call) {
+                if let Some(port) = leading_port(&text[at + call.len()..]) {
+                    claims.entry(port).or_default().push(name.clone());
+                }
             }
         }
         // The licensed pair's constants, whose starts pass the name rather than a literal.

@@ -7058,6 +7058,45 @@ impl crate::App {
 
     /// `if key := ps.AsymmetricSigningKey(); key != nil { … }` (platform/config.go:234) — the
     /// property is added to **both** client maps or to neither.
+    /// Port of `PlatformService.ClientConfigHash` (platform/config.go:216) — the third field of
+    /// every `X-Version-Id` Go writes.
+    ///
+    /// Go computes it in `regenerateClientConfig` (platform/config.go:220) and caches it until the
+    /// next config or licence change: the SHA-256, hex, of `json.Marshal` of the **full** client
+    /// map, before any of the computed properties `ClientConfigWithComputed` adds per request. So
+    /// `NoAccounts`, `MaxPostSize` and friends are not in it, while `CustomTermsOfServiceId` (only
+    /// when `EnableCustomTermsOfService` is `"true"`, and only if the latest row loads) and
+    /// `AsymmetricSigningPublicKey` are. `json.Marshal` of a `map[string]string` sorts the keys and
+    /// HTML-escapes `<`, `>` and `&`, which [`mm_model::utils::go_json_marshal_string_map`] does.
+    ///
+    /// Recomputed per call here rather than cached; the value only moves when its inputs do.
+    pub async fn client_config_hash(
+        &self,
+        config: &mm_model::config::Config,
+    ) -> Result<String, ConfigError> {
+        use sha2::Digest as _;
+        let license = self.license().await.map_err(ConfigError::License)?;
+        let mut props =
+            generate_client_config(config, &self.telemetry_id().await, license.as_deref());
+        if props.get("EnableCustomTermsOfService").map(String::as_str) == Some("true") {
+            // `GetLatest(true)` failing is logged and skipped, exactly as Go's `mlog.Err(err)`.
+            match self.get_latest_terms_of_service().await {
+                Ok(terms) => {
+                    props.insert("CustomTermsOfServiceId".to_owned(), terms.id);
+                }
+                Err(err) => tracing::warn!(error = %err.id, "no terms of service for the hash"),
+            }
+        }
+        self.add_signing_key(&mut props).await;
+        let json = mm_model::utils::go_json_marshal_string_map(Some(&props));
+        let digest = sha2::Sha256::digest(json.as_bytes());
+        Ok(digest.iter().fold(String::with_capacity(64), |mut out, b| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{b:02x}");
+            out
+        }))
+    }
+
     async fn add_signing_key(&self, props: &mut mm_model::utils::StringMap) {
         let Some(row) = self.system_value(SYSTEM_ASYMMETRIC_SIGNING_KEY).await else {
             return;

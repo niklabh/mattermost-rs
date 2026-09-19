@@ -162,6 +162,8 @@ hmac = "0.12"
 serde_yaml_ng = "0.10"
 tar = "0.4"
 flate2 = "1"
+# zstd for the web client's compression (`mm_api::gzhttp`): Go's gzhttp prefers it.
+zstd = { version = "0.13", default-features = false }
 sha2 = { version = "0.10", features = ["oid"] }
 # Licence verification: Mattermost signs a licence with RSA PKCS#1 v1.5 over SHA-512 and appends
 # the 256-byte signature (channels/utils/license.go:71). `rsa` is the RustCrypto implementation;
@@ -207,6 +209,12 @@ opt-level = 3
 [profile.dev.package.blowfish]
 opt-level = 3
 [profile.dev.package.bcrypt]
+opt-level = 3
+# The web client compresses every static asset a browser fetches, some of them tens of megabytes
+# (source maps); unoptimised, one such response takes seconds.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.zstd-sys]
 opt-level = 3
 
 # `[profile.dev.package.*]` above does **not** reach `cargo test`: the test profile inherits

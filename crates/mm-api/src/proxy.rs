@@ -116,7 +116,7 @@ async fn forward(state: AppState, request: Request) -> Response {
     };
 
     let upstream = state
-        .http
+        .forward_http
         .request(parts.method.clone(), &url)
         .headers(forwardable(&parts.headers))
         .body(body_bytes)
