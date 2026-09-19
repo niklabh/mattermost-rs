@@ -14,10 +14,17 @@
 //! between that and a real escape, in Go and here alike; `plugin_install::go_parity` runs Go's own
 //! function over the same corpus, the sibling case included.
 //!
+//! # Signatures in the sync
+//!
+//! With `RequirePluginSignature` on, `syncPlugins` verifies each bundle against the signature the
+//! file store keeps beside it (`crate::plugin_signature`), and skips the bundle — logged, never an
+//! error of the sync — when the signature is missing, unreadable or does not verify. A bundle with
+//! no `.sig` at all is asked for the path `""`: Go's local store then opens the data directory
+//! itself and fails reading it as a signature, this store fails to open it; both skip the bundle,
+//! under different log lines.
+//!
 //! # Not ported
 //!
-//! - Signatures (`plugin_signature.go`). With `RequirePluginSignature` on, a synced bundle is
-//!   skipped with an error, where Go would verify it — [D-811].
 //! - The cluster messages (`notifyClusterPluginEvent`): there is no cluster.
 //! - `unregisterPluginCommands`: no plugin can register a command here yet (the API is Phase 6).
 
@@ -312,7 +319,7 @@ impl App {
     }
 
     /// Port of `installPluginToFilestore` (plugin_install.go:214).
-    async fn install_plugin_to_filestore(
+    pub(crate) async fn install_plugin_to_filestore(
         &self,
         manifest: &Manifest,
         bundle: &[u8],
@@ -376,7 +383,7 @@ impl App {
     }
 
     /// Port of `installExtractedPlugin` (plugin_install.go:427).
-    async fn install_extracted_plugin(
+    pub(crate) async fn install_extracted_plugin(
         &self,
         manifest: Manifest,
         from_plugin_dir: &Path,
@@ -583,11 +590,17 @@ impl App {
                 }
             };
             if require_signature {
-                tracing::error!(
-                    plugin_id = %plugin.plugin_id,
-                    "Failed to validate plugin signature: signature verification is not ported (D-811)"
-                );
-                return;
+                let signature = match self.file_backend().read_file(&plugin.signature_path).await {
+                    Ok(signature) => signature,
+                    Err(err) => {
+                        tracing::error!(plugin_id = %plugin.plugin_id, signature_path = %plugin.signature_path, error = %err, "Failed to open plugin signature from file store.");
+                        return;
+                    }
+                };
+                if let Err(err) = self.verify_plugin(&bundle, &signature).await {
+                    tracing::error!(plugin_id = %plugin.plugin_id, error = %err, "Failed to validate plugin signature");
+                    return;
+                }
             }
             tracing::info!(plugin_id = %plugin.plugin_id, "Syncing plugin from file store");
             if let Err(err) = self
@@ -604,10 +617,10 @@ impl App {
 }
 
 /// `os.MkdirTemp("", "plugintmp")`, removed on drop as Go's `defer os.RemoveAll` does.
-struct TempDir(PathBuf);
+pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new() -> std::io::Result<Self> {
+    pub(crate) fn new() -> std::io::Result<Self> {
         let base = std::env::temp_dir();
         for _ in 0..10_000 {
             let candidate = base.join(format!("plugintmp{}", mm_model::utils::new_id()));
@@ -620,7 +633,7 @@ impl TempDir {
         Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.0
     }
 }

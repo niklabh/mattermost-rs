@@ -95,9 +95,11 @@
   },
   "PluginSettings": {
     "AllowInsecureDownloadURL": false,
+    "AutomaticPrepackagedPlugins": true,
     "ClientDirectory": "./client/plugins",
     "Directory": "./plugins",
     "Enable": true,
+    "EnableHealthCheck": true,
     "EnableMarketplace": true,
     "EnableRemoteMarketplace": true,
     "EnableUploads": false,

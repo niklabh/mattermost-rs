@@ -1,0 +1,18 @@
+# Mutation plan for the app side of plugin start-up that needs no stack: the signature check in
+# syncPlugins, the health-check toggle in initPlugins and the config listener, and the prepackaged helpers.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-startup-unit.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-20: 9 run, 7 caught, both controls survived.
+
+sync-signature-not-required	crates/mm-app/src/plugin_install.rs	                if let Err(err) = self.verify_plugin(&bundle, &signature).await {	                if let Err(err) = async { Ok::<(), Box<AppError>>(()) }.await {	unit	plugins::tests
+sync-signature-requirement-ignored	crates/mm-app/src/plugin_install.rs	            if require_signature {	            if false {	unit	plugins::tests
+init-health-check-inverted	crates/mm-app/src/plugins.rs	\n            .toggle_plugin_health_check_job(self.config().plugin_enable_health_check)	\n            .toggle_plugin_health_check_job(!self.config().plugin_enable_health_check)	unit	plugins::tests
+reinit-health-check-ignored	crates/mm-app/src/plugins.rs	\n                    .toggle_plugin_health_check_job(self.config().plugin_enable_health_check)	\n                    .toggle_plugin_health_check_job(true)	unit	plugins::tests
+health-setting-not-a-change	crates/mm-app/src/plugins.rs	        || old.plugin_enable_health_check != new.plugin_enable_health_check\n	        || false\n	unit	plugins::tests
+persist-when-equal	crates/mm-app/src/plugin_prepackaged.rs	    if prepackaged > existing {	    if prepackaged >= existing {	unit	plugin_prepackaged
+walk-not-recursive	crates/mm-app/src/plugin_prepackaged.rs	        walk(&go_path::join(&[path, &name]), out);	        out.push(go_path::join(&[path, &name]));	unit	plugin_prepackaged
+CONTROL-persist-message	crates/mm-app/src/plugin_prepackaged.rs	        tracing::info!(plugin_id = %id, "Should persist transitionally prepackged plugin: newer version");	        tracing::info!(plugin_id = %id, "Should persist transitionally prepackaged plugin: a newer version");	unit	plugin_prepackaged
+CONTROL-sync-log-field-order	crates/mm-app/src/plugin_install.rs	                    tracing::error!(plugin_id = %plugin.plugin_id, error = %err, "Failed to validate plugin signature");	                    tracing::error!(error = %err, plugin_id = %plugin.plugin_id, "Failed to validate plugin signature");	unit	plugins::tests

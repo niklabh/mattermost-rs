@@ -3,7 +3,9 @@
 //!
 //! The test installs this one binary under several names. A name containing `refuse` answers
 //! `OnActivate` with an `*model.AppError`, which is how both environments see a plugin refuse to
-//! start.
+//! start. A name containing `crash` crashes on demand: it exits the moment a file named
+//! `$ENV_PLUGIN_LOG.crash` appears, deleting it first, so exactly one process dies per request —
+//! what the health check (health_check.go) is there to notice.
 
 use std::io::Write;
 
@@ -66,12 +68,33 @@ impl Plugin for Env {
     }
 }
 
+/// A name containing `crash`: watch for the crash request and exit on it.
+fn crash_on_demand(name: &str) {
+    if !name.contains("crash") {
+        return;
+    }
+    let Some(log) = std::env::var_os("ENV_PLUGIN_LOG") else {
+        return;
+    };
+    let mut request = log;
+    request.push(".crash");
+    std::thread::spawn(move || {
+        loop {
+            if std::fs::remove_file(&request).is_ok() {
+                std::process::exit(3);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
     let name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_default();
+    crash_on_demand(&name);
     if let Err(e) = client_main(Env { name }).await {
         eprintln!("env plugin: {e}");
         std::process::exit(1);

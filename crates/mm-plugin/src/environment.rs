@@ -23,7 +23,10 @@
 //! component is an error. A plugin whose version check or start fails is still recorded as
 //! **running**, with no supervisor behind it, and the caller is told it succeeded.
 //!
-//! Not ported yet: the health-check job, prepackaged plugins, and the per-plugin database connections Go's `AppDriver` tracks
+//! The health-check job (health_check.go) is [`HealthCheckJob`]; the prepackaged lists Go keeps on
+//! the environment are [`Environment::prepackaged_plugins`] and its siblings, filled by the app.
+//!
+//! Not ported yet: the per-plugin database connections Go's `AppDriver` tracks
 //! (`ConnWithPluginID`, `ShutdownConns`), which belong to the app's driver.
 //!
 //! Divergences: Go decodes `plugin.json` with case-insensitive keys ([D-040]) and YAML with
@@ -31,20 +34,20 @@
 //! changes a manifest written the way the documentation shows. Go's metrics layer
 //! (`hooksTimerLayer`) is not here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::time::{Duration, Instant};
 
 use goplugin::{Client, ClientConfig, PluginAddr, PluginCommand, ReattachConfig};
 use mm_model::bundle_info::BundleInfo;
 use mm_model::manifest::Manifest;
 use mm_model::plugin_reattach::PluginReattachConfig;
 use mm_model::plugin_status::{
-    PLUGIN_STATE_FAILED_TO_START, PLUGIN_STATE_NOT_RUNNING, PLUGIN_STATE_RUNNING, PluginStatus,
-    PluginStatuses,
+    PLUGIN_STATE_FAILED_TO_START, PLUGIN_STATE_FAILED_TO_STAY_RUNNING, PLUGIN_STATE_NOT_RUNNING,
+    PLUGIN_STATE_RUNNING, PluginStatus, PluginStatuses,
 };
 
 use crate::error::decodable_error;
@@ -71,7 +74,7 @@ pub struct GoIoError {
 }
 
 impl GoIoError {
-    fn new(op: &'static str, path: &Path, source: io::Error) -> Self {
+    pub fn new(op: &'static str, path: &Path, source: io::Error) -> Self {
         Self {
             op,
             path: path.to_string_lossy().into_owned(),
@@ -469,6 +472,20 @@ impl Supervisor {
     pub async fn ping(&self) -> Result<(), goplugin::ClientError> {
         self.client.ping().await
     }
+
+    /// supervisor.go, `PerformHealthCheck`: a ping, and up to two more when it fails. Only the
+    /// last failure counts, and its cause is not kept.
+    pub async fn perform_health_check(&self) -> Result<(), HealthCheckError> {
+        if self.ping().await.is_ok() {
+            return Ok(());
+        }
+        for _ in 1..HEALTH_CHECK_PING_FAIL_LIMIT {
+            if self.ping().await.is_ok() {
+                return Ok(());
+            }
+        }
+        Err(HealthCheckError)
+    }
 }
 
 /// supervisor.go, `WithExecutableFromManifest`: the executable's path and checksum.
@@ -514,6 +531,21 @@ pub struct Environment<A, D> {
     driver: Arc<D>,
     plugin_dir: PathBuf,
     webapp_plugin_dir: PathBuf,
+    /// `prepackagedPlugins` and `transitionallyPrepackagedPlugins`, set by the app at start-up.
+    prepackaged: Mutex<(Vec<PrepackagedPlugin>, Vec<PrepackagedPlugin>)>,
+    /// `pluginHealthCheckJob`: the running job, when `EnableHealthCheck` started one.
+    health_check: Mutex<Option<Arc<HealthCheckJob<A, D>>>>,
+}
+
+/// environment.go, `PrepackagedPlugin`: a bundle found in `prepackaged_plugins` at start-up, with
+/// the paths it was read from and its icon as a `data:` URI (empty when it has none, or when the
+/// icon could not be read).
+#[derive(Debug, Clone, Default)]
+pub struct PrepackagedPlugin {
+    pub path: String,
+    pub signature_path: String,
+    pub manifest: Option<Manifest>,
+    pub icon_data: String,
 }
 
 impl<A, D> Environment<A, D>
@@ -533,7 +565,43 @@ where
             driver,
             plugin_dir,
             webapp_plugin_dir,
+            prepackaged: Mutex::new((Vec::new(), Vec::new())),
+            health_check: Mutex::new(None),
         }
+    }
+
+    fn prepackaged_lists(
+        &self,
+    ) -> std::sync::MutexGuard<'_, (Vec<PrepackagedPlugin>, Vec<PrepackagedPlugin>)> {
+        self.prepackaged
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// environment.go, `PrepackagedPlugins`: what `prepackaged_plugins` offers, less the
+    /// transitionally prepackaged ones.
+    pub fn prepackaged_plugins(&self) -> Vec<PrepackagedPlugin> {
+        self.prepackaged_lists().0.clone()
+    }
+
+    /// environment.go, `TransitionallyPrepackagedPlugins`: the ones still to be persisted to the
+    /// file store.
+    pub fn transitionally_prepackaged_plugins(&self) -> Vec<PrepackagedPlugin> {
+        self.prepackaged_lists().1.clone()
+    }
+
+    /// environment.go, `SetPrepackagedPlugins`.
+    pub fn set_prepackaged_plugins(
+        &self,
+        plugins: Vec<PrepackagedPlugin>,
+        transitional: Vec<PrepackagedPlugin>,
+    ) {
+        *self.prepackaged_lists() = (plugins, transitional);
+    }
+
+    /// environment.go, `ClearTransitionallyPrepackagedPlugins`.
+    pub fn clear_transitionally_prepackaged_plugins(&self) {
+        self.prepackaged_lists().1.clear();
     }
 
     fn map(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Registered>> {
@@ -950,8 +1018,9 @@ where
         self.activate(id).await.map(drop)
     }
 
-    /// Deactivate every plugin at once, then forget them all.
+    /// Deactivate every plugin at once, then forget them all. The health-check job stops first.
     pub async fn shutdown(&self) {
+        self.stop_health_check_job().await;
         let registered: Vec<Registered> = self.map().values().cloned().collect();
         let teardowns = registered
             .into_iter()
@@ -1006,6 +1075,217 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The health check (health_check.go, and its two entry points in environment.go)
+// ---------------------------------------------------------------------------------------------
+
+/// health_check.go, `HealthCheckInterval`: how often the job checks every running plugin.
+pub const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// `HealthCheckDeactivationWindow`: three failures inside this window deactivate a plugin.
+pub const HEALTH_CHECK_DEACTIVATION_WINDOW: Duration = Duration::from_secs(60 * 60);
+/// `HealthCheckPingFailLimit`: pings in a row before a check fails.
+pub const HEALTH_CHECK_PING_FAIL_LIMIT: usize = 3;
+/// `HealthCheckNumRestartsLimit`: failures, inside the window, that deactivate instead of restart.
+pub const HEALTH_CHECK_NUM_RESTARTS_LIMIT: usize = 3;
+
+/// supervisor.go's `PerformHealthCheck` failure, with Go's text.
+#[derive(Debug, thiserror::Error)]
+#[error("plugin RPC connection is not responding")]
+pub struct HealthCheckError;
+
+/// health_check.go, `shouldDeactivatePlugin`: at least three failures, the third-from-last no
+/// older than the window. The boundary is inclusive, as Go's `<=`.
+pub fn should_deactivate_plugin(failures: &[Instant], now: Instant) -> bool {
+    if failures.len() < HEALTH_CHECK_NUM_RESTARTS_LIMIT {
+        return false;
+    }
+    let index = failures.len() - HEALTH_CHECK_NUM_RESTARTS_LIMIT;
+    now.saturating_duration_since(failures[index]) <= HEALTH_CHECK_DEACTIVATION_WINDOW
+}
+
+/// health_check.go, `removeStaleTimestamps`: keep only the last three.
+pub fn remove_stale_timestamps(mut failures: Vec<Instant>) -> Vec<Instant> {
+    if failures.len() > HEALTH_CHECK_NUM_RESTARTS_LIMIT {
+        failures.drain(..failures.len() - HEALTH_CHECK_NUM_RESTARTS_LIMIT);
+    }
+    failures
+}
+
+/// health_check.go, `PluginHealthCheckJob`: every [`HEALTH_CHECK_INTERVAL`], each running plugin
+/// is pinged; one that does not answer is restarted, and one that failed three times within an
+/// hour is deactivated and left **failed to stay running** (state 4), which is what
+/// `GET /plugins/statuses` then reports. A deactivation forgets the plugin's failures; a restart
+/// that fails is logged and the failure still counts.
+///
+/// The job holds the environment weakly: Go's holds a pointer, and an environment is only ever
+/// dropped after `Shutdown`, which stops the job first.
+pub struct HealthCheckJob<A, D> {
+    env: Weak<Environment<A, D>>,
+    failure_timestamps: Mutex<HashMap<String, Vec<Instant>>>,
+    cancel: tokio::sync::watch::Sender<bool>,
+    task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl<A, D> HealthCheckJob<A, D>
+where
+    A: PluginApi + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
+    D: Driver + Send + Sync + 'static,
+{
+    fn timestamps(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<Instant>>> {
+        self.failure_timestamps
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// health_check.go, `CheckPlugin`: nothing when the plugin answers (or is not registered, or
+    /// has no supervisor); otherwise deactivate or restart it by how often it failed.
+    pub async fn check_plugin(&self, id: &str) {
+        let Some(env) = self.env.upgrade() else {
+            return;
+        };
+        let Err(err) = env.perform_health_check(id).await else {
+            return;
+        };
+        tracing::warn!(id = %id, error = %err, "Health check failed for plugin");
+        let mut failures = self.timestamps().get(id).cloned().unwrap_or_default();
+        failures.push(Instant::now());
+
+        if should_deactivate_plugin(&failures, Instant::now()) {
+            // Go's order: deactivate, forget the failures, then set the state.
+            tracing::debug!(id = %id, "Deactivating plugin due to multiple crashes");
+            env.deactivate(id).await;
+            self.timestamps().remove(id);
+            env.set_plugin_state(id, PLUGIN_STATE_FAILED_TO_STAY_RUNNING);
+        } else {
+            tracing::debug!(id = %id, "Restarting plugin due to failed health check");
+            if let Err(err) = env.restart_plugin(id).await {
+                tracing::error!(id = %id, error = %err, "Failed to restart plugin");
+            }
+            self.timestamps()
+                .insert(id.to_owned(), remove_stale_timestamps(failures));
+        }
+    }
+
+    /// health_check.go, `run`: check every running plugin on each tick until cancelled. The first
+    /// tick is one interval in, as Go's ticker's is.
+    async fn run(
+        self: Arc<Self>,
+        interval: Duration,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) {
+        tracing::debug!("Plugin health check job starting.");
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {
+                    let Some(env) = self.env.upgrade() else {
+                        return;
+                    };
+                    let active = env.active();
+                    drop(env);
+                    for plugin in active {
+                        if let Some(manifest) = plugin.manifest {
+                            self.check_plugin(&manifest.id).await;
+                        }
+                    }
+                }
+                _ = cancel.changed() => return,
+            }
+        }
+    }
+}
+
+impl<A, D> HealthCheckJob<A, D> {
+    /// health_check.go, `Cancel`: stop the loop and wait for it, a check in progress included.
+    pub async fn cancel(&self) {
+        let _ = self.cancel.send(true);
+        if let Some(task) = self.task.lock().await.take() {
+            let _ = task.await;
+        }
+    }
+}
+
+impl<A, D> Environment<A, D>
+where
+    A: PluginApi + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
+    D: Driver + Send + Sync + 'static,
+{
+    /// environment.go, `TogglePluginHealthCheckJob`: start a job when enabling and none runs;
+    /// stop the running one when disabling. Anything else does nothing.
+    pub async fn toggle_plugin_health_check_job(self: &Arc<Self>, enable: bool) {
+        self.toggle_health_check_job_every(enable, HEALTH_CHECK_INTERVAL)
+            .await;
+    }
+
+    /// [`Self::toggle_plugin_health_check_job`] with another interval, for tests that cannot wait
+    /// thirty seconds a tick.
+    #[doc(hidden)]
+    pub async fn toggle_health_check_job_every(self: &Arc<Self>, enable: bool, interval: Duration) {
+        if enable {
+            let mut slot = self
+                .health_check
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if slot.is_none() {
+                tracing::debug!(interval_s = ?interval, "Enabling plugin health check job");
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                let job = Arc::new(HealthCheckJob {
+                    env: Arc::downgrade(self),
+                    failure_timestamps: Mutex::new(HashMap::new()),
+                    cancel,
+                    task: tokio::sync::Mutex::new(None),
+                });
+                let task = tokio::spawn(Arc::clone(&job).run(interval, cancelled));
+                if let Ok(mut held) = job.task.try_lock() {
+                    *held = Some(task);
+                }
+                *slot = Some(job);
+            }
+            return;
+        }
+        self.stop_health_check_job().await;
+    }
+}
+
+impl<A, D> Environment<A, D> {
+    /// environment.go, `GetPluginHealthCheckJob`.
+    pub fn health_check_job(&self) -> Option<Arc<HealthCheckJob<A, D>>> {
+        self.health_check
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl<A, D> Environment<A, D>
+where
+    A: PluginApi + PluginApiStreams + PluginApiHttp,
+    D: Driver,
+{
+    /// The disabling half of `TogglePluginHealthCheckJob`.
+    async fn stop_health_check_job(&self) {
+        let job = self
+            .health_check
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(job) = job {
+            tracing::debug!("Disabling plugin health check job");
+            job.cancel().await;
+        }
+    }
+
+    /// environment.go, `PerformHealthCheck`: ping a registered plugin's supervisor. A plugin that
+    /// is not registered, or has no supervisor (a failed activation replaced it), passes.
+    pub async fn perform_health_check(&self, id: &str) -> Result<(), HealthCheckError> {
+        let Some(supervisor) = self.get(id).and_then(|r| r.supervisor) else {
+            return Ok(());
+        };
+        supervisor.perform_health_check().await
+    }
+}
+
 /// environment.go, `checkMinServerVersion`.
 fn check_min_server_version(manifest: &Manifest) -> Result<(), EnvError> {
     if manifest.min_server_version.is_empty() {
@@ -1049,6 +1329,47 @@ mod tests {
     fn fnv64a_matches_go() {
         assert_eq!(fnv64a(b""), 0xcbf2_9ce4_8422_2325u64.to_be_bytes());
         assert_eq!(fnv64a(b"a"), 0xaf63_dc4c_8601_ec8cu64.to_be_bytes());
+    }
+
+    /// health_check.go's `shouldDeactivatePlugin`, each branch: fewer than three failures never
+    /// deactivate; three do when the third-from-last is inside the hour, the boundary included;
+    /// only the third-from-last is looked at.
+    #[test]
+    fn should_deactivate_plugin_follows_go() {
+        let now = Instant::now() + Duration::from_secs(10 * 60 * 60);
+        let ago = |secs: u64| now - Duration::from_secs(secs);
+        assert!(!should_deactivate_plugin(&[], now));
+        assert!(!should_deactivate_plugin(&[now, now], now));
+        assert!(should_deactivate_plugin(&[now, now, now], now));
+        assert!(
+            should_deactivate_plugin(&[ago(3600), now, now], now),
+            "the window is inclusive"
+        );
+        assert!(!should_deactivate_plugin(&[ago(3601), now, now], now));
+        assert!(
+            should_deactivate_plugin(&[ago(9000), ago(60), now, now], now),
+            "the oldest of four is not the one compared"
+        );
+        assert!(!should_deactivate_plugin(&[now, ago(3601), now, now], now));
+    }
+
+    /// `removeStaleTimestamps` keeps the last three, in order.
+    #[test]
+    fn remove_stale_timestamps_keeps_the_last_three() {
+        let base = Instant::now();
+        let at = |n: u64| base + Duration::from_secs(n);
+        assert_eq!(
+            remove_stale_timestamps(vec![at(1), at(2)]),
+            vec![at(1), at(2)]
+        );
+        assert_eq!(
+            remove_stale_timestamps(vec![at(1), at(2), at(3)]),
+            vec![at(1), at(2), at(3)]
+        );
+        assert_eq!(
+            remove_stale_timestamps(vec![at(1), at(2), at(3), at(4), at(5)]),
+            vec![at(3), at(4), at(5)]
+        );
     }
 
     #[test]

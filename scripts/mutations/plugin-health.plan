@@ -1,0 +1,20 @@
+# Mutation plan for the plugin health check (public/plugin/health_check.go) in mm_plugin::environment.
+#
+#   PATH=$PATH:/usr/local/go/bin MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/plugin-health.plan
+#
+# Verdicts come from tests/environment.rs (health_check_matches_go_step_for_step against plugingen
+# health, and the job-loop test) and the unit tests of the two pure functions. CONTROL- lines must SURVIVE.
+
+health-never-deactivates	crates/mm-plugin/src/environment.rs	        if should_deactivate_plugin(&failures, Instant::now()) {	        if false {	pkg	health
+health-deactivated-state-not-running	crates/mm-plugin/src/environment.rs	            env.set_plugin_state(id, PLUGIN_STATE_FAILED_TO_STAY_RUNNING);	            env.set_plugin_state(id, PLUGIN_STATE_NOT_RUNNING);	pkg	health
+health-failures-kept-after-deactivation	crates/mm-plugin/src/environment.rs	            self.timestamps().remove(id);	            self.timestamps().get(id);	pkg	health
+health-restart-forgets-failures	crates/mm-plugin/src/environment.rs	                .insert(id.to_owned(), remove_stale_timestamps(failures));	                .insert(id.to_owned(), Vec::new());	pkg	health
+health-no-supervisor-fails	crates/mm-plugin/src/environment.rs	        let Some(supervisor) = self.get(id).and_then(|r| r.supervisor) else {\n            return Ok(());	        let Some(supervisor) = self.get(id).and_then(|r| r.supervisor) else {\n            return Err(HealthCheckError);	pkg	health
+health-toggle-replaces-job	crates/mm-plugin/src/environment.rs	            if slot.is_none() {	            if true {	pkg	health
+health-toggle-off-keeps-job	crates/mm-plugin/src/environment.rs	        self.stop_health_check_job().await;\n    }	    }	pkg	health
+health-shutdown-keeps-job	crates/mm-plugin/src/environment.rs	        self.stop_health_check_job().await;\n        let registered	        let registered	pkg	health
+health-loop-checks-nothing	crates/mm-plugin/src/environment.rs	                            self.check_plugin(&manifest.id).await;	                            let _ = &manifest.id;	pkg	health
+health-window-exclusive	crates/mm-plugin/src/environment.rs	    now.saturating_duration_since(failures[index]) <= HEALTH_CHECK_DEACTIVATION_WINDOW	    now.saturating_duration_since(failures[index]) < HEALTH_CHECK_DEACTIVATION_WINDOW	pkg	should_deactivate
+health-index-last	crates/mm-plugin/src/environment.rs	    let index = failures.len() - HEALTH_CHECK_NUM_RESTARTS_LIMIT;	    let index = failures.len() - 1;	pkg	should_deactivate
+CONTROL-health-restart-message	crates/mm-plugin/src/environment.rs	            tracing::debug!(id = %id, "Restarting plugin due to failed health check");	            tracing::debug!(id = %id, "Restarting the plugin after a failed health check");	pkg	health
+CONTROL-health-warn-field-order	crates/mm-plugin/src/environment.rs	        tracing::warn!(id = %id, error = %err, "Health check failed for plugin");	        tracing::warn!(error = %err, id = %id, "Health check failed for plugin");	pkg	health

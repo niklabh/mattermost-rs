@@ -63,7 +63,7 @@ fn oracle() -> String {
 // The fixture
 // ---------------------------------------------------------------------------------------------
 
-fn fixture() -> serde_json::Value {
+pub(crate) fn fixture() -> serde_json::Value {
     serde_json::from_str(include_str!(
         "../../../../fixtures/behaviour_plugin_signature.json"
     ))
@@ -343,7 +343,7 @@ async fn both_from_url(
 }
 
 /// Put the test key where `SignaturePublicKeyFiles` points both servers.
-async fn plant_key(fixture: &serde_json::Value) {
+pub(crate) async fn plant_key(fixture: &serde_json::Value) {
     let pool = common::fixture_pool().await.expect("the stack database");
     let key = String::from_utf8(raw(fixture, "keys", "armored")).expect("armored is text");
     sqlx::query(

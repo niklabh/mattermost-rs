@@ -88,6 +88,7 @@ pub mod password;
 pub mod peer_cache;
 pub mod peer_config;
 pub mod plugin_install;
+pub mod plugin_prepackaged;
 pub mod plugin_signature;
 pub mod plugins;
 pub mod post;
@@ -358,6 +359,16 @@ impl App {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         std::sync::Arc::clone(&loaded.config)
+    }
+
+    /// Swap the configuration in place, as a reload would, without a database.
+    #[cfg(test)]
+    pub(crate) fn replace_config(&self, config: Config) {
+        let mut loaded = self
+            .config
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loaded.config = std::sync::Arc::new(config);
     }
 
     /// Reload the projection when the active `Configurations` row is no longer the one it was

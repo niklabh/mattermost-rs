@@ -1143,6 +1143,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_plugin_signature.json"))
 
+	if err := writePluginStartupBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: plugin startup behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_plugin_startup.json"))
+
 	if err := writeSVGBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: svg behaviour fixture: %v\n", err)
 		os.Exit(1)

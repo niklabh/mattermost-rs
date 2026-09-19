@@ -589,6 +589,15 @@ pub struct Config {
     /// a bundle synced from the file store must carry a signature that verifies.
     pub plugin_require_signature: bool,
 
+    /// `PluginSettings.EnableHealthCheck` (config.go:3606, defaulted **`true`** at :3633): whether
+    /// the environment runs the health-check job that restarts, then deactivates, a plugin that
+    /// stops answering (public/plugin/health_check.go).
+    pub plugin_enable_health_check: bool,
+
+    /// `PluginSettings.AutomaticPrepackagedPlugins` (config.go:3613, defaulted **`true`** at
+    /// :3681): whether a prepackaged plugin that `PluginStates` enables is installed at start-up.
+    pub plugin_automatic_prepackaged_plugins: bool,
+
     /// `PluginSettings.EnableUploads` (config.go:3604, defaulted **`false`** at :3626): off,
     /// `POST /plugins` is the 501 `app.plugin.upload_disabled.app_error`. The API cannot change it
     /// (`patchConfig` refuses), so the environment is how a server gets it on.
@@ -1525,6 +1534,8 @@ impl Default for Config {
             plugin_client_directory: "./client/plugins".to_owned(),
             plugin_states: default_plugin_states(true),
             plugin_require_signature: false,
+            plugin_enable_health_check: true,
+            plugin_automatic_prepackaged_plugins: true,
             plugin_enable_uploads: false,
             plugin_enable_remote_marketplace: true,
             plugin_marketplace_url: DEFAULT_MARKETPLACE_URL.to_owned(),
@@ -2020,6 +2031,16 @@ impl Config {
                 lookup,
                 "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
                 default.plugin_require_signature,
+            ),
+            plugin_enable_health_check: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEHEALTHCHECK",
+                default.plugin_enable_health_check,
+            ),
+            plugin_automatic_prepackaged_plugins: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_AUTOMATICPREPACKAGEDPLUGINS",
+                default.plugin_automatic_prepackaged_plugins,
             ),
             plugin_enable_uploads: lookup_bool(
                 lookup,
@@ -2784,6 +2805,12 @@ impl Config {
             plugin_require_signature: plugin_settings
                 .require_plugin_signature
                 .unwrap_or(default.plugin_require_signature),
+            plugin_enable_health_check: plugin_settings
+                .enable_health_check
+                .unwrap_or(default.plugin_enable_health_check),
+            plugin_automatic_prepackaged_plugins: plugin_settings
+                .automatic_prepackaged_plugins
+                .unwrap_or(default.plugin_automatic_prepackaged_plugins),
             plugin_enable_uploads: plugin_settings
                 .enable_uploads
                 .unwrap_or(default.plugin_enable_uploads),
@@ -3603,6 +3630,10 @@ struct PluginSettingsDocument {
     plugin_states: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
     #[serde(rename = "RequirePluginSignature")]
     require_plugin_signature: Option<bool>,
+    #[serde(rename = "EnableHealthCheck")]
+    enable_health_check: Option<bool>,
+    #[serde(rename = "AutomaticPrepackagedPlugins")]
+    automatic_prepackaged_plugins: Option<bool>,
     #[serde(rename = "EnableUploads")]
     enable_uploads: Option<bool>,
     #[serde(rename = "Enable")]
@@ -4492,8 +4523,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 126,
-            "the fixture covers {keys} settings and Config reads 126 from the document. \
+            keys, 128,
+            "the fixture covers {keys} settings and Config reads 128 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4551,6 +4582,8 @@ mod go_parity {
                 "EnableMarketplace": false,
                 "ClientDirectory": "/elsewhere",
                 "RequirePluginSignature": true,
+                "EnableHealthCheck": false,
+                "AutomaticPrepackagedPlugins": false,
                 "EnableUploads": true,
                 "EnableRemoteMarketplace": false,
                 "MarketplaceURL": "http://marketplace.invalid",
@@ -4656,6 +4689,8 @@ mod go_parity {
         // The plugin host's: a document entry wins over SetDefaults', which fills only the gaps.
         assert_eq!(config.plugin_client_directory, "/elsewhere");
         assert!(config.plugin_require_signature);
+        assert!(!config.plugin_enable_health_check);
+        assert!(!config.plugin_automatic_prepackaged_plugins);
         assert!(config.plugin_enable_uploads);
         assert!(!config.plugin_enable_remote_marketplace);
         assert_eq!(config.plugin_marketplace_url, "http://marketplace.invalid");
