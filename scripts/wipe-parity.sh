@@ -48,6 +48,8 @@ set -e
 
 if [ -z "${MMRS_WIPE_KEEP:-}" ]; then
   "$ROOT/scripts/stack.sh" down "$K"
+  # `parity.sh` started this stack's mm-api, and `stack.sh down` does not match it: free its port.
+  (MMRS_STACK="$K" source "$ROOT/scripts/stack-env.sh" && mmrs_free_port "$MMRS_API_PORT")
   echo "stack $K is down (its volume is gone)"
 else
   echo "stack $K left up, erased, for inspection; take it down with scripts/stack.sh down $K"
