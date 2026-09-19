@@ -25,8 +25,10 @@
 pub mod bufio;
 pub mod flate;
 pub mod fma;
+pub mod gomath;
 pub mod hash;
 pub mod image;
+pub mod imaging;
 pub mod jpeg;
 pub mod png;
 pub mod sink;
