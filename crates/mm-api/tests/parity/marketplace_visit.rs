@@ -229,6 +229,9 @@ async fn the_webapp_plugin_list_is_served_while_go_runs_no_plugin() {
     if !stack_enabled() {
         return;
     }
+    // `plugin_toggle` and `local_plugins` plant a probe bundle in Go's plugin directory while they
+    // hold this lock; with one there, the list is (rightly) forwarded and this test's premise is gone.
+    let _states = crate::common::PLUGIN_STATES.lock().await;
     let client = client();
     let path = "/api/v4/plugins/webapp";
     let (go_status, go_body, _) =

@@ -606,6 +606,58 @@ impl App {
     pub fn is_plugin_active(&self, id: &str) -> Result<bool, Box<AppError>> {
         Ok(self.get_plugin_status(id)?.state == PLUGIN_STATE_RUNNING)
     }
+
+    /// Port of `Channels.ReattachPlugin` (app/plugin_reattach.go:17): the 501 when plugins are
+    /// off, then [`Self::detach_plugin`], then `Environment::Reattach` — whose one error, a
+    /// manifest without a server component, is the 500 `app.plugin.reattach.app_error`. Every
+    /// other failure is swallowed by the environment (see `mm_plugin::environment`), so a
+    /// reattach to a process that is not there answers success.
+    pub async fn reattach_plugin(
+        &self,
+        manifest: &Manifest,
+        config: &mm_model::plugin_reattach::PluginReattachConfig,
+    ) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "ReattachPlugin",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        self.detach_plugin(&manifest.id).await?;
+        environment.reattach(manifest, config).await.map_err(|err| {
+            Box::new(
+                AppError::new(
+                    "ReattachPlugin",
+                    "app.plugin.reattach.app_error",
+                    None,
+                    "",
+                    500,
+                )
+                .wrap(err),
+            )
+        })
+    }
+
+    /// Port of `Channels.DetachPlugin` (app/plugin_reattach.go:42): the 501 when plugins are off,
+    /// otherwise deactivate and forget the plugin, which is never an error — an id nothing is
+    /// registered under succeeds too.
+    pub async fn detach_plugin(&self, id: &str) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "DetachPlugin",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        environment.deactivate(id).await;
+        environment.remove_plugin(id);
+        Ok(())
+    }
 }
 
 /// Await every future concurrently on the current task: Go's `WaitGroup` over goroutines.

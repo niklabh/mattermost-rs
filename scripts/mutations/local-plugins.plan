@@ -1,0 +1,33 @@
+# Mutation plan for the local plugin routes (api4/plugin_local.go): the Go-host gates and
+# forwards, the Rust-host handlers, reattach/detach, the request decoder (parity::local_plugins),
+# and Environment.Reattach against plugingen's reattach oracle (mm-plugin tests/environment.rs).
+#
+#   MUTATE_PACKAGE=mm-plugin scripts/mutate-batch.sh scripts/mutations/local-plugins.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-19: 21 run, 19 caught, both controls survived. hosted-list-forwards survived the first
+# run: the probe comparison never asked who answered, so a forwarded list matched Go's trivially.
+# `probe_entry` and `marketplace_entry` now assert the answerer; caught on re-run.
+
+hosted-list-forwards	crates/mm-api/src/local_plugins.rs	        get(local_get_plugins).post(local_upload_plugin)	        get(go_hosted_get_plugins).post(local_upload_plugin)	api	local_plugins::
+go-upload-gate-dropped	crates/mm-api/src/local_plugins.rs	    gate_or_forward(plugins::upload_gate(&state), &go, request).await	    gate_or_forward(Ok(()), &go, request).await	api	local_plugins::
+go-list-gate-dropped	crates/mm-api/src/local_plugins.rs	    gate_or_forward(plugins::plugins_on(&state, "getPlugins"), &go, request).await	    gate_or_forward(Ok(()), &go, request).await	api	local_plugins::
+go-filter-forwarded	crates/mm-api/src/local_plugins.rs	        .and_then(|()| plugins::marketplace_filter(request.uri().query()).map(drop));	        .and_then(|()| Ok(()));	api	local_plugins::
+go-market-body-forwarded	crates/mm-api/src/local_plugins.rs	    if let Err(err) = plugins::marketplace_request(&bytes) {	    if let Err(err) = plugins::marketplace_request(b"{}") {	api	local_plugins::
+reattach-skips-is-valid	crates/mm-api/src/local_plugins.rs	    if let Err(err) = reattach.is_valid() {	    if let Err(err) = Ok::<(), Box<AppError>>(()) {	api	local_plugins::
+go-reattach-not-forwarded	crates/mm-api/src/local_plugins.rs	    if !state.app.plugin_host().hosted() {\n        if let Err(err)	    if false {\n        if let Err(err)	api	local_plugins::
+go-reattach-501-dropped	crates/mm-api/src/local_plugins.rs	        if let Err(err) = plugins::plugins_on(&state, "ReattachPlugin") {	        if let Err(err) = Ok::<(), ApiError>(()) {	api	local_plugins::
+go-detach-501-dropped	crates/mm-api/src/local_plugins.rs	        return gate_or_forward(plugins::plugins_on(&state, "DetachPlugin"), &go, request).await;	        return gate_or_forward(Ok(()), &go, request).await;	api	local_plugins::
+empty-ok-has-body	crates/mm-api/src/local_plugins.rs	        ],\n        "",\n    )\n        .into_response()\n}\n\n/// Port of `reattachPlugin`	        ],\n        "{}",\n    )\n        .into_response()\n}\n\n/// Port of `reattachPlugin`	api	local_plugins::
+app-reattach-no-detach	crates/mm-app/src/plugins.rs	        self.detach_plugin(&manifest.id).await?;	        let _ = &manifest.id;	api	local_plugins::
+model-null-body-refused	crates/mm-model/src/plugin_reattach.rs	        if value.is_null() {\n            return Ok(Self::default());	        if false {\n            return Ok(Self::default());	api	local_plugins::
+model-keys-exact	crates/mm-model/src/plugin_reattach.rs	        remap_object_keys(&mut value, &REQUEST_FIELDS);	        let _ = &REQUEST_FIELDS;	api	local_plugins::
+model-seq-accepted	crates/mm-model/src/plugin_reattach.rs	        Some(_) => Err(<serde_json::Error as serde::de::Error>::custom(\n            "json: cannot unmarshal a non-object into a struct",\n        )),	        Some(_) => Ok(()),	api	local_plugins::
+env-version-failure-surfaced	crates/mm-plugin/src/environment.rs	            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: version check failed");\n            return Ok(());	            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: version check failed");\n            return Err(err);	pkg	reattach_matches_go
+env-start-failure-surfaced	crates/mm-plugin/src/environment.rs	            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: start failed");\n            return Ok(());	            tracing::debug!(plugin_id = %manifest.id, error = %err, "reattach: start failed");\n            return Err(err);	pkg	reattach_matches_go
+env-active-not-short-circuited	crates/mm-plugin/src/environment.rs	        let id = manifest.id.as_str();\n        if self.is_active(id) {	        let id = manifest.id.as_str();\n        if false && self.is_active(id) {	pkg	reattach_matches_go
+env-failed-state-not-running	crates/mm-plugin/src/environment.rs	        let result = self.reattach_registered(manifest, config).await;\n        self.set_plugin_state(\n            id,\n            if result.is_ok() {\n                PLUGIN_STATE_RUNNING\n            } else {\n                PLUGIN_STATE_FAILED_TO_START	        let result = self.reattach_registered(manifest, config).await;\n        self.set_plugin_state(\n            id,\n            if result.is_ok() {\n                PLUGIN_STATE_RUNNING\n            } else {\n                PLUGIN_STATE_NOT_RUNNING	pkg	reattach_matches_go
+env-unix-not-dialled	crates/mm-plugin/src/environment.rs	        "unix" | "unixgram" | "unixpacket" => PluginAddr::Unix	        "unixgram" | "unixpacket" => PluginAddr::Unix	pkg	reattach_matches_go
+CONTROL-header-order	crates/mm-api/src/local_plugins.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        "",\n    )\n        .into_response()\n}\n\n/// Port of `reattachPlugin`	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),\n        ],\n        "",\n    )\n        .into_response()\n}\n\n/// Port of `reattachPlugin`	api	local_plugins::
+CONTROL-nested-order	crates/mm-model/src/plugin_reattach.rs	        ("Manifest", &MANIFEST_FIELDS),\n        ("PluginReattachConfig", &CONFIG_FIELDS),	        ("PluginReattachConfig", &CONFIG_FIELDS),\n        ("Manifest", &MANIFEST_FIELDS),	api	local_plugins::

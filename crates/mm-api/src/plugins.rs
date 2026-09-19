@@ -31,6 +31,21 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
 
+/// The 501 every plugin route opens with while `PluginSettings.Enable` is off, under the
+/// handler's own `where`.
+pub(crate) fn plugins_on(state: &AppState, where_: &str) -> Result<(), ApiError> {
+    if state.app.config().plugin_enable {
+        return Ok(());
+    }
+    Err(ApiError::from(AppError::new(
+        where_,
+        "app.plugin.disabled.app_error",
+        None,
+        "",
+        501,
+    )))
+}
+
 /// Port of `getPluginStatuses` (plugin.go:198): the 501 when plugins are off comes before the
 /// permission check, then `sysconsole_read_plugins`, then the statuses through
 /// `json.NewEncoder`, so with a trailing newline.
@@ -80,15 +95,7 @@ pub async fn get_plugins(State(state): State<AppState>, session: AuthenticatedSe
 }
 
 async fn serve_plugins(state: &AppState, session: &Session) -> Result<Response, ApiError> {
-    if !state.app.config().plugin_enable {
-        return Err(ApiError::from(AppError::new(
-            "getPlugins",
-            "app.plugin.disabled.app_error",
-            None,
-            "",
-            501,
-        )));
-    }
+    plugins_on(state, "getPlugins")?;
     if !state
         .app
         .session_has_permission_to(session, &PERMISSION_SYSCONSOLE_READ_PLUGINS)
@@ -215,11 +222,8 @@ pub async fn upload_plugin(
 
 const UPLOAD: &str = "uploadPlugin";
 
-async fn serve_upload(
-    state: &AppState,
-    session: &Session,
-    request: axum::extract::Request,
-) -> Result<Response, ApiError> {
+/// `uploadPlugin`'s one 501, for plugins off, uploads off or a signature requirement.
+pub(crate) fn upload_gate(state: &AppState) -> Result<(), ApiError> {
     let config = state.app.config();
     if !config.plugin_enable || !config.plugin_enable_uploads || config.plugin_require_signature {
         return Err(ApiError::from(AppError::new(
@@ -230,6 +234,16 @@ async fn serve_upload(
             501,
         )));
     }
+    Ok(())
+}
+
+async fn serve_upload(
+    state: &AppState,
+    session: &Session,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    upload_gate(state)?;
+    let config = state.app.config();
     if !state
         .app
         .session_has_permission_to(
@@ -359,15 +373,7 @@ fn http_error(message: &str, status: StatusCode) -> Response {
 /// off (each under its own `where`), `sysconsole_write_plugins`, the app call, and
 /// `ReturnStatusOK`. The id is non-empty by routing.
 async fn plugin_write(state: &AppState, session: &Session, where_: &str) -> Result<(), ApiError> {
-    if !state.app.config().plugin_enable {
-        return Err(ApiError::from(AppError::new(
-            where_,
-            "app.plugin.disabled.app_error",
-            None,
-            "",
-            501,
-        )));
-    }
+    plugins_on(state, where_)?;
     if !state
         .app
         .session_has_permission_to(
@@ -385,7 +391,7 @@ async fn plugin_write(state: &AppState, session: &Session, where_: &str) -> Resu
 }
 
 /// `ReturnStatusOK`: `{"status":"OK"}` with no trailing newline.
-fn status_ok() -> Response {
+pub(crate) fn status_ok() -> Response {
     (
         StatusCode::OK,
         [
@@ -484,6 +490,25 @@ fn parse_int(
         .map_err(|_| FilterError::NotAnInteger(name))
 }
 
+/// `parseMarketplacePluginFilter` as `getMarketplacePlugins` answers its failure: the 500
+/// `app.plugin.marshal.app_error`, ahead of the permission check.
+pub(crate) fn marketplace_filter(
+    query: Option<&str>,
+) -> Result<mm_model::marketplace_plugin::MarketplacePluginFilter, ApiError> {
+    parse_marketplace_plugin_filter(query).map_err(|err| {
+        ApiError::from(
+            AppError::new(
+                GET_MARKETPLACE,
+                "app.plugin.marshal.app_error",
+                None,
+                "",
+                500,
+            )
+            .wrap(err),
+        )
+    })
+}
+
 /// Port of `parseMarketplacePluginFilter` (plugin.go:382).
 fn parse_marketplace_plugin_filter(
     query: Option<&str>,
@@ -507,10 +532,10 @@ fn parse_marketplace_plugin_filter(
     })
 }
 
-const GET_MARKETPLACE: &str = "getMarketplacePlugins";
+pub(crate) const GET_MARKETPLACE: &str = "getMarketplacePlugins";
 
 /// The two 501s the marketplace routes open with, each under its handler's `where`.
-fn marketplace_gates(state: &AppState, where_: &str) -> Result<(), ApiError> {
+pub(crate) fn marketplace_gates(state: &AppState, where_: &str) -> Result<(), ApiError> {
     let config = state.app.config();
     if !config.plugin_enable {
         return Err(ApiError::from(AppError::new(
@@ -559,18 +584,7 @@ async fn serve_marketplace(
     query: Option<&str>,
 ) -> Result<Response, ApiError> {
     marketplace_gates(state, GET_MARKETPLACE)?;
-    let filter = parse_marketplace_plugin_filter(query).map_err(|err| {
-        ApiError::from(
-            AppError::new(
-                GET_MARKETPLACE,
-                "app.plugin.marshal.app_error",
-                None,
-                "",
-                500,
-            )
-            .wrap(err),
-        )
-    })?;
+    let filter = marketplace_filter(query)?;
     if !filter.remote_only
         && !state
             .app
@@ -611,7 +625,7 @@ async fn serve_marketplace(
         .into_response())
 }
 
-const INSTALL_MARKETPLACE: &str = "installMarketplacePlugin";
+pub(crate) const INSTALL_MARKETPLACE: &str = "installMarketplacePlugin";
 
 /// The `json:` names of `InstallMarketplacePluginRequest`, for Go's case-insensitive match.
 const INSTALL_REQUEST_FIELDS: mm_model::go_json::GoFields = mm_model::go_json::GoFields {
@@ -634,6 +648,24 @@ fn plugin_request_from_json(
     }
     mm_model::go_json::remap_object_keys(&mut value, &INSTALL_REQUEST_FIELDS);
     serde_json::from_value(value).ok()
+}
+
+/// `PluginRequestFromReader` as `installMarketplacePlugin` answers its failure: a **501**.
+pub(crate) fn marketplace_request(
+    body: &[u8],
+) -> Result<mm_model::marketplace_plugin::InstallMarketplacePluginRequest, ApiError> {
+    plugin_request_from_json(body).ok_or_else(marketplace_request_refused)
+}
+
+/// The 501 `installMarketplacePlugin` gives a body that does not decode.
+pub(crate) fn marketplace_request_refused() -> ApiError {
+    ApiError::from(AppError::new(
+        INSTALL_MARKETPLACE,
+        "app.plugin.marketplace_plugin_request.app_error",
+        None,
+        "",
+        501,
+    ))
 }
 
 /// Port of `installMarketplacePlugin` (plugin.go:130).
@@ -664,21 +696,29 @@ pub async fn install_marketplace_plugin(
                 &[&mm_model::permission::PERMISSION_SYSCONSOLE_WRITE_PLUGINS],
             )));
         }
-        let Some(mut request) = plugin_request_from_json(&body) else {
-            return Err(ApiError::from(AppError::new(
-                INSTALL_MARKETPLACE,
-                "app.plugin.marketplace_plugin_request.app_error",
-                None,
-                "",
-                501,
-            )));
-        };
+        let mut request = marketplace_request(&body)?;
         request.version.clear();
         let manifest = state.app.install_marketplace_plugin(&request).await?;
         crate::commands::encoded(StatusCode::CREATED, &manifest, INSTALL_MARKETPLACE)
     }
     .await;
     result.unwrap_or_else(IntoResponse::into_response)
+}
+
+/// `installPluginFromURL`'s one 501 — `app.plugin.disabled.app_error`, not the upload one — for
+/// plugins off, a signature requirement or uploads off.
+pub(crate) fn from_url_gate(state: &AppState) -> Result<(), ApiError> {
+    let config = state.app.config();
+    if !config.plugin_enable || config.plugin_require_signature || !config.plugin_enable_uploads {
+        return Err(ApiError::from(AppError::new(
+            "installPluginFromURL",
+            "app.plugin.disabled.app_error",
+            None,
+            "",
+            501,
+        )));
+    }
+    Ok(())
 }
 
 /// Port of `installPluginFromURL` (plugin.go:100).
@@ -695,17 +735,7 @@ pub async fn install_plugin_from_url(
     axum::extract::RawQuery(query): axum::extract::RawQuery,
 ) -> Response {
     let result = async {
-        let config = state.app.config();
-        if !config.plugin_enable || config.plugin_require_signature || !config.plugin_enable_uploads
-        {
-            return Err(ApiError::from(AppError::new(
-                "installPluginFromURL",
-                "app.plugin.disabled.app_error",
-                None,
-                "",
-                501,
-            )));
-        }
+        from_url_gate(&state)?;
         if !state
             .app
             .session_has_permission_to(

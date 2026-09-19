@@ -14131,3 +14131,11 @@ first survived; it is caught by the `posted`-event test added for it.
 
 Mutation tally (`managed-categories.plan`): 15 run, 15 caught, 2 controls survived.
 
+
+## `plugin_local.go` — the ten local plugin pairs, D-850 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitPluginLocal`, `reattachPlugin`, `detachPlugin`, `App.ReattachPlugin`/`DetachPlugin`, `Environment.Reattach` | `mm-api/src/local_plugins.rs`, `mm-app/src/plugins.rs`, `mm-plugin/src/environment.rs`, `mm-model/src/plugin_reattach.rs` | DONE (Go host: gates only, D-850) | 2 unit + 1 oracle (`plugingen reattach`) + 3 parity | Under a Rust host all ten are served; under Go's the gates are answered and the rest forwarded. `Reattach` only errors on a manifest with no server: a failed version check or start answers 200 and leaves the plugin "running" with no supervisor, as in Go. |
+
+Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.

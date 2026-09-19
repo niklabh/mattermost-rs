@@ -364,3 +364,197 @@ fn environment_matches_go_step_for_step() {
     report(&failures);
     assert_eq!(plugin_log(&log), go_log, "what the plugins logged");
 }
+
+/// plugingen/reattach.go's `ReattachManifests`.
+fn reattach_manifest(name: &str) -> mm_model::manifest::Manifest {
+    let json = match name {
+        "webonly" => r#"{"id":"webonly","version":"1.0.0","webapp":{"bundle_path":"main.js"}}"#,
+        "minversion" => {
+            r#"{"id":"reminv","version":"1.0.0","min_server_version":"99.0.0","server":{"executable":"x"}}"#
+        }
+        "dead" => {
+            r#"{"id":"dead","version":"1.0.0","server":{"executable":"x"},"webapp":{"bundle_path":"main.js"}}"#
+        }
+        "ok" => {
+            r#"{"id":"ok","name":"OK","version":"1.0.0","server":{"executable":"server/env_plugin"}}"#
+        }
+        "refuse" => {
+            r#"{"id":"refuse","name":"Refuses","version":"1.0.0","server":{"executable":"server/env_plugin_refuse"}}"#
+        }
+        other => panic!("no manifest {other}"),
+    };
+    serde_json::from_str(json).unwrap()
+}
+
+/// plugingen/reattach.go's `launch`: start the executable as a plugin ourselves, as a developer's
+/// tooling would, and hand the environment only its reattach configuration.
+async fn launch(
+    path: &Path,
+    log: &Path,
+) -> (
+    goplugin::Client,
+    mm_model::plugin_reattach::PluginReattachConfig,
+) {
+    let mut config = goplugin::ClientConfig::new(mm_plugin::rpc::handshake());
+    // The log path goes on the command rather than into this process's environment, which
+    // `environment_matches_go_step_for_step` sets for itself on another thread.
+    let mut command = goplugin::PluginCommand::new(path);
+    command
+        .env
+        .push(("ENV_PLUGIN_LOG".into(), log.as_os_str().to_owned()));
+    config.cmd = Some(command);
+    let client = goplugin::Client::start(config).await.unwrap();
+    let r = client.reattach_config();
+    let reattach = mm_model::plugin_reattach::PluginReattachConfig {
+        protocol: r.protocol,
+        protocol_version: 1,
+        addr: mm_model::plugin_reattach::UnixAddr {
+            name: r.addr.to_string(),
+            net: r.addr.network().to_owned(),
+        },
+        pid: i64::from(r.pid),
+        test: r.test,
+    };
+    (client, reattach)
+}
+
+/// plugingen/reattach.go's `runReattach`, over the Rust environment.
+async fn reattach_script(root: &Path, log: &Path) -> Json {
+    let plugin_dir = root.join("plugins");
+    let env = Environment::new(
+        Box::new(|_| Arc::new(NoApi)),
+        Arc::new(NoDriver),
+        plugin_dir.clone(),
+        root.join("webapp"),
+    );
+
+    let mut gone = Command::new("true").spawn().unwrap();
+    let gone_pid = gone.id();
+    gone.wait().unwrap();
+    let dead = mm_model::plugin_reattach::PluginReattachConfig {
+        protocol: "netrpc".into(),
+        protocol_version: 1,
+        addr: mm_model::plugin_reattach::UnixAddr {
+            name: root.join("nobody.sock").to_string_lossy().into_owned(),
+            net: "unix".into(),
+        },
+        pid: i64::from(gone_pid),
+        test: false,
+    };
+    let (ok_client, ok_config) = launch(&plugin_dir.join("ok/server/env_plugin"), log).await;
+    let (refuse_client, refuse_config) =
+        launch(&plugin_dir.join("refuse/server/env_plugin_refuse"), log).await;
+
+    let ids = ["webonly", "reminv", "dead", "ok", "refuse"];
+    let observe = |env: &Environment<NoApi, NoDriver>, label: &str| {
+        let mut state = serde_json::Map::new();
+        let mut hooks = serde_json::Map::new();
+        for id in ids {
+            state.insert(id.into(), json!(env.get_plugin_state(id)));
+            hooks.insert(
+                id.into(),
+                json!(err_string(env.hooks_for_plugin(id).map(drop))),
+            );
+        }
+        let mut active: Vec<String> = env
+            .active()
+            .into_iter()
+            .map(|i| format!("{} {}", i.manifest.unwrap().id, i.path))
+            .collect();
+        active.sort();
+        let (errs, statuses_error) = match env.statuses() {
+            Ok(st) => (
+                st.0.iter()
+                    .filter(|s| s.plugin_id == "ok" || s.plugin_id == "refuse")
+                    .map(|s| (s.plugin_id.clone(), json!(s.error)))
+                    .collect::<serde_json::Map<_, _>>(),
+                String::new(),
+            ),
+            Err(e) => (serde_json::Map::new(), e.to_string()),
+        };
+        json!({"step": "observe", "label": label, "state": state, "hooks": hooks,
+            "active": active, "status_errors": errs, "statuses_error": statuses_error})
+    };
+
+    let mut steps = Vec::new();
+    for (name, config) in [
+        ("webonly", &dead),
+        ("minversion", &dead),
+        ("dead", &dead),
+        ("ok", &ok_config),
+        ("ok", &ok_config),
+        ("refuse", &refuse_config),
+    ] {
+        let error = err_string(env.reattach(&reattach_manifest(name), config).await);
+        steps.push(json!({"step": "reattach", "name": name, "error": error}));
+    }
+    steps.push(observe(&env, "after reattaching"));
+
+    let mut deactivated = serde_json::Map::new();
+    for id in ids {
+        deactivated.insert(id.into(), json!(env.deactivate(id).await));
+    }
+    steps.push(json!({"step": "deactivate", "deactivated": deactivated}));
+    steps.push(observe(&env, "after deactivating"));
+
+    for id in ids {
+        env.remove_plugin(id);
+    }
+    steps.push(observe(&env, "after removing"));
+    env.shutdown().await;
+    ok_client.kill().await;
+    refuse_client.kill().await;
+
+    let text = serde_json::to_string(&steps)
+        .unwrap()
+        .replace(&root.to_string_lossy().into_owned(), "$ROOT");
+    serde_json::from_str(&text).unwrap()
+}
+
+/// `Environment.Reattach` against Go's, step for step: the one error (no server component), the
+/// failures it swallows and marks running (a version check, a process that is gone, a plugin
+/// that refuses `OnActivate`), a real reattach whose hooks answer, a second one that is a no-op,
+/// and what `Deactivate` and `RemovePlugin` make of each.
+#[test]
+fn reattach_matches_go_step_for_step() {
+    let go_root = build_root("reattach-go");
+    let go_log = go_root.join("plugin.log");
+    let out = Command::new(plugingen())
+        .arg("reattach")
+        .arg(&go_root)
+        .current_dir(root_dir())
+        .env("ENV_PLUGIN_LOG", &go_log)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "plugingen reattach: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let go: Json = serde_json::from_slice(&out.stdout).unwrap();
+
+    let root = build_root("reattach-rust");
+    let log = root.join("plugin.log");
+    let rust = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(reattach_script(&root, &log));
+
+    let (go_steps, rust_steps) = (go.as_array().unwrap(), rust.as_array().unwrap());
+    assert_eq!(go_steps.len(), rust_steps.len(), "step count");
+    let mut failures = Vec::new();
+    for (i, (g, r)) in go_steps.iter().zip(rust_steps).enumerate() {
+        if g != r {
+            failures.push(format!(
+                "step {i}:\nGo:   {}\nRust: {}",
+                serde_json::to_string_pretty(g).unwrap(),
+                serde_json::to_string_pretty(r).unwrap()
+            ));
+        }
+    }
+    report(&failures);
+    assert_eq!(
+        plugin_log(&log),
+        plugin_log(&go_log),
+        "what the plugins logged"
+    );
+}
