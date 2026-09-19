@@ -211,6 +211,12 @@ func imagingPipelineStage() (map[string]any, error) {
 		return (&png.Encoder{}).Encode(b, imgSpec{"nrgba", 1000, 300, "gradient", "mixed", 8004, 0, ""}.build())
 	})
 	inline("alpha_1000x300", alpha)
+	// Either side of GeneratePreview's `w > width` and GenerateThumbnail's `width > height`.
+	for _, sz := range [][2]int{{1920, 40}, {1921, 40}, {130, 130}} {
+		inline("edge_"+itoa(sz[0])+"x"+itoa(sz[1]), mustEncode(func(b *bytes.Buffer) error {
+			return (&png.Encoder{}).Encode(b, imgSpec{"nrgba", sz[0], sz[1], "gradient", "opaque", 8006, 0, ""}.build())
+		}))
+	}
 	// The 1×1 PNG every parity suite uploads.
 	inline("parity_1x1", []byte{
 		137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,

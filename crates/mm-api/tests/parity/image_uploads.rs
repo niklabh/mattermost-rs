@@ -155,6 +155,14 @@ fn corpus() -> Vec<(&'static str, &'static str, Vec<u8>)> {
             "mmrs-parity-img-liar.png",
             corpus_file("jpeg", "video-001.q50.420.jpeg"),
         ),
+        // A PNG named .gif: the mime type says image/gif, so preprocessImage decodes it whole and
+        // clears has_preview_image — but the derived files are still written, as PNG bytes
+        // under `_thumb.jpg`, because the decoder said "png" and the mime said "not png".
+        (
+            "png named gif",
+            "mmrs-parity-img-liar.gif",
+            TINY_PNG.to_vec(),
+        ),
         // Header decodes, body does not: the row keeps its preview paths and nothing is written.
         (
             "truncated png",
@@ -294,7 +302,8 @@ async fn every_corpus_image_uploads_identically() {
         }
     }
     // Guard against a vacuous pass: every corpus file but the three whose bodies do not decode
-    // must have produced both derived files and a mini preview.
+    // must have produced both derived files and a mini preview — including the PNG named .gif,
+    // whose row says has_preview_image: false.
     let total = corpus().len();
     assert_eq!(
         with_derived,

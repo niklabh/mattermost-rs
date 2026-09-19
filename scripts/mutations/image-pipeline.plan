@@ -1,0 +1,33 @@
+# Mutation plan for the image pipeline: goimage's codecs and resampler, mm-app's imaging call
+# surface, and the four served write routes (POST /files, the completing POST /uploads/{id} chunk,
+# createEmoji's resize, POST /users/{id}/image). 2026-09-19.
+#
+#   scripts/mutate-batch.sh scripts/mutations/image-pipeline.plan
+#
+# Not planned: the brand archive's timestamp format (no suite reads the archive name — a recorded
+# gap), and level-1 deflate (not ported). The fork sessions' hand mutations are not repeated here.
+# goimage: the codecs and the resampler (unit, filtered to the module under test)
+deflate-lazy-min	crates/goimage/src/flate/deflate.rs	                    && prev_length >= MIN_MATCH_LENGTH	                    && prev_length > MIN_MATCH_LENGTH	unit	flate::deflate
+huff-stored-tie	crates/goimage/src/flate/huffman_bit_writer.rs	            if storable && stored_size < size {	            if storable && stored_size <= size {	unit	flate::deflate
+png-filter-paletted	crates/goimage/src/png/writer.rs	        if level != ZLIB_NO_COMPRESSION && !cb.is_paletted() {	        if level != ZLIB_NO_COMPRESSION {	unit	png::writer
+jpeg-div-round	crates/goimage/src/jpeg/writer.rs	        a.wrapping_add(b >> 1) / b	        a.wrapping_add(b >> 2) / b	unit	jpeg::writer
+jpeg-quality-scale	crates/goimage/src/jpeg/writer.rs	        5000 / quality	        5001 / quality	unit	jpeg::writer
+inflate-dist-far	crates/goimage/src/flate/inflate.rs	                if dist > self.dict.hist_size() {	                if dist > self.dict.hist_size() + 1 {	unit	inflate
+resize-alpha-unfused	crates/goimage/src/imaging/resize.rs	        a = madd(a, s3, weight);	        a += s3 * weight;	unit	imaging
+resize-centre-unfused	crates/goimage/src/imaging/resize.rs	        let fu = nmsub(v as f64 + 0.5, du, 0.5);	        let fu = (v as f64 + 0.5) * du - 0.5;	unit	imaging
+exif-count-cap	crates/goimage/src/exif.rs	        if count > 0x10000 {	        if count > 0x20000 {	unit	exif
+# mm-app: the Mattermost call surface (unit)
+thumb-axis	crates/mm-app/src/image_pipeline.rs	    if b.dx() > b.dy() {	    if b.dx() >= b.dy() {	unit	image_pipeline
+preview-edge	crates/mm-app/src/image_pipeline.rs	    if img.bounds().dx() > width {	    if img.bounds().dx() >= width {	unit	image_pipeline
+resolution-guard	crates/mm-app/src/image_pipeline.rs	    width > max_resolution / height	    width >= max_resolution / height	unit	image_pipeline
+# the routes (api, one suite each)
+swap-drops-ccw	crates/mm-app/src/file_upload.rs	            ROTATED_CW_MIRRORED | ROTATED_CCW | ROTATED_CCW_MIRRORED | ROTATED_CW	            ROTATED_CW_MIRRORED | ROTATED_CCW_MIRRORED | ROTATED_CW	api	image_uploads
+gif-mime-preview	crates/mm-app/src/file_upload.rs	        if info.mime_type == "image/gif" {	        if info.mime_type == "image/giff" {	api	image_uploads
+mini-only-if-none	crates/mm-app/src/file_upload.rs	        if info.mini_preview.is_none() {	        if info.mini_preview.is_some() {	api	image_uploads
+uploads-preview-path	crates/mm-app/src/upload.rs	            info.preview_path = format!("{dir}/{stem}_preview.{ext}");	            info.preview_path = format!("{dir}/{stem}_prev.{ext}");	api	image_uploads
+uploads-sniff-jpeg	crates/mm-app/src/upload.rs	            Some("png" | "jpeg") | None => Ok(()),	            Some("png") | None => Ok(()),	api	image_uploads
+emoji-write-through	crates/mm-app/src/emoji.rs	        if width <= MAX_EMOJI_WIDTH && height <= MAX_EMOJI_HEIGHT {	        if width <= MAX_EMOJI_WIDTH || height <= MAX_EMOJI_HEIGHT {	api	emoji_writes
+profile-noop	crates/mm-app/src/user_image.rs	            if stored == png {	            if stored != png {	api	image_writes
+# no-op controls
+control-fma-order	crates/goimage/src/fma.rs	    if FUSES { x.mul_add(y, a) } else { a + x * y }	    if FUSES { x.mul_add(y, a) } else { x * y + a }	unit	imaging
+control-lanczos-path	crates/mm-app/src/image_pipeline.rs	    let preview = imaging::resize(img, w, h, &LANCZOS);	    let preview = imaging::resize(img, w, h, &imaging::LANCZOS);	unit	image_pipeline
