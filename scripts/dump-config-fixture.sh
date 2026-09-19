@@ -127,6 +127,8 @@ MODELLED = {
     # ClientDirectory and PluginStates are what the plugin host reads.
     "PluginSettings": [
         "Directory", "Enable", "EnableMarketplace", "ClientDirectory", "PluginStates", "RequirePluginSignature", "EnableUploads",
+        # The health-check job and the prepackaged-plugin install, read at plugin start-up.
+        "EnableHealthCheck", "AutomaticPrepackagedPlugins",
         # What GET and POST /plugins/marketplace and POST /plugins/install_from_url read.
         "EnableRemoteMarketplace", "MarketplaceURL", "AllowInsecureDownloadURL", "SignaturePublicKeyFiles",
     ],

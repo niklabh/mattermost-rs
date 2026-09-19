@@ -18,9 +18,9 @@
 //!
 //! # Prepackaged plugins
 //!
-//! This plugin host does not read `prepackaged_plugins/` yet ([D-811]), so its environment offers
-//! none, and both passes that consult them see an empty list. The merge itself is ported, and
-//! unit-tested, so the route needs no change when D-811 lands.
+//! The list and the install consult the environment's prepackaged plugins, which
+//! `crate::plugin_prepackaged` reads from `prepackaged_plugins/` at start-up. The transitionally
+//! prepackaged ones are not among them, so neither route offers those.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -257,15 +257,7 @@ fn base_plugins_from_json(
     Ok(serde_json::from_value(value)?)
 }
 
-/// A prepackaged plugin as the environment offers it (`plugin.PrepackagedPlugin`). This host
-/// offers none yet; see the module docs.
-#[derive(Debug, Clone, Default)]
-pub struct PrepackagedPlugin {
-    pub path: String,
-    pub signature_path: String,
-    pub manifest: Option<Manifest>,
-    pub icon_data: String,
-}
+pub use mm_plugin::environment::PrepackagedPlugin;
 
 /// Port of `mergePrepackagedPlugins` (app/plugin.go:661): a prepackaged plugin is added when the
 /// Marketplace lacks it and replaces the Marketplace's entry only when **strictly** newer. Either
@@ -349,7 +341,7 @@ pub fn is_svg(buf: &[u8]) -> bool {
 }
 
 /// `getIcon` (app/plugin.go:1230): an SVG file as a `data:` URI.
-fn get_icon(path: &str) -> Result<String, String> {
+pub(crate) fn get_icon(path: &str) -> Result<String, String> {
     use base64::Engine;
     let icon =
         std::fs::read(path).map_err(|e| format!("failed to open icon at path {path}: {e}"))?;
@@ -566,7 +558,7 @@ impl App {
                     500,
                 ));
             };
-            merge_prepackaged_plugins(&mut plugins, &[])?;
+            merge_prepackaged_plugins(&mut plugins, &environment.prepackaged_plugins())?;
             let local = environment.available().map_err(|e| {
                 Box::new(
                     AppError::new(
@@ -629,7 +621,7 @@ impl App {
 
     /// Port of `Channels.InstallMarketplacePlugin` (app/plugin_install.go:258).
     ///
-    /// A prepackaged bundle first (none on this host yet); then, with the remote Marketplace on,
+    /// A prepackaged bundle first; then, with the remote Marketplace on,
     /// the Marketplace's entry, downloaded when newer than the prepackaged one. A failure to reach
     /// the Marketplace is only logged — the plugin may be prepackaged-only — so it surfaces as the
     /// `not_found` 500. The bundle must then carry a signature that verifies, and is installed,
@@ -642,8 +634,9 @@ impl App {
         const WHERE: &str = "InstallMarketplacePlugin";
         tracing::info!(requested_version = %request.version, "Installing plugin from marketplace");
 
-        // `getPrepackagedPlugin`: a nil environment is its own 500; otherwise not found.
-        if self.plugins_environment().is_none() {
+        // `getPrepackagedPlugin`: a nil environment is its own 500; otherwise the first bundle with
+        // the id (and the version, when one is named), or none.
+        let Some(environment) = self.plugins_environment() else {
             return Err(AppError::boxed(
                 "getPrepackagedPlugin",
                 "app.plugin.config.app_error",
@@ -651,10 +644,43 @@ impl App {
                 "plugin environment is nil",
                 500,
             ));
-        }
-        let prepackaged: Option<PrepackagedPlugin> = None;
+        };
+        let prepackaged: Option<PrepackagedPlugin> =
+            environment.prepackaged_plugins().into_iter().find(|p| {
+                p.manifest.as_ref().is_some_and(|m| {
+                    m.id == request.id
+                        && (request.version.is_empty() || m.version == request.version)
+                })
+            });
         let mut plugin_file: Option<Vec<u8>> = None;
         let mut signature_file: Option<Vec<u8>> = None;
+        if let Some(p) = &prepackaged {
+            let open_error = |detail: String, e: std::io::Error| {
+                Box::new(
+                    AppError::new(
+                        WHERE,
+                        "app.plugin.install_marketplace_plugin.app_error",
+                        None,
+                        &detail,
+                        500,
+                    )
+                    .wrap(e),
+                )
+            };
+            plugin_file = Some(std::fs::read(&p.path).map_err(|e| {
+                open_error(format!("failed to open prepackaged plugin {}", p.path), e)
+            })?);
+            signature_file = Some(std::fs::read(&p.signature_path).map_err(|e| {
+                open_error(
+                    format!(
+                        "failed to open prepackaged plugin signature {}",
+                        p.signature_path
+                    ),
+                    e,
+                )
+            })?);
+            tracing::debug!(bundle_path = %p.path, signature_path = %p.signature_path, "Found matching pre-packaged plugin");
+        }
 
         if self.config().plugin_enable_remote_marketplace {
             let plugin = match self

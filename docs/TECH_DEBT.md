@@ -9220,28 +9220,23 @@ query-string token too and answer `auth::token_provided_rejection`, shared with 
 here where Go answered 401, and the PR #30 review found `AuthenticatedSession` accepted it too —
 both extractors now refuse it.
 
-## D-811 · The Rust plugin host starts from the plugin directory alone
+## D-811 · The Rust plugin host is not yet a drop-in for Go's
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-18 (app/plugin.go:172-259) · **Owner** the plugin host
 
-With `MMRS_PLUGIN_HOST=rust`, `mm_app::plugins` ports `initPlugins`, `syncPluginsActiveState`,
-`ShutDownPlugins` and the `PluginSettings` config listener, and `GET /plugins/statuses` answers from
-it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-in for Go's:
+With `MMRS_PLUGIN_HOST=rust`, start-up follows Go's `initPlugins` step for step: the environment,
+the health-check job (`EnableHealthCheck`), the file-store sync with signatures checked when
+`RequirePluginSignature` is on, the prepackaged and transitionally prepackaged plugins, then the
+active state (closed 2026-09-20: `mm_app::plugin_prepackaged`, `mm_plugin::environment::HealthCheckJob`,
+measured by `parity::plugin_startup` and `environment::health_check_matches_go_step_for_step`).
+What still keeps it from being a drop-in:
 
-- Signatures (`plugin_signature.go`, OpenPGP): `syncPlugins` is ported (2026-09-18,
-  `mm_app::plugin_install`), but with `RequirePluginSignature` on it skips every bundle with an
-  error where Go would verify it. `verifyPlugin` itself is ported since 2026-09-19
-  (`mm_app::plugin_signature`, used by marketplace installs, which also store the signature);
-  what is owed is calling it from the sync.
-- Prepackaged and transitionally prepackaged plugins (`processPrepackagedPlugins`,
-  `persistTransitionallyPrepackagedPlugins`). The marketplace list and install consult the
-  environment's prepackaged list, which is empty here (`mm_app::marketplace`).
-- The health-check job (`health_check.go`, `EnableHealthCheck`).
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
+- The hook call sites: D-402, D-471 and D-542's hooks do not yet fire from Rust write paths
+  (plugin plan Phase 5).
 
-`MMRS_PLUGIN_HOST` stays `go` by default until these land and D-402, D-471 and D-542's hook call
-sites fire from Rust write paths (plugin plan Phase 5).
+`MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
 ## D-850 · Under a Go plugin host, the local plugin routes forward past their gates
 
