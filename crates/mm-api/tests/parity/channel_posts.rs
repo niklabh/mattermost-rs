@@ -161,7 +161,7 @@ struct Fixture {
     /// writes when its creator joins — the only way to get a channel with **no** posts at all,
     /// and therefore the only way to reach the clock-stamped etag.
     private_channel: String,
-    /// A channel holding one message with a link in it, which the metadata pipeline refuses.
+    /// A channel holding one message with a link to a host that does not resolve.
     link_channel: String,
     /// A second, non-admin account that is a member of `channel` but not of `private_channel`.
     plain_token: String,
@@ -1079,8 +1079,8 @@ async fn an_open_channel_is_readable_by_a_team_member_who_never_joined() {
     let token = go_minted_token(&client).await;
     let fixture = fixture(&client, &token).await;
 
-    // `statuses` rather than `fetch_both_raw` because this channel's one post carries a link,
-    // so our side forwards it — the claim under test is the *gate*, not who answered.
+    // `statuses` rather than `fetch_both_raw`: the claim under test is the *gate*, not the body
+    // (`a_page_with_a_link_is_served` compares that).
     let path = format!("/api/v4/channels/{}/posts", fixture.link_channel);
     let (go_status, rs_status) = statuses(&client, &fixture.plain_token, &path).await;
     assert_eq!(go_status, 200, "Go serves a non-member of an open channel");
@@ -1115,15 +1115,30 @@ async fn the_shapes_this_port_declines_are_forwarded() {
         )
         .await;
     }
+}
 
-    // A message the markdown parser would find a link in refuses the *whole page*, because one
-    // unreproducible post is enough to make the list unreproducible.
-    assert_forwarded_and_identical(
-        &client,
-        &token,
-        &format!("/api/v4/channels/{}/posts", fixture.link_channel),
-    )
-    .await;
+/// A page holding a post with a link is served since 2026-09-19: the link's host does not
+/// resolve, so Go's create left a `none` row, and both servers answer a plain `link` embed from
+/// it (Go from its link cache, this server from the row).
+#[tokio::test]
+async fn a_page_with_a_link_is_served() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let fixture = fixture(&client, &token).await;
+    let path = format!("/api/v4/channels/{}/posts", fixture.link_channel);
+    let (go, rs) = fetch_both(&client, &token, &path).await;
+    assert_eq!(
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "{path}"
+    );
+    assert!(
+        String::from_utf8_lossy(&go).contains(r#""type":"link""#),
+        "the unresolvable link is a plain link embed"
+    );
 }
 
 /// `?since=` on both store branches, byte for byte. On the plain branch a reacted-to reply's

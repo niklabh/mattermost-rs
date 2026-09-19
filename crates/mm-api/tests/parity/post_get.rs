@@ -884,14 +884,14 @@ async fn create_private_channel(
     created["id"].as_str().expect("an id").to_owned()
 }
 
-/// The other half of the contract: every shape whose metadata this port cannot predict has to be
-/// **forwarded**, and each of these really does produce an embed or an image on the Go side.
+/// Messages with a link are served since 2026-09-19: each preview is answered from the
+/// `LinkMetadata` row Go wrote when it created the post (or, where the fetch failed, from its
+/// `none` row), so the two servers agree whatever the link's host answers. The link-preview
+/// suites (`parity::post_link_reads`) compare the fetch itself against a mock site.
 ///
-/// If `mm_app::post::message_may_contain_a_link` is ever narrowed, one of these starts being
-/// answered locally with an empty `metadata` where Go sends an embed — a divergence no
-/// byte-comparison of the *served* shapes would notice, because none of them would be served.
+/// A prop this port cannot reproduce is still forwarded, link or not.
 #[tokio::test]
-async fn shapes_with_links_are_forwarded_and_still_match() {
+async fn shapes_with_links_are_served_and_a_refused_prop_forwarded() {
     if !stack_enabled() {
         return;
     }
@@ -906,7 +906,13 @@ async fn shapes_with_links_are_forwarded_and_still_match() {
         "angle <https://example.com> autolink",
     ] {
         let post_id = post_message(&client, &token, &channel, message, None).await;
-        assert_forwarded_and_identical(&client, &token, &format!("/api/v4/posts/{post_id}")).await;
+        let path = format!("/api/v4/posts/{post_id}");
+        let (go, rs) = fetch_both_stable(&client, &token, &path).await;
+        assert_eq!(
+            String::from_utf8_lossy(&go),
+            String::from_utf8_lossy(&rs),
+            "{message:?}"
+        );
     }
 
     // The other refusal axis: a prop, not the message. `attachments` is `getEmbedForPost`'s very

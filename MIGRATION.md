@@ -14163,3 +14163,11 @@ Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run,
 | `App.PermanentDeleteUser`, `App.PermanentDeleteAllUsers`, `deleteUser`/`localDeleteUser` `?permanent=true`, `localPermanentDeleteAllUsers`, 16 store methods | `mm-app/src/user_delete.rs`, `mm-api/src/{user_deletes,local_users}.rs`, `mm-store/src/*` (+ `scheduled_post_store.rs`) | DONE (bot owners forward, D-472) | 3 unit + 3 parity (stack 4) + 1 wipe parity (`scripts/wipe-parity.sh`, spare stack) | Served only when no erasure would reach the bot cascade; for the wipe that is a question of `Username` order, not ownership (`App::permanent_delete_all_needs_go`). A profile directory that cannot be checked answers **202 with an error body** after every table is gone. |
 
 Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 controls survived; `permanent-delete-all.plan` (spare stack 6) 5 run, 3 caught, 2 controls survived. A first user-plan run had one harness fault (an untyped `$1`), re-expressed and re-run whole.
+
+## Post reads with a link — D-860 and D-720 closed (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages(post, false)` on every read, edit and ephemeral path; `SetPostReminder`'s team-less permalink; `createEphemeralPost`'s second prepare; `getPostsByIds`' embed-less prepare | `mm-app/src/link_metadata.rs`, `post.rs`, `post_write.rs`, `post_rest.rs`; `mm-api/src/posts.rs`, `post_writes.rs` | DONE (reads) | 7 parity (`post_link_reads`) + guards moved in `post_get`, `channel_posts`, `postrest`, `post_acks` | Every read answers a link from the creating process's cache or the `LinkMetadata` row, never a fetch, except a URL past 2,048 bytes (the cache decision is on `LinkCache`); `getPostsByIds` runs `PreparePostForClient` alone and an ephemeral answer carries its embed twice — both were wrong here and hidden by the old forward. |
+
+Mutation tally (`post-link-reads.plan`): 18 run, 16 caught, 2 controls survived.

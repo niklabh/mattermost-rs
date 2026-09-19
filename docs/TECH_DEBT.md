@@ -7527,8 +7527,9 @@ be done without claiming on shapes we then forward.
 **Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
 (`attachFilesToPost`) and a `PostPriority`; 2026-09-19 — a message with a link is served
 (`mm_app::link_metadata`: OpenGraph, image and plain-link previews, the image dimensions, the
-permalink preview and its `previewed_post` prop, the `LinkMetadata` row); the rows below are what
-still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
+permalink preview and its `previewed_post` prop, the `LinkMetadata` row), and a permalink to a post
+with a link of its own once the read path was ([D-860] closed); the rows below are what still
+forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
 `App::notification_forward_reason` carry the Go branch behind each arm.
 
 `POST /api/v4/posts` answers a message or a reply, mentions included, in an open or private
@@ -7544,7 +7545,6 @@ it:
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
 | a shared channel | the shared-channel sync service |
 | a link with the image proxy on | `PostWithProxyAddedToImageURLs` and `ImageProxyAdder` — the proxy is not ported (refused for every post, link or not, before the write) |
-| a permalink to a post whose own first link is not a permalink | preparing the referenced post takes the **read** path of `getEmbedsAndImages` — [D-860] |
 | a link whose host is non-ASCII or has an `xn--` label, with `RestrictLinkPreviews` set | `idna.Lookup.ToASCII`'s UTS #46 tables and Punycode (`mm_app::link_metadata::idna_lookup_to_ascii`) |
 | `{SiteURL}/api/v4/image?…` | `ImageProxy().GetImageDirect` |
 | the fetched page or image is one of the parser's unreproducible shapes | a charset decoder `encoding_rs` does not match, a JPEG segment skip past 10 MiB, a body that fails part-way (`mm_app::link_image`, `mm_app::opengraph`) |
@@ -8929,34 +8929,18 @@ parity tests as the unsharded one. The headroom is about 80 users; per-test reti
 owed, and `MMRS_PARITY_SHARDS=3` is the stopgap if the peak climbs back.
 ## D-720 · `setPostReminder` on a DM or group-channel post forwards: its permalink is fetched, not previewed
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
-
-Narrows [D-420]. The team-channel reminder is served, confirmation embed included
-(`mm_app::post::sole_permalink_in`, `App::link_metadata_for_permalink`). A post whose channel has
-no team gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so Go sends the URL
-through `getLinkMetadataForURL`: an outbound fetch plus a `LinkMetadata` row. `App::set_post_reminder`
-refuses that branch before writing. **What is owed:** the generic link-metadata path
-(OpenGraph fetch, `LinkMetadata` store, the link cache) — ported for the create path since
-2026-09-19; what is left is the read path, [D-860].
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+**Closed** 2026-09-19 — the team-less `{SiteURL}/pl/{id}` goes through `getLinkMetadata` like any
+other URL (`mm_app::post_rest::App::set_post_reminder`); `parity::postrest` compares the
+confirmation.
 
 ## D-860 · Reading a post whose message has a link forwards: `getEmbedsAndImages` on the read path
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (createPost with a link)
-
-`POST /api/v4/posts` runs `getEmbedsAndImages(post, isNewPost=true)` — the fetch, the
-`LinkMetadata` upsert, the process link cache — and is served. Every **read** of a post runs it
-with `isNewPost=false`, which consults the `LinkMetadata` row before fetching, and
-`mm_app::post::App::get_embeds_and_images` still refuses any message whose first link is not a lone
-permalink (`message_may_contain_a_link`). So every list, thread, search and single-post read that
-holds such a post forwards, as does a create whose permalink points at one (the referenced post is
-prepared on the read path) and `setPostReminder` on a DM post ([D-720]).
-
-**What is owed:** route the read path through `App::get_link_metadata` with `is_new_post = false`
-(the database branch and `DeserializeDataToConcreteType` are ported and unexercised), then lift the
-refusal. The one thing to decide first is the process cache: Go's answer on a read is its own
-in-memory entry when it has one, which can differ from the row only for a URL longer than
-`LinkMetadataMaxURLLength` (the save fails, the cache keeps the result) or a permalink previewed
-within the hour of an edit.
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-19 (createPost with a link)
+**Closed** 2026-09-19 — every read runs `App::get_embeds_and_images` with `is_new_post = false`
+(the `LinkMetadata` row before a fetch); the process-cache decision is on `mm_app::link_metadata::LinkCache`.
+What still forwards is [D-401]'s parser and proxy rows, an edit that previews a permalink
+([D-880]) and a burn-on-read reveal with a link ([D-881]).
 
 ## D-721 · The author's own `burnPost` forwards: `PermanentDeletePostDataRetainStub` is unported
 
@@ -9277,3 +9261,24 @@ cache administrator — that the same operation through Go does not. Measured by
 `parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
 route that Go does not audit, or deleting the row after the call.
 
+## D-880 · An edit that previews a permalink forwards: `addPostPreviewProp` and the edit's `PermalinkFate`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (post reads with a link)
+
+`UpdatePost` (app/post.go:1019) prepares the edited post, then `addPostPreviewProp` writes the row
+a second time with `previewed_post`, and `publishWebsocketEventForPost` takes the preview and the
+prop off the post it answers with and puts them back for an author who may read the channel.
+`App::update_post` serves every other link and forwards, **before its write**, an edit whose post
+carries `previewed_post` or whose first link is a permalink. **What is owed:** the second
+`Update`, and applying the returned `PermalinkFate` to the edit's answer as `create_post` does.
+`parity::post_link_reads` asserts the forward (Go's history holds three rows, not four).
+
+## D-881 · `revealPost` of a burn-on-read message with a link forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (post reads with a link)
+
+The read path now previews links, but `App::reveal_post` still refuses a revealed message with any
+link but a lone permalink (`message_may_contain_a_link`) before it writes the read receipt: a
+parser or proxy refusal after that write would hand Go a reveal whose receipt already exists, and
+Go would then skip the first-reveal event. **What is owed:** a burn-on-read oracle on the links
+pair, then the refusal lifted to exactly the shapes `get_embeds_and_images` can still refuse.

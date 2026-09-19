@@ -10,9 +10,11 @@
 //! or an embed. **Links are served** (since 2026-09-19): the first autolink's preview — fetched
 //! OpenGraph, a measured image, a plain link, or a permalink previewed from the database with its
 //! `previewed_post` prop — and the dimensions of every image, by
-//! [`App::get_embeds_and_images_for_new_post`](crate::link_metadata). What that pipeline cannot
-//! reproduce (the image proxy, a non-ASCII host under `RestrictLinkPreviews`, a permalink to a post
-//! whose own preview needs a fetch) is refused from there, still before the save. Everything else
+//! [`App::get_embeds_and_images`](crate::link_metadata). What that pipeline cannot
+//! reproduce (the image proxy, a non-ASCII host under `RestrictLinkPreviews`, a page or image the
+//! parsers cannot reproduce) is refused from there, still before the save. A permalink to a post
+//! with a link of its own is served since the read path is: the referenced post is prepared with
+//! `IsNewPost` false, from its `LinkMetadata` row. Everything else
 //! is forwarded, and two functions decide, both
 //! **before the pending-post id is claimed and before `Post().Save`** so that no forward leaves a
 //! half-written row behind: [`App::refuse_create_post_shapes`] on the request's shape, and
@@ -726,7 +728,7 @@ impl App {
         // measured or previewed, with a `LinkMetadata` row written for a fetch — and the
         // dimensions of every image. What it cannot reproduce is forwarded from here, still before
         // the save; the only thing left behind is the `LinkMetadata` upsert Go repeats.
-        self.get_embeds_and_images_for_new_post(post).await?;
+        self.get_embeds_and_images(post, true).await?;
         // The permalink preview's id goes into the saved row.
         if let Some(preview) = post.get_preview_post() {
             post.add_prop(
@@ -788,7 +790,7 @@ impl App {
         // `PreparePostForClient`, *not* the embeds-and-images variant: Go relies on
         // `getEmbedsAndImages` having already run on the pre-save post.
         let mut prepared = self
-            .prepare_created_post_for_client(
+            .prepare_post_for_client(
                 &saved,
                 PreparePostForClientOpts {
                     is_edit_post: true,
@@ -850,7 +852,7 @@ impl App {
         }
 
         let (sanitized, _is_member_for_previews) = self
-            .sanitize_created_post_metadata_for_user(prepared, &session.user_id)
+            .sanitize_post_metadata_for_user(prepared, &session.user_id)
             .await?;
 
         Ok((sanitized, user.is_bot))

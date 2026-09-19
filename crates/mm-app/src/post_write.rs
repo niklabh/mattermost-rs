@@ -42,8 +42,8 @@ use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
     AllStringsOptions, POST_PROPS_ADAPTIVE_CARDS, POST_PROPS_AI_GENERATED_BY_USER_ID,
     POST_PROPS_BLOCK_KIT_BLOCKS, POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_CURRENT_TEAM_ID,
-    POST_PROPS_MM_BLOCKS, POST_PROPS_MM_BLOCKS_ACTIONS, POST_TYPE_BURN_ON_READ, POST_TYPE_CARD,
-    Post, PostPatch,
+    POST_PROPS_MM_BLOCKS, POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_PREVIEWED_POST,
+    POST_TYPE_BURN_ON_READ, POST_TYPE_CARD, Post, PostPatch,
 };
 use mm_model::session::Session;
 use mm_model::user::User;
@@ -348,6 +348,21 @@ impl App {
             None => new_post.metadata = old_post.metadata.clone(),
         }
 
+        // A permalink preview on an edit is the one link shape this path does not answer:
+        // `addPostPreviewProp` writes the row a second time, and `publishWebsocketEventForPost`
+        // takes the preview and the prop off the post it answers with (`PermalinkFate`), which
+        // the edit path does not apply. Both need the post's first link to be a permalink or the
+        // post to carry `previewed_post`, so those forward — decided here, before the write, so
+        // Go does not write the edit a second time. Every other link is served: the embed comes
+        // from the read path's `LinkMetadata` row, or a fetch. Owed: [D-880].
+        if new_post.get_prop(POST_PROPS_PREVIEWED_POST).is_some()
+            || self.contains_permalink(&new_post)?
+        {
+            return Err(PrepareError::Unreproducible(
+                "an edit whose first link is a permalink runs addPostPreviewProp",
+            ));
+        }
+
         let saved = self
             .store()
             .post()
@@ -388,9 +403,8 @@ impl App {
 
         // `addPostPreviewProp` would run here and, if the post carried a permalink preview, write
         // the row a **second** time. `GetPreviewPost` reads `Metadata.Embeds` for a permalink
-        // embed, and any post that could have one carries `previewed_post` — a refused prop, so
-        // `prepare_post_for_client_with_embeds_and_images` above has already declined. Nothing
-        // reaching this line has an embed to find.
+        // embed, and only a post whose first link is a permalink can have one — refused before
+        // the write above. Nothing reaching this line has a permalink embed to find.
 
         // `AutoTranslation().Translate` would run here on a licensed installation with the
         // feature enabled for the channel. See the module docs.
@@ -925,8 +939,9 @@ impl App {
     /// # Four of its five stages are inert here
     ///
     /// The burn-on-read content blanking needs that post type (refused). The permalink hook needs
-    /// `previewed_post`, a refused prop, so `removePermalinkMetadataFromPost` has nothing to
-    /// remove. The ABAC files hook needs `AccessControlSettings.EnableAttributeBasedAccessControl`,
+    /// a permalink embed, which an edit forwards before its write and a delete's unprepared post
+    /// never has; a stored `previewed_post` prop is still taken off the frame, as Go takes it,
+    /// and the returned fate is not needed because nothing is put back. The ABAC files hook needs `AccessControlSettings.EnableAttributeBasedAccessControl`,
     /// an enterprise setting, and `FeatureFlags.PermissionPolicies`. What is left is the
     /// serialisation, the `channel_mentions` hook and the publish — all in
     /// [`App::publish_websocket_event_for_post_with_hooks`], shared with the `posted` event.

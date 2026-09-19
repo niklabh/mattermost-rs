@@ -243,11 +243,32 @@ pub struct CachedLink {
 /// [`LINK_CACHE_DURATION`] after it was written, keyed by the hex of
 /// `GenerateLinkMetadataHash(url, hour)`.
 ///
-/// **Per process, like Go's.** This server and the Go server each hold their own, so a link Go
-/// fetched a minute ago is fetched again here — the `LinkMetadata` row is what the two share,
-/// and a new post never reads it (`isNewPost`). Go's LRU stores entries **msgpack-encoded** and
-/// decodes them on the way out; this one stores the values. The two agree on every value a fetch
-/// produces except where msgpack is lossy, which none of these fields are on the shapes served.
+/// **Per process, like Go's — decided, not approximated.** `platform.linkCache` is a package
+/// global LRU: never shared between cluster nodes, never invalidated by an edit or a new row, and
+/// purged only when the image-proxy settings change. So in Go itself the answer to a read
+/// depends on which node served it, and this server holding its own cache is exactly one more
+/// node. Sharing Go's would need a channel into the Go process that no Go node has either.
+///
+/// What the two processes share is the `LinkMetadata` row, which a read (`isNewPost` false)
+/// consults after its own cache and before fetching. The cache and the row can disagree in
+/// exactly the ways they disagree between two Go nodes, all within the hour an entry lives:
+///
+/// - **a URL longer than `LinkMetadataMaxURLLength`** (2,048 bytes): the save fails, so only the
+///   process that fetched it has the answer, and any other process — this one reading a post Go
+///   created, or a second Go node — fetches again. The preview agrees unless the site changed.
+/// - **a permalink preview without a `previewed_post` prop** (a post written while
+///   `EnablePermalinkPreviews` was off, or an ephemeral confirmation): the cached preview is the
+///   referenced post as it was, so an edit of that post within the hour shows here and not on the
+///   node that cached it. Every permalink `CreatePost` previews carries the prop, which bypasses
+///   both the cache and the row, so a post read back is always previewed fresh on both.
+/// - **a failed fetch**: `getEmbedForPost` drops the embed on the error, but the entry cached
+///   beside it holds no error, so the fetching process answers `link` on its next read — as does
+///   every other process, from the `none` row. Only the create response itself differs.
+///
+/// Go's LRU stores entries **msgpack-encoded** and decodes them on the way out; this one stores
+/// the values. The two agree on every value a fetch produces except where msgpack is lossy,
+/// which none of these fields are on the shapes served, and `parity::post_link_reads` compares a
+/// Go read from its cache with a read here from the row, and the reverse.
 #[derive(Debug, Default)]
 pub struct LinkCache {
     entries: std::sync::Mutex<LinkCacheEntries>,
@@ -614,9 +635,9 @@ impl App {
     /// `api.post.get_link_metadata_for_permalink.burn_on_read.app_error`. The referenced post is
     /// prepared with `IncludePriority` unless its own first link is a permalink
     /// (`containsPermalink`), in which case the preview carries the bare row; preparing it goes
-    /// through the **read** path, which forwards a referenced post whose own preview needs a
-    /// fetch. `populatePostListTranslations` needs the autotranslation service and is inert
-    /// without it.
+    /// through the **read** path, so the referenced post's own link is answered from its
+    /// `LinkMetadata` row, or fetched when it has none. `populatePostListTranslations` needs the
+    /// autotranslation service and is inert without it.
     async fn get_link_metadata_for_permalink(
         &self,
         request_url: &str,
@@ -809,17 +830,24 @@ impl App {
 }
 
 impl App {
-    /// Port of `getEmbedsAndImages` (post_metadata.go:277) for a post being **created**
-    /// (`isNewPost`), run by `CreatePost` on the pre-save post.
+    /// Port of `getEmbedsAndImages` (post_metadata.go:277), for a post being created
+    /// (`is_new_post`, run by `CreatePost` on the pre-save post and by `SendEphemeralPost`) and
+    /// for every read, edit and preview of an existing post (`PreparePostForClientWithEmbedsAndImages`
+    /// with `IsNewPost` false).
     ///
     /// Embeds come from the message's first autolink only — "not from attachments or blocks" —
     /// and a failed lookup drops the embed without failing anything. `Images` is always
     /// assigned, and an empty map is dropped by `omitempty`. The image proxy rewrites both
-    /// (`ImageProxyAdder`), and is refused before the write by
-    /// [`App::create_post`](crate::App).
-    pub(crate) async fn get_embeds_and_images_for_new_post(
+    /// (`ImageProxyAdder`); `PreparePostForClient` refuses it before this runs, and
+    /// [`App::create_post`](crate::App) before the write.
+    ///
+    /// `is_new_post` decides one thing: whether [`App::get_link_metadata`] consults the
+    /// `LinkMetadata` row before fetching. On a read it does, so a post whose preview was fetched
+    /// when it was created — by either server — is answered from the row and not fetched again.
+    pub(crate) async fn get_embeds_and_images(
         &self,
         post: &mut Post,
+        is_new_post: bool,
     ) -> Result<(), PrepareError> {
         let config = self.config();
         let first_link = get_first_link(&config.restrict_link_previews, &post.message)
@@ -833,7 +861,10 @@ impl App {
             return Ok(());
         }
 
-        match self.get_embed_for_post(post, &first_link, true).await? {
+        match self
+            .get_embed_for_post(post, &first_link, is_new_post)
+            .await?
+        {
             Ok(Some(embed)) => {
                 if let Some(metadata) = post.metadata.as_mut() {
                     metadata.embeds.push(embed);
@@ -847,7 +878,7 @@ impl App {
                 }
             }
         }
-        let images = self.get_images_for_post(post, true).await?;
+        let images = self.get_images_for_post(post, is_new_post).await?;
         if let Some(metadata) = post.metadata.as_mut() {
             metadata.images = images;
         }
