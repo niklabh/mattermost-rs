@@ -91,6 +91,25 @@ pub fn assert_encoded(name: &str, got: &[u8], want: &Json) {
     panic!("{msg}");
 }
 
+/// The input bytes of an EXIF-stage case: its base64, plus — for the `pad` recipe — an ancillary
+/// `abCD` chunk of that many zero bytes inserted after the PNG's IHDR (mirror of the oracle's
+/// `withPNGChunks(pngChunkBytes("abCD", make([]byte, pad)), …)`).
+pub fn exif_case_bytes(c: &Json) -> Vec<u8> {
+    let data = b64(c["b64"].as_str().unwrap());
+    let Some(pad) = c["pad"].as_u64() else {
+        return data;
+    };
+    let mut chunk = (pad as u32).to_be_bytes().to_vec();
+    let mut body = b"abCD".to_vec();
+    body.resize(4 + pad as usize, 0);
+    chunk.extend_from_slice(&body);
+    chunk.extend_from_slice(&crate::hash::crc32_ieee(&body).to_be_bytes());
+    let mut out = data[..33].to_vec();
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&data[33..]);
+    out
+}
+
 // --- generator mirror ---------------------------------------------------------------------------
 
 pub fn mix64(mut z: u64) -> u64 {

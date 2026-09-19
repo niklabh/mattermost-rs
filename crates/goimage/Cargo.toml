@@ -2,8 +2,7 @@
 name = "goimage"
 version = "0.1.0"
 edition.workspace = true
-# Not the workspace value: `let` chains need 1.88.
-rust-version = "1.88"
+rust-version.workspace = true
 # DELIBERATELY NOT `license.workspace = true`. This crate is a port of Go's standard library
 # (`image`, `image/color`, `image/png`, `image/jpeg`, `compress/flate`, `compress/zlib`,
 # `hash/crc32`, `hash/adler32`, `bufio`, `math.Sin`; BSD-3-Clause, LICENSE-GO) and of two MIT

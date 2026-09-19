@@ -162,9 +162,12 @@ func withPNGChunks(chunks ...[]byte) []byte {
 }
 
 type exifCase struct {
-	Name   string         `json:"name"`
-	Format string         `json:"format"`
-	B64    string         `json:"b64"`
+	Name   string `json:"name"`
+	Format string `json:"format"`
+	B64    string `json:"b64"`
+	// PNG only: the bytes are B64 with an ancillary "abCD" chunk of Pad zero bytes inserted
+	// after IHDR — the recipe for inputs too large to carry (the 10 MiB scan limit).
+	Pad    int            `json:"pad,omitempty"`
 	Seeker map[string]any `json:"seeker"`
 	Stream map[string]any `json:"stream"`
 }
@@ -309,6 +312,60 @@ func imagingEXIFStage() (map[string]any, error) {
 		binary.BigEndian.PutUint32(b[33:], 0x7fffff)
 		return b
 	}())
+	// Where the two reader shapes part: an eXIf behind a chunk that ends past bufReadSeeker's
+	// 10 MiB scan limit.
+	mib := 10 * 1024 * 1024
+	for _, pad := range []int{1000, mib - 100, mib + 100, 2 * mib} {
+		small := withPNGChunks(pngGood)
+		big := withPNGChunks(pngChunkBytes("abCD", make([]byte, pad)), pngGood)
+		cases = append(cases, exifCase{
+			Name: "png_padded_" + itoa(pad), Format: "png", B64: b64(small), Pad: pad,
+			Seeker: orientationOf(bytes.NewReader(big), "png"),
+			Stream: orientationOf(io.MultiReader(bytes.NewReader(big)), "png"),
+		})
+	}
+	// Minimal JPEGs: SOI, one APP1 Exif segment around a little-endian TIFF, then SOS.
+	tiffLE := func(entries ...[4]any) []byte {
+		t := []byte("II\x2a\x00\x08\x00\x00\x00")
+		t = binary.LittleEndian.AppendUint16(t, uint16(len(entries)))
+		for _, e := range entries {
+			t = binary.LittleEndian.AppendUint16(t, e[0].(uint16))
+			t = binary.LittleEndian.AppendUint16(t, e[1].(uint16))
+			t = binary.LittleEndian.AppendUint32(t, e[2].(uint32))
+			v := e[3].([4]byte)
+			t = append(t, v[:]...)
+		}
+		return append(t, 0, 0, 0, 0)
+	}
+	jpegWith := func(tiff []byte) []byte {
+		j := []byte{0xff, 0xd8, 0xff, 0xe1}
+		j = binary.BigEndian.AppendUint16(j, uint16(len(tiff)+8))
+		j = append(j, "Exif\x00\x00"...)
+		j = append(j, tiff...)
+		return append(j, 0xff, 0xda)
+	}
+	e := func(tag, typ uint16, count uint32, v [4]byte) [4]any { return [4]any{tag, typ, count, v} }
+	{
+		// A tag over LimitTagSize is skipped before it is counted, so 5000 counted tags still fit.
+		entries := [][4]any{e(0x9286, 7, 10001, [4]byte{})}
+		for i := 0; i < 4999; i++ {
+			entries = append(entries, e(0x010e, 3, 1, [4]byte{1}))
+		}
+		entries = append(entries, e(0x0112, 3, 1, [4]byte{6}))
+		add("oversize_tag_not_counted", "jpeg", jpegWith(tiffLE(entries...)))
+	}
+	// XMP (0x02bc) and IPTC (0x83bb) are skipped whatever their size, but after the type check.
+	add("xmp_iptc_tags_skipped", "jpeg", jpegWith(tiffLE(e(0x02bc, 7, 1, [4]byte{}), e(0x83bb, 7, 1, [4]byte{}), e(0x0112, 3, 1, [4]byte{3}))))
+	add("xmp_tag_unknown_type", "jpeg", jpegWith(tiffLE(e(0x02bc, 99, 1, [4]byte{}), e(0x0112, 3, 1, [4]byte{3}))))
+	// A SubIFD pointer array of SHORTs is a []any with no uint32 in it: nothing followed.
+	add("subifd_short_array", "jpeg", jpegWith(tiffLE(e(0x014a, 3, 2, [4]byte{1, 0, 2, 0}), e(0x0112, 3, 1, [4]byte{8}))))
+	// The one silent EOF hands back the previous read's bytes: a value cut off after the count
+	// reads the count's last two bytes.
+	truncated := []byte("MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01")
+	add("truncated_value_count_1", "jpeg", jpegWith(truncated))
+	truncated2 := bytes.Clone(truncated)
+	truncated2[17] = 2
+	add("truncated_value_count_2", "jpeg", jpegWith(truncated2))
 	add("png_truncated", "png", exifBasePNG[:20])
 	add("png_empty", "png", nil)
 	return map[string]any{"cases": cases}, nil

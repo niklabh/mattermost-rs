@@ -23,6 +23,7 @@
 //! `postprocessImage`, `AdjustImage`, …) are in `mm-app`.
 
 pub mod bufio;
+pub mod exif;
 pub mod flate;
 pub mod fma;
 pub mod gomath;
