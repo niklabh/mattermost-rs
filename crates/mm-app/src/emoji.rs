@@ -751,22 +751,27 @@ impl App {
     ///
     /// Go decodes the image header, refuses anything over 1028×1028, counts the frames of a GIF,
     /// and then either writes the bytes through untouched (≤128×128) or **resizes and re-encodes**
-    /// them. The resize is `imaging.Fit` followed by `EncodePNG` or `gif.EncodeAll`, and no second
-    /// implementation reproduces those bytes — so the resize path is
-    /// [`PrepareError::Unreproducible`] and the request is forwarded. So is every format whose
-    /// header this port does not measure exactly (see [`crate::imaging::decode_config`]), and so
-    /// is any filename that is not `.png`, which is what keeps the GIF frame walk out of reach.
+    /// them: `image.Decode`, `imaging.Fit` to 128×128, `EncodePNG` — served here byte for byte
+    /// through [`crate::image_pipeline`] for PNG and JPEG sources. Still handed to Go:
+    ///
+    /// * a GIF, BMP, TIFF or WebP header — those decoders are not ported, so neither the
+    ///   dimensions nor the resize are known here ([D-380]);
+    /// * any filename that is not `.png`, which is what keeps the GIF branch (the frame walk and
+    ///   `gif.EncodeAll` after a per-frame redraw) out of reach: `isGIF` is read off the name.
     ///
     /// Both forwarding points sit **before** the only write, so a forwarded request has left
     /// nothing behind in the file backend. That is not incidental: `WriteFile` is the last
     /// statement of every branch.
     ///
-    /// # The two refusals that are answered here
+    /// # The refusals answered here
     ///
-    /// * No registered decoder claimed the bytes → 400 `api.emoji.upload.image.app_error`.
+    /// * `image.DecodeConfig` failed — no registered decoder claimed the bytes, or the PNG/JPEG
+    ///   header is malformed → 400 `api.emoji.upload.image.app_error`.
     /// * Over 1028 in either dimension → 400
     ///   `api.emoji.upload.large_image.too_large.app_error`, carrying `MaxWidth` **and**
     ///   `MaxHeight` as i18n params. This check is `>`, not `>=`: exactly 1028 is accepted.
+    /// * The resize's `image.Decode` failed after the header parsed → 400
+    ///   `api.emoji.upload.large_image.decode_error`.
     ///
     /// Their order matters and is Go's: a 2000-pixel image that is not an image at all is the
     /// decode error, never the size one.
@@ -776,31 +781,30 @@ impl App {
         id: &str,
         image: EmojiUpload<'_>,
     ) -> Result<(), PrepareError> {
-        let (width, height) = match crate::imaging::decode_config(image.data) {
-            crate::imaging::ImageConfig::NoFormat => {
-                return Err(PrepareError::App(AppError::boxed(
-                    "uploadEmojiImage",
-                    "api.emoji.upload.image.app_error",
-                    None,
-                    String::new(),
-                    400,
-                )));
-            }
-            crate::imaging::ImageConfig::Undecidable(why) => {
-                tracing::debug!(why, "emoji image header is not measured here");
+        let (width, height) = match goimage::format::decode_config(image.data) {
+            Err(goimage::format::DecodeError::NotPorted(format)) => {
+                tracing::debug!(format, "emoji image format is decoded by Go");
                 return Err(PrepareError::Unreproducible(
                     "the emoji image's format is not decoded here",
                 ));
             }
-            crate::imaging::ImageConfig::Known {
-                format,
-                width,
-                height,
-            } => {
+            Err(goimage::format::DecodeError::Go(err)) => {
+                return Err(PrepareError::App(Box::new(
+                    AppError::new(
+                        "uploadEmojiImage",
+                        "api.emoji.upload.image.app_error",
+                        None,
+                        String::new(),
+                        400,
+                    )
+                    .wrap(goimage::format::DecodeError::Go(err)),
+                )));
+            }
+            Ok((config, format)) => {
                 tracing::Span::current().record("format", format);
-                tracing::Span::current().record("width", width);
-                tracing::Span::current().record("height", height);
-                (width, height)
+                tracing::Span::current().record("width", config.width);
+                tracing::Span::current().record("height", config.height);
+                (config.width, config.height)
             }
         };
 
@@ -832,13 +836,64 @@ impl App {
             ));
         }
 
-        if width > MAX_EMOJI_WIDTH || height > MAX_EMOJI_HEIGHT {
-            return Err(PrepareError::Unreproducible(
-                "the emoji image needs resizing, whose output bytes are not reproducible here",
-            ));
+        if width <= MAX_EMOJI_WIDTH && height <= MAX_EMOJI_HEIGHT {
+            self.write_file(image.data, &emoji_image_path(id)).await?;
+            return Ok(());
         }
 
-        self.write_file(image.data, &emoji_image_path(id)).await?;
+        // `resizeEmoji`: `image.Decode` (no resolution guard — the 1028 check above is the
+        // guard), `imaging.Fit` to 128×128, `EncodePNG`.
+        let data = image.data.to_vec(); // moved to the blocking pool
+        let resized = tokio::task::spawn_blocking(move || {
+            let (img, _) = goimage::format::decode(&data)?;
+            Ok::<_, goimage::format::DecodeError>(crate::image_pipeline::encode_png(
+                &crate::image_pipeline::fit(&img, MAX_EMOJI_WIDTH, MAX_EMOJI_HEIGHT),
+            ))
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "emoji resize panicked");
+            PrepareError::App(AppError::boxed(
+                "uploadEmojiImage",
+                "api.emoji.upload.large_image.encode_error",
+                None,
+                String::new(),
+                400,
+            ))
+        })?;
+        let png = match resized {
+            Ok(Ok(png)) => png,
+            Ok(Err(err)) => {
+                return Err(PrepareError::App(Box::new(
+                    AppError::new(
+                        "uploadEmojiImage",
+                        "api.emoji.upload.large_image.encode_error",
+                        None,
+                        String::new(),
+                        400,
+                    )
+                    .wrap(err),
+                )));
+            }
+            Err(goimage::format::DecodeError::NotPorted(_)) => {
+                return Err(PrepareError::Unreproducible(
+                    "the emoji image's format is not decoded here",
+                ));
+            }
+            Err(goimage::format::DecodeError::Go(err)) => {
+                return Err(PrepareError::App(Box::new(
+                    AppError::new(
+                        "uploadEmojiImage",
+                        "api.emoji.upload.large_image.decode_error",
+                        None,
+                        String::new(),
+                        400,
+                    )
+                    .wrap(goimage::format::DecodeError::Go(err)),
+                )));
+            }
+        };
+        self.write_file(&png, &emoji_image_path(id)).await?;
         Ok(())
     }
 

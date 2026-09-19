@@ -11,11 +11,11 @@
 //!
 //! # What forwards
 //!
-//! Each file goes through [`mm_app::App::upload_file_x`], which serves every refusal and the write
-//! but hands a **raster image it would resize** to Go before writing ([D-380]/[D-411]). So a text
-//! or non-image upload is served end to end; an image upload forwards — and because the multipart
-//! form can carry several files, one image among them forwards the *whole* request, since the
-//! response is one document and a half-served one would double-write the text files. That
+//! Each file goes through [`mm_app::App::upload_file_x`], which serves every refusal, the write
+//! and — for PNG and JPEG — the thumbnail, preview and mini preview, but hands a **GIF, BMP, TIFF
+//! or WebP** to Go before writing ([D-650]: those decoders are not ported). Because the multipart
+//! form can carry several files, one such image among them forwards the *whole* request, since
+//! the response is one document and a half-served one would double-write the other files. That
 //! all-or-nothing rule is [`ForwardWholeRequest`].
 //!
 //! # Gaps from Go, recorded rather than hidden

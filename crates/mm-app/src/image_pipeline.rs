@@ -232,6 +232,99 @@ pub fn mini_preview(upright: &Image) -> Result<Vec<u8>, PipelineError> {
     )
 }
 
+/// What `postprocessImage` stores for one upload: the two derived files and the mini preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Postprocessed {
+    pub derived: DerivedImages,
+    pub mini_preview: Result<Vec<u8>, PipelineError>,
+}
+
+/// Port of `UploadFileTask.postprocessImage` (app/file.go:951) minus the writes: decode the stored
+/// bytes (a failure is Go's log line and nothing more — `Ok(None)`), make them upright with the
+/// orientation `preprocessImage` read through the stream reader, and derive the thumbnail, the
+/// preview and the mini preview. `Err` names a format this port does not decode.
+///
+/// CPU-bound: call it from a blocking context.
+pub fn postprocess_image(
+    data: &[u8],
+    max_resolution: i64,
+    orientation: i64,
+) -> Result<Option<Postprocessed>, &'static str> {
+    let (img, img_type) = match decode(data, max_resolution) {
+        Ok(decoded) => decoded,
+        Err(PipelineError::NotPorted(name)) => return Err(name),
+        Err(err) => {
+            tracing::error!(error = %err, "Unable to decode image");
+            return Ok(None);
+        }
+    };
+    let upright = make_image_upright(&img, orientation);
+    Ok(Some(Postprocessed {
+        derived: derived_images(&upright, img_type),
+        mini_preview: mini_preview(&upright),
+    }))
+}
+
+/// Port of one iteration of `App.HandleImages` (app/file.go:1161) with `prepareImage`
+/// (app/file.go:1186): decode (a failure is skipped — `Ok(None)`), read the orientation through a
+/// **seekable** reader with the decoder's format name, make upright, derive the thumbnail and the
+/// preview. No mini preview on this path; `createPost` generates it later. `Err` names a format
+/// this port does not decode.
+///
+/// CPU-bound: call it from a blocking context.
+pub fn handle_image(
+    data: &[u8],
+    max_resolution: i64,
+) -> Result<Option<DerivedImages>, &'static str> {
+    let (img, img_type) = match decode(data, max_resolution) {
+        Ok(decoded) => decoded,
+        Err(PipelineError::NotPorted(name)) => return Err(name),
+        Err(err) => {
+            tracing::debug!(error = %err, "Failed to prepare image");
+            return Ok(None);
+        }
+    };
+    let orientation = seeker_orientation(data, img_type)?;
+    let upright = make_image_upright(&img, orientation);
+    Ok(Some(derived_images(&upright, img_type)))
+}
+
+/// Port of `App.generateMiniPreview`'s pixel half (app/file.go:1252): `prepareImage` over the
+/// stored original, then the mini preview. `Ok(None)` when the original does not decode (Go logs
+/// at debug and leaves `MiniPreview` nil); the encode failing is `Ok(Some(Err))`, which Go logs and
+/// also leaves nil.
+///
+/// CPU-bound: call it from a blocking context.
+pub fn generate_mini_preview(
+    data: &[u8],
+    max_resolution: i64,
+) -> Result<Option<Result<Vec<u8>, PipelineError>>, &'static str> {
+    let (img, img_type) = match decode(data, max_resolution) {
+        Ok(decoded) => decoded,
+        Err(PipelineError::NotPorted(name)) => return Err(name),
+        Err(err) => {
+            tracing::debug!(error = %err, "generateMiniPreview: prepareImage failed");
+            return Ok(None);
+        }
+    };
+    let orientation = seeker_orientation(data, img_type)?;
+    Ok(Some(mini_preview(&make_image_upright(&img, orientation))))
+}
+
+/// `GetImageOrientation` over a seekable reader, as `prepareImage` calls it: an error is logged and
+/// the orientation it came with (Upright) is used.
+fn seeker_orientation(data: &[u8], img_type: &str) -> Result<i64, &'static str> {
+    let outcome = crate::imaging_orientation::get_image_orientation(
+        crate::imaging_orientation::Input::Seeker(data),
+        img_type,
+    )
+    .map_err(|crate::imaging_orientation::Unreproducible(why)| why)?;
+    if let Some(err) = &outcome.err {
+        tracing::debug!(error = %err, "GetImageOrientation failed");
+    }
+    Ok(outcome.orientation)
+}
+
 #[cfg(test)]
 mod go_parity {
     //! End to end against `fixtures/behaviour_imaging_pipeline.json`: each input through the
