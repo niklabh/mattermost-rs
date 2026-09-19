@@ -14147,3 +14147,11 @@ Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls surv
 | `InitPluginLocal`, `reattachPlugin`, `detachPlugin`, `App.ReattachPlugin`/`DetachPlugin`, `Environment.Reattach` | `mm-api/src/local_plugins.rs`, `mm-app/src/plugins.rs`, `mm-plugin/src/environment.rs`, `mm-model/src/plugin_reattach.rs` | DONE (Go host: gates only, D-850) | 2 unit + 1 oracle (`plugingen reattach`) + 3 parity | Under a Rust host all ten are served; under Go's the gates are answered and the rest forwarded. `Reattach` only errors on a manifest with no server: a failed version check or start answers 200 and leaves the plugin "running" with no supervisor, as in Go. |
 
 Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.
+
+## `POST /api/v4/posts` with a link — D-401 narrowed, D-105 and D-106 closed, D-860 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages`, `getLinkMetadata` and everything under it, `dyatlov/go-opengraph`, `x/net/html` tokenizer and `charset`, `parseImages`, `http.DetectContentType`, `LinkMetadataStore`, the `permalink` broadcast hook, `SanitizePostMetadataForUser` | `mm-app/src/link_metadata.rs`, `opengraph.rs`, `link_image.rs`, `broadcast_hooks.rs`, `notification.rs`, `post_create.rs`; `mm-model/src/opengraph.rs`, `go_html.rs`, `go_charset.rs`, `post_embed.rs`; `mm-store/src/link_metadata_store.rs` | DONE (create) | 6 parity; unit oracles: link selection 7, OpenGraph/HTML/charset/URL (mm-model + `opengraph` 6), images and sniffing 12 | A link's preview is fetched through the outbound guard on the pre-save post (OpenGraph, image, plain link, or a permalink with its `previewed_post` prop) and the permalink is taken off the `posted` frame and put back per recipient; compared with `scripts/go-links.sh` (Go + 50, allowed to reach a mock on 127.0.0.1). Reads of such posts still forward ([D-860]). |
+
+Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run, 74 caught, 7 survived — the six controls and `sanitize-keeps-a-hidden-preview`, unreachable on the create path (see `App::sanitize_created_post_metadata_for_user`); two first-run survivors were caught after a test was added for each.

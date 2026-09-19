@@ -54,7 +54,81 @@ pub struct PostEmbed {
     /// `Some(Value::String("".into()))` and `Some(json!({}))` — is emitted verbatim, because
     /// `omitempty` never looked at the contents.
     #[serde(rename = "data", skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>,
+    pub data: Option<PostEmbedData>,
+}
+
+/// What `PostEmbed.Data` (an `any`) holds.
+///
+/// Two origins with two different wire behaviours:
+///
+/// - **Decoded from JSON** ([`PostEmbedData::Json`]) — Go's `any` after `json.Unmarshal`, i.e.
+///   maps, slices and scalars. Go re-marshals a `map[string]any` with its keys sorted, which is
+///   exactly what `serde_json::Value`'s `BTreeMap` does, so this round-trips byte for byte.
+/// - **A typed value the server put there** ([`PostEmbedData::Encoded`]) —
+///   `*opengraph.OpenGraph` for an `opengraph` embed (post_metadata.go:639) and `*PreviewPost`
+///   for a `permalink` one (:668). Go marshals a struct in **field order**, which a `Value`
+///   cannot hold: it would sort `{"type","url","title",…}` alphabetically. So the value is kept
+///   as the text `json.Marshal` writes for it, produced by serialising the typed Rust port, and
+///   emitted verbatim. This is the half of [D-106] that reaches the wire.
+///
+/// Go's type assertions (`embed.Data.(*PreviewPost)` in `GetPreviewPost`,
+/// `embed.Data.(*opengraph.OpenGraph)` in `getImagesForPost`) succeed only on the typed origin;
+/// [`PostEmbedData::decode_typed`] is that assertion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostEmbedData {
+    /// Decoded from JSON.
+    Json(serde_json::Value),
+    /// A typed Go value, as the compact JSON text `json.Marshal` writes for it.
+    Encoded(String),
+}
+
+impl PostEmbedData {
+    /// Serialise a typed value the way Go stores it in the interface: the struct itself, in
+    /// field order.
+    pub fn encode<T: Serialize>(value: &T) -> Result<Self, serde_json::Error> {
+        serde_json::to_string(value).map(Self::Encoded)
+    }
+
+    /// The Go type assertion: `Some` only when the server put a typed value here and it decodes
+    /// as `T`. A [`PostEmbedData::Json`] value never asserts, as a `map[string]any` never
+    /// asserts to `*PreviewPost` in Go.
+    pub fn decode_typed<T: serde::de::DeserializeOwned>(&self) -> Option<T> {
+        match self {
+            Self::Encoded(text) => serde_json::from_str(text).ok(),
+            Self::Json(_) => None,
+        }
+    }
+
+    /// The value as a JSON document, whichever origin it has.
+    pub fn to_json_value(&self) -> serde_json::Value {
+        match self {
+            Self::Json(value) => value.clone(),
+            Self::Encoded(text) => serde_json::from_str(text).unwrap_or(serde_json::Value::Null),
+        }
+    }
+}
+
+impl From<serde_json::Value> for PostEmbedData {
+    fn from(value: serde_json::Value) -> Self {
+        Self::Json(value)
+    }
+}
+
+impl Serialize for PostEmbedData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Json(value) => value.serialize(serializer),
+            Self::Encoded(text) => serde_json::value::RawValue::from_string(text.clone())
+                .map_err(serde::ser::Error::custom)?
+                .serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PostEmbedData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde_json::Value::deserialize(deserializer).map(Self::Json)
+    }
 }
 
 #[cfg(test)]
@@ -75,7 +149,7 @@ mod tests {
         // Every "empty-looking" value survives, because Go only tested IsNil.
         for value in [json!(""), json!(0), json!(false), json!({}), json!([])] {
             let embed = PostEmbed {
-                data: Some(value.clone()),
+                data: Some(value.clone().into()),
                 ..Default::default()
             };
             let encoded = serde_json::to_value(&embed).unwrap();
@@ -90,7 +164,7 @@ mod tests {
     #[test]
     fn an_explicit_null_is_a_third_state_on_the_way_out() {
         let embed = PostEmbed {
-            data: Some(Value::Null),
+            data: Some(Value::Null.into()),
             ..Default::default()
         };
         assert_eq!(
@@ -107,6 +181,42 @@ mod tests {
         assert_eq!(
             crate::utils::go_json_marshal(&parsed).unwrap(),
             r#"{"type":""}"#
+        );
+    }
+
+    /// A typed value keeps its struct's field order on the wire; the same document decoded from
+    /// JSON is sorted, as Go's `map[string]any` is.
+    #[test]
+    fn encoded_data_keeps_field_order_and_json_data_is_sorted() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Typed {
+            zebra: i32,
+            apple: i32,
+        }
+        let typed = PostEmbed {
+            type_: "opengraph".into(),
+            data: Some(PostEmbedData::encode(&Typed { zebra: 1, apple: 2 }).unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::utils::go_json_marshal(&typed).unwrap(),
+            r#"{"type":"opengraph","data":{"zebra":1,"apple":2}}"#
+        );
+        let decoded: PostEmbed =
+            serde_json::from_str(r#"{"type":"opengraph","data":{"zebra":1,"apple":2}}"#).unwrap();
+        assert_eq!(
+            crate::utils::go_json_marshal(&decoded).unwrap(),
+            r#"{"type":"opengraph","data":{"apple":2,"zebra":1}}"#
+        );
+        // Go's type assertion holds only for the typed origin.
+        assert_eq!(
+            typed.data.as_ref().unwrap().decode_typed::<Typed>(),
+            Some(Typed { zebra: 1, apple: 2 })
+        );
+        assert_eq!(decoded.data.as_ref().unwrap().decode_typed::<Typed>(), None);
+        assert_eq!(
+            typed.data.unwrap().to_json_value(),
+            decoded.data.unwrap().to_json_value()
         );
     }
 

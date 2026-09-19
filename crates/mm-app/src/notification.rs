@@ -43,8 +43,8 @@ use mm_model::license::minimum_professional_license;
 use mm_model::permission::{PERMISSION_USE_CHANNEL_MENTIONS, PERMISSION_USE_GROUP_MENTIONS};
 use mm_model::post::{
     POST_PROPS_ADDED_USER_ID, POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_FROM_WEBHOOK,
-    POST_PROPS_OVERRIDE_USERNAME, POST_TYPE_ADD_TO_CHANNEL, POST_TYPE_HEADER_CHANGE,
-    POST_TYPE_PURPOSE_CHANGE, Post,
+    POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_PREVIEWED_POST, POST_TYPE_ADD_TO_CHANNEL,
+    POST_TYPE_HEADER_CHANGE, POST_TYPE_PURPOSE_CHANGE, Post,
 };
 use mm_model::post_list::PostList;
 use mm_model::status::Status;
@@ -253,6 +253,26 @@ impl PostNotification<'_> {
 pub struct NotificationOutcome {
     /// `mentionedUsersList` — the ids `IncrementMentionCount` was given and `add_mentions` carries.
     pub mentioned_users: Vec<String>,
+    /// What `publishWebsocketEventForPost` did to the post's permalink preview, when the pass
+    /// reached it — see [`PermalinkFate`]. `None` when the pass returned before publishing.
+    pub permalink: Option<PermalinkFate>,
+}
+
+/// What `publishWebsocketEventForPost` (app/post.go:1097) leaves of a post's permalink
+/// preview. Go **mutates the post it publishes**, and `CreatePost` answers with that post, so
+/// this is the HTTP response's shape as much as the event's.
+///
+/// The preview and the `previewed_post` prop are removed unconditionally
+/// (`removePermalinkMetadataFromPost`, "secure-by-default websocket broadcast") and put back —
+/// the embed **appended** after any other embed — only when the prop is a valid id, the
+/// previewed post and its channel both load, and the author may read that channel
+/// (`setupBroadcastHookForPermalink`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermalinkFate {
+    /// Removed and not put back.
+    Removed,
+    /// Removed and put back for the author.
+    Restored,
 }
 
 fn prop_is_true(post: &Post, key: &str) -> bool {
@@ -734,7 +754,8 @@ impl App {
             }
         }
 
-        self.publish_websocket_event_for_post_with_hooks(post, message)
+        let permalink = self
+            .publish_websocket_event_for_post_with_hooks(post, message)
             .await?;
 
         // If this is a reply in a thread, notify participants.
@@ -837,6 +858,7 @@ impl App {
 
         Ok(NotificationOutcome {
             mentioned_users: mentioned_users_list,
+            permalink: Some(permalink),
         })
     }
 
@@ -1028,32 +1050,45 @@ impl App {
         Ok(())
     }
 
-    /// Port of `App.publishWebsocketEventForPost` (app/post.go) for the shapes the create route
-    /// serves: the post is serialised **once**, after the permalink metadata and the
-    /// `channel_mentions` prop would have been removed — neither exists on a post that reaches
-    /// here, since links and `~` mentions are forwarded — and the two hooks they would attach
-    /// are therefore not attached.
+    /// Port of `App.publishWebsocketEventForPost` (app/post.go:1097): the post is serialised
+    /// **once**, without its permalink preview and its `channel_mentions` prop — the frame every
+    /// connection shares is secure by default — and two hooks put back, per recipient, what that
+    /// recipient may see: the `permalink` hook the preview, the `channel_mentions` hook the
+    /// mentions. Attached in that order, after the three `SendNotifications` attached.
+    ///
+    /// Go mutates the post it was handed and `CreatePost` answers with it. The mentions end up
+    /// where they started (`setupBroadcastHookForChannelMentions` re-adds the prop "for HTTP
+    /// response"), so only the preview can change, and what happened to it is returned for the
+    /// caller to apply — see [`PermalinkFate`]. The burn-on-read blanking and the ABAC files hook
+    /// need a refused type and an enterprise setting respectively.
     pub(crate) async fn publish_websocket_event_for_post_with_hooks(
         &self,
         post: &Post,
         mut message: WebSocketEvent,
-    ) -> AppResult<()> {
-        // Extract the metadata that needs per-recipient filtering before serialisation, then
-        // strip it: the precomputed frame every connection shares is secure by default, and the
-        // `channel_mentions` hook puts back, per recipient, what that recipient may resolve.
-        // Go mutates the post it was handed and `CreatePost` answers with that post — with the
-        // prop re-added by `setupBroadcastHookForChannelMentions` — so the caller's copy keeps
-        // it here and only the frame's copy loses it.
+    ) -> AppResult<PermalinkFate> {
+        // Extract metadata that needs per-recipient filtering before serialization.
+        let permalink_previewed_post = post.get_preview_post();
+        let preview_prop = post.get_previewed_post_prop();
         let channel_mentions = post
             .get_prop(POST_PROPS_CHANNEL_MENTIONS)
             .and_then(serde_json::Value::as_object)
             .cloned()
             .unwrap_or_default();
-        let post_json = if channel_mentions.is_empty() {
+        let has_permalink_metadata = post.get_prop(POST_PROPS_PREVIEWED_POST).is_some()
+            || post.metadata.as_ref().is_some_and(|metadata| {
+                metadata
+                    .embeds
+                    .iter()
+                    .any(|embed| embed.type_ == mm_model::post_embed::POST_EMBED_PERMALINK)
+            });
+        // "Remove all metadata for secure-by-default websocket broadcast" — on the frame's copy;
+        // the caller's post is changed by the returned fate instead.
+        let post_json = if channel_mentions.is_empty() && !has_permalink_metadata {
             post.to_json()
         } else {
-            // Owned because the frame's post is the caller's post minus one prop; see above.
+            // Owned because the frame's post is the caller's post minus the preview and one prop.
             let mut stripped = post.clone();
+            crate::post::remove_permalink_metadata_from_post(&mut stripped);
             stripped.del_prop(POST_PROPS_CHANNEL_MENTIONS);
             stripped.to_json()
         }
@@ -1069,7 +1104,15 @@ impl App {
         })?;
         message.add("post", serde_json::Value::String(post_json));
 
-        // `setupBroadcastHookForPermalink` — no permalink previews on the shapes served.
+        let fate = self
+            .setup_broadcast_hook_for_permalink(
+                post,
+                &mut message,
+                permalink_previewed_post,
+                preview_prop,
+            )
+            .await?;
+
         // `setupBroadcastHookForChannelMentions`: nothing to register without mentions.
         if !channel_mentions.is_empty() {
             let mut args = StringInterface::new();
@@ -1081,11 +1124,92 @@ impl App {
                 broadcast.add_hook(BROADCAST_CHANNEL_MENTIONS, args);
             }
         }
-        // `processBroadcastHookForBurnOnRead` and `setupBroadcastHookForAbacFiles` — the first
-        // is for a refused type, the second is off without ABAC.
 
         self.publish(message).await;
-        Ok(())
+        Ok(fate)
+    }
+
+    /// Port of `setupBroadcastHookForPermalink` (app/post.go:1188).
+    ///
+    /// A missing preview or prop registers nothing. A prop that is not a valid id, a previewed
+    /// post that is gone, or a channel that is gone is logged and registers nothing — Go's
+    /// `return nil` — while any other lookup failure is the error. The author's read permission
+    /// on the previewed channel decides the HTTP response; each recipient's decides their frame,
+    /// in the hook. The hook carries the preview as it was built, not the post just re-read,
+    /// which serves only to find the channel.
+    async fn setup_broadcast_hook_for_permalink(
+        &self,
+        post: &Post,
+        message: &mut WebSocketEvent,
+        permalink_previewed_post: Option<mm_model::permalink::PreviewPost>,
+        preview_prop: &str,
+    ) -> AppResult<PermalinkFate> {
+        // Early return if no permalink metadata
+        let Some(previewed) = permalink_previewed_post else {
+            return Ok(PermalinkFate::Removed);
+        };
+        if preview_prop.is_empty() {
+            return Ok(PermalinkFate::Removed);
+        }
+        if !mm_model::utils::is_valid_id(preview_prop) {
+            tracing::warn!(
+                prop_key = POST_PROPS_PREVIEWED_POST,
+                prop_value = preview_prop,
+                "invalid post prop value"
+            );
+            return Ok(PermalinkFate::Removed);
+        }
+        let previewed_post = match self.get_single_post(preview_prop, false).await {
+            Ok(previewed_post) => previewed_post,
+            Err(err) if err.status_code == 404 => {
+                tracing::warn!(
+                    referenced_post_id = preview_prop,
+                    "permalinked post not found"
+                );
+                return Ok(PermalinkFate::Removed);
+            }
+            Err(err) => return Err(err),
+        };
+        let channel = match self.get_channel(&previewed_post.channel_id).await {
+            Ok(channel) => channel,
+            Err(err) if err.status_code == 404 => {
+                tracing::warn!(
+                    referenced_channel_id = %previewed_post.channel_id,
+                    "channel containing permalinked post not found"
+                );
+                return Ok(PermalinkFate::Removed);
+            }
+            Err(err) => return Err(err),
+        };
+
+        // "Add metadata back to post for HTTP response if post author has permission"
+        let (author_may_read, _) = self
+            .has_permission_to_read_channel(&post.user_id, &channel)
+            .await;
+
+        // "Register hook for per-recipient filtering"
+        let mut args = StringInterface::new();
+        args.insert(
+            "preview_channel".to_owned(),
+            serde_json::to_value(&channel).unwrap_or(serde_json::Value::Null),
+        );
+        args.insert(
+            "permalink_previewed_post".to_owned(),
+            serde_json::to_value(&previewed).unwrap_or(serde_json::Value::Null),
+        );
+        args.insert(
+            "preview_prop".to_owned(),
+            serde_json::Value::String(preview_prop.to_owned()),
+        );
+        if let Some(broadcast) = message.broadcast.as_mut() {
+            broadcast.add_hook(crate::broadcast_hooks::BROADCAST_PERMALINK, args);
+        }
+
+        Ok(if author_may_read {
+            PermalinkFate::Restored
+        } else {
+            PermalinkFate::Removed
+        })
     }
 
     /// Port of `App.getExplicitMentionsAndKeywords` (notification.go:1066).

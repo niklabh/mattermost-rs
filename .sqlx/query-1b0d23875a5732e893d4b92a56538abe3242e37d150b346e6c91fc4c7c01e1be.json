@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT remoteid AS \"remote_id!\",\n                   remoteteamid AS \"remote_team_id!\",\n                   name AS \"name!\",\n                   displayname AS \"display_name!\",\n                   siteurl AS \"site_url!\",\n                   defaultteamid AS \"default_team_id!\",\n                   createat AS \"create_at!\",\n                   deleteat AS \"delete_at!\",\n                   lastpingat AS \"last_ping_at!\",\n                   token AS \"token!\",\n                   remotetoken AS \"remote_token!\",\n                   topics AS \"topics!\",\n                   creatorid AS \"creator_id!\",\n                   pluginid AS \"plugin_id!\",\n                   options AS \"options!\",\n                   lastglobalusersyncat AS \"last_global_user_sync_at!\"\n              FROM remoteclusters\n             WHERE remoteid = $1 AND (deleteat = 0 OR $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "remote_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "remote_team_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "site_url!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "default_team_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_ping_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "token!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "remote_token!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "topics!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "creator_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "plugin_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "options!",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 15,
+        "name": "last_global_user_sync_at!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1b0d23875a5732e893d4b92a56538abe3242e37d150b346e6c91fc4c7c01e1be"
+}

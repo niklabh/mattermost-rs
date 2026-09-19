@@ -66,6 +66,9 @@ pub mod job_runtime;
 pub mod job_scheduler;
 pub mod license;
 pub mod limits;
+pub mod link_image;
+/// Link selection for previews — `getFirstLink`, `getImages`, `isLinkAllowedForPreview`.
+pub mod link_metadata;
 pub mod login;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
 pub mod marketplace;
@@ -78,6 +81,7 @@ pub mod notification;
 pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;
+pub mod opengraph;
 pub mod password;
 pub mod peer_cache;
 pub mod peer_config;
@@ -190,6 +194,9 @@ pub struct App {
     pending_post_ids: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<String, crate::post_create::PendingPostEntry>>,
     >,
+    /// Go's `platform.linkCache` — a package-level LRU in Go, so one per process; shared across
+    /// every clone of `App` for the same reason. See `crate::link_metadata::LinkCache`.
+    link_cache: std::sync::Arc<crate::link_metadata::LinkCache>,
     /// Go's `uploadLockMap` (app/channels.go) — the upload-session ids with a chunk in flight,
     /// shared across every clone so a second chunk for one session is refused whichever request
     /// holds it. See `crate::upload`.
@@ -280,6 +287,7 @@ impl App {
             pending_post_ids: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            link_cache: std::sync::Arc::default(),
             upload_locks: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),

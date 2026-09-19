@@ -6,8 +6,14 @@
 //!
 //! Served: a **message or a reply in an open or private channel**, mentions included — `@user`,
 //! `@channel`, `@here`, `@all`, mention keys and first names — with or without `file_ids` or a
-//! priority, with no other metadata, the default post type, no props that name an integration or an embed, and a
-//! message with no link and no `~`. Everything else is forwarded, and two functions decide, both
+//! priority, with no other metadata, the default post type, and no props that name an integration
+//! or an embed. **Links are served** (since 2026-09-19): the first autolink's preview — fetched
+//! OpenGraph, a measured image, a plain link, or a permalink previewed from the database with its
+//! `previewed_post` prop — and the dimensions of every image, by
+//! [`App::get_embeds_and_images_for_new_post`](crate::link_metadata). What that pipeline cannot
+//! reproduce (the image proxy, a non-ASCII host under `RestrictLinkPreviews`, a permalink to a post
+//! whose own preview needs a fetch) is refused from there, still before the save. Everything else
+//! is forwarded, and two functions decide, both
 //! **before the pending-post id is claimed and before `Post().Save`** so that no forward leaves a
 //! half-written row behind: [`App::refuse_create_post_shapes`] on the request's shape, and
 //! [`App::notification_forward_reason`] on what the notification pass would have to say — a
@@ -42,9 +48,9 @@ use mm_model::post::{
     POST_CUSTOM_TYPE_PREFIX, POST_PROPS_AI_GENERATED_BY_USER_ID, POST_PROPS_FORCE_NOTIFICATION,
     POST_PROPS_FROM_BOT, POST_PROPS_FROM_OAUTH_APP, POST_PROPS_FROM_PLUGIN,
     POST_PROPS_FROM_WEBHOOK, POST_PROPS_MM_BLOCKS_ACTIONS, POST_PROPS_OVERRIDE_ICON_EMOJI,
-    POST_PROPS_OVERRIDE_ICON_URL, POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_SILENT_NOTIFICATION,
-    POST_PROPS_WEBHOOK_DISPLAY_NAME, POST_SYSTEM_MESSAGE_PREFIX, POST_TYPE_BURN_ON_READ,
-    POST_TYPE_EPHEMERAL, Post,
+    POST_PROPS_OVERRIDE_ICON_URL, POST_PROPS_OVERRIDE_USERNAME, POST_PROPS_PREVIEWED_POST,
+    POST_PROPS_SILENT_NOTIFICATION, POST_PROPS_WEBHOOK_DISPLAY_NAME, POST_SYSTEM_MESSAGE_PREFIX,
+    POST_TYPE_BURN_ON_READ, POST_TYPE_EPHEMERAL, Post,
 };
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostMetadata;
@@ -57,7 +63,8 @@ use mm_store::{ChannelStore, FileInfoStore, PostStore, ThreadStore, WebhookStore
 
 use crate::App;
 use crate::channel::RestrictedDm;
-use crate::post::{PrepareError, PreparePostForClientOpts, message_may_contain_a_link};
+use crate::notification::PermalinkFate;
+use crate::post::{PrepareError, PreparePostForClientOpts};
 
 /// Port of `model.CreatePostFlags` (post.go:414), restricted to the fields a served entry point
 /// sets: `POST /api/v4/posts` sets the first two, `App::send_test_message` the third.
@@ -106,6 +113,24 @@ pub(crate) struct PendingPostEntry {
 /// **Hardened mode does not protect this list.** `ExperimentalEnableHardenedMode` is off by
 /// default, so `from_webhook` and the three overrides really are settable by any client on the
 /// public create-post API — which is why they are refused here rather than assumed absent.
+/// The `setupBroadcastHookForPermalink` half of [`PermalinkFate::Restored`]: Go removed the
+/// preview and then re-added the prop and **appended** the embed, so the permalink embed ends up
+/// after any other. A post carries at most one embed from `getEmbedForPost`, so the move is
+/// usually to where it already was.
+fn restore_permalink_metadata(post: &mut Post) {
+    let Some(metadata) = post.metadata.as_mut() else {
+        return;
+    };
+    let (mut permalinks, others): (Vec<_>, Vec<_>) = std::mem::take(&mut metadata.embeds)
+        .into_iter()
+        .partition(|embed| embed.type_ == mm_model::post_embed::POST_EMBED_PERMALINK);
+    metadata.embeds = others;
+    // `GetPreviewPost` returned the first one; `removeEmbeddedPostsFromMetadata` removed all.
+    if !permalinks.is_empty() {
+        metadata.embeds.push(permalinks.swap_remove(0));
+    }
+}
+
 const REFUSED_CREATE_PROPS: [&str; 8] = [
     POST_PROPS_FROM_WEBHOOK,
     POST_PROPS_FROM_BOT,
@@ -345,11 +370,13 @@ impl App {
         // lands before the row rather than after it.
         crate::post::refuse_on_props(post)?;
 
-        // `getEmbedsAndImages` → `getFirstLink` → `getLinkMetadata`, and a permalink additionally
-        // writes the `previewed_post` prop into the saved row.
-        if message_may_contain_a_link(&post.message) {
+        // `PostWithProxyAddedToImageURLs` and `ImageProxyAdder` rewrite image URLs through the
+        // proxy — in the markdown, in the OpenGraph images and in `/api/v4/image` links — and
+        // the proxy is not ported. `PreparePostForClient` would refuse it after the save, so the
+        // refusal is here, before anything is written.
+        if self.config().image_proxy_enable {
             return Err(PrepareError::Unreproducible(
-                "message may contain a link or a markdown image",
+                "the image proxy rewrites a post's image URLs",
             ));
         }
         // `handleWebhookEvents` fires an outgoing webhook whose *response* Go turns into a second
@@ -695,8 +722,18 @@ impl App {
             post.create_at = get_millis();
         }
 
-        // `getEmbedsAndImages` leaves `Embeds` empty and `Images` empty on a message with no
-        // link, and `omitempty` drops both — so there is no `previewed_post` prop to add either.
+        // `getEmbedsAndImages(post, isNewPost=true)`: the first autolink's embed — fetched,
+        // measured or previewed, with a `LinkMetadata` row written for a fetch — and the
+        // dimensions of every image. What it cannot reproduce is forwarded from here, still before
+        // the save; the only thing left behind is the `LinkMetadata` upsert Go repeats.
+        self.get_embeds_and_images_for_new_post(post).await?;
+        // The permalink preview's id goes into the saved row.
+        if let Some(preview) = post.get_preview_post() {
+            post.add_prop(
+                POST_PROPS_PREVIEWED_POST,
+                serde_json::Value::String(preview.post_id),
+            );
+        }
 
         // Go: `fileIDs := post.FileIds` — captured **before** `Save`, and it is the same
         // backing array `PreSave` then sorts and compacts in place. See
@@ -750,8 +787,8 @@ impl App {
 
         // `PreparePostForClient`, *not* the embeds-and-images variant: Go relies on
         // `getEmbedsAndImages` having already run on the pre-save post.
-        let prepared = self
-            .prepare_post_for_client(
+        let mut prepared = self
+            .prepare_created_post_for_client(
                 &saved,
                 PreparePostForClientOpts {
                     is_edit_post: true,
@@ -784,7 +821,7 @@ impl App {
                 tracing::warn!(error = %err, "Failed to update thread membership");
             }
         }
-        if let Err(err) = self
+        match self
             .handle_post_events(
                 &prepared,
                 &user,
@@ -794,13 +831,26 @@ impl App {
             )
             .await
         {
+            // `publishWebsocketEventForPost` took the permalink preview off the post it was
+            // handed — this one — and put it back only for an author who may read it.
+            Ok(outcome) => match outcome.permalink {
+                Some(PermalinkFate::Removed) => {
+                    crate::post::remove_permalink_metadata_from_post(&mut prepared);
+                }
+                Some(PermalinkFate::Restored) => restore_permalink_metadata(&mut prepared),
+                None => {}
+            },
             // Go: `rctx.Logger().Warn("Failed to handle post events")` — the post is written and
-            // is answered whatever the fan-out did.
-            tracing::warn!(error = %err, post_id = %prepared.id, "Failed to handle post events");
+            // is answered whatever the fan-out did. An error leaves the preview as it was, which
+            // is Go's answer for every failure except a database error inside the permalink
+            // lookup itself, after the preview had already been taken off.
+            Err(err) => {
+                tracing::warn!(error = %err, post_id = %prepared.id, "Failed to handle post events");
+            }
         }
 
         let (sanitized, _is_member_for_previews) = self
-            .sanitize_post_metadata_for_user(prepared, &session.user_id)
+            .sanitize_created_post_metadata_for_user(prepared, &session.user_id)
             .await?;
 
         Ok((sanitized, user.is_bot))
@@ -1286,13 +1336,53 @@ mod tests {
     }
 
     #[test]
-    fn an_email_address_is_an_at_mention_for_this_gate_even_though_go_finds_no_link_in_it() {
-        // Deliberate over-approximation: Mattermost's autolinker has no email rule, so
-        // `message_may_contain_a_link` says no — but `@` says yes and the request is forwarded.
-        // Widening is free here; narrowing would write a row Go would have mentioned somebody for.
+    fn an_email_address_is_an_at_mention_and_not_a_link() {
+        // Mattermost's autolinker has no email rule, so `getFirstLink` finds nothing to preview
+        // — but `@` is still a mention candidate for the notification pass.
         let post = post_with_message("mail me at sam@example.com");
-        assert!(!message_may_contain_a_link(&post.message));
+        assert_eq!(
+            crate::link_metadata::get_first_link("", &post.message),
+            Ok(String::new())
+        );
         assert!(post.message.contains('@'));
+    }
+
+    /// `removePermalinkMetadataFromPost` then the author's re-add: the permalink embed moves to
+    /// the end, the other embeds keep their order, and a post without one is left alone.
+    #[test]
+    fn a_restored_permalink_is_appended_after_the_other_embeds() {
+        use mm_model::post_embed::PostEmbed;
+        let embed = |type_: &str| PostEmbed {
+            type_: type_.to_owned(),
+            ..PostEmbed::default()
+        };
+        let mut post = post_with_message("m");
+        post.metadata = Some(mm_model::post_metadata::PostMetadata {
+            embeds: vec![embed("permalink"), embed("link"), embed("image")],
+            ..Default::default()
+        });
+        restore_permalink_metadata(&mut post);
+        let types: Vec<&str> = post
+            .metadata
+            .as_ref()
+            .unwrap()
+            .embeds
+            .iter()
+            .map(|e| e.type_.as_str())
+            .collect();
+        assert_eq!(types, ["link", "image", "permalink"]);
+
+        let mut plain = post_with_message("m");
+        restore_permalink_metadata(&mut plain);
+        assert!(plain.metadata.is_none());
+
+        post.add_prop(
+            POST_PROPS_PREVIEWED_POST,
+            serde_json::Value::String("x".into()),
+        );
+        crate::post::remove_permalink_metadata_from_post(&mut post);
+        assert!(post.get_prop(POST_PROPS_PREVIEWED_POST).is_none());
+        assert_eq!(post.metadata.as_ref().unwrap().embeds.len(), 2);
     }
 
     #[test]

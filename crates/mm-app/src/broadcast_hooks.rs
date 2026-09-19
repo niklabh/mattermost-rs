@@ -8,16 +8,17 @@
 //!
 //! # Which hooks exist here
 //!
-//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Five are ported — the
-//! three `SendNotifications` attaches to every `posted` event, the one
-//! `publishWebsocketEventForPost` attaches when the post mentions a channel, and the filter the
-//! channel-join-request events carry:
+//! Go registers nine (`makeBroadcastHooks`, web_broadcast_hooks.go:31). Six are ported — the
+//! three `SendNotifications` attaches to every `posted` event, the two
+//! `publishWebsocketEventForPost` attaches when the post previews a permalink or mentions a
+//! channel, and the filter the channel-join-request events carry:
 //!
 //! | id | args (JSON types, as `add_hook` must supply them) | effect on a connection |
 //! |---|---|---|
 //! | [`BROADCAST_ADD_MENTIONS`] | `mentions`: array of user ids | user in the list → `data.mentions = "[\"<user>\"]"` (a **stringified** array) |
 //! | [`BROADCAST_ADD_FOLLOWERS`] | `followers`: array of user ids | same, key `followers` |
 //! | [`BROADCAST_POSTED_ACK`] | `posted_user_id`: string, `channel_type`: string, `users`: array of user ids | `data.should_ack = true` for a `?posted_ack=true` connection that is not the poster's, when the frame already carries `mentions`/`followers`, or the channel is a DM, or the user is in `users` |
+//! | [`BROADCAST_PERMALINK`] | `preview_channel`: channel, `permalink_previewed_post`: preview post, `preview_prop`: string | recipient may read the channel → re-decodes `data.post`, adds `props.previewed_post` and appends the `permalink` embed, and re-encodes |
 //! | [`BROADCAST_CHANNEL_MENTIONS`] | `channel_mentions`: object, name → `{display_name, team_name, id}` | re-decodes `data.post`, puts back under `props.channel_mentions` only the entries whose `id` the recipient may resolve, and re-encodes |
 //! | [`BROADCAST_ONLY_CHANNEL_ADMINS`] | `channel_admin_user_ids`: array of user ids | user **not** in the list → the event is rejected, on the broadcast's shared event unless an earlier hook copied it (see `HookedWebSocketEvent::reject`) |
 //!
@@ -26,7 +27,7 @@
 //! `channel_mentions` re-encodes the post, so a hooked recipient's `post` string is a fresh
 //! marshal rather than the precomputed one — the same bytes, since both are `Post.ToJSON`.
 //!
-//! The other four — `permalink`, `burn_on_read`, `burn_on_read_reaction`, `abac_files` — are not
+//! The other three — `burn_on_read`, `burn_on_read_reaction`, `abac_files` — are not
 //! registered. An event carrying one of their ids reaches the runner, which logs Go's `Unable to
 //! find broadcast hook` warning and skips it, so the frame leaves unmodified and precomputed.
 //! Their ids are declared below so a raiser can attach them today. See [D-183].
@@ -41,7 +42,9 @@
 use std::collections::HashMap;
 
 use mm_model::channel::CHANNEL_TYPE_DIRECT;
-use mm_model::post::{POST_PROPS_CHANNEL_MENTIONS, Post};
+use mm_model::permalink::PreviewPost;
+use mm_model::post::{POST_PROPS_CHANNEL_MENTIONS, POST_PROPS_PREVIEWED_POST, Post};
+use mm_model::post_embed::{POST_EMBED_PERMALINK, PostEmbed, PostEmbedData};
 use mm_model::utils::{StringInterface, array_to_json};
 use serde::de::DeserializeOwned;
 
@@ -53,7 +56,7 @@ pub const BROADCAST_ADD_MENTIONS: &str = "add_mentions";
 pub const BROADCAST_ADD_FOLLOWERS: &str = "add_followers";
 /// `broadcastPostedAck` (web_broadcast_hooks.go:22).
 pub const BROADCAST_POSTED_ACK: &str = "posted_ack";
-/// `broadcastPermalink` (web_broadcast_hooks.go:23). Declared, not registered.
+/// `broadcastPermalink` (web_broadcast_hooks.go:23).
 pub const BROADCAST_PERMALINK: &str = "permalink";
 /// `broadcastChannelMentions` (web_broadcast_hooks.go:24).
 pub const BROADCAST_CHANNEL_MENTIONS: &str = "channel_mentions";
@@ -73,6 +76,7 @@ pub fn make_broadcast_hooks() -> HashMap<&'static str, Box<dyn BroadcastHook>> {
     hooks.insert(BROADCAST_ADD_MENTIONS, Box::new(AddMentionsBroadcastHook));
     hooks.insert(BROADCAST_ADD_FOLLOWERS, Box::new(AddFollowersBroadcastHook));
     hooks.insert(BROADCAST_POSTED_ACK, Box::new(PostedAckBroadcastHook));
+    hooks.insert(BROADCAST_PERMALINK, Box::new(PermalinkBroadcastHook));
     hooks.insert(
         BROADCAST_CHANNEL_MENTIONS,
         Box::new(ChannelMentionsBroadcastHook),
@@ -475,6 +479,91 @@ impl BroadcastHook for ChannelMentionsBroadcastHook {
     }
 }
 
+/// Port of `permalinkBroadcastHook` (web_broadcast_hooks.go:164): a recipient who may read the
+/// previewed post's channel gets the preview back — the `previewed_post` prop and a `permalink`
+/// embed **appended** to the post the frame carries, which an earlier hook may have rewritten —
+/// and one who may not keeps the sanitised frame ("Do nothing").
+///
+/// The file stripping in the middle needs `HasPermissionToFileAction`, which answers `true`
+/// whenever the access-control service is nil — always, on a build without the enterprise
+/// code — so the preview goes out with its files. The audit record Go writes per recipient is
+/// not modelled: nothing on the wire or in the database carries it.
+///
+/// The preview is decoded from the argument into the typed [`PreviewPost`] and re-encoded, so it
+/// leaves in Go's field order rather than a `Value`'s sorted one.
+#[derive(Debug)]
+struct PermalinkBroadcastHook;
+
+impl BroadcastHook for PermalinkBroadcastHook {
+    fn process<'a, 'e>(
+        &'a self,
+        msg: &'a mut HookedWebSocketEvent<'e>,
+        conn: &'a WebConn,
+        args: &'a StringInterface,
+        suite: &'a dyn BroadcastHookSuite,
+    ) -> HookFuture<'a, Result<(), BroadcastHookError>>
+    where
+        'e: 'a,
+    {
+        Box::pin(async move {
+            const HOOK: &str = "permalinkBroadcastHook";
+            let preview_channel =
+                get_typed_arg::<mm_model::channel::Channel>(args, "preview_channel").map_err(
+                    |source| BroadcastHookError::InvalidArg {
+                        hook: HOOK,
+                        key: "preview_channel",
+                        source,
+                    },
+                )?;
+
+            let (may_read, _is_member) = suite
+                .has_permission_to_read_channel(&conn.user_id(), &preview_channel)
+                .await;
+            if !may_read {
+                // "In this case, the sanitized post is already attached to the ws event."
+                return Ok(());
+            }
+
+            let mut post = get_post_from_message(msg)
+                .map_err(|source| BroadcastHookError::PostFromMessage { hook: HOOK, source })?;
+            let previewed = get_typed_arg::<PreviewPost>(args, "permalink_previewed_post")
+                .map_err(|source| BroadcastHookError::InvalidArg {
+                    hook: HOOK,
+                    key: "permalink_previewed_post",
+                    source,
+                })?;
+            let preview_prop = get_typed_arg::<String>(args, "preview_prop").map_err(|source| {
+                BroadcastHookError::InvalidArg {
+                    hook: HOOK,
+                    key: "preview_prop",
+                    source,
+                }
+            })?;
+
+            post.add_prop(
+                POST_PROPS_PREVIEWED_POST,
+                serde_json::Value::String(preview_prop),
+            );
+            let data = PostEmbedData::encode(&previewed)
+                .map_err(|source| BroadcastHookError::PostToJson { hook: HOOK, source })?;
+            post.metadata
+                .get_or_insert_with(Default::default)
+                .embeds
+                .push(PostEmbed {
+                    type_: POST_EMBED_PERMALINK.to_owned(),
+                    url: String::new(),
+                    data: Some(data),
+                });
+
+            let updated = post
+                .to_json()
+                .map_err(|source| BroadcastHookError::PostToJson { hook: HOOK, source })?;
+            msg.add("post", serde_json::Value::String(updated));
+            Ok(())
+        })
+    }
+}
+
 /// Port of `incrementWebsocketCounter` (web_broadcast_hooks.go:519). Its first line returns when
 /// `Platform.Metrics()` is nil, and there is no metrics service here, so that is the whole
 /// function. Kept as a call so the three sites read like Go's.
@@ -538,6 +627,14 @@ mod tests {
             channel_id: &'a str,
         ) -> HookFuture<'a, bool> {
             Box::pin(async move { self.0.contains(&channel_id) })
+        }
+
+        fn has_permission_to_read_channel<'a>(
+            &'a self,
+            _user_id: &'a str,
+            channel: &'a mm_model::channel::Channel,
+        ) -> HookFuture<'a, (bool, bool)> {
+            Box::pin(async move { (self.0.contains(&channel.id.as_str()), false) })
         }
     }
 
@@ -907,7 +1004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_registry_holds_exactly_the_five_ported_hooks() {
+    async fn the_registry_holds_exactly_the_six_ported_hooks() {
         let hooks = make_broadcast_hooks();
         let mut ids: Vec<_> = hooks.keys().copied().collect();
         ids.sort_unstable();
@@ -918,6 +1015,7 @@ mod tests {
                 BROADCAST_ADD_MENTIONS,
                 BROADCAST_CHANNEL_MENTIONS,
                 BROADCAST_ONLY_CHANNEL_ADMINS,
+                BROADCAST_PERMALINK,
                 BROADCAST_POSTED_ACK
             ]
         );
@@ -1083,6 +1181,124 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("Invalid channel_mentions value passed to channelMentionsBroadcastHook"),
+            "{err}"
+        );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // permalink
+    // -----------------------------------------------------------------------------------------
+
+    const PREVIEW_CHANNEL: &str = "previewchannelpreviewchann";
+    const PREVIEWED: &str = "previewedpostpreviewedpost";
+
+    fn permalink_args() -> StringInterface {
+        args(json!({
+            "preview_channel": { "id": PREVIEW_CHANNEL, "type": "O" },
+            "permalink_previewed_post": {
+                "post_id": PREVIEWED,
+                "post": { "id": PREVIEWED, "message": "the previewed one" },
+                "team_name": "team",
+                "channel_display_name": "Channel",
+                "channel_type": "O",
+                "channel_id": PREVIEW_CHANNEL,
+            },
+            "preview_prop": PREVIEWED,
+        }))
+    }
+
+    fn posted_with(post: serde_json::Value) -> WebSocketEvent {
+        let mut event = WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", "chan", "", None, "");
+        event.add("post", json!(post.to_string()));
+        event
+    }
+
+    fn post_of(event: &Option<WebSocketEvent>) -> serde_json::Value {
+        serde_json::from_str(data_key(event, "post").unwrap().as_str().unwrap()).unwrap()
+    }
+
+    /// A recipient who may read the channel gets the prop back and the preview **appended**,
+    /// after any embed the frame already had, in `PreviewPost`'s own field order.
+    #[tokio::test]
+    async fn permalink_restores_the_preview_for_a_reader_of_the_channel() {
+        let (conn, _rx) = conn(false);
+        let event = posted_with(json!({
+            "id": "p", "metadata": { "embeds": [{ "type": "link", "url": "http://x/" }] },
+        }));
+        let out = run_with(
+            &PermalinkBroadcastHook,
+            &event,
+            &conn,
+            &permalink_args(),
+            &ResolvesOnly(vec![PREVIEW_CHANNEL]),
+        )
+        .await
+        .unwrap();
+        let post = post_of(&out);
+        assert_eq!(post["props"]["previewed_post"], PREVIEWED);
+        let embeds = post["metadata"]["embeds"].as_array().unwrap();
+        assert_eq!(embeds.len(), 2);
+        assert_eq!(embeds[0]["type"], "link");
+        assert_eq!(embeds[1]["type"], "permalink");
+        assert_eq!(embeds[1]["data"]["post"]["message"], "the previewed one");
+        let text = data_key(&out, "post").unwrap().as_str().unwrap();
+        let order: Vec<usize> = ["\"post_id\"", "\"post\"", "\"team_name\"", "\"channel_id\""]
+            .iter()
+            .map(|key| text.rfind(key).unwrap())
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "field order: {text}");
+    }
+
+    /// A recipient who may not read it keeps the sanitised frame — no copy at all.
+    #[tokio::test]
+    async fn permalink_leaves_the_frame_alone_for_anyone_else() {
+        let (conn, _rx) = conn(false);
+        let out = run_with(
+            &PermalinkBroadcastHook,
+            &posted_with(json!({ "id": "p" })),
+            &conn,
+            &permalink_args(),
+            &ResolvesOnly(Vec::new()),
+        )
+        .await
+        .unwrap();
+        assert!(out.is_none(), "{out:?}");
+    }
+
+    /// The channel argument is read first — before the permission and before the post.
+    #[tokio::test]
+    async fn permalink_fails_on_a_bad_channel_argument_before_anything_else() {
+        let (conn, _rx) = conn(false);
+        let mut bad = permalink_args();
+        bad.insert("preview_channel".to_owned(), json!("not a channel"));
+        let err = run_with(
+            &PermalinkBroadcastHook,
+            &posted(),
+            &conn,
+            &bad,
+            &ResolvesOnly(Vec::new()),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Invalid preview_channel value passed to permalinkBroadcastHook"),
+            "{err}"
+        );
+        // With the permission, a bad preview argument fails after the post decodes.
+        let mut bad = permalink_args();
+        bad.insert("permalink_previewed_post".to_owned(), json!(7));
+        let err = run_with(
+            &PermalinkBroadcastHook,
+            &posted_with(json!({ "id": "p" })),
+            &conn,
+            &bad,
+            &ResolvesOnly(vec![PREVIEW_CHANNEL]),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("permalink_previewed_post"),
             "{err}"
         );
     }

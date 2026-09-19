@@ -1,0 +1,3687 @@
+{
+    "first_link": [
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://example.com/a",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://www.example.com",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": ""
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://example.com/restricted",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": ""
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": ""
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://127.0.0.1:9/mock/page",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": ""
+        },
+        {
+            "first_link": "http://www2.example.com/page",
+            "message": "www2.example.com/page",
+            "restrict": ""
+        },
+        {
+            "first_link": "https://example.com/é/ü",
+            "message": "https://example.com/é/ü",
+            "restrict": ""
+        },
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://other.org/b",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "https://second.test/",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://mock.test/allowed",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://127.0.0.1:9/mock/page",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "www2.example.com/page",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "https://example.com/é/ü",
+            "restrict": "example.com"
+        },
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "https://second.test/",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://mock.test/allowed",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://127.0.0.1:9/mock/page",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "www2.example.com/page",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "https://example.com/é/ü",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://example.com/a",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://www.example.com",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://example.com/restricted",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://127.0.0.1:9/mock/page",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "http://www2.example.com/page",
+            "message": "www2.example.com/page",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "https://example.com/é/ü",
+            "message": "https://example.com/é/ü",
+            "restrict": "  mock  "
+        },
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://example.com/a",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://www.example.com",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://example.com/restricted",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "http://www2.example.com/page",
+            "message": "www2.example.com/page",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "https://example.com/é/ü",
+            "message": "https://example.com/é/ü",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "first_link": "",
+            "message": "",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "no links here",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://example.com/a",
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://www.example.com",
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "https://first.test/one",
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://outside.test/",
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://after.fence/",
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://auto.link/",
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://angle.test/",
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://example.com/restricted",
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://punct.test/path",
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://paren.test/a_(b)",
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://quote.test/",
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://list.test/",
+            "message": "- item http://list.test/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "HTTP://UPPER.TEST/",
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "ftp://ftp.test/file",
+            "message": "ftp://ftp.test/file",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://127.0.0.1:9/mock/page",
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://mention.test/",
+            "message": "@user http://mention.test/",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "",
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://x.test/?q=1\u0026r=2#frag",
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "http://www2.example.com/page",
+            "message": "www2.example.com/page",
+            "restrict": "xn--"
+        },
+        {
+            "first_link": "https://example.com/é/ü",
+            "message": "https://example.com/é/ü",
+            "restrict": "xn--"
+        }
+    ],
+    "idna_lookup_to_ascii": [
+        {
+            "ascii": "example.com",
+            "error": false,
+            "host": "example.com"
+        },
+        {
+            "ascii": "example.com",
+            "error": false,
+            "host": "EXAMPLE.com"
+        },
+        {
+            "ascii": "ex_ample.com",
+            "error": true,
+            "host": "ex_ample.com"
+        },
+        {
+            "ascii": "-lead.com",
+            "error": true,
+            "host": "-lead.com"
+        },
+        {
+            "ascii": "trail-.com",
+            "error": true,
+            "host": "trail-.com"
+        },
+        {
+            "ascii": "ab--cd.com",
+            "error": true,
+            "host": "ab--cd.com"
+        },
+        {
+            "ascii": "xn--nxasmq6b.com",
+            "error": false,
+            "host": "xn--nxasmq6b.com"
+        },
+        {
+            "ascii": "xn--zz.com",
+            "error": true,
+            "host": "xn--zz.com"
+        },
+        {
+            "ascii": "xn--mnchen-3ya.de",
+            "error": false,
+            "host": "münchen.de"
+        },
+        {
+            "ascii": "127.0.0.1",
+            "error": false,
+            "host": "127.0.0.1"
+        },
+        {
+            "ascii": "::1",
+            "error": true,
+            "host": "::1"
+        },
+        {
+            "ascii": "",
+            "error": false,
+            "host": ""
+        },
+        {
+            "ascii": "a..b",
+            "error": false,
+            "host": "a..b"
+        },
+        {
+            "ascii": ".a",
+            "error": false,
+            "host": ".a"
+        },
+        {
+            "ascii": "a.",
+            "error": false,
+            "host": "a."
+        },
+        {
+            "ascii": "exa mple.com",
+            "error": true,
+            "host": "exa mple.com"
+        },
+        {
+            "ascii": "xn--cole-9oa.fr",
+            "error": false,
+            "host": "ÉCOLE.fr"
+        },
+        {
+            "ascii": "xn--zca.de",
+            "error": false,
+            "host": "ß.de"
+        },
+        {
+            "ascii": "a-b.c-d",
+            "error": false,
+            "host": "a-b.c-d"
+        },
+        {
+            "ascii": "123",
+            "error": false,
+            "host": "123"
+        },
+        {
+            "ascii": "a.b.c.d.e",
+            "error": false,
+            "host": "a.b.c.d.e"
+        },
+        {
+            "ascii": "",
+            "error": false,
+            "host": "xn--"
+        },
+        {
+            "ascii": "upper",
+            "error": false,
+            "host": "UPPER"
+        },
+        {
+            "ascii": "host!",
+            "error": true,
+            "host": "host!"
+        },
+        {
+            "ascii": "host~name",
+            "error": true,
+            "host": "host~name"
+        },
+        {
+            "ascii": "ho*st",
+            "error": true,
+            "host": "ho*st"
+        }
+    ],
+    "images": [
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": ""
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": ""
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": "example.com"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": "  mock  "
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "no links here",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "see http://example.com/a and http://other.org/b",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www.example.com is first, then https://second.test/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://first.test/one https://second.test/two",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "`http://in.code/span` then http://outside.test/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "```\nhttp://in.fence/\n```\nhttp://after.fence/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "[text](http://markdown.link/) and http://auto.link/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png"
+            ],
+            "images": [
+                "http://image.test/a.png"
+            ],
+            "message": "![alt](http://image.test/a.png) and http://auto.link/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "images": [
+                "http://image.test/b.png",
+                "http://image.test/a.png",
+                "http://image.test/b.png"
+            ],
+            "message": "![a](http://image.test/b.png) ![b](http://image.test/a.png) ![c](http://image.test/b.png)",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/ref.png"
+            ],
+            "images": [
+                "http://image.test/ref.png"
+            ],
+            "message": "![ref][img]\n\n[img]: http://image.test/ref.png",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "http://image.test/dims.png"
+            ],
+            "images": [
+                "http://image.test/dims.png"
+            ],
+            "message": "![dims](http://image.test/dims.png =100x200)",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003chttp://angle.test/\u003e",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://example.com/restricted then http://mock.test/allowed",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "trailing punctuation http://punct.test/path).",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://paren.test/a_(b) end",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "\u003e quoted http://quote.test/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "- item http://list.test/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "HTTP://UPPER.TEST/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "ftp://ftp.test/file",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://127.0.0.1:9/mock/page and http://[::1]/v6",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "@user http://mention.test/",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "data:image/png;base64,AAAA"
+            ],
+            "images": [
+                "data:image/png;base64,AAAA"
+            ],
+            "message": "![](data:image/png;base64,AAAA)",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": [
+                "/abs/path.png",
+                "relative/path.png"
+            ],
+            "images": [
+                "relative/path.png",
+                "/abs/path.png"
+            ],
+            "message": "![](relative/path.png) ![](/abs/path.png)",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "http://x.test/?q=1\u0026r=2#frag",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "www2.example.com/page",
+            "restrict": "xn--"
+        },
+        {
+            "deduplicated": null,
+            "images": [],
+            "message": "https://example.com/é/ü",
+            "restrict": "xn--"
+        }
+    ],
+    "is_link_allowed_for_preview": [
+        {
+            "allowed": true,
+            "link": "http://example.com/a",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://notexample.com",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://[::1]:80/v6",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://ex_ample.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://-lead.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://trail-.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://ab--cd.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--zz.com/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://münchen.de/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://%zz/bad-escape",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://host with space/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "ftp://example.com/file",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://user:pass@mock.test/",
+            "restrict": ""
+        },
+        {
+            "allowed": true,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": ""
+        },
+        {
+            "allowed": false,
+            "link": "http://example.com/a",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://notexample.com",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://[::1]:80/v6",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://ex_ample.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://-lead.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://trail-.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://ab--cd.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--zz.com/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://münchen.de/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://%zz/bad-escape",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://host with space/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "ftp://example.com/file",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://user:pass@mock.test/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": true,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": "example.com"
+        },
+        {
+            "allowed": false,
+            "link": "http://example.com/a",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://notexample.com",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://[::1]:80/v6",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://ex_ample.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://-lead.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://trail-.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://ab--cd.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--zz.com/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://münchen.de/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://%zz/bad-escape",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "http://host with space/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": false,
+            "link": "ftp://example.com/file",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://user:pass@mock.test/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": "@Example.COM, other.org"
+        },
+        {
+            "allowed": true,
+            "link": "http://example.com/a",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://notexample.com",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://[::1]:80/v6",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://ex_ample.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://-lead.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://trail-.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://ab--cd.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--zz.com/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://münchen.de/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://%zz/bad-escape",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://host with space/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "ftp://example.com/file",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": false,
+            "link": "http://user:pass@mock.test/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": "  mock  "
+        },
+        {
+            "allowed": true,
+            "link": "http://example.com/a",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://notexample.com",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://[::1]:80/v6",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://ex_ample.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://-lead.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://trail-.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://ab--cd.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--zz.com/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://münchen.de/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://%zz/bad-escape",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": false,
+            "link": "http://host with space/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "ftp://example.com/file",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://user:pass@mock.test/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": "127.0.0.1"
+        },
+        {
+            "allowed": true,
+            "link": "http://example.com/a",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "https://sub.example.com:8443/x?y#z",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://notexample.com",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://EXAMPLE.com/UPPER",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://127.0.0.1:9/mock/page",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://[::1]:80/v6",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://ex_ample.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://-lead.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://trail-.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://ab--cd.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--nxasmq6b.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://xn--zz.com/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://münchen.de/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://%zz/bad-escape",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://a..b/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://host with space/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "ftp://example.com/file",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "www.example.com",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "mailto:someone@example.com",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": true,
+            "link": "http://user:pass@mock.test/",
+            "restrict": "xn--"
+        },
+        {
+            "allowed": false,
+            "link": "http://ÉCOLE.fr/",
+            "restrict": "xn--"
+        }
+    ],
+    "looks_like_a_permalink": [
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/Slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice_team-1/pl/0123456789abcdefghijklmnop"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice-team/pl/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065//slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "  http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/a/b/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:80650/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "https://chat.example.com/sub/team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "",
+            "url": "slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa?x=1"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/Slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice_team-1/pl/0123456789abcdefghijklmnop"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice-team/pl/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065//slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065",
+            "url": "  http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/a/b/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:80650/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "https://chat.example.com/sub/team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa?x=1"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/Slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice_team-1/pl/0123456789abcdefghijklmnop"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice-team/pl/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065//slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065/",
+            "url": "  http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/a/b/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:80650/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "https://chat.example.com/sub/team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "http://localhost:8065/",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa?x=1"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/Slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice_team-1/pl/0123456789abcdefghijklmnop"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice-team/pl/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065//slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "  http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/a/b/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:80650/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": true,
+            "site_url": "https://chat.example.com/sub",
+            "url": "https://chat.example.com/sub/team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa?x=1"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/Slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice_team-1/pl/0123456789abcdefghijklmnop"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice-team/pl/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065//slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "  http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/a/b/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:80650/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "https://chat.example.com/sub/team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "matches": false,
+            "site_url": "%zz",
+            "url": "http://localhost:8065/slice-team/pl/aaaaaaaaaaaaaaaaaaaaaaaaaa?x=1"
+        }
+    ],
+    "normalize_domains": [
+        {
+            "domains": [],
+            "input": ""
+        },
+        {
+            "domains": [
+                "example.com"
+            ],
+            "input": "example.com"
+        },
+        {
+            "domains": [
+                "example.com",
+                "other.org"
+            ],
+            "input": "@Example.COM, other.org"
+        },
+        {
+            "domains": [
+                "mock"
+            ],
+            "input": "  mock  "
+        },
+        {
+            "domains": [
+                "127.0.0.1"
+            ],
+            "input": "127.0.0.1"
+        },
+        {
+            "domains": [
+                "xn--"
+            ],
+            "input": "xn--"
+        },
+        {
+            "domains": [
+                "a",
+                "b",
+                "c",
+                "d",
+                "e"
+            ],
+            "input": "a,b@c\td e"
+        },
+        {
+            "domains": [
+                "äbc.de"
+            ],
+            "input": "ÄBC.de"
+        },
+        {
+            "domains": [],
+            "input": ",,,"
+        },
+        {
+            "domains": [],
+            "input": "@"
+        }
+    ],
+    "resolve_metadata_url": [
+        {
+            "resolved": "http://example.com/a",
+            "site_url": "",
+            "url": "http://example.com/a"
+        },
+        {
+            "resolved": "http://Example.COM/b/c",
+            "site_url": "",
+            "url": "HTTP://Example.COM/a/../b/./c"
+        },
+        {
+            "resolved": "/relative/path.png",
+            "site_url": "",
+            "url": "/relative/path.png"
+        },
+        {
+            "resolved": "/relative/path.png",
+            "site_url": "",
+            "url": "relative/path.png"
+        },
+        {
+            "resolved": "//protocol.relative/x",
+            "site_url": "",
+            "url": "//protocol.relative/x"
+        },
+        {
+            "resolved": "?only=query",
+            "site_url": "",
+            "url": "?only=query"
+        },
+        {
+            "resolved": "#frag",
+            "site_url": "",
+            "url": "#frag"
+        },
+        {
+            "resolved": "http://example.com/a%20b",
+            "site_url": "",
+            "url": "http://example.com/a b"
+        },
+        {
+            "resolved": "http://example.com/%41%2f",
+            "site_url": "",
+            "url": "http://example.com/%41%2f"
+        },
+        {
+            "resolved": "http://[::1]:80/x",
+            "site_url": "",
+            "url": "http://[::1]:80/x"
+        },
+        {
+            "resolved": "data:image/png;base64,AAAA",
+            "site_url": "",
+            "url": "data:image/png;base64,AAAA"
+        },
+        {
+            "resolved": "",
+            "site_url": "",
+            "url": "http://%zz/"
+        },
+        {
+            "resolved": "",
+            "site_url": "",
+            "url": ""
+        },
+        {
+            "resolved": "https://example.com/%C3%A9",
+            "site_url": "",
+            "url": "https://example.com/é"
+        },
+        {
+            "resolved": "http://example.com:8080",
+            "site_url": "",
+            "url": "http://example.com:8080"
+        },
+        {
+            "resolved": "http://example.com?",
+            "site_url": "",
+            "url": "http://example.com?"
+        },
+        {
+            "resolved": "http://example.com/a",
+            "site_url": "http://localhost:8065",
+            "url": "http://example.com/a"
+        },
+        {
+            "resolved": "http://Example.COM/b/c",
+            "site_url": "http://localhost:8065",
+            "url": "HTTP://Example.COM/a/../b/./c"
+        },
+        {
+            "resolved": "http://localhost:8065/relative/path.png",
+            "site_url": "http://localhost:8065",
+            "url": "/relative/path.png"
+        },
+        {
+            "resolved": "http://localhost:8065/relative/path.png",
+            "site_url": "http://localhost:8065",
+            "url": "relative/path.png"
+        },
+        {
+            "resolved": "http://protocol.relative/x",
+            "site_url": "http://localhost:8065",
+            "url": "//protocol.relative/x"
+        },
+        {
+            "resolved": "http://localhost:8065?only=query",
+            "site_url": "http://localhost:8065",
+            "url": "?only=query"
+        },
+        {
+            "resolved": "http://localhost:8065#frag",
+            "site_url": "http://localhost:8065",
+            "url": "#frag"
+        },
+        {
+            "resolved": "http://example.com/a%20b",
+            "site_url": "http://localhost:8065",
+            "url": "http://example.com/a b"
+        },
+        {
+            "resolved": "http://example.com/%41%2f",
+            "site_url": "http://localhost:8065",
+            "url": "http://example.com/%41%2f"
+        },
+        {
+            "resolved": "http://[::1]:80/x",
+            "site_url": "http://localhost:8065",
+            "url": "http://[::1]:80/x"
+        },
+        {
+            "resolved": "data:image/png;base64,AAAA",
+            "site_url": "http://localhost:8065",
+            "url": "data:image/png;base64,AAAA"
+        },
+        {
+            "resolved": "",
+            "site_url": "http://localhost:8065",
+            "url": "http://%zz/"
+        },
+        {
+            "resolved": "http://localhost:8065",
+            "site_url": "http://localhost:8065",
+            "url": ""
+        },
+        {
+            "resolved": "https://example.com/%C3%A9",
+            "site_url": "http://localhost:8065",
+            "url": "https://example.com/é"
+        },
+        {
+            "resolved": "http://example.com:8080",
+            "site_url": "http://localhost:8065",
+            "url": "http://example.com:8080"
+        },
+        {
+            "resolved": "http://example.com?",
+            "site_url": "http://localhost:8065",
+            "url": "http://example.com?"
+        },
+        {
+            "resolved": "http://example.com/a",
+            "site_url": "http://localhost:8065/",
+            "url": "http://example.com/a"
+        },
+        {
+            "resolved": "http://Example.COM/b/c",
+            "site_url": "http://localhost:8065/",
+            "url": "HTTP://Example.COM/a/../b/./c"
+        },
+        {
+            "resolved": "http://localhost:8065/relative/path.png",
+            "site_url": "http://localhost:8065/",
+            "url": "/relative/path.png"
+        },
+        {
+            "resolved": "http://localhost:8065/relative/path.png",
+            "site_url": "http://localhost:8065/",
+            "url": "relative/path.png"
+        },
+        {
+            "resolved": "http://protocol.relative/x",
+            "site_url": "http://localhost:8065/",
+            "url": "//protocol.relative/x"
+        },
+        {
+            "resolved": "http://localhost:8065/?only=query",
+            "site_url": "http://localhost:8065/",
+            "url": "?only=query"
+        },
+        {
+            "resolved": "http://localhost:8065/#frag",
+            "site_url": "http://localhost:8065/",
+            "url": "#frag"
+        },
+        {
+            "resolved": "http://example.com/a%20b",
+            "site_url": "http://localhost:8065/",
+            "url": "http://example.com/a b"
+        },
+        {
+            "resolved": "http://example.com/%41%2f",
+            "site_url": "http://localhost:8065/",
+            "url": "http://example.com/%41%2f"
+        },
+        {
+            "resolved": "http://[::1]:80/x",
+            "site_url": "http://localhost:8065/",
+            "url": "http://[::1]:80/x"
+        },
+        {
+            "resolved": "data:image/png;base64,AAAA",
+            "site_url": "http://localhost:8065/",
+            "url": "data:image/png;base64,AAAA"
+        },
+        {
+            "resolved": "",
+            "site_url": "http://localhost:8065/",
+            "url": "http://%zz/"
+        },
+        {
+            "resolved": "http://localhost:8065/",
+            "site_url": "http://localhost:8065/",
+            "url": ""
+        },
+        {
+            "resolved": "https://example.com/%C3%A9",
+            "site_url": "http://localhost:8065/",
+            "url": "https://example.com/é"
+        },
+        {
+            "resolved": "http://example.com:8080",
+            "site_url": "http://localhost:8065/",
+            "url": "http://example.com:8080"
+        },
+        {
+            "resolved": "http://example.com?",
+            "site_url": "http://localhost:8065/",
+            "url": "http://example.com?"
+        },
+        {
+            "resolved": "http://example.com/a",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://example.com/a"
+        },
+        {
+            "resolved": "http://Example.COM/b/c",
+            "site_url": "https://chat.example.com/sub",
+            "url": "HTTP://Example.COM/a/../b/./c"
+        },
+        {
+            "resolved": "https://chat.example.com/relative/path.png",
+            "site_url": "https://chat.example.com/sub",
+            "url": "/relative/path.png"
+        },
+        {
+            "resolved": "https://chat.example.com/relative/path.png",
+            "site_url": "https://chat.example.com/sub",
+            "url": "relative/path.png"
+        },
+        {
+            "resolved": "https://protocol.relative/x",
+            "site_url": "https://chat.example.com/sub",
+            "url": "//protocol.relative/x"
+        },
+        {
+            "resolved": "https://chat.example.com/sub?only=query",
+            "site_url": "https://chat.example.com/sub",
+            "url": "?only=query"
+        },
+        {
+            "resolved": "https://chat.example.com/sub#frag",
+            "site_url": "https://chat.example.com/sub",
+            "url": "#frag"
+        },
+        {
+            "resolved": "http://example.com/a%20b",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://example.com/a b"
+        },
+        {
+            "resolved": "http://example.com/%41%2f",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://example.com/%41%2f"
+        },
+        {
+            "resolved": "http://[::1]:80/x",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://[::1]:80/x"
+        },
+        {
+            "resolved": "data:image/png;base64,AAAA",
+            "site_url": "https://chat.example.com/sub",
+            "url": "data:image/png;base64,AAAA"
+        },
+        {
+            "resolved": "",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://%zz/"
+        },
+        {
+            "resolved": "https://chat.example.com/sub",
+            "site_url": "https://chat.example.com/sub",
+            "url": ""
+        },
+        {
+            "resolved": "https://example.com/%C3%A9",
+            "site_url": "https://chat.example.com/sub",
+            "url": "https://example.com/é"
+        },
+        {
+            "resolved": "http://example.com:8080",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://example.com:8080"
+        },
+        {
+            "resolved": "http://example.com?",
+            "site_url": "https://chat.example.com/sub",
+            "url": "http://example.com?"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://example.com/a"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "HTTP://Example.COM/a/../b/./c"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "/relative/path.png"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "relative/path.png"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "//protocol.relative/x"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "?only=query"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "#frag"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://example.com/a b"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://example.com/%41%2f"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://[::1]:80/x"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "data:image/png;base64,AAAA"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://%zz/"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": ""
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "https://example.com/é"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://example.com:8080"
+        },
+        {
+            "resolved": "",
+            "site_url": "%zz",
+            "url": "http://example.com?"
+        }
+    ]
+}

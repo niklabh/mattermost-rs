@@ -127,6 +127,7 @@ mod parity {
     pub mod post_create_channel_mentions;
     pub mod post_create_dm;
     pub mod post_create_files;
+    pub mod post_create_links;
     pub mod post_create_priority;
     pub mod post_create_replies;
     pub mod post_create_silent;

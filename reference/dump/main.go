@@ -1113,6 +1113,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_mime.json"))
 
+	if err := writeLinkImageBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link image behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_image.json"))
+
 	if err := writePluginSignatureBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: plugin signature behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1247,6 +1253,18 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_metadata.json"))
+
+	if err := writeOpenGraphBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: opengraph behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_opengraph.json"))
+
+	if err := writeLinkPreviewBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link preview behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_preview.json"))
 
 	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)

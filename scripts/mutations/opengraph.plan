@@ -1,0 +1,49 @@
+# Mutation plan for the OpenGraph half of link previews: the x/net tokenizer and entity decoding
+# (mm_model::go_html), charset detection (go_charset), dyatlov's parser and Go's RFC 3339 parse
+# (opengraph), TruncateOpenGraph and friends (link_metadata), ResolveReference (go_url), and
+# parseOpenGraphMetadata / oEmbed (mm_app::opengraph). All unit: the oracle is
+# fixtures/behaviour_opengraph.json and behaviour_go_url.json, no stack needed.
+#
+#   scripts/mutate-batch.sh scripts/mutations/opengraph.plan
+#
+# Not planned, because the mutation is unobservable by construction: x/net's numeric clamp at
+# 0x10FFFF (both sides then answer U+FFFD), the longest-prefix order of the no-semicolon match
+# (no corpus entity has two matching prefixes), and exact-before-folded oEmbed field matching
+# (no two OEmbedResponse names fold together).
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+noscript-not-raw	crates/mm-model/src/go_html.rs	b"noembed", b"noframes", b"noscript"	b"noembed", b"noframes"	unit	go_html::
+duplicate-attr-kept	crates/mm-model/src/go_html.rs	if save_attr && key_span.start != key_span.end && !self.attr_names.contains(&key) {	if save_attr && key_span.start != key_span.end {	unit	go_html::
+self-closing-ignores-unquoted-slash	crates/mm-model/src/go_html.rs	&& (n == 0 || self.raw.end - 2 != self.attr[n - 1][1].end.wrapping_sub(1))	&& true	unit	go_html::
+comment-beginning-close-dropped	crates/mm-model/src/go_html.rs	if dash_count >= 2 || beginning {	if dash_count >= 2 {	unit	go_html::
+abrupt-comment-bang-suffix	crates/mm-model/src/go_html.rs	if raw.ends_with(b"--!") {\n                return self.raw.end - 3;	if raw.ends_with(b"--!") {\n                return self.raw.end - 2;	unit	go_html::
+title-is-raw-text	crates/mm-model/src/go_html.rs	self.text_is_raw = self.raw_tag != b"textarea" && self.raw_tag != b"title";	self.text_is_raw = self.raw_tag != b"textarea";	unit	go_html::
+doctype-eof-not-reset	crates/mm-model/src/go_html.rs	                self.raw.end = self.data.start;\n                self.eof = false;\n                return false;	                self.raw.end = self.data.start;\n                return false;	unit	go_html::
+double-escape-end-not-skipped	crates/mm-model/src/go_html.rs	self.raw.end += "</script>".len();	self.raw.end += 0;	unit	go_html::
+attr-equals-rule-dropped	crates/mm-model/src/go_html.rs	|| (attribute && name[name.len() - 1] != b';' && s.len() > i && s[i] == b'=');	|| (attribute && name[name.len() - 1] != b';' && s.len() > i && s[i] == b';');	unit	go_html::
+std-knows-nlt	crates/mm-model/src/go_html.rs	if std && ENTITY2_NOT_IN_STD.contains(&n) {	if false && std && ENTITY2_NOT_IN_STD.contains(&n) {	unit	go_html::
+std-int32-saturates	crates/mm-model/src/go_html.rs	x = x.wrapping_mul(10).wrapping_add(i32::from(c - b'0'));	x = x.saturating_mul(10).saturating_add(i32::from(c - b'0'));	unit	go_html::
+prescan-pragma-ignored	crates/mm-model/src/go_charset.rs	|| (need_pragma == Need::DoNeedPragma && !got_pragma)	|| false	unit	go_charset::
+partial-rune-window-wider	crates/mm-model/src/go_charset.rs	while i > 0 && i + 3 > len {	while i > 0 && i + 4 > len {	unit	go_charset::
+c1-controls-kept	crates/mm-model/src/go_charset.rs	.map(|c| {	.map(|c| {\n                    return c;	unit	go_charset::
+prescan-utf16-not-nop	crates/mm-model/src/go_charset.rs	if name.is_some_and(|n| n.starts_with("utf-16")) {	if name.is_some_and(|n| n.starts_with("utf-17")) {	unit	go_charset::
+image-same-url-appends	crates/mm-model/src/opengraph.rs	is_some_and(|x| !x.url.is_empty() && x.url != c));\n                last(&mut self.images, grow).url = c;	is_some_and(|x| !x.url.is_empty()));\n                last(&mut self.images, grow).url = c;	unit	opengraph::
+article-flag-never-set	crates/mm-model/src/opengraph.rs	"article" => self.is_article = true,	"article" => {}	unit	opengraph::
+music-album-starts-nil	crates/mm-model/src/opengraph.rs	album: Some(Album::default()),	album: None,	unit	opengraph::
+parse-uint-accepts-sign	crates/mm-model/src/opengraph.rs	if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {	if s.is_empty() {	unit	opengraph::
+time-hour-two-digits	crates/mm-model/src/opengraph.rs	let (hour, v) = getnum(v, false)?;	let (hour, v) = getnum(v, true)?;	unit	opengraph::
+time-offset-hour-24-refused	crates/mm-model/src/opengraph.rs	if hr > 24 || mm > 60 {	if hr > 23 || mm > 60 {	unit	opengraph::
+time-marshals-hour-24	crates/mm-model/src/opengraph.rs	if zone / 60 >= 24 {	if zone / 60 > 24 {	unit	opengraph::
+truncate-at-299	crates/mm-model/src/link_metadata.rs	match original.char_indices().nth(300) {	match original.char_indices().nth(299) {	unit	open_graph
+svg-secure-url-ignored	crates/mm-model/src/link_metadata.rs	|| is_svg_image_url(&img.secure_url)	|| false	unit	svg
+truncate-drops-music	crates/mm-model/src/link_metadata.rs	og.videos = None;\n        og	og.videos = None;\n        og.music = None;\n        og	unit	open_graph
+six-images	crates/mm-model/src/link_metadata.rs	images.truncate(max);	images.truncate(max + 1);	unit	open_graph
+resolve-no-trailing-slash-on-dotdot	crates/mm-model/src/go_url.rs	if elem == b"." || elem == b".." {\n        dst.push(b'/');	if elem == b"." {\n        dst.push(b'/');	unit	go_url::
+resolve-drops-base-query	crates/mm-model/src/go_url.rs	url.raw_query = self.raw_query.clone();	url.raw_query = String::new();	unit	go_url::
+og-url-always-request-url	crates/mm-app/src/opengraph.rs	    if !og.url.is_empty() {\n        og.url = request_url.to_owned();	    if true {\n        og.url = request_url.to_owned();	unit	opengraph::
+no-second-unescape	crates/mm-app/src/opengraph.rs	og.title = mm_model::go_html::unescape_string(&og.title);	og.title = og.title.clone();	unit	opengraph::
+oembed-int-accepts-any-number	crates/mm-app/src/opengraph.rs	serde_json::Value::Number(n) if is_int && n.as_i64().is_some() => {	serde_json::Value::Number(_) if is_int => {	unit	opengraph::
+oembed-any-version	crates/mm-app/src/opengraph.rs	if response.version != "1.0" {	if false {	unit	opengraph::
+control-tokenizer-field-order	crates/mm-model/src/go_html.rs	            text_is_raw: false,\n            convert_nul: false,	            convert_nul: false,\n            text_is_raw: false,	unit	go_html::
+control-truncate-statement-order	crates/mm-model/src/link_metadata.rs	        og.article = None;\n        og.book = None;	        og.book = None;\n        og.article = None;	unit	open_graph
