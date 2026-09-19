@@ -915,6 +915,18 @@ pub trait ChannelStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<HashMap<String, i64>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.PermanentDeleteMembersByUser` (channel_store.go:2831).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// Only `ChannelMembers`: no `ChannelMemberHistory` leave row, no channel `TotalMsgCount`
+    /// touch, no sidebar cleanup. Go's search layer re-indexes the channels afterwards, which is a
+    /// no-op with no search engine configured.
+    fn permanent_delete_members_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1953,6 +1965,19 @@ impl ChannelStore for SqlChannelStore {
             .into_iter()
             .map(|row| (row.channel_type, row.count))
             .collect())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_members_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM channelmembers WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to permanent delete ChannelMembers with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

@@ -108,6 +108,17 @@ pub trait CommandStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlCommandStore.PermanentDeleteByUser` (command_store.go:177).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// A hard delete of every slash command the user **created**, soft-deleted ones included —
+    /// `CreatorId`, whatever team the command is in.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -407,6 +418,19 @@ impl CommandStore for SqlCommandStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM commands WHERE creatorid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("delete: user_id={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

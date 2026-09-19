@@ -208,6 +208,7 @@ mod parity {
     pub mod user_deletes;
     pub mod user_get;
     pub mod user_lookups;
+    pub mod user_permanent_delete;
     pub mod user_reports;
     pub mod user_terms_of_service;
     pub mod users_autocomplete;
@@ -221,6 +222,7 @@ mod parity {
     pub mod users_search;
     pub mod users_stats;
     pub mod users_stats_filtered;
+    pub mod users_wipe;
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;

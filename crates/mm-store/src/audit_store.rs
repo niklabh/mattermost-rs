@@ -2,9 +2,8 @@
 //!
 //! Ported for `getUserAudits` (api4/user.go:2827) — the webapp's *View Access History* panel —
 //! and for `getAudits` (api4/system.go:44), the system console's server-wide audit log, which is
-//! the same store call with an **empty** user id. The write side (`Save`,
-//! `PermanentDeleteByUser`) is not ported: nothing migrated writes an audit row, and `Audits` is
-//! append-only from the Go server's side of the shared database.
+//! the same store call with an **empty** user id. `PermanentDeleteByUser` is ported for
+//! `PermanentDeleteUser`; `Save` is not: nothing migrated writes an audit row.
 
 use mm_model::audit::{Audit, Audits};
 use sqlx::PgPool;
@@ -32,6 +31,14 @@ pub trait AuditStore {
         offset: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Audits, StoreError>> + Send;
+
+    /// Port of `SqlAuditStore.PermanentDeleteByUser` (audit_store.go:79).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -156,6 +163,19 @@ impl AuditStore for SqlAuditStore {
 
         tracing::Span::current().record("found", rows.len());
         Ok(Audits(rows.into_iter().map(Audit::from).collect()))
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM audits WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete Audit with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

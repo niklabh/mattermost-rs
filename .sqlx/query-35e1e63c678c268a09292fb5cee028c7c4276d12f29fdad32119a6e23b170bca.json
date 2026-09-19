@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM outgoingwebhooks WHERE creatorid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "35e1e63c678c268a09292fb5cee028c7c4276d12f29fdad32119a6e23b170bca"
+}

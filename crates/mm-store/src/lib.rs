@@ -45,6 +45,7 @@ pub mod reaction_store;
 pub mod read_receipt_store;
 pub mod remote_cluster_store;
 pub mod role_store;
+pub mod scheduled_post_store;
 pub mod scheme_store;
 pub mod session_store;
 /// The read side of `SidebarCategories` — Go hangs these off `ChannelStore`.
@@ -94,6 +95,7 @@ pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
 pub use remote_cluster_store::{RemoteClusterStore, SqlRemoteClusterStore};
 pub use role_store::{RoleStore, SqlRoleStore};
+pub use scheduled_post_store::{ScheduledPostStore, SqlScheduledPostStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use sidebar_category_store::{
@@ -134,6 +136,7 @@ pub struct SqlStore {
     config: SqlConfigStore,
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
+    scheduled_post: SqlScheduledPostStore,
     file_info: SqlFileInfoStore,
     notify_admin: SqlNotifyAdminStore,
     desktop_tokens: SqlDesktopTokensStore,
@@ -206,6 +209,7 @@ impl SqlStore {
             config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
+            scheduled_post: SqlScheduledPostStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
             notify_admin: SqlNotifyAdminStore::new(pool.clone()),
             desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
@@ -496,6 +500,11 @@ impl SqlStore {
     /// Port of `store.Store.FileInfo()`.
     pub fn draft(&self) -> &SqlDraftStore {
         &self.draft
+    }
+
+    /// Port of `store.Store.ScheduledPost()`.
+    pub fn scheduled_post(&self) -> &SqlScheduledPostStore {
+        &self.scheduled_post
     }
 
     /// Port of `store.Store.NotifyAdmin()`.

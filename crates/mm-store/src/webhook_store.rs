@@ -170,6 +170,29 @@ pub trait WebhookStore {
         &self,
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.PermanentDeleteIncomingByUser` (webhook_store.go:156).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// Keyed on `UserId` — the incoming table's creator column. Its outgoing sibling is keyed on
+    /// `CreatorId`, and swapping the two is a delete that silently matches nothing.
+    /// Go's local-cache layer then runs `ClearCaches()` on its webhook cache; that cache is the
+    /// Go process's, and [D-190] is the gap.
+    fn permanent_delete_incoming_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.PermanentDeleteOutgoingByUser` (webhook_store.go:374).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// Keyed on `CreatorId`, not `UserId` — the outgoing table has no `UserId` column.
+    fn permanent_delete_outgoing_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1074,6 +1097,32 @@ impl WebhookStore for SqlWebhookStore {
         rows.into_iter()
             .map(OutgoingWebhookRow::into_model)
             .collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_incoming_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM incomingwebhooks WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete IncomingWebhook with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_outgoing_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM outgoingwebhooks WHERE creatorid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete OutgoingWebhook with creatorId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

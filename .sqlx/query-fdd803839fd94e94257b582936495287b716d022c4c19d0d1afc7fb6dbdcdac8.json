@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM reactions WHERE postid = ANY($1) AND userid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fdd803839fd94e94257b582936495287b716d022c4c19d0d1afc7fb6dbdcdac8"
+}

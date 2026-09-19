@@ -354,9 +354,17 @@ impl BotStore for SqlBotStore {
         sqlx::query!("DELETE FROM bots WHERE userid = $1", bot_user_id)
             .execute(&self.pool)
             .await
-            .map_err(|source| StoreError::Db {
-                context: format!("permanent_delete: user_id={bot_user_id}"),
-                source,
+            .map_err(|source| {
+                // `store.NewErrInvalidInput("Bot", "UserId", botUserId).Wrap(err)`: the *kind* is
+                // what `PermanentDeleteUser` branches on — a 400 `app.bot.permenent_delete.bad_id`
+                // naming the id, not the 500 a driver error gets everywhere else. The variant has
+                // no source slot, so the driver error is logged here instead of carried.
+                tracing::warn!(error = %source, "failed to delete the Bots row");
+                StoreError::InvalidInput {
+                    entity: "Bot",
+                    field: "UserId",
+                    value: bot_user_id.to_owned(),
+                }
             })?;
 
         Ok(())

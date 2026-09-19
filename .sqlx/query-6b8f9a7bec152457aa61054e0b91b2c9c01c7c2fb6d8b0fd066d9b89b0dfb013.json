@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM fileinfo WHERE creatorid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b8f9a7bec152457aa61054e0b91b2c9c01c7c2fb6d8b0fd066d9b89b0dfb013"
+}
