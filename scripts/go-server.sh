@@ -100,7 +100,11 @@ env_for_server() {
   export MM_CONFIG="$DSN"
   export MM_SQLSETTINGS_DRIVERNAME=postgres
   export MM_SQLSETTINGS_DATASOURCE="$DSN"
-  export MM_SERVICESETTINGS_SITEURL="http://localhost:$PORT"
+  # `MMRS_SITE_URL` is set only by `scripts/demo.sh`, to mm-api's LAN URL, so the links Go
+  # writes (permalinks, e-mail) work from another machine. Unset — every stack the parity harness
+  # starts — it is Go's own address, as it always was. `mm-api-env.sh` reads the same variable,
+  # and follows a running Go's value when it is unset, so the two servers never disagree.
+  export MM_SERVICESETTINGS_SITEURL="${MMRS_SITE_URL:-http://localhost:$PORT}"
   # **Not optional once there is more than one stack.** The listen address lives in the
   # configuration document, which `SetDefaults` fills with `:8065` on a fresh database — so
   # without this every stack's server binds 8065 and all but the first die with

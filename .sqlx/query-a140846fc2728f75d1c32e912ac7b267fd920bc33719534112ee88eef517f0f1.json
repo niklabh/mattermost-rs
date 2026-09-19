@@ -1,0 +1,132 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH cte AS (SELECT * FROM posts WHERE updateat > $1 AND channelid = $2 LIMIT 1000)\n            (SELECT cte.id         AS \"id!\",\n                    cte.createat     AS \"create_at!\",\n                    cte.updateat     AS \"update_at!\",\n                    cte.editat       AS \"edit_at!\",\n                    cte.deleteat     AS \"delete_at!\",\n                    cte.ispinned     AS \"is_pinned!\",\n                    cte.userid       AS \"user_id!\",\n                    cte.channelid    AS \"channel_id!\",\n                    cte.rootid       AS \"root_id!\",\n                    cte.originalid   AS \"original_id!\",\n                    cte.message      AS \"message!\",\n                    cte.type         AS \"post_type!\",\n                    cte.props        AS \"props?\",\n                    cte.hashtags     AS \"hashtags!\",\n                    cte.filenames    AS \"filenames?\",\n                    cte.fileids      AS \"file_ids?\",\n                    cte.hasreactions AS \"has_reactions!\",\n                    cte.remoteid     AS \"remote_id?\",\n                    CASE WHEN $3 THEN\n                        (SELECT COUNT(*) FROM posts sub\n                          WHERE sub.rootid = (CASE WHEN cte.rootid = '' THEN cte.id ELSE cte.rootid END)\n                            AND sub.deleteat = 0)\n                    ELSE 0 END AS \"reply_count!\"\n               FROM cte)\n            UNION\n            (SELECT p1.id, p1.createat, p1.updateat, p1.editat, p1.deleteat, p1.ispinned,\n                    p1.userid, p1.channelid, p1.rootid, p1.originalid, p1.message, p1.type,\n                    p1.props, p1.hashtags, p1.filenames, p1.fileids, p1.hasreactions,\n                    p1.remoteid,\n                    CASE WHEN $3 THEN\n                        (SELECT COUNT(*) FROM posts sub\n                          WHERE sub.rootid = (CASE WHEN p1.rootid = '' THEN p1.id ELSE p1.rootid END)\n                            AND sub.deleteat = 0)\n                    ELSE 0 END\n               FROM posts p1\n              WHERE p1.id IN (SELECT rootid FROM cte))\n            ORDER BY \"create_at!\" DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "edit_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "original_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "post_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "props?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "hashtags!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "filenames?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_reactions!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "a140846fc2728f75d1c32e912ac7b267fd920bc33719534112ee88eef517f0f1"
+}

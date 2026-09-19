@@ -1,4 +1,4 @@
-//! Cross-server parity for `PUT /api/v4/users/me/preferences` — **the first write**.
+//! Cross-server parity for `PUT /api/v4/users/{me,{user_id}}/preferences` — **the first write**.
 //!
 //! A write has a property a read does not: the other server has to agree afterwards. So these
 //! tests write through one server and read back through both.
@@ -262,7 +262,7 @@ async fn the_batch_bounds_match_go() {
     );
 }
 
-/// The route is served here, not forwarded — unless it touches `flagged_post`.
+/// The route is served here, not forwarded.
 #[tokio::test]
 async fn ordinary_categories_are_served_by_rust() {
     if !stack_enabled() {
@@ -332,4 +332,357 @@ async fn an_unmigrated_method_on_a_migrated_path_still_reaches_go() {
         Some("go"),
         "and it must be Go that answered"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// `PUT /users/{user_id}/preferences` — the spelling the webapp sends (2026-09-19)
+// ---------------------------------------------------------------------------------------------
+
+/// `PUT` a raw batch to `/users/{user_id}/preferences` on `base`: status, body, served-by-Rust.
+async fn put_for(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    user_id: &str,
+    batch: &serde_json::Value,
+) -> (u16, Vec<u8>, bool) {
+    let response = client
+        .put(format!("{base}/api/v4/users/{user_id}/preferences"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(batch)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base} unreachable: {e}"));
+    let status = response.status().as_u16();
+    let rust = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        == Some("rust");
+    (status, response.bytes().await.expect("body").to_vec(), rust)
+}
+
+fn one(user_id: &str, category: &str, name: &str, value: &str) -> serde_json::Value {
+    serde_json::json!([{
+        "user_id": user_id, "category": category, "name": name, "value": value,
+    }])
+}
+
+/// The browser's own spelling is served here, and answers as Go does — including for another
+/// user's id, the 403 naming `edit_other_users`, which the `me` literal cannot reach.
+#[tokio::test]
+async fn the_explicit_id_spelling_is_served_and_matches() {
+    if !stack_enabled() {
+        eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team = common::create_team(&client, &admin, "prefidteam").await;
+    let user = common::create_plain_user(&client, &admin, &team, "prefid").await;
+
+    let batch = one(&user.id, CATEGORY, "mmrs_parity_explicit_id", "true");
+    let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
+    let (rs_status, rs_body, served) = put_for(&client, RUST, &user.token, &user.id, &batch).await;
+    assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
+    assert_eq!((rs_status, &rs_body), (go_status, &go_body));
+    assert!(served, "PUT /users/{{user_id}}/preferences is served here");
+
+    // Somebody else's id: the permission check precedes the body.
+    let foreign = logged_in_user_id();
+    let batch = one(foreign, CATEGORY, "mmrs_parity_explicit_id", "true");
+    let (go_status, go_body, _) = put_for(&client, GO, &user.token, foreign, &batch).await;
+    let (rs_status, rs_body, served) = put_for(&client, RUST, &user.token, foreign, &batch).await;
+    assert_eq!(go_status, 403);
+    assert_eq!(rs_status, 403);
+    assert!(served);
+    let body = common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "foreign");
+    assert_eq!(body["id"], "api.context.permissions.app_error");
+
+    common::delete_plain_user(&client, &admin, &user.id).await;
+}
+
+/// `direct_channel_show` and `group_channel_show` used to be forwarded for a sidebar sync that
+/// Go's store never runs for them ([D-091]). Now served, and the row is the same either way.
+#[tokio::test]
+async fn dm_visibility_is_served_here() {
+    if !stack_enabled() {
+        eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team = common::create_team(&client, &admin, "prefdmteam").await;
+    let user = common::create_plain_user(&client, &admin, &team, "prefdm").await;
+
+    for category in ["direct_channel_show", "group_channel_show"] {
+        let batch = one(&user.id, category, logged_in_user_id(), "false");
+        let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
+        let (rs_status, rs_body, served) =
+            put_for(&client, RUST, &user.token, &user.id, &batch).await;
+        assert_eq!(
+            go_status,
+            200,
+            "{category}: {}",
+            String::from_utf8_lossy(&go_body)
+        );
+        assert_eq!((rs_status, &rs_body), (go_status, &go_body), "{category}");
+        assert!(served, "{category} is no longer forwarded");
+    }
+
+    common::delete_plain_user(&client, &admin, &user.id).await;
+}
+
+/// Each user's Favorites, per team, as channel ids in sort order — read through **Go**, so the
+/// comparison is about what each server wrote, not about how each reads it. `names` turns ids
+/// that differ per user (the DM, the teams) into labels.
+async fn favourites(
+    client: &reqwest::Client,
+    token: &str,
+    user_id: &str,
+    teams: &[(&str, &str)],
+    names: &[(&str, &str)],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for (team_label, team_id) in teams {
+        let categories: serde_json::Value = client
+            .get(format!(
+                "{GO}/api/v4/users/{user_id}/teams/{team_id}/channels/categories"
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("Go answers")
+            .json()
+            .await
+            .expect("categories decode");
+        let favourites = categories["categories"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .find(|c| c["type"] == "favorites")
+            .expect("a Favorites category");
+        let ids: Vec<String> = favourites["channel_ids"]
+            .as_array()
+            .expect("channel ids")
+            .iter()
+            .map(|id| {
+                let id = id.as_str().expect("an id");
+                names
+                    .iter()
+                    .find(|(real, _)| *real == id)
+                    .map_or_else(|| id.to_owned(), |(_, label)| (*label).to_owned())
+            })
+            .collect();
+        out.push(format!("{team_label}: {}", ids.join(",")));
+    }
+    out
+}
+
+/// **`UpdateSidebarChannelsByPreferences`, byte for byte through the same sequence.** The same
+/// seven writes go through Go for one user and through Rust for another; the Favorites of both,
+/// in both teams, must end up identical.
+///
+/// The sequence is built to separate the decisions a port could get wrong:
+/// - two team channels favourited in turn — the second must sort **first** (`MIN - 10`);
+/// - a repeat of the first — already present, so no second row;
+/// - a DM — no team, so it joins the Favorites of **both** teams, where a team channel joins
+///   only its own;
+/// - `"false"` removes, while `"FALSE"` and `""` favourite: only the exact string unfavourites;
+/// - a channel id that does not exist — the preference is saved, then the sync fails, a 500.
+#[tokio::test]
+async fn favourites_follow_favorite_channel_preferences_as_on_go() {
+    if !stack_enabled() {
+        eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team_a = common::create_team(&client, &admin, "preffava").await;
+    let team_b = common::create_team(&client, &admin, "preffavb").await;
+    let one_ch = common::create_channel(&client, &admin, &team_a, "preffav-one").await;
+    let two_ch = common::create_channel(&client, &admin, &team_a, "preffav-two").await;
+    let three_ch = common::create_channel(&client, &admin, &team_a, "preffav-three").await;
+    let four_ch = common::create_channel(&client, &admin, &team_a, "preffav-four").await;
+    let missing = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+    let mut results = Vec::new();
+    for (base, tag) in [(GO, "preffavgo"), (RUST, "preffavrs")] {
+        let user = common::create_plain_user(&client, &admin, &team_a, tag).await;
+        let joined = client
+            .post(format!("{GO}/api/v4/teams/{team_b}/members"))
+            .header("Authorization", format!("Bearer {admin}"))
+            .json(&serde_json::json!({ "team_id": team_b, "user_id": user.id }))
+            .send()
+            .await
+            .expect("Go answers");
+        assert!(joined.status().is_success(), "joining the second team");
+        for channel in [&one_ch, &two_ch, &three_ch, &four_ch] {
+            common::add_user_to_channel(&client, &admin, channel, &user.id).await;
+        }
+        let dm = common::create_direct_channel(&client, &user.token, &user.id, logged_in_user_id())
+            .await;
+
+        let mut statuses = Vec::new();
+        for (channel, value) in [
+            (one_ch.as_str(), "true"),
+            (two_ch.as_str(), "true"),
+            (one_ch.as_str(), "true"),
+            (dm.as_str(), "true"),
+            (two_ch.as_str(), "false"),
+            (three_ch.as_str(), "FALSE"),
+            (four_ch.as_str(), ""),
+        ] {
+            let batch = one(&user.id, "favorite_channel", channel, value);
+            let (status, body, served) =
+                put_for(&client, base, &user.token, &user.id, &batch).await;
+            assert_eq!(
+                status,
+                200,
+                "{base} {value}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            assert_eq!(served, base == RUST, "{base}: who answered");
+            statuses.push(status);
+        }
+
+        // The sync's failure: the preference is written first, so it survives the 500.
+        let batch = one(&user.id, "favorite_channel", missing, "true");
+        let (status, body, _) = put_for(&client, base, &user.token, &user.id, &batch).await;
+        let error: serde_json::Value = serde_json::from_slice(&body).expect("an error body");
+        let saved = client
+            .get(format!(
+                "{GO}/api/v4/users/{}/preferences/favorite_channel/name/{missing}",
+                user.id
+            ))
+            .header("Authorization", format!("Bearer {}", user.token))
+            .send()
+            .await
+            .expect("Go answers")
+            .status()
+            .as_u16();
+
+        let names = [
+            (one_ch.as_str(), "one"),
+            (two_ch.as_str(), "two"),
+            (three_ch.as_str(), "three"),
+            (four_ch.as_str(), "four"),
+            (dm.as_str(), "dm"),
+        ];
+        let favs = favourites(
+            &client,
+            &user.token,
+            &user.id,
+            &[("a", &team_a), ("b", &team_b)],
+            &names,
+        )
+        .await;
+        results.push((statuses, status, error["id"].clone(), saved, favs));
+        common::delete_plain_user(&client, &admin, &user.id).await;
+    }
+
+    let (go, rust) = (&results[0], &results[1]);
+    assert_eq!(
+        go.4,
+        vec!["a: four,three,dm,one", "b: dm"],
+        "the fixture must discriminate: Go's own answer"
+    );
+    assert_eq!(
+        rust, go,
+        "the same writes, the same sidebar and the same failure"
+    );
+    assert_eq!(go.1, 500);
+    assert_eq!(
+        go.2,
+        "api.preference.update_preferences.update_sidebar.app_error"
+    );
+    assert_eq!(go.3, 200, "the preference outlived the failed sync");
+}
+
+/// `flagged_post` is served now, with Go's checks in Go's order: the post must exist and not be
+/// deleted (400 naming `preference.name`), and its channel must be readable (403 naming
+/// `read_channel_content`). A readable post saves.
+#[tokio::test]
+async fn flagged_post_checks_the_post_and_its_channel_as_go_does() {
+    if !stack_enabled() {
+        eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team = common::create_team(&client, &admin, "prefflagteam").await;
+    let user = common::create_plain_user(&client, &admin, &team, "prefflag").await;
+    let open = common::create_channel(&client, &admin, &team, "prefflag-open").await;
+    let private = common::create_channel_typed(&client, &admin, &team, "prefflag-priv", "P").await;
+    common::add_user_to_channel(&client, &admin, &open, &user.id).await;
+    let readable = common::post_message(&client, &admin, &open, "flag me", None).await;
+    let hidden = common::post_message(&client, &admin, &private, "not yours", None).await;
+    let deleted = common::post_message(&client, &admin, &open, "gone", None).await;
+    common::delete_post(&client, &admin, &deleted).await;
+
+    for (label, post, status, id) in [
+        (
+            "missing",
+            "zzzzzzzzzzzzzzzzzzzzzzzzzz",
+            400,
+            "api.context.invalid_body_param.app_error",
+        ),
+        (
+            "deleted",
+            deleted.as_str(),
+            400,
+            "api.context.invalid_body_param.app_error",
+        ),
+        (
+            "unreadable",
+            hidden.as_str(),
+            403,
+            "api.context.permissions.app_error",
+        ),
+    ] {
+        // A good entry first: the refusal must still write nothing, since the checks run before
+        // the save.
+        let batch = serde_json::json!([
+            { "user_id": user.id, "category": CATEGORY, "name": "mmrs_flag_probe", "value": label },
+            { "user_id": user.id, "category": "flagged_post", "name": post, "value": "true" },
+        ]);
+        let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
+        let (rs_status, rs_body, served) =
+            put_for(&client, RUST, &user.token, &user.id, &batch).await;
+        assert_eq!(
+            go_status,
+            status,
+            "{label}: {}",
+            String::from_utf8_lossy(&go_body)
+        );
+        assert_eq!(rs_status, status, "{label}");
+        assert!(served, "{label}: served here");
+        let body = common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, label);
+        assert_eq!(body["id"], id, "{label}");
+    }
+    let probe = client
+        .get(format!(
+            "{GO}/api/v4/users/{}/preferences/{CATEGORY}/name/mmrs_flag_probe",
+            user.id
+        ))
+        .header("Authorization", format!("Bearer {}", user.token))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(
+        probe.status(),
+        400,
+        "no refused batch wrote its first entry"
+    );
+
+    let batch = one(&user.id, "flagged_post", &readable, "true");
+    let (go_status, go_body, _) = put_for(&client, GO, &user.token, &user.id, &batch).await;
+    let (rs_status, rs_body, served) = put_for(&client, RUST, &user.token, &user.id, &batch).await;
+    assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
+    assert_eq!((rs_status, &rs_body), (go_status, &go_body));
+    assert!(served);
+
+    common::delete_plain_user(&client, &admin, &user.id).await;
+    common::delete_channel(&client, &admin, &private).await;
+    common::delete_channel(&client, &admin, &open).await;
 }

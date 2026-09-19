@@ -184,8 +184,9 @@ async fn the_refusals_match() {
     delete_plain_user(&client, &admin, &user.id).await;
 }
 
-/// Serving one literal under `/plugins` must not capture its neighbours: six other `/plugins`
-/// requests still come back from Go.
+/// Serving one literal under `/plugins` must not capture its neighbours: five other `/plugins`
+/// requests still come back from Go. (`GET /plugins/webapp` left this list on 2026-09-19; see
+/// `the_webapp_plugin_list_is_served_while_go_runs_no_plugin`.)
 #[tokio::test]
 async fn the_other_plugin_routes_still_forward() {
     if !stack_enabled() {
@@ -197,7 +198,6 @@ async fn the_other_plugin_routes_still_forward() {
         (reqwest::Method::GET, "/api/v4/plugins"),
         (reqwest::Method::GET, "/api/v4/plugins/marketplace"),
         (reqwest::Method::GET, "/api/v4/plugins/statuses"),
-        (reqwest::Method::GET, "/api/v4/plugins/webapp"),
         (reqwest::Method::POST, "/api/v4/plugins/marketplace"),
         (reqwest::Method::POST, "/api/v4/plugins/install_from_url"),
         (reqwest::Method::PUT, PATH),
@@ -220,4 +220,27 @@ async fn the_other_plugin_routes_still_forward() {
             "{method} {path}"
         );
     }
+}
+
+/// `GET /plugins/webapp` while plugins run in Go: this stack's Go plugin directory holds no bundle,
+/// so Go runs no plugin and both answer `[]` — served here, anonymously, as an `APIHandler`.
+#[tokio::test]
+async fn the_webapp_plugin_list_is_served_while_go_runs_no_plugin() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let path = "/api/v4/plugins/webapp";
+    let (go_status, go_body, _) =
+        request_raw(&client, GO, reqwest::Method::GET, None, path, None).await;
+    let (rs_status, rs_body, served_by) =
+        request_raw(&client, RUST, reqwest::Method::GET, None, path, None).await;
+    assert_eq!(go_status, 200);
+    assert_eq!(rs_status, go_status);
+    assert_eq!(
+        go_body, b"[]",
+        "the stack's Go runs no plugin, or this proves nothing"
+    );
+    assert_eq!(rs_body, go_body);
+    assert_eq!(served_by.as_deref(), Some("rust"));
 }

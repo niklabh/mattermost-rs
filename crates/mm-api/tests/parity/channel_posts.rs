@@ -1099,8 +1099,8 @@ async fn the_shapes_this_port_declines_are_forwarded() {
     let channel = &fixture.channel;
 
     for query in [
-        // The three cursor branches, each a different store query.
-        "?since=1".to_owned(),
+        // The two cursor branches, each a different store query. (`since` is served since
+        // 2026-09-19 — see `since_matches_go_on_both_branches`.)
         format!("?after={}", fixture.root),
         format!("?before={}", fixture.newest),
         // Sanitized participant profiles.
@@ -1124,6 +1124,118 @@ async fn the_shapes_this_port_declines_are_forwarded() {
         &format!("/api/v4/channels/{}/posts", fixture.link_channel),
     )
     .await;
+}
+
+/// `?since=` on both store branches, byte for byte. On the plain branch a reacted-to reply's
+/// unchanged root is carried in `posts` but not in `order` (the `UNION`), and a soft-deleted post
+/// comes back — "changed since" includes a deletion.
+/// `skipFetchThreads` is the switch that turns the reply counts **on** there; the collapsed branch
+/// is the webapp's own request, flags and all.
+#[tokio::test]
+async fn since_matches_go_on_both_branches() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let fixture = fixture(&client, &token).await;
+    let channel = &fixture.channel;
+
+    // A channel of its own, so the writes below cannot race the suite's shared page comparisons.
+    // A reply bumps its root's `UpdateAt`, so the only way to a root that is *carried* but not
+    // *ordered* is a reply changed after that without touching the root: `since` sits at the
+    // reply's creation, where the root last changed, and only the reaction and a later deletion
+    // are news.
+    let team = go_get(&client, &token, &format!("/api/v4/channels/{channel}")).await["team_id"]
+        .as_str()
+        .expect("a team")
+        .to_owned();
+    let channel = &go_post(
+        &client,
+        &token,
+        "/api/v4/channels",
+        serde_json::json!({
+            "team_id": team,
+            "name": format!("{PREFIX}-since"),
+            "display_name": "mmrs chan posts since",
+            "type": "O",
+        }),
+    )
+    .await["id"]
+        .as_str()
+        .expect("a channel id")
+        .to_owned();
+    let root = post_message(&client, &token, channel, "since root", None).await;
+    let reply = post_message(&client, &token, channel, "since reply", Some(&root)).await;
+    let reply_created =
+        go_get(&client, &token, &format!("/api/v4/posts/{reply}")).await["create_at"]
+            .as_i64()
+            .expect("a time");
+    let since = reply_created;
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    // A reaction, because it moves the reply's `UpdateAt` and not the root's — an edit or a
+    // deletion bumps the root as well (measured), which would put it back in `order`.
+    let me = go_get(&client, &token, "/api/v4/users/me").await["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    go_post(
+        &client,
+        &token,
+        "/api/v4/reactions",
+        serde_json::json!({ "user_id": me, "post_id": reply, "emoji_name": "smile" }),
+    )
+    .await;
+    let doomed = post_message(&client, &token, channel, "since doomed", None).await;
+    common::delete_post(&client, &token, &doomed).await;
+
+    for query in [
+        format!("?since={since}"),
+        format!("?since={since}&skipFetchThreads=true"),
+        format!(
+            "?since={since}&skipFetchThreads=false&collapsedThreads=true&collapsedThreadsExtended=false"
+        ),
+    ] {
+        let path = format!("/api/v4/channels/{channel}/posts{query}");
+        let (go, rs) = fetch_both(&client, &token, &path).await;
+        assert_eq!(
+            String::from_utf8_lossy(&go),
+            String::from_utf8_lossy(&rs),
+            "{query}"
+        );
+        let list: serde_json::Value = serde_json::from_slice(&go).expect("a list");
+        assert!(
+            !list["order"].as_array().expect("order").is_empty(),
+            "{query}: an empty answer tests nothing"
+        );
+        if !query.contains("collapsedThreads=true") {
+            assert!(
+                list["posts"].get(root.as_str()).is_some()
+                    && !list["order"]
+                        .as_array()
+                        .expect("order")
+                        .iter()
+                        .any(|id| id == root.as_str()),
+                "{query}: the older root must be carried, not ordered"
+            );
+            assert!(
+                list["posts"].get(doomed.as_str()).is_some(),
+                "{query}: and the deletion is news"
+            );
+        }
+    }
+
+    // No etag on this branch, on either server.
+    let path = format!("/api/v4/channels/{channel}/posts?since={since}");
+    for base in [GO, RUST] {
+        let response = client
+            .get(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("answers");
+        assert!(response.headers().get("etag").is_none(), "{base}: no etag");
+    }
 }
 
 /// `?since=0` is not a cursor: Go's test is `since > 0`, so it takes the page branch.

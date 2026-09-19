@@ -1,0 +1,14 @@
+# Mutation plan for getPostsForChannel's since branch (2026-09-19): GetPostsSince and
+# getPostsSinceCollapsedThreads, and the handler's no-etag, no-cursor answer.
+#   scripts/mutate-batch.sh scripts/mutations/posts-since.plan
+collapsed-drops-deleted	crates/mm-store/src/post_store.rs	                 WHERE posts.channelid = $1\n                   AND posts.updateat > $2	                 WHERE posts.deleteat = 0 AND posts.channelid = $1\n                   AND posts.updateat > $2	api	channel_posts
+plain-drops-deleted	crates/mm-store/src/post_store.rs	WITH cte AS (SELECT * FROM posts WHERE updateat > $1 AND channelid = $2 LIMIT 1000)	WITH cte AS (SELECT * FROM posts WHERE updateat > $1 AND channelid = $2 AND deleteat = 0 LIMIT 1000)	api	channel_posts
+carried-roots-ordered	crates/mm-store/src/post_store.rs	            if changed {\n                list.add_order(id);	            if changed || true {\n                list.add_order(id);	api	channel_posts
+no-carried-roots	crates/mm-store/src/post_store.rs	              WHERE p1.id IN (SELECT rootid FROM cte))	              WHERE p1.id IN (SELECT rootid FROM cte) AND FALSE)	api	channel_posts
+reply-count-switch-inverted	crates/mm-store/src/post_store.rs	                    CASE WHEN $3 THEN\n                        (SELECT COUNT(*) FROM posts sub\n                          WHERE sub.rootid = (CASE WHEN cte.rootid	                    CASE WHEN NOT $3 THEN\n                        (SELECT COUNT(*) FROM posts sub\n                          WHERE sub.rootid = (CASE WHEN cte.rootid	api	channel_posts
+collapsed-since-inclusive	crates/mm-store/src/post_store.rs	                   AND posts.updateat > $2\n                   AND posts.rootid = ''	                   AND posts.updateat >= $2\n                   AND posts.rootid = ''	api	channel_posts
+since-gets-an-etag	crates/mm-api/src/posts.rs	    let etag = if since > 0 {	    let etag = if since > 0 && false {	api	channel_posts
+since-gets-cursors	crates/mm-api/src/posts.rs	    if since == 0 {\n        prepared.next_post_id	    if true {\n        prepared.next_post_id	api	channel_posts
+since-ignores-collapsed	crates/mm-api/src/posts.rs	                since,\n                &session.0.user_id,\n                collapsed_threads,	                since,\n                &session.0.user_id,\n                false,	api	channel_posts
+control-log-message	crates/mm-app/src/post.rs	"posts-since lookup failed"	"posts since lookup failed"	api	channel_posts
+control-comment	crates/mm-api/src/posts.rs	    // `if etag != ""` — so the `since` branch sends none.	    // Go writes the header only for a non-empty etag.	api	channel_posts

@@ -1057,23 +1057,20 @@ fn wants_collapsed_threads(query: Option<&str>) -> bool {
 ///    reader can list another user's teams and is refused their unread counts.
 /// 3. `exclude_team` is passed through verbatim — **no `IsValidId`**, and an empty value is still
 ///    a predicate (see the store: it is what hides the DMs).
-/// 4. `include_collapsed_threads=true` is **forwarded to Go whole**. That half needs the Threads
-///    store, `CollapsedThreads` and `PostPriority` config, none of which is ported. Go re-runs
-///    the same gate, so forwarding before step 2 would answer identically; it runs after so the
-///    served and forwarded paths share one refusal. The webapp sends `true` whenever the user has
-///    CRT on, so on a CRT-enabled deployment most real traffic for this route is still Go's.
+/// 4. `include_collapsed_threads=true` adds the three `thread_*` counters, subject to the
+///    `CollapsedThreads` setting — see `App::get_teams_unread_for_user`. Served since 2026-09-19;
+///    it used to forward, and the webapp sends it on every load once CRT is on.
 ///
 /// # Wire format
 ///
 /// `json.Marshal` + `w.Write` (team.go:788) — **no trailing newline** ([D-086]). The list's
 /// order is Go's map-iteration order, i.e. random per request; see `App::fold_team_unreads`.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded, count))]
+#[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
 pub async fn get_teams_unread_for_user(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
-    request: axum::extract::Request,
 ) -> Response {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -1100,18 +1097,14 @@ pub async fn get_teams_unread_for_user(
         .into_response();
     }
 
-    if wants_collapsed_threads(query.as_deref()) {
-        tracing::Span::current().record("forwarded", true);
-        return crate::proxy::forward_to_go(State(state), request).await;
-    }
-    tracing::Span::current().record("forwarded", false);
+    let include_collapsed_threads = wants_collapsed_threads(query.as_deref());
 
     let exclude_team =
         crate::channels::query_first(query.as_deref(), EXCLUDE_TEAM_PARAM).unwrap_or_default();
 
     let unreads = match state
         .app
-        .get_teams_unread_for_user(&exclude_team, &user_id)
+        .get_teams_unread_for_user(&exclude_team, &user_id, include_collapsed_threads)
         .await
     {
         Ok(unreads) => unreads,

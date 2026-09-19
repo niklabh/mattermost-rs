@@ -220,8 +220,8 @@ async fn the_local_client_config_is_the_full_map_without_a_newline() {
 // ---------------------------------------------------------------------------------------------
 
 /// The preference round trip — write, three reads, delete, read again — for a synthetic user
-/// per server, plus the refusals, `me`, and the two forwards (a category outside the mux class,
-/// a `flagged_post` batch).
+/// per server, plus the refusals, `me`, a `flagged_post` batch, and the one forward (a category
+/// outside the mux class).
 #[tokio::test]
 async fn the_preference_pairs_match_over_the_socket() {
     if !sockets_enabled() {
@@ -314,8 +314,8 @@ async fn the_preference_pairs_match_over_the_socket() {
         );
     }
 
-    // A `flagged_post` batch is Go's, over the socket: the post does not exist, so Go's own
-    // handler answers the 400 naming `preference.name` before it writes anything.
+    // A `flagged_post` batch is served here since 2026-09-19: the post does not exist, so both
+    // answer the 400 naming `preference.name` before writing anything.
     let flagged = format!(
         r#"[{{"user_id":"{RUST_PREF_USER}","category":"flagged_post","name":"zzzzzzzzzzzzzzzzzzzzzzzzzz","value":"true"}}]"#
     );
@@ -323,13 +323,10 @@ async fn the_preference_pairs_match_over_the_socket() {
     let rust = rust_socket().expect("checked");
     let (go_status, _, go_body) = send(&go, "PUT", &rs_path, Some(&flagged)).await;
     let (rs_status, rs_headers, rs_body) = send(&rust, "PUT", &rs_path, Some(&flagged)).await;
-    assert!(
-        !served_here(&rs_headers),
-        "a flagged_post batch is forwarded"
-    );
+    assert!(served_here(&rs_headers), "a flagged_post batch is ours");
     assert_eq!(go_status, 400);
     assert_eq!(rs_status, go_status);
-    assert_forwarded_body_is_gos(&go_body, &rs_body, "flagged_post");
+    common::assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "flagged_post");
 
     // A category outside `[A-Za-z0-9_]+` is Go's mux 404, over the socket (a port forward would
     // be a 401 here); one inside it but not lower-case is our 400 naming `category`.

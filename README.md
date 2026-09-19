@@ -9,6 +9,24 @@ correctness and idiomatic Rust conflict on the wire format, the wire format wins
 
 ---
 
+## Demo
+
+```sh
+scripts/demo.sh up        # then open the URL it prints, from any machine on the network
+```
+
+It checks the prerequisites, builds what is stale, starts Postgres, the Go server and `mm-api`,
+seeds `tester` / `Tester-Pass-2026` (and two more accounts it lists), and prints the LAN URL.
+`scripts/demo.sh status` and `scripts/demo.sh down` do what they say.
+
+**55% of requests in a scripted browser session were answered by Rust** — measured on 2026-09-19
+by `scripts/demo-traffic.sh`, which drives Firefox through login, posting, editing, reactions,
+threads, search, a DM, an upload, a preference and a profile, and reports every call Go answered
+and why. The rest were the webapp's static files and HTML pages, which the Go server serves.
+That is a share of traffic, not of the port: `scripts/routes.py` counts routes.
+
+---
+
 ## Status: phases 1-4 are live
 
 The model crate, the store, the app layer and the REST API all serve real traffic. `mm-api`
@@ -208,9 +226,10 @@ Things worth knowing:
   environment overrides, which never reach the shared configuration document that `mm-api`
   reads, so a bare `mm-api` disagrees with its Go peer. `scripts/mm-api.sh` launches it through
   `scripts/mm-api-env.sh`, the one list of those settings.
-- **`SiteURL` is Go's address** (`http://localhost:8065`), not `mm-api`'s. The webapp talks to the
-  origin it was loaded from, so browsing and the websocket go through :8066 regardless; only
-  generated links (permalinks, e-mails) name :8065.
+- **`SiteURL` is Go's address** (`http://localhost:8065`), not `mm-api`'s, unless the stack was
+  started by `scripts/demo.sh`, which sets both servers' to `mm-api`'s LAN URL. The webapp talks
+  to the origin it was loaded from, so browsing and the websocket go through :8066 regardless;
+  only generated links (permalinks, e-mails) name the `SiteURL`.
 - **Rust's plugin host is opt-in.** With the default, plugins run inside the Go server. To host
   them in `mm-api` instead, start it with `MMRS_PLUGIN_HOST=rust` in the environment.
 - **From another machine**, start `mm-api` with `MMRS_API_HOST=0.0.0.0 scripts/mm-api.sh start`

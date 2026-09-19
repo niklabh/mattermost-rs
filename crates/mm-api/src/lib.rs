@@ -105,6 +105,8 @@ pub mod terms_of_service;
 pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
+/// `MM_API_TRAFFIC_LOG`: a line per request, for measuring what share of a session Rust answers.
+pub mod traffic;
 pub mod typing;
 /// The two upload-session writes: `createUpload` and `uploadData`.
 pub mod upload_write;
@@ -498,7 +500,12 @@ pub fn router(state: AppState) -> Router {
                 partially_migrated_with_ids(&state, post(plugins::disable_plugin)),
             )
     } else {
-        Router::new()
+        // Plugins run in Go: only the webapp list is answered here, and only when Go provably
+        // runs none — see `plugins::get_webapp_plugins_go_hosted`.
+        Router::new().route(
+            "/api/v4/plugins/webapp",
+            partially_migrated(get(plugins::get_webapp_plugins_go_hosted)),
+        )
     };
     Router::new()
         .merge(plugin_routes)
@@ -970,7 +977,10 @@ pub fn router(state: AppState) -> Router {
         // literal route, so it arrives here as a value the handler resolves.
         .route(
             "/api/v4/users/{user_id}/preferences",
-            partially_migrated_with_ids(&state, get(preferences::get_preferences)),
+            partially_migrated_with_ids(
+                &state,
+                get(preferences::get_preferences).put(preferences::update_preferences),
+            ),
         )
         // `{category}` and `{preference_name}` are not id-shaped, so the id-charset middleware
         // leaves them alone; the handlers carry Go's own `[A-Za-z0-9_]+` mux class instead.

@@ -311,27 +311,22 @@ async fn local_get_preferences(
 
 /// `updatePreferences` through `APILocal` (preference_local.go:8).
 ///
-/// The one pair in this module the HTTP router does not register under this path. A batch with
-/// a `flagged_post`, `direct_channel_show` or `group_channel_show` entry is Go's over the socket.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, count, forwarded))]
+/// The same handler as the HTTP router's; the local session is unrestricted, so a
+/// `flagged_post` entry passes the read check once its post and channel load.
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
 async fn local_update_preferences(
     State(state): State<AppState>,
-    Extension(go): Extension<GoLocalSocket>,
     Path(user_id): Path<String>,
     request: Request,
 ) -> Response {
-    let (parts, body) = request.into_parts();
-    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
             tracing::warn!(error = %err, "could not read the request body");
             return ApiError::invalid_param("preferences").into_response();
         }
     };
-    match preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await {
-        Some(response) => response,
-        None => forward_over_unix(&go.0, Request::from_parts(parts, Body::from(bytes))).await,
-    }
+    preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await
 }
 
 /// `deletePreferences` through `APILocal` (preference_local.go:9).

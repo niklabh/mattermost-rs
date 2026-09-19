@@ -683,8 +683,9 @@ pub async fn regen_command_token(
 // - **`GET /teams/{team_id}/commands/autocomplete_suggestions`** serves the suggestions under the
 //   same two conditions, and forwards when the parser reaches a dynamic list argument.
 
-/// Whether the Go server beside us may have plugin-registered slash commands — `true` means "do
-/// not answer anything that depends on the command set".
+/// Whether the Go server beside us may be running a plugin — so may have plugin-registered slash
+/// commands, or a webapp plugin to list (`plugins::get_webapp_plugins_go_hosted`). `true` means
+/// "do not answer anything that depends on Go's plugins".
 ///
 /// Plugin commands live only in Go's memory (`a.ch.pluginCommands`, app/plugin_commands.go:106),
 /// registered by a running plugin; a plugin can only run from a bundle Go found under its plugin
@@ -697,7 +698,7 @@ pub async fn regen_command_token(
 /// beside `MM_GO_UPSTREAM`), not `PluginSettings.Directory`: that setting is relative to the Go
 /// process's working directory, which is not this process's, and overriding the setting itself
 /// would change what `GET /config` reports. Unset means forward.
-fn go_may_have_plugin_commands() -> bool {
+pub(crate) fn go_may_have_plugins() -> bool {
     let Some(directory) = std::env::var_os("MM_GO_PLUGIN_DIRECTORY") else {
         return true;
     };
@@ -775,7 +776,7 @@ pub async fn list_autocomplete_commands(
     if let Err(err) = require_team_view(&state, &team_id, &session).await {
         return err.into_response();
     }
-    if go_may_have_plugin_commands() || !request_is_english(&state, request.headers()) {
+    if go_may_have_plugins() || !request_is_english(&state, request.headers()) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
@@ -825,7 +826,7 @@ pub async fn list_command_autocomplete_suggestions(
         .unwrap_or(&user_input)
         .to_owned();
 
-    if go_may_have_plugin_commands() || !request_is_english(&state, request.headers()) {
+    if go_may_have_plugins() || !request_is_english(&state, request.headers()) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
@@ -1027,7 +1028,7 @@ async fn serve_execute(
     };
 
     // `tryExecutePluginCommand` runs first, and a plugin command overrides everything.
-    if go_may_have_plugin_commands() {
+    if go_may_have_plugins() {
         return Ok(Execute::Forward);
     }
 

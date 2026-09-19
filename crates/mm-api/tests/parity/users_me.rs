@@ -254,11 +254,10 @@ async fn rejected_credentials_match_gos_status_exactly() {
 
 /// An unmigrated route must be forwarded, and the answer must be Go's.
 ///
-/// The canary was `GET /api/v4/system/ping` until 2026-09-07 and
-/// `GET /api/v4/config/client?format=old` until 2026-09-11, each moved on the day its route was
-/// migrated. It is now `GET /api/v4/plugins/webapp`, chosen for the same two properties: it is
-/// `api.APIHandler`, so it needs no session and the test needs no fixture, and it is behind the
-/// plugin host, which is not ported at all.
+/// The canary was `GET /api/v4/system/ping` until 2026-09-07, `GET /api/v4/config/client?format=old`
+/// until 2026-09-11 and `GET /api/v4/plugins/webapp` until 2026-09-19, each moved on the day its
+/// route was migrated. It is now `GET /api/v4/plugins/marketplace` without a session: unregistered
+/// here, so the request reaches Go, whose session check answers the 401.
 ///
 /// **When this route is migrated, move the canary rather than deleting the test.** It is the only
 /// assertion in the suite that the fallback still exists at all.
@@ -271,25 +270,24 @@ async fn an_unmigrated_route_is_forwarded_to_go() {
 
     let client = client();
     let response = client
-        .get(format!("{RUST}/api/v4/plugins/webapp"))
+        .get(format!("{RUST}/api/v4/plugins/marketplace"))
         .send()
         .await
         .expect("the proxy is reachable");
 
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), 401);
     assert_eq!(
         response
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "the webapp plugin list is not migrated, so the proxy should have forwarded it"
+        "the marketplace list is not migrated, so the proxy should have forwarded it"
     );
-
-    let body: serde_json::Value = response.json().await.expect("the plugin list decodes");
-    assert!(
-        body.is_array(),
-        "and the body is Go's `[]*model.Manifest`, not something we synthesised: {body}"
+    let body: serde_json::Value = response.json().await.expect("an error body");
+    assert_eq!(
+        body["id"], "api.context.session_expired.app_error",
+        "and it is Go's: {body}"
     );
 }
 

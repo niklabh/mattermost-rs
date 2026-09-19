@@ -814,13 +814,16 @@ fn encoded<T: serde::Serialize>(status: StatusCode, value: &T, where_: &'static 
         .into_response()
 }
 
-async fn forward(
+/// `#[track_caller]`, so the forward is attributed to the branch that chose it rather than to
+/// this helper — see [`crate::proxy::ForwardSite`].
+#[track_caller]
+fn forward(
     state: AppState,
     parts: axum::http::request::Parts,
     bytes: axum::body::Bytes,
-) -> Response {
+) -> impl std::future::Future<Output = Response> + Send + 'static {
     let request = Request::from_parts(parts, axum::body::Body::from(bytes));
-    crate::proxy::forward_to_go(State(state), request).await
+    crate::proxy::forward_to_go(State(state), request)
 }
 
 #[cfg(test)]

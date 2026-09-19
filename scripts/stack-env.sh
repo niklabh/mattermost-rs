@@ -64,6 +64,15 @@ fi
 export MMRS_LOCK="/tmp/mmrs-stack$MMRS_STACK_SUFFIX.lock"
 
 # `docker compose` for this stack, project flag included when there is one.
+# The value of one environment variable of the process listening on a port of this machine, or
+# nothing. Linux-only (`/proc`); elsewhere it prints nothing and the caller keeps its default.
+mmrs_listener_env() {
+  local port="$1" name="$2" pid
+  pid=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  [ -n "$pid" ] || return 0
+  tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n "s/^$name=//p" | head -1
+}
+
 mmrs_compose() {
   if [ -n "$MMRS_COMPOSE_PROJECT" ]; then
     docker compose -p "$MMRS_COMPOSE_PROJECT" "$@"

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO sidebarchannels (channelid, categoryid, userid, sortorder)\n                SELECT $1, sidebarcategories.id, $2,\n                       COALESCE(MIN(sidebarchannels.sortorder) - 10, 0)\n                  FROM sidebarcategories\n                  LEFT JOIN sidebarchannels\n                    ON sidebarcategories.id = sidebarchannels.categoryid\n                 WHERE sidebarcategories.id = ANY($3)\n                 GROUP BY sidebarcategories.id\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f648fdf0f46de45b701108af0146de5b55e00e9f37200f0b47ebb10866ed2c05"
+}

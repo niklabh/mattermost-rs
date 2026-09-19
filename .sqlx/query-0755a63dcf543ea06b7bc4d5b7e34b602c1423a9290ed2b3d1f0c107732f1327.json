@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT sidebarcategories.id AS \"id!\"\n                  FROM sidebarcategories\n                  LEFT JOIN sidebarchannels\n                    ON sidebarcategories.id = sidebarchannels.categoryid\n                   AND sidebarchannels.channelid = $1\n                 WHERE sidebarcategories.userid = $2\n                   AND sidebarcategories.type = $3\n                   AND sidebarchannels.channelid IS NULL\n                   AND ($4 = '' OR sidebarcategories.teamid = $4)\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0755a63dcf543ea06b7bc4d5b7e34b602c1423a9290ed2b3d1f0c107732f1327"
+}

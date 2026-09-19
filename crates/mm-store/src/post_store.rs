@@ -141,6 +141,29 @@ pub trait PostStore {
         opts: GetPostsOptions<'_>,
     ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.GetPostsSince` (post_store.go:1437) and its collapsed-threads branch
+    /// `getPostsSinceCollapsedThreads` (:1406): every post in the channel changed after `since`,
+    /// newest `CreateAt` first, at most 1000.
+    ///
+    /// **Deleted posts are included** on both branches — "changed since" is how a client learns
+    /// of a deletion — which is the one filter the page query has and these do not.
+    ///
+    /// - **Collapsed**: roots only, with the `Threads` columns and the caller's
+    ///   `ThreadMemberships.Following`, every row in `order` — the page query's shape.
+    /// - **Not collapsed**: the changed posts plus the roots of any changed reply (a `UNION`, so
+    ///   a root that changed itself appears once), and only the changed ones enter `order`: an
+    ///   older root is carried in `posts` alone. `reply_count` is computed **only when
+    ///   `skip_fetch_threads`** is set, which reads backwards and is Go's; otherwise it is 0.
+    ///   No `MakeNonNil`, unlike the page.
+    fn get_posts_since(
+        &self,
+        channel_id: &str,
+        since: i64,
+        user_id: &str,
+        collapsed_threads: bool,
+        skip_fetch_threads: bool,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
+
     /// The `UpdateAt` half of `SqlPostStore.GetEtag` (post_store.go:951): the newest
     /// `Posts.UpdateAt` in the channel, or `None` when the channel is empty **or the query
     /// failed**.
@@ -2305,6 +2328,136 @@ impl PostStore for SqlPostStore {
                 remote_id: row.remote_id,
             })
             .collect())
+    }
+
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, since, collapsed_threads))]
+    async fn get_posts_since(
+        &self,
+        channel_id: &str,
+        since: i64,
+        user_id: &str,
+        collapsed_threads: bool,
+        skip_fetch_threads: bool,
+    ) -> Result<PostList, StoreError> {
+        let db = |source| StoreError::Db {
+            context: format!("failed to find Posts with channelId={channel_id}"),
+            source,
+        };
+        let mut list = PostList::new();
+
+        if collapsed_threads {
+            let rows = sqlx::query_as!(
+                ThreadedPostRow,
+                r#"
+                SELECT posts.id,
+                       posts.createat     AS "create_at!",
+                       posts.updateat     AS "update_at!",
+                       posts.editat       AS "edit_at!",
+                       posts.deleteat     AS "delete_at!",
+                       posts.ispinned     AS "is_pinned!",
+                       posts.userid       AS "user_id!",
+                       posts.channelid    AS "channel_id!",
+                       posts.rootid       AS "root_id!",
+                       posts.originalid   AS "original_id!",
+                       posts.message      AS "message!",
+                       posts.type         AS "post_type!",
+                       posts.props        AS "props?",
+                       posts.hashtags     AS "hashtags!",
+                       posts.filenames    AS "filenames?",
+                       posts.fileids      AS "file_ids?",
+                       posts.hasreactions AS "has_reactions!",
+                       posts.remoteid     AS "remote_id?",
+                       COALESCE(threads.replycount, 0)          AS "thread_reply_count!",
+                       COALESCE(threads.lastreplyat, 0)         AS "last_reply_at!",
+                       COALESCE(threads.participants, '[]'::jsonb) AS "thread_participants!",
+                       threadmemberships.following              AS "is_following?"
+                  FROM posts
+                  LEFT JOIN threads ON threads.postid = posts.id
+                  LEFT JOIN threadmemberships ON threadmemberships.postid = posts.id
+                                             AND threadmemberships.userid = $3
+                 WHERE posts.channelid = $1
+                   AND posts.updateat > $2
+                   AND posts.rootid = ''
+                 ORDER BY posts.createat DESC
+                 LIMIT 1000
+                "#,
+                channel_id,
+                since,
+                user_id,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db)?;
+            for row in rows {
+                let post = threaded_post_from_row(row)?;
+                let id = post.id.clone();
+                list.add_post(post);
+                list.add_order(id);
+            }
+            return Ok(list);
+        }
+
+        // Go's CTE and `UNION`, column for column. The reply count is one expression guarded by
+        // `$3` rather than two query strings; a `UNION` deduplicates whole rows, and the count is
+        // a function of the post, so the rows it merges are the ones Go merges.
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            WITH cte AS (SELECT * FROM posts WHERE updateat > $1 AND channelid = $2 LIMIT 1000)
+            (SELECT cte.id         AS "id!",
+                    cte.createat     AS "create_at!",
+                    cte.updateat     AS "update_at!",
+                    cte.editat       AS "edit_at!",
+                    cte.deleteat     AS "delete_at!",
+                    cte.ispinned     AS "is_pinned!",
+                    cte.userid       AS "user_id!",
+                    cte.channelid    AS "channel_id!",
+                    cte.rootid       AS "root_id!",
+                    cte.originalid   AS "original_id!",
+                    cte.message      AS "message!",
+                    cte.type         AS "post_type!",
+                    cte.props        AS "props?",
+                    cte.hashtags     AS "hashtags!",
+                    cte.filenames    AS "filenames?",
+                    cte.fileids      AS "file_ids?",
+                    cte.hasreactions AS "has_reactions!",
+                    cte.remoteid     AS "remote_id?",
+                    CASE WHEN $3 THEN
+                        (SELECT COUNT(*) FROM posts sub
+                          WHERE sub.rootid = (CASE WHEN cte.rootid = '' THEN cte.id ELSE cte.rootid END)
+                            AND sub.deleteat = 0)
+                    ELSE 0 END AS "reply_count!"
+               FROM cte)
+            UNION
+            (SELECT p1.id, p1.createat, p1.updateat, p1.editat, p1.deleteat, p1.ispinned,
+                    p1.userid, p1.channelid, p1.rootid, p1.originalid, p1.message, p1.type,
+                    p1.props, p1.hashtags, p1.filenames, p1.fileids, p1.hasreactions,
+                    p1.remoteid,
+                    CASE WHEN $3 THEN
+                        (SELECT COUNT(*) FROM posts sub
+                          WHERE sub.rootid = (CASE WHEN p1.rootid = '' THEN p1.id ELSE p1.rootid END)
+                            AND sub.deleteat = 0)
+                    ELSE 0 END
+               FROM posts p1
+              WHERE p1.id IN (SELECT rootid FROM cte))
+            ORDER BY "create_at!" DESC
+            "#,
+            since,
+            channel_id,
+            skip_fetch_threads,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db)?;
+        for row in rows {
+            let post = post_from_row(row)?;
+            let (id, changed) = (post.id.clone(), post.update_at > since);
+            list.add_post(post);
+            if changed {
+                list.add_order(id);
+            }
+        }
+        Ok(list)
     }
 
     /// The two branches are Go's, and so is the asymmetry between them: the non-collapsed one
