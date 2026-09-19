@@ -3631,8 +3631,8 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(post(boards::create_board)),
         )
         // ---- `api4/remote_cluster.go`, the five `RemoteClusterTokenRequired` routes
-        // (2026-09-15). All gated identically; `remote_cluster_token_gate` is the whole served
-        // surface — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
+        // (2026-09-15). All share the gate and the remote-cluster session; `{user_id}/image`
+        // also serves its handler's refusals (2026-09-19) — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
         // literal siblings of `{remote_id}` (registered above), each with an underscore or
         // shorter than an id, so mux and axum both prefer these literals.
         .route(
@@ -3652,11 +3652,11 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
         )
         // Go names this segment `{user_id}`, but axum requires one capture name per tree
-        // position and `{remote_id}` already holds it (the CRUD routes above); the gate never
-        // reads it and the two charsets accept the same segments, so the wire is identical.
+        // position and `{remote_id}` already holds it (the CRUD routes above); the handler reads
+        // it positionally and the two charsets accept the same segments, so the wire is identical.
         .route(
             "/api/v4/remotecluster/{remote_id}/image",
-            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_set_profile_image)),
         )
         // ---- `api4/command.go:19,26,27` (2026-09-15): execute and the two autocomplete reads.
         // Each serves its refusals and forwards whatever would run a command or depends on

@@ -97,6 +97,7 @@ pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
 pub mod reaction;
+pub mod remote_cluster;
 pub mod report;
 pub mod role;
 pub mod scheme;
