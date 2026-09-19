@@ -2,7 +2,8 @@
 name = "gobwire"
 version = "0.1.0"
 edition.workspace = true
-rust-version.workspace = true
+# Not the workspace value: `let` chains need 1.88, and `scripts/crates-preflight.sh --msrv` checks it.
+rust-version = "1.88"
 # DELIBERATELY NOT `license.workspace = true`. This crate is an original implementation of Go's
 # documented `encoding/gob` wire format and depends on no Mattermost code; it is meant to be
 # published on its own (docs/PLUGIN_PLAN.md, D3). It must never depend on an `mm-*` crate.
@@ -12,6 +13,12 @@ description = "Go encoding/gob wire format for Rust: encoder, merge-decoding dec
 keywords = ["gob", "go", "golang", "serialization", "rpc"]
 categories = ["encoding", "network-programming"]
 readme = "README.md"
+# The integration tests are left out: they drive the Go oracle under reference/dump/ and the corpus
+# under fixtures/, neither of which ships in the package. They run in the repository.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["derive"]

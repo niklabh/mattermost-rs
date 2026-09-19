@@ -1,0 +1,37 @@
+[package]
+name = "gobwire-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: libfuzzer-sys needs nightly and sanitizer flags the main workspace must not
+# inherit. Run from this directory with `cargo +nightly fuzz run <target>`.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+gobwire = { path = ".." }
+
+[[bin]]
+name = "decode_dynamic"
+path = "fuzz_targets/decode_dynamic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_typed"
+path = "fuzz_targets/decode_typed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "reencode"
+path = "fuzz_targets/reencode.rs"
+test = false
+doc = false
+bench = false

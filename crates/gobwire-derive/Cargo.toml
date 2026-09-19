@@ -2,11 +2,17 @@
 name = "gobwire-derive"
 version = "0.1.0"
 edition.workspace = true
-rust-version.workspace = true
+# Not the workspace value: `let` chains need 1.88, and `scripts/crates-preflight.sh --msrv` checks it.
+rust-version = "1.88"
 # Not the workspace licence: see crates/gobwire/Cargo.toml.
 license = "MIT OR Apache-2.0"
 repository.workspace = true
 description = "#[derive(Gob)] for the gobwire crate"
+keywords = ["gob", "go", "golang", "derive", "serialization"]
+categories = ["encoding", "development-tools::procedural-macro-helpers"]
+readme = "README.md"
+# Its tests live in gobwire's suite (tests/derive.rs), which exercises the derive end to end.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [lib]
 proc-macro = true

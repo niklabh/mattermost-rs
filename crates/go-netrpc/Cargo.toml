@@ -2,7 +2,8 @@
 name = "go-netrpc"
 version = "0.1.0"
 edition.workspace = true
-rust-version.workspace = true
+# Not the workspace value: `let` chains need 1.88, and `scripts/crates-preflight.sh --msrv` checks it.
+rust-version = "1.88"
 # Not the workspace licence: a generic, publishable crate (docs/PLUGIN_PLAN.md, D3). It must never
 # depend on an mm-* crate.
 license = "MIT OR Apache-2.0"
@@ -10,6 +11,10 @@ repository.workspace = true
 description = "Go's net/rpc protocol (gob codec) for async Rust: client and server"
 keywords = ["go", "golang", "rpc", "gob", "net-rpc"]
 categories = ["network-programming", "asynchronous"]
+readme = "README.md"
+# The integration tests are left out: they drive the Go oracle under reference/dump/ and the corpus
+# under fixtures/, neither of which ships in the package. They run in the repository.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [dependencies]
 gobwire = { path = "../gobwire", version = "0.1.0" }
