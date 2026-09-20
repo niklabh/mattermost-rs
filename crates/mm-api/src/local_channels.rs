@@ -550,6 +550,9 @@ async fn local_move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    // A local-socket request has no session and no peer address, which is what Go's
+    // `pluginContext` reads off one: every field but `RequestId` is empty there too.
+    let hook_ctx = crate::plugin_context::hook_context(&parts, None);
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -596,7 +599,7 @@ async fn local_move_channel(
     if force {
         match state
             .app
-            .remove_users_from_channel_not_member_of_team(None, &channel, &team)
+            .remove_users_from_channel_not_member_of_team(None, &channel, &team, &hook_ctx)
             .await
         {
             Ok(MemberWrite::Done(())) => {}
@@ -605,7 +608,11 @@ async fn local_move_channel(
         }
     }
 
-    match state.app.move_channel(&team, &mut channel, None).await {
+    match state
+        .app
+        .move_channel(&team, &mut channel, None, &hook_ctx)
+        .await
+    {
         Ok(MemberWrite::Done(())) => {}
         Ok(MemberWrite::Forward(why)) => return forward_over_unix(&go.0, forward(why)).await,
         Err(err) => return ApiError::from(err).into_response(),
@@ -762,7 +769,14 @@ async fn local_remove_channel_member(
 
     match state
         .app
-        .remove_user_from_channel(&user_id, "", &channel)
+        .remove_user_from_channel(
+            &user_id,
+            "",
+            &channel,
+            // A local-socket request has no session and no peer address, which is what Go's
+            // `pluginContext` reads off one: every field but `RequestId` is empty there too.
+            &crate::plugin_context::hook_context_of(&request, None),
+        )
         .await
     {
         Ok(MemberWrite::Done(())) => channel_writes::status_ok(),
@@ -800,6 +814,8 @@ async fn local_add_channel_member(
         return err.into_response();
     }
     let (parts, body) = request.into_parts();
+    // See `local_move_channel`: the socket carries no session and no peer address.
+    let hook_ctx = crate::plugin_context::hook_context(&parts, None);
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -866,7 +882,11 @@ async fn local_add_channel_member(
         post_root_id: post_root_id.to_owned(),
         skip_team_member_integrity_check: false,
     };
-    let member = match state.app.add_channel_member(user_id, &channel, &opts).await {
+    let member = match state
+        .app
+        .add_channel_member(user_id, &channel, &opts, &hook_ctx)
+        .await
+    {
         Ok(MemberWrite::Done(member)) => member,
         Ok(MemberWrite::Forward(why)) => return forward_over_unix(&go.0, forward(why)).await,
         Err(err) => return ApiError::from(err).into_response(),

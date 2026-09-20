@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 7 of 35 (2026-09-20)
+### Phase 5 · Hook call sites — IN PROGRESS, 13 of 35 (2026-09-20)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -531,7 +531,24 @@ D6's switch defaults to `rust`.
 and `ReactionHasBeenRemoved` — 7 of the 35 hooks, 9 of the 46 invocations. With them:
 `mm_app::plugin_hooks` (the `plugin.Context`, the model↔wire conversion, `RunMultiHook` and
 `guarded_hooks.go`'s two-phase dispatcher), `mm_api::plugin_context`, and the read half of
-`ChannelGuardStore`. D-402's plugin half is closed; the other 28 sites are D-932.
+`ChannelGuardStore`. D-402's plugin half is closed.
+
+**Done next, the channel and team membership family:** `ChannelMemberWillBeAdded`,
+`UserHasJoinedChannel`, `UserHasLeftChannel`, `TeamMemberWillBeAdded`, `UserHasJoinedTeam` and
+`UserHasLeftTeam` — 13 of the 35 hooks, 15 of the 46 invocations. With them `wire::User` (the
+34-field conversion, unsanitised as Go sends it), `wire::ChannelMember` and `wire::TeamMember`,
+and a `HookContext` threaded through the membership write paths. The remaining 22 are D-932. Three
+findings, each in the code where it applies:
+
+- **The two families disagree about what a rejection looks like on the wire.** A refused post puts
+  the plugin's text in the error **id**; a refused member puts it in a `Reason` *parameter* of a
+  real translation key. Same dispatcher, opposite arrangement.
+- **`TeamMemberWillBeAdded` is a plain `RunMultiHook`**, not the guarded two-phase dispatcher —
+  guards guard channels — and it runs on the **revival** path as well as the insert, because both
+  go through `applyPreSaveHooks`.
+- **Go's system posts fire the message hooks and this server's do not** ([D-950]). Found here: Go
+  writes every "added to the channel" message with the whole of `CreatePost`, and
+  `create_system_post` is a narrow slice of it. Invisible without a plugin host.
 
 The oracle is `mm-plugin`'s `examples/hook_recorder`: **one** Rust SDK plugin binary run under
 both hosts, which is what D1 bought. It writes each hook's arguments rendered from the gob stream,

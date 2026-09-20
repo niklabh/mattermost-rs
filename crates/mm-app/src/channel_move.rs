@@ -77,6 +77,7 @@ impl App {
         remover: Option<&User>,
         channel: &Channel,
         team: &Team,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<()>, Box<AppError>> {
         let channel_members = self
             .get_channel_members_page(&channel.id, 0, ALL_MEMBERS)
@@ -109,6 +110,7 @@ impl App {
                     user_id,
                     remover.map_or("", |remover| remover.id.as_str()),
                     channel,
+                    hook_ctx,
                 )
                 .await?
             {
@@ -127,6 +129,7 @@ impl App {
         team: &Team,
         channel: &mut Channel,
         user: Option<&User>,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<()>, Box<AppError>> {
         if channel.is_space() {
             return Err(AppError::boxed(
@@ -267,7 +270,7 @@ impl App {
         // The sweep again, after the row changed; a failure is logged, a forward is the
         // caller's to act on.
         match self
-            .remove_users_from_channel_not_member_of_team(user, channel, team)
+            .remove_users_from_channel_not_member_of_team(user, channel, team, hook_ctx)
             .await
         {
             Ok(MemberWrite::Done(())) => {}

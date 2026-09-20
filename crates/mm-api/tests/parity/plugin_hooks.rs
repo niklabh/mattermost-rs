@@ -46,10 +46,15 @@ use crate::common;
 
 use common::{GO, SecondServer, client, go_minted_token, request_raw, stack_enabled};
 
-/// The Rust host; see `second_server_ports`.
+/// The Rust host of the post and reaction tranche; see `second_server_ports`.
 const HOST_PORT: u16 = 8119;
-/// This suite's Go server sits at Go's port plus this.
+/// Its Go server sits at Go's port plus this.
 const GO_OFFSET: u16 = 74;
+/// The Rust host of the channel and team membership tranche, which runs its own pair of servers
+/// so that either tranche can be run, and debugged, on its own.
+const MEMBERSHIP_HOST_PORT: u16 = 8130;
+/// Its Go server.
+const MEMBERSHIP_GO_OFFSET: u16 = 80;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -123,11 +128,19 @@ fn bundle() -> PathBuf {
 }
 
 /// A run directory: the bundle in the file store, and the two plugin directories empty.
+///
+/// It also gets Go's `i18n/`, because **both** servers started here resolve it against their
+/// working directory and neither will start without it — `utils.TranslationsPreInit` on the Go
+/// side, `mm_app::i18n::init` on ours since the error messages became Go's sentences.
 fn lay_out(run: &Path) -> PathBuf {
     let _ = std::fs::remove_dir_all(run);
     for dir in ["data/plugins", "plugins", "client", "logs"] {
         std::fs::create_dir_all(run.join(dir)).expect("the run directory");
     }
+    let _ = std::os::unix::fs::symlink(
+        repo().join("reference/mattermost/server/i18n"),
+        run.join("i18n"),
+    );
     std::fs::copy(
         bundle(),
         run.join("data/plugins").join(format!("{PLUGIN_ID}.tar.gz")),
@@ -160,7 +173,7 @@ fn go_port() -> u16 {
 /// `parity::plugin_startup` does. **Two database connections, not fifty**: the stack's servers
 /// already hold most of the ceiling, and a server with Go's default `MaxIdleConns` takes the
 /// database down for every suite running beside this one.
-async fn start_go(run: &Path, env: &[(&str, &str)]) -> GoServer {
+async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
     let binary = repo().join("reference/.build/mattermost");
     assert!(
         binary.exists(),
@@ -171,7 +184,7 @@ async fn start_go(run: &Path, env: &[(&str, &str)]) -> GoServer {
     for dir in ["i18n", "templates", "fonts"] {
         let _ = std::os::unix::fs::symlink(src.join(dir), run.join(dir));
     }
-    let port = go_port() + GO_OFFSET;
+    let port = go_port() + offset;
     let _ = Command::new("sh")
         .arg("-c")
         .arg(format!(
@@ -348,7 +361,17 @@ const ID_KEYS: [&str; 6] = [
 ];
 /// Epoch milliseconds, likewise. `DeleteAt` is one of them on the history row, and its
 /// zero-or-not is still asserted where it matters (the deleted post the delete hook carries).
-const TIME_KEYS: [&str; 5] = ["CreateAt", "UpdateAt", "EditAt", "LastReplyAt", "DeleteAt"];
+/// `LastUpdateAt` and `LastViewedAt` are the `ChannelMember` pair: both are stamped by the save,
+/// so the two servers' members differ by the milliseconds between the two requests.
+const TIME_KEYS: [&str; 7] = [
+    "CreateAt",
+    "UpdateAt",
+    "EditAt",
+    "LastReplyAt",
+    "DeleteAt",
+    "LastUpdateAt",
+    "LastViewedAt",
+];
 
 /// Replace what cannot be compared with a token that keeps the only thing worth asserting about
 /// it: an id is `""` or `"<id>"`, a timestamp is `0` or `"<set>"`. A mutation that stopped
@@ -428,19 +451,41 @@ fn same_post(go: &Json, rust: &Json, what: &str) {
     assert_eq!(go, rust, "{what}: the two rows");
 }
 
-/// The transcript so far, normalised.
-fn transcript(path: &Path) -> Vec<Json> {
+/// Every occurrence of each `from` replaced by its `to`, over the raw text.
+///
+/// The membership tranche needs it: two servers cannot add the **same** user to the same channel
+/// (the second finds the member already there and writes nothing), so each side acts on a subject
+/// of its own and the two ids — and the two usernames, which reach the system posts and their
+/// props — are rewritten to one token before anything is compared. Everything else still has to
+/// match exactly, which is the point of doing it as a substitution rather than as another
+/// [`normalise`] key.
+fn scrub(text: &str, pairs: &[(String, String)]) -> String {
+    let mut out = text.to_owned();
+    for (from, to) in pairs {
+        out = out.replace(from.as_str(), to);
+    }
+    out
+}
+
+/// The transcript so far, scrubbed of this side's subject and normalised.
+fn transcript_of(path: &Path, pairs: &[(String, String)]) -> Vec<Json> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
-            let mut value: Json =
-                serde_json::from_str(l).unwrap_or_else(|e| panic!("transcript line {l:?}: {e}"));
+            let line = scrub(l, pairs);
+            let mut value: Json = serde_json::from_str(&line)
+                .unwrap_or_else(|e| panic!("transcript line {line:?}: {e}"));
             normalise(&mut value);
             value
         })
         .collect()
+}
+
+/// [`transcript_of`] with nothing to scrub.
+fn transcript(path: &Path) -> Vec<Json> {
+    transcript_of(path, &[])
 }
 
 /// The hook names in the transcript, in order.
@@ -597,6 +642,7 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
     let go = start_go(
         &go_run,
         &[("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy())],
+        GO_OFFSET,
     )
     .await;
 
@@ -1030,6 +1076,602 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
     drop(go);
     common::delete_channel(&client, &admin, &channel).await;
     common::delete_channel(&client, &admin, &guarded).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The channel and team membership tranche
+// ---------------------------------------------------------------------------------------------
+
+/// One side's subject, and the tokens the other side's is rewritten to.
+///
+/// Two servers on one database cannot perform the *same* membership change: whichever goes second
+/// finds the row already there and writes nothing, fires nothing and answers 200 from a branch the
+/// other never took. So each side gets a plain user of its own, and [`scrub`] turns both into one
+/// token before the transcripts are compared. The **actor** is shared, because a `model.User`
+/// carries a bcrypt hash and two accounts can never agree on one.
+struct Subject {
+    id: String,
+    username: String,
+}
+
+impl Subject {
+    fn pairs(&self) -> Vec<(String, String)> {
+        vec![
+            (self.id.clone(), "<subject>".to_owned()),
+            (self.username.clone(), "<subject-name>".to_owned()),
+        ]
+    }
+}
+
+/// The post-family hooks the system messages a membership change writes fire **on the Go host
+/// only**. Go's `postAddToChannelMessage` and its eighteen siblings go through the whole of
+/// `a.CreatePost`, which dispatches `MessageWillBePosted` and `MessageHasBeenPosted`; this
+/// server's `create_system_post` is a narrow slice of `CreatePost` that does not — [D-950].
+///
+/// Dropped from both sides so that this suite is about the membership hooks and fails for their
+/// reasons. The gap is the debt entry's, and it was found here: it is invisible without a plugin.
+const SYSTEM_POST_HOOKS: [&str; 2] = ["MessageWillBePosted", "MessageHasBeenPosted"];
+
+/// How long both transcripts must stay unchanged before they are judged complete.
+///
+/// The membership paths fire a *variable* number of hooks — a channel add is followed by a system
+/// post, which fires two more — so waiting for a count means writing that count down twice. This
+/// waits for quiescence instead and then insists the two sides agree, which is the assertion that
+/// matters and which a wrong count would hide.
+const QUIET: Duration = Duration::from_millis(600);
+
+/// One action against both servers, each with its own subject.
+struct MemberPair {
+    client: reqwest::Client,
+    go_base: String,
+    rust_base: String,
+    go_log: PathBuf,
+    rust_log: PathBuf,
+    go_scrub: Vec<(String, String)>,
+    rust_scrub: Vec<(String, String)>,
+    seen: usize,
+}
+
+impl MemberPair {
+    /// The same request to each server, with each side's own subject in the path or the body.
+    async fn each(
+        &self,
+        method: reqwest::Method,
+        token: &str,
+        go: (String, Option<Vec<u8>>),
+        rust: (String, Option<Vec<u8>>),
+    ) -> ((u16, Json), (u16, Json)) {
+        let decode = |bytes: Vec<u8>, pairs: &[(String, String)]| -> Json {
+            let text = scrub(&String::from_utf8_lossy(&bytes), pairs);
+            serde_json::from_str(&text).unwrap_or_else(|_| Json::String(text.trim_end().to_owned()))
+        };
+        let (gs, gb, _) = request_raw(
+            &self.client,
+            &self.go_base,
+            method.clone(),
+            Some(token),
+            &go.0,
+            go.1.as_deref(),
+        )
+        .await;
+        let (rs, rb, served_by) = request_raw(
+            &self.client,
+            &self.rust_base,
+            method,
+            Some(token),
+            &rust.0,
+            rust.1.as_deref(),
+        )
+        .await;
+        assert_eq!(
+            served_by.as_deref(),
+            Some("rust"),
+            "{} was forwarded",
+            rust.0
+        );
+        (
+            (gs, decode(gb, &self.go_scrub)),
+            (rs, decode(rb, &self.rust_scrub)),
+        )
+    }
+
+    /// Wait until both transcripts have stopped growing, then assert they agree entry for entry
+    /// and return what this step added.
+    async fn hooks(&mut self, what: &str) -> Vec<Json> {
+        let without_system_posts = |entries: Vec<Json>| -> Vec<Json> {
+            entries
+                .into_iter()
+                .filter(|e| {
+                    !e["hook"]
+                        .as_str()
+                        .is_some_and(|h| SYSTEM_POST_HOOKS.contains(&h))
+                })
+                .collect()
+        };
+        let read = || {
+            (
+                without_system_posts(transcript_of(&self.go_log, &self.go_scrub)),
+                without_system_posts(transcript_of(&self.rust_log, &self.rust_scrub)),
+            )
+        };
+        let (mut go, mut rust) = read();
+        let mut quiet_since = std::time::Instant::now();
+        for _ in 0..300 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let (g, r) = read();
+            if g.len() == go.len() && r.len() == rust.len() {
+                if quiet_since.elapsed() >= QUIET && g.len() == r.len() && g.len() > self.seen {
+                    break;
+                }
+            } else {
+                quiet_since = std::time::Instant::now();
+            }
+            go = g;
+            rust = r;
+        }
+        assert_eq!(
+            names(&go),
+            names(&rust),
+            "{what}: the hooks that fired\n  go:   {:?}\n  rust: {:?}",
+            names(&go),
+            names(&rust)
+        );
+        for (index, (g, r)) in go.iter().zip(rust.iter()).enumerate() {
+            assert_eq!(g, r, "{what}: hook {index} differs");
+        }
+        let fresh = go[self.seen..].to_vec();
+        self.seen = go.len();
+        fresh
+    }
+
+    /// Wait for quiescence and assert **nothing** fired — for the two rejections, where the plugin
+    /// is called and the request then dies before any notification hook.
+    async fn no_more_hooks(&mut self, what: &str) {
+        tokio::time::sleep(QUIET).await;
+        let keep = |entries: Vec<Json>| -> Vec<Json> {
+            entries
+                .into_iter()
+                .filter(|e| {
+                    !e["hook"]
+                        .as_str()
+                        .is_some_and(|h| SYSTEM_POST_HOOKS.contains(&h))
+                })
+                .collect()
+        };
+        let go = keep(transcript_of(&self.go_log, &self.go_scrub));
+        let rust = keep(transcript_of(&self.rust_log, &self.rust_scrub));
+        assert_eq!(go.len(), self.seen, "{what}: Go fired {:?}", names(&go));
+        assert_eq!(
+            rust.len(),
+            self.seen,
+            "{what}: Rust fired {:?}",
+            names(&rust)
+        );
+    }
+}
+
+/// The plain users this suite creates, so the cleanup can find them after a panic.
+static MEMBERSHIP_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the six channel and team membership hook sites
+/// (docs/PLUGIN_PLAN.md, Phase 5; [D-932]).
+///
+/// `ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
+/// `TeamMemberWillBeAdded`, `UserHasJoinedTeam` and `UserHasLeftTeam`, each under a real Go host
+/// and the Rust host, with the same plugin binary and the same client action.
+///
+/// The two `*WillBeAdded` hooks are the ones that can change the answer, and the recorder drives
+/// both branches off ids the test plants in the environment: one channel and one team it refuses,
+/// one of each where it answers a member carrying **only** `SchemeAdmin` so that the host's
+/// gob merge is what fills the rest back in.
+#[tokio::test]
+async fn the_membership_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_membership_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *MEMBERSHIP_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_membership_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-members");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins, so none of this setup
+    // reaches the recorder.
+    let home = common::create_team(&client, &admin, "hookmb").await;
+    let channel = common::create_channel(&client, &admin, &home, "hookmb").await;
+    let reject_channel = common::create_channel(&client, &admin, &home, "hookrj").await;
+    let admin_channel = common::create_channel(&client, &admin, &home, "hookad").await;
+    // A channel of its own for the removal, whose two subjects are added through **main** Go.
+    // Adding them through the pair instead would leave the Go side's member carrying the
+    // `MentionCount` of 1 that `system_add_to_channel`'s implicit mention gives the added user
+    // and the Rust side's carrying 0 — [D-235], a gap in the notification port, not in the hook.
+    let leave_channel = common::create_channel(&client, &admin, &home, "hooklv").await;
+    let join_team = common::create_team(&client, &admin, "hookjn").await;
+    let reject_team = common::create_team(&client, &admin, "hookrt").await;
+    let admin_team = common::create_team(&client, &admin, "hookat").await;
+
+    let actor = common::create_plain_user(&client, &admin, &home, "hookact").await;
+    let go_user = common::create_plain_user(&client, &admin, &home, "hookgo").await;
+    let rs_user = common::create_plain_user(&client, &admin, &home, "hookrs").await;
+    MEMBERSHIP_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .extend([actor.id.clone(), go_user.id.clone(), rs_user.id.clone()]);
+
+    // The actor drives every request, and it is one account rather than two because a
+    // `model.User` crossing to a plugin carries `Password` — a bcrypt hash no two accounts share.
+    // `manage_public_channel_members` is channel-scoped, so it has to be **in** each channel.
+    for id in [&channel, &reject_channel, &admin_channel, &leave_channel] {
+        for user in [&actor.id, &go_user.id, &rs_user.id] {
+            if user != &actor.id && id != &leave_channel {
+                continue;
+            }
+            let joined = client
+                .post(format!("{GO}/api/v4/channels/{id}/members"))
+                .bearer_auth(&admin)
+                .json(&serde_json::json!({ "user_id": user }))
+                .send()
+                .await
+                .expect("Go answers");
+            assert!(joined.status().is_success(), "{user} joins {id}");
+        }
+    }
+    // It needs `team_admin` on the three teams to add and remove members there.
+    for team in [&join_team, &reject_team, &admin_team] {
+        let joined = client
+            .post(format!("{GO}/api/v4/teams/{team}/members"))
+            .bearer_auth(&admin)
+            .json(&serde_json::json!({ "team_id": team, "user_id": actor.id }))
+            .send()
+            .await
+            .expect("Go answers");
+        assert!(joined.status().is_success(), "the actor joins {team}");
+        let promoted = client
+            .put(format!(
+                "{GO}/api/v4/teams/{team}/members/{}/roles",
+                actor.id
+            ))
+            .bearer_auth(&admin)
+            .json(&serde_json::json!({ "roles": "team_user team_admin" }))
+            .send()
+            .await
+            .expect("Go answers");
+        assert!(
+            promoted.status().is_success(),
+            "the actor is admin of {team}"
+        );
+    }
+    // The roles live on the **session** row, copied at login, so the token has to be minted again
+    // after the promotion or every team request is a 403 from Go.
+    let actor_token = common::login_plain_user(&client, "hookact").await;
+
+    let plugin_env: Vec<(&str, String)> = vec![
+        ("HOOK_RECORDER_REJECT_CHANNEL", reject_channel.clone()),
+        ("HOOK_RECORDER_ADMIN_CHANNEL", admin_channel.clone()),
+        ("HOOK_RECORDER_REJECT_TEAM", reject_team.clone()),
+        ("HOOK_RECORDER_ADMIN_TEAM", admin_team.clone()),
+    ];
+
+    let mut go_env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", "")];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    go_env[0].1 = go_transcript.as_str();
+    for (key, value) in &plugin_env {
+        go_env.push((key, value.as_str()));
+    }
+    let go = start_go(&go_run, &go_env, MEMBERSHIP_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    for (key, value) in &plugin_env {
+        rust_env.push((key, value.as_str()));
+    }
+    let rust = SecondServer::start_in(MEMBERSHIP_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let go_subject = Subject {
+        id: go_user.id.clone(),
+        username: common::plain_username("hookgo"),
+    };
+    let rs_subject = Subject {
+        id: rs_user.id.clone(),
+        username: common::plain_username("hookrs"),
+    };
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: go_subject.pairs(),
+        rust_scrub: rs_subject.pairs(),
+        seen: 0,
+    };
+
+    let member_body = |user: &str, channel: &str| {
+        Some(
+            serde_json::to_vec(&serde_json::json!({ "user_id": user, "channel_id": channel }))
+                .expect("a body"),
+        )
+    };
+    let add_to = |channel: &str| {
+        (
+            (
+                format!("/api/v4/channels/{channel}/members"),
+                member_body(&go_user.id, channel),
+            ),
+            (
+                format!("/api/v4/channels/{channel}/members"),
+                member_body(&rs_user.id, channel),
+            ),
+        )
+    };
+
+    // 1. A plain channel add. The hook that can refuse runs first, then the notification, then
+    //    the system post `PostAddToChannelMessage` writes — which is itself two post hooks, and
+    //    their presence here is what shows the two families interleave in Go's order.
+    let (go_call, rust_call) = add_to(&channel);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a channel member");
+    let fired = pair.hooks("a channel add").await;
+    assert_eq!(
+        &names(&fired)[..2],
+        ["ChannelMemberWillBeAdded", "UserHasJoinedChannel"],
+        "Go's order, and the whole sequence was {:?}",
+        names(&fired)
+    );
+    assert_eq!(fired[0]["args"]["B"]["ChannelId"], channel);
+    assert_eq!(fired[0]["args"]["B"]["UserId"], "<subject>");
+    // The member the `Will` hook sees has no `LastUpdateAt` — it has not been saved — and the one
+    // the notification sees does. Without this the two could be swapped unnoticed.
+    assert_eq!(
+        fired[0]["args"]["B"]["LastUpdateAt"],
+        Json::Null,
+        "gob omits a zero LastUpdateAt on the unsaved member"
+    );
+    assert_eq!(fired[1]["args"]["B"]["LastUpdateAt"], "<set>");
+    // `C` is the actor: `opts.UserRequestorID`, the session's user, and the whole 34-field
+    // `model.User` — unsanitised, as Go sends it.
+    assert_eq!(
+        fired[1]["args"]["C"]["Username"],
+        common::plain_username("hookact")
+    );
+    assert!(
+        fired[1]["args"]["C"]["Password"].is_string(),
+        "Go sends the stored hash: the hook's user is not sanitised"
+    );
+
+    // 2. A refused add: the reason is a translation **parameter** here, not part of the id the way
+    //    the post hooks build theirs.
+    let (go_call, rust_call) = add_to(&reject_channel);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a channel add the plugin refused",
+    );
+    assert_eq!(
+        gb["id"],
+        "app.channel.add_user.to.channel.rejected_by_plugin"
+    );
+    let fired = pair.hooks("a refused channel add").await;
+    assert_eq!(names(&fired), ["ChannelMemberWillBeAdded"]);
+    pair.no_more_hooks("a refused channel add writes nothing")
+        .await;
+
+    // 3. A replacement carrying one field: `SchemeAdmin`, which the merge folds into the member
+    //    the host sent, so the row that lands has the plugin's flag and the host's everything
+    //    else. The roles column is derived from the flag, so both are on the wire.
+    let (go_call, rust_call) = add_to(&admin_channel);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a member the plugin promoted");
+    assert_eq!(gb["scheme_admin"], true, "the merge kept the plugin's flag");
+    assert_eq!(gb["roles"], "channel_user channel_admin");
+    assert_eq!(rb["roles"], "channel_user channel_admin");
+    // The notify props came back on a member the plugin only set one field of.
+    assert_eq!(gb["notify_props"]["desktop"], "default");
+    pair.hooks("a promoted channel add").await;
+
+    // 4. A removal. The member is read before the delete and handed to the hook, and the actor is
+    //    the remover.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &actor_token,
+            (
+                format!("/api/v4/channels/{leave_channel}/members/{}", go_user.id),
+                None,
+            ),
+            (
+                format!("/api/v4/channels/{leave_channel}/members/{}", rs_user.id),
+                None,
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("a channel removal").await;
+    assert_eq!(names(&fired)[0], "UserHasLeftChannel");
+    assert_eq!(fired[0]["args"]["B"]["UserId"], "<subject>");
+    assert_eq!(
+        fired[0]["args"]["C"]["Username"],
+        common::plain_username("hookact"),
+        "the actor is the remover"
+    );
+
+    // 5. A team join. `AddTeamMember` passes an **empty** requestor, so `UserHasJoinedTeam`'s
+    //    actor is nil whoever asked — and a nil pointer is a field gob omits entirely.
+    let team_body = |user: &str, team: &str| {
+        Some(
+            serde_json::to_vec(&serde_json::json!({ "team_id": team, "user_id": user }))
+                .expect("a body"),
+        )
+    };
+    let join = |team: &str| {
+        (
+            (
+                format!("/api/v4/teams/{team}/members"),
+                team_body(&go_user.id, team),
+            ),
+            (
+                format!("/api/v4/teams/{team}/members"),
+                team_body(&rs_user.id, team),
+            ),
+        )
+    };
+    let (go_call, rust_call) = join(&join_team);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a team member");
+    let fired = pair.hooks("a team join").await;
+    assert_eq!(
+        &names(&fired)[..2],
+        ["TeamMemberWillBeAdded", "UserHasJoinedTeam"],
+        "Go's order, and the whole sequence was {:?}",
+        names(&fired)
+    );
+    assert_eq!(fired[0]["args"]["B"]["TeamId"], join_team);
+    assert_eq!(fired[0]["args"]["B"]["UserId"], "<subject>");
+    assert_eq!(
+        fired[1]["args"]["C"],
+        Json::Null,
+        "AddTeamMember's requestor is empty, so the actor is nil and gob omits it"
+    );
+
+    // 6. A refused join.
+    let (go_call, rust_call) = join(&reject_team);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a team join the plugin refused",
+    );
+    assert_eq!(gb["id"], "app.team.join_user_to_team.rejected_by_plugin");
+    let fired = pair.hooks("a refused team join").await;
+    assert_eq!(names(&fired), ["TeamMemberWillBeAdded"]);
+    pair.no_more_hooks("a refused team join writes nothing")
+        .await;
+
+    // 7. A replacement on the team side, the same shape as 3.
+    let (go_call, rust_call) = join(&admin_team);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a team member the plugin promoted");
+    assert_eq!(gb["scheme_admin"], true, "the merge kept the plugin's flag");
+    assert_eq!(gb["roles"], "team_user team_admin");
+    pair.hooks("a promoted team join").await;
+
+    // 8. A team departure. `UserHasLeftTeam` is the first statement of
+    //    `postProcessTeamMemberLeave`, so it fires before the three writes that can fail it.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &actor_token,
+            (
+                format!("/api/v4/teams/{join_team}/members/{}", go_user.id),
+                None,
+            ),
+            (
+                format!("/api/v4/teams/{join_team}/members/{}", rs_user.id),
+                None,
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("a team departure").await;
+    assert!(
+        names(&fired).contains(&"UserHasLeftTeam".to_owned()),
+        "the departure fired {:?}",
+        names(&fired)
+    );
+    let left = fired
+        .iter()
+        .find(|e| e["hook"] == "UserHasLeftTeam")
+        .expect("the hook");
+    assert_eq!(left["args"]["B"]["TeamId"], join_team);
+    assert_eq!(left["args"]["B"]["UserId"], "<subject>");
+    assert_eq!(
+        left["args"]["C"]["Username"],
+        common::plain_username("hookact"),
+        "the actor is the requestor of the removal"
+    );
+
+    // 9. A rejoin. A deleted membership is **revived**, and `applyPreSaveHooks` runs on that
+    //    branch too (app/teams/teams.go:226) — after the member-count check, not before it. A
+    //    port that hung the hook off the insert alone passes every test above and silently stops
+    //    calling the plugin for the one case a plugin most wants: somebody coming back.
+    let (go_call, rust_call) = join(&join_team);
+    let ((gs, gb), (rs, rb)) = pair
+        .each(reqwest::Method::POST, &actor_token, go_call, rust_call)
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a revived team member");
+    let fired = pair.hooks("a team rejoin").await;
+    assert_eq!(
+        &names(&fired)[..2],
+        ["TeamMemberWillBeAdded", "UserHasJoinedTeam"],
+        "the revival path runs both, and the whole sequence was {:?}",
+        names(&fired)
+    );
+
+    drop(rust);
+    drop(go);
+    for id in [&channel, &reject_channel, &admin_channel, &leave_channel] {
+        common::delete_channel(&client, &admin, id).await;
+    }
 }
 
 /// The rendering the transcript is written in is a pure function of the value, so the

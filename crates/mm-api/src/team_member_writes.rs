@@ -74,6 +74,7 @@ pub async fn remove_team_member(
     State(state): State<AppState>,
     Path((team_id, user_id)): Path<(String, String)>,
     session: AuthenticatedSession,
+    request: Request,
 ) -> Response {
     if let Err(err) = require_id(&team_id, "team_id") {
         return err.into_response();
@@ -82,6 +83,7 @@ pub async fn remove_team_member(
         return err.into_response();
     }
 
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let self_removal = session.0.user_id == user_id;
     tracing::Span::current().record("self_removal", self_removal);
 
@@ -121,7 +123,7 @@ pub async fn remove_team_member(
 
     match state
         .app
-        .remove_user_from_team(&team_id, &user_id, &session.0.user_id)
+        .remove_user_from_team(&team_id, &user_id, &session.0.user_id, &hook_ctx)
         .await
     {
         Ok(()) => status_ok(),
@@ -356,6 +358,7 @@ pub async fn add_team_member(
     }
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -446,7 +449,7 @@ pub async fn add_team_member(
 
     let mut created = match state
         .app
-        .add_team_member(&member.team_id, &member.user_id)
+        .add_team_member(&member.team_id, &member.user_id, &hook_ctx)
         .await
     {
         Ok(created) => created,
@@ -517,7 +520,11 @@ pub async fn add_user_to_team_from_invite(
 
     match state
         .app
-        .add_user_to_team_by_invite_id(&invite_id, &session.0.user_id)
+        .add_user_to_team_by_invite_id(
+            &invite_id,
+            &session.0.user_id,
+            &crate::plugin_context::hook_context_of(&request, Some(&session.0)),
+        )
         .await
     {
         Ok((_team, member)) => encoded(StatusCode::CREATED, &member, "addUserToTeamFromInvite"),
@@ -565,6 +572,7 @@ pub async fn add_team_members(
     }
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -631,7 +639,7 @@ pub async fn add_team_members(
 
     let mut results = match state
         .app
-        .add_team_members(&team_id, &user_ids, &session.0.user_id, graceful)
+        .add_team_members(&team_id, &user_ids, &session.0.user_id, graceful, &hook_ctx)
         .await
     {
         Ok(results) => results,

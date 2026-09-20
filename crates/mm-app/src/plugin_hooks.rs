@@ -38,8 +38,11 @@
 
 use std::sync::Arc;
 
+use mm_model::channel_member::ChannelMember;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
 use mm_model::reaction::Reaction;
+use mm_model::team_member::TeamMember;
+use mm_model::user::User;
 use mm_model::utils::AppError;
 use mm_plugin::rpc::{HooksClient, hook_id, json_to_interface};
 use mm_plugin::wire::plugin as wire_plugin;
@@ -130,22 +133,172 @@ fn props_from_wire(props: &wire_model::StringInterface) -> mm_model::utils::Stri
     out
 }
 
+/// A `model.StringMap` as gob sends it.
+///
+/// `mm-model` models Go's nil map as `None`, and gob omits an empty map as readily as a nil one,
+/// so the two are indistinguishable once they cross — which is why [`channel_member_from_wire`]
+/// and [`team_member_from_wire`] take the caller's value back when what returned is empty.
+fn string_map_to_wire(map: Option<&mm_model::utils::StringMap>) -> wire_model::StringMap {
+    map.into_iter()
+        .flatten()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// The reverse: a gob `StringMap` (a `HashMap`) into `mm-model`'s ordered one.
+fn string_map_from_wire(map: &wire_model::StringMap) -> mm_model::utils::StringMap {
+    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+/// A user as gob sends it, all 34 fields of `model.User` (user.go:86).
+///
+/// **Nothing is sanitised here, because Go sanitises nothing at these call sites.** `Password`,
+/// `AuthData` and `MfaSecret` are ordinary gob fields — they carry `json:"-"`-ish JSON tags but
+/// gob matches by Go field name (docs/PLUGIN_PLAN.md, §2) — and `AddChannelMember`,
+/// `removeUserFromChannel`, `JoinUserToTeam` and `postProcessTeamMemberLeave` all hand the hook
+/// `a.GetUser(...)`, which is the raw store row. The one user that *is* sanitised is
+/// `UserHasBeenCreated`'s, and its `Sanitize` happens in `userService.createUser`, before the
+/// hook and above this conversion.
+pub fn user_to_wire(user: &User) -> wire_model::User {
+    wire_model::User {
+        id: user.id.clone(),
+        create_at: user.create_at,
+        update_at: user.update_at,
+        delete_at: user.delete_at,
+        username: user.username.clone(),
+        password: user.password.clone(),
+        auth_data: user.auth_data.clone(),
+        auth_service: user.auth_service.clone(),
+        email: user.email.clone(),
+        email_verified: user.email_verified,
+        nickname: user.nickname.clone(),
+        first_name: user.first_name.clone(),
+        last_name: user.last_name.clone(),
+        position: user.position.clone(),
+        roles: user.roles.clone(),
+        allow_marketing: user.allow_marketing,
+        props: string_map_to_wire(user.props.as_ref()),
+        notify_props: string_map_to_wire(user.notify_props.as_ref()),
+        last_password_update: user.last_password_update,
+        last_picture_update: user.last_picture_update,
+        failed_attempts: user.failed_attempts,
+        locale: user.locale.clone(),
+        timezone: string_map_to_wire(user.timezone.as_ref()),
+        mfa_active: user.mfa_active,
+        mfa_secret: user.mfa_secret.clone(),
+        remote_id: user.remote_id.clone(),
+        last_activity_at: user.last_activity_at,
+        is_bot: user.is_bot,
+        bot_description: user.bot_description.clone(),
+        bot_last_icon_update: user.bot_last_icon_update,
+        terms_of_service_id: user.terms_of_service_id.clone(),
+        terms_of_service_create_at: user.terms_of_service_create_at,
+        disable_welcome_email: user.disable_welcome_email,
+        last_login: user.last_login,
+        mfa_used_timestamps: user.mfa_used_timestamps.clone().unwrap_or_default(),
+    }
+}
+
+/// A channel member as gob sends it, field for field (`model.ChannelMember`,
+/// channel_member.go:22). `NotifyProps` is one of the fields tagged `json:"-"` that gob still
+/// carries (docs/PLUGIN_PLAN.md, §2).
+pub fn channel_member_to_wire(member: &ChannelMember) -> wire_model::ChannelMember {
+    wire_model::ChannelMember {
+        channel_id: member.channel_id.clone(),
+        user_id: member.user_id.clone(),
+        roles: member.roles.clone(),
+        last_viewed_at: member.last_viewed_at,
+        msg_count: member.msg_count,
+        mention_count: member.mention_count,
+        mention_count_root: member.mention_count_root,
+        urgent_mention_count: member.urgent_mention_count,
+        msg_count_root: member.msg_count_root,
+        notify_props: string_map_to_wire(member.notify_props.as_ref()),
+        last_update_at: member.last_update_at,
+        scheme_guest: member.scheme_guest,
+        scheme_user: member.scheme_user,
+        scheme_admin: member.scheme_admin,
+        explicit_roles: member.explicit_roles.clone(),
+        auto_translation_disabled: member.auto_translation_disabled,
+    }
+}
+
+/// A member a `ChannelMemberWillBeAdded` plugin answered with, back into the model.
+///
+/// `source` is the member the call was made with, for the same reason as
+/// [`post_from_wire`]: gob cannot tell an empty map from an absent one, and a member whose
+/// `NotifyProps` came back empty has to keep the caller's — an empty one would fail
+/// `ChannelMember::is_valid` inside the store, turning every add into a 500.
+pub fn channel_member_from_wire(
+    wire: &wire_model::ChannelMember,
+    source: &ChannelMember,
+) -> ChannelMember {
+    ChannelMember {
+        channel_id: wire.channel_id.clone(),
+        user_id: wire.user_id.clone(),
+        roles: wire.roles.clone(),
+        last_viewed_at: wire.last_viewed_at,
+        msg_count: wire.msg_count,
+        mention_count: wire.mention_count,
+        mention_count_root: wire.mention_count_root,
+        urgent_mention_count: wire.urgent_mention_count,
+        msg_count_root: wire.msg_count_root,
+        notify_props: if wire.notify_props.is_empty() {
+            source.notify_props.clone()
+        } else {
+            Some(string_map_from_wire(&wire.notify_props))
+        },
+        last_update_at: wire.last_update_at,
+        scheme_guest: wire.scheme_guest,
+        scheme_user: wire.scheme_user,
+        scheme_admin: wire.scheme_admin,
+        explicit_roles: wire.explicit_roles.clone(),
+        auto_translation_disabled: wire.auto_translation_disabled,
+    }
+}
+
+/// A team member as gob sends it (`model.TeamMember`, team_member.go:14). `CreateAt` is another
+/// `json:"-"` field gob carries.
+pub fn team_member_to_wire(member: &TeamMember) -> wire_model::TeamMember {
+    wire_model::TeamMember {
+        team_id: member.team_id.clone(),
+        user_id: member.user_id.clone(),
+        roles: member.roles.clone(),
+        delete_at: member.delete_at,
+        scheme_guest: member.scheme_guest,
+        scheme_user: member.scheme_user,
+        scheme_admin: member.scheme_admin,
+        explicit_roles: member.explicit_roles.clone(),
+        create_at: member.create_at,
+    }
+}
+
+/// A member a `TeamMemberWillBeAdded` plugin answered with. Every field is a scalar, so unlike
+/// [`channel_member_from_wire`] there is nothing gob's omission rule can hide.
+pub fn team_member_from_wire(wire: &wire_model::TeamMember) -> TeamMember {
+    TeamMember {
+        team_id: wire.team_id.clone(),
+        user_id: wire.user_id.clone(),
+        roles: wire.roles.clone(),
+        delete_at: wire.delete_at,
+        scheme_guest: wire.scheme_guest,
+        scheme_user: wire.scheme_user,
+        scheme_admin: wire.scheme_admin,
+        explicit_roles: wire.explicit_roles.clone(),
+        create_at: wire.create_at,
+    }
+}
+
 /// A post as gob sends it, field for field.
 ///
 /// **Not** `Metadata`: every call site passes [`Post::for_plugin`] first, which nils it
 /// (`model/post.go:1355`), and no hook site here reads a replacement's metadata back — see
 /// [`App::run_guarded_message_will_be_posted`].
 ///
-/// **Not** `Participants` either. Go sends it, but it is nil on every path that reaches these
-/// hooks (only the thread reads fill it), and converting it means the 34-field `model.User`,
-/// which belongs to the session that ports `UserHasJoinedChannel` and its actor argument.
+/// `Participants` **is** sent now that [`user_to_wire`] exists. It is nil on every path that
+/// reaches these hooks — only the thread reads fill it — so this changes no byte any plugin has
+/// seen; it removes the silent gap rather than a live divergence.
 pub fn post_to_wire(post: &Post) -> wire_model::Post {
-    if post.participants.as_ref().is_some_and(|p| !p.is_empty()) {
-        tracing::warn!(
-            post_id = %post.id,
-            "a post reaching a plugin hook carried participants; they are not sent"
-        );
-    }
     wire_model::Post {
         id: post.id.clone(),
         create_at: post.create_at,
@@ -169,7 +322,12 @@ pub fn post_to_wire(post: &Post) -> wire_model::Post {
         remote_id: post.remote_id.clone(),
         reply_count: post.reply_count,
         last_reply_at: post.last_reply_at,
-        participants: Vec::new(),
+        participants: post
+            .participants
+            .iter()
+            .flatten()
+            .map(user_to_wire)
+            .collect(),
         is_following: post.is_following,
         metadata: None,
     }
@@ -297,6 +455,24 @@ fn guard_hook_failed_error(plugin_id: &str, caller: &str) -> Box<AppError> {
 ///
 /// Not a translation key and not a parameter — a client sees the plugin's own text in the error's
 /// `id` and, since no bundle has that key, in its `message` too.
+/// The rejection the **membership** hooks build, which is the opposite arrangement to
+/// [`rejection_error`]: a real translation key with the reason as a `Reason` parameter
+/// (guarded_hooks.go:249, team.go:813). A client of a translating server therefore reads
+/// "Adding channel member rejected by plugin: <reason>" here, and the plugin's bare text in the
+/// error *id* on the post paths.
+fn member_rejection_error(caller: &str, id: &str, reason: &str) -> Box<AppError> {
+    AppError::boxed(
+        caller,
+        id,
+        Some(std::collections::HashMap::from([(
+            "Reason".to_owned(),
+            serde_json::Value::String(reason.to_owned()),
+        )])),
+        String::new(),
+        400,
+    )
+}
+
 fn rejection_error(reason: &str, caller: &str) -> Box<AppError> {
     let id = if reason == DISMISS_POST_ERROR {
         DISMISS_POST_ERROR.to_owned()
@@ -683,5 +859,272 @@ impl App {
                 }
             },
         );
+    }
+
+    /// Port of `runGuardedChannelMemberWillBeAdded` (guarded_hooks.go:239) — hook 49,
+    /// `ChannelMemberWillBeAdded`, between the new member's flags and `SaveMember`.
+    ///
+    /// **A rejection is `reason != ""`**, as in
+    /// [`App::run_guarded_message_will_be_posted`] and unlike phase A of
+    /// [`App::run_guarded_message_will_be_updated`] — but the error is a real translation key
+    /// with a `Reason` **parameter**, `app.channel.add_user.to.channel.rejected_by_plugin`, not
+    /// the reason concatenated into the id. The two families of rejecting hook disagree about
+    /// that, and a client sees the difference.
+    ///
+    /// Go's three caller names are not the same string: `resolveGuards` is told
+    /// `AddUserToChannel` and the rejection uses it, while phase B's two failures say
+    /// `addUserToChannel`, lower-case. `Where` is `json:"-"`, so this is invisible on the wire
+    /// and kept because it is what the source says.
+    pub(crate) async fn run_guarded_channel_member_will_be_added(
+        &self,
+        ctx: &HookContext,
+        channel_id: &str,
+        member: ChannelMember,
+    ) -> Result<ChannelMember, Box<AppError>> {
+        const CALLER: &str = "AddUserToChannel";
+        /// Phase B's caller name, which Go spells with a lower-case first letter.
+        const PHASE_B_CALLER: &str = "addUserToChannel";
+
+        // See [`App::run_guarded_message_will_be_posted`]: under the Go host, nothing at all —
+        // not even the guard read, because the guards' plugins live in the other process.
+        if !self.plugin_host().hosted() {
+            return Ok(member);
+        }
+
+        let (guards, rejected) = self.resolve_guards(channel_id, CALLER).await;
+        if let Some(err) = rejected {
+            return Err(err);
+        }
+        let Some(environment) = self.hook_environment() else {
+            return Ok(member);
+        };
+
+        let mut member = member;
+
+        // Phase A: `RunMultiHookExcluding`, fail-open, over the plugins that do not guard this
+        // channel.
+        for (hooks, manifest) in
+            environment.hooks_implementing(hook_id::CHANNEL_MEMBER_WILL_BE_ADDED)
+        {
+            if guards.contains(&manifest.id) {
+                continue;
+            }
+            let returns = hooks
+                .channel_member_will_be_added(wire_plugin::Z_ChannelMemberWillBeAddedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(channel_member_to_wire(&member))),
+                })
+                .await;
+            if !returns.b.is_empty() {
+                return Err(member_rejection_error(
+                    CALLER,
+                    "app.channel.add_user.to.channel.rejected_by_plugin",
+                    &returns.b,
+                ));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                member = channel_member_from_wire(replacement, &member);
+            }
+        }
+
+        // Phase B: each guard claimant in `PluginId` order, fail-closed.
+        for plugin_id in &guards {
+            let Ok(hooks) = environment.hooks_for_plugin(plugin_id) else {
+                tracing::error!(
+                    error_id = "guard_plugin_inactive",
+                    channel_id,
+                    caller = PHASE_B_CALLER,
+                    plugin_ids = ?[plugin_id],
+                    "Channel guard rejected operation: claiming plugin is not active",
+                );
+                return Err(inactive_guard_error(PHASE_B_CALLER));
+            };
+            let (returns, rpc_err) = hooks
+                .channel_member_will_be_added_with_rpc_err(
+                    wire_plugin::Z_ChannelMemberWillBeAddedArgs {
+                        a: ctx.boxed_wire(),
+                        b: Some(Box::new(channel_member_to_wire(&member))),
+                    },
+                )
+                .await;
+            if rpc_err.is_some() {
+                return Err(guard_hook_failed_error(plugin_id, PHASE_B_CALLER));
+            }
+            if !returns.b.is_empty() {
+                return Err(member_rejection_error(
+                    CALLER,
+                    "app.channel.add_user.to.channel.rejected_by_plugin",
+                    &returns.b,
+                ));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                member = channel_member_from_wire(replacement, &member);
+            }
+        }
+
+        Ok(member)
+    }
+
+    /// `TeamMemberWillBeAdded` (hook 50) — team.go:800, inside the `preSaveHook` that
+    /// `TeamService.JoinUserToTeam` applies immediately before `SaveMember` **and** before the
+    /// revival `UpdateMember` (app/teams/teams.go:199, :226).
+    ///
+    /// **A plain `RunMultiHook`, not the guarded dispatcher.** Channel guards guard channels; a
+    /// team has none, so Go calls this one directly and a plugin that fails in transport is
+    /// simply skipped, where `ChannelMemberWillBeAdded` would refuse the request.
+    pub(crate) async fn run_team_member_will_be_added(
+        &self,
+        ctx: &HookContext,
+        member: TeamMember,
+    ) -> Result<TeamMember, Box<AppError>> {
+        const CALLER: &str = "JoinUserToTeam";
+
+        let Some(environment) = self.hook_environment() else {
+            return Ok(member);
+        };
+        let mut member = member;
+        for (hooks, _manifest) in environment.hooks_implementing(hook_id::TEAM_MEMBER_WILL_BE_ADDED)
+        {
+            let returns = hooks
+                .team_member_will_be_added(wire_plugin::Z_TeamMemberWillBeAddedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(team_member_to_wire(&member))),
+                })
+                .await;
+            if !returns.b.is_empty() {
+                return Err(member_rejection_error(
+                    CALLER,
+                    "app.team.join_user_to_team.rejected_by_plugin",
+                    &returns.b,
+                ));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                member = team_member_from_wire(replacement);
+            }
+        }
+        Ok(member)
+    }
+
+    /// `UserHasJoinedChannel` (hook 9) — channel.go:2044, in `AddChannelMember`, after the
+    /// `channel.IsSpace()` early return and **before** the join or add-to-channel system post.
+    ///
+    /// `actor` is `userRequestor`, which is `nil` for a self-add — Go's `opts.UserRequestorID ==
+    /// ""`. The other call site (`JoinChannel`, channel.go:2764) always passes `nil`, and it is
+    /// not reachable here because `App::join_channel` is not ported; see [D-932].
+    pub(crate) fn user_has_joined_channel(
+        &self,
+        ctx: &HookContext,
+        member: &ChannelMember,
+        actor: Option<&User>,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let context = ctx.boxed_wire();
+        let member = channel_member_to_wire(member);
+        let actor = actor.map(|u| Box::new(user_to_wire(u)));
+        spawn_multi_hook(
+            environment,
+            hook_id::USER_HAS_JOINED_CHANNEL,
+            move |hooks| {
+                let args = wire_plugin::Z_UserHasJoinedChannelArgs {
+                    a: context.clone(),
+                    b: Some(Box::new(member.clone())),
+                    c: actor.clone(),
+                };
+                async move {
+                    hooks.user_has_joined_channel(args).await;
+                }
+            },
+        );
+    }
+
+    /// `UserHasLeftChannel` (hook 10) — channel.go:3087, in `removeUserFromChannel`, after the
+    /// `channel.IsSpace()` early return and **before** the two `user_removed` events.
+    ///
+    /// `actor` is the remover, loaded with `a.GetUser(removerUserId)` whose error Go **discards**
+    /// — so a remover id that no longer resolves gives a nil actor rather than a failed request.
+    /// A self-removal through the API still has a remover id, so nil here means the caller passed
+    /// none (the local-mode route, and the channel sweep a team move runs).
+    pub(crate) fn user_has_left_channel(
+        &self,
+        ctx: &HookContext,
+        member: &ChannelMember,
+        actor: Option<&User>,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let context = ctx.boxed_wire();
+        let member = channel_member_to_wire(member);
+        let actor = actor.map(|u| Box::new(user_to_wire(u)));
+        spawn_multi_hook(environment, hook_id::USER_HAS_LEFT_CHANNEL, move |hooks| {
+            let args = wire_plugin::Z_UserHasLeftChannelArgs {
+                a: context.clone(),
+                b: Some(Box::new(member.clone())),
+                c: actor.clone(),
+            };
+            async move {
+                hooks.user_has_left_channel(args).await;
+            }
+        });
+    }
+
+    /// `UserHasJoinedTeam` (hook 11) — team.go:884, after the session-cache clear and **before**
+    /// the `added_to_team` websocket event.
+    ///
+    /// `actor` is `a.GetUser(userRequestorId)` with its error discarded, and nil when the join
+    /// carried no requestor — which is every self-join and every invite-id join (team.go:746
+    /// passes `""`).
+    pub(crate) fn user_has_joined_team(
+        &self,
+        ctx: &HookContext,
+        member: &TeamMember,
+        actor: Option<&User>,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let context = ctx.boxed_wire();
+        let member = team_member_to_wire(member);
+        let actor = actor.map(|u| Box::new(user_to_wire(u)));
+        spawn_multi_hook(environment, hook_id::USER_HAS_JOINED_TEAM, move |hooks| {
+            let args = wire_plugin::Z_UserHasJoinedTeamArgs {
+                a: context.clone(),
+                b: Some(Box::new(member.clone())),
+                c: actor.clone(),
+            };
+            async move {
+                hooks.user_has_joined_team(args).await;
+            }
+        });
+    }
+
+    /// `UserHasLeftTeam` (hook 12) — team.go:1295, the **first** statement of
+    /// `postProcessTeamMemberLeave`, before the user is re-read and before the three writes that
+    /// can fail the request. So a removal whose sidebar clear 500s has still told every plugin
+    /// the user left.
+    pub(crate) fn user_has_left_team(
+        &self,
+        ctx: &HookContext,
+        member: &TeamMember,
+        actor: Option<&User>,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let context = ctx.boxed_wire();
+        let member = team_member_to_wire(member);
+        let actor = actor.map(|u| Box::new(user_to_wire(u)));
+        spawn_multi_hook(environment, hook_id::USER_HAS_LEFT_TEAM, move |hooks| {
+            let args = wire_plugin::Z_UserHasLeftTeamArgs {
+                a: context.clone(),
+                b: Some(Box::new(member.clone())),
+                c: actor.clone(),
+            };
+            async move {
+                hooks.user_has_left_team(args).await;
+            }
+        });
     }
 }

@@ -457,6 +457,7 @@ impl App {
         syncable_type: &GroupSyncableType,
         group_id: &str,
         sync_roles: bool,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) {
         let group = match self.get_group(group_id).await {
             Ok(group) => group,
@@ -496,13 +497,19 @@ impl App {
         match syncable_type.as_str() {
             GroupSyncableType::TEAM => {
                 params.scoped_team_id = Some(syncable_id.to_owned());
-                if let Err(err) = self.create_default_team_memberships(&params).await {
+                if let Err(err) = self
+                    .create_default_team_memberships(&params, hook_ctx)
+                    .await
+                {
                     tracing::warn!(error = %err, "Error creating default team memberships");
                 }
             }
             GroupSyncableType::CHANNEL => {
                 params.scoped_channel_id = Some(syncable_id.to_owned());
-                if let Err(err) = self.create_default_channel_memberships(&params).await {
+                if let Err(err) = self
+                    .create_default_channel_memberships(&params, hook_ctx)
+                    .await
+                {
                     tracing::warn!(error = %err, "Error creating default channel memberships");
                 }
             }
@@ -516,11 +523,12 @@ impl App {
         &self,
         syncable_id: &str,
         syncable_type: &GroupSyncableType,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) {
         match syncable_type.as_str() {
             GroupSyncableType::TEAM => {
                 if let Err(err) = self
-                    .delete_group_constrained_team_memberships(Some(syncable_id))
+                    .delete_group_constrained_team_memberships(Some(syncable_id), hook_ctx)
                     .await
                 {
                     tracing::warn!(error = %err, "Error deleting group constrained team memberships");
@@ -528,7 +536,7 @@ impl App {
             }
             GroupSyncableType::CHANNEL => {
                 if let Err(err) = self
-                    .delete_group_constrained_channel_memberships(Some(syncable_id))
+                    .delete_group_constrained_channel_memberships(Some(syncable_id), hook_ctx)
                     .await
                 {
                     tracing::warn!(error = %err, "Error deleting group constrained channel memberships");
@@ -544,6 +552,7 @@ impl App {
     async fn create_default_team_memberships(
         &self,
         params: &CreateDefaultMembershipParams,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), String> {
         let team_members = self
             .store()
@@ -568,7 +577,7 @@ impl App {
                 continue;
             }
             match self
-                .add_team_member(&user_team.team_id, &user_team.user_id)
+                .add_team_member(&user_team.team_id, &user_team.user_id, hook_ctx)
                 .await
             {
                 Ok(_) => {
@@ -597,6 +606,7 @@ impl App {
     async fn create_default_channel_memberships(
         &self,
         params: &CreateDefaultMembershipParams,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), String> {
         let channel_members = self
             .store()
@@ -647,7 +657,7 @@ impl App {
             // First add user to team
             if team_member.is_none() {
                 match self
-                    .add_team_member(&channel.team_id, &user_channel.user_id)
+                    .add_team_member(&channel.team_id, &user_channel.user_id, hook_ctx)
                     .await
                 {
                     Ok(_) => {
@@ -670,7 +680,7 @@ impl App {
                 ..ChannelMemberOpts::default()
             };
             match self
-                .add_channel_member(&user_channel.user_id, &channel, &opts)
+                .add_channel_member(&user_channel.user_id, &channel, &opts, hook_ctx)
                 .await
             {
                 Ok(MemberWrite::Done(_)) => {
@@ -701,6 +711,7 @@ impl App {
     async fn delete_group_constrained_team_memberships(
         &self,
         team_id: Option<&str>,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), String> {
         let team_members = self
             .store()
@@ -714,7 +725,7 @@ impl App {
         let mut errors = SyncErrors::new();
         for user_team in &team_members {
             match self
-                .remove_user_from_team(&user_team.team_id, &user_team.user_id, "")
+                .remove_user_from_team(&user_team.team_id, &user_team.user_id, "", hook_ctx)
                 .await
             {
                 Ok(()) => {
@@ -733,6 +744,7 @@ impl App {
     async fn delete_group_constrained_channel_memberships(
         &self,
         channel_id: Option<&str>,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(), String> {
         let channel_members = self
             .store()
@@ -755,7 +767,7 @@ impl App {
                 }
             };
             match self
-                .remove_user_from_channel(&user_channel.user_id, "", &channel)
+                .remove_user_from_channel(&user_channel.user_id, "", &channel, hook_ctx)
                 .await
             {
                 Ok(MemberWrite::Done(())) => {

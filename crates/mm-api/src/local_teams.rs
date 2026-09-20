@@ -427,8 +427,9 @@ async fn local_get_team_members_by_ids(
 async fn local_remove_team_member(
     state: State<AppState>,
     path: UrlPath<(String, String)>,
+    request: Request,
 ) -> Response {
-    team_member_writes::remove_team_member(state, path, local_session()).await
+    team_member_writes::remove_team_member(state, path, local_session(), request).await
 }
 
 /// Port of `localCreateTeam` (team_local.go:293) — `POST /api/v4/teams` over the socket.
