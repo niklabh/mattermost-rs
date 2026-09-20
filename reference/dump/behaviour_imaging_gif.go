@@ -566,6 +566,28 @@ func craftedGIFs() []namedFile {
 		g.trailer()
 		add("multi_subblock", g.bytes())
 	}
+	// Saturated at the maximum code width, with no clear code anywhere.
+	//
+	// compress/lzw's *encoder* emits a clear code the moment its table fills, so a stream it
+	// produced leaves the decoder at `hi == overflow && width == maxWidth` for exactly one code.
+	// This one never clears: after 3839 literal codes the width reaches 12 and the table stops
+	// growing, and the decoder then spends 36000 codes in the branch that sets `last` back to
+	// `decoderInvalidCode` and undoes the `hi++`. A decoder that does not undo it walks `hi` past
+	// the 4096-entry table and, eventually, past a uint16 — which no shorter stream can show,
+	// because every code is readable at width 12 and so nothing is ever "invalid" there.
+	{
+		const dx, dy = 200, 200
+		pix := indexPlane(dx, dy, 256, 933)
+		e := newLZWEmit(8)
+		var g gifWriter
+		g.header("GIF89a", dx, dy, 7, 0, 0)
+		g.blob(gct256)
+		g.imageDescriptor(0, 0, dx, dy, -1, false)
+		g.raw(8)
+		g.subBlocks(checkLZW(8, e.literals(pix, true), pix))
+		g.trailer()
+		add("lzw_saturated_max_width", g.bytes())
+	}
 	// Long enough for the LZW code width to reach its 12-bit maximum and stay there.
 	{
 		pix := indexPlane(128, 128, 256, 931)
@@ -652,6 +674,8 @@ func craftedGIFs() []namedFile {
 	gceFrame("gce_delay", 1, 0x1234, -1, 4, 0)
 	gceFrame("gce_transparent_0", 0, 5, 0, 4, 0)
 	gceFrame("gce_transparent_3", 0, 5, 3, 4, 0)
+	// ti == len(palette): the first index the enlarging branch has to cover.
+	gceFrame("gce_transparent_at_len", 0, 5, 4, 4, 0)
 	gceFrame("gce_transparent_oob_7", 0, 5, 7, 4, 0)
 	gceFrame("gce_transparent_oob_255", 0, 5, 255, 4, 0)
 	gceFrame("gce_bad_size", 0, 0, -1, 5, 0)
