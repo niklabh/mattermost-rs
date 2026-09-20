@@ -185,6 +185,45 @@ fn corpus() -> Vec<(&'static str, &'static str, Vec<u8>)> {
             "mmrs-parity-img-flip.jpg",
             corpus_file("jpeg", "flip_330"),
         ),
+        // GIF and BMP, served since `goimage::gif` and `goimage::bmp` landed. The mime table
+        // calls a `.gif` `image/gif`, which is the one branch of `preprocessImage` that decodes
+        // the whole file and clears `has_preview_image` — so the animated case exercises both
+        // that and the fact that `image.Decode` yields frame 0 alone.
+        (
+            "gif photo",
+            "mmrs-parity-img-photo.gif",
+            corpus_file("pipeline", "gif_1400x900"),
+        ),
+        (
+            "animated gif",
+            "mmrs-parity-img-anim.gif",
+            corpus_file("pipeline", "gif_animated_300x200"),
+        ),
+        (
+            "interlaced gif",
+            "mmrs-parity-img-inter.gif",
+            corpus_file("gif", "crafted_interlaced_17"),
+        ),
+        (
+            "24-bit bmp photo",
+            "mmrs-parity-img-photo.bmp",
+            corpus_file("pipeline", "bmp_1400x900_24"),
+        ),
+        (
+            "8-bit gray bmp",
+            "mmrs-parity-img-gray.bmp",
+            corpus_file("pipeline", "bmp_2000x120_gray"),
+        ),
+        (
+            "1-bit paletted bmp",
+            "mmrs-parity-img-1bpp.bmp",
+            corpus_file("bmp", "bmp_1bpp.bmp"),
+        ),
+        (
+            "32-bit bmp with alpha",
+            "mmrs-parity-img-alpha.bmp",
+            corpus_file("bmp", "crafted_baseline_32_topdown"),
+        ),
     ]
 }
 

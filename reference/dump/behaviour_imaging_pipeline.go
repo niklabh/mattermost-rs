@@ -238,6 +238,15 @@ func imagingPipelineStage() (map[string]any, error) {
 		"crafted_baseline_8_bottomup", "crafted_paletted_1bpp_33x2_topdown",
 	})
 
+	corpusSlice("tiff", named(tiffCorpus()), []string{
+		"video-001.tiff", "video-001-gray.tiff", "video-001-paletted.tiff",
+		"video-001-16bit.tiff", "video-001-tile-64x64.tiff",
+		"blue-purple-pink.lzwcompressed.tiff", "bw-packbits.tiff", "bw-uncompressed.tiff",
+		"bw-gopher_ccittGroup3.tiff", "bw-gopher_ccittGroup4.tiff",
+		"tiled-nrgba16.tiff", "tiled-rgba8.tiff", "tiled-paletted1.tiff", "tiled-gray16.tiff",
+		"crafted_rgb8_be", "crafted_predictor_rgb16", "crafted_one_by_one_rgb",
+	})
+
 	exif, eerr := imagingEXIFStage()
 	if eerr != nil {
 		return nil, eerr

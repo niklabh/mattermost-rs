@@ -462,7 +462,7 @@ impl App {
         };
 
         match goimage::format::sniff(&head) {
-            Some("png" | "jpeg") | None => Ok(()),
+            Some("png" | "jpeg" | "gif" | "bmp") | None => Ok(()),
             Some(_) => Err(PrepareError::Unreproducible(
                 "TIFF and WebP uploads are decoded by Go",
             )),

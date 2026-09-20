@@ -54,7 +54,7 @@ impl App {
     /// `brand/<2006-01-02T15:04:05>.png` in the server's local time (both failures only logged);
     /// and the write (500 `save_image`).
     ///
-    /// A TIFF or WebP is [`PrepareError::Unreproducible`] — handed to Go before the
+    /// A WebP is [`PrepareError::Unreproducible`] — handed to Go before the
     /// archive and the write, so a forwarded upload has not touched the backend ([D-411]).
     pub async fn save_brand_image(&self, data: &[u8]) -> Result<(), PrepareError> {
         use crate::image_pipeline::{self, PipelineError};
@@ -78,7 +78,7 @@ impl App {
         match goimage::format::decode_config(data) {
             Err(goimage::format::DecodeError::NotPorted(_)) => {
                 return Err(PrepareError::Unreproducible(
-                    "TIFF and WebP brand images are decoded by Go",
+                    "WebP brand images are decoded by Go",
                 ));
             }
             Err(goimage::format::DecodeError::Go(err)) => {
@@ -126,7 +126,7 @@ impl App {
             }
             Err(PipelineError::NotPorted(_)) => {
                 return Err(PrepareError::Unreproducible(
-                    "TIFF and WebP brand images are decoded by Go",
+                    "WebP brand images are decoded by Go",
                 ));
             }
             Err(err) => {
@@ -242,15 +242,15 @@ mod go_parity {
     /// the archive `MoveFile` and before the `WriteFile`, so a forwarded upload has left nothing
     /// in the backend for Go to trip over. (The store is unreachable: a write would fail loudly.)
     ///
-    /// The bytes are a TIFF header rather than the GIF this test used to send: GIF and BMP are
-    /// decoded here now, so a GIF reaches the store and the test would be measuring the store.
+    /// The bytes are a WebP header rather than the GIF this test used to send: this route needs
+    /// no EXIF walk, so everything but WebP is decoded here now and a GIF would reach the store.
     #[tokio::test]
     async fn an_unported_format_forwards_without_writing() {
         let app = crate::App::with_config(unreachable_store(), crate::config::Config::default());
         let err = app
-            .save_brand_image(b"MM\x00\x2a\x00\x00\x00\x08")
+            .save_brand_image(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
             .await
-            .expect_err("a TIFF is Go's to decode");
+            .expect_err("a WebP is Go's to decode");
         assert!(
             matches!(err, PrepareError::Unreproducible(_)),
             "a configured server forwards rather than answering"

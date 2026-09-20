@@ -1430,7 +1430,7 @@ mod tests {
 #[cfg(test)]
 mod go_parity {
     use super::*;
-    use crate::testsupport::{b64, describe, fixture, sha};
+    use crate::testsupport::{b64, describe, fixture};
     use serde_json::{Value as Json, json};
 
     /// A ColorMap entry as the oracle's `paletteEntry` spells a `color.RGBA64`: its Go type, then
@@ -1454,22 +1454,6 @@ mod go_parity {
             ConfigModel::Nrgba64 => json!("nrgba64"),
             ConfigModel::Palette(p) => json!({ "palette": palette_json(p) }),
         }
-    }
-
-    /// `testsupport::describe` spells a palette entry only as `color.RGBA` or `color.NRGBA`; a
-    /// TIFF ColorMap is `color.RGBA64`, which the oracle falls back to `["%T", r, g, b, a]` for.
-    fn describe_tiff(m: &Image) -> Json {
-        let Image::Paletted(p) = m else {
-            return describe(m);
-        };
-        let b = m.bounds();
-        json!({
-            "rect": [b.min_x, b.min_y, b.max_x, b.max_y],
-            "type": "paletted",
-            "stride": p.pix.stride,
-            "pix_sha256": sha(&p.pix.pix),
-            "palette": palette_json(&p.palette),
-        })
     }
 
     /// Every file of the oracle's TIFF corpus through `image.DecodeConfig` and `image.Decode`:
@@ -1500,7 +1484,7 @@ mod go_parity {
 
             let image = match decode(&data) {
                 Ok(img) => {
-                    let mut d = describe_tiff(&img);
+                    let mut d = describe(&img);
                     d["format"] = json!("tiff");
                     d
                 }

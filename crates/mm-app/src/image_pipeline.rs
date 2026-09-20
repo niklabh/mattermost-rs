@@ -376,10 +376,18 @@ mod go_parity {
         }
     }
 
-    fn orientation(input: Input, format: &str) -> Json {
-        let o = get_image_orientation(input, format).expect("jpeg/png only in this corpus");
-        serde_json::json!({ "orientation": o.orientation, "err": o.err.is_some() })
+    /// `GetImageOrientation`'s answer, or `None` for a format whose EXIF walk is not ported —
+    /// in which case every caller of it forwards, and the rest of the case is not this port's
+    /// to answer either. Counted, so the gap shrinking is visible rather than silent.
+    fn orientation(input: Input, format: &str) -> Option<Json> {
+        let o = get_image_orientation(input, format).ok()?;
+        Some(serde_json::json!({ "orientation": o.orientation, "err": o.err.is_some() }))
     }
+
+    /// How many corpus cases the EXIF walk cannot answer, over both reader shapes. Every one is
+    /// a TIFF: `imagemeta`'s TIFF and WebP walks are unported, and the corpus has no WebP.
+    static UNREPRODUCIBLE_ORIENTATIONS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
 
     #[test]
     fn every_pipeline_case_matches_go() {
@@ -387,6 +395,7 @@ mod go_parity {
         let jpeg = fixture("jpeg");
         let gif = fixture("gif");
         let bmp = fixture("bmp");
+        let tiff = fixture("tiff");
         let exif = fixture("exif");
         let bytes_of = |c: &Json| -> Vec<u8> {
             let name = &c["name"];
@@ -396,6 +405,7 @@ mod go_parity {
                 "jpeg" => &jpeg["decode"],
                 "gif" => &gif["decode"],
                 "bmp" => &bmp["decode"],
+                "tiff" => &tiff["decode"],
                 "exif" => &exif["cases"],
                 other => panic!("{other}"),
             };
@@ -424,6 +434,13 @@ mod go_parity {
             }
         });
         assert!(cases.len() > 250, "{}", cases.len());
+        // Every TIFF stops at the orientation read; nothing else does. When `goimage::exif`
+        // grows the TIFF walk this becomes zero and the `else` arms above become unreachable.
+        assert_eq!(
+            UNREPRODUCIBLE_ORIENTATIONS.load(std::sync::atomic::Ordering::Relaxed),
+            17,
+            "cases whose EXIF walk is not ported"
+        );
     }
 
     fn run_case(c: &Json, data: Vec<u8>) {
@@ -443,7 +460,11 @@ mod go_parity {
                     ""
                 }
             };
-            let o_stream = orientation(Input::Stream(&data), format);
+            let Some(o_stream) = orientation(Input::Stream(&data), format) else {
+                UNREPRODUCIBLE_ORIENTATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                assert_eq!(format, "tiff", "{label}: only TIFF's walk is unported");
+                return;
+            };
             assert_eq!(
                 c["orientation_stream"], o_stream,
                 "{label} stream orientation"
@@ -460,7 +481,11 @@ mod go_parity {
                     ""
                 }
             };
-            let o_seek = orientation(Input::Seeker(&data), img_type);
+            let Some(o_seek) = orientation(Input::Seeker(&data), img_type) else {
+                UNREPRODUCIBLE_ORIENTATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                assert_eq!(img_type, "tiff", "{label}: only TIFF's walk is unported");
+                return;
+            };
             assert_eq!(
                 c["orientation_seeker"], o_seek,
                 "{label} seeker orientation"
@@ -570,15 +595,26 @@ mod go_parity {
         assert!(!exceeds_resolution(0, 4320, MAX_RES));
     }
 
+    /// WebP is the last format `image.Decode`'s registry recognises and this port does not
+    /// decode; every other magic reaches a decoder.
     #[test]
     fn unported_formats_are_named_for_the_forward() {
         assert_eq!(
-            decode(b"MM\x00\x2a\x00\x00\x00\x08", MAX_RES),
-            Err(PipelineError::NotPorted("tiff"))
+            decode(b"RIFF\x00\x00\x00\x00WEBPVP8 ", MAX_RES),
+            Err(PipelineError::NotPorted("webp"))
         );
         assert_eq!(
-            decode_config(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+            decode_config(b"RIFF\x00\x00\x00\x00WEBPVP8L"),
             Err(PipelineError::NotPorted("webp"))
+        );
+        // A TIFF decodes, but its EXIF walk does not, so `GetImageOrientation` is what the two
+        // upload paths still forward on — [D-650].
+        assert!(decode(b"MM\x00\x2a\x00\x00\x00\x08", MAX_RES).is_err());
+        assert_eq!(
+            crate::imaging_orientation::get_image_orientation(Input::Seeker(b""), "tiff"),
+            Err(crate::imaging_orientation::Unreproducible(
+                "the EXIF walk over a TIFF is not ported"
+            ))
         );
     }
 }

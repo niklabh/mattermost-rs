@@ -401,6 +401,9 @@ pub fn palette_entry(c: &Color) -> Json {
     match *c {
         Color::Rgba([r, g, b, a]) => json!(["rgba", r, g, b, a]),
         Color::Nrgba([r, g, b, a]) => json!(["nrgba", r, g, b, a]),
+        // The oracle's default arm: `%T` plus the four `RGBA()` channels. A TIFF's ColorMap is a
+        // `color.RGBA64` palette, which is the only type that reaches it here.
+        Color::Rgba64([r, g, b, a]) => json!(["color.RGBA64", r, g, b, a]),
         other => panic!("palette entry {other:?} is not one the oracle can describe"),
     }
 }

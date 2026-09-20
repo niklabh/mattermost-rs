@@ -3,8 +3,8 @@
 //! `webp` from `golang.org/x/image` (registered by `channels/app/imaging/decode.go`).
 //!
 //! `sniff` picks the first registered format whose magic prefix matches, `?` being a wildcard
-//! byte; no match is `image.ErrFormat`. PNG, JPEG, GIF and BMP are decoded here. TIFF and
-//! WebP are **recognised but not decoded** — [`DecodeError::NotPorted`] names the format so a
+//! byte; no match is `image.ErrFormat`. Every format but WebP is decoded here; WebP is
+//! **recognised but not decoded** — [`DecodeError::NotPorted`] names the format so a
 //! caller can hand the request to Go instead of guessing at an answer.
 
 use crate::image::Image;
@@ -126,6 +126,17 @@ pub fn decode_config(data: &[u8]) -> Result<(Config, &'static str), DecodeError>
                 )
             })
             .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("tiff") => crate::tiff::decode_config(data)
+            .map(|c| {
+                (
+                    Config {
+                        width: c.width,
+                        height: c.height,
+                    },
+                    "tiff",
+                )
+            })
+            .map_err(|e| DecodeError::Go(e.to_string())),
         Some("bmp") => crate::bmp::decode_config(data)
             .map(|c| {
                 (
@@ -158,6 +169,9 @@ pub fn decode(data: &[u8]) -> Result<(Image, &'static str), DecodeError> {
         Some("gif") => crate::gif::decode(data)
             .map(|m| (m, "gif"))
             .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("tiff") => crate::tiff::decode(data)
+            .map(|m| (m, "tiff"))
+            .map_err(|e| DecodeError::Go(e.to_string())),
         Some("bmp") => crate::bmp::decode(data)
             .map(|m| (m, "bmp"))
             .map_err(|e| DecodeError::Go(e.to_string())),
@@ -173,7 +187,7 @@ mod go_parity {
     /// How many corpus files across all the stages below match no registered magic at all, so
     /// `image.Decode` answers `ErrFormat` before any decoder is reached. Pinned rather than
     /// derived: a codec whose magic stopped matching would otherwise hide inside this loop.
-    const UNSNIFFABLE: usize = 23;
+    const UNSNIFFABLE: usize = 26;
 
     /// Every file of the decode corpora of every ported codec, through `image.DecodeConfig` and
     /// `image.Decode` as a whole — including the inputs no magic matches, which the per-codec
@@ -181,7 +195,7 @@ mod go_parity {
     #[test]
     fn the_registry_answers_every_corpus_file_as_go_does() {
         let mut unknown = 0;
-        for stage in ["png", "jpeg", "gif", "bmp"] {
+        for stage in ["png", "jpeg", "gif", "bmp", "tiff"] {
             for c in fixture(stage)["decode"].as_array().unwrap() {
                 let data = b64(c["b64"].as_str().unwrap());
                 let name = &c["name"];
@@ -211,18 +225,18 @@ mod go_parity {
         assert_eq!(unknown, UNSNIFFABLE, "the corpora's no-magic inputs");
     }
 
-    /// The registered formats this crate does not decode are named, not refused.
+    /// WebP is the last registered format this crate does not decode: named, not refused.
     #[test]
     fn unported_formats_are_recognised() {
-        for (data, name) in [
-            (&b"II\x2a\x00"[..], "tiff"),
-            (b"MM\x00\x2a", "tiff"),
-            (b"RIFF\x00\x00\x00\x00WEBPVP8L", "webp"),
+        for data in [
+            &b"RIFF\x00\x00\x00\x00WEBPVP8L"[..],
+            b"RIFF\x00\x00\x00\x00WEBPVP8 ",
+            b"RIFF\x00\x00\x00\x00WEBPVP8X",
         ] {
-            assert_eq!(decode(data).err(), Some(DecodeError::NotPorted(name)));
+            assert_eq!(decode(data).err(), Some(DecodeError::NotPorted("webp")));
             assert_eq!(
                 decode_config(data).err(),
-                Some(DecodeError::NotPorted(name))
+                Some(DecodeError::NotPorted("webp"))
             );
         }
         // `BM` alone is short of the magic: ErrFormat, not bmp.

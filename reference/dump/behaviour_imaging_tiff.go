@@ -1197,7 +1197,9 @@ func setLongVals(b *tbuild, tag uint16, vals []uint32) {
 	e.vals = vals
 }
 
-func imagingTIFFStage() (map[string]any, error) {
+// tiffCorpus is every decoder input for the tiff stage, in a stable order. The pipeline stage
+// draws a slice of it by name.
+func tiffCorpus() []namedFile {
 	var corpus []namedFile
 	corpus = append(corpus, xImageTestdata("testdata", "tiff")...)
 	corpus = append(corpus, xImageTestdata("tiff/testdata", "tiff")...)
@@ -1205,9 +1207,12 @@ func imagingTIFFStage() (map[string]any, error) {
 	corpus = append(corpus, goEncodedTIFFs()...)
 	corpus = append(corpus, craftedTIFFs()...)
 	corpus = append(corpus, ccittTIFFs()...)
+	return corpus
+}
 
+func imagingTIFFStage() (map[string]any, error) {
 	var dec []decodeCase
-	for _, f := range corpus {
+	for _, f := range tiffCorpus() {
 		dec = append(dec, decodeCase{Name: f.Name, B64: b64(f.Data), Config: configOf(f.Data), Image: imageOf(f.Data)})
 	}
 	return map[string]any{"decode": dec, "ccitt": ccittCases()}, nil
