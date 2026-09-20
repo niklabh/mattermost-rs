@@ -1,2 +1,6 @@
-//! Port of the BMP decoder. **Stub** — see `docs/TECH_DEBT.md` D-650; the module exists so the
-//! crate's layout is fixed while the decoders are ported one per branch.
+//! Port of `golang.org/x/image/bmp`'s decoder. The encoder is out of scope: Mattermost registers
+//! this package in `channels/app/imaging/decode.go` to *read* uploads and never writes a BMP.
+
+pub mod reader;
+
+pub use reader::{Config, ConfigModel, Error, decode, decode_config};
