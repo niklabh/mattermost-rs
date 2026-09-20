@@ -1040,8 +1040,19 @@ where
         }
     }
 
-    /// The running plugins that implement `hook_id`, with their manifests.
-    fn implementing(&self, hook_id: usize) -> Vec<(Arc<HooksClient>, Manifest)> {
+    /// The running plugins that implement `hook_id`, with their manifests: the body every one of
+    /// Go's three `RunMultiPluginHook*` variants shares (environment.go:629, :660, :698), namely
+    /// the `rp.supervisor == nil || !Implements(hookId) || !IsActive(id)` skip.
+    ///
+    /// Public because a caller that must own the loop cannot use [`Self::run_multi_plugin_hook`]:
+    /// its closure returns a future whose type is fixed independently of the closure's borrows,
+    /// so the future cannot carry a `&mut` into the caller's state. `RunMultiPluginHookExcluding`
+    /// and `RunMultiPluginHookWithRPCErr` are that shape, and both are written as a loop over
+    /// this list in `mm_app::plugin_hooks`.
+    ///
+    /// The order is Go's `sync.Map` `Range` order, which its own doc comment calls unspecified;
+    /// here it is ascending plugin id, because the registry is a `BTreeMap`.
+    pub fn hooks_implementing(&self, hook_id: usize) -> Vec<(Arc<HooksClient>, Manifest)> {
         self.map()
             .values()
             .filter(|r| r.state == PLUGIN_STATE_RUNNING)
@@ -1057,7 +1068,7 @@ where
 
     /// Whether any running plugin implements `hook_id`.
     pub fn has_plugin_implementing(&self, hook_id: usize) -> bool {
-        !self.implementing(hook_id).is_empty()
+        !self.hooks_implementing(hook_id).is_empty()
     }
 
     /// environment.go, `RunMultiPluginHook`: call `f` for each running plugin implementing
@@ -1067,7 +1078,7 @@ where
         F: FnMut(Arc<HooksClient>, Manifest) -> Fut,
         Fut: Future<Output = bool>,
     {
-        for (hooks, manifest) in self.implementing(hook_id) {
+        for (hooks, manifest) in self.hooks_implementing(hook_id) {
             if !f(hooks, manifest).await {
                 return;
             }

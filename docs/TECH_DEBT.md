@@ -7558,9 +7558,14 @@ it:
 | a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
 | the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
 
-## D-402 · email, push and plugin hooks do not fire for a post this server writes
+## D-402 · email and push do not fire for a post this server writes
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+**Narrowed** 2026-09-20 — the plugin half is served. Under `MMRS_PLUGIN_HOST=rust`,
+`MessageWillBePosted` and `MessageHasBeenPosted` fire where Go fires them, rejection and
+replacement included (`mm_app::plugin_hooks`, `parity::plugin_hooks`); under the default Go host
+nothing fires, which is [D-811]. What is still owed is email and push. The text below is the
+2026-09-12 state.
 
 A post served here publishes the `posted` websocket event, the `thread_updated` events and the
 mention-count increments (`mm_app::notification`, since 2026-09-14) and nothing else.
@@ -8149,9 +8154,10 @@ an empty list and the two servers agree by accident rather than by construction.
 That accident is the whole reason the deactivation could be served. On a server with a plugin
 that implements the hook, a deactivation served here would skip it silently.
 
-**What is owed:** the plugin host, which is out of scope for a route session and is the same
-dependency several other entries name. Until then, a deployment with plugins should not point at
-this server for `DELETE /users/{user_id}`.
+**What is owed:** the call site. The host exists since 2026-09-18 and fires seven hooks since
+2026-09-20 ([D-932]); `UserHasBeenDeactivated` is one of the 28 that do not, and it is the whole
+of this entry now. Until then, a deployment with plugins should not point at this server for
+`DELETE /users/{user_id}`.
 
 ---
 
@@ -8609,8 +8615,9 @@ no plugins either, measured by `parity::cpa_licensed::access_modes_filter_reads_
 — and a protected field cannot be created over REST at all, so the divergence needs a plugin
 installed on Go and a row that plugin created. Recorded where `mm_app::property_hooks` says it.
 
-**What is owed:** the plugin host, or at least `GetPluginStatus` against the `PluginStatuses`
-the Go server keeps, which is cluster state and not a table.
+**What is owed:** `GetPluginStatus` at that call site. `App::get_plugin_status` exists since
+2026-09-18 and answers from the Rust host's own environment, so under `MMRS_PLUGIN_HOST=rust` the
+checker can be wired; under the Go host it is still that process's cluster state and not a table.
 
 ---
 
@@ -9238,8 +9245,8 @@ What still keeps it from being a drop-in:
 
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: D-402, D-471 and D-542's hooks do not yet fire from Rust write paths
-  (plugin plan Phase 5).
+- The hook call sites: 7 of the 35 are wired (2026-09-20 — the post family and reactions, which
+  closes D-402's plugin half). The other 28 are [D-932]; D-471's and D-542's are among them.
 
 `MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
@@ -9420,3 +9427,93 @@ serves whatever is on disk. **What is owed:** the rewrite, once mm-api can be th
 bytes it read — which for a `HEAD` is none, so hyper writes `Content-Length: 0` where Go sent the
 entity's length (`HEAD /api/v5/x`: Go 248, forwarded 0). Found by `parity::web_client`, pre-existing
 for every forwarded `HEAD`. **What is owed:** keep Go's `Content-Length` on a `HEAD` answer.
+
+## D-930 · `TrustedProxyIPHeader` is not modelled, so a hook's `IPAddress` is the peer's
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+
+`utils.GetIPAddress` (channels/utils/utils.go:94) walks
+`ServiceSettings.TrustedProxyIPHeader` for the first header holding a parseable address and only
+then falls back to `RemoteAddr`'s host. That setting is not in `mm_app::config` at all, and
+`mm_api::plugin_context` ports the `RemoteAddr` half alone.
+
+Its Go default is the **empty list** (`config.go:679`), so a stock server takes the same branch and
+`parity::plugin_hooks` compares the two byte for byte. It diverges only behind a proxy with the
+setting on, where Go would read the header and this reads the socket.
+
+**What is owed:** the config field and the header walk, when something other than a plugin hook
+reads an IP address — the audit trail is the likely first caller.
+
+## D-931 · A `MessageWillBePosted` replacement's own `PostMetadata` is dropped
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (plugin hook call sites)
+
+`runGuardedMessageWillBePosted` (guarded_hooks.go:139) keeps a replacement post's `Metadata` when
+it has one and overwrites only its `Priority` from the pre-hook copy; it restores the pre-hook
+value wholesale only when the replacement has none. `mm_app::plugin_hooks::post_from_wire` always
+restores the pre-hook value, because `mm_plugin::wire::model::PostMetadata` is not converted back
+to `mm_model` — that means the embed `Data` interface values, the emoji, file and acknowledgement
+lists, and nothing on the ported write paths reads them.
+
+Reachable only when a plugin *invents* a metadata on the way back: Go strips metadata on the way
+out (`Post.ForPlugin`), so a plugin that leaves the field alone cannot tell the difference, and
+gob's merge keeps the caller's `nil`.
+
+**What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
+plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
+
+## D-932 · 28 of the 35 plugin hook call sites do not fire from the Rust host
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
+
+`channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
+seven fire from `mm_app::plugin_hooks` exactly where Go fires them: `MessageWillBePosted`,
+`MessageHasBeenPosted`, `MessageWillBeUpdated`, `MessageHasBeenUpdated`, `MessageHasBeenDeleted`,
+`ReactionHasBeenAdded` and `ReactionHasBeenRemoved`. The remaining 28 do not, and the paths that
+would fire them behave exactly as they did before:
+
+```text
+channel.go   ChannelHasBeenCreated (×3), UserHasJoinedChannel (×2), UserHasLeftChannel,
+             ChannelWillBeUpdated, ChannelWillBeRestored, ChannelWillBeArchived,
+             ChannelMemberWillBeAdded
+team.go      UserHasJoinedTeam, UserHasLeftTeam, TeamMemberWillBeAdded
+user.go      UserHasBeenCreated, UserHasBeenDeactivated ([D-471])
+login.go     UserWillLogIn, UserHasLoggedIn
+file.go      FileWillBeUploaded (×2), FileWillBeDownloaded
+upload.go    FileWillBeUploaded
+post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
+             ScheduledPostWillBeCreated
+draft        DraftWillBeUpserted
+preference   PreferencesHaveChanged
+notification EmailNotificationWillBeSent, NotificationWillBePushed
+plugin.go    OnPluginClusterEvent, OnInstall
+support      GenerateSupportData
+properties   the `checkFieldDeleteAccess` plugin check ([D-542])
+```
+
+`ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
+are served already.
+
+**What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
+channel and team membership family next. The pattern is `mm_app::plugin_hooks` plus a
+`parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
+
+## D-933 · The channel-guard cache is a per-dispatch read, and nothing can register a guard
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+
+Two halves of `app/channel_guards.go` are unported, and both are invisible today:
+
+1. **The cache.** Go loads the whole `ChannelGuards` table into a `sync.Map` in `NewChannels` and
+   reloads it on a register, an unregister and a cluster invalidation, with a backoff retry.
+   `App::resolve_guards` reads the table per dispatch instead. The answers agree; the failure
+   modes do not — a row written while Go runs is invisible to Go until it reloads and visible here
+   at once, and a database blip is "no guards" here where Go would serve its cache.
+2. **`RegisterChannelGuard` / `UnregisterChannelGuard`**, two of the 258 plugin API methods, so
+   nothing hosted here can write a guard at all. They are Phase 6.
+
+`parity::plugin_hooks` plants a row by SQL before either server starts — which is the only way to
+reach the guarded branch — and both refuse the post at 503.
+
+**What is owed:** the two API methods, and the cache with them, since a register has to invalidate
+something for the reload path to exist.

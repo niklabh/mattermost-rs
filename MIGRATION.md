@@ -14210,3 +14210,26 @@ survivors each exposed a corpus gap and five are caught since the oracle grew, t
 | `manualtesting.ManualTest`, `testAutoLink`, `getChannelID`; `handleContextError`'s non-API tail, `utils.RenderWebError`, `i18n.GetTranslationsAndLocaleFromRequest` + go-i18n lookup, the signing key's private half | `mm-api/src/{manualtest,web_error}.rs`, `web_static.rs` (`session_preamble`, `serve_http_headers`), `mm-app/src/{manualtest,i18n}.rs`, `team.rs` (`save_team`), `config.rs` | DONE | `parity::manualtest` (31 compared answers + the `HEAD` and header checks), `behaviour_web_error.json` oracle, 13 unit | At the pinned SHA the team email has no `@`, so `username`+`teamname` is always the email 400 and `rand.Seed` is a Go 1.24+ no-op — see `mm_api::manualtest`'s doc. Error pages are compared after verifying both signatures. |
 
 Mutation tally (`manualtest.plan`): 38 run, 35 caught, 3 controls survived.
+
+## Plugin hook call sites: the post family and reactions (2026-09-20)
+
+Plugin plan **Phase 5, partly done**. Under `MMRS_PLUGIN_HOST=rust` this server now fires 7 of the
+35 hook sites `channels/app` has — the post family and reactions, 9 of the 46 `hooks.*`
+invocations — from the write paths it already serves. Under the default Go host nothing fires and
+the behaviour is what it was. D-402 and D-811 are narrowed; the other 28 sites are listed on
+[D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (`TrustedProxyIPHeader` not modelled, [D-930]) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
+| `Channels.RunMultiHook*` (app/channels.go:341), `runGuardedMessageWillBePosted`/`Updated` and `resolveGuards` (app/guarded_hooks.go), `store.ChannelGuardStore.GetForChannel` | `mm-app/src/plugin_hooks.rs`, `mm-store/src/channel_guard_store.rs` | DONE (the guard *register* API is Phase 6) | 1 parity | The two `MessageWillBe*` hooks disagree on what a rejection is — a reason for one, a nil post for the other — and the reason is concatenated into the error **id**. A guard whose plugin is not active is 503 before any hook runs. |
+| `MessageWillBePosted`, `MessageHasBeenPosted` (post.go:368, :430), `MessageWillBeUpdated`, `MessageHasBeenUpdated` (post.go:978, :1007), `MessageHasBeenDeleted` (post.go:3393), `ReactionHasBeenAdded`/`Removed` (reaction.go:105, :187) | `mm-app/src/{post_create,post_write,reaction}.rs` | DONE | 1 parity (`plugin_hooks`, 14 hooks diffed) + 4 unit | `PostStore::update` now mutates both arguments as Go does: `MessageHasBeenUpdated`'s old post **is** the edit-history row (minted id, `OriginalId`, `DeleteAt`), which this suite is what found. |
+
+The parity oracle is `mm-plugin`'s `examples/hook_recorder`, one Rust SDK plugin run under a real
+Go host (Go's port + 74) and under a Rust host (:8119) over the same bundle; it writes each hook's
+arguments rendered from the gob stream, and the suite diffs the two transcripts entry for entry
+with only ids and timestamps tokenised.
+
+Mutation tally (`plugin-hooks.plan`): 22 run, 20 caught, 2 controls survived, 0 harness faults.
+Every line was caught first time, which is unusual and is the oracle's doing: the same plugin under
+two hosts makes almost any change to what is sent visible as a transcript diff.

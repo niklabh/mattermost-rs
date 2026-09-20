@@ -237,11 +237,12 @@ pub async fn restore_post_version(
         file_ids: Some(to_restore.file_ids.clone().unwrap_or_default()),
         ..PostPatch::default()
     };
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let outcome = async {
         post_patch_checks(&state, &post_id, &session, &patch).await?;
         let (updated, _is_member_for_preview) = state
             .app
-            .restore_post_version(&session.0, &post_id, &restore_version_id)
+            .restore_post_version(&session.0, &post_id, &restore_version_id, &hook_ctx)
             .await?;
         encoded_post(updated)
     }
@@ -606,6 +607,7 @@ pub async fn start_users_batch_export(
     State(state): State<AppState>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
+    request: Request,
 ) -> Response {
     if let Err(err) = require_system_admin(&state, &session).await {
         return err.into_response();
@@ -625,7 +627,13 @@ pub async fn start_users_batch_export(
 
     match state
         .app
-        .start_users_batch_export(&session.0, &options, start_at, end_at)
+        .start_users_batch_export(
+            &session.0,
+            &options,
+            start_at,
+            end_at,
+            &crate::plugin_context::hook_context_of(&request, Some(&session.0)),
+        )
         .await
     {
         Ok(()) => status_ok(),

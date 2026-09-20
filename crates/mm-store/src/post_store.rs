@@ -380,15 +380,16 @@ pub trait PostStore {
     /// **The `time` here is a second `GetMillis()`, not the post's `UpdateAt`.** They differ by a
     /// millisecond often enough to matter to a test that asserts equality.
     ///
-    /// Go mutates the caller's `newPost` and `oldPost` in place; this takes them by reference and
-    /// returns the saved post, so the two clones inside are the price of not lying about what the
-    /// caller still holds. Nothing observable depends on the mutation — the only Go reader of the
-    /// mutated `oldPost` is the plugin hook, which sees an old post carrying the *history row's*
-    /// fresh id.
+    /// **Both arguments are mutated, as Go mutates them**, and the mutation is observable:
+    /// `MessageHasBeenUpdated` is handed `newPost` and `oldPost` *after* this call
+    /// (app/post.go:1007), so the hook sees the new post's fresh `UpdateAt` and an old post that
+    /// has become the **history row** — a minted `Id`, `OriginalId` set to the post's own id and
+    /// `DeleteAt` equal to the new `UpdateAt`. Taking them by value and cloning would have hidden
+    /// all three from the plugin; `parity::plugin_hooks` is what found it.
     fn update(
         &self,
-        new_post: &Post,
-        old_post: &Post,
+        new_post: &mut Post,
+        old_post: &mut Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
 
     /// Port of `SqlPostStore.Overwrite` (post_store.go:513), which is `OverwriteMultiple` of
@@ -3317,12 +3318,9 @@ impl PostStore for SqlPostStore {
     }
 
     #[tracing::instrument(skip(self, new_post, old_post), fields(post_id = %new_post.id))]
-    async fn update(&self, new_post: &Post, old_post: &Post) -> Result<Post, StoreError> {
-        // Owned copies because Go mutates its arguments and the mutation is part of the write:
-        // `new_post` gains an `UpdateAt` and a `PreCommit`, and `old_post` becomes the history row.
-        let mut new_post = new_post.clone();
-        let mut old_post = old_post.clone();
-
+    async fn update(&self, new_post: &mut Post, old_post: &mut Post) -> Result<Post, StoreError> {
+        // In place, as Go does: `new_post` gains an `UpdateAt` and a `PreCommit`, and `old_post`
+        // becomes the history row. Both are read again by the caller's plugin hook.
         new_post.update_at = get_millis();
         new_post.pre_commit();
 
@@ -3341,7 +3339,7 @@ impl PostStore for SqlPostStore {
             })?;
         // `ValidateProps` would run here. It only logs — see the trait docs.
 
-        let props = props_for_column(&new_post);
+        let props = props_for_column(new_post);
         sqlx::query!(
             r#"
             UPDATE posts
@@ -3418,14 +3416,15 @@ impl PostStore for SqlPostStore {
             })?;
         }
 
-        insert_post(&self.pool, &old_post)
+        insert_post(&self.pool, old_post)
             .await
             .map_err(|source| StoreError::Db {
                 context: "failed to insert the old post".to_owned(),
                 source,
             })?;
 
-        Ok(new_post)
+        // Go returns the same pointer it mutated; the caller keeps the mutated value too.
+        Ok(new_post.clone())
     }
 
     #[tracing::instrument(skip(self, post), fields(post_id = %post.id))]

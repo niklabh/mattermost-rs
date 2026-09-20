@@ -95,8 +95,9 @@ fn no_two_second_servers_share_a_port() {
     // `parity::marketplace` serves for the plugins oracle at + 39, and the link-preview oracle
     // `scripts/go-links.sh` at + 50. Measured 2026-09-18: a plugin suite on :8095 took the
     // boards oracle down, and twenty tests in six other suites failed for it.
-    // `parity::plugin_startup` starts its own Go server at + 73.
-    let reserved: Vec<u16> = [8065, 8066, 8115, 8138]
+    // `parity::plugin_startup` starts its own Go server at + 73, and `parity::plugin_hooks` at
+    // + 74.
+    let reserved: Vec<u16> = [8065, 8066, 8115, 8138, 8139]
         .into_iter()
         .chain(8095..=8104)
         .collect();

@@ -1,0 +1,35 @@
+# Mutation plan for the plugin hook call sites (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks.plan
+#
+# The decisions: what counts as a rejection for each of the two `MessageWillBe*` hooks (they
+# disagree, and the disagreement is Go's), the rejection id and status, the gob conversion of
+# `Post.Props`, which post each `*HasBeen*` hook is handed and in which order, the channel-guard
+# fail-closed branch, the six fields of `plugin.Context`, the history row the store mutates into
+# its `oldPost` argument, and the `MMRS_PLUGIN_HOST` switch itself.
+#
+# Every line is judged by `parity::plugin_hooks`, which runs the same plugin under a real Go host
+# and under this one and diffs what it saw. The two CONTROL- lines must SURVIVE.
+
+willbeposted-rejection-ignored	crates/mm-app/src/plugin_hooks.rs	                .await;\n            if !returns.b.is_empty() {	                .await;\n            if false && !returns.b.is_empty() {	api	plugin_hooks
+willbeposted-dismiss-gets-the-prefix	crates/mm-app/src/plugin_hooks.rs	    let id = if reason == DISMISS_POST_ERROR {	    let id = if false {	api	plugin_hooks
+rejection-prefix-text	crates/mm-app/src/plugin_hooks.rs	const REJECTED_PREFIX: &str = "Post rejected by plugin. ";	const REJECTED_PREFIX: &str = "Post rejected by plugin: ";	api	plugin_hooks
+rejection-status-403	crates/mm-app/src/plugin_hooks.rs	    AppError::boxed(caller, id, None, String::new(), 400)	    AppError::boxed(caller, id, None, String::new(), 403)	api	plugin_hooks
+props-numbers-not-go-normalised	crates/mm-app/src/plugin_hooks.rs	        mm_model::utils::go_normalize_json_numbers(&mut json);	        let _ = &mut json;	api	plugin_hooks
+props-bool-sent-as-string	crates/mm-app/src/plugin_hooks.rs	        .map(|(k, v)| (k.clone(), json_to_interface(v)))	        .map(|(k, v)| (k.clone(), json_to_interface(&serde_json::Value::String(v.to_string()))))	api	plugin_hooks
+hasbeenposted-sends-the-pre-save-post	crates/mm-app/src/post_create.rs	        self.message_has_been_posted(hook_ctx, &saved);	        self.message_has_been_posted(hook_ctx, &post.clone());	api	plugin_hooks
+hasbeenupdated-args-swapped	crates/mm-app/src/post_write.rs	        self.message_has_been_updated(hook_ctx, &new_post, &old_post_for_history);	        self.message_has_been_updated(hook_ctx, &old_post_for_history, &new_post);	api	plugin_hooks
+hasbeenupdated-old-post-is-not-the-history-row	crates/mm-app/src/post_write.rs	        self.message_has_been_updated(hook_ctx, &new_post, &old_post_for_history);	        self.message_has_been_updated(hook_ctx, &new_post, &old_post);	api	plugin_hooks
+willbeupdated-a-nil-answer-is-not-a-rejection	crates/mm-app/src/plugin_hooks.rs	            post = returns.a.as_deref().map(|p| post_from_wire(p, current));	            if let Some(p) = returns.a.as_deref() {\n                post = Some(post_from_wire(p, current));\n            }	api	plugin_hooks
+hasbeendeleted-not-fired	crates/mm-app/src/post_write.rs	        self.message_has_been_deleted(hook_ctx, post);	        let _ = hook_ctx;	api	plugin_hooks
+reactionadded-not-fired	crates/mm-app/src/reaction.rs	        self.reaction_has_been_added(hook_ctx, &reaction);	        let _ = hook_ctx;	api	plugin_hooks
+reactionremoved-not-fired	crates/mm-app/src/reaction.rs	        self.reaction_has_been_removed(hook_ctx, &reaction);	        let _ = hook_ctx;	api	plugin_hooks
+guard-inactive-not-refused	crates/mm-app/src/plugin_hooks.rs	        if !inactive.is_empty() {	        if inactive.is_empty() && false {	api	plugin_hooks
+guard-refusal-is-a-500	crates/mm-app/src/plugin_hooks.rs	        "app.plugin.inactive_guard.app_error",\n        None,\n        String::new(),\n        503,	        "app.plugin.inactive_guard.app_error",\n        None,\n        String::new(),\n        500,	api	plugin_hooks
+context-user-agent-dropped	crates/mm-api/src/plugin_context.rs	        user_agent: header("User-Agent"),	        user_agent: String::new(),	api	plugin_hooks
+context-ip-keeps-the-port	crates/mm-api/src/plugin_context.rs	            .map(|ConnectInfo(addr)| addr.ip().to_string())	            .map(|ConnectInfo(addr)| addr.to_string())	api	plugin_hooks
+context-session-dropped	crates/mm-api/src/plugin_context.rs	        session_id: session.map(|s| s.id.clone()).unwrap_or_default(),	        session_id: String::new(),	api	plugin_hooks
+store-history-row-keeps-a-zero-deleteat	crates/mm-store/src/post_store.rs	        old_post.delete_at = new_post.update_at;	        old_post.delete_at = 0;	api	plugin_hooks
+plugin-host-switch-inverted	crates/mm-app/src/plugin_hooks.rs	        if !self.plugin_host().hosted() {\n            return None;\n        }	        if self.plugin_host().hosted() {\n            return None;\n        }	api	plugin_hooks
+CONTROL-rename-the-refusal-binding	crates/mm-app/src/plugin_hooks.rs	        let (guards, rejected) = self.resolve_guards(&post.channel_id, CALLER).await;\n        if let Some(err) = rejected {	        let (guards, refusal) = self.resolve_guards(&post.channel_id, CALLER).await;\n        if let Some(err) = refusal {	api	plugin_hooks
+CONTROL-reorder-two-context-fields	crates/mm-api/src/plugin_context.rs	        accept_language: header("Accept-Language"),\n        user_agent: header("User-Agent"),	        user_agent: header("User-Agent"),\n        accept_language: header("Accept-Language"),	api	plugin_hooks

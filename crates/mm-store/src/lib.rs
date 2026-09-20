@@ -16,6 +16,7 @@
 pub mod access_control_policy_store;
 pub mod audit_store;
 pub mod bot_store;
+pub mod channel_guard_store;
 pub mod channel_join_request_store;
 pub mod channel_member_history_store;
 pub mod channel_store;
@@ -69,6 +70,7 @@ pub mod webhook_store;
 pub use access_control_policy_store::{AccessControlPolicyStore, SqlAccessControlPolicyStore};
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use bot_store::{BotStore, SqlBotStore};
+pub use channel_guard_store::{ChannelGuard, ChannelGuardStore, SqlChannelGuardStore};
 pub use channel_join_request_store::{ChannelJoinRequestStore, SqlChannelJoinRequestStore};
 pub use channel_member_history_store::{ChannelMemberHistoryStore, SqlChannelMemberHistoryStore};
 pub use channel_store::{ChannelSave, ChannelStore, SqlChannelStore, UnreadsAndMentions};
@@ -132,6 +134,7 @@ pub struct SqlStore {
     bot: SqlBotStore,
     command: SqlCommandStore,
     channel: SqlChannelStore,
+    channel_guard: SqlChannelGuardStore,
     channel_join_request: SqlChannelJoinRequestStore,
     config: SqlConfigStore,
     emoji: SqlEmojiStore,
@@ -205,6 +208,7 @@ impl SqlStore {
             bot: SqlBotStore::new(pool.clone()),
             command: SqlCommandStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
+            channel_guard: SqlChannelGuardStore::new(pool.clone()),
             channel_join_request: SqlChannelJoinRequestStore::new(pool.clone()),
             config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
@@ -664,6 +668,10 @@ impl SqlStore {
     }
 
     /// Port of `store.Store.ChannelJoinRequest()`.
+    pub fn channel_guard(&self) -> &SqlChannelGuardStore {
+        &self.channel_guard
+    }
+
     pub fn channel_join_request(&self) -> &SqlChannelJoinRequestStore {
         &self.channel_join_request
     }

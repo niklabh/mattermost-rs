@@ -326,6 +326,7 @@ impl App {
         session: &Session,
         post_id: &str,
         restore_version_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         let to_restore = self
             .store()
@@ -370,7 +371,7 @@ impl App {
             file_ids: Some(to_restore.file_ids.unwrap_or_default()),
             ..PostPatch::default()
         };
-        self.patch_post(post_id, &patch, session).await
+        self.patch_post(post_id, &patch, session, hook_ctx).await
     }
 
     /// Port of `app.App.RevealPost` (app/post.go:3730) for a reader who is not the author.
@@ -801,6 +802,7 @@ impl App {
         options: &UserReportOptions,
         start_at: i64,
         end_at: i64,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<()> {
         let license = self.license().await?;
         if !minimum_professional_license(license.as_deref()) {
@@ -833,8 +835,10 @@ impl App {
         let app = self.clone();
         let session = session.clone();
         let date_range = options.base.date_range.clone();
+        let hook_ctx = hook_ctx.clone();
         tokio::spawn(async move {
-            app.post_batch_export_started(&session, &date_range).await;
+            app.post_batch_export_started(&session, &date_range, &hook_ctx)
+                .await;
         });
         Ok(())
     }
@@ -886,7 +890,12 @@ impl App {
 
     /// The goroutine of `StartUsersBatchExport`: system bot, DM, requester, one post. Every
     /// failure is logged and nothing is retried.
-    async fn post_batch_export_started(&self, session: &Session, date_range: &str) {
+    async fn post_batch_export_started(
+        &self,
+        session: &Session,
+        date_range: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) {
         let bot = match self.get_system_bot().await {
             Ok(bot) => bot,
             Err(err) => {
@@ -935,6 +944,7 @@ impl App {
                     set_online: true,
                     ..CreatePostFlags::default()
                 },
+                hook_ctx,
             )
             .await
         {

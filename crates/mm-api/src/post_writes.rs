@@ -23,6 +23,7 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_app::plugin_hooks::HookContext;
 use mm_app::post::PrepareError;
 use mm_app::post_create::CreatePostFlags;
 use mm_app::post_unread::MarkUnreadError;
@@ -90,13 +91,14 @@ async fn save_is_pinned_post(
     request: Request,
     is_pinned: bool,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     // `c.RequirePostId()` (web/context.go:411). The router's charset middleware has already
     // handled the shapes gorilla 404s, so what is left is a segment of the wrong length.
     if !is_valid_id(&post_id) {
         return ApiError::invalid_url_param("post_id").into_response();
     }
 
-    match serve(&state, &post_id, &session, is_pinned).await {
+    match serve(&state, &post_id, &session, is_pinned, &hook_ctx).await {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -112,6 +114,7 @@ async fn serve(
     post_id: &str,
     session: &AuthenticatedSession,
     is_pinned: bool,
+    hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     let post = state
         .app
@@ -159,8 +162,10 @@ async fn serve(
     };
 
     // The patched post and `isMemberForPreviews` both feed the audit record only ([D-028]).
-    let (_patched, _is_member_for_previews) =
-        state.app.patch_post(post_id, &patch, &session.0).await?;
+    let (_patched, _is_member_for_previews) = state
+        .app
+        .patch_post(post_id, &patch, &session.0, hook_ctx)
+        .await?;
 
     Ok(status_ok())
 }
@@ -217,7 +222,8 @@ pub async fn delete_post(
         return proxy::forward_to_go(State(state), request).await;
     }
 
-    match serve_delete(&state, &post_id, &session).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match serve_delete(&state, &post_id, &session, &hook_ctx).await {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -232,6 +238,7 @@ async fn serve_delete(
     state: &AppState,
     post_id: &str,
     session: &AuthenticatedSession,
+    hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     // Unlike the pin and edit routes, this one lets `GetSinglePost`'s error through: a post that
     // does not exist is a **404 `app.post.get.app_error`** here and a 403 there.
@@ -264,7 +271,7 @@ async fn serve_delete(
 
     state
         .app
-        .delete_post(post_id, &session.0.user_id)
+        .delete_post(post_id, &session.0.user_id, hook_ctx)
         .await
         .map(|_deleted| status_ok())
 }
@@ -334,7 +341,8 @@ pub async fn update_post(
         return ApiError::invalid_param("id").into_response();
     }
 
-    match serve_update(&state, &post_id, &session, post).await {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match serve_update(&state, &post_id, &session, post, &hook_ctx).await {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -351,6 +359,7 @@ async fn serve_update(
     post_id: &str,
     session: &AuthenticatedSession,
     mut post: Post,
+    hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     post_hardened_mode_check(state, session, post.get_props())?;
 
@@ -430,7 +439,8 @@ async fn serve_update(
     // gate above refuses anything else — so the assignment is Go's belt and braces.
     post.id = post_id.to_owned();
 
-    let (updated, _is_member_for_previews) = state.app.update_post(&post, &session.0).await?;
+    let (updated, _is_member_for_previews) =
+        state.app.update_post(&post, &session.0, hook_ctx).await?;
     encoded_post(updated)
 }
 
@@ -482,7 +492,8 @@ pub async fn patch_post(
         }
     };
 
-    match serve_patch(&state, &post_id, &session, &patch).await {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match serve_patch(&state, &post_id, &session, &patch, &hook_ctx).await {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -499,6 +510,7 @@ async fn serve_patch(
     post_id: &str,
     session: &AuthenticatedSession,
     patch: &PostPatch,
+    hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     // Only when the patch *carries* props — a patch that leaves them alone is never checked, so a
     // post keeps whatever reserved props it already had.
@@ -523,8 +535,10 @@ async fn serve_patch(
         check_edit_file_attachment_permission(state, session, file_ids, &original).await?;
     }
 
-    let (patched, _is_member_for_previews) =
-        state.app.patch_post(post_id, patch, &session.0).await?;
+    let (patched, _is_member_for_previews) = state
+        .app
+        .patch_post(post_id, patch, &session.0, hook_ctx)
+        .await?;
     encoded_post(patched)
 }
 
@@ -867,7 +881,8 @@ pub async fn create_post(
 
     let query = parts.uri.query().map(str::to_owned);
 
-    match serve_create(&state, &session, post, query.as_deref()).await {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match serve_create(&state, &session, post, query.as_deref(), &hook_ctx).await {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -884,6 +899,7 @@ async fn serve_create(
     session: &AuthenticatedSession,
     mut post: Post,
     query: Option<&str>,
+    hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     // "if post.CreateAt != 0 && !c.App.SessionHasPermissionTo(session, PermissionManageSystem)".
     // A **system** permission, not a channel one, and the failure is silent: the timestamp is
@@ -938,6 +954,7 @@ async fn serve_create(
                 // Server-set only; `SanitizeProps` strips a client's prop.
                 force_notification: false,
             },
+            hook_ctx,
         )
         .await?;
 

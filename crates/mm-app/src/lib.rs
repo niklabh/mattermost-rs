@@ -87,6 +87,7 @@ pub mod opengraph;
 pub mod password;
 pub mod peer_cache;
 pub mod peer_config;
+pub mod plugin_hooks;
 pub mod plugin_install;
 pub mod plugin_prepackaged;
 pub mod plugin_signature;

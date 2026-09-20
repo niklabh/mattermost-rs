@@ -470,6 +470,7 @@ impl App {
         post: Post,
         session: &Session,
         flags: CreatePostFlags,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<Post, PrepareError> {
         let channel = self
             .store()
@@ -515,7 +516,9 @@ impl App {
             RestrictedDm::No => {}
         }
 
-        let (saved, author_is_bot) = self.create_post(post, &channel, session, flags).await?;
+        let (saved, author_is_bot) = self
+            .create_post(post, &channel, session, flags, hook_ctx)
+            .await?;
 
         // `_, fromWebhook := post.GetProps()[from_webhook]` and the `from_bot` twin. Both props
         // are refused inbound, so only the bot flag `CreatePost` derives survives.
@@ -564,6 +567,7 @@ impl App {
         channel: &Channel,
         session: &Session,
         flags: CreatePostFlags,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         if let Some(found) = self.deduplicate_create_post(&post, session).await? {
             return Ok((found, false));
@@ -578,7 +582,7 @@ impl App {
         }
 
         let outcome = self
-            .create_post_claimed(&mut post, channel, session, flags)
+            .create_post_claimed(&mut post, channel, session, flags, hook_ctx)
             .await;
 
         if !pending_post_id.is_empty() {
@@ -598,6 +602,7 @@ impl App {
         channel: &Channel,
         session: &Session,
         flags: CreatePostFlags,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         // `flags.SilentNotification` with persistent notifications on is a 400 before anything
         // else looks at either. The persistent-notification post itself is refused by the store,
@@ -715,7 +720,19 @@ impl App {
         // burn-on-read type, and all four are refused.
         self.fill_in_post_props(post, Some(channel)).await?;
 
-        // `runGuardedMessageWillBePosted` — no plugin environment, [D-183].
+        // `runGuardedMessageWillBePosted`: `MessageWillBePosted`, before `CreateAt` is filled
+        // and before the embeds. It can replace the post or refuse the request outright, and it
+        // is the last thing that reads the post before the row is written.
+        //
+        // The burn-on-read gate is Go's and is unreachable here: `refuse_create_post_shapes`
+        // forwards *any* non-default post type long before this. It is written rather than
+        // dropped so that a reader diffing the two files finds it.
+        if post.post_type != mm_model::post::POST_TYPE_BURN_ON_READ {
+            *post = self
+                .run_guarded_message_will_be_posted(hook_ctx, std::mem::take(post))
+                .await
+                .map_err(PrepareError::App)?;
+        }
 
         // "Pre-fill the CreateAt field for link previews to get the correct timestamp." A
         // client-supplied `CreateAt` survives; the handler has already zeroed it unless the
@@ -785,7 +802,7 @@ impl App {
                 }
             }
         }
-        // `MessageHasBeenPosted` — no plugin environment, [D-183].
+        self.message_has_been_posted(hook_ctx, &saved);
 
         // `PreparePostForClient`, *not* the embeds-and-images variant: Go relies on
         // `getEmbedsAndImages` having already run on the pre-save post.

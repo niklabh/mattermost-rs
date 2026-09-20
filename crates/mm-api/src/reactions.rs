@@ -292,7 +292,8 @@ pub async fn save_reaction(
         .into_response();
     }
 
-    match state.app.save_reaction_for_post(&reaction).await {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match state.app.save_reaction_for_post(&reaction, &hook_ctx).await {
         Ok(ReactionWrite::Done(saved)) => {
             tracing::Span::current().record("forwarded", false);
             // `json.NewEncoder(w).Encode(re)` — an **encoder**, so the body carries a trailing
@@ -416,7 +417,12 @@ pub async fn delete_reaction(
         ..Default::default()
     };
 
-    match state.app.delete_reaction_for_post(&reaction).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match state
+        .app
+        .delete_reaction_for_post(&reaction, &hook_ctx)
+        .await
+    {
         Ok(ReactionWrite::Done(())) => {
             tracing::Span::current().record("forwarded", false);
             (

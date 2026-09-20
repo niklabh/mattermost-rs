@@ -274,7 +274,12 @@ fn make_map_gob_safe(m: &AnyMap) -> AnyMap {
 }
 
 /// What Go's `json.Unmarshal` into an `any` leaves behind, as gob then sends it.
-fn json_to_interface(value: &Json) -> Option<Interface> {
+///
+/// Also the only way to put a `map[string]any` on the wire from Rust, which is what a
+/// `Post.Props` is: `client_rpc.go`'s `init()` registers `[]any` and `map[string]any`, so a
+/// nested document is encodable, and every number is a float64 because that is what Go's own
+/// JSON decode of the request body left in the map.
+pub fn json_to_interface(value: &Json) -> Option<Interface> {
     Some(match value {
         Json::Null => return None,
         Json::Bool(b) => Interface::bool(*b),
