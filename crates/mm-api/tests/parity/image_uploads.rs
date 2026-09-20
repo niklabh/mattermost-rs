@@ -488,10 +488,48 @@ async fn the_uploads_route_completes_images_identically() {
     );
 }
 
+/// A 1×1 black, uncompressed, little-endian, 8-bit grayscale TIFF: the smallest input that
+/// reaches `golang.org/x/image/tiff`'s decoder and comes back with dimensions. Built here rather
+/// than taken from a fixture because the TIFF oracle stage records what the *decoder* answers,
+/// and this test is about the route forwarding before it ever gets that far.
+fn tiny_tiff() -> Vec<u8> {
+    // tag, type (3 = SHORT, 4 = LONG), value. Every entry has count 1, so the value sits inline.
+    const PIXEL_AT: u32 = 8 + 2 + 9 * 12 + 4;
+    let entries: [(u16, u16, u32); 9] = [
+        (256, 3, 1),        // ImageWidth
+        (257, 3, 1),        // ImageLength
+        (258, 3, 8),        // BitsPerSample
+        (259, 3, 1),        // Compression = none
+        (262, 3, 1),        // PhotometricInterpretation = BlackIsZero
+        (273, 4, PIXEL_AT), // StripOffsets
+        (277, 3, 1),        // SamplesPerPixel
+        (278, 4, 1),        // RowsPerStrip
+        (279, 4, 1),        // StripByteCounts
+    ];
+    let mut out = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
+    out.extend_from_slice(&u16::try_from(entries.len()).unwrap().to_le_bytes());
+    for (tag, typ, value) in entries {
+        out.extend_from_slice(&tag.to_le_bytes());
+        out.extend_from_slice(&typ.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+        if typ == 3 {
+            out.extend_from_slice(&u16::try_from(value).unwrap().to_le_bytes());
+            out.extend_from_slice(&[0, 0]);
+        } else {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    out.extend_from_slice(&0u32.to_le_bytes());
+    assert_eq!(out.len(), PIXEL_AT as usize);
+    out.push(0);
+    out
+}
+
 /// The formats this port does not decode are still Go's, and forward before anything is
-/// written: a GIF (its frame walk and palette decode) and a BMP.
+/// written. GIF and BMP are no longer among them — `goimage::gif` and `goimage::bmp` decode
+/// them, and the derived files they produce are compared with everything else in `corpus()`.
 #[tokio::test]
-async fn gif_and_bmp_uploads_still_forward() {
+async fn the_undecoded_formats_still_forward() {
     if !stack_enabled() {
         return;
     }
@@ -500,10 +538,8 @@ async fn gif_and_bmp_uploads_still_forward() {
     let token = go_minted_token(&client).await;
     let (_team, channel) = a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    // A 1x1 GIF89a and a 1x1 24-bit BMP.
-    let gif: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
-    let bmp: &[u8] = b"BM:\x00\x00\x00\x00\x00\x00\x006\x00\x00\x00(\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x18\x00\x00\x00\x00\x00\x04\x00\x00\x00\x13\x0b\x00\x00\x13\x0b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\x00";
-    for (filename, bytes) in [("mmrs-parity-img.gif", gif), ("mmrs-parity-img.bmp", bmp)] {
+    let tiff = tiny_tiff();
+    for (filename, bytes) in [("mmrs-parity-img.tiff", tiff.as_slice())] {
         let path = format!("/api/v4/files?channel_id={channel}&filename={filename}");
         let (status, served_by, body) = send(
             &client,

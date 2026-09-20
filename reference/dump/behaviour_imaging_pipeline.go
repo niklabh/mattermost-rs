@@ -20,12 +20,26 @@ import (
 	"bytes"
 	"encoding/binary"
 	"image"
+	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
 
 	mmimaging "github.com/mattermost/mattermost/server/v8/channels/app/imaging"
+	"golang.org/x/image/bmp"
 )
+
+// pipelineGIFPalette is a fixed 256-entry palette for the animated inline case: a deterministic
+// ramp rather than Plan 9's table, so the frames differ from each other in the low bits that a
+// Lanczos resize is most likely to round differently.
+func pipelineGIFPalette() color.Palette {
+	p := make(color.Palette, 256)
+	for i := range p {
+		p[i] = color.RGBA{R: uint8(i), G: uint8(255 - i), B: uint8(i * 7 % 256), A: 0xff}
+	}
+	return p
+}
 
 // Mattermost's defaults: FileSettings.MaxImageResolution and the file.go constants.
 const pipelineMaxRes = 7680 * 4320
@@ -173,9 +187,60 @@ func imagingPipelineStage() (map[string]any, error) {
 	for _, f := range jpegCorpus() {
 		cases = append(cases, runPipeline("jpeg", f.Name, f.Data))
 	}
-	exif, err := imagingEXIFStage()
+	// A slice of the GIF and BMP corpora rather than all of it: those two stages carry 430 files
+	// between them, and what this stage adds over them is the *composition* — Lanczos, the two
+	// encoders, the orientation read — which depends on the decoded image's type, palette and
+	// geometry, not on which header grammar produced it. The names below are one per decoded
+	// shape (each colour-table size, each bit depth, top-down and bottom-up, interlaced, animated,
+	// transparent, quantised), which is what the composition can tell apart.
+	corpusSlice := func(source string, byName map[string][]byte, want []string) {
+		for _, n := range want {
+			data, ok := byName[n]
+			if !ok {
+				panic(source + ": no corpus file " + n)
+			}
+			cases = append(cases, runPipeline(source, n, data))
+		}
+	}
+	named := func(files []namedFile) map[string][]byte {
+		m := map[string][]byte{}
+		for _, f := range files {
+			m[f.Name] = f.Data
+		}
+		return m
+	}
+	// The BMP stage builds its cases inline rather than through a `[]namedFile`, so its bytes
+	// come back out of the stage's own output.
+	bmpStage, err := imagingBMPStage()
 	if err != nil {
 		return nil, err
+	}
+	bmpByName := map[string][]byte{}
+	for _, c := range bmpStage["decode"].([]bmpCase) {
+		data, derr := decodeB64(c.B64)
+		if derr != nil {
+			return nil, derr
+		}
+		bmpByName[c.Name] = data
+	}
+	corpusSlice("gif", named(gifCorpus()), []string{
+		"go_paletted_120x100_p2", "go_paletted_120x100_p16", "go_paletted_120x100_p256",
+		"go_paletted_alpha_120x100", "go_quantised_nrgba_256", "go_quantised_gray_4",
+		"go_quantised_ycbcr_64", "go_anim_disposals", "go_anim_local_tables",
+		"go_anim_transparent", "crafted_interlaced_17", "crafted_gct_bits_0",
+		"crafted_gce_transparent_oob_255", "crafted_one_by_one", "crafted_six_frames",
+	})
+	corpusSlice("bmp", bmpByName, []string{
+		"bmp_1bpp.bmp", "bmp_4bpp.bmp", "bmp_8bpp.bmp", "colormap.bmp", "video-001.bmp",
+		"yellow_rose-small.bmp", "yellow_rose-small-v5.bmp",
+		"go_gray_opaque_13x9", "go_paletted_mixed_40x30", "go_rgba_mixed_5x4",
+		"go_nrgba_mixed_64x48", "crafted_baseline_24_topdown", "crafted_baseline_32_topdown",
+		"crafted_baseline_8_bottomup", "crafted_paletted_1bpp_33x2_topdown",
+	})
+
+	exif, eerr := imagingEXIFStage()
+	if eerr != nil {
+		return nil, eerr
 	}
 	for _, c := range exif["cases"].([]exifCase) {
 		data, _ := decodeB64(c.B64)
@@ -222,6 +287,38 @@ func imagingPipelineStage() (map[string]any, error) {
 	inline("edge_1920x40_jpeg", mustEncode(func(b *bytes.Buffer) error {
 		return jpeg.Encode(b, imgSpec{"ycbcr", 1920, 40, "smooth", "opaque", 8007, 0, "420"}.build(), &jpeg.Options{Quality: 85})
 	}))
+	// Photo-sized GIF and BMP, so the two new decoders meet a Lanczos resize that actually
+	// resamples rather than one that fits in a thumbnail. The GIF is quantised by Go's own
+	// encoder (a *image.Paletted with 256 colours out the other side); the BMP round-trips an
+	// NRGBA at 24 bits and a Gray at 8.
+	bigPaletted := imgSpec{"nrgba", 1400, 900, "gradient", "opaque", 8008, 0, ""}.build()
+	inline("gif_1400x900", mustEncode(func(b *bytes.Buffer) error {
+		return gif.Encode(b, bigPaletted, &gif.Options{NumColors: 256})
+	}))
+	inline("bmp_1400x900_24", mustEncode(func(b *bytes.Buffer) error {
+		return bmp.Encode(b, bigPaletted)
+	}))
+	inline("bmp_2000x120_gray", mustEncode(func(b *bytes.Buffer) error {
+		return bmp.Encode(b, imgSpec{"gray", 2000, 120, "smooth", "opaque", 8009, 0, ""}.build())
+	}))
+	// Animated: `image.Decode` hands back frame 0 alone, so the derived files come from it and
+	// not from a composite. Twenty frames, so a port that composited would differ visibly.
+	animated := make([]*image.Paletted, 0, 20)
+	delays := make([]int, 0, 20)
+	for i := range 20 {
+		m := image.NewPaletted(image.Rect(0, 0, 300, 200), pipelineGIFPalette())
+		for y := range 200 {
+			for x := range 300 {
+				m.SetColorIndex(x, y, sample("blocks", uint64(8010+i), x, y, 0, 300, 200))
+			}
+		}
+		animated = append(animated, m)
+		delays = append(delays, 4)
+	}
+	inline("gif_animated_300x200", mustEncode(func(b *bytes.Buffer) error {
+		return gif.EncodeAll(b, &gif.GIF{Image: animated, Delay: delays, LoopCount: 3})
+	}))
+
 	// The 1×1 PNG every parity suite uploads.
 	inline("parity_1x1", []byte{
 		137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,

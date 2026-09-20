@@ -3,9 +3,9 @@
 //! `webp` from `golang.org/x/image` (registered by `channels/app/imaging/decode.go`).
 //!
 //! `sniff` picks the first registered format whose magic prefix matches, `?` being a wildcard
-//! byte; no match is `image.ErrFormat`. PNG and JPEG are decoded here. The other four are
-//! **recognised but not decoded** — [`DecodeError::NotPorted`] names the format so a caller can
-//! hand the request to Go instead of guessing at an answer.
+//! byte; no match is `image.ErrFormat`. PNG, JPEG, GIF and BMP are decoded here. TIFF and
+//! WebP are **recognised but not decoded** — [`DecodeError::NotPorted`] names the format so a
+//! caller can hand the request to Go instead of guessing at an answer.
 
 use crate::image::Image;
 
@@ -75,8 +75,8 @@ pub enum DecodeError {
     /// Go's error, with Go's text: `image.ErrFormat`, or whatever the format's decoder returned.
     #[error("{0}")]
     Go(String),
-    /// The bytes are a registered format this crate does not decode (gif, bmp, tiff, webp). Go
-    /// has an answer; this crate does not claim to know it.
+    /// The bytes are a registered format this crate does not decode. Go has an answer; this
+    /// crate does not claim to know it.
     #[error("the {0} decoder is not ported")]
     NotPorted(&'static str),
 }
@@ -115,6 +115,28 @@ pub fn decode_config(data: &[u8]) -> Result<(Config, &'static str), DecodeError>
                 )
             })
             .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("gif") => crate::gif::decode_config(data)
+            .map(|c| {
+                (
+                    Config {
+                        width: c.width,
+                        height: c.height,
+                    },
+                    "gif",
+                )
+            })
+            .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("bmp") => crate::bmp::decode_config(data)
+            .map(|c| {
+                (
+                    Config {
+                        width: c.width,
+                        height: c.height,
+                    },
+                    "bmp",
+                )
+            })
+            .map_err(|e| DecodeError::Go(e.to_string())),
         Some(other) => Err(DecodeError::NotPorted(other)),
     }
 }
@@ -133,6 +155,12 @@ pub fn decode(data: &[u8]) -> Result<(Image, &'static str), DecodeError> {
         Some("jpeg") => crate::jpeg::decode(data)
             .map(|m| (m, "jpeg"))
             .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("gif") => crate::gif::decode(data)
+            .map(|m| (m, "gif"))
+            .map_err(|e| DecodeError::Go(e.to_string())),
+        Some("bmp") => crate::bmp::decode(data)
+            .map(|m| (m, "bmp"))
+            .map_err(|e| DecodeError::Go(e.to_string())),
         Some(other) => Err(DecodeError::NotPorted(other)),
     }
 }
@@ -142,13 +170,18 @@ mod go_parity {
     use super::*;
     use crate::testsupport::{b64, describe, fixture};
 
-    /// Every file of the PNG and JPEG decode corpora through `image.DecodeConfig` and
+    /// How many corpus files across all the stages below match no registered magic at all, so
+    /// `image.Decode` answers `ErrFormat` before any decoder is reached. Pinned rather than
+    /// derived: a codec whose magic stopped matching would otherwise hide inside this loop.
+    const UNSNIFFABLE: usize = 23;
+
+    /// Every file of the decode corpora of every ported codec, through `image.DecodeConfig` and
     /// `image.Decode` as a whole — including the inputs no magic matches, which the per-codec
     /// suites skip because the registry answers them.
     #[test]
     fn the_registry_answers_every_corpus_file_as_go_does() {
         let mut unknown = 0;
-        for stage in ["png", "jpeg"] {
+        for stage in ["png", "jpeg", "gif", "bmp"] {
             for c in fixture(stage)["decode"].as_array().unwrap() {
                 let data = b64(c["b64"].as_str().unwrap());
                 let name = &c["name"];
@@ -175,16 +208,14 @@ mod go_parity {
                 }
             }
         }
-        assert_eq!(unknown, 5, "the corpus's no-magic inputs");
+        assert_eq!(unknown, UNSNIFFABLE, "the corpora's no-magic inputs");
     }
 
-    /// The four registered formats this crate does not decode are named, not refused.
+    /// The registered formats this crate does not decode are named, not refused.
     #[test]
     fn unported_formats_are_recognised() {
         for (data, name) in [
-            (&b"GIF89a\x01\x00"[..], "gif"),
-            (b"BM\x00\x00\x00\x00\x00\x00\x00\x00", "bmp"),
-            (b"II\x2a\x00", "tiff"),
+            (&b"II\x2a\x00"[..], "tiff"),
             (b"MM\x00\x2a", "tiff"),
             (b"RIFF\x00\x00\x00\x00WEBPVP8L", "webp"),
         ] {

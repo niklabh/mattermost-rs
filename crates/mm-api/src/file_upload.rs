@@ -12,7 +12,7 @@
 //! # What forwards
 //!
 //! Each file goes through [`mm_app::App::upload_file_x`], which serves every refusal, the write
-//! and — for PNG and JPEG — the thumbnail, preview and mini preview, but hands a **GIF, BMP, TIFF
+//! and — for PNG, JPEG, GIF and BMP — the thumbnail, preview and mini preview, but hands a **TIFF
 //! or WebP** to Go before writing ([D-650]: those decoders are not ported). Because the multipart
 //! form can carry several files, one such image among them forwards the *whole* request, since
 //! the response is one document and a half-served one would double-write the other files. That

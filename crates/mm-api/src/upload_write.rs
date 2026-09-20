@@ -8,7 +8,7 @@
 //! # Where `uploadData` hands the request to Go
 //!
 //! An image chunk that *completes* the upload is where Go derives a `_preview` and `_thumb`. For
-//! PNG and JPEG that is served ([`mm_app::image_pipeline`]); a GIF, BMP, TIFF or WebP is Go's
+//! PNG, JPEG, GIF and BMP that is served ([`mm_app::image_pipeline`]); a TIFF or WebP is Go's
 //! ([D-650]) — [`mm_app::App::upload_data`] refuses it as `Unreproducible` **before writing the
 //! chunk**, so forwarding replays the same request Go would have handled. Every other outcome —
 //! the 204 for an incomplete chunk, the completed `FileInfo`, the size and offset refusals, the

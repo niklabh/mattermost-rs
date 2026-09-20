@@ -12,7 +12,7 @@
 //!
 //! # What this does not decode
 //!
-//! Go's registry also decodes GIF, BMP, TIFF and WebP. Those are recognised here and answered
+//! Go's registry also decodes TIFF and WebP. Those are recognised here and answered
 //! [`PipelineError::NotPorted`]; every caller hands such a request to Go before it writes.
 
 use std::borrow::Cow;
@@ -385,6 +385,8 @@ mod go_parity {
     fn every_pipeline_case_matches_go() {
         let png = fixture("png");
         let jpeg = fixture("jpeg");
+        let gif = fixture("gif");
+        let bmp = fixture("bmp");
         let exif = fixture("exif");
         let bytes_of = |c: &Json| -> Vec<u8> {
             let name = &c["name"];
@@ -392,6 +394,8 @@ mod go_parity {
                 "inline" => return b64(c["b64"].as_str().unwrap()),
                 "png" => &png["decode"],
                 "jpeg" => &jpeg["decode"],
+                "gif" => &gif["decode"],
+                "bmp" => &bmp["decode"],
                 "exif" => &exif["cases"],
                 other => panic!("{other}"),
             };
@@ -569,8 +573,8 @@ mod go_parity {
     #[test]
     fn unported_formats_are_named_for_the_forward() {
         assert_eq!(
-            decode(b"GIF89a\x01\x00\x01\x00", MAX_RES),
-            Err(PipelineError::NotPorted("gif"))
+            decode(b"MM\x00\x2a\x00\x00\x00\x08", MAX_RES),
+            Err(PipelineError::NotPorted("tiff"))
         );
         assert_eq!(
             decode_config(b"RIFF\x00\x00\x00\x00WEBPVP8 "),

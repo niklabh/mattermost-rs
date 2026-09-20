@@ -7,7 +7,7 @@
 //! extension, mime type), `preprocessImage` (the SVG and raster header reads, the resolution
 //! refusal, the EXIF axis swap, the derived paths), the write, the over-length removal,
 //! `postprocessImage` (the `_thumb` and `_preview` files and the 16×16 `mini_preview`, byte for
-//! byte through [`crate::image_pipeline`]) and the row — **for PNG and JPEG**. A GIF, BMP, TIFF or
+//! byte through [`crate::image_pipeline`]) and the row — **for PNG, JPEG, GIF and BMP**. A TIFF or
 //! WebP is recognised by its header and refused as [`PrepareError::Unreproducible`] **before
 //! anything is written**, and the handler forwards the untouched request: those decoders are not
 //! ported ([D-650]). A raster Go cannot decode is served: `preprocessImage` returns "as is" and
@@ -253,7 +253,7 @@ impl App {
             Ok(config) => config,
             Err(PipelineError::NotPorted(_)) => {
                 return Err(Preprocess::Unreproducible(
-                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                    "TIFF and WebP uploads are decoded by Go",
                 ));
             }
             // "If we fail to decode, return as is."
@@ -295,7 +295,7 @@ impl App {
                 Ok(_) => info.has_preview_image = false,
                 Err(PipelineError::NotPorted(_)) => {
                     return Err(Preprocess::Unreproducible(
-                        "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                        "TIFF and WebP uploads are decoded by Go",
                     ));
                 }
                 Err(PipelineError::Go(_)) => {}
@@ -337,7 +337,7 @@ impl App {
             // Refused before the write for every format that reaches here; kept as a guard.
             Err(_) => {
                 return Err(PrepareError::Unreproducible(
-                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                    "TIFF and WebP uploads are decoded by Go",
                 ));
             }
         };
