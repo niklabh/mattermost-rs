@@ -7,8 +7,8 @@
 //! extension, mime type), `preprocessImage` (the SVG and raster header reads, the resolution
 //! refusal, the EXIF axis swap, the derived paths), the write, the over-length removal,
 //! `postprocessImage` (the `_thumb` and `_preview` files and the 16×16 `mini_preview`, byte for
-//! byte through [`crate::image_pipeline`]) and the row — **for PNG, JPEG, GIF and BMP**. A TIFF or
-//! WebP is recognised by its header and refused as [`PrepareError::Unreproducible`] **before
+//! byte through [`crate::image_pipeline`]) and the row — **for every format but WebP**. A WebP is
+//! recognised by its header and refused as [`PrepareError::Unreproducible`] **before
 //! anything is written**, and the handler forwards the untouched request: those decoders are not
 //! ported ([D-650]). A raster Go cannot decode is served: `preprocessImage` returns "as is" and
 //! `postprocessImage` only logs, so the row is the plain one with no dimensions.
@@ -252,9 +252,7 @@ impl App {
         let config = match image_pipeline::decode_config(input) {
             Ok(config) => config,
             Err(PipelineError::NotPorted(_)) => {
-                return Err(Preprocess::Unreproducible(
-                    "TIFF and WebP uploads are decoded by Go",
-                ));
+                return Err(Preprocess::Unreproducible("WebP uploads are decoded by Go"));
             }
             // "If we fail to decode, return as is."
             Err(PipelineError::Go(_)) => return Ok(0),
@@ -294,9 +292,7 @@ impl App {
             match image_pipeline::decode(input, self.config().file_max_image_resolution) {
                 Ok(_) => info.has_preview_image = false,
                 Err(PipelineError::NotPorted(_)) => {
-                    return Err(Preprocess::Unreproducible(
-                        "TIFF and WebP uploads are decoded by Go",
-                    ));
+                    return Err(Preprocess::Unreproducible("WebP uploads are decoded by Go"));
                 }
                 Err(PipelineError::Go(_)) => {}
             }
@@ -337,7 +333,7 @@ impl App {
             // Refused before the write for every format that reaches here; kept as a guard.
             Err(_) => {
                 return Err(PrepareError::Unreproducible(
-                    "TIFF and WebP uploads are decoded by Go",
+                    "WebP uploads are decoded by Go",
                 ));
             }
         };

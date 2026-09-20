@@ -4,9 +4,9 @@
 //! # Where the port stops, and why it stops *before* writing
 //!
 //! `UploadData`'s completion step for an image runs `HandleImages` (app/file.go:1161): it decodes
-//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. PNG, JPEG, GIF and
-//! BMP are
-//! served, byte for byte, through [`crate::image_pipeline`]. TIFF and WebP are not
+//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. Every format but
+//! WebP is
+//! served, byte for byte, through [`crate::image_pipeline`]. WebP is not
 //! decoded here ([D-650]), so an upload whose last chunk would reach one of them is handed to Go
 //! as [`PrepareError::Unreproducible`] — and the decision is taken from the file's first bytes
 //! **before the chunk is written**, because a request forwarded after the write would find
@@ -436,7 +436,7 @@ impl App {
     /// Only a name whose mime type says image matters. A first chunk carries its own head; a
     /// later one reads the head of what is already on disk (chunks are at least 5 MiB, so the
     /// header is there). A format `image.Decode` would hand to a decoder this port does not
-    /// have — TIFF, WebP — is forwarded; PNG, JPEG, GIF, BMP and bytes no decoder claims are
+    /// have — WebP — is forwarded; every other format and bytes no decoder claims are
     /// served (the last is `genFileInfoFromReader`'s 500).
     async fn refuse_if_completion_needs_derived_images(
         &self,
@@ -462,9 +462,9 @@ impl App {
         };
 
         match goimage::format::sniff(&head) {
-            Some("png" | "jpeg" | "gif" | "bmp") | None => Ok(()),
+            Some("png" | "jpeg" | "gif" | "bmp" | "tiff") | None => Ok(()),
             Some(_) => Err(PrepareError::Unreproducible(
-                "TIFF and WebP uploads are decoded by Go",
+                "WebP uploads are decoded by Go",
             )),
         }
     }
@@ -488,9 +488,7 @@ impl App {
                     ))
                 })?
                 // The head was sniffed before the write; a format reaching here is decoded.
-                .map_err(|_| {
-                    PrepareError::Unreproducible("TIFF and WebP uploads are decoded by Go")
-                })?;
+                .map_err(|_| PrepareError::Unreproducible("WebP uploads are decoded by Go"))?;
         let Some(derived) = derived else {
             return Ok(());
         };
@@ -658,7 +656,7 @@ pub fn gen_file_info_from_reader(
             Err(PipelineError::Go(text)) => return Err(GenFileInfoError::Decode(text)),
             Err(PipelineError::NotPorted(_)) => {
                 return Err(GenFileInfoError::Unreproducible(
-                    "TIFF and WebP uploads are decoded by Go",
+                    "WebP uploads are decoded by Go",
                 ));
             }
         }
