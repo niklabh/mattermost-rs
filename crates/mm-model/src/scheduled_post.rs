@@ -744,12 +744,9 @@ mod go_parity {
     /// the lookup runs, so `chrono_tz` not knowing them is unobservable.
     #[test]
     fn the_timezone_table_agrees_with_go_except_on_host_artifacts() {
-        const HOST_ARTIFACTS: [&str; 6] = [
+        const HOST_ARTIFACTS: [&str; 3] = [
             "",                  // Go: LoadLocation("") is UTC. Rejected earlier by base_is_valid.
             "Local",             // Go: the server's own zone. Rejected earlier by base_is_valid.
-            "america/new_york",  // accepted only on a case-insensitive filesystem
-            "AMERICA/NEW_YORK",  // ditto
-            "utc",               // ditto
             "America//New_York", // accepted only where the OS collapses `//` in a path
         ];
 
@@ -758,9 +755,18 @@ mod go_parity {
         assert!(rows.len() > 40, "corpus shrank: {}", rows.len());
 
         let mut agreed = 0;
+        let mut masked = 0;
         let mut differed = Vec::new();
         for row in rows {
             let name = row["name"].as_str().unwrap();
+            // A name that differs from a real zone only by case has no Go answer recorded: the
+            // oracle masks it, because `time.LoadLocation` opens a path and the generating
+            // filesystem's case-folding decides. There is nothing for `chrono_tz` to agree with.
+            if let Some(reason) = row["host_dependent"].as_str() {
+                assert!(!reason.is_empty(), "{name}: masked without a reason");
+                masked += 1;
+                continue;
+            }
             let go_ok = row["ok"].as_bool().unwrap();
             let ours = chrono_tz::Tz::from_str(name).is_ok();
 
@@ -776,7 +782,8 @@ mod go_parity {
         }
 
         assert_eq!(differed, HOST_ARTIFACTS, "the disagreements moved");
-        assert!(agreed >= 44, "only {agreed} names agreed");
+        assert_eq!(masked, 3, "the masked case-folded corpus changed size");
+        assert!(agreed >= 41, "only {agreed} names agreed");
     }
 
     fn assert_hook(

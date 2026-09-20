@@ -427,6 +427,12 @@ func recurrenceComputeNextAll(zones []recurrenceZone) []map[string]any {
 }
 
 func computeNextRow(row map[string]any) map[string]any {
+	// A mis-cased zone name resolves or not according to the generating host's filesystem, so
+	// there is no Go answer to record — see caseFoldedZoneNames in behaviour_scheduled_post.go.
+	if caseFoldedZoneNames[row["timezone"].(string)] {
+		row["host_dependent"] = caseFoldedZoneReason
+		return row
+	}
 	s := &model.ScheduledPost{
 		RepeatType:     row["repeat_type"].(string),
 		RepeatTimezone: row["timezone"].(string),

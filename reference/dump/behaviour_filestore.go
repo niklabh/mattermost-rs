@@ -20,7 +20,9 @@ package main
 //     `FileExists` distinguishes a missing file from a broken one.
 //
 // Determinism: fixed corpora, a fixed modification time, and a temporary directory whose name is
-// never recorded. No rand, no time.Now — see [D-032].
+// never recorded. No rand, no time.Now — see [D-032]. The one exception is the multipart boundary
+// `http.ServeContent` mints from crypto/rand for a multi-range response, which
+// `maskMultipartBoundary` rewrites to a fixed marker of the same length.
 
 import (
 	"bytes"
@@ -279,6 +281,7 @@ func writeFileResponseAll() []map[string]any {
 		for k, v := range res.Header {
 			headers[k] = strings.Join(v, ", ")
 		}
+		body := maskMultipartBoundary(headers, rec.Body.Bytes())
 
 		row := map[string]any{
 			"name":            tc.Name,
@@ -292,11 +295,40 @@ func writeFileResponseAll() []map[string]any {
 			"req_headers":     sortedHeaderPairs(tc.ReqHeaders),
 			"status":          res.StatusCode,
 			"headers":         headers,
-			"body_base64":     base64.StdEncoding.EncodeToString(rec.Body.Bytes()),
+			"body_base64":     base64.StdEncoding.EncodeToString(body),
 		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// multipartBoundaryPrefix is the readable head of the marker maskMultipartBoundary substitutes
+// for the random boundary; the rest is `0` padding up to the generated boundary's own length.
+const multipartBoundaryPrefix = "fixedboundary"
+
+// maskMultipartBoundary makes a multi-range response reproducible.
+//
+// `http.ServeContent` answers two ranges with `multipart/byteranges`, and `multipart.Writer`
+// mints that boundary from crypto/rand — thirty random bytes, hex-encoded. Recording it verbatim
+// rewrote this fixture on every run for no gain: the boundary is the one part of the response
+// that is deliberately unpredictable, so no port can or should reproduce it (`mm_api::
+// serve_content` forwards the case outright, see [D-205]).
+//
+// The substitute is the same *length* as what Go generated, so `Content-Length` — which is a
+// property worth comparing — still describes the recorded body.
+func maskMultipartBoundary(headers map[string]string, body []byte) []byte {
+	const prefix = "multipart/byteranges; boundary="
+	ct, ok := headers["Content-Type"]
+	if !ok || !strings.HasPrefix(ct, prefix) {
+		return body
+	}
+	generated := strings.TrimPrefix(ct, prefix)
+	if len(generated) < len(multipartBoundaryPrefix) {
+		return body
+	}
+	marker := multipartBoundaryPrefix + strings.Repeat("0", len(generated)-len(multipartBoundaryPrefix))
+	headers["Content-Type"] = prefix + marker
+	return bytes.ReplaceAll(body, []byte(generated), []byte(marker))
 }
 
 // modTimeMillis renders the modification time the way a FileInfo carries it — epoch

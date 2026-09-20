@@ -1576,18 +1576,12 @@
             "panicked": false
         },
         {
-            "err": null,
-            "loc": "america/new_york",
-            "name": "america/new_york",
-            "ok": true,
-            "panicked": false
+            "host_dependent": "differs from a real zone only by case: time.LoadLocation resolves it on a case-insensitive filesystem and not on a case-sensitive one",
+            "name": "america/new_york"
         },
         {
-            "err": null,
-            "loc": "AMERICA/NEW_YORK",
-            "name": "AMERICA/NEW_YORK",
-            "ok": true,
-            "panicked": false
+            "host_dependent": "differs from a real zone only by case: time.LoadLocation resolves it on a case-insensitive filesystem and not on a case-sensitive one",
+            "name": "AMERICA/NEW_YORK"
         },
         {
             "err": null,
@@ -1816,11 +1810,8 @@
             "panicked": false
         },
         {
-            "err": null,
-            "loc": "utc",
-            "name": "utc",
-            "ok": true,
-            "panicked": false
+            "host_dependent": "differs from a real zone only by case: time.LoadLocation resolves it on a case-insensitive filesystem and not on a case-sensitive one",
+            "name": "utc"
         },
         {
             "err": "time: invalid location name",

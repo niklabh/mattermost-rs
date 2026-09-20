@@ -372,11 +372,33 @@ func newValidScheduledPost() *model.ScheduledPost {
 
 // --- time.LoadLocation -------------------------------------------------------------------------
 
+// caseFoldedZoneNames are the corpus names that differ from a real IANA zone only in letter case.
+//
+// `time.LoadLocation` opens `<zoneinfo dir>/<name>`, so whether one of these resolves is a
+// property of the generating machine's **filesystem**: it loads on a case-insensitive one (macOS)
+// and fails on a case-sensitive one (Linux). Recording either answer means the next generator run
+// on the other kind of host rewrites the committed fixture — which is exactly what happened, five
+// sessions in a row. These rows are therefore emitted with a fixed reason and **no answer**, the
+// same masking `"Local"`'s resolved zone already gets in behaviour_scheduled_post_recurrence.go.
+//
+// A Rust port reads nothing from them: `chrono_tz` is a compiled-in database with its own
+// case rules, and what it does with a mis-cased name is its business, not Go's. See [D-032],
+// [D-065].
+var caseFoldedZoneNames = map[string]bool{
+	"america/new_york": true,
+	"AMERICA/NEW_YORK": true,
+	"utc":              true,
+}
+
+// caseFoldedZoneReason is what a masked row carries instead of ok/err/loc.
+const caseFoldedZoneReason = "differs from a real zone only by case: time.LoadLocation resolves it on a case-insensitive filesystem and not on a case-sensitive one"
+
 // scheduledPostTimezonesAll records what THIS machine's tzdata accepts. time.LoadLocation reads
 // $ZONEINFO and then the host's zoneinfo directory, so the answer is a deployment artifact rather
 // than a property of Go — the same shape of problem as mime.TypeByExtension in [D-030]. Recorded
 // as evidence for the Rust port's choice of timezone database, not as a target it must hit
-// exactly.
+// exactly. The names in caseFoldedZoneNames are masked rather than answered, because their answer
+// varies between two hosts that both have a complete tzdata.
 func scheduledPostTimezonesAll() []map[string]any {
 	names := []string{
 		"", "UTC", "Local", "GMT", "EST", "MST", "HST", "EST5EDT",
@@ -396,6 +418,11 @@ func scheduledPostTimezonesAll() []map[string]any {
 	var res []map[string]any
 	for _, name := range names {
 		row := map[string]any{"name": name}
+		if caseFoldedZoneNames[name] {
+			row["host_dependent"] = caseFoldedZoneReason
+			res = append(res, row)
+			continue
+		}
 		probe(row, func() {
 			loc, err := time.LoadLocation(name)
 			if err != nil {
