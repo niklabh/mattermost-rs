@@ -3,10 +3,12 @@
 //! The encoder (`tiff/writer.go`) is not ported: Mattermost decodes TIFF uploads and re-encodes
 //! them as PNG or JPEG, so no code path in the server writes one.
 //!
-//! Group 3 and Group 4 fax compression are **not** ported either — `tiff.Decode` hands those to
-//! `golang.org/x/image/ccitt`, and [`reader::Error::CcittNotPorted`] names that gap so a caller
-//! forwards exactly those files and no others.
+//! Group 3 and Group 4 fax compression go through [`ccitt`], a port of
+//! `golang.org/x/image/ccitt`'s reader — `tiff.Decode` calls `ccitt.NewReader` for compression
+//! values 3 and 4.
 
+pub mod ccitt;
+mod ccitt_tables;
 pub mod lzw;
 pub mod reader;
 

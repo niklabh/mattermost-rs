@@ -24,6 +24,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use super::ccitt;
 use super::lzw;
 use crate::goread::{BufReader, Error as IoError, Read};
 use crate::image::{Color, Image, Paletted, Pixels, Rect};
@@ -111,11 +112,9 @@ pub enum Error {
     /// An error from `tiff/lzw`.
     #[error("{0}")]
     Lzw(#[from] lzw::Error),
-    /// **Not Go.** Group 3 and Group 4 fax compression need `golang.org/x/image/ccitt`, which
-    /// this crate does not port; a caller forwards exactly these files to the Go server rather
-    /// than be told a wrong answer. Every other branch of Go's compression switch is ported.
-    #[error("tiff: the CCITT Group 3/4 decoder is not ported")]
-    CcittNotPorted,
+    /// An error from `golang.org/x/image/ccitt`, which decodes Group 3 and Group 4 fax data.
+    #[error("{0}")]
+    Ccitt(#[from] ccitt::Error),
 }
 
 /// `errNoPixels`.
@@ -146,6 +145,16 @@ impl From<lzw::Error> for Stop {
             Stop::Eof
         } else {
             Stop::Err(Error::Lzw(e))
+        }
+    }
+}
+
+impl From<ccitt::Error> for Stop {
+    fn from(e: ccitt::Error) -> Stop {
+        if e.is_eof() {
+            Stop::Eof
+        } else {
+            Stop::Err(Error::Ccitt(e))
         }
     }
 }
@@ -1154,7 +1163,12 @@ pub fn decode(data: &[u8]) -> Result<Image, Error> {
     }
     // Maximum data per pixel is 8 bytes (RGBA64).
     let block_max_data_size = block_width * block_height * 8;
-    let compression = d.first_val(T_COMPRESSION);
+    let params = BlockParams {
+        compression: d.first_val(T_COMPRESSION),
+        photometric: d.first_val(T_PHOTOMETRIC_INTERPRETATION),
+        fill_order: d.first_val(T_FILL_ORDER),
+        max_data_size: block_max_data_size,
+    };
     for i in 0..blocks_across {
         let mut blk_w = block_width;
         if !block_padding && i == blocks_across - 1 && d.width % block_width != 0 {
@@ -1168,7 +1182,7 @@ pub fn decode(data: &[u8]) -> Result<Image, Error> {
             let k = (j * blocks_across + i) as usize;
             let offset = block_offsets[k];
             let n = block_counts[k];
-            d.block = read_block(&mut d.r, compression, offset, n, block_max_data_size)?;
+            d.block = read_block(&mut d.r, &params, offset, n, blk_w, blk_h)?;
 
             let xmin = i * block_width;
             let ymin = j * block_height;
@@ -1180,24 +1194,78 @@ pub fn decode(data: &[u8]) -> Result<Image, Error> {
     Ok(img)
 }
 
+/// What the compression switch needs from the IFD besides the block's own bytes.
+struct BlockParams {
+    compression: u64,
+    photometric: u64,
+    fill_order: u64,
+    /// `blockMaxDataSize`: `blockWidth * blockHeight * 8`, eight bytes being the most any pixel
+    /// format needs.
+    max_data_size: i64,
+}
+
+/// Port of `ccittFillOrder` (reader.go:690).
+fn ccitt_fill_order(tiff_fill_order: u64) -> ccitt::Order {
+    if tiff_fill_order == 2 {
+        ccitt::Order::Lsb
+    } else {
+        ccitt::Order::Msb
+    }
+}
+
 /// The compression switch of `Decode` (reader.go:843): one strip or tile's bytes.
 fn read_block(
     r: &mut Buffer<'_>,
-    compression: u64,
+    params: &BlockParams,
     offset: u64,
     n: u64,
-    block_max_data_size: i64,
+    blk_w: i64,
+    blk_h: i64,
 ) -> Result<Block, Error> {
     let limit = offset.saturating_add(n);
-    match compression {
+    let lim = params.max_data_size;
+    match params.compression {
         // The spec gives Compression no default, but some tools write none at all and mean 1.
         C_NONE | 0 => {
-            if n > block_max_data_size as u64 {
+            if n > lim as u64 {
                 return Err(Error::Format("block data size too large"));
             }
             Ok(Block::Window(r.slice(offset, n)?))
         }
-        C_G3 | C_G4 => Err(Error::CcittNotPorted),
+        C_G3 | C_G4 => {
+            let sub_format = if params.compression == C_G3 {
+                ccitt::SubFormat::Group3
+            } else {
+                ccitt::SubFormat::Group4
+            };
+            let opts = ccitt::Options {
+                invert: params.photometric == P_WHITE_IS_ZERO,
+                align: false,
+            };
+            let mut z = ccitt::Reader::new(
+                Section {
+                    r,
+                    off: offset,
+                    limit,
+                },
+                ccitt_fill_order(params.fill_order),
+                sub_format,
+                blk_w,
+                blk_h,
+                opts,
+            );
+            let (buf, err) = read_buf(
+                |p| {
+                    let (n, e) = z.read(p);
+                    (n, e.map(Stop::from))
+                },
+                lim,
+            );
+            match err {
+                Some(e) => Err(e),
+                None => Ok(Block::Owned(buf)),
+            }
+        }
         C_LZW => {
             let mut z = lzw::Reader::new(
                 BufReader::new(Section {
@@ -1213,7 +1281,7 @@ fn read_block(
                     let (n, e) = z.read(p);
                     (n, e.map(Stop::from))
                 },
-                block_max_data_size,
+                lim,
             );
             match err {
                 Some(e) => Err(e),
@@ -1231,7 +1299,7 @@ fn read_block(
                     let (n, e) = z.read(p);
                     (n, e.map(Stop::from))
                 },
-                block_max_data_size,
+                lim,
             );
             match err {
                 Some(e) => Err(e),
@@ -1244,7 +1312,7 @@ fn read_block(
                 off: offset,
                 limit,
             });
-            Ok(Block::Owned(unpack_bits(&mut br, block_max_data_size)?))
+            Ok(Block::Owned(unpack_bits(&mut br, lim)?))
         }
         other => Err(Error::Unsupported(format!("compression value {other}"))),
     }
@@ -1365,17 +1433,6 @@ mod go_parity {
     use crate::testsupport::{b64, describe, fixture, sha};
     use serde_json::{Value as Json, json};
 
-    /// The files whose answer Go gets from `golang.org/x/image/ccitt`. Named here rather than
-    /// sniffed out of the error text, so that a case silently becoming CCITT — or a ported case
-    /// silently starting to claim it is — fails the test.
-    const CCITT_CASES: &[&str] = &[
-        "bw-gopher_ccittGroup3.tiff",
-        "bw-gopher_ccittGroup4.tiff",
-        "crafted_compression_3",
-        "crafted_compression_4",
-        "crafted_g3_fill_order_2",
-    ];
-
     /// A ColorMap entry as the oracle's `paletteEntry` spells a `color.RGBA64`: its Go type, then
     /// the four `RGBA()` channels, which for an `RGBA64` are the stored values.
     fn palette_json(p: &[Color]) -> Vec<Json> {
@@ -1421,7 +1478,7 @@ mod go_parity {
     #[test]
     fn decode_matches_go_on_every_corpus_file() {
         let cases = fixture("tiff")["decode"].as_array().unwrap();
-        let (mut checked, mut skipped, mut ccitt) = (0, 0, 0);
+        let (mut checked, mut skipped) = (0, 0);
         for c in cases {
             let name = c["name"].as_str().unwrap();
             let data = b64(c["b64"].as_str().unwrap());
@@ -1447,25 +1504,12 @@ mod go_parity {
                     d["format"] = json!("tiff");
                     d
                 }
-                Err(Error::CcittNotPorted) => {
-                    assert!(
-                        CCITT_CASES.contains(&name),
-                        "{name}: unexpected CCITT claim"
-                    );
-                    ccitt += 1;
-                    continue;
-                }
                 Err(e) => json!({ "err": e.to_string() }),
             };
-            assert!(
-                !CCITT_CASES.contains(&name),
-                "{name}: answered without the CCITT decoder"
-            );
             assert_eq!(image, c["image"], "{name}: image");
             checked += 1;
         }
         assert_eq!(skipped, 3, "files the TIFF magic does not match");
-        assert_eq!(ccitt, CCITT_CASES.len(), "files handed to ccitt");
-        assert!(checked > 200, "{checked}");
+        assert!(checked > 220, "{checked}");
     }
 }

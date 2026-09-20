@@ -34,9 +34,11 @@ import (
 	"image/color"
 	"io"
 	"sort"
+	"strings"
 
 	xlzw "golang.org/x/image/tiff/lzw"
 
+	"golang.org/x/image/ccitt"
 	"golang.org/x/image/tiff"
 )
 
@@ -990,6 +992,211 @@ func bz2TIFFs() []namedFile {
 	return files
 }
 
+// --- the CCITT reader, driven directly -----------------------------------------------------
+//
+// `tiff.Decode` only ever calls `ccitt.NewReader` with Align false and an explicit height, so a
+// corpus of TIFF files leaves most of ccitt/reader.go unexercised: the byte-alignment paths, the
+// AutoDetectHeight paths, LSB bit order, and the truncated-trailer tolerance. These cases drive
+// the reader the way the package's own API does, over the raw CCITT streams x/image ships.
+
+type ccittCase struct {
+	Name   string `json:"name"`
+	B64    string `json:"b64"`
+	Order  string `json:"order"` // "msb" or "lsb"
+	Sub    string `json:"sub"`   // "group3" or "group4"
+	Width  int    `json:"width"`
+	Height int    `json:"height"` // -1 is ccitt.AutoDetectHeight
+	Align  bool   `json:"align"`
+	Invert bool   `json:"invert"`
+	OutSHA string `json:"out_sha256"`
+	OutLen int    `json:"out_len"`
+	Err    any    `json:"err"`
+}
+
+func runCCITT(name string, data []byte, order string, sub string, w, h int, align, invert bool) ccittCase {
+	o := ccitt.MSB
+	if order == "lsb" {
+		o = ccitt.LSB
+	}
+	sf := ccitt.Group3
+	if sub == "group4" {
+		sf = ccitt.Group4
+	}
+	r := ccitt.NewReader(bytes.NewReader(data), o, sf, w, h, &ccitt.Options{Align: align, Invert: invert})
+	out, err := io.ReadAll(r)
+	return ccittCase{
+		Name: name, B64: b64(data), Order: order, Sub: sub, Width: w, Height: h,
+		Align: align, Invert: invert,
+		OutSHA: sha(out), OutLen: len(out), Err: imgErr(err),
+	}
+}
+
+// ccittStreams are the raw CCITT streams in x/image's own ccitt/testdata, which cover the
+// aligned, inverted and truncated variants of one 153x55 image.
+func ccittStreams() []namedFile {
+	var files []namedFile
+	files = append(files, xImageTestdata("ccitt/testdata", "ccitt_group3")...)
+	files = append(files, xImageTestdata("ccitt/testdata", "ccitt_group4")...)
+	return files
+}
+
+func ccittCases() []ccittCase {
+	const gopherW, gopherH = 153, 55
+	var cases []ccittCase
+	for _, f := range ccittStreams() {
+		sub := "group3"
+		if strings.HasSuffix(f.Name, "group4") {
+			sub = "group4"
+		}
+		align := strings.Contains(f.Name, "aligned")
+		invert := strings.Contains(f.Name, "inverted")
+		// The combination the file was written with, then each option flipped: an option the
+		// stream was not written with is a decode failure or a different image, and both are
+		// answers the port has to reproduce.
+		for _, v := range []struct {
+			tag           string
+			order         string
+			w, h          int
+			align, invert bool
+		}{
+			{"", "msb", gopherW, gopherH, align, invert},
+			{"_noalign", "msb", gopherW, gopherH, false, invert},
+			{"_align", "msb", gopherW, gopherH, true, invert},
+			{"_flipinvert", "msb", gopherW, gopherH, align, !invert},
+			{"_lsb", "lsb", gopherW, gopherH, align, invert},
+			{"_autoheight", "msb", gopherW, -1, align, invert},
+		} {
+			cases = append(cases, runCCITT(f.Name+v.tag, f.Data, v.order, sub, v.w, v.h, v.align, v.invert))
+		}
+	}
+	// Geometry the stream does not match, and the two widths NewReader rejects outright.
+	for _, f := range ccittStreams() {
+		if f.Name != "bw-gopher.ccitt_group3" && f.Name != "bw-gopher.ccitt_group4" {
+			continue
+		}
+		sub := "group3"
+		if strings.HasSuffix(f.Name, "group4") {
+			sub = "group4"
+		}
+		for _, wh := range [][2]int{{152, 55}, {154, 55}, {153, 54}, {153, 56}, {153, 0}, {8, 55}, {0, 3}, {-1, 5}, {1 << 21, 5}} {
+			cases = append(cases, runCCITT(fmt.Sprintf("%s_%dx%d", f.Name, wh[0], wh[1]), f.Data, "msb", sub, wh[0], wh[1], false, false))
+		}
+		for _, cut := range []int{0, 1, 2, 5, 17, 64, len(f.Data) / 2, len(f.Data) - 3, len(f.Data) - 1} {
+			if cut < 0 || cut > len(f.Data) {
+				continue
+			}
+			cases = append(cases, runCCITT(fmt.Sprintf("%s_cut%d", f.Name, cut), f.Data[:cut], "msb", sub, gopherW, gopherH, false, false))
+		}
+		// A byte flipped in the middle of the stream: an invalid code, an invalid mode or a run
+		// that overflows the row, depending where it lands.
+		for _, pos := range []int{3, 11, 40, 100, len(f.Data) - 10} {
+			if pos < 0 || pos >= len(f.Data) {
+				continue
+			}
+			bad := bytes.Clone(f.Data)
+			bad[pos] ^= 0x5a
+			cases = append(cases, runCCITT(fmt.Sprintf("%s_flip%d", f.Name, pos), bad, "msb", sub, gopherW, gopherH, false, false))
+		}
+	}
+	// Hand-made streams for the codes the gopher image may not contain: an immediate EOL, an
+	// all-zero stream, an all-one stream and the extension mode (0000001 in Table 1).
+	for _, h := range []struct {
+		name string
+		data []byte
+	}{
+		{"eol_only", []byte{0x00, 0x10}},
+		{"eol_then_eol", []byte{0x00, 0x10, 0x01}},
+		{"zeros", make([]byte, 16)},
+		{"ones", bytes.Repeat([]byte{0xff}, 16)},
+		{"ext_mode", []byte{0x02, 0x00, 0x00, 0x00}},
+		{"empty", nil},
+	} {
+		for _, sub := range []string{"group3", "group4"} {
+			for _, wh := range [][2]int{{8, 2}, {8, -1}, {0, 1}} {
+				cases = append(cases, runCCITT(fmt.Sprintf("hand_%s_%s_%dx%d", h.name, sub, wh[0], wh[1]), h.data, "msb", sub, wh[0], wh[1], false, false))
+			}
+		}
+	}
+	return cases
+}
+
+// ccittTIFFs wraps the raw CCITT streams in TIFF containers, which is how tiff.Decode reaches
+// the ccitt package: Align is always false there and the height is always the block height.
+func ccittTIFFs() []namedFile {
+	var files []namedFile
+	for _, f := range ccittStreams() {
+		comp := uint32(3)
+		if strings.HasSuffix(f.Name, "group4") {
+			comp = 4
+		}
+		for _, v := range []struct {
+			tag         string
+			photometric uint32
+			fillOrder   uint32
+			w, h, rps   int
+		}{
+			{"_p0", 0, 0, 153, 55, 0},
+			{"_p1", 1, 0, 153, 55, 0},
+			{"_fill2", 0, 2, 153, 55, 0},
+			{"_strips", 0, 0, 153, 55, 11},
+			{"_narrow", 0, 0, 100, 55, 0},
+			{"_short", 0, 0, 153, 20, 0},
+		} {
+			b := &tbuild{}
+			off := b.addData(f.Data)
+			b.put(256, ttShort, uint32(v.w))
+			b.put(257, ttShort, uint32(v.h))
+			b.put(258, ttShort, 1)
+			b.put(259, ttShort, comp)
+			b.put(262, ttShort, v.photometric)
+			if v.fillOrder != 0 {
+				b.put(266, ttShort, v.fillOrder)
+			}
+			b.put(273, ttLong, off)
+			b.put(277, ttShort, 1)
+			b.put(279, ttLong, uint32(len(f.Data)))
+			if v.rps > 0 {
+				b.put(278, ttShort, uint32(v.rps))
+				// Every strip points at the whole stream: only the first can decode.
+				n := (v.h + v.rps - 1) / v.rps
+				offs := make([]uint32, n)
+				counts := make([]uint32, n)
+				for i := range offs {
+					offs[i], counts[i] = off, uint32(len(f.Data))
+				}
+				setLongVals(b, 273, offs)
+				setLongVals(b, 279, counts)
+			}
+			files = append(files, namedFile{"ccitt_" + f.Name + v.tag, b.bytes()})
+		}
+	}
+	// One tiled G4 file, so the tile path meets the ccitt reader too.
+	{
+		f := ccittStreams()[0]
+		b := &tbuild{}
+		off := b.addData(f.Data)
+		b.put(256, ttShort, 32)
+		b.put(257, ttShort, 32)
+		b.put(258, ttShort, 1)
+		b.put(259, ttShort, 4)
+		b.put(262, ttShort, 0)
+		b.put(277, ttShort, 1)
+		b.put(322, ttShort, 16)
+		b.put(323, ttShort, 16)
+		b.put(324, ttLong, off, off, off, off)
+		b.put(325, ttLong, uint32(len(f.Data)), uint32(len(f.Data)), uint32(len(f.Data)), uint32(len(f.Data)))
+		files = append(files, namedFile{"ccitt_tiled_g4", b.bytes()})
+	}
+	return files
+}
+
+// setLongVals replaces a Long entry's whole value list.
+func setLongVals(b *tbuild, tag uint16, vals []uint32) {
+	e := findEntry(b, tag)
+	e.typ = ttLong
+	e.vals = vals
+}
+
 func imagingTIFFStage() (map[string]any, error) {
 	var corpus []namedFile
 	corpus = append(corpus, xImageTestdata("testdata", "tiff")...)
@@ -997,12 +1204,13 @@ func imagingTIFFStage() (map[string]any, error) {
 	corpus = append(corpus, bz2TIFFs()...)
 	corpus = append(corpus, goEncodedTIFFs()...)
 	corpus = append(corpus, craftedTIFFs()...)
+	corpus = append(corpus, ccittTIFFs()...)
 
 	var dec []decodeCase
 	for _, f := range corpus {
 		dec = append(dec, decodeCase{Name: f.Name, B64: b64(f.Data), Config: configOf(f.Data), Image: imageOf(f.Data)})
 	}
-	return map[string]any{"decode": dec}, nil
+	return map[string]any{"decode": dec, "ccitt": ccittCases()}, nil
 }
 
 // keep the image and color imports honest if a case above is ever commented out.
