@@ -507,7 +507,10 @@ impl<'a> Decoder<'a> {
             return Err(Error::Format("IFD data too large"));
         }
         let truncated_count = i64::from(count).min(max_count).max(0) as usize;
-        let datalen = unit * count;
+        // Go's `lengths[datatype] * count` is `uint32` arithmetic. The check above keeps the
+        // product inside `MaxInt32`, so the wrap is unreachable — but a debug-mode panic here
+        // would be a divergence from Go, where it would silently wrap.
+        let datalen = unit.wrapping_mul(count);
         let raw: Vec<u8> = if datalen > 4 {
             let truncated_len = u64::from(unit) * truncated_count as u64;
             self.r
@@ -1316,6 +1319,24 @@ mod tests {
             unpack_bits(&mut r, 1000).err(),
             Some(Error::Io(IoError::Eof))
         );
+    }
+
+    /// `readBuf`'s limit is a hard stop, not a bound on one read: a stream that never ends is
+    /// truncated at `lim` and the reader is not called again. No geometry can observe this —
+    /// `blockMaxDataSize` is the most bytes any block can need — so only a direct test can.
+    #[test]
+    fn read_buf_stops_dead_at_the_limit() {
+        let mut calls = 0;
+        let (out, err) = read_buf(
+            |p| {
+                calls += 1;
+                p.fill(0xab);
+                (p.len(), None)
+            },
+            700,
+        );
+        assert_eq!((out.len(), err.is_none()), (700, true));
+        assert_eq!(calls, 2, "512 bytes then 188, and then no further read");
     }
 
     /// `buffer.fill`'s two EOFs, which decide half the decoder's error texts.

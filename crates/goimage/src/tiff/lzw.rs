@@ -223,6 +223,10 @@ impl<R: ByteRead> Reader<R> {
                     i -= 1;
                     c = self.last;
                 }
+                // `c >= clear` and `c > clear` are the same test here: `c` is a code that was
+                // emitted or a `prefix` entry written from one, and neither the clear code nor
+                // the EOF code can be either (clear `continue`s, EOF breaks). A mutation between
+                // the two is equivalent, and survives the suite for that reason.
                 while c >= self.clear {
                     self.output[i] = self.suffix[usize::from(c)];
                     i -= 1;

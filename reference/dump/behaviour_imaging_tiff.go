@@ -429,6 +429,10 @@ func (s tifSpec) build() []byte {
 	bps := uint32(1)
 	if samples > 0 {
 		bps = s.bps[0]
+	} else {
+		// No BitsPerSample entry: the reader defaults to one bit and one sample, and the pixel
+		// data has to be laid out that way or the case cannot tell that default from any other.
+		samples = 1
 	}
 	src := noiseSrc(s.seed, bps)
 	comp := s.compression
@@ -567,6 +571,23 @@ func craftedTIFFs() []namedFile {
 	add(tifSpec{name: "paletted8_no_colormap", w: 4, h: 3, bps: []uint32{8}, photometric: 3, compression: 1, seed: next()})
 	add(tifSpec{name: "paletted8_short_colormap", w: 4, h: 3, bps: []uint32{8}, photometric: 3, compression: 1, colorMap: grayMap(4, 34), seed: next()})
 	add(tifSpec{name: "paletted1_two_colours", w: 4, h: 2, bps: []uint32{1}, photometric: 3, compression: 1, colorMap: grayMap(2, 35), seed: next()})
+	// A ColorMap of exactly n entries with the largest index in use at n-1 and, next door, at n:
+	// the pair that separates `idx >= len(palette)` from `idx > len(palette)`.
+	for _, top := range []int{3, 4} {
+		b := &tbuild{}
+		pix := []byte{0, 1, 2, 3, byte(top)}
+		off := b.addData(pix)
+		b.put(256, ttShort, uint32(len(pix)))
+		b.put(257, ttShort, 1)
+		b.put(258, ttShort, 8)
+		b.put(259, ttShort, 1)
+		b.put(262, ttShort, 3)
+		b.put(273, ttLong, off)
+		b.put(277, ttShort, 1)
+		b.put(279, ttLong, uint32(len(pix)))
+		b.put(320, ttShort, grayMap(4, 37)...)
+		raw(fmt.Sprintf("paletted_top_index_%d_of_4", top), b.bytes())
+	}
 	add(tifSpec{name: "colormap_bad_length", w: 4, h: 3, bps: []uint32{8}, photometric: 3, compression: 1, colorMap: make([]uint32, 4), seed: next()})
 	add(tifSpec{name: "colormap_too_long", w: 4, h: 3, bps: []uint32{8}, photometric: 3, compression: 1, colorMap: make([]uint32, 3*257), seed: next()})
 
@@ -717,8 +738,14 @@ func craftedTIFFs() []namedFile {
 		mutate: func(b *tbuild) { setType(b, 256, ttRational) }})
 	add(tifSpec{name: "ifd_entry_byte_width", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, seed: next(),
 		mutate: func(b *tbuild) { setType(b, 256, ttByte) }})
+	// 800000000 Longs is over MaxInt32/4 and under MaxUint32/4, so it separates the reader's
+	// `count > MaxInt32/lengths[datatype]` from the looser bound a reader might write instead.
 	add(tifSpec{name: "ifd_count_overflows", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, seed: next(),
+		mutate: func(b *tbuild) { setCount(b, 273, 800000000) }})
+	add(tifSpec{name: "ifd_count_max_int32", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, seed: next(),
 		mutate: func(b *tbuild) { setCount(b, 273, 0x7fffffff) }})
+	add(tifSpec{name: "ifd_count_just_under", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, seed: next(),
+		mutate: func(b *tbuild) { setCount(b, 273, 536870911) }})
 	add(tifSpec{name: "ifd_external_pointer_past_eof", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, rowsPerStrip: 1, seed: next(),
 		mutate: func(b *tbuild) { setWord(b, 273, 1<<20) }})
 	add(tifSpec{name: "sample_format_1", w: 5, h: 4, bps: []uint32{8}, photometric: 1, compression: 1, sampleFormat: []uint32{1}, seed: next()})
