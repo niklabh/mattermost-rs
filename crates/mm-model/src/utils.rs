@@ -1017,6 +1017,47 @@ pub fn decode_one_from_json<T: serde::de::DeserializeOwned>(
     T::deserialize(&mut deserializer)
 }
 
+/// [`decode_one_from_json`] for a body whose Go target is a **struct**, which a JSON array is
+/// never a valid encoding of.
+///
+/// serde's derived `Deserialize` accepts a *sequence* as well as a map — the fields are read
+/// positionally — so `[]` decodes into a struct with every field at its default, where
+/// `encoding/json` answers `cannot unmarshal array into Go value of type model.X`. The difference
+/// is on the wire: Go's handler answers `invalid_body_param` naming the **body**, and a port that
+/// accepted the array walks on to a later validation branch and names some *field* instead. Found
+/// 2026-09-20 by `parity::channel_creates`, once error messages started being compared.
+///
+/// A leading `[` is the whole test, because that is the only token serde and `encoding/json`
+/// disagree about here: a string, a number and a bare `true` are errors for both, and `null` is
+/// the caller's to model — `T = Option<Struct>` for Go's `var x *model.T`, and
+/// [`decode_one_value_from_json`] for its `var x model.T`.
+pub fn decode_one_object_from_json<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    if data
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b'[')
+    {
+        return Err(serde::de::Error::custom(
+            "json: cannot unmarshal array into Go value",
+        ));
+    }
+    decode_one_from_json(data)
+}
+
+/// [`decode_one_object_from_json`] for Go's `var x model.T` — a **value**, not a pointer.
+///
+/// `json.Decode(&x)` of a `null` body into a non-pointer is a no-op *success*: `x` keeps its zero
+/// value and the handler walks on to its field checks. serde rejects `null` for a struct, so a
+/// port that used the plain decoder answers `invalid_body_param` naming the body where Go names
+/// the first empty field. Found 2026-09-20 by `parity::properties`.
+pub fn decode_one_value_from_json<T: serde::de::DeserializeOwned + Default>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    Ok(decode_one_object_from_json::<Option<T>>(data)?.unwrap_or_default())
+}
+
 /// Port of `model.SortedArrayFromJSON` (utils.go:546): `json.Decoder.Decode` into `[]string`,
 /// then [`remove_duplicate_strings`]. The body every "by ids" / "by names" POST in api4 carries.
 ///

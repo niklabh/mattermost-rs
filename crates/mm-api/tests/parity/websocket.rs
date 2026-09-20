@@ -225,9 +225,9 @@ async fn presence_and_an_unknown_action_answer_identically() {
         "an accepted action answers OK with no data key at all"
     );
 
-    // The unknown-action error. `message` is Go's translated string and ours is the id — the
-    // project-wide i18n gap — so the two comparable fields are compared and `message` is not.
-    for field in ["id", "detailed_error", "status_code"] {
+    // The unknown-action error, `message` included: a frame carries the `DefaultServerLocale`
+    // translation `NewAppError` set at construction, and nothing re-translates one.
+    for field in ["id", "message", "detailed_error", "status_code"] {
         assert_eq!(
             go_frames[1]["error"][field], rust_frames[1]["error"][field],
             "the unknown-action error's {field} differs"

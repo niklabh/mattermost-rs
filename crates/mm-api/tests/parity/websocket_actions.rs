@@ -132,7 +132,10 @@ fn raw_answer(probe: &SocketProbe, seq: i64) -> String {
         .expect("the answer was collected")
 }
 
-/// Both servers refused, with `id`, and agree on everything but the translated message.
+/// Both servers refused, with `id`, and agree on every field including the translated
+/// `message` — which on a websocket frame is in `DefaultServerLocale`, not the connecting
+/// client's language, because `NewAppError` translates at construction and nothing re-translates
+/// a frame (wsapi/websocket_handler.go:66).
 fn assert_same_refusal(what: &str, go: &Value, rust: &Value, id: &str, status_code: i64) {
     assert_eq!(go["status"], "FAIL", "{what}: Go did not refuse: {go}");
     assert_eq!(rust["status"], "FAIL", "{what}: we did not refuse: {rust}");
@@ -141,7 +144,13 @@ fn assert_same_refusal(what: &str, go: &Value, rust: &Value, id: &str, status_co
         go["error"]["id"], id,
         "{what}: Go refused differently: {go}"
     );
-    for field in ["id", "detailed_error", "status_code", "request_id"] {
+    for field in [
+        "id",
+        "message",
+        "detailed_error",
+        "status_code",
+        "request_id",
+    ] {
         assert_eq!(
             go["error"][field], rust["error"][field],
             "{what}: error.{field}\n go: {go}\nrust: {rust}"

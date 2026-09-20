@@ -2893,13 +2893,21 @@ Two places where Go puts a live credential into a string that reaches logs:
 - `store.NewErrNotFound("Session", fmt.Sprintf("sessionIdOrToken=%s", ...))` (session_store.go:107)
 - `model.NewAppError(..., map[string]any{"Token": token, ...})` (app/session.go:96, :115)
 
-Both are reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
+Both were reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
 code and detail string are unchanged, so nothing a client sees differs — `AppError.params` is
 `json:"-"` and never serialised.
 
-**Accepted deliberately, and it is the one place this port is intentionally not bug-compatible.**
-The miss path runs on every request with a bad token, which is exactly the path most likely to be
-high-volume in a log aggregator. A test in `session_store.rs` asserts the token does not appear.
+**Narrowed 2026-09-20, because that last premise stopped being true.** `AppError.params` is not
+serialised, but since [D-092] closed it is *rendered*: the id's sentence is
+`Invalid session token={{.Token}}, err={{.Error}}`, so withholding the token put `<no value>` on
+the wire where Go writes the token. `parity::remote_cluster` failed on it the first time messages
+were compared. The **params** now carry the token (`mm_app::session`, `mm_app::remote_cluster`),
+and nothing in either path logs them.
+
+What stays redacted is the half that never reaches a client: the store's
+`NewErrNotFound("Session", "sessionIdOrToken=<redacted>")`, which lands in `detailed_error` and is
+wiped unless `EnableDeveloper`. The `session_store.rs` test still asserts the token does not
+appear there.
 
 ---
 
@@ -3286,7 +3294,7 @@ here, but nothing is broken until then.
 
 ## D-092 · Error messages are untranslated ids where Go sends prose
 
-**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
+**Status** CLOSED (2026-09-20) · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
 **Affects** every error body this server produces.
 
 Go turns an `AppError` into a response in `web.Handler.ServeHTTP` (handlers.go:424-455), and
@@ -3308,13 +3316,19 @@ Two of the three were closed the moment they were measured, in `ApiError::into_r
 - **`RequestId`.** Set on every error. Ours omitted the key entirely (`omitempty`), so the shapes
   differed as well as the values.
 
-What remains is `Translate`, which needs the i18n bundle — the same dependency
-`post_deletion_report.go` is blocked on. Until then our `message` equals our `id`, which is
-exactly what an unconfigured Go server emits before `AppErrorInit` runs, so it is the same
-degradation rather than a novel one.
+**Closed 2026-09-20.** `Translate` is ported: `mm_app::i18n::Translations::translate_app_error`
+renders the id's template against the error's params, `mm_api::translate_error_messages` picks the
+request's locale exactly as `GetTranslationsAndLocaleFromRequest` does, and `mm_api::error` applies
+it where `handleContextError` does — so the message is Go's sentence in Go's language, on the
+TCP router, the unix socket, the signed web error page and the websocket's error frames (those in
+`DefaultServerLocale`, because `NewAppError` translates at construction and nothing re-translates
+a frame). The parity harness's `assert_error_bodies_match_except_known_gaps` now compares
+`message`, which makes every error assertion in the binary a check of it; `parity::error_i18n`
+adds eight `Accept-Language` values over the 400/401/403/404/413/501 families.
 
-**To pay off** port the i18n bundle loader and `AppError::Translate`. Worth noting the webapp
-branches on `id`, not `message`, so the practical impact is on humans reading errors.
+Two constructs of Go's template language are still not rendered — [D-940] — and no id this port
+raises uses either, which `mm_app::i18n`'s `go_parity_no_reachable_id_needs_a_construct_we_skip`
+asserts against the whole source tree on every run.
 
 ---
 
@@ -3874,6 +3888,9 @@ waiting on.
 
 Status moves to **ACCEPTED** for the `message` field specifically; the two fixed thirds stay
 closed.
+
+**Superseded 2026-09-20.** The bundle landed with `/manualtest`, so the reason to accept went
+away; D-092 is CLOSED and the residue is [D-940].
 
 ---
 
@@ -9517,3 +9534,49 @@ reach the guarded branch — and both refuse the post at 503.
 
 **What is owed:** the two API methods, and the cache with them, since a register has to invalidate
 something for the reload path to exist.
+
+## D-940 · Two `text/template` constructs in the translation files are not rendered
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (D-092, the error translation)
+
+`mm_app::i18n::Template` renders text and `{{ .Field }}` actions, which is every action in every
+entry of the 22 loaded locale files bar two, and every action of every id this port can raise.
+What it does not render:
+
+- **`{{if}}`/`{{else}}`/`{{end}}`** — one id, `app.bot.get_disable_bot_sysadmin_message`, the DM
+  posted when a bot owner is deactivated. It needs Go's truthiness rules, not just substitution.
+- **A plural translation** (`{"one": …, "other": …}`), ten ids, all notification or digest text.
+  Selecting a form needs `language.Plural`, which is a CLDR table per language.
+
+Both currently answer as though the entry were absent, which is the id — never a wrong sentence.
+`go_parity_no_reachable_id_needs_a_construct_we_skip` greps the whole crate tree for translation
+ids on every test run and fails if any of them needs either construct, so this cannot start
+mattering silently; `Translations::can_render` lets the **signed** web error page forward to Go
+rather than sign a message Go would not have written.
+
+**What is owed:** the `{{if}}` branch and the CLDR plural specs, when a route raises one of those
+thirteen ids. Nothing does today.
+
+## D-941 · Body decoders: serde takes a JSON array for a struct, and refuses `null` for one
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+
+Two habits of `encoding/json` that serde does not share, both reachable from any route that
+decodes a body, and both invisible until error *messages* started being compared — the answers
+agree on `id` and `status_code` and differ only in which parameter the sentence names:
+
+- **A JSON array decodes into a struct.** serde's derive reads a sequence positionally, so `[]`
+  becomes a struct with every field at its default and the handler walks on to a later validation
+  branch. Go answers `cannot unmarshal array into Go value` and the handler names the *body*.
+  `POST /channels` with `[]`: Go `channel`, ours `team_id`.
+- **`null` into a Go *value* struct is a zero, not an error.** `var x model.T; Decode(&x)` of
+  `null` succeeds and leaves `x` zero; serde rejects `null` for a struct.
+  `POST /properties/groups/{name}/fields/search` with `null`: Go `object_types`, ours
+  `property_field_search`.
+
+`mm_model::utils::decode_one_object_from_json` and `decode_one_value_from_json` are the two
+fixed forms, and the three call sites the parity suite caught use them.
+
+**What is owed:** the remaining ~80 `decode_one_from_json` call sites have not been audited
+against their Go declaration (pointer or value), and a route whose suite never posts `[]` or
+`null` would not have shown up. Convert each as its suite grows a malformed-body case.

@@ -885,7 +885,11 @@ async fn root(
     }
 
     if is_api_call(path, &setup.subpath) {
-        return Some(handle_404(headers, path));
+        return Some(handle_404(
+            state.app.config().default_server_locale.as_str(),
+            headers,
+            path,
+        ));
     }
 
     set_header(&mut headers, "cache-control", CACHE_REVALIDATE);
@@ -1099,9 +1103,16 @@ fn is_api_call(path: &str, subpath: &str) -> bool {
 /// Port of `Handle404` (web.go:79) for an API path: the JSON `AppError`, **with** its detailed
 /// error — it is written directly, not through `handleContextError`, so nothing wipes it — and
 /// without a request id.
-fn handle_404(mut headers: HeaderMap, path: &str) -> Response {
+///
+/// Its message is the one `NewAppError` set at construction, which is `i18n.T`: the
+/// **`DefaultServerLocale`** translation, not the caller's. This page never sees an
+/// `Accept-Language`, because `handleContextError` is exactly what it does not go through.
+fn handle_404(server_locale: &str, mut headers: HeaderMap, path: &str) -> Response {
     let mut err =
         mm_model::utils::AppError::new("Handle404", "api.context.404.app_error", None, "", 404);
+    if let Some(bundle) = mm_app::i18n::loaded() {
+        bundle.translate_app_error(bundle.server_locale(server_locale), &mut err);
+    }
     err.detailed_error = format!(
         "There doesn't appear to be an api call for the url='{path}'.  Typo? are you missing a team_id or user_id as part of the url?"
     );

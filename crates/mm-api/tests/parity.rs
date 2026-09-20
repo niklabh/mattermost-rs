@@ -295,4 +295,6 @@ mod parity {
     pub mod post_edit_time_limit;
     // Appended 2026-09-20: GET /manualtest against the EnableTesting oracle (D-782).
     pub mod manualtest;
+    // Appended 2026-09-20: the translated error message in eight locales (D-092).
+    pub mod error_i18n;
 }

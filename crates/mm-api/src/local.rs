@@ -304,6 +304,13 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             crate::refresh_config_after_write,
         ))
         .layer(Extension(GoLocalSocket(Arc::new(go_socket))))
+        // The socket goes through the same `web.Handler.ServeHTTP` in Go, so its errors are
+        // translated the same way. The CLI sends no `Accept-Language`, which makes every one of
+        // them `DefaultClientLocale` — but that is Go's answer, not a shortcut.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::translate_error_messages,
+        ))
         .with_state(state)
 }
 

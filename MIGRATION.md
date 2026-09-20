@@ -14233,3 +14233,26 @@ with only ids and timestamps tokenised.
 Mutation tally (`plugin-hooks.plan`): 22 run, 20 caught, 2 controls survived, 0 harness faults.
 Every line was caught first time, which is unusual and is the oracle's doing: the same plugin under
 two hosts makes almost any change to what is sent visible as a transcript diff.
+
+## `AppError.Translate` — D-092 closed, D-940/D-941 opened (2026-09-20)
+
+Every error body this server writes now carries Go's sentence in Go's language: `mm_app::i18n`
+renders the id's `text/template` against the error's params, `mm_api::translate_error_messages`
+picks the locale `GetTranslationsAndLocaleFromRequest` would, and the websocket and `Handle404`
+use `DefaultServerLocale` instead, because those messages are the ones `NewAppError` set at
+construction and nothing re-translates.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `model.AppError.Translate`/`SkipTranslation` (utils.go:281), `i18n.tfuncWithFallback`, go-i18n `bundle.translate` + `translation.template.Execute`, `Handle404`'s `i18n.T`, `returnWebSocketError` | `mm-app/src/i18n.rs` (`Template`, `translate_with`, `translate_app_error`, `server_locale`, `can_render`, `init`), `mm-api/src/{error,lib,web_error,web_static,websocket}.rs` | DONE | `behaviour_i18n.json` oracle (4360 request rows, 304 server rows, 26 template rows), 5 new unit, `parity::error_i18n` (7, eight `Accept-Language` values × 400/401/403/404/413/501), plus every `assert_error_bodies_match_except_known_gaps` caller, which now compares `message` | A missing or `null` param renders `<no value>`, exactly as `text/template` does; `{{if}}` and plural entries are not rendered ([D-940]) and no reachable id needs either. |
+
+Comparing `message` found four divergences nothing else could see: two body decoders
+(`[]` is a valid struct on serde and not in Go; `null` into Go's *value* struct is a zero, not an
+error — `mm_model::utils::decode_one_{object,value}_from_json`, [D-941]) and two error sites
+raised without the params their sentence interpolates (`App::get_channels`'s id **list**, and the
+four interactive-dialog refusals).
+
+Mutation tally (`error-i18n.plan`): 17 run, 15 caught, 2 controls survived, 0 harness faults. A
+mutation that swaps `DefaultClientLocale` for `DefaultServerLocale` in the middleware is *not*
+planned: both are `en` on the stack, so it is wire-equivalent in the same way a misnamed
+parameter used to be.

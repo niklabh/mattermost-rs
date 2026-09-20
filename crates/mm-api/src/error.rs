@@ -14,6 +14,44 @@ use mm_model::utils::AppError;
 pub const SERVED_BY: axum::http::HeaderName =
     axum::http::HeaderName::from_static("x-mmrs-served-by");
 
+/// The translate function `web.Handler.ServeHTTP` picks for a request (handlers.go:191), carried
+/// to the one place that needs it.
+///
+/// # Why a task-local and not an extractor
+///
+/// In Go the translation happens in `ServeHTTP`, **after** the handler has returned its
+/// `*AppError` — the handler never sees a locale. The same is true here: [`IntoResponse`] is a
+/// synchronous conversion with no access to the request, and `into_wire` is called from a
+/// streaming handler that has already written its status. A task-local set by
+/// `mm_api::translate_error_messages` around the whole router reaches both, and resolving the
+/// bundle *in the middleware* is what lets a `fn` with no `.await` use it.
+///
+/// Unset — in a unit test, or on a path outside the router — the message stays the id, which is
+/// what a Go server before `AppErrorInit` also writes.
+#[derive(Clone)]
+pub struct RequestTranslator {
+    /// The process's bundle, loaded once at start-up.
+    pub bundle: &'static mm_app::i18n::Translations,
+    /// The locale `GetTranslationsAndLocaleFromRequest` chose from `Accept-Language` and
+    /// `DefaultClientLocale`.
+    pub locale: String,
+}
+
+tokio::task_local! {
+    pub(crate) static REQUEST_TRANSLATOR: Option<RequestTranslator>;
+}
+
+/// Port of `c.Err.Translate(c.AppContext.T)` (web/handlers.go:431) for the current request.
+fn translate(err: &mut AppError) {
+    let _ = REQUEST_TRANSLATOR.try_with(|translator| {
+        if let Some(translator) = translator {
+            translator
+                .bundle
+                .translate_app_error(&translator.locale, err);
+        }
+    });
+}
+
 /// An error on its way to a client, carrying the `AppError` Go would have written.
 ///
 /// The `AppError` is **boxed**. It carries five `String`s and is 192 bytes, which is larger than
@@ -98,9 +136,10 @@ impl ApiError {
     /// handler is NOT what a client sees:
     ///
     ///   1. `c.Err.RequestId = c.AppContext.RequestId()` — populated on every error.
-    ///   2. `c.Err.Translate(c.AppContext.T)` — the id becomes a human message. Not ported;
-    ///      we emit the untranslated id, which is what an unconfigured Go server also does.
-    ///      See [D-092].
+    ///   2. `c.Err.Translate(c.AppContext.T)` — the id becomes a sentence in the caller's
+    ///      language, rendered from the error's params. The locale comes from the request, so it
+    ///      arrives through [`REQUEST_TRANSLATOR`]; with no bundle in scope the message stays the
+    ///      id, which is what a Go server before `AppErrorInit` writes.
     ///   3. `if !EnableDeveloper { c.Err.WipeDetailed() }` — `detailed_error` is blanked. The
     ///      setting defaults to false, so **the default is to wipe**, and a port that skips
     ///      this leaks internal detail Go withholds. Reproduced unconditionally because the
@@ -114,6 +153,9 @@ impl ApiError {
     /// to `unwrap`.
     pub fn into_wire(mut self) -> (StatusCode, Option<Vec<u8>>) {
         self.0.request_id = mm_model::utils::new_id();
+        // Go's order: the request id, then the log line, then the translation — the comment there
+        // says the logs must not be translated — then `WipeDetailed`.
+        translate(&mut self.0);
         self.0.wipe_detailed();
 
         // `AppError.status_code` is the authority; the status line and the body must agree,
