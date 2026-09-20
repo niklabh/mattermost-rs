@@ -39,10 +39,12 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
+	"strings"
 )
 
 // imagingFixtureNote is stamped into every stage's fixture so a reader of the JSON knows the
@@ -462,3 +464,30 @@ func mustEncode(fn func(*bytes.Buffer) error) []byte {
 }
 
 func decodeB64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }
+
+// xImageTestdata reads golang.org/x/image's own test images, the way pngCorpus reads GOROOT's:
+// the module version is pinned in go.mod, so what comes back is a function of this checkout and
+// not of the host. `sub` is a directory inside the module ("testdata", "tiff/testdata"), `ext`
+// the extension to glob for. Sorted, so the corpus order is stable.
+//
+// The decoders under golang.org/x/image are the ones `channels/app/imaging/decode.go` registers,
+// so their test corpora are the closest thing to an authored set of inputs for the BMP, TIFF and
+// WebP ports — and WebP in particular has no encoder anywhere in Go, so files are the only source.
+func xImageTestdata(sub, ext string) []namedFile {
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "golang.org/x/image").Output()
+	if err != nil {
+		panic(fmt.Errorf("locating golang.org/x/image: %w", err))
+	}
+	dir := strings.TrimSpace(string(out))
+	matches, _ := filepath.Glob(filepath.Join(dir, filepath.FromSlash(sub), "*."+ext))
+	sort.Strings(matches)
+	var files []namedFile
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			panic(err)
+		}
+		files = append(files, namedFile{filepath.Base(m), data})
+	}
+	return files
+}
