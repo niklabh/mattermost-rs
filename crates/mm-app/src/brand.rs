@@ -238,11 +238,6 @@ mod go_parity {
         assert_eq!(err.where_, "SaveBrandImage");
     }
 
-    /// With a driver configured a format this port does not decode is handed over — **before**
-    /// the archive `MoveFile` and before the `WriteFile`, so a forwarded upload has left nothing
-    /// in the backend for Go to trip over. (The store is unreachable: a write would fail loudly.)
-    ///
-
     /// A lossy WebP carrying an `ALPH` chunk, out of the imaging oracle's own corpus: Go decodes
     /// it into an `*image.NYCbCrA`, which `goimage::image::Image` does not model.
     fn alpha_webp() -> Vec<u8> {
@@ -264,6 +259,10 @@ mod go_parity {
             .unwrap()
     }
 
+    /// With a driver configured a format this port does not decode is handed over — **before**
+    /// the archive `MoveFile` and before the `WriteFile`, so a forwarded upload has left nothing
+    /// in the backend for Go to trip over. (The store is unreachable: a write would fail loudly.)
+    ///
     /// The bytes are a WebP canvas declaring alpha — the one answer this port does not have —
     /// rather than the GIF this test used to send: every other format is decoded here now, so a
     /// GIF would reach the store and this test would be measuring the store.

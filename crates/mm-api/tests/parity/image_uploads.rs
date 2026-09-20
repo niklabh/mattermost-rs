@@ -616,5 +616,51 @@ async fn the_undecoded_formats_still_forward() {
             true,
             "{filename}: Go derived from it"
         );
+
+        // …and the same through the *uploads* route, whose gate is a second copy of the
+        // decision — `mm_app::upload::refuse_if_completion_needs_derived_images`, which reads
+        // the chunk's head before it is written. A mutation that made that gate never forward
+        // survived the whole suite until this half existed, because every other case here goes
+        // through `POST /files`.
+        let session = serde_json::json!({
+            "channel_id": channel,
+            "filename": filename,
+            "file_size": bytes.len(),
+            "type": "attachment",
+        });
+        let (status, _, reply) = send(
+            &client,
+            RUST,
+            reqwest::Method::POST,
+            "/api/v4/uploads",
+            &token,
+            Some("application/json"),
+            serde_json::to_vec(&session).unwrap(),
+        )
+        .await;
+        assert_eq!(status, 201, "{}", String::from_utf8_lossy(&reply));
+        let session: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        let upload_id = session["id"].as_str().unwrap().to_owned();
+
+        let (status, served_by, reply) = send(
+            &client,
+            RUST,
+            reqwest::Method::POST,
+            &format!("/api/v4/uploads/{upload_id}"),
+            &token,
+            Some("application/octet-stream"),
+            bytes.to_vec(),
+        )
+        .await;
+        // The completing chunk answers 200, not the 201 `POST /files` gives.
+        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&reply));
+        assert_ne!(
+            served_by.as_deref(),
+            Some("rust"),
+            "{filename} must forward on the uploads route too"
+        );
+        let info: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        // `UploadData`'s reply is the FileInfo without `has_preview_image`, unlike `POST /files`.
+        assert_eq!(info["width"], 400, "{filename}: Go completed the upload");
     }
 }
