@@ -72,6 +72,7 @@ func writeImagingBehaviourFixtures(outDir string) error {
 		{"webp", imagingWebPStage},
 		{"resize", imagingResizeStage},
 		{"exif", imagingEXIFStage},
+		{"profile", imagingProfilePictureStage},
 		{"pipeline", imagingPipelineStage},
 	}
 	for _, s := range stages {

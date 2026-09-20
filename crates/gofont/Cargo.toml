@@ -1,0 +1,24 @@
+[package]
+name = "gofont"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# DELIBERATELY NOT `license.workspace = true`. This crate is a port of `github.com/golang/freetype`
+# (its `truetype` glyph loader and its `raster` scan converter; FreeType License OR GPL-2.0-or-later,
+# LICENSE-FREETYPE) and of the parts of `golang.org/x/image/font`, `golang.org/x/image/math/fixed`
+# and Go's `image/draw` that Mattermost's initials avatar draws through (BSD-3-Clause, LICENSE-GO).
+# It contains no Mattermost code and must never depend on an `mm-*` crate; the Mattermost call
+# sequence (`createProfileImage`) lives in `mm-app` (AGPL).
+license = "(FTL OR GPL-2.0-or-later) AND BSD-3-Clause"
+repository.workspace = true
+description = "Byte-exact ports of freetype-go's TrueType rasteriser and the font.Drawer it is drawn through"
+include = ["src/**/*.rs", "LICENSE*"]
+
+[dependencies]
+goimage = { path = "../goimage" }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true

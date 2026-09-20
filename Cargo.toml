@@ -19,6 +19,9 @@ members = [
     # (BSD-3-Clause AND MIT, from the Go standard library, boxes-ltd/imaging and bep/imagemeta);
     # forbidden from depending on any mm-* crate. mm-app drives it.
     "crates/goimage",
+    # Byte-exact port of freetype-go's TrueType rasteriser and the font.Drawer over it
+    # ((FTL OR GPL-2.0-or-later) AND BSD-3-Clause); forbidden from depending on any mm-* crate.
+    "crates/gofont",
 ]
 
 [workspace.package]
