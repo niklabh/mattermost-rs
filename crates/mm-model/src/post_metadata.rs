@@ -15,7 +15,7 @@
 //! `fixtures/post_translation.json`, `fixtures/post_priority.json` and
 //! `fixtures/behaviour_post_metadata.json`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -150,8 +150,11 @@ pub struct PostMetadata {
 
     /// Dimensions of every **external** image in the post, keyed by URL. Does not include file
     /// attachments — those dimensions live on [`FileInfo`].
-    #[serde(rename = "images", skip_serializing_if = "HashMap::is_empty")]
-    pub images: HashMap<String, PostImage>,
+    ///
+    /// A `BTreeMap` because Go's `map[string]*PostImage` marshals with its keys **sorted**; a
+    /// `HashMap` would put the same entries on the wire in a different order per process.
+    #[serde(rename = "images", skip_serializing_if = "BTreeMap::is_empty")]
+    pub images: BTreeMap<String, PostImage>,
 
     #[serde(rename = "reactions", skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<Reaction>,
@@ -245,7 +248,7 @@ mod tests {
 
         let explicit_empty = PostMetadata {
             embeds: Vec::new(),
-            images: HashMap::new(),
+            images: BTreeMap::new(),
             recipients: Vec::new(),
             ..Default::default()
         };

@@ -1,0 +1,28 @@
+# web-static.plan — the web client (mm_api::web_static, mm_api::gzhttp), 2026-09-19.
+# og-empty-description-kept (description.filter(!is_empty)) survived 2026-09-19 as an equivalent
+# mutation — the empty check below it gave the same answer — and the filter was removed.
+# Unit lines run the oracle-backed lib tests; api lines run parity::web_client on the stack.
+gz-tie-goes-to-gzip	crates/mm-api/src/gzhttp.rs	        return Encoding::Gzip;\n    }\n    Encoding::Zstd\n}	        return Encoding::Gzip;\n    }\n    Encoding::Gzip\n}	unit	gzhttp
+gz-head-compressed	crates/mm-api/src/gzhttp.rs	    if method == Method::HEAD {\n        return Encoding::None;	    if false {\n        return Encoding::None;	unit	gzhttp
+gz-min-size-off-by-one	crates/mm-api/src/gzhttp.rs	        body_len >= DEFAULT_MIN_SIZE	        body_len > DEFAULT_MIN_SIZE	unit	gzhttp
+gz-min-size-judges-body	crates/mm-api/src/gzhttp.rs	        declared >= DEFAULT_MIN_SIZE	        body_len >= DEFAULT_MIN_SIZE	unit	gzhttp
+gz-filter-all-images	crates/mm-api/src/gzhttp.rs	"image/jp"]	"image/"]	unit	gzhttp
+gz-framing-boundary	crates/mm-api/src/gzhttp.rs	if bytes.len() <= BUFFER_BEFORE_CHUNKING_SIZE {	if bytes.len() < BUFFER_BEFORE_CHUNKING_SIZE {	unit	gzhttp
+ua-floor-exclusive	crates/mm-api/src/web_static.rs	ua.browser_version.major >= minimum	ua.browser_version.major > minimum	unit	web_static
+api-prefix-without-slash	crates/mm-api/src/web_static.rs	path.starts_with(&format!("{}/", go_path::join(&[subpath, "api"])))	path.starts_with(&go_path::join(&[subpath, "api"]))	unit	web_static
+mux-trailing-slash-always	crates/mm-api/src/web_static.rs	    if p.ends_with('/') && np != "/" {	    if np != "/" {	api	web_client
+mux-clean-redirect-skipped	crates/mm-api/src/web_static.rs	    if cleaned != path {	    if false {	api	web_client
+head-framing-skipped	crates/mm-api/src/web_static.rs	    if *method != Method::HEAD\n	    if true\n	api	web_client
+strip-prefix-ignores-raw-path	crates/mm-api/src/web_static.rs	let raw_stripped = raw_path.is_empty() || raw_path.starts_with(prefix.as_str());	let raw_stripped = true;	api	web_client
+not-found-keeps-cache	crates/mm-api/src/web_static.rs	    if response.status() == StatusCode::NOT_FOUND {	    if response.status() == StatusCode::FORBIDDEN {	api	web_client
+index-html-not-redirected	crates/mm-api/src/web_static.rs	    if url_path.ends_with("/index.html") {	    if url_path.ends_with("/index.htmlx") {	api	web_client
+dir-redirect-full-path	crates/mm-api/src/web_static.rs	let target = format!("{}/", go_path::base(url_path));	let target = format!("{url_path}/");	api	web_client
+enotdir-is-500	crates/mm-api/src/web_static.rs	Ok(info) if !info.is_dir() => return std::io::Error::from(ErrorKind::NotFound),	Ok(info) if !info.is_dir() => return err,	api	web_client
+remote-entry-cached	crates/mm-api/src/web_static.rs	if go_path::base(path) == "remote_entry.js" {	if go_path::base(path) == "remote_entry.jsx" {	api	web_client
+version-licence-inverted	crates/mm-api/src/web_static.rs	            license.is_some()\n	            license.is_none()\n	api	web_client
+no-frame-options	crates/mm-api/src/web_static.rs	    set_header(&mut headers, "x-frame-options", "SAMEORIGIN");\n	    // x-frame-options dropped\n	api	web_client
+csp-no-space	crates/mm-api/src/web_static.rs	"frame-ancestors 'self' {}; script-src 'self'{}{}"	"frame-ancestors 'self'{}; script-src 'self'{}{}"	api	web_client
+hash-tos-inverted	crates/mm-app/src/config.rs	if props.get("EnableCustomTermsOfService").map(String::as_str) == Some("true") {	if props.get("EnableCustomTermsOfService").map(String::as_str) != Some("true") {	api	web_client
+# Controls: must survive.
+control-reorder-q-values	crates/mm-api/src/gzhttp.rs	    let gzip_q = parse_encoding_q_value(ae, "gzip");\n    let zstd_q = parse_encoding_q_value(ae, "zstd");	    let zstd_q = parse_encoding_q_value(ae, "zstd");\n    let gzip_q = parse_encoding_q_value(ae, "gzip");	unit	gzhttp
+control-rename-max-url	crates/mm-api/src/web_static.rs	    let max_url = service.maximum_url_length.unwrap_or(2048);\n    if i64::try_from(raw_target.len()).unwrap_or(i64::MAX) > max_url {	    let limit = service.maximum_url_length.unwrap_or(2048);\n    if i64::try_from(raw_target.len()).unwrap_or(i64::MAX) > limit {	api	web_client

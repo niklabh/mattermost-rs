@@ -106,6 +106,7 @@ mod parity {
     pub mod group_writes_licensed;
     pub mod groups;
     pub mod image_proxy;
+    pub mod image_uploads;
     pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
@@ -127,6 +128,7 @@ mod parity {
     pub mod post_create_channel_mentions;
     pub mod post_create_dm;
     pub mod post_create_files;
+    pub mod post_create_links;
     pub mod post_create_priority;
     pub mod post_create_replies;
     pub mod post_create_silent;
@@ -135,6 +137,7 @@ mod parity {
     pub mod post_edit_history;
     pub mod post_get;
     pub mod post_info;
+    pub mod post_link_reads;
     pub mod post_reactions;
     pub mod post_thread;
     pub mod post_writes;
@@ -207,6 +210,7 @@ mod parity {
     pub mod user_deletes;
     pub mod user_get;
     pub mod user_lookups;
+    pub mod user_permanent_delete;
     pub mod user_reports;
     pub mod user_terms_of_service;
     pub mod users_autocomplete;
@@ -220,6 +224,7 @@ mod parity {
     pub mod users_search;
     pub mod users_stats;
     pub mod users_stats_filtered;
+    pub mod users_wipe;
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
@@ -253,6 +258,8 @@ mod parity {
     pub mod configlic;
     // Appended 2026-09-15: no two SecondServers share a port (needs no stack).
     pub mod second_server_ports;
+    // Appended 2026-09-19: the web client — `/static/*`, the SPA page, robots, the UB script.
+    pub mod web_client;
     // Appended 2026-09-15: the SAML/LDAP/audit certificate and enterprise-gate routes.
     pub mod auth_certs;
     pub mod local_auth_certs;
@@ -271,8 +278,13 @@ mod parity {
     // the socket, first_admin_visit).
     pub mod boards;
     pub mod command_dispatch;
+    pub mod local_plugins;
     pub mod local_uploads;
+    pub mod managed_categories;
+    pub mod marketplace;
     pub mod marketplace_visit;
+    pub mod plugin_hooks;
+    pub mod plugin_startup;
     pub mod plugin_statuses;
     pub mod plugin_toggle;
     pub mod plugin_upload;
@@ -281,4 +293,8 @@ mod parity {
     pub mod sysops;
     // Appended 2026-09-16: PostEditTimeLimit against its own Go oracle (D-222).
     pub mod post_edit_time_limit;
+    // Appended 2026-09-20: GET /manualtest against the EnableTesting oracle (D-782).
+    pub mod manualtest;
+    // Appended 2026-09-20: the translated error message in eight locales (D-092).
+    pub mod error_i18n;
 }

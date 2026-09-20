@@ -285,6 +285,8 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .merge(crate::local_access_control::routes(&state))
         // ---- `system_local.go`: the integrity check and the log page, 2026-09-15.
         .merge(crate::local_sysops::routes())
+        // `plugin_local.go`, all ten pairs; see `local_plugins` for what a Go plugin host forwards.
+        .merge(crate::local_plugins::routes(&state))
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
         // process rather than 404'd by this one.
@@ -302,6 +304,13 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             crate::refresh_config_after_write,
         ))
         .layer(Extension(GoLocalSocket(Arc::new(go_socket))))
+        // The socket goes through the same `web.Handler.ServeHTTP` in Go, so its errors are
+        // translated the same way. The CLI sends no `Accept-Language`, which makes every one of
+        // them `DefaultClientLocale` — but that is Go's answer, not a shortcut.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::translate_error_messages,
+        ))
         .with_state(state)
 }
 

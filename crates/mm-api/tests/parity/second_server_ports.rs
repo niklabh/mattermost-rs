@@ -59,9 +59,11 @@ fn no_two_second_servers_share_a_port() {
         let name = file.strip_prefix(&tests).unwrap().display().to_string();
         // The start sites. `start(` followed by a literal; a call passing a named constant is
         // covered by the constant's own declaration below.
-        for (at, _) in text.match_indices("SecondServer::start(") {
-            if let Some(port) = leading_port(&text[at + "SecondServer::start(".len()..]) {
-                claims.entry(port).or_default().push(name.clone());
+        for call in ["SecondServer::start(", "SecondServer::start_in("] {
+            for (at, _) in text.match_indices(call) {
+                if let Some(port) = leading_port(&text[at + call.len()..]) {
+                    claims.entry(port).or_default().push(name.clone());
+                }
             }
         }
         // The licensed pair's constants, whose starts pass the name rather than a literal.
@@ -87,11 +89,18 @@ fn no_two_second_servers_share_a_port() {
         "ports claimed more than once: {shared:?}"
     );
 
-    // The stack's own servers, which a second server would free and so kill: Go and mm-api, and
-    // the oracles `scripts/go-*.sh` start at Go's port + 30 to + 36 (boards, discoverable, the
-    // licensed three, edit limit, plugins). Measured 2026-09-18: a plugin suite on :8095 took the boards
-    // oracle down, and twenty tests in six other suites failed for it.
-    let reserved: Vec<u16> = [8065, 8066].into_iter().chain(8095..=8101).collect();
+    // The stack's own servers, which a second server would free and so kill: Go and mm-api, the
+    // oracles `scripts/go-*.sh` start at Go's port + 30 to + 38 (boards, discoverable, the licensed
+    // three, edit limit, plugins, the managed-categories two), and the mock Marketplace
+    // `parity::marketplace` serves for the plugins oracle at + 39, and the link-preview oracle
+    // `scripts/go-links.sh` at + 50. Measured 2026-09-18: a plugin suite on :8095 took the
+    // boards oracle down, and twenty tests in six other suites failed for it.
+    // `parity::plugin_startup` starts its own Go server at + 73, and `parity::plugin_hooks` at
+    // + 74.
+    let reserved: Vec<u16> = [8065, 8066, 8115, 8138, 8139]
+        .into_iter()
+        .chain(8095..=8104)
+        .collect();
     let taken: Vec<_> = claims
         .iter()
         .filter(|(port, _)| reserved.contains(port))

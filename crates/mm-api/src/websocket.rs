@@ -682,7 +682,23 @@ fn send_response(state: &AppState, conn: &Arc<WebConn>, response: WebSocketRespo
 }
 
 /// Port of `returnWebSocketError` (websocket_router.go:124), including `WipeDetailed`.
+///
+/// # The message is in the *server's* language, not the caller's
+///
+/// A frame carries whatever `model.NewAppError` set at construction, which is `i18n.T` — the
+/// function `InitTranslations` built from `LocalizationSettings.DefaultServerLocale`
+/// (model/utils.go:374). Nothing on the websocket path re-translates it, so unlike an HTTP error
+/// it never depends on the connecting client's `Accept-Language`. Translating here rather than in
+/// the constructor is the same string: `Translate` overwrites `Message` from the id and params
+/// every time it runs, and nothing reads the message in between.
 fn return_error(state: &AppState, conn: &Arc<WebConn>, seq: i64, mut err: AppError) {
+    if let Some(bundle) = mm_app::i18n::loaded() {
+        let config = state.app.config();
+        bundle.translate_app_error(
+            bundle.server_locale(&config.default_server_locale),
+            &mut err,
+        );
+    }
     err.wipe_detailed();
     let response = WebSocketResponse {
         status: WEBSOCKET_STATUS_FAIL.to_owned(),

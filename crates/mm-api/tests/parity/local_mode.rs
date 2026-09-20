@@ -290,10 +290,10 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
     let go = go_socket().expect("present");
     let rust = rust_socket().expect("present");
 
-    // `GET /api/v4/plugins` (plugin_local.go) is not registered on this router — the plugin
-    // families are unported — so it falls to the socket fallback. `/users/me` used to be the
-    // example here and no longer is: `user_local.go`'s `{user_id}` catches `me` (a 400 about
-    // `user_id`), so it is now served rather than forwarded.
+    // `GET /api/v4/plugins` (plugin_local.go) is registered, but under the stack's Go plugin host
+    // it answers only the plugins-off 501 itself and forwards everything else — the list is Go's
+    // (`local_plugins`). `/users/me` used to be the example here and no longer is: `user_local.go`'s
+    // `{user_id}` catches `me` (a 400 about `user_id`), so it is now served rather than forwarded.
     let (go_status, _, go_body) = over_socket(&go, "GET", "/api/v4/plugins").await;
     let (rust_status, rust_headers, rust_body) = over_socket(&rust, "GET", "/api/v4/plugins").await;
 
@@ -313,39 +313,44 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
 /// carrying it changes nothing. A mutation that stopped dropping it survived the whole suite
 /// until this existed.
 ///
-/// `plugins/reattach` is chosen because the body decides its answer and nothing is ever written: an
-/// absent body fails `json.NewDecoder` (`api4.plugin.reattachPlugin.invalid_request`), while `{}`
-/// decodes and is refused by `PluginReattachRequest.IsValid` for its nil manifest
-/// (`plugin_reattach_request.is_valid.manifest.app_error`) before `App.ReattachPlugin` runs. Both
-/// are 400, so the error id is what proves the body arrived. Only the socket registers this route,
-/// and the plugin host is the last thing this port will serve, so it should stay forwarded for a
-/// long time. Earlier examples were `access_control_policies/cel/check` and `ldap/migrateid`, each
-/// retired the day its family was served.
+/// `plugins/reattach` is chosen because the body decides its answer: under the stack's Go plugin
+/// host a body that decodes and validates is forwarded (`local_plugins`), and a manifest with no
+/// server component is Go's 500 `app.plugin.reattach.app_error` — while an absent or mangled body
+/// would be a 400 from the decoder. So the error id is what proves the body arrived. The plugin
+/// that reattach registers is detached again, also through the forward. Earlier examples were
+/// `access_control_policies/cel/check`, `ldap/migrateid` and this route's `{}`, each retired the
+/// day its branch was served.
 #[tokio::test]
 async fn a_forwarded_post_carries_its_body() {
     if !sockets_enabled() {
         return;
     }
     const PATH: &str = "/api/v4/plugins/reattach";
-    const BODY: &str = "{}";
+    const BODY: &str = r#"{"Manifest":{"id":"mmrs.local_mode.body","webapp":{"bundle_path":"x"}},"PluginReattachConfig":{}}"#;
 
     let (go_status, _, go_body) =
         post_over_socket(&go_socket().expect("present"), PATH, BODY).await;
     let (rust_status, rust_headers, rust_body) =
         post_over_socket(&rust_socket().expect("present"), PATH, BODY).await;
 
-    assert_eq!(go_status, 400, "{}", String::from_utf8_lossy(&go_body));
+    assert_eq!(go_status, 500, "{}", String::from_utf8_lossy(&go_body));
     assert!(
-        String::from_utf8_lossy(&go_body).contains("plugin_reattach_request.is_valid.manifest"),
-        "the body arrived, so validation refused it rather than the decoder: {}",
+        String::from_utf8_lossy(&go_body).contains("app.plugin.reattach.app_error"),
+        "the body arrived, so the reattach refused it rather than the decoder: {}",
         String::from_utf8_lossy(&go_body)
     );
     assert_eq!(rust_status, go_status);
     assert!(
         rust_headers.get("x-mmrs-served-by").is_none(),
-        "this route is not migrated; it must arrive as Go's own answer"
+        "past its validation this route forwards under a Go host; it must arrive as Go's answer"
     );
     assert_forwarded_body_is_gos(&go_body, &rust_body, PATH);
+
+    let detach = "/api/v4/plugins/mmrs.local_mode.body/detach";
+    for socket in [go_socket(), rust_socket()] {
+        let (status, _, _) = post_over_socket(&socket.expect("present"), detach, "").await;
+        assert_eq!(status, 200, "{detach}");
+    }
 }
 
 /// A path neither router registers reaches Go's own 404 through the forward leg.

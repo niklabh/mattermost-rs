@@ -380,15 +380,16 @@ pub trait PostStore {
     /// **The `time` here is a second `GetMillis()`, not the post's `UpdateAt`.** They differ by a
     /// millisecond often enough to matter to a test that asserts equality.
     ///
-    /// Go mutates the caller's `newPost` and `oldPost` in place; this takes them by reference and
-    /// returns the saved post, so the two clones inside are the price of not lying about what the
-    /// caller still holds. Nothing observable depends on the mutation — the only Go reader of the
-    /// mutated `oldPost` is the plugin hook, which sees an old post carrying the *history row's*
-    /// fresh id.
+    /// **Both arguments are mutated, as Go mutates them**, and the mutation is observable:
+    /// `MessageHasBeenUpdated` is handed `newPost` and `oldPost` *after* this call
+    /// (app/post.go:1007), so the hook sees the new post's fresh `UpdateAt` and an old post that
+    /// has become the **history row** — a minted `Id`, `OriginalId` set to the post's own id and
+    /// `DeleteAt` equal to the new `UpdateAt`. Taking them by value and cloning would have hidden
+    /// all three from the plugin; `parity::plugin_hooks` is what found it.
     fn update(
         &self,
-        new_post: &Post,
-        old_post: &Post,
+        new_post: &mut Post,
+        old_post: &mut Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
 
     /// Port of `SqlPostStore.Overwrite` (post_store.go:513), which is `OverwriteMultiple` of
@@ -643,6 +644,33 @@ pub trait PostStore {
         team_id: &str,
         page: i64,
     ) -> impl std::future::Future<Output = Result<PostSearchResults, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.PermanentDeleteByUser` (post_store.go:1163).
+    ///
+    /// # Replies first, in one transaction; then roots, a thousand at a time
+    ///
+    /// `permanentDeleteAllCommentByUser` deletes every reply the user wrote (`RootId != ''`,
+    /// soft-deleted ones included), then for each one runs `updateThreadAfterReplyDeletion` on its
+    /// root — which, since every reply of theirs is now gone, always removes the user from
+    /// `Participants` and recounts `ReplyCount`/`LastReplyAt` from the live replies — and then
+    /// sweeps `Reactions`, `TemporaryPosts` and `ReadReceipts` for the deleted ids. **Not**
+    /// `Threads` or `ThreadMemberships`: a reply has neither.
+    ///
+    /// Then the roots (everything left with `UserId` = the user — a reply was already removed),
+    /// selected `LIMIT 1000` **with no `ORDER BY`**, each batch in its own transaction through
+    /// `permanentDelete`: threads, thread memberships, reactions, temporary posts, read receipts,
+    /// the batch's replies by *anyone* (`RootId IN ids`), and the batch.
+    ///
+    /// # The ten-batch fail-safe fires on the tenth batch, not the eleventh
+    ///
+    /// `count++; if count >= maxLoops` runs after each successful batch, so a user with between
+    /// 9,001 and 10,000 roots has all of them deleted **and** gets
+    /// [`StoreError::LimitExceeded`] — Go checks the counter before it looks for more rows. The
+    /// app layer maps it to the same 500 as any other failure here.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Port of `store.PostReminderMetadata` (channels/store/store.go:1389).
@@ -3290,12 +3318,9 @@ impl PostStore for SqlPostStore {
     }
 
     #[tracing::instrument(skip(self, new_post, old_post), fields(post_id = %new_post.id))]
-    async fn update(&self, new_post: &Post, old_post: &Post) -> Result<Post, StoreError> {
-        // Owned copies because Go mutates its arguments and the mutation is part of the write:
-        // `new_post` gains an `UpdateAt` and a `PreCommit`, and `old_post` becomes the history row.
-        let mut new_post = new_post.clone();
-        let mut old_post = old_post.clone();
-
+    async fn update(&self, new_post: &mut Post, old_post: &mut Post) -> Result<Post, StoreError> {
+        // In place, as Go does: `new_post` gains an `UpdateAt` and a `PreCommit`, and `old_post`
+        // becomes the history row. Both are read again by the caller's plugin hook.
         new_post.update_at = get_millis();
         new_post.pre_commit();
 
@@ -3314,7 +3339,7 @@ impl PostStore for SqlPostStore {
             })?;
         // `ValidateProps` would run here. It only logs — see the trait docs.
 
-        let props = props_for_column(&new_post);
+        let props = props_for_column(new_post);
         sqlx::query!(
             r#"
             UPDATE posts
@@ -3391,14 +3416,15 @@ impl PostStore for SqlPostStore {
             })?;
         }
 
-        insert_post(&self.pool, &old_post)
+        insert_post(&self.pool, old_post)
             .await
             .map_err(|source| StoreError::Db {
                 context: "failed to insert the old post".to_owned(),
                 source,
             })?;
 
-        Ok(new_post)
+        // Go returns the same pointer it mutated; the caller keeps the mutated value too.
+        Ok(new_post.clone())
     }
 
     #[tracing::instrument(skip(self, post), fields(post_id = %post.id))]
@@ -4139,6 +4165,178 @@ impl PostStore for SqlPostStore {
 
         Ok(PostSearchResults::new(Some(posts), None))
     }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, batches))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        permanent_delete_all_comments_by_user(&self.pool, user_id).await?;
+
+        const MAX_LOOPS: i64 = 10;
+        let mut count = 0;
+        loop {
+            let ids: Vec<String> =
+                sqlx::query_scalar!("SELECT id FROM posts WHERE userid = $1 LIMIT 1000", user_id)
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|source| StoreError::Db {
+                        context: format!("failed to find Posts with userId={user_id}"),
+                        source,
+                    })?;
+            if ids.is_empty() {
+                break;
+            }
+
+            permanent_delete_ids(&self.pool, &ids).await?;
+
+            // "This is a fail safe, give up if more than 10k messages" — checked after the batch.
+            count += 1;
+            tracing::Span::current().record("batches", count);
+            if count >= MAX_LOOPS {
+                return Err(StoreError::LimitExceeded {
+                    what: "permanently deleting posts for user",
+                    count: MAX_LOOPS * 1000,
+                    details: format!("userId={user_id}"),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Port of `permanentDeleteAllCommentByUser` (post_store.go:1113): every reply the user wrote,
+/// the threads they were in, and the rows that hang off the deleted ids — one transaction.
+///
+/// The `SELECT` and the `DELETE` repeat one predicate rather than deleting by the selected ids,
+/// as Go does; inside one transaction they see the same rows. `updateThreadAfterReplyDeletion`
+/// then runs once **per deleted reply**, so a root the user replied to three times is recounted
+/// three times — idempotently, since each run reads the table as it now is.
+async fn permanent_delete_all_comments_by_user(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+) -> Result<(), StoreError> {
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let replies = sqlx::query!(
+        r#"SELECT id AS "id!", rootid AS "root_id!" FROM posts WHERE userid = $1 AND rootid != ''"#,
+        user_id
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to fetch Posts with userId={user_id}"),
+        source,
+    })?;
+
+    sqlx::query!(
+        "DELETE FROM posts WHERE userid = $1 AND rootid != ''",
+        user_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to delete Posts with userId={user_id}"),
+        source,
+    })?;
+
+    let mut ids = Vec::with_capacity(replies.len());
+    for reply in replies {
+        update_thread_after_reply_deletion(&mut tx, &reply.root_id, user_id).await?;
+        ids.push(reply.id);
+    }
+
+    // "Delete all the reactions on the comments", then `permanentDeleteTemporaryPosts` and
+    // `permanentDeleteReadReceipts` — Go's order. `Threads` and `ThreadMemberships` are keyed by
+    // a root's id and a reply has none.
+    delete_by_post_ids(&mut tx, &ids).await?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })
+}
+
+/// `permanentDeleteReactions`, `permanentDeleteTemporaryPosts` and `permanentDeleteReadReceipts`
+/// (post_store.go:2993-3028) over a list of post ids, in that order. An empty list deletes
+/// nothing: squirrel renders `sq.Eq{"PostId": []string{}}` as `(1=0)`, and `= ANY('{}')` is
+/// false.
+async fn delete_by_post_ids(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ids: &[String],
+) -> Result<(), StoreError> {
+    sqlx::query!("DELETE FROM reactions WHERE postid = ANY($1)", ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Reactions".to_owned(),
+            source,
+        })?;
+    // Go's own wrap text for this table says "Threads"; kept, as in `permanent_delete`.
+    sqlx::query!("DELETE FROM temporaryposts WHERE postid = ANY($1)", ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Threads".to_owned(),
+            source,
+        })?;
+    sqlx::query!("DELETE FROM readreceipts WHERE postid = ANY($1)", ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete ReadReceipts".to_owned(),
+            source,
+        })?;
+    Ok(())
+}
+
+/// Port of `permanentDelete(postIds)` (post_store.go:1027) — `permanentDeleteAssociatedData`
+/// and then the posts, in one transaction. [`PostStore::permanent_delete`] is the one-id form of
+/// the same statements.
+///
+/// The replies go by `RootId IN ids` **whoever wrote them**: erasing a user takes every answer
+/// in the threads they started.
+async fn permanent_delete_ids(pool: &sqlx::PgPool, ids: &[String]) -> Result<(), StoreError> {
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    // `permanentDeleteThreads`.
+    sqlx::query!("DELETE FROM threads WHERE postid = ANY($1)", ids)
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Threads".to_owned(),
+            source,
+        })?;
+    sqlx::query!("DELETE FROM threadmemberships WHERE postid = ANY($1)", ids)
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete ThreadMemberships".to_owned(),
+            source,
+        })?;
+    delete_by_post_ids(&mut tx, ids).await?;
+    sqlx::query!("DELETE FROM posts WHERE rootid = ANY($1)", ids)
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Posts".to_owned(),
+            source,
+        })?;
+    sqlx::query!("DELETE FROM posts WHERE id = ANY($1)", ids)
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Posts".to_owned(),
+            source,
+        })?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })
 }
 
 /// Port of `updateThreadAfterReplyDeletion` (post_store.go:3063), inside the delete's

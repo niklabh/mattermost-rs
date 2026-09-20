@@ -9,6 +9,8 @@
 #   scripts/go-licensed.sh files     print the directory holding the key pair and the licence
 #   MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh start|stop|port   the guest variant, +33
 #   MMRS_LICENSED_VARIANT=mfa scripts/go-licensed.sh start|stop|port     MFA enforced, +34
+#   MMRS_LICENSED_VARIANT=managedcat scripts/go-licensed.sh start|stop|port        flag on, +37
+#   MMRS_LICENSED_VARIANT=managedcat-unlicensed scripts/go-licensed.sh start|stop  no licence, +38
 #
 # # Why the stack's own Go server cannot be licensed
 #
@@ -59,6 +61,18 @@
 # the stock value. A separate process is the same answer `go-discoverable.sh` gives for a flag.
 # `common::licensed_guest` in the parity harness starts the matching mm-api with the same
 # override, on :8091 + the stack offset.
+#
+# # The managed-categories pair
+#
+# `getManagedCategories` (api4/channel.go:3302) is registered only while
+# `FeatureFlags.ManagedChannelCategories` is on, and that flag is environment-only and off at the
+# pinned SHA, so every other Go on the stack answers the mux 404 for it. `managedcat` is the
+# licensed server with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true` (+37), for the mappings
+# behind the licence; `managedcat-unlicensed` is the **stock** binary with the same flag and no
+# licence (+38), for the 501 in front of it. The flag also changes the licensed create and patch
+# of a channel (channel.go:528, :552), which is why it is not simply turned on in the licensed
+# oracle above. `common::managed_categories` starts the matching mm-api pair on :8094 and :8068
+# plus the stack offset.
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
@@ -86,7 +100,19 @@ case "${MMRS_LICENSED_VARIANT:-}" in
     LOG="$BUILD/licensed-mfa$MMRS_STACK_SUFFIX.log"
     API_PORT=$((MMRS_API_PORT + 26))
     ;;
-  *) echo "MMRS_LICENSED_VARIANT must be unset, 'guest' or 'mfa'"; exit 2 ;;
+  managedcat)
+    PORT=$((MMRS_GO_PORT + 37))
+    RUN="$BUILD/mmlicmc$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/licensed-managedcat$MMRS_STACK_SUFFIX.log"
+    API_PORT=$((MMRS_API_PORT + 28))
+    ;;
+  managedcat-unlicensed)
+    PORT=$((MMRS_GO_PORT + 38))
+    RUN="$BUILD/mmmcunlic$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/managedcat-unlicensed$MMRS_STACK_SUFFIX.log"
+    API_PORT=$((MMRS_API_PORT + 2))
+    ;;
+  *) echo "MMRS_LICENSED_VARIANT must be unset, 'guest', 'mfa', 'managedcat' or 'managedcat-unlicensed'"; exit 2 ;;
 esac
 DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmode=disable&connect_timeout=10"
 BIN="$BUILD/mattermost-licensed"
@@ -150,7 +176,13 @@ case "${1:-start}" in
     [ -x "$BIN" ] || build
     license_files
     mkdir -p "$RUN/bin" "$RUN/data" "$RUN/plugins" "$RUN/client/plugins" "$RUN/config" "$RUN/logs"
-    cp -f "$BIN" "$RUN/bin/mattermost"
+    if [ "${MMRS_LICENSED_VARIANT:-}" = managedcat-unlicensed ]; then
+      # The stack's own Team Edition binary: an unlicensed server exactly like `go-server.sh`'s.
+      [ -x "$BUILD/mattermost" ] || { echo "no binary at $BUILD/mattermost — run scripts/go-server.sh first"; exit 2; }
+      cp -f "$BUILD/mattermost" "$RUN/bin/mattermost"
+    else
+      cp -f "$BIN" "$RUN/bin/mattermost"
+    fi
     for dir in i18n templates fonts; do
       [ -e "$RUN/$dir" ] || ln -s "$SRC/$dir" "$RUN/$dir"
     done
@@ -169,6 +201,14 @@ case "${1:-start}" in
     export MMRS_LICENSE_PUBLIC_KEY_FILE="$LIC/public.pem"
     # The guest variant's one difference from the licensed server — see the header.
     [ "${MMRS_LICENSED_VARIANT:-}" = guest ] && export MM_GUESTACCOUNTSSETTINGS_ENABLE=true
+    # The managed-categories pair's one difference each — see the header.
+    case "${MMRS_LICENSED_VARIANT:-}" in
+      managedcat) export MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true ;;
+      managedcat-unlicensed)
+        export MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true
+        unset MM_LICENSE MMRS_LICENSE_PUBLIC_KEY_FILE
+        ;;
+    esac
     # The MFA variant's: MFA enabled **and enforced**, so `MFARequired` refuses a user who has not
     # set it up — on every `RequireMfa` route and in the websocket's `IsAuthenticated`.
     if [ "${MMRS_LICENSED_VARIANT:-}" = mfa ]; then
@@ -187,7 +227,13 @@ case "${1:-start}" in
       || { echo "the licensed oracle never came up — see $LOG"; exit 1; }
     # Say so in words: a licensed oracle that loaded no licence is the silent failure this
     # script exists to remove.
-    if curl -sf "http://127.0.0.1:$PORT/api/v4/license/client?format=old" | grep -q '"IsLicensed":"true"'; then
+    if [ "${MMRS_LICENSED_VARIANT:-}" = managedcat-unlicensed ]; then
+      if curl -sf "http://127.0.0.1:$PORT/api/v4/license/client?format=old" | grep -q '"IsLicensed":"false"'; then
+        echo "the unlicensed managed-categories Go oracle is listening on :$PORT (log: $LOG)"
+      else
+        echo "the unlicensed managed-categories oracle on :$PORT reports a licence — see $LOG"; exit 1
+      fi
+    elif curl -sf "http://127.0.0.1:$PORT/api/v4/license/client?format=old" | grep -q '"IsLicensed":"true"'; then
       echo "the licensed${MMRS_LICENSED_VARIANT:+ ($MMRS_LICENSED_VARIANT)} Go oracle is listening on :$PORT (log: $LOG)"
     else
       echo "the licensed oracle is up on :$PORT but reports IsLicensed=false — see $LOG"; exit 1

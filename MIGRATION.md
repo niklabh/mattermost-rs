@@ -543,12 +543,15 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | public/plugin `PluginHTTP` and `FileWillBeUploaded` (plugin plan Phase 3, eighth part) | `crates/mm-plugin/src/rpc/streams.rs`, `rpc/file_upload.rs` | DONE | `cargo test -p mm-plugin` (a 70 KB body and a rewritten file, both directions) | The outward HTTP call, with the buffered fallback Go takes only for its exact "can't find method" error, and the hook that lends a reader and a writer at once. The thing to know: the host waits for the replacement copy before the hook answers. |
 | public/plugin `db_rpc.go` and the error helpers (plugin plan Phase 3, ninth part) | `crates/mm-plugin/src/rpc/driver.rs` (generated), `src/error.rs` | DONE | `cargo test -p mm-plugin` (a plugin querying the host in both directions) | The 20 driver methods a plugin reaches the server's database through, and the errors that cross with them. The thing to know: an error that is not an AppError or a pq.Error becomes an `ErrorString`, and seven `database/sql` sentinels carry a code so the far side can name them again — Go's `errors.Is` still recognises `driver.ErrBadConn` after the round trip. |
 | public/plugin `hijack.go`, a hijacked response across the boundary (plugin plan Phase 3, tenth part) | `crates/mm-plugin/src/hijack.rs` | DONE | `cargo test -p mm-plugin` (one script, run by the Go and Rust plugins under the Go server and the Rust host); oracle `plugingen/hijack.go` | The host serves the raw connection and Go's server-side `bufio` pair, and the SDK hands a plugin `HijackedConn` and a buffered reader-writer. The thing to know: nothing flushes the host's writer, so fewer than 4096 bytes written through it are lost at close, as in Go; the module docs list the three divergences. |
-| public/plugin `environment.go` and `supervisor.go`, with `FindManifest` and `BundleInfoForPath` (plugin plan Phase 4, first part) | `crates/mm-plugin/src/environment.rs`, `examples/env_plugin.rs` | PARTIAL | `cargo test -p mm-plugin --test environment`; oracle `plugingen env` (Go's real `plugin.Environment`) | One script over one bundle tree, step for step against Go: activation of every shape and failure, statuses, the webapp unpack, lookups, deactivation, restart and shutdown. The thing to know: a webapp unpacks from `<plugins>/<id>`, not its own directory, so a bundle not named after its id fails, as in Go. Deferred: `Reattach`, the health check, prepackaged plugins, per-plugin DB connections. |
+| public/plugin `environment.go` and `supervisor.go`, with `FindManifest` and `BundleInfoForPath` (plugin plan Phase 4, first part) | `crates/mm-plugin/src/environment.rs`, `examples/env_plugin.rs` | PARTIAL | `cargo test -p mm-plugin --test environment`; oracle `plugingen env` (Go's real `plugin.Environment`) | One script over one bundle tree, step for step against Go: activation of every shape and failure, statuses, the webapp unpack, lookups, deactivation, restart and shutdown. The thing to know: a webapp unpacks from `<plugins>/<id>`, not its own directory, so a bundle not named after its id fails, as in Go. Deferred: per-plugin DB connections. |
 | `GET /api/v4/plugins/statuses` and the app's plugin host (`app/plugin.go` `initPlugins`, `syncPluginsActiveState`, `ShutDownPlugins`; `app/plugin_statuses.go`; the `PluginSettings` config listener) | `crates/mm-api/src/plugins.rs`, `crates/mm-app/src/plugins.rs`, `mm-app` config (`ClientDirectory`, `PluginStates`, `FeatureFlags.AppsEnabled`) | PARTIAL | `parity::plugin_statuses` (2), config unit tests | Served only with `MMRS_PLUGIN_HOST=rust`, from this server's own environment; with the default `go` the route is not registered and forwards untouched. The thing to know: the Go-side comparison installs webapp-only bundles under the ids `SetDefaults` already enables, so the shared configuration gains no key. Deferred: [D-811]. |
 | `GET /api/v4/plugins` and `GET /api/v4/plugins/webapp` (`getPlugins`, `getWebappPlugins`; `App.GetPlugins`, `GetActivePluginManifests`) | `crates/mm-api/src/plugins.rs`, `crates/mm-app/src/plugins.rs` | DONE | `parity::plugin_statuses` (byte-identical bodies, before and after a deactivation) | Served with `MMRS_PLUGIN_HOST=rust` only, like the statuses. The thing to know: the webapp list names each bundle by its FNV hash, so equal bodies mean the same bytes were unpacked; Go orders it by `sync.Map` range, which is why the suite keeps one entry. |
 | `POST /api/v4/plugins` (`uploadPlugin`, `installPlugin`) | `crates/mm-api/src/plugins.rs`; oracle `scripts/go-plugins.sh` (Go with `EnableUploads` on and its own file store, on Go's port + 36) | DONE | `parity::plugin_upload` | Served with `MMRS_PLUGIN_HOST=rust`. The thing to know: a body that is not multipart is not an `AppError` but `http.Error`'s plain text with Go's own message, so `MultipartError::go_text` exists; two of its malformed-body texts are measured and the rest are the nearest fixed text. |
+| `GET`/`POST /api/v4/plugins/marketplace`, `POST /api/v4/plugins/install_from_url` (`getMarketplacePlugins`, `installMarketplacePlugin`, `installPluginFromURL`; the Marketplace client, `downloadFromURL`, `verifyPlugin`) | `crates/mm-api/src/plugins.rs`, `crates/mm-app/src/{marketplace,plugin_signature}.rs`; oracle `reference/dump/behaviour_plugin_signature.go`, plus a mock Marketplace the plugins oracle points at | DONE | `parity::marketplace` (2), `marketplace::tests`, `plugin_signature::go_parity` | Served with `MMRS_PLUGIN_HOST=rust`; OpenPGP verification is rpgp, pinned to x/crypto/openpgp by a 25-case corpus (a stranger's signature ahead of ours verifies; an armor CRC is never checked). The thing to know: an empty list is `null`, and a `null` install body panics Go (the connection drops) where Rust answers the decode 501. |
 | `POST /plugins/{plugin_id}/enable`, `/disable`, `DELETE /plugins/{plugin_id}` (`enablePlugin`, `disablePlugin`, `removePlugin`; `Channels.enablePlugin`/`disablePlugin`, `RemovePlugin`) | `crates/mm-api/src/plugins.rs`, `crates/mm-app/src/plugins.rs`, `crates/mm-app/src/peer_config.rs`, `mm_api::go_cache` (the `PeerConfig` impl) | DONE | `parity::plugin_toggle` (against main Go) | The `PluginStates` save goes to main Go as a `PATCH /config` carrying the whole map (a patch replaces a map), then this server reloads, which activates or deactivates before it answers. The thing to know: only main Go may be the oracle — a Go server saves its whole in-memory configuration, and the uploads oracle's copy is as old as its start, so its save reverted a key planted since. |
-| `app/plugin_install.go`, `app/extract_plugin_tar.go`, `syncPlugins` (plugin install, local removal, file-store sync) | `crates/mm-app/src/plugin_install.rs`; oracle `reference/dump/plugintar` (Go's own `extractTarGz`, compiled from the pinned file) | PARTIAL | `plugin_install::go_parity` (22 corpus bundles), `parity::plugin_statuses` (the host installs from the file store) | Extraction matches Go byte for byte, including Go's string-prefix path check, which lets `../outx/f` escape into a sibling of a destination named `out`. The thing to know: a start-up sync removes every installed plugin and reinstalls from `plugins/*.tar.gz`. Deferred: signatures and `RemovePlugin`'s config write ([D-811]). |
+| `app/plugin_install.go`, `app/extract_plugin_tar.go`, `syncPlugins` (plugin install, local removal, file-store sync) | `crates/mm-app/src/plugin_install.rs`; oracle `reference/dump/plugintar` (Go's own `extractTarGz`, compiled from the pinned file) | PARTIAL | `plugin_install::go_parity` (22 corpus bundles), `parity::plugin_statuses` (the host installs from the file store) | Extraction matches Go byte for byte, including Go's string-prefix path check, which lets `../outx/f` escape into a sibling of a destination named `out`. The thing to know: a start-up sync removes every installed plugin and reinstalls from `plugins/*.tar.gz`, and with `RequirePluginSignature` on skips (logs, never fails) any bundle whose `.sig` is missing or does not verify. |
+| Plugin start-up, the rest of `initPlugins`: `processPrepackagedPlugins`, `persistTransitionallyPrepackagedPlugins`, the signature check in `syncPlugins`, and the prepackaged list the Marketplace list and install consult (app/plugin.go:172-259, 903-1242) | `crates/mm-app/src/plugin_prepackaged.rs`, `plugin_install.rs`, `marketplace.rs`, `plugins.rs`; config `EnableHealthCheck`, `AutomaticPrepackagedPlugins`; oracle `fixtures/behaviour_plugin_startup.json` | DONE | `parity::plugin_startup` (a Go server started by the suite over the same bundles), `plugin_prepackaged::tests`, `plugins::tests` | Statuses, `GET /plugins`, `/plugins/webapp`, the Marketplace list, a prepackaged install, and both servers' file stores and plugin directories agree after start-up. The thing to know: the eleven transitionally prepackaged ids are never offered; an enabled one newer than the store's copy is written to the file store instead. |
+| public/plugin `health_check.go`, `PerformHealthCheck`, `TogglePluginHealthCheckJob` (the plugin health check) | `crates/mm-plugin/src/environment.rs` (`HealthCheckJob`), `examples/env_plugin.rs` (crashes on demand) | DONE | `environment::health_check_matches_go_step_for_step` (oracle `plugingen health`, Go's real `plugin.Environment`), the job-loop test, unit tests of the window | Two restarts, then state 4 on the third failure inside the hour, with the failures forgotten. The thing to know: `Deactivate` keeps the dead supervisor, so a direct check of a deactivated plugin fails anew and restarts it; the 30-second loop only ever checks running plugins. |
 
 ## Notes — model/utils.go
 
@@ -11386,8 +11389,8 @@ input the suite never sent**, so the right answer and the wrong answer coincided
 |---|---|---|
 | app | `crates/mm-app/src/config.rs` — `file_max_file_size`, `ldap_picture_attribute`, `saml_enable_sync_with_ldap`, `lock_profile_fields_for_email_users` | DONE |
 | app | `crates/mm-app/src/user.rs` — `is_profile_image_locked_for_user` | PARTIAL (licensed forwards, [D-413]) |
-| app | `crates/mm-app/src/brand.rs` — `save_brand_image` | PARTIAL (the 501 only, [D-411]) |
-| api | `crates/mm-api/src/images.rs` — `set_profile_image`, `set_default_profile_image`, `get_default_profile_image`, `upload_brand_image` | PARTIAL (refusals only, [D-411]) |
+| app | `crates/mm-app/src/brand.rs` — `save_brand_image` | DONE for PNG/JPEG since 2026-09-20 (see *The image pipeline*) |
+| api | `crates/mm-api/src/images.rs` — `set_profile_image`, `set_default_profile_image`, `get_default_profile_image`, `upload_brand_image` | PARTIAL (the two POSTs served for PNG/JPEG since 2026-09-20; the default avatar forwards, [D-411]) |
 | test | `crates/mm-api/tests/parity/image_writes.rs` — 13 tests | DONE |
 | test | `crates/mm-app/tests/db_profile_image_lock.rs` — 3 tests | DONE |
 
@@ -13373,7 +13376,8 @@ and still only as `me` on the HTTP router. `me` is nobody on five pairs and both
 for every attachment: `createUpload`/`uploadData` (the resumable session and its data leg) and
 `uploadFileStream` (the classic simple-body and multipart upload). The write path is served —
 offset/size checks, the 5 MiB first-part floor, the local-backend write, the `FileInfo` the
-completing chunk mints — but a **raster image** is handed to Go before the write, because its
+completing chunk mints — but a **raster image** is handed to Go before the write (since
+2026-09-20 only GIF/BMP/TIFF/WebP — see *The image pipeline*), because its
 `_preview`/`_thumb`/`mini_preview` are the pixel work [D-380]/[D-411] defer; `uploadData` decides
 that from the file's head *before* writing the chunk, so the forward replays the request Go would
 have handled. Two new oracles underpin the wire format: `mime.TypeByExtension` with its host
@@ -13391,8 +13395,8 @@ table loader (`behaviour_mime.json`) for `FileInfo.mime_type`, and `imaging.Pars
 | mutation | `scripts/mutations/uploads.plan` — see report tally | DONE |
 
 - **The completed `FileInfo` from `uploadData` sets neither `has_preview_image` nor
-  `mini_preview`**, unlike `UploadFileX` — a resumable upload's image answer is Go's (forwarded);
-  a resumable text file's row is this server's. See the doc comment on `App::upload_data`.
+  `mini_preview`**, unlike `UploadFileX` (`HandleImages` writes the derived files only); since
+  2026-09-20 a PNG or JPEG completion is this server's too. See the doc comment on `App::upload_data`.
 - Content extraction (`ExtractContentFromFileInfo`) is skipped on both new write paths — [D-651].
 - The multipart `uploadFileStream` parses the whole body rather than reproducing Go's
   streaming-vs-legacy split — observably identical for a well-formed request — [D-652].
@@ -14121,3 +14125,134 @@ Mutation tally (`join-update-at-and-edit-limit.plan`): 7 run, 5 caught, 2 contro
 
 Mutation tally (`test-notifications.plan`): 8 run, 6 caught, 2 controls survived. `set-online-passed`
 first survived; it is caught by the `posted`-event test added for it.
+
+## `GET /api/v4/teams/{team_id}/channels/managed_categories` — D-440, D-740 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getManagedCategories`, `App.GetVisibleManagedCategoryMappings` | `mm-api/src/channels.rs`, `mm-app/src/sidebar.rs` | DONE | 1 unit + 5 parity | Served only while the env-only `ManagedChannelCategories` flag is on (a route layer forwards before the session check otherwise), against two new flag-on oracles from `go-licensed.sh`. No team check: the caller's DMs answer on any team id, and a `null` value maps to `""` rather than being skipped. |
+
+Mutation tally (`managed-categories.plan`): 17 run, 15 caught, 2 controls survived.
+
+
+## `POST /api/v4/remotecluster/{user_id}/image` and the remote-cluster session — D-780 narrowed (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `remoteSetProfileImage`, `ServeHTTP`'s cloud/remote-cluster branches, `GetRemoteClusterSession`, `GetCloudSession`, `sqlRemoteClusterStore.Get` | `mm-api/src/remote_cluster.rs`, `mm-api/src/auth.rs` (`parse_service_token`), `mm-app/src/remote_cluster.rs`, `mm-store/src/remote_cluster_store.rs` | PARTIAL | 6 unit + 4 new parity | The session is served on all five token routes, and every refusal on `/image` is served against the licensed oracle. The write forwards ([D-411]), as do the other four bodies past the gate ([D-780]). A `RemoteClusters` row with a NULL column or a negative `Options` is refused like a wrong token, because Go's scan fails. |
+
+Mutation tally (`remote-profile-image.plan`): 21 run, 19 caught, 2 controls survived.
+
+## `plugin_local.go` — the ten local plugin pairs, D-850 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitPluginLocal`, `reattachPlugin`, `detachPlugin`, `App.ReattachPlugin`/`DetachPlugin`, `Environment.Reattach` | `mm-api/src/local_plugins.rs`, `mm-app/src/plugins.rs`, `mm-plugin/src/environment.rs`, `mm-model/src/plugin_reattach.rs` | DONE (Go host: gates only, D-850) | 2 unit + 1 oracle (`plugingen reattach`) + 3 parity | Under a Rust host all ten are served; under Go's the gates are answered and the rest forwarded. `Reattach` only errors on a manifest with no server: a failed version check or start answers 200 and leaves the plugin "running" with no supervisor, as in Go. |
+
+Mutation tally (`local-plugins.plan`): 21 run, 19 caught, 2 controls survived; `hosted-list-forwards` first survived and is caught since the list comparison asks who answered.
+
+## `POST /api/v4/posts` with a link — D-401 narrowed, D-105 and D-106 closed, D-860 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages`, `getLinkMetadata` and everything under it, `dyatlov/go-opengraph`, `x/net/html` tokenizer and `charset`, `parseImages`, `http.DetectContentType`, `LinkMetadataStore`, the `permalink` broadcast hook, `SanitizePostMetadataForUser` | `mm-app/src/link_metadata.rs`, `opengraph.rs`, `link_image.rs`, `broadcast_hooks.rs`, `notification.rs`, `post_create.rs`; `mm-model/src/opengraph.rs`, `go_html.rs`, `go_charset.rs`, `post_embed.rs`; `mm-store/src/link_metadata_store.rs` | DONE (create) | 6 parity; unit oracles: link selection 7, OpenGraph/HTML/charset/URL (mm-model + `opengraph` 6), images and sniffing 12 | A link's preview is fetched through the outbound guard on the pre-save post (OpenGraph, image, plain link, or a permalink with its `previewed_post` prop) and the permalink is taken off the `posted` frame and put back per recipient; compared with `scripts/go-links.sh` (Go + 50, allowed to reach a mock on 127.0.0.1). Reads of such posts still forward ([D-860]). |
+
+Mutation tally (`post-links.plan`, `opengraph.plan`, `link-image.plan`): 81 run, 74 caught, 7 survived — the six controls and `sanitize-keeps-a-hidden-preview`, unreachable on the create path (see `App::sanitize_created_post_metadata_for_user`); two first-run survivors were caught after a test was added for each.
+
+## `PermanentDeleteUser` / `PermanentDeleteAllUsers` — D-470, D-600 (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `App.PermanentDeleteUser`, `App.PermanentDeleteAllUsers`, `deleteUser`/`localDeleteUser` `?permanent=true`, `localPermanentDeleteAllUsers`, 16 store methods | `mm-app/src/user_delete.rs`, `mm-api/src/{user_deletes,local_users}.rs`, `mm-store/src/*` (+ `scheduled_post_store.rs`) | DONE (bot owners forward, D-472) | 3 unit + 3 parity (stack 4) + 1 wipe parity (`scripts/wipe-parity.sh`, spare stack) | Served only when no erasure would reach the bot cascade; for the wipe that is a question of `Username` order, not ownership (`App::permanent_delete_all_needs_go`). A profile directory that cannot be checked answers **202 with an error body** after every table is gone. |
+
+Mutation tally: `permanent-delete-user.plan` (stack 4) 15 run, 13 caught, 2 controls survived; `permanent-delete-all.plan` (spare stack 6) 5 run, 3 caught, 2 controls survived. A first user-plan run had one harness fault (an untyped `$1`), re-expressed and re-run whole.
+
+## Post reads with a link — D-860 and D-720 closed (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `getEmbedsAndImages(post, false)` on every read, edit and ephemeral path; `SetPostReminder`'s team-less permalink; `createEphemeralPost`'s second prepare; `getPostsByIds`' embed-less prepare | `mm-app/src/link_metadata.rs`, `post.rs`, `post_write.rs`, `post_rest.rs`; `mm-api/src/posts.rs`, `post_writes.rs` | DONE (reads) | 7 parity (`post_link_reads`) + guards moved in `post_get`, `channel_posts`, `postrest`, `post_acks` | Every read answers a link from the creating process's cache or the `LinkMetadata` row, never a fetch, except a URL past 2,048 bytes (the cache decision is on `LinkCache`); `getPostsByIds` runs `PreparePostForClient` alone and an ephemeral answer carries its embed twice — both were wrong here and hidden by the old forward. |
+
+Mutation tally (`post-link-reads.plan`): 18 run, 16 caught, 2 controls survived.
+
+## The image pipeline — D-650 and D-411 narrowed, D-380 narrowed, D-890–D-895 opened (2026-09-20)
+
+No route+method pair is added (763 of 764 are registered); five forwarded branches become served.
+`crates/goimage` (BSD-3-Clause AND MIT, no Mattermost code) ports Go's `image/png` and `image/jpeg`
+both ways, `compress/flate` and `zlib`, `image/color`, `math.Sin`, `boxes-ltd/imaging` and
+`bep/imagemeta`'s EXIF walk; every stage is checked against `reference/dump/behaviour_imaging*.go`
+on arm64, whose Lanczos output depends on Go fusing `a + x*y` (see `goimage::fma`).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `image/png`, `image/jpeg`, `compress/flate`, `compress/zlib`, `image.Decode` registry, `math.Sin`, `boxes-ltd/imaging` (Lanczos, Fit, Fill, transforms), `bep/imagemeta` (JPEG/PNG EXIF) | `crates/goimage` | DONE (PNG, JPEG) | 63 unit, every oracle case | GIF, BMP, TIFF, WebP are recognised and answered `NotPorted` ([D-650]); deflate level 1 is not ported (no caller). |
+| `channels/app/imaging` (`Decoder`, `Encoder`, `Fit`, `FillCenter`, `GenerateThumbnail`/`Preview`/`MiniPreviewImage`, `MakeImageUpright`, `GetImageOrientation`) | `mm-app/src/image_pipeline.rs`, `imaging_orientation.rs` | DONE | 3 + 4 unit over the end-to-end oracle | `GetImageOrientation` answers differently through a seekable reader and a stream; the two callers are kept apart. |
+| `POST /files` raster branch (`preprocessImage`, `postprocessImage`); `POST /uploads/{id}` completion (`HandleImages`) | `mm-app/src/file_upload.rs`, `upload.rs` | DONE (PNG, JPEG) | 4 parity (`image_uploads`, 21 files, both routes) | `_thumb`/`_preview` are PNG when the decoder said `png` and JPEG q90 otherwise, whatever the name; a PNG named `.gif` keeps its derived files but loses `has_preview_image`. |
+| `createEmoji` resize | `mm-app/src/emoji.rs` | DONE (`.png` names) | `emoji_writes` 1 rewritten | Byte-identical resized emoji; a non-`.png` name is still the GIF branch's ([D-380]). |
+| `SetProfileImage`, `SaveBrandImage` | `mm-app/src/user_image.rs`, `brand.rs`; `mm-store` `update_last_picture_update` | DONE (PNG, JPEG) | `image_writes` 2 new, 3 rewritten | An identical re-upload writes nothing and does not move `LastPictureUpdate`; `setTeamIcon` stays forwarded ([D-890]). |
+
+Mutation tally (`image-pipeline.plan`): 20 run, 19 caught, 2 controls survived; the six first-run
+survivors each exposed a corpus gap and five are caught since the oracle grew, the sixth
+(`5000/q`→`5001/q`) is equivalent over every quality and was replaced by the clamp, caught.
+
+## The web client — `channels/web/static.go`, D-782 narrowed, D-900..D-903 opened (2026-09-19)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `InitStatic`, `root`, `staticFilesHandler`, `robotsHandler`, `unsupportedBrowserScriptHandler`, `getOpenGraphMetaTags`, the `IsStatic` arm of `Handler.ServeHTTP`, `Handle404`/`IsAPICall`, gorilla's clean-path redirect, `http.FileServer`, `gzhttp.GzipHandler`, `GetStaticScriptHashes`, `ClientConfigHash`, `GetDesktopAppVersion` | `mm-api/src/{web_static,gzhttp}.rs` (the TCP router's fallback), `serve_content.rs`, `mm-app/src/{config,user_agent}.rs` | DONE (template pages and `RenderWebAppError` forward, D-900/D-901) | `parity::web_client` (8), `behaviour_web_static.json` oracle | A compressed asset's bytes and its small-body `Content-Length` differ from Go's (another compressor; zstd preferred as in Go); `X-Version-Id` matches to the byte. The proxy now forwards redirects instead of following them, and `go_global_headers` stopped stamping `Expires`/`Vary` on forwarded answers. |
+
+## `GET /manualtest` under `EnableTesting` — D-782 closed, D-901 narrowed (2026-09-20)
+
+764 of 764 route+method pairs are now registered (`scripts/routes.py`; this one dispatched from `web_static::classify`).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `manualtesting.ManualTest`, `testAutoLink`, `getChannelID`; `handleContextError`'s non-API tail, `utils.RenderWebError`, `i18n.GetTranslationsAndLocaleFromRequest` + go-i18n lookup, the signing key's private half | `mm-api/src/{manualtest,web_error}.rs`, `web_static.rs` (`session_preamble`, `serve_http_headers`), `mm-app/src/{manualtest,i18n}.rs`, `team.rs` (`save_team`), `config.rs` | DONE | `parity::manualtest` (31 compared answers + the `HEAD` and header checks), `behaviour_web_error.json` oracle, 13 unit | At the pinned SHA the team email has no `@`, so `username`+`teamname` is always the email 400 and `rand.Seed` is a Go 1.24+ no-op — see `mm_api::manualtest`'s doc. Error pages are compared after verifying both signatures. |
+
+Mutation tally (`manualtest.plan`): 38 run, 35 caught, 3 controls survived.
+
+## Plugin hook call sites: the post family and reactions (2026-09-20)
+
+Plugin plan **Phase 5, partly done**. Under `MMRS_PLUGIN_HOST=rust` this server now fires 7 of the
+35 hook sites `channels/app` has — the post family and reactions, 9 of the 46 `hooks.*`
+invocations — from the write paths it already serves. Under the default Go host nothing fires and
+the behaviour is what it was. D-402 and D-811 are narrowed; the other 28 sites are listed on
+[D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (`TrustedProxyIPHeader` not modelled, [D-930]) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
+| `Channels.RunMultiHook*` (app/channels.go:341), `runGuardedMessageWillBePosted`/`Updated` and `resolveGuards` (app/guarded_hooks.go), `store.ChannelGuardStore.GetForChannel` | `mm-app/src/plugin_hooks.rs`, `mm-store/src/channel_guard_store.rs` | DONE (the guard *register* API is Phase 6) | 1 parity | The two `MessageWillBe*` hooks disagree on what a rejection is — a reason for one, a nil post for the other — and the reason is concatenated into the error **id**. A guard whose plugin is not active is 503 before any hook runs. |
+| `MessageWillBePosted`, `MessageHasBeenPosted` (post.go:368, :430), `MessageWillBeUpdated`, `MessageHasBeenUpdated` (post.go:978, :1007), `MessageHasBeenDeleted` (post.go:3393), `ReactionHasBeenAdded`/`Removed` (reaction.go:105, :187) | `mm-app/src/{post_create,post_write,reaction}.rs` | DONE | 1 parity (`plugin_hooks`, 14 hooks diffed) + 4 unit | `PostStore::update` now mutates both arguments as Go does: `MessageHasBeenUpdated`'s old post **is** the edit-history row (minted id, `OriginalId`, `DeleteAt`), which this suite is what found. |
+
+The parity oracle is `mm-plugin`'s `examples/hook_recorder`, one Rust SDK plugin run under a real
+Go host (Go's port + 74) and under a Rust host (:8119) over the same bundle; it writes each hook's
+arguments rendered from the gob stream, and the suite diffs the two transcripts entry for entry
+with only ids and timestamps tokenised.
+
+Mutation tally (`plugin-hooks.plan`): 22 run, 20 caught, 2 controls survived, 0 harness faults.
+Every line was caught first time, which is unusual and is the oracle's doing: the same plugin under
+two hosts makes almost any change to what is sent visible as a transcript diff.
+
+## `AppError.Translate` — D-092 closed, D-940/D-941 opened (2026-09-20)
+
+Every error body this server writes now carries Go's sentence in Go's language: `mm_app::i18n`
+renders the id's `text/template` against the error's params, `mm_api::translate_error_messages`
+picks the locale `GetTranslationsAndLocaleFromRequest` would, and the websocket and `Handle404`
+use `DefaultServerLocale` instead, because those messages are the ones `NewAppError` set at
+construction and nothing re-translates.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `model.AppError.Translate`/`SkipTranslation` (utils.go:281), `i18n.tfuncWithFallback`, go-i18n `bundle.translate` + `translation.template.Execute`, `Handle404`'s `i18n.T`, `returnWebSocketError` | `mm-app/src/i18n.rs` (`Template`, `translate_with`, `translate_app_error`, `server_locale`, `can_render`, `init`), `mm-api/src/{error,lib,web_error,web_static,websocket}.rs` | DONE | `behaviour_i18n.json` oracle (4360 request rows, 304 server rows, 26 template rows), 5 new unit, `parity::error_i18n` (7, eight `Accept-Language` values × 400/401/403/404/413/501), plus every `assert_error_bodies_match_except_known_gaps` caller, which now compares `message` | A missing or `null` param renders `<no value>`, exactly as `text/template` does; `{{if}}` and plural entries are not rendered ([D-940]) and no reachable id needs either. |
+
+Comparing `message` found four divergences nothing else could see: two body decoders
+(`[]` is a valid struct on serde and not in Go; `null` into Go's *value* struct is a zero, not an
+error — `mm_model::utils::decode_one_{object,value}_from_json`, [D-941]) and two error sites
+raised without the params their sentence interpolates (`App::get_channels`'s id **list**, and the
+four interactive-dialog refusals).
+
+Mutation tally (`error-i18n.plan`): 17 run, 15 caught, 2 controls survived, 0 harness faults. A
+mutation that swaps `DefaultClientLocale` for `DefaultServerLocale` in the middleware is *not*
+planned: both are `en` on the stack, so it is wire-equivalent in the same way a misnamed
+parameter used to be.

@@ -369,6 +369,17 @@ pub trait TeamStore {
         member: &TeamMember,
         max_users_per_team: i64,
     ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.RemoveAllMembersByUser` (team_store.go:1312).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    ///
+    /// A hard delete despite the name: every `TeamMembers` row of the user, including the ones
+    /// a leave already soft-deleted (`DeleteAt != 0`).
+    fn remove_all_members_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -636,6 +647,19 @@ impl TeamStore for SqlTeamStore {
         max_users_per_team: i64,
     ) -> Result<TeamMember, StoreError> {
         save_member(&self.pool, member, max_users_per_team).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn remove_all_members_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM teammembers WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete TeamMembers with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

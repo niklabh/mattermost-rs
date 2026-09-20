@@ -11,6 +11,8 @@ hand. This produces it from the two sources of truth:
     routers, so the same path+method can legitimately appear in both.
   * `crates/mm-api/src/lib.rs` — the axum chain, parsed by matching parentheses rather than by
     line, since a `.route(...)` call spans as many lines as its comment needs.
+  * `crates/mm-api/src/web_static.rs` — the HTTP router's fallback, for the one api4 route it
+    dispatches (`FALLBACK_SERVED`).
   * `crates/mm-api/src/local.rs` — the **second** axum chain. The local-mode routes land on a
     different router bound to a unix socket, so a local route served there is invisible to a
     parse of `lib.rs` alone; before 2026-09-11 this script hardcoded every local pair as
@@ -190,6 +192,9 @@ def collect():
 ALIASES = {
     "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}":
         "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category_id}",
+    # Go's `{user_id}`; axum's tree position is already `{remote_id}` (the CRUD routes).
+    "/api/v4/remotecluster/{remote_id}/image":
+        "/api/v4/remotecluster/{user_id}/image",
 }
 ME_LITERALS = {"/api/v4/users/me", "/api/v4/users/me/preferences",
                "/api/v4/users/me/teams/members"}
@@ -251,6 +256,21 @@ def served_through_merges(router):
 def served_in(text):
     """`served`, over source text rather than a file — see `merged_local_sources`."""
     out = set()
+    # A method router bound first and registered by name — `let root = if hosted { get(a) }
+    # else { get(b) };` then `.route("/api/v4/plugins", partially_migrated(root))`, as
+    # `local_plugins.rs` does because the handler depends on the plugin host. The verbs live in
+    # the `let`, so a route body naming a bound identifier is read together with its binding.
+    # Without this, eight served local pairs were reported unserved (2026-09-19).
+    bindings = {}
+    for b in re.finditer(r'\blet\s+([a-z_0-9]+)\s*=', text):
+        depth, i = 0, b.end()
+        while i < len(text) and not (depth == 0 and text[i] == ";"):
+            if text[i] in "({[":
+                depth += 1
+            elif text[i] in ")}]":
+                depth -= 1
+            i += 1
+        bindings[b.group(1)] = text[b.end():i]
     for m in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
         depth, i = 1, m.end()
         while depth and i < len(text):
@@ -262,6 +282,8 @@ def served_in(text):
         body = text[m.end():i]
         # Strip comments so a verb named in prose is not counted as a registration.
         body = re.sub(r'//[^\n]*', '', body)
+        body += "".join(re.sub(r'//[^\n]*', '', bindings[name])
+                        for name in set(re.findall(r'\b[a-z_0-9]+\b', body)) & bindings.keys())
         path = m.group(1).replace("{*", "{")
         # `get(system::get_system_ping)` in lib.rs, but `get(local_get_system_ping)` in local.rs:
         # the local router's handlers are module-private and therefore unqualified. Requiring the
@@ -285,10 +307,28 @@ def served_in(text):
     return out
 
 
+# Pairs the HTTP router serves through its **fallback**, `web_static::fallback`, rather than a
+# `.route(...)`: Go registers `GET /manualtest` only when `EnableTesting` is on at start
+# (api4/api.go:414), and on the root router, under the subpath — so the port decides it where it
+# decides the web client's routes (`web_static::classify`) and not in the axum table. Each pair
+# counts only while the pattern that sends it to its handler is present in `web_static.rs`.
+WEBSTATIC = ROOT / "crates/mm-api/src/web_static.rs"
+FALLBACK_SERVED = [
+    ("GET", "/manualtest",
+     r'rel == "/manualtest" && \*method == Method::GET \{\s*return Route::ManualTest;'),
+]
+
+
+def served_through_fallback():
+    text = WEBSTATIC.read_text() if WEBSTATIC.exists() else ""
+    return {(method, path) for method, path, pattern in FALLBACK_SERVED
+            if re.search(pattern, text)}
+
+
 def main():
     args = set(sys.argv[1:])
     routes = collect()
-    have = served() | served_through_merges(LIBRS)
+    have = served() | served_through_merges(LIBRS) | served_through_fallback()
     # The local router is `local.rs` plus the `local_<family>.rs` modules it `.merge`s — a family
     # ports as its own module (see `local::router`), so a parse of `local.rs` alone would miss
     # every merged family. Union them all.

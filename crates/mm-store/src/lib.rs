@@ -16,6 +16,7 @@
 pub mod access_control_policy_store;
 pub mod audit_store;
 pub mod bot_store;
+pub mod channel_guard_store;
 pub mod channel_join_request_store;
 pub mod channel_member_history_store;
 pub mod channel_store;
@@ -31,6 +32,8 @@ pub mod group_store;
 pub mod group_syncable_store;
 pub mod job_store;
 pub mod license_store;
+/// Port of `SqlLinkMetadataStore` — the link-preview cache table.
+pub mod link_metadata_store;
 pub mod notify_admin_store;
 pub mod oauth_store;
 pub mod post_acknowledgement_store;
@@ -41,7 +44,9 @@ pub mod product_notices_store;
 pub mod property_store;
 pub mod reaction_store;
 pub mod read_receipt_store;
+pub mod remote_cluster_store;
 pub mod role_store;
+pub mod scheduled_post_store;
 pub mod scheme_store;
 pub mod session_store;
 /// The read side of `SidebarCategories` — Go hangs these off `ChannelStore`.
@@ -65,6 +70,7 @@ pub mod webhook_store;
 pub use access_control_policy_store::{AccessControlPolicyStore, SqlAccessControlPolicyStore};
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use bot_store::{BotStore, SqlBotStore};
+pub use channel_guard_store::{ChannelGuard, ChannelGuardStore, SqlChannelGuardStore};
 pub use channel_join_request_store::{ChannelJoinRequestStore, SqlChannelJoinRequestStore};
 pub use channel_member_history_store::{ChannelMemberHistoryStore, SqlChannelMemberHistoryStore};
 pub use channel_store::{ChannelSave, ChannelStore, SqlChannelStore, UnreadsAndMentions};
@@ -79,6 +85,7 @@ pub use group_store::{GroupStore, SqlGroupStore};
 pub use group_syncable_store::GroupSyncableStore;
 pub use job_store::{JobStore, SqlJobStore};
 pub use license_store::{LicenseStore, SqlLicenseStore};
+pub use link_metadata_store::{LinkMetadataStore, SqlLinkMetadataStore};
 pub use notify_admin_store::{NotifyAdminStore, SqlNotifyAdminStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
@@ -88,7 +95,9 @@ pub use product_notices_store::{ProductNoticesStore, SqlProductNoticesStore};
 pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use read_receipt_store::{ReadReceiptStore, SqlReadReceiptStore};
+pub use remote_cluster_store::{RemoteClusterStore, SqlRemoteClusterStore};
 pub use role_store::{RoleStore, SqlRoleStore};
+pub use scheduled_post_store::{ScheduledPostStore, SqlScheduledPostStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use sidebar_category_store::{
@@ -125,15 +134,18 @@ pub struct SqlStore {
     bot: SqlBotStore,
     command: SqlCommandStore,
     channel: SqlChannelStore,
+    channel_guard: SqlChannelGuardStore,
     channel_join_request: SqlChannelJoinRequestStore,
     config: SqlConfigStore,
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
+    scheduled_post: SqlScheduledPostStore,
     file_info: SqlFileInfoStore,
     notify_admin: SqlNotifyAdminStore,
     desktop_tokens: SqlDesktopTokensStore,
     read_receipt: SqlReadReceiptStore,
     temporary_post: SqlTemporaryPostStore,
+    link_metadata: SqlLinkMetadataStore,
     upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     access_control_policy: SqlAccessControlPolicyStore,
@@ -143,6 +155,7 @@ pub struct SqlStore {
     oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
+    remote_cluster: SqlRemoteClusterStore,
     terms_of_service: SqlTermsOfServiceStore,
     thread: SqlThreadStore,
     preference: SqlPreferenceStore,
@@ -195,15 +208,18 @@ impl SqlStore {
             bot: SqlBotStore::new(pool.clone()),
             command: SqlCommandStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
+            channel_guard: SqlChannelGuardStore::new(pool.clone()),
             channel_join_request: SqlChannelJoinRequestStore::new(pool.clone()),
             config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
+            scheduled_post: SqlScheduledPostStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
             notify_admin: SqlNotifyAdminStore::new(pool.clone()),
             desktop_tokens: SqlDesktopTokensStore::new(pool.clone()),
             read_receipt: SqlReadReceiptStore::new(pool.clone()),
             temporary_post: SqlTemporaryPostStore::new(pool.clone()),
+            link_metadata: SqlLinkMetadataStore::new(pool.clone()),
             upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             access_control_policy: SqlAccessControlPolicyStore::new(pool.clone()),
@@ -213,6 +229,7 @@ impl SqlStore {
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
+            remote_cluster: SqlRemoteClusterStore::new(pool.clone()),
             terms_of_service: SqlTermsOfServiceStore::new(pool.clone()),
             thread: SqlThreadStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
@@ -489,6 +506,11 @@ impl SqlStore {
         &self.draft
     }
 
+    /// Port of `store.Store.ScheduledPost()`.
+    pub fn scheduled_post(&self) -> &SqlScheduledPostStore {
+        &self.scheduled_post
+    }
+
     /// Port of `store.Store.NotifyAdmin()`.
     pub fn notify_admin(&self) -> &SqlNotifyAdminStore {
         &self.notify_admin
@@ -499,6 +521,11 @@ impl SqlStore {
         &self.desktop_tokens
     }
 
+    /// Port of `SqlStore.RemoteCluster()`.
+    pub fn remote_cluster(&self) -> &SqlRemoteClusterStore {
+        &self.remote_cluster
+    }
+
     /// Port of `store.Store.ReadReceipt()`.
     pub fn read_receipt(&self) -> &SqlReadReceiptStore {
         &self.read_receipt
@@ -507,6 +534,11 @@ impl SqlStore {
     /// Port of `store.Store.TemporaryPost()`.
     pub fn temporary_post(&self) -> &SqlTemporaryPostStore {
         &self.temporary_post
+    }
+
+    /// Port of `store.Store.LinkMetadata()`.
+    pub fn link_metadata(&self) -> &SqlLinkMetadataStore {
+        &self.link_metadata
     }
 
     pub fn file_info(&self) -> &SqlFileInfoStore {
@@ -636,6 +668,10 @@ impl SqlStore {
     }
 
     /// Port of `store.Store.ChannelJoinRequest()`.
+    pub fn channel_guard(&self) -> &SqlChannelGuardStore {
+        &self.channel_guard
+    }
+
     pub fn channel_join_request(&self) -> &SqlChannelJoinRequestStore {
         &self.channel_join_request
     }

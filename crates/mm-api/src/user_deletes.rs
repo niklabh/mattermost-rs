@@ -44,12 +44,13 @@
 //! |---|---|---|
 //! | every refusal above | served | — |
 //! | `?permanent=true`, `EnableAPIUserDeletion` off | served — the 401, which writes nothing | — |
-//! | `?permanent=true`, `EnableAPIUserDeletion` on | — | forwarded ([D-470]) |
+//! | `?permanent=true`, `EnableAPIUserDeletion` on, target owns no bots | served | — |
+//! | `?permanent=true`, `EnableAPIUserDeletion` on, target owns a bot | — | forwarded ([D-472]) |
 //! | soft delete, target owns no bots | served | — |
 //! | soft delete, target owns a bot | — | forwarded ([D-461]) |
 //!
-//! Both forwards are decided from `SELECT`s and the configuration, strictly before
-//! [`mm_app::App::deactivate_user`] writes anything — which is the whole constraint this route
+//! Every forward is decided from `SELECT`s and the configuration, strictly before
+//! [`mm_app::App::deactivate_user`] writes anything — `PermanentDeleteUser` begins with it — which is the whole constraint this route
 //! is under; see the module doc on [`mm_app::user_delete`].
 
 use axum::extract::{Path, Query, Request, State};
@@ -91,7 +92,13 @@ pub struct DeleteUserQuery {
 /// calls the first a "More verbose error message for system admins". Both are 401 and both are
 /// reached only after every gate above has passed, so the fork leaks nothing to a caller who
 /// could not already delete the account. It is also the *reachable* arm on this deployment: the
-/// flag is off in the live document, and [D-470] is the other one.
+/// flag is off in the live document. With it on, [`mm_app::App::permanent_delete_user`] runs.
+///
+/// # A permanent delete can answer 202 with an error body
+///
+/// When the profile-image directory cannot be checked or removed, `PermanentDeleteUser` finishes
+/// every table and then returns `app.file_info.permanent_delete_by_user.app_error` at **202**,
+/// which `c.Err` renders as an error document under a success status. Passed through as is.
 ///
 /// A `GetUser` failure on that re-read is swallowed (`usrErr == nil && loggedUser != nil`), which
 /// falls to the non-admin message — so a caller whose own row has vanished mid-request gets the
@@ -185,9 +192,20 @@ async fn delete_resolved_user(
 
     if permanent {
         if state.app.config().enable_api_user_deletion {
-            // `App.PermanentDeleteUser` — see [D-470].
-            tracing::Span::current().record("forwarded", true);
-            return proxy::forward_to_go(State(state), request).await;
+            // `App.PermanentDeleteUser` opens with the deactivation, so its bot gate is this
+            // route's soft-delete gate, asked before anything is written.
+            match state.app.permanent_delete_needs_go(&user_id).await {
+                Ok(true) => {
+                    tracing::Span::current().record("forwarded", true);
+                    return proxy::forward_to_go(State(state), request).await;
+                }
+                Ok(false) => {}
+                Err(err) => return ApiError::from(err).into_response(),
+            }
+            if let Err(err) = state.app.permanent_delete_user(&user).await {
+                return ApiError::from(err).into_response();
+            }
+            return status_ok();
         }
         let caller_is_admin = match state.app.get_user(&session.0.user_id).await {
             Ok(caller) => caller.is_system_admin(),

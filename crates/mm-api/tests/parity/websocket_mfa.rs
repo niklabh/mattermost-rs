@@ -150,7 +150,7 @@ async fn a_user_who_owes_mfa_is_greeted_then_refused_and_hears_nothing() {
         "{go_base}: an unauthenticated socket heard typing"
     );
 
-    for field in ["id", "status_code", "detailed_error"] {
+    for field in ["id", "message", "status_code", "detailed_error"] {
         assert_eq!(
             go_refused["error"][field], rust_refused["error"][field],
             "the refusal's {field}\n go: {go_refused}\nrust: {rust_refused}"

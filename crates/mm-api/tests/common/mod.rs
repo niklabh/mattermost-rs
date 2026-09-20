@@ -394,16 +394,18 @@ pub async fn set_active_licence_id(id: Option<&str>) {
     }
 }
 
-/// Compare two error bodies and assert they differ in **exactly** the two keys that are known to,
+/// Compare two error bodies and assert they differ in **exactly** the one key that is known to,
 /// returning the parsed Go body for further assertions.
 ///
-/// `request_id` is per-request and can never match. `message` is Go's *translated* prose where
-/// ours is the raw error id — the one remaining third of [D-092], which needs the i18n bundle.
+/// `request_id` is per-request and can never match. Everything else must be equal, `message`
+/// included: since [D-092] closed, this server translates the id through the same bundle Go does,
+/// so every caller of this helper is also a check that the sentence — and the params rendered
+/// into it — is Go's. That is most of the breadth behind the i18n work; `parity::error_i18n`
+/// covers the locales a default-locale request never reaches.
 ///
 /// Written as a difference-set assertion rather than as "compare these three fields" on purpose:
 /// a field added to `AppError` upstream, or a value we get wrong in some *other* key, fails this
-/// immediately instead of slipping through a hand-listed comparison. When i18n lands, `message`
-/// comes out of the tolerated set and this gets stricter with a one-word edit.
+/// immediately instead of slipping through a hand-listed comparison.
 pub fn assert_error_bodies_match_except_known_gaps(
     go_body: &[u8],
     rs_body: &[u8],
@@ -433,28 +435,16 @@ pub fn assert_error_bodies_match_except_known_gaps(
         .map(|(key, _)| key.as_str())
         .collect();
 
-    // A **subset**, not an equality. `request_id` always differs and `message` almost always
-    // does — but not when the id is `model.NoTranslation`, whose "translation" is the sentinel
-    // itself, so both servers write `<untranslated>` and the two messages agree. Requiring the
-    // message to differ failed `getUsersWithInvalidEmails` for agreeing with Go *more* closely
-    // than the helper expected.
+    // A **subset**, not an equality: `request_id` always differs, nothing else may.
     let unexpected: Vec<&str> = differing
         .iter()
         .copied()
-        .filter(|key| !matches!(*key, "message" | "request_id"))
+        .filter(|key| *key != "request_id")
         .collect();
     assert!(
         unexpected.is_empty(),
-        "{context}: only `message` (D-092, i18n) and `request_id` may differ, but {unexpected:?} \
-         also did.\n  go:   {go}\n  rust: {rs}"
-    );
-
-    // And pin what our `message` actually is, so the divergence stays the documented one rather
-    // than becoming some third value nobody chose.
-    assert_eq!(
-        rs_obj.get("message"),
-        rs_obj.get("id"),
-        "{context}: until i18n lands our message is the raw id (D-092)"
+        "{context}: only `request_id` may differ, but {unexpected:?} also did.\n  \
+         go:   {go}\n  rust: {rs}"
     );
 
     go
@@ -2455,6 +2445,38 @@ pub struct SecondServer {
     pub base: String,
 }
 
+/// This stack's Go file store, `reference/.build/mmroot<-k>/data/` — the directory every server
+/// on the stack, Go and mm-api alike, reads and writes files under.
+pub fn stack_data_dir() -> String {
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let suffix = if offset == 0 {
+        String::new()
+    } else {
+        format!("-{}", offset / 100)
+    };
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../reference/.build/mmroot{suffix}/data/"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The **run directory** `scripts/go-server.sh` builds for this stack, and the one
+/// `scripts/mm-api-env.sh` launches the stack's own mm-api from.
+///
+/// `i18n/`, `templates/`, `fonts/`, `logs/` and `client/` are found relative to the working
+/// directory (`fileutils.FindDir`), so a server started anywhere else is a different server. That
+/// was invisible until the translations became mandatory at start-up: every `SecondServer` ran in
+/// the test binary's own directory, found no `i18n`, and simply refused to boot.
+pub fn stack_run_dir() -> std::path::PathBuf {
+    let data = std::path::PathBuf::from(stack_data_dir());
+    data.parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or(data)
+}
+
 impl SecondServer {
     /// Start one on `port` with `env` overlaid, and wait for it to answer.
     ///
@@ -2465,6 +2487,21 @@ impl SecondServer {
     /// callers and each names a literal — so two stacks never race for :8071 while the call sites
     /// keep saying one number.
     pub async fn start(port: u16, env: &[(&str, &str)]) -> Option<Self> {
+        Self::start_with(port, None, env).await
+    }
+
+    /// [`SecondServer::start`] with the child's working directory set — for a suite whose subject
+    /// is what the server finds relative to it (`fileutils.FindDir`: the web client's `client/`,
+    /// `templates/`, `logs/`).
+    pub async fn start_in(port: u16, dir: &std::path::Path, env: &[(&str, &str)]) -> Option<Self> {
+        Self::start_with(port, Some(dir), env).await
+    }
+
+    async fn start_with(
+        port: u16,
+        dir: Option<&std::path::Path>,
+        env: &[(&str, &str)],
+    ) -> Option<Self> {
         let port = port
             + std::env::var("MMRS_PORT_OFFSET")
                 .ok()
@@ -2507,11 +2544,23 @@ impl SecondServer {
             .env("MM_GO_UPSTREAM", GO)
             // Required at startup; the stack's first account, as `scripts/mm-api-env.sh` sets it.
             .env("MM_API_GO_CACHE_USER", "sliceuser")
+            // The stack's shared file store, as `scripts/mm-api-env.sh` gives the main mm-api. A
+            // second server that writes a file (a profile picture, since that write is served)
+            // otherwise resolves the default `./data/` against the test's working directory and
+            // leaves the file inside the crate. `env` below can still override it.
+            .env("MM_FILESETTINGS_DIRECTORY", stack_data_dir())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         for (key, value) in env {
             command.env(key, value);
         }
+        // The stack's run directory unless the caller named one: that is where the stack's own
+        // mm-api runs (`scripts/mm-api-env.sh`), and it is where `i18n/` — which the process now
+        // refuses to start without — actually is.
+        let run_dir = stack_run_dir();
+        let dir = dir.unwrap_or(run_dir.as_path());
+        // `PWD` goes with it: Go's `os.Getwd` (and the port's) prefers it when it names `.`.
+        command.current_dir(dir).env("PWD", dir);
         let child = command.spawn().ok()?;
 
         let base = format!("http://127.0.0.1:{port}");
@@ -2640,20 +2689,7 @@ async fn start_licensed_rust(
     key_file: &str,
     extra: &[(&str, &str)],
 ) -> SecondServer {
-    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let suffix = if offset == 0 {
-        String::new()
-    } else {
-        format!("-{}", offset / 100)
-    };
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let data_dir = root
-        .join(format!("reference/.build/mmroot{suffix}/data/"))
-        .to_string_lossy()
-        .into_owned();
+    let data_dir = stack_data_dir();
     let database_url = std::env::var("DATABASE_URL").unwrap_or_default();
     let listen = format!(":{go_port}");
     let mut env: Vec<(&str, &str)> = vec![
@@ -2792,6 +2828,81 @@ pub async fn licensed_mfa() -> LicensedPair {
         signed: signed.clone(),
         key_file: key_file.clone(),
     }
+}
+
+/// The mm-api port for the licensed managed-categories pair: 8094 on stack 0.
+const MANAGED_CATEGORIES_LICENSED_RUST_PORT: u16 = 8094;
+/// The mm-api port for the **unlicensed** managed-categories pair: 8068 on stack 0.
+const MANAGED_CATEGORIES_UNLICENSED_RUST_PORT: u16 = 8068;
+
+static MANAGED_CATEGORIES_LICENSED: tokio::sync::OnceCell<(SecondServer, String, String)> =
+    tokio::sync::OnceCell::const_new();
+static MANAGED_CATEGORIES_UNLICENSED: tokio::sync::OnceCell<SecondServer> =
+    tokio::sync::OnceCell::const_new();
+
+/// The two Go servers with `FeatureFlags.ManagedChannelCategories` on —
+/// `MMRS_LICENSED_VARIANT=managedcat` (+37, licensed) and `managedcat-unlicensed` (+38, the stock
+/// binary) of `scripts/go-licensed.sh` — each with an mm-api carrying the same flag beside it.
+/// `(licensed, unlicensed)`; the unlicensed pair reuses [`LicensedPair`] with an empty licence.
+///
+/// **Panics** when either oracle is absent, for the reason [`licensed`] gives.
+pub async fn managed_categories() -> (LicensedPair, LicensedPair) {
+    const FLAG: (&str, &str) = ("MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES", "true");
+    let licensed_go = format!("http://localhost:{}", go_port() + 37);
+    let unlicensed_go = format!("http://localhost:{}", go_port() + 38);
+
+    let (server, signed, key_file) = MANAGED_CATEGORIES_LICENSED
+        .get_or_init(|| async {
+            let (signed, key_file) = stack_license_files();
+            require_licensed_go(&licensed_go, "managed-categories licensed").await;
+            let server = start_licensed_rust(
+                MANAGED_CATEGORIES_LICENSED_RUST_PORT,
+                &licensed_go,
+                go_port() + 37,
+                &signed,
+                &key_file,
+                &[FLAG],
+            )
+            .await;
+            (server, signed, key_file)
+        })
+        .await;
+    let unlicensed = MANAGED_CATEGORIES_UNLICENSED
+        .get_or_init(|| async {
+            let alive = client()
+                .get(format!("{unlicensed_go}/api/v4/system/ping"))
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success());
+            assert!(
+                alive,
+                "no unlicensed managed-categories Go oracle at {unlicensed_go}: run \
+                 `MMRS_LICENSED_VARIANT=managedcat-unlicensed scripts/go-licensed.sh start`"
+            );
+            SecondServer::start(
+                MANAGED_CATEGORIES_UNLICENSED_RUST_PORT,
+                &[FLAG, ("MM_GO_UPSTREAM", unlicensed_go.as_str())],
+            )
+            .await
+            .expect(
+                "the unlicensed managed-categories mm-api starts — is target/debug/mm-api built?",
+            )
+        })
+        .await;
+    (
+        LicensedPair {
+            go: licensed_go,
+            rust: server.base.clone(),
+            signed: signed.clone(),
+            key_file: key_file.clone(),
+        },
+        LicensedPair {
+            go: unlicensed_go,
+            rust: unlicensed.base.clone(),
+            signed: String::new(),
+            key_file: String::new(),
+        },
+    )
 }
 
 /// One request to one base: `(status, body, x-mmrs-served-by)`. The general-purpose sibling of

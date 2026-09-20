@@ -85,7 +85,7 @@ use mm_model::property_value::{
     PROPERTY_VALUE_SYSTEM_TARGET_ID, PropertyValueSearchCursor, PropertyValueSearchOpts,
 };
 use mm_model::session_attributes::SESSION_ATTRIBUTES_PROPERTY_GROUP_NAME;
-use mm_model::utils::{AppError, decode_one_from_json, is_valid_id};
+use mm_model::utils::{AppError, decode_one_value_from_json, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -325,7 +325,9 @@ pub async fn search_property_fields(
             return ApiError::invalid_param("property_field_search").into_response();
         }
     };
-    let Ok(search) = decode_one_from_json::<PropertyFieldSearch>(&body) else {
+    // `var search model.PropertyFieldSearch` is a **value**: a `null` body leaves it zero and the
+    // handler falls through to the `object_types` check, rather than naming the body.
+    let Ok(search) = decode_one_value_from_json::<PropertyFieldSearch>(&body) else {
         return ApiError::invalid_param("property_field_search").into_response();
     };
 

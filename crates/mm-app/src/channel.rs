@@ -1130,11 +1130,24 @@ impl App {
             .map_err(|err| {
                 let not_found = err.is_not_found();
                 tracing::error!(error = %err, "channels-by-ids lookup failed");
+                // `errCtx := map[string]any{"channel_id": channelIDs}` (channel.go:2292): the
+                // whole **list** under the singular key, which the sentence renders with `%v` —
+                // `[abc def]`, brackets and spaces. The key is singular here and in `GetChannel`
+                // alike, so the two sentences differ only in what `%v` prints.
+                let params = std::collections::HashMap::from([(
+                    "channel_id".to_owned(),
+                    serde_json::Value::Array(
+                        channel_ids
+                            .iter()
+                            .map(|id| serde_json::Value::String(id.clone()))
+                            .collect(),
+                    ),
+                )]);
                 if not_found {
                     AppError::boxed(
                         "GetChannel",
                         "app.channel.get.existing.app_error",
-                        None,
+                        Some(params),
                         String::new(),
                         404,
                     )
@@ -1142,7 +1155,7 @@ impl App {
                     AppError::boxed(
                         "GetChannel",
                         "app.channel.get.find.app_error",
-                        None,
+                        Some(params),
                         String::new(),
                         500,
                     )

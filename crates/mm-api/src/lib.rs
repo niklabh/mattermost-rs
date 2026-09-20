@@ -49,6 +49,8 @@ pub mod file_upload;
 pub mod files;
 pub mod go_cache;
 pub mod groups;
+/// Port of `gzhttp.GzipHandler` — the compression in front of the static file servers.
+pub mod gzhttp;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
 pub mod image_proxy;
 pub mod images;
@@ -65,12 +67,14 @@ pub mod local_channels;
 pub mod local_misc;
 pub mod local_users;
 pub mod login;
+pub mod manualtest;
 pub mod migrate_auth;
 pub mod multipart;
 pub mod notify_admin;
 pub mod oauth;
 pub mod outgoing_oauth_writes;
 pub mod permissions;
+pub mod plugin_context;
 pub mod post_acks;
 pub mod post_search;
 pub mod post_writes;
@@ -120,6 +124,9 @@ pub mod user_deletes;
 pub mod user_updates;
 pub mod users;
 pub mod views;
+/// The web client — the static half of Go's `channels/web`, mounted as the router's fallback.
+pub mod web_error;
+pub mod web_static;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
@@ -154,6 +161,7 @@ pub mod remote_cluster;
 pub mod auth_certs;
 pub mod local_auth_certs;
 // Appended 2026-09-15: the system-operations family.
+pub mod local_plugins;
 pub mod local_sysops;
 pub mod sysops;
 
@@ -170,8 +178,17 @@ use mm_app::App;
 pub struct AppState {
     pub app: App,
     pub http: reqwest::Client,
+    /// The forward leg's client: [`AppState::http`] with **redirects off**. reqwest follows up to
+    /// ten by default, so a forwarded `302` — SAML's `/login/sso/saml`, every OAuth `…/login` —
+    /// reached the browser as the page at the far end of the chain, fetched by this server.
+    /// `http` keeps following, because its other callers port Go code that uses `http.Get`,
+    /// which follows too.
+    pub forward_http: reqwest::Client,
     /// Base URL of the Go server, without a trailing slash.
     pub go_upstream: String,
+    /// What Go's `InitStatic` reads once — see [`web_static::StaticSetup`]. Shared by every clone
+    /// of the state, filled on the first request that reaches the web client.
+    pub web_setup: std::sync::Arc<tokio::sync::OnceCell<web_static::StaticSetup>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -191,7 +208,17 @@ impl AppState {
         Self {
             app,
             http: reqwest::Client::new(),
+            forward_http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_else(|err| {
+                    // Only a TLS backend that fails to initialise gets here, and then the default
+                    // client (which would fail the same way on first use) is all there is.
+                    tracing::error!(error = %err, "could not build the forwarding client");
+                    reqwest::Client::new()
+                }),
             go_upstream: go_upstream.trim_end_matches('/').to_owned(),
+            web_setup: std::sync::Arc::default(),
         }
     }
 
@@ -387,9 +414,9 @@ pub(crate) async fn refresh_config_after_write(
 ///
 /// # Only our own responses
 ///
-/// Guarded on `x-mmrs-served-by`, which every locally-served response carries and no proxied one
-/// does. A forwarded response already has Go's own headers, including the two per-request ones
-/// this cannot mint (`X-Request-Id`, `X-Version-Id`).
+/// Guarded on `x-mmrs-served-by: rust`, which every locally-served response carries; a proxied
+/// one carries `go`. A forwarded response already has Go's own headers, including the two
+/// per-request ones this cannot mint (`X-Request-Id`, `X-Version-Id`).
 ///
 /// # Three details
 ///
@@ -405,6 +432,41 @@ pub(crate) async fn refresh_config_after_write(
 ///
 /// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
 /// defaults to `false` and is not modelled in [`mm_app::config::Config`].
+/// Port of the translation half of `web.Handler.ServeHTTP`: pick this request's `T` before the
+/// handler runs (handlers.go:191) so that `handleContextError` can apply it to whatever error
+/// comes back (handlers.go:431).
+///
+/// Go keeps the function on `c.AppContext`; here it goes into a task-local
+/// ([`error::RequestTranslator`]) because the conversion that needs it — `IntoResponse` for
+/// `ApiError` — is synchronous and never sees the request. Resolving the bundle and the locale
+/// *here*, where awaiting is allowed, is what makes that possible.
+///
+/// **Not the user's locale.** `GetTranslationsAndLocaleFromRequest` reads only `Accept-Language`
+/// and `LocalizationSettings.DefaultClientLocale`; nothing later replaces `AppContext.T` with the
+/// session user's `Locale`, so an error body is in the *client's* language and a user who set
+/// `fr` in their profile still gets English from a browser that asks for English.
+pub(crate) async fn translate_error_messages(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let accept_language = request
+        .headers()
+        .get(axum::http::header::ACCEPT_LANGUAGE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let translator = mm_app::i18n::loaded().map(|bundle| {
+        let locale = bundle
+            .request_locale(&accept_language, &state.app.config().default_client_locale)
+            .to_owned();
+        error::RequestTranslator { bundle, locale }
+    });
+    error::REQUEST_TRANSLATOR
+        .scope(translator, next.run(request))
+        .await
+}
+
 pub(crate) async fn go_global_headers(
     State(state): State<AppState>,
     request: Request,
@@ -415,8 +477,24 @@ pub(crate) async fn go_global_headers(
 
     let mut response = next.run(request).await;
 
-    // A forwarded response already carries Go's own headers.
-    if !response.headers().contains_key("x-mmrs-served-by") {
+    // A forwarded response already carries Go's own headers, and so does one the web client
+    // module built: its handlers are not API handlers and set their own (or none at all).
+    //
+    // **The value, not the presence.** The proxy marks what it forwards `x-mmrs-served-by: go`,
+    // so a presence check let this layer add `Expires: 0` and `Vary` to every forwarded answer.
+    // On a forwarded API `GET` that was invisible — Go's own handler had set both — but a
+    // forwarded static asset, SPA page or `/api/v5` 404 left here carrying two headers Go never
+    // sent. Found by the web-client parity run (2026-09-19).
+    let served_here = response
+        .headers()
+        .get(error::SERVED_BY)
+        .is_some_and(|v| v.as_bytes() == b"rust");
+    if !served_here
+        || response
+            .extensions()
+            .get::<web_static::WebOwnHeaders>()
+            .is_some()
+    {
         return response;
     }
 
@@ -482,6 +560,16 @@ pub fn router(state: AppState) -> Router {
             .route(
                 "/api/v4/plugins/statuses",
                 partially_migrated(get(plugins::get_plugin_statuses)),
+            )
+            .route(
+                "/api/v4/plugins/install_from_url",
+                partially_migrated(post(plugins::install_plugin_from_url)),
+            )
+            .route(
+                "/api/v4/plugins/marketplace",
+                partially_migrated(
+                    get(plugins::get_marketplace_plugins).post(plugins::install_marketplace_plugin),
+                ),
             )
             .route(
                 "/api/v4/plugins/webapp",
@@ -1460,11 +1548,10 @@ pub fn router(state: AppState) -> Router {
         // `BaseRoutes.ChannelsForTeam` (api.go:212) — the browse-channels list and its two
         // siblings. Unlike `/teams/name/{team_name}` above there is **no precedence puzzle
         // here**: every route gorilla registers under `/teams/{team_id}/channels/` is a static
-        // literal, so neither router has a parameter to prefer over one. The literals we do not
-        // serve (`/recommended`, `/ids`, `/search`, `/autocomplete`, `/search_autocomplete`,
-        // `/managed_categories`) are simply unregistered and fall to `Router::fallback` whole —
-        // asserted over HTTP in `tests/parity_team_channel_lists.rs`, because "still forwarded"
-        // is a claim about the router, not about a handler.
+        // literal, so neither router has a parameter to prefer over one. Since
+        // `/managed_categories` (2026-09-19) every literal gorilla registers here is registered
+        // on this router too; an unserved *method* on one still falls to
+        // `partially_migrated`'s fallback.
         //
         // `/channels/name/{channel_name}` (registered above) is one segment deeper and cannot
         // collide with the two literals below.
@@ -1623,6 +1710,22 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/channels/recommended",
             partially_migrated_with_ids(&state, get(channels::get_recommended_channels_for_team)),
+        )
+        // `BaseRoutes.ChannelsForTeam.Handle("/managed_categories")` (api4/channel.go:72) — GET
+        // only, a static literal beside `/recommended`; no `{param}` sibling at this depth. The
+        // route layer is Go's registration `if` on the feature flag: off, it forwards before the
+        // session extractor runs.
+        .route(
+            "/api/v4/teams/{team_id}/channels/managed_categories",
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_managed_categories).route_layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        channels::managed_categories_flag_or_forward,
+                    ),
+                ),
+            ),
         )
         .route(
             "/api/v4/channels/{channel_id}/common_teams",
@@ -2186,7 +2289,7 @@ pub fn router(state: AppState) -> Router {
         // to `partially_migrated`'s method fallback.
         // `BaseRoutes.Upload` (api.go:249): `GET` is `getUpload`, `POST` is `uploadData` — the
         // data leg of the resumable upload, which writes through the file backend and forwards a
-        // completing image chunk to Go ([D-380]/[D-411]).
+        // completing GIF, BMP, TIFF or WebP chunk to Go ([D-650]).
         .route(
             "/api/v4/uploads/{upload_id}",
             partially_migrated_with_ids(
@@ -3606,8 +3709,8 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(post(boards::create_board)),
         )
         // ---- `api4/remote_cluster.go`, the five `RemoteClusterTokenRequired` routes
-        // (2026-09-15). All gated identically; `remote_cluster_token_gate` is the whole served
-        // surface — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
+        // (2026-09-15). All share the gate and the remote-cluster session; `{user_id}/image`
+        // also serves its handler's refusals (2026-09-19) — see the module docs. `ping`, `msg`, `confirm_invite` and `upload` are
         // literal siblings of `{remote_id}` (registered above), each with an underscore or
         // shorter than an id, so mux and axum both prefer these literals.
         .route(
@@ -3627,11 +3730,11 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
         )
         // Go names this segment `{user_id}`, but axum requires one capture name per tree
-        // position and `{remote_id}` already holds it (the CRUD routes above); the gate never
-        // reads it and the two charsets accept the same segments, so the wire is identical.
+        // position and `{remote_id}` already holds it (the CRUD routes above); the handler reads
+        // it positionally and the two charsets accept the same segments, so the wire is identical.
         .route(
             "/api/v4/remotecluster/{remote_id}/image",
-            partially_migrated_with_ids(&state, post(remote_cluster::remote_cluster_token_gate)),
+            partially_migrated_with_ids(&state, post(remote_cluster::remote_set_profile_image)),
         )
         // ---- `api4/command.go:19,26,27` (2026-09-15): execute and the two autocomplete reads.
         // Each serves its refusals and forwards whatever would run a command or depends on
@@ -3651,7 +3754,9 @@ pub fn router(state: AppState) -> Router {
                 get(commands::list_command_autocomplete_suggestions),
             ),
         )
-        .fallback(proxy::forward_to_go)
+        // Every path no route claimed: the web client's handlers, which forward whatever is not
+        // theirs — see `web_static::fallback`.
+        .fallback(web_static::fallback)
         // Outermost, so it sees every response this server produces — including the proxy's,
         // which it then leaves alone. See [`go_global_headers`].
         .layer(axum::middleware::from_fn_with_state(
@@ -3662,6 +3767,13 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             refresh_config_after_write,
+        ))
+        // Outermost of all: `ServeHTTP` picks the request's `T` before anything else it does, and
+        // every error below here — a handler's, the fallback's, a rejection's — is written with
+        // it. See [`translate_error_messages`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            translate_error_messages,
         ))
         .with_state(state)
 }

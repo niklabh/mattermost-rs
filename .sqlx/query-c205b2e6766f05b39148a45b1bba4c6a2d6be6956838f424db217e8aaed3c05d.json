@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM posts WHERE userid = $1 AND rootid != ''",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c205b2e6766f05b39148a45b1bba4c6a2d6be6956838f424db217e8aaed3c05d"
+}

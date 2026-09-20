@@ -2,28 +2,17 @@
 //! `GetPostIfAuthorized`, `PreparePostForClientWithEmbedsAndImages` and
 //! `SanitizePostMetadataForUser`.
 //!
-//! # The metadata pipeline is only partly reproducible, and this module says which part
+//! # The metadata pipeline is a total function that can refuse
 //!
-//! `PreparePostForClient` (app/post_metadata.go:189) is a pipeline, and two of its stages
-//! depend on machinery this server does not have:
-//!
-//! - **`getFirstLink` runs Go's markdown parser** (`shared/markdown`) to find the first
-//!   *autolink* in the message, and `getImagesForPost` runs it again to find markdown images.
-//!   The parser is not ported ([D-044]).
-//! - **`getLinkMetadata` fetches the link over HTTP** — OpenGraph, image dimensions, oEmbed —
-//!   and caches the result in `LinkMetadata`. Whether it produces an `opengraph`, `image` or
-//!   plain `link` embed depends on what the remote host answers *at that moment*, which is not
-//!   a thing a second implementation can agree with.
-//!
-//! So the pipeline here is written as a **total function that can refuse**. Every stage it
-//! reproduces is reproduced exactly; every input shape whose output it cannot predict returns
-//! [`PrepareError::Unreproducible`], and the handler forwards that request to the Go server
-//! rather than answering with a body that is nearly right. The refusal predicate is deliberately
-//! a *superset* of the shapes that actually differ — over-forwarding costs a proxy hop, while
-//! under-forwarding is a wire-format bug nothing would catch.
-//!
-//! [`REFUSED_PROPS`] and [`message_may_contain_a_link`] are that predicate, and each entry names
-//! the Go branch it stands in for.
+//! `PreparePostForClient` (app/post_metadata.go:189) and `getEmbedsAndImages` are reproduced
+//! stage by stage; the link half — the first autolink, the `LinkMetadata` row, the fetch, the
+//! permalink preview — lives in [`crate::link_metadata`] and runs for reads with `IsNewPost`
+//! false, exactly as Go's does (since 2026-09-19; before that any message with a link was
+//! forwarded). Every shape whose output this server cannot predict returns
+//! [`PrepareError::Unreproducible`], and the handler forwards the request to the Go server
+//! rather than answering with a body that is nearly right: the image proxy, a plugin post type,
+//! [`REFUSED_PROPS`], and the parser and host shapes `link_metadata` names. Over-forwarding costs
+//! a proxy hop; under-forwarding is a wire-format bug nothing would catch.
 //!
 //! # What is *not* refused, and why that is safe here
 //!
@@ -98,7 +87,7 @@ pub enum PrepareError {
 /// | `boards` | `getEmbedForPost` returns a `boards` embed carrying the prop verbatim (:553) |
 /// | `mm_blocks`, `blocks`, `cards` | `InteractiveBlocksImageURLs` and `AllStrings` walk the three interactive dialects (post.go:846) |
 /// | `unsafe_links` | `HasUnsafeLinks` short-circuits `getEmbedsAndImages` and empties `getImagesForPost` (:283, :617) |
-/// | `previewed_post` | feeds `getLinkMetadata`'s permalink lookup (:568) |
+/// | `previewed_post` | a client-supplied one on `CreatePost` only; a stored post's feeds `getLinkMetadata` (:568), which reproduces it |
 ///
 /// `override_icon_emoji` is deliberately **absent**: its branch is additionally gated on
 /// `EnablePostIconOverride`, so it only refuses when that setting is on. See
@@ -135,6 +124,9 @@ pub const REFUSED_PROPS: [&str; 7] = [
 ///
 /// **This must never return `false` for a message Go would find a link in.** Widening it is
 /// free; narrowing it is a wire-format bug.
+///
+/// Only `revealPost` still refuses on it, before its receipt write — see `App::reveal_post` and
+/// [D-881]. Every read runs the real link selection instead.
 pub fn message_may_contain_a_link(message: &str) -> bool {
     message.contains("://")
         || message.contains("www")
@@ -341,13 +333,20 @@ impl App {
         opts: PreparePostForClientOpts,
     ) -> Result<Post, PrepareError> {
         let mut post = self.prepare_post_for_client(post, opts).await?;
-        self.get_embeds_and_images(&mut post).await?;
+        self.get_embeds_and_images(&mut post, opts.is_new_post)
+            .await?;
         self.prepare_post_files_for_client(&mut post, opts).await;
         Ok(post)
     }
 
     /// Port of `app.App.PreparePostForClient` (post_metadata.go:189). Stage order is Go's.
-    pub(crate) async fn prepare_post_for_client(
+    ///
+    /// A `previewed_post` prop is not refused here: `PreparePostForClient` never reads it, and
+    /// [`App::get_embeds_and_images`] handles it as Go does (it bypasses the link cache and the
+    /// `LinkMetadata` row, so a permalink is previewed fresh). `CreatePost` still refuses one a
+    /// client supplies ([`refuse_on_props`]), and an edit that would carry one forwards before
+    /// its write (`App::update_post`).
+    pub async fn prepare_post_for_client(
         &self,
         original: &Post,
         opts: PreparePostForClientOpts,
@@ -392,7 +391,7 @@ impl App {
             return Err(PrepareError::Unreproducible("icon override is enabled"));
         }
 
-        refuse_on_props(&post)?;
+        refuse_on_props_with(&post, PreviewedPostProp::Allow)?;
 
         // 3. Metadata always exists from here on, which is why a plain post serialises
         //    `"metadata":{}` rather than omitting the key.
@@ -630,174 +629,54 @@ impl App {
         self.store().emoji().get_multiple_by_name(&custom).await
     }
 
-    /// Port of `app.App.getEmbedsAndImages` (post_metadata.go:277).
+    /// Port of `app.App.SanitizePostMetadataForUser` (post_metadata.go:332), for every caller:
+    /// the reads, `CreatePost`'s answer, an edit, an ephemeral post and a thread event.
     ///
-    /// Reproduced only for the shapes where both `Embeds` and `Images` come out empty:
-    /// `getEmbedForPost` returns `(nil, nil)` when there is no first link and no attachment or
-    /// board prop, and `getImagesForPost` returns an empty map when the message holds no
-    /// markdown images. `omitempty` drops both, which is why a plain post's metadata is `{}`.
+    /// A permalink embed is checked against the **viewer**: `HasPermissionToReadChannel` on the
+    /// previewed post's channel, and without it the embed and the `previewed_post` prop go
+    /// (`removePermalinkMetadataFromPost`) and the member flag is reset to `true`. With it, the
+    /// flag is the viewer's membership of that channel — `false` for a public channel read
+    /// through the team fallback. The channel lookup's error fails the request, as Go's does.
+    /// Only a post with an embed is looked at; `GetPreviewPost` finds nothing in an OpenGraph,
+    /// image or link embed, so those pass through untouched.
     ///
-    /// # One link shape is reproduced: a lone permalink
-    ///
-    /// `getEmbedForPost` → `getLinkMetadata` → `getLinkMetadataForPermalink` (post_metadata.go:902)
-    /// builds a `permalink` embed from rows this server already reads — the referenced post,
-    /// its channel and its team — with no outbound request and no `LinkMetadata` row. So a
-    /// message whose **only** link is `{SiteURL}/{team}/pl/{post_id}` ([`sole_permalink_in`])
-    /// gets that embed here; `setPostReminder`'s confirmation is exactly that shape. Every
-    /// other link still refuses. Two things Go does around it are not reproduced: the
-    /// per-process `linkCache` (a second preview of the same post within the hour comes from
-    /// the cache in Go and is rebuilt here — the same rows unless the post was edited between),
-    /// and `populatePostListTranslations`, which needs the autotranslation service.
-    async fn get_embeds_and_images(&self, post: &mut Post) -> Result<(), PrepareError> {
-        // `getFirstLink` reads `post.Message` and nothing else — and the message it reads is
-        // the one the deleted-post short circuit may already have emptied, which is why this
-        // check has to sit here rather than at the top of the pipeline.
-        if let Some(referenced_post_id) = sole_permalink_in(
-            &post.message,
-            self.config().site_url.as_deref().unwrap_or(""),
-        ) {
-            // `!EnablePermalinkPreviews` sends the URL down `getLinkMetadataForURL` instead: an
-            // outbound fetch and a `LinkMetadata` row, neither reproduced.
-            if !self.config().enable_permalink_previews {
-                return Err(PrepareError::Unreproducible(
-                    "permalink previews are off, so the link is fetched",
-                ));
-            }
-            if let Some(preview) = self
-                .link_metadata_for_permalink(&referenced_post_id)
-                .await?
-            {
-                let data = serde_json::to_value(&preview).map_err(|err| {
-                    PrepareError::App(AppError::boxed(
-                        "getEmbedsAndImages",
-                        "api.marshal_error",
-                        None,
-                        err.to_string(),
-                        500,
-                    ))
-                })?;
-                if let Some(metadata) = post.metadata.as_mut() {
-                    metadata.embeds.push(mm_model::post_embed::PostEmbed {
-                        type_: mm_model::post_embed::POST_EMBED_PERMALINK.to_owned(),
-                        url: String::new(),
-                        data: Some(data),
-                    });
-                }
-            }
-            return Ok(());
-        }
-        if message_may_contain_a_link(&post.message) {
-            return Err(PrepareError::Unreproducible(
-                "message may contain a link or a markdown image",
-            ));
-        }
-        // Go sets `Embeds` to an empty slice and `Images` to an empty map. Both are `omitempty`,
-        // so the fields' defaults already serialise identically; nothing to write.
-        Ok(())
-    }
-
-    /// Port of `app.App.getLinkMetadataForPermalink` (post_metadata.go:902), as
-    /// `getEmbedsAndImages` consumes it: an `AppError` from any of the reads means **no embed**
-    /// (logged at debug, and a 404 not even that), never a failed request. `None` is that
-    /// outcome.
-    ///
-    /// The referenced post is prepared with `IncludePriority` unless it itself contains a
-    /// permalink (`containsPermalink`), in which case the preview carries the bare row. A
-    /// referenced post with any other link is refused here, since which link Go's autolinker
-    /// finds first is not reproduced.
-    async fn link_metadata_for_permalink(
-        &self,
-        referenced_post_id: &str,
-    ) -> Result<Option<mm_model::permalink::PreviewPost>, PrepareError> {
-        let referenced = match self.get_single_post(referenced_post_id, false).await {
-            Ok(post) => post,
-            Err(err) => {
-                if err.status_code != 404 {
-                    tracing::debug!(error = %err, "Failed to get embedded content for a post");
-                }
-                return Ok(None);
-            }
-        };
-        if referenced.post_type == POST_TYPE_BURN_ON_READ {
-            // The 403 `api.post.get_link_metadata_for_permalink.burn_on_read.app_error`,
-            // which the caller logs and drops.
-            tracing::debug!(post_id = %referenced.id, "Failed to get embedded content for a post: burn-on-read");
-            return Ok(None);
-        }
-        let channel = match self.get_channel(&referenced.channel_id).await {
-            Ok(channel) => channel,
-            Err(err) => {
-                if err.status_code != 404 {
-                    tracing::debug!(error = %err, "Failed to get embedded content for a post");
-                }
-                return Ok(None);
-            }
-        };
-        let team = if channel.channel_type == mm_model::channel::CHANNEL_TYPE_DIRECT
-            || channel.channel_type == mm_model::channel::CHANNEL_TYPE_GROUP
-        {
-            Team::default()
-        } else {
-            match self.get_team(&channel.team_id).await {
-                Ok(team) => team,
-                Err(err) => {
-                    if err.status_code != 404 {
-                        tracing::debug!(error = %err, "Failed to get embedded content for a post");
-                    }
-                    return Ok(None);
-                }
-            }
-        };
-
-        let site_url = self.config().site_url.clone().unwrap_or_default();
-        let previewed = if sole_permalink_in(&referenced.message, &site_url).is_some() {
-            referenced
-        } else if message_may_contain_a_link(&referenced.message) {
-            return Err(PrepareError::Unreproducible(
-                "the previewed post carries a link that is not a lone permalink",
-            ));
-        } else {
-            Box::pin(self.prepare_post_for_client_with_embeds_and_images(
-                &referenced,
-                PreparePostForClientOpts {
-                    include_priority: true,
-                    ..PreparePostForClientOpts::default()
-                },
-            ))
-            .await?
-        };
-        Ok(mm_model::permalink::new_preview_post(
-            Some(&previewed),
-            &team,
-            &channel,
-        ))
-    }
-
-    /// Port of `app.App.SanitizePostMetadataForUser` (post_metadata.go:332).
-    ///
-    /// The returned `bool` is `isMemberForPreviews`, which Go initialises to **`true`** and only
-    /// lowers inside the permalink-embed branch. That branch needs a non-empty `Metadata.Embeds`
-    /// — impossible here, because any post that could carry an embed was refused upstream — so
-    /// this always answers `true` on the shapes it serves. Channel mentions are rewritten for
-    /// the viewer by [`App::sanitize_channel_mentions_for_user`]; ABAC file sanitisation is
-    /// inert without an enterprise licence (see the module docs).
+    /// **On the create path the permission half is unreachable**: `publishWebsocketEventForPost`
+    /// has already taken the preview off and put it back only for an author who may read it
+    /// ([`crate::notification::PermalinkFate`]). On a read it is the only check, and
+    /// `parity::post_link_reads` reads a preview of a private post as a user outside it.
     #[tracing::instrument(skip_all, fields(post_id = %post.id))]
     pub async fn sanitize_post_metadata_for_user(
         &self,
         mut post: Post,
         user_id: &str,
     ) -> Result<(Post, bool), PrepareError> {
+        refuse_on_props_with(&post, PreviewedPostProp::Allow)?;
+        let mut is_member_for_previews = true;
         if post
             .metadata
             .as_ref()
             .is_some_and(|metadata| !metadata.embeds.is_empty())
         {
-            return Err(PrepareError::Unreproducible("post carries embeds"));
+            if let Some(preview) = post.get_preview_post() {
+                let channel_id = preview
+                    .post
+                    .as_ref()
+                    .map(|previewed| previewed.channel_id.as_str())
+                    .unwrap_or_default();
+                let channel = self.get_channel(channel_id).await?;
+                let (has_permission, is_member) =
+                    self.has_permission_to_read_channel(user_id, &channel).await;
+                is_member_for_previews = is_member;
+                if !has_permission {
+                    remove_permalink_metadata_from_post(&mut post);
+                    // "Since we remove the permalink metadata, we return true for isMember"
+                    is_member_for_previews = true;
+                }
+            }
         }
-        refuse_on_props(&post)?;
         self.sanitize_channel_mentions_for_user(&mut post, user_id)
             .await;
-        Ok((post, true))
+        Ok((post, is_member_for_previews))
     }
 
     /// Port of `app.App.sanitizeChannelMentionsForUser` (post_metadata.go:370) — the **read**
@@ -995,7 +874,8 @@ impl App {
     /// `acknowledgements` unset. So a history entry's `metadata` is `{"files":[…]}` and nothing
     /// else, where the same post read through `getPost` would carry the lot. That also means
     /// none of the refusals in [`App::prepare_post_for_client_with_embeds_and_images`] apply: a
-    /// history entry whose message holds a link is served here and forwarded there.
+    /// history entry whose message holds a link carries no embed here, where the same post read
+    /// through `getPost` carries its preview.
     ///
     /// # `GetByIds` is called with `includeDeleted = true`
     ///
@@ -1574,16 +1454,47 @@ impl App {
     }
 }
 
+/// Port of `removePermalinkMetadataFromPost` (post_metadata.go:306): every `permalink` embed
+/// goes ("we always have only one permalink embed even if the post contains multiple
+/// permalinks") and so does the `previewed_post` prop.
+pub(crate) fn remove_permalink_metadata_from_post(post: &mut Post) {
+    if let Some(metadata) = post.metadata.as_mut() {
+        metadata
+            .embeds
+            .retain(|embed| embed.type_ != mm_model::post_embed::POST_EMBED_PERMALINK);
+    }
+    post.del_prop(POST_PROPS_PREVIEWED_POST);
+}
+
 /// The [`REFUSED_PROPS`] check, applied wherever Go would branch on one of them.
 ///
 /// Go tests key **presence** (`if _, ok := props[...]; ok`), not the value, so a prop explicitly
 /// set to `null` still takes the branch. The refusal carries the prop name, which is what a log
 /// reader needs to know which branch stopped us.
 pub(crate) fn refuse_on_props(post: &Post) -> Result<(), PrepareError> {
+    refuse_on_props_with(post, PreviewedPostProp::Refuse)
+}
+
+/// Whether a `previewed_post` prop is among the [`REFUSED_PROPS`] for this call: refused only
+/// when a client supplies it to `CreatePost` ([`refuse_on_props`]); every preparation of a stored
+/// post allows it — see [`App::prepare_post_for_client`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviewedPostProp {
+    Refuse,
+    Allow,
+}
+
+fn refuse_on_props_with(
+    post: &Post,
+    previewed_post: PreviewedPostProp,
+) -> Result<(), PrepareError> {
     let Some(props) = post.props.as_ref() else {
         return Ok(());
     };
     for refused in REFUSED_PROPS {
+        if previewed_post == PreviewedPostProp::Allow && refused == POST_PROPS_PREVIEWED_POST {
+            continue;
+        }
         if props.contains_key(refused) {
             return Err(PrepareError::Unreproducible(refused));
         }

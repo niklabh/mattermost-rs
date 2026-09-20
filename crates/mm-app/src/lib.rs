@@ -58,7 +58,9 @@ pub mod http_guard;
 pub mod hub;
 pub mod i18n;
 /// The format-detection half of Go's `image.DecodeConfig`.
+pub mod image_pipeline;
 pub mod imaging;
+pub mod imaging_orientation;
 /// Port of the file-backend half of `app/import.go`.
 pub mod import;
 pub mod job;
@@ -66,8 +68,12 @@ pub mod job_runtime;
 pub mod job_scheduler;
 pub mod license;
 pub mod limits;
+pub mod link_image;
+/// Link selection for previews — `getFirstLink`, `getImages`, `isLinkAllowedForPreview`.
+pub mod link_metadata;
 pub mod login;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
+pub mod marketplace;
 pub mod marketplace_visit;
 pub mod mention;
 pub mod mfa;
@@ -77,10 +83,14 @@ pub mod notification;
 pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;
+pub mod opengraph;
 pub mod password;
 pub mod peer_cache;
 pub mod peer_config;
+pub mod plugin_hooks;
 pub mod plugin_install;
+pub mod plugin_prepackaged;
+pub mod plugin_signature;
 pub mod plugins;
 pub mod post;
 pub mod post_acknowledgement;
@@ -95,6 +105,7 @@ pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
 pub mod reaction;
+pub mod remote_cluster;
 pub mod report;
 pub mod role;
 pub mod scheme;
@@ -121,6 +132,7 @@ pub mod user_auth;
 pub mod user_convert;
 pub mod user_create;
 pub mod user_delete;
+pub mod user_image;
 pub mod user_terms_of_service;
 pub mod user_update;
 pub mod utils;
@@ -129,6 +141,7 @@ pub mod view;
 pub mod webhook;
 // Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
 pub mod logs;
+pub mod manualtest;
 pub mod searchengine;
 pub mod upgrader;
 
@@ -187,6 +200,9 @@ pub struct App {
     pending_post_ids: std::sync::Arc<
         std::sync::Mutex<std::collections::HashMap<String, crate::post_create::PendingPostEntry>>,
     >,
+    /// Go's `platform.linkCache` — a package-level LRU in Go, so one per process; shared across
+    /// every clone of `App` for the same reason. See `crate::link_metadata::LinkCache`.
+    link_cache: std::sync::Arc<crate::link_metadata::LinkCache>,
     /// Go's `uploadLockMap` (app/channels.go) — the upload-session ids with a chunk in flight,
     /// shared across every clone so a second chunk for one session is refused whichever request
     /// holds it. See `crate::upload`.
@@ -277,6 +293,7 @@ impl App {
             pending_post_ids: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            link_cache: std::sync::Arc::default(),
             upload_locks: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
@@ -344,6 +361,16 @@ impl App {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         std::sync::Arc::clone(&loaded.config)
+    }
+
+    /// Swap the configuration in place, as a reload would, without a database.
+    #[cfg(test)]
+    pub(crate) fn replace_config(&self, config: Config) {
+        let mut loaded = self
+            .config
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loaded.config = std::sync::Arc::new(config);
     }
 
     /// Reload the projection when the active `Configurations` row is no longer the one it was

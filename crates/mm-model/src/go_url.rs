@@ -23,9 +23,10 @@
 //!
 //! # What is not ported
 //!
-//! `ResolveReference`/`resolvePath`, `JoinPath`, `RequestURI`, `Redacted`, `MarshalBinary` and
-//! `Hostname`/`Port`. None has a call site in the ported tree; each is self-contained enough to
-//! add when one appears.
+//! `JoinPath`, `RequestURI`, `Redacted`, `MarshalBinary` and `Port`. None has a call site in the
+//! ported tree; each is self-contained enough to add when one appears. `ResolveReference`,
+//! `resolvePath`, `IsAbs`, `Hostname` and `(*URL).Parse` arrived with the link previews, which
+//! resolve an OpenGraph page's relative URLs and a message's links against a base.
 //!
 //! # What is not asserted
 //!
@@ -672,6 +673,145 @@ impl GoUrl {
     }
 }
 
+/// Port of `resolvePath` (net/url/url.go:1024): RFC 3986 dot-segment removal over **escaped**
+/// paths, `ref` applied to `base`.
+fn resolve_path(base: &[u8], reference: &[u8]) -> Vec<u8> {
+    let full: Vec<u8> = if reference.is_empty() {
+        base.to_vec()
+    } else if reference[0] != b'/' {
+        let i = base.iter().rposition(|&c| c == b'/').map_or(0, |i| i + 1);
+        [&base[..i], reference].concat()
+    } else {
+        reference.to_vec()
+    };
+    if full.is_empty() {
+        return Vec::new();
+    }
+
+    let mut dst: Vec<u8> = vec![b'/'];
+    let mut first = true;
+    let mut remaining: &[u8] = &full;
+    let mut elem: &[u8] = &[];
+    let mut found = true;
+    while found {
+        match remaining.iter().position(|&c| c == b'/') {
+            Some(i) => {
+                elem = &remaining[..i];
+                remaining = &remaining[i + 1..];
+            }
+            None => {
+                elem = remaining;
+                remaining = &[];
+                found = false;
+            }
+        }
+        if elem == b"." {
+            first = false;
+            continue;
+        }
+        if elem == b".." {
+            // Ignore the leading '/' already written.
+            let s = dst[1..].to_vec();
+            dst = vec![b'/'];
+            match s.iter().rposition(|&c| c == b'/') {
+                None => first = true,
+                Some(index) => dst.extend_from_slice(&s[..index]),
+            }
+        } else {
+            if !first {
+                dst.push(b'/');
+            }
+            dst.extend_from_slice(elem);
+            first = false;
+        }
+    }
+    if elem == b"." || elem == b".." {
+        dst.push(b'/');
+    }
+    // "We wrote an initial '/', but we don't want two."
+    if dst.len() > 1 && dst[1] == b'/' {
+        dst.remove(0);
+    }
+    dst
+}
+
+impl GoUrl {
+    /// Port of `(*URL).IsAbs` (net/url/url.go:1090): a non-empty scheme, nothing more.
+    pub fn is_abs(&self) -> bool {
+        !self.scheme.is_empty()
+    }
+
+    /// Port of `(*URL).Hostname` (net/url/url.go:1182): the host without a valid numeric port,
+    /// and without the brackets of an IPv6 literal.
+    pub fn hostname(&self) -> Vec<u8> {
+        let mut host: &[u8] = &self.host;
+        if let Some(colon) = host.iter().rposition(|&c| c == b':') {
+            if valid_optional_port(&host[colon..]) {
+                host = &host[..colon];
+            }
+        }
+        if host.len() >= 2 && host[0] == b'[' && host[host.len() - 1] == b']' {
+            host = &host[1..host.len() - 1];
+        }
+        host.to_vec()
+    }
+
+    /// `url.setPath` with its error ignored, as `ResolveReference` does: a failed unescape
+    /// leaves the path as it was.
+    fn set_path_ignoring_error(&mut self, p: &[u8]) {
+        let _ = self.set_path(p);
+    }
+
+    /// Port of `(*URL).ResolveReference` (net/url/url.go:1111), RFC 3986 §5.2 with Go's own
+    /// choices: an empty reference keeps the base's query and fragment, an opaque base answers
+    /// an opaque result, and the path is always re-derived from the escaped form.
+    pub fn resolve_reference(&self, reference: &GoUrl) -> GoUrl {
+        let mut url = reference.clone();
+        if reference.scheme.is_empty() {
+            url.scheme = self.scheme.clone();
+        }
+        if !reference.scheme.is_empty() || !reference.host.is_empty() || reference.user.is_some() {
+            // The "absoluteURI" or "net_path" cases.
+            let path = resolve_path(&reference.escaped_path(), b"");
+            url.set_path_ignoring_error(&path);
+            return url;
+        }
+        if !reference.opaque.is_empty() {
+            url.user = None;
+            url.host = Vec::new();
+            url.path = Vec::new();
+            return url;
+        }
+        if reference.path.is_empty() && !reference.force_query && reference.raw_query.is_empty() {
+            url.raw_query = self.raw_query.clone();
+            if reference.fragment.is_empty() {
+                url.fragment = self.fragment.clone();
+                url.raw_fragment = self.raw_fragment.clone();
+            }
+        }
+        if reference.path.is_empty() && !self.opaque.is_empty() {
+            url.opaque = self.opaque.clone();
+            url.user = None;
+            url.host = Vec::new();
+            url.path = Vec::new();
+            return url;
+        }
+        // The "abs_path" or "rel_path" cases.
+        url.host = self.host.clone();
+        url.user = self.user.clone();
+        let path = resolve_path(&self.escaped_path(), &reference.escaped_path());
+        url.set_path_ignoring_error(&path);
+        url
+    }
+
+    /// Port of `(*URL).Parse` (net/url/url.go:1097): `reference` parsed, then resolved against
+    /// this URL.
+    pub fn parse_with_base(&self, reference: &str) -> Result<GoUrl, UrlError> {
+        let reference = go_parse(reference)?;
+        Ok(self.resolve_reference(&reference))
+    }
+}
+
 /// Port of `validEncoded` (net/url/url.go:702).
 fn valid_encoded(s: &[u8], mode: Encoding) -> bool {
     s.iter().all(|&c| match c {
@@ -1141,6 +1281,38 @@ mod go_parity {
                 b(&case, "valid"),
                 "{name}"
             );
+        }
+    }
+    /// `(*URL).Parse` — `ResolveReference` over RFC 3986's examples crossed with ten bases.
+    #[test]
+    fn resolve_reference_matches_go() {
+        let o = oracle();
+        let cases = section(&o, "resolve");
+        assert!(cases.len() > 400);
+        for case in cases {
+            let base = go_parse(&s(&case, "base")).expect("the base parsed in Go");
+            let reference = s(&case, "ref");
+            match base.parse_with_base(&reference) {
+                Ok(u) => {
+                    assert!(!b(&case, "err"), "{reference:?}");
+                    assert_eq!(
+                        u.to_go_string(),
+                        s(&case, "out"),
+                        "{:?} + {reference:?}",
+                        s(&case, "base")
+                    );
+                }
+                Err(_) => assert!(b(&case, "err"), "{reference:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn hostname_matches_go() {
+        let o = oracle();
+        for case in section(&o, "hostname") {
+            let u = go_parse(&s(&case, "url")).expect("parsed in Go");
+            assert_eq!(String::from_utf8_lossy(&u.hostname()), s(&case, "hostname"));
         }
     }
 }

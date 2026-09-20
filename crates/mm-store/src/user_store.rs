@@ -393,6 +393,13 @@ pub trait UserStore {
         restricted_domains: &str,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateLastPictureUpdate` (user_store.go:380): `LastPictureUpdate` and
+    /// `UpdateAt` both set to one `GetMillis()`. A miss writes nothing and is not an error.
+    fn update_last_picture_update(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdatePassword` (user_store.go:410).
     ///
     /// **Six columns, not one.** The statement is
@@ -689,6 +696,15 @@ pub trait UserStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetAll` (user_store.go:644): `usersQuery.OrderBy("Username ASC")` —
+    /// every row, deactivated and bot accounts included, no page.
+    ///
+    /// **The order is the database's collation, and it is load-bearing.** `PermanentDeleteAllUsers`
+    /// erases users in this order, and whether erasing a bot owner reaches the bot cascade depends
+    /// on whether the bot's own row was erased first. Sorting in Rust would compare bytes where
+    /// Postgres compares by collation; the caller takes positions from this list instead.
+    fn get_all(&self) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
@@ -3185,6 +3201,24 @@ impl UserStore for SqlUserStore {
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, updated))]
+    #[tracing::instrument(skip(self), fields(updated))]
+    async fn update_last_picture_update(&self, user_id: &str) -> Result<(), StoreError> {
+        let cur_time = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastpictureupdate = $1, updateat = $1 WHERE id = $2",
+            cur_time,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
     async fn update_password(
         &self,
         user_id: &str,
@@ -3798,6 +3832,58 @@ impl UserStore for SqlUserStore {
 
         tracing::Span::current().record("deleted", result.rows_affected());
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(found))]
+    async fn get_all(&self) -> Result<Vec<User>, StoreError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             ORDER BY u.username ASC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
     }
 }
 

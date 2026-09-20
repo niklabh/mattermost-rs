@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM temporaryposts WHERE postid = ANY($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7201c448edcd201efbe4bd203a0c59e271bf3f7762e89de9bdb93930d5257249"
+}

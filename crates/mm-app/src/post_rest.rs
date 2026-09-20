@@ -56,6 +56,26 @@ fn app_error(where_: &'static str, id: &str, status: i32) -> Box<AppError> {
     AppError::boxed(where_, id, None, String::new(), status)
 }
 
+/// [`app_error`] with the one-entry params map Go's `map[string]any{key: value}` is. The
+/// sentences for the dialog refusals interpolate it (`Maximum allowed is {{.Max}}.`,
+/// `File {{.FileId}} …`), so an error raised without it renders `<no value>` where Go names the
+/// number or the id.
+fn app_error_with(
+    where_: &'static str,
+    id: &str,
+    status: i32,
+    key: &str,
+    value: serde_json::Value,
+) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        id,
+        Some(std::collections::HashMap::from([(key.to_owned(), value)])),
+        String::new(),
+        status,
+    )
+}
+
 /// `time.RFC822` in UTC: `02 Jan 06 15:04 UTC`. `time.Unix(targetTime, 0)` takes any `int64`;
 /// chrono refuses one outside its range, and Go's formatting of such a year is not reproduced.
 fn rfc822_utc(seconds: i64) -> String {
@@ -194,12 +214,13 @@ impl App {
     ///
     /// The row is written, then the confirmation goes down the user's websocket as an
     /// `ephemeral_message` carrying a `reminder`-typed ephemeral post whose text embeds a
-    /// permalink to the reminded post. `PreparePostForClientWithEmbedsAndImages` turns that
-    /// permalink into a `permalink` embed — reproduced for a post in a **team** channel, whose
-    /// link is `{SiteURL}/{team}/pl/{id}`. A DM or group-channel post gets `{SiteURL}/pl/{id}`,
-    /// which `looksLikeAPermalink` rejects, so Go fetches it as an ordinary URL through the
-    /// outbound guard and records a `LinkMetadata` row — neither reproduced, and that branch
-    /// is refused **before** the reminder row is written so the caller can forward it whole.
+    /// permalink to the reminded post. `PreparePostForClientWithEmbedsAndImages` (`IsNewPost`)
+    /// turns a team channel's `{SiteURL}/{team}/pl/{id}` into a `permalink` embed. A DM or
+    /// group-channel post gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so it is
+    /// fetched as an ordinary URL through the outbound guard and leaves a `LinkMetadata` row —
+    /// served since 2026-09-19 ([D-720] closed). What the fetch can still refuse (a page the
+    /// parsers cannot reproduce) is decided **after** the reminder row is written, and the
+    /// forwarded request then writes the same upsert again, which changes nothing.
     ///
     /// Both store failures are the 500 `<untranslated>` (`model.NoTranslation`), a 404 from
     /// the existence check included: `SetPostReminder`'s `ErrNotFound` is wrapped like any
@@ -229,13 +250,6 @@ impl App {
                 app_error("SetPostReminder", NO_TRANSLATION, 500)
             })?;
 
-        // Decided before the write: see the doc comment.
-        if metadata.team_name.is_empty() {
-            return Err(PrepareError::Unreproducible(
-                "a DM or group-channel permalink is fetched, not previewed",
-            ));
-        }
-
         self.store()
             .post()
             .set_post_reminder(post_id, user_id, target_time)
@@ -247,7 +261,11 @@ impl App {
 
         let parsed_time = rfc822_utc(target_time);
         let site_url = self.config().site_url.clone().unwrap_or_default();
-        let permalink = format!("{site_url}/{}/pl/{post_id}", metadata.team_name);
+        let permalink = if metadata.team_name.is_empty() {
+            format!("{site_url}/pl/{post_id}")
+        } else {
+            format!("{site_url}/{}/pl/{post_id}", metadata.team_name)
+        };
 
         let mut props = StringInterface::new();
         props.insert("target_time".to_owned(), serde_json::json!(target_time));
@@ -328,6 +346,7 @@ impl App {
         session: &Session,
         post_id: &str,
         restore_version_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
         let to_restore = self
             .store()
@@ -372,7 +391,7 @@ impl App {
             file_ids: Some(to_restore.file_ids.unwrap_or_default()),
             ..PostPatch::default()
         };
-        self.patch_post(post_id, &patch, session).await
+        self.patch_post(post_id, &patch, session, hook_ctx).await
     }
 
     /// Port of `app.App.RevealPost` (app/post.go:3730) for a reader who is not the author.
@@ -413,7 +432,8 @@ impl App {
             )));
         }
 
-        // The forward decision, ahead of the write. A missing row is not decided here: Go
+        // The forward decision, ahead of the write ([D-881]): a link the read path could still
+        // refuse after the receipt exists would hand Go a reveal that is no longer the first. A missing row is not decided here: Go
         // reaches its 500 after the receipt exists, and so does this.
         let temporary = self.store().temporary_post().get(&post.id).await;
         if let Ok(temporary) = &temporary {
@@ -802,6 +822,7 @@ impl App {
         options: &UserReportOptions,
         start_at: i64,
         end_at: i64,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<()> {
         let license = self.license().await?;
         if !minimum_professional_license(license.as_deref()) {
@@ -834,8 +855,10 @@ impl App {
         let app = self.clone();
         let session = session.clone();
         let date_range = options.base.date_range.clone();
+        let hook_ctx = hook_ctx.clone();
         tokio::spawn(async move {
-            app.post_batch_export_started(&session, &date_range).await;
+            app.post_batch_export_started(&session, &date_range, &hook_ctx)
+                .await;
         });
         Ok(())
     }
@@ -887,7 +910,12 @@ impl App {
 
     /// The goroutine of `StartUsersBatchExport`: system bot, DM, requester, one post. Every
     /// failure is logged and nothing is retried.
-    async fn post_batch_export_started(&self, session: &Session, date_range: &str) {
+    async fn post_batch_export_started(
+        &self,
+        session: &Session,
+        date_range: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) {
         let bot = match self.get_system_bot().await {
             Ok(bot) => bot,
             Err(err) => {
@@ -936,6 +964,7 @@ impl App {
                     set_online: true,
                     ..CreatePostFlags::default()
                 },
+                hook_ctx,
             )
             .await
         {
@@ -993,10 +1022,12 @@ impl App {
     ) -> AppResult<OutboundDisposition> {
         let file_ids = remove_duplicate_strings_non_sort(&request.file_ids);
         if file_ids.len() > MAX_DIALOG_FILE_IDS {
-            return Err(app_error(
+            return Err(app_error_with(
                 "SubmitInteractiveDialog",
                 "app.submit_interactive_dialog.too_many_file_ids",
                 400,
+                "Max",
+                MAX_DIALOG_FILE_IDS.into(),
             ));
         }
         if !file_ids.is_empty() {
@@ -1015,19 +1046,23 @@ impl App {
                 })?;
             for info in &declared {
                 if info.creator_id != request.user_id {
-                    return Err(app_error(
+                    return Err(app_error_with(
                         "SubmitInteractiveDialog",
                         "app.submit_interactive_dialog.file_not_owned",
                         403,
+                        "FileId",
+                        info.id.as_str().into(),
                     ));
                 }
             }
             for id in &file_ids {
                 if !declared.iter().any(|info| &info.id == id) {
-                    return Err(app_error(
+                    return Err(app_error_with(
                         "SubmitInteractiveDialog",
                         "app.submit_interactive_dialog.invalid_file_id",
                         400,
+                        "FileId",
+                        id.as_str().into(),
                     ));
                 }
             }
@@ -1050,10 +1085,12 @@ impl App {
             }
         }
         if scan_limit_exceeded {
-            return Err(app_error(
+            return Err(app_error_with(
                 "SubmitInteractiveDialog",
                 "app.submit_interactive_dialog.too_many_submission_ids",
                 400,
+                "Max",
+                MAX_DIALOG_SUBMISSION_ID_SHAPED_TOKEN_SCAN.into(),
             ));
         }
         if !candidates.is_empty() {
@@ -1069,18 +1106,22 @@ impl App {
                 Ok(found) => {
                     for info in &found {
                         if info.creator_id != request.user_id {
-                            return Err(app_error(
+                            return Err(app_error_with(
                                 "SubmitInteractiveDialog",
                                 "app.submit_interactive_dialog.file_not_owned",
                                 403,
+                                "FileId",
+                                info.id.as_str().into(),
                             ));
                         }
                     }
                     if file_ids.len() + found.len() > MAX_DIALOG_FILE_IDS {
-                        return Err(app_error(
+                        return Err(app_error_with(
                             "SubmitInteractiveDialog",
                             "app.submit_interactive_dialog.too_many_file_ids",
                             400,
+                            "Max",
+                            MAX_DIALOG_FILE_IDS.into(),
                         ));
                     }
                 }
@@ -1332,6 +1373,15 @@ impl App {
             .system_value(crate::config::SYSTEM_ASYMMETRIC_SIGNING_KEY)
             .await?;
         crate::config::asymmetric_signing_verifying_key(&row)
+    }
+
+    /// The private half of the same row, as `utils.RenderWebError` signs with it. See
+    /// [`crate::config::asymmetric_signing_key`] for when it is `None`.
+    pub async fn asymmetric_signing_key(&self) -> Option<p256::ecdsa::SigningKey> {
+        let row = self
+            .system_value(crate::config::SYSTEM_ASYMMETRIC_SIGNING_KEY)
+            .await?;
+        crate::config::asymmetric_signing_key(&row)
     }
 }
 

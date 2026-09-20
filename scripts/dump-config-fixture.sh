@@ -92,6 +92,8 @@ MODELLED = {
         # The two settings of the outbound-connection guard and the link-preview gate on
         # GET /api/v4/redirect_location.
         "EnableLinkPreviews", "AllowedUntrustedInternalConnections",
+        # The domains a link preview refuses, read by POST /api/v4/posts.
+        "RestrictLinkPreviews",
         # The 501 gate on the two post-search routes.
         "EnablePostSearch",
         # The reader window of a burn-on-read reveal and the outbound budget (also the
@@ -112,7 +114,7 @@ MODELLED = {
     "ComplianceSettings": ["Enable"],
     # `EnableSharedChannels` here is the legacy key `ConnectedWorkspacesSettings` falls back to
     # on an update; both are projected so the fixture can show which one a live document has.
-    "ExperimentalSettings": ["RestrictSystemAdmin", "EnableSharedChannels"],
+    "ExperimentalSettings": ["RestrictSystemAdmin", "EnableSharedChannels", "LinkMetadataTimeoutMilliseconds"],
     "ConnectedWorkspacesSettings": ["EnableSharedChannels"],
     "ImageProxySettings": ["Enable"],
     "FileSettings": [
@@ -123,7 +125,13 @@ MODELLED = {
     # Directory is read by createUpload for an import upload. Enable and EnableMarketplace
     # decide the marketplace slash command AutoComplete flag in the built-in command registry.
     # ClientDirectory and PluginStates are what the plugin host reads.
-    "PluginSettings": ["Directory", "Enable", "EnableMarketplace", "ClientDirectory", "PluginStates", "RequirePluginSignature", "EnableUploads"],
+    "PluginSettings": [
+        "Directory", "Enable", "EnableMarketplace", "ClientDirectory", "PluginStates", "RequirePluginSignature", "EnableUploads",
+        # The health-check job and the prepackaged-plugin install, read at plugin start-up.
+        "EnableHealthCheck", "AutomaticPrepackagedPlugins",
+        # What GET and POST /plugins/marketplace and POST /plugins/install_from_url read.
+        "EnableRemoteMarketplace", "MarketplaceURL", "AllowInsecureDownloadURL", "SignaturePublicKeyFiles",
+    ],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -158,7 +166,8 @@ MODELLED = {
         "SendEmailNotifications",
     ],
     # `users.CreateUser` replaces an unsupported submitted locale with this.
-    "LocalizationSettings": ["DefaultClientLocale"],
+    # DefaultServerLocale is the Accept-Language of a link-preview fetch.
+    "LocalizationSettings": ["DefaultClientLocale", "DefaultServerLocale"],
     "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink", "EnforceMultifactorAuthentication"],
     # The five flags the deferred error mask in `login` reads. Any one of them being on
     # replaces every masked failure id with `api.user.login.invalid_credentials_sso`.

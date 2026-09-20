@@ -253,7 +253,8 @@ impl Session {
             .insert(key.into(), value.into());
     }
 
-    fn prop(&self, key: &str) -> Option<&str> {
+    /// `Props[key]`, `None` when the map or the key is absent — Go's zero-value `""` read.
+    pub fn prop(&self, key: &str) -> Option<&str> {
         self.props.as_ref()?.get(key).map(String::as_str)
     }
 

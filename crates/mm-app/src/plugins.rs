@@ -10,11 +10,16 @@
 //! route forwarded; `rust` starts it, and the plugin routes this server has ported answer from it.
 //! [`PluginHost::hosted`] is that switch; nothing else here runs when it is off.
 //!
+//! # Start-up, in Go's order
+//!
+//! `initPlugins`: the two directories, the environment, the health-check job when
+//! `EnableHealthCheck` is on, the file-store sync (signatures checked when required, see
+//! `crate::plugin_install`), the prepackaged plugins and the persistence of the transitional ones
+//! (`crate::plugin_prepackaged`), then the active state. The cluster-leader listener Go registers
+//! there is not: without a cluster the leader never changes.
+//!
 //! # What is not ported yet
 //!
-//! - Signature checks on the bundles `syncPlugins` installs (see `crate::plugin_install`).
-//! - Prepackaged and transitionally prepackaged plugins, the health-check job and the cluster
-//!   leader listener.
 //! - The plugin API itself: [`AppPluginApi`] answers every method with the typed
 //!   not-implemented error (plugin plan Phase 6), and [`AppPluginDriver`] likewise.
 //!
@@ -119,6 +124,14 @@ fn plugin_settings_changed(old: &Config, new: &Config) -> bool {
         || old.plugin_client_directory != new.plugin_client_directory
         || old.plugin_states != new.plugin_states
         || old.plugin_enable_marketplace != new.plugin_enable_marketplace
+        || old.plugin_enable_health_check != new.plugin_enable_health_check
+        || old.plugin_automatic_prepackaged_plugins != new.plugin_automatic_prepackaged_plugins
+        || old.plugin_require_signature != new.plugin_require_signature
+        || old.plugin_enable_uploads != new.plugin_enable_uploads
+        || old.plugin_enable_remote_marketplace != new.plugin_enable_remote_marketplace
+        || old.plugin_marketplace_url != new.plugin_marketplace_url
+        || old.plugin_allow_insecure_download_url != new.plugin_allow_insecure_download_url
+        || old.plugin_signature_public_key_files != new.plugin_signature_public_key_files
 }
 
 /// `os.Mkdir(dir, 0744)`, tolerating an existing directory.
@@ -146,18 +159,23 @@ impl App {
         self.plugins.get()
     }
 
-    /// Port of `Channels.initPlugins` (app/plugin.go:172), without the file-store sync and the
-    /// prepackaged plugins (see the module docs): make the two directories, start the
-    /// environment, and activate what `PluginStates` enables. A second call only re-syncs.
+    /// Port of `Channels.initPlugins` (app/plugin.go:172), in Go's order (see the module docs).
+    /// A second call only re-syncs the active state and turns the health-check job on or off.
     #[tracing::instrument(skip(self))]
     pub async fn init_plugins(&self, plugin_dir: &Path, webapp_plugin_dir: &Path) {
         if !self.plugins.hosted {
             return;
         }
         let lifecycle = self.plugins.lifecycle.lock().await;
-        if self.plugins.get().is_some() || !self.config().plugin_enable {
+        let existing = self.plugins.get();
+        if existing.is_some() || !self.config().plugin_enable {
             drop(lifecycle);
             self.sync_plugins_active_state().await;
+            if let Some(environment) = existing {
+                environment
+                    .toggle_plugin_health_check_job(self.config().plugin_enable_health_check)
+                    .await;
+            }
             return;
         }
         tracing::info!("Starting up plugins");
@@ -173,11 +191,22 @@ impl App {
             PathBuf::from(plugin_dir),
             PathBuf::from(webapp_plugin_dir),
         );
-        self.plugins.set(Some(Arc::new(environment)));
+        let environment = Arc::new(environment);
+        self.plugins.set(Some(Arc::clone(&environment)));
+        environment
+            .toggle_plugin_health_check_job(self.config().plugin_enable_health_check)
+            .await;
         drop(lifecycle);
         if let Err(err) = self.sync_plugins().await {
             tracing::error!(error = %err, "Failed to sync plugins from the file store");
         }
+        if let Err(err) = self
+            .process_prepackaged_plugins(crate::plugin_prepackaged::PREPACKAGED_PLUGINS_DIR)
+            .await
+        {
+            tracing::error!(error = %err, "Failed to process prepackaged plugins");
+        }
+        self.persist_transitionally_prepackaged_plugins().await;
         self.sync_plugins_active_state().await;
     }
 
@@ -606,6 +635,58 @@ impl App {
     pub fn is_plugin_active(&self, id: &str) -> Result<bool, Box<AppError>> {
         Ok(self.get_plugin_status(id)?.state == PLUGIN_STATE_RUNNING)
     }
+
+    /// Port of `Channels.ReattachPlugin` (app/plugin_reattach.go:17): the 501 when plugins are
+    /// off, then [`Self::detach_plugin`], then `Environment::Reattach` — whose one error, a
+    /// manifest without a server component, is the 500 `app.plugin.reattach.app_error`. Every
+    /// other failure is swallowed by the environment (see `mm_plugin::environment`), so a
+    /// reattach to a process that is not there answers success.
+    pub async fn reattach_plugin(
+        &self,
+        manifest: &Manifest,
+        config: &mm_model::plugin_reattach::PluginReattachConfig,
+    ) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "ReattachPlugin",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        self.detach_plugin(&manifest.id).await?;
+        environment.reattach(manifest, config).await.map_err(|err| {
+            Box::new(
+                AppError::new(
+                    "ReattachPlugin",
+                    "app.plugin.reattach.app_error",
+                    None,
+                    "",
+                    500,
+                )
+                .wrap(err),
+            )
+        })
+    }
+
+    /// Port of `Channels.DetachPlugin` (app/plugin_reattach.go:42): the 501 when plugins are off,
+    /// otherwise deactivate and forget the plugin, which is never an error — an id nothing is
+    /// registered under succeeds too.
+    pub async fn detach_plugin(&self, id: &str) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.plugins_environment() else {
+            return Err(AppError::boxed(
+                "DetachPlugin",
+                "app.plugin.disabled.app_error",
+                None,
+                "",
+                501,
+            ));
+        };
+        environment.deactivate(id).await;
+        environment.remove_plugin(id);
+        Ok(())
+    }
 }
 
 /// Await every future concurrently on the current task: Go's `WaitGroup` over goroutines.
@@ -639,6 +720,131 @@ mod tests {
         let mut new = old.clone();
         new.show_full_name = !new.show_full_name;
         assert!(!plugin_settings_changed(&old, &new), "not a plugin setting");
+    }
+
+    /// A hosting [`App`] with no reachable database, over a scratch plugin directory, webapp
+    /// directory and file store.
+    fn offline_host(name: &str, edit: impl FnOnce(&mut Config)) -> (App, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("mm-app-plugins-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data/plugins")).unwrap();
+        let mut config = Config {
+            plugin_directory: root.join("plugins").to_string_lossy().into_owned(),
+            plugin_client_directory: root.join("client").to_string_lossy().into_owned(),
+            file_directory: format!("{}/", root.join("data").to_string_lossy()),
+            ..Config::default()
+        };
+        edit(&mut config);
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody:nobody@127.0.0.1:1/nonexistent")
+            .expect("a lazy pool never connects");
+        let app = App::with_config(mm_store::SqlStore::from_pool(pool), config)
+            .with_plugin_host(PluginHost::hosting());
+        (app, root)
+    }
+
+    async fn init(app: &App) {
+        let config = app.config();
+        app.init_plugins(
+            Path::new(&config.plugin_directory),
+            Path::new(&config.plugin_client_directory),
+        )
+        .await;
+    }
+
+    /// `initPlugins` starts the job when `EnableHealthCheck` is on and not when it is off, and a
+    /// change to the setting turns it on or off again through the config listener.
+    #[tokio::test]
+    async fn the_health_check_job_follows_enable_health_check() {
+        let (app, root) = offline_host("health", |_| {});
+        init(&app).await;
+        let environment = app.plugins_environment().expect("started");
+        assert!(environment.health_check_job().is_some(), "on by default");
+
+        for enable in [false, true, false] {
+            let old = app.config();
+            let mut new = (*old).clone();
+            new.plugin_enable_health_check = enable;
+            app.replace_config(new.clone());
+            app.plugins_config_changed(&old, &new).await;
+            assert_eq!(
+                environment.health_check_job().is_some(),
+                enable,
+                "toggled to {enable}"
+            );
+        }
+        app.shut_down_plugins().await;
+
+        let (off, off_root) = offline_host("health-off", |c| c.plugin_enable_health_check = false);
+        init(&off).await;
+        assert!(
+            off.plugins_environment()
+                .expect("started")
+                .health_check_job()
+                .is_none()
+        );
+        off.shut_down_plugins().await;
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(off_root);
+    }
+
+    /// The file-store sync with `RequirePluginSignature` on: a bundle whose signature is a
+    /// stranger's, and one with no signature at all, are both skipped; with it off both install.
+    /// (A signature that verifies needs the test key from the database: `parity::plugin_startup`.)
+    #[tokio::test]
+    async fn a_required_signature_that_does_not_verify_skips_the_synced_bundle() {
+        use base64::Engine as _;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_plugin_signature.json"
+        ))
+        .expect("generated by reference/dump");
+        let bytes = |section: &str, name: &str| {
+            base64::engine::general_purpose::STANDARD
+                .decode(fixture[section][name].as_str().expect("an entry"))
+                .expect("base64")
+        };
+        for require in [true, false] {
+            let (app, root) = offline_host(&format!("sync-{require}"), |c| {
+                c.plugin_require_signature = require;
+            });
+            let store = root.join("data/plugins");
+            std::fs::write(
+                store.join("mmrs.market.alpha.tar.gz"),
+                bytes("bundles", "alpha"),
+            )
+            .unwrap();
+            std::fs::write(
+                store.join("mmrs.market.alpha.tar.gz.sig"),
+                bytes("signatures", "alpha_stranger"),
+            )
+            .unwrap();
+            std::fs::write(
+                store.join("mmrs.market.beta.tar.gz"),
+                bytes("bundles", "beta"),
+            )
+            .unwrap();
+            init(&app).await;
+            let mut installed: Vec<String> = app
+                .plugins_environment()
+                .expect("started")
+                .available()
+                .unwrap()
+                .into_iter()
+                .filter_map(|b| b.manifest.map(|m| m.id))
+                .collect();
+            installed.sort();
+            let expected: &[&str] = if require {
+                &[]
+            } else {
+                &["mmrs.market.alpha", "mmrs.market.beta"]
+            };
+            assert_eq!(installed, expected, "RequirePluginSignature={require}");
+            app.shut_down_plugins().await;
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     #[test]

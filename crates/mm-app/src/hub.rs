@@ -636,6 +636,14 @@ pub trait BroadcastHookSuite: Send + Sync {
         user_id: &'a str,
         channel_id: &'a str,
     ) -> HookFuture<'a, bool>;
+
+    /// `webConn.Suite.HasPermissionToReadChannel` — the `permalink` hook's gate, answering
+    /// `(has_permission, is_member)`.
+    fn has_permission_to_read_channel<'a>(
+        &'a self,
+        user_id: &'a str,
+        channel: &'a mm_model::channel::Channel,
+    ) -> HookFuture<'a, (bool, bool)>;
 }
 
 /// Port of `platform.HookedWebSocketEvent` (web_broadcast_hook.go:42).
@@ -1144,6 +1152,14 @@ impl BroadcastHookSuite for App {
             self.has_permission_to_resolve_channel_mention(user_id, &channel)
                 .await
         })
+    }
+
+    fn has_permission_to_read_channel<'a>(
+        &'a self,
+        user_id: &'a str,
+        channel: &'a mm_model::channel::Channel,
+    ) -> HookFuture<'a, (bool, bool)> {
+        Box::pin(App::has_permission_to_read_channel(self, user_id, channel))
     }
 }
 
@@ -2580,6 +2596,14 @@ mod tests {
             _channel_id: &'a str,
         ) -> HookFuture<'a, bool> {
             Box::pin(async { false })
+        }
+
+        fn has_permission_to_read_channel<'a>(
+            &'a self,
+            _user_id: &'a str,
+            _channel: &'a mm_model::channel::Channel,
+        ) -> HookFuture<'a, (bool, bool)> {
+            Box::pin(async { (false, false) })
         }
     }
 

@@ -77,6 +77,14 @@ pub trait PreferenceStore {
         category: &str,
         name: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.PermanentDeleteByUser` (preference_store.go:162).
+    ///
+    /// One `DELETE`, no `RowsAffected` check: a user with no rows here is not an error.
+    fn permanent_delete_by_user(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of Go's `preferenceSelectQuery`, in its column order.
@@ -348,6 +356,19 @@ impl PreferenceStore for SqlPreferenceStore {
         };
         tracing::Span::current().record("found", true);
         Ok(row.into())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete_by_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM preferences WHERE userid = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete Preference with userId={user_id}"),
+                source,
+            })?;
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

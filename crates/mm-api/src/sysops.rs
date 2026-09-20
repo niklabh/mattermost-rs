@@ -216,7 +216,8 @@ pub async fn test_notifications(
     session: AuthenticatedSession,
     request: Request,
 ) -> Result<Response, ApiError> {
-    match state.app.send_test_message(&session.0).await? {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match state.app.send_test_message(&session.0, &hook_ctx).await? {
         mm_app::test_notification::SendTestMessage::Sent(_) => {
             tracing::Span::current().record("forwarded", false);
             Ok(json_response(StatusCode::OK, STATUS_OK.as_bytes().to_vec()))

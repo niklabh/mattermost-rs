@@ -15,6 +15,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+# `SqlReactionStore.PermanentDeleteByUser` sleeps 10 ms between its post updates, as Go does.
+tokio.workspace = true
 
 [dev-dependencies]
 # The DB-backed tests in tests/ need a runtime; they skip themselves unless MM_STORE_DB=1.

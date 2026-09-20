@@ -598,6 +598,8 @@ async fn a_permanent_delete_is_refused_with_the_admin_wording_and_writes_nothing
         return;
     }
     let _count = common::USER_COUNT.lock().await;
+    // `user_permanent_delete` turns the flag on under the write guard.
+    let _config = common::CONFIG_DOCUMENT.read().await;
     let http = client();
     let (admin, team) = admin_and_team(&http).await;
     let (go_id, rs_id) = pair(&http, &admin, &team, "hard").await;

@@ -1,0 +1,45 @@
+# manualtest.plan — GET /manualtest (mm_api::manualtest), the web error page (mm_api::web_error),
+# the request translation (mm_app::i18n::Translations) and the signing key, 2026-09-20.
+# Unit lines run the oracle-backed lib tests (fixtures/behaviour_web_error.json); api lines run
+# parity::manualtest against the EnableTesting oracle (MMRS_EDITLIMIT_VARIANT=testing
+# scripts/go-edit-limit.sh). Not planned: `by_tag` before `fallback` in `file_for` — with the
+# pinned file set every exact tag's fallback entry is its own file, so the swap is equivalent.
+locale-short-first	crates/mm-app/src/i18n.rs	        if self.locales.contains(full) {\n            full\n        } else if self.locales.contains(short) {\n            short\n	        if self.locales.contains(short) {\n            short\n        } else if self.locales.contains(full) {\n            full\n	unit	i18n
+locale-split-on-semicolon	crates/mm-app/src/i18n.rs	let full = accept_language.split(',').next().unwrap_or_default();	let full = accept_language.split([',', ';']).next().unwrap_or_default();	unit	i18n
+fallback-locale-es	crates/mm-app/src/i18n.rs	const FALLBACK_LOCALE: &str = "en";	const FALLBACK_LOCALE: &str = "es";	unit	i18n
+empty-translation-kept	crates/mm-app/src/i18n.rs	                    if !text.is_empty() {	                    if true {	unit	i18n
+fallback-first-file-wins	crates/mm-app/src/i18n.rs	            self.fallback.insert(tag[..at].to_owned(), index);	            self.fallback.entry(tag[..at].to_owned()).or_insert(index);	unit	i18n
+parse-always-splits	crates/mm-app/src/i18n.rs	if src.contains([',', ';', '.']) {	if true {	unit	i18n
+parse-no-trim	crates/mm-app/src/i18n.rs	.map(|tag| normalize_tag(tag.trim()))	.map(normalize_tag)	unit	i18n
+normalize-keeps-underscore	crates/mm-app/src/i18n.rs	tag.to_lowercase().replace('_', "-")	tag.to_lowercase()	unit	i18n
+js-eq-unescaped	crates/mm-api/src/web_error.rs	            '=' => out.push_str("\\\\u003D"),\n	            // = unescaped\n	unit	web_error
+js-control-lower-hex	crates/mm-api/src/web_error.rs	format!("\\\\u00{:02X}", u32::from(c))	format!("\\\\u00{:02x}", u32::from(c))	unit	web_error
+js-unicode-lower-hex	crates/mm-api/src/web_error.rs	format!("\\\\u{:04X}", u32::from(c))	format!("\\\\u{:04x}", u32::from(c))	unit	web_error
+js-nonprint-kept	crates/mm-api/src/web_error.rs	c if mm_model::utils::go_is_print(c) => out.push(c),	c if true => out.push(c),	unit	web_error
+html-nul-kept	crates/mm-api/src/web_error.rs	'\\0' => out.push('\\u{FFFD}'),	'\\0' => out.push('\\0'),	unit	web_error
+redirect-range-inclusive	crates/mm-api/src/web_error.rs	if (300..400).contains(&status) {	if (300..=400).contains(&status) {	unit	web_error
+signature-std-base64	crates/mm-api/src/web_error.rs	base64::engine::general_purpose::URL_SAFE.encode(signature)	base64::engine::general_purpose::STANDARD.encode(signature)	unit	web_error
+signing-key-unchecked	crates/mm-app/src/config.rs	(signing.verifying_key() == &stored).then_some(signing)	{ let _ = stored; Some(signing) }	unit	signing_key
+wipe-detailed-inverted	crates/mm-api/src/web_error.rs	    if !config.enable_developer {	    if config.enable_developer {	api	manualtest
+mobile-json-inverted	crates/mm-api/src/web_error.rs	    if context.mobile_app {	    if !context.mobile_app {	api	manualtest
+request-id-dropped	crates/mm-api/src/web_error.rs	    err.request_id = context.request_id.to_owned();	    let _ = context.request_id;	api	manualtest
+message-untranslated	crates/mm-api/src/web_error.rs	        err.message = bundle.translate_for_request(	        let _ = bundle.translate_for_request(	api	manualtest
+parse-error-ignored	crates/mm-api/src/manualtest.rs	    if parse_error.is_some() {	    if false {	api	manualtest
+username-alone-enough	crates/mm-api/src/manualtest.rs	(params.get_all("username"), params.get_all("teamname"))	(params.get_all("username"), params.get_all("username"))	api	manualtest
+invalid-team-is-existing	crates/mm-api/src/manualtest.rs	Err(mm_store::StoreError::Invalid { app_error, .. }) => Outcome::Err(*app_error),	Err(mm_store::StoreError::Invalid { .. }) => Outcome::Err(AppError::new("manualTest", "app.team.save.existing.app_error", None, "", 400)),	api	manualtest
+last-test-value	crates/mm-api/src/manualtest.rs	    match test_name.first().map(Vec::as_slice) {	    match test_name.last().map(Vec::as_slice) {	api	manualtest
+autolink-off-topic	crates/mm-api/src/manualtest.rs	.manual_test_channel_id(mm_model::channel::DEFAULT_CHANNEL_NAME, "", "")	.manual_test_channel_id("off-topic", "", "")	api	manualtest
+channel-match-inverted	crates/mm-app/src/manualtest.rs	.find(|channel| channel.name == channel_name)	.find(|channel| channel.name != channel_name)	api	manualtest
+listen-check-inverted	crates/mm-api/src/manualtest.rs	    if !listen_address.starts_with(':') {	    if listen_address.starts_with(':') {	api	manualtest
+post-refusal-403	crates/mm-api/src/manualtest.rs	        "UserRequired",\n        401,	        "UserRequired",\n        403,	api	manualtest
+url-limit-inclusive	crates/mm-api/src/manualtest.rs	    let answer = if i64::try_from(raw_target.len()).unwrap_or(i64::MAX) > max_url {	    let answer = if i64::try_from(raw_target.len()).unwrap_or(i64::MAX) >= max_url {	api	manualtest
+url-refusal-has-headers	crates/mm-api/src/manualtest.rs	        handle_context_error(state, &context, HeaderMap::new(), err).await?	        handle_context_error(state, &context, serve_http_headers(state, &config, &request_id).await?, err).await?	api	manualtest
+no-json-content-type	crates/mm-api/src/manualtest.rs	        set_header(&mut headers, "content-type", "application/json");\n	        // content type dropped\n	api	manualtest
+no-gzip-wrapper	crates/mm-api/src/manualtest.rs	    if setup_is_gzip(setup) {	    if false {	api	manualtest
+head-is-manualtest	crates/mm-api/src/web_static.rs	rel == "/manualtest" && *method == Method::GET {	rel == "/manualtest" {	api	manualtest
+query-token-check-inverted	crates/mm-api/src/web_static.rs	Ok(session) if !session.is_oauth && location == crate::auth::TokenLocation::QueryString => {	Ok(session) if !session.is_oauth && location != crate::auth::TokenLocation::QueryString => {	api	manualtest
+team-validation-skipped	crates/mm-app/src/team.rs	        team.is_valid()\n            .map_err(	        Ok::<(), Box<mm_model::utils::AppError>>(())\n            .map_err(	api	manualtest
+# Controls: must survive.
+control-rename-listen	crates/mm-api/src/manualtest.rs	let listen_address = service.listen_address.as_deref().unwrap_or(":8065");\n                handle(state, raw_query, listen_address).await	let listen = service.listen_address.as_deref().unwrap_or(":8065");\n                handle(state, raw_query, listen).await	api	manualtest
+control-reorder-service-request-id	crates/mm-api/src/manualtest.rs	    let service = &config.service_settings;\n    let request_id = mm_model::utils::new_id();	    let request_id = mm_model::utils::new_id();\n    let service = &config.service_settings;	api	manualtest
+control-rename-short	crates/mm-app/src/i18n.rs	        let short = full.split('-').next().unwrap_or_default();\n        if self.locales.contains(full) {\n            full\n        } else if self.locales.contains(short) {\n            short	        let lang = full.split('-').next().unwrap_or_default();\n        if self.locales.contains(full) {\n            full\n        } else if self.locales.contains(lang) {\n            lang	unit	i18n

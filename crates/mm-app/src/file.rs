@@ -202,6 +202,9 @@ mod backend_errors {
     pub const WRITE_FILE: (&str, &str) = ("WriteFile", "api.file.write_file.app_error");
     /// `App.MoveFile` (app/file.go:249).
     pub const MOVE_FILE: (&str, &str) = ("MoveFile", "api.file.move_file.app_error");
+    /// `App.RemoveDirectory` (app/file.go:376).
+    pub const REMOVE_DIRECTORY: (&str, &str) =
+        ("RemoveDirectory", "api.file.remove_directory.app_error");
     /// `App.AppendFile` (app/file.go:307).
     pub const APPEND_FILE: (&str, &str) = ("AppendFile", "api.file.append_file.app_error");
 }
@@ -312,6 +315,14 @@ impl App {
             .remove_file(path)
             .await
             .map_err(|err| Self::backend_error(backend_errors::REMOVE_FILE, err))
+    }
+
+    /// Port of `app.App.RemoveDirectory` (app/file.go:376).
+    pub async fn remove_directory(&self, path: &str) -> Result<(), PrepareError> {
+        self.file_backend()
+            .remove_directory(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::REMOVE_DIRECTORY, err))
     }
 
     /// Port of `app.App.RemoveExportFile` (app/file.go:319).

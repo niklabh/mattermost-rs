@@ -768,7 +768,37 @@ func main() {
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
+	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
+	// iterating on one oracle should not.
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n) and exit")
 	flag.Parse()
+
+	if *only == "imaging" {
+		if err := os.MkdirAll(*out, 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "dump: cannot create %s: %v\n", *out, err)
+			os.Exit(1)
+		}
+		if err := writeImagingBehaviourFixtures(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: imaging behaviour fixtures: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "web_error" {
+		if err := writeWebErrorBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: web error behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "i18n" {
+		if err := writeI18nBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: i18n behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only != "" {
+		fmt.Fprintf(os.Stderr, "dump: unknown -only %q\n", *only)
+		os.Exit(2)
+	}
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "dump: cannot create %s: %v\n", *out, err)
@@ -1113,6 +1143,24 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_mime.json"))
 
+	if err := writeLinkImageBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link image behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_image.json"))
+
+	if err := writePluginSignatureBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: plugin signature behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_plugin_signature.json"))
+
+	if err := writePluginStartupBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: plugin startup behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_plugin_startup.json"))
+
 	if err := writeSVGBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: svg behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1206,6 +1254,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeWebStaticBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: web static behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_web_static.json"))
+
+	if err := writeWebErrorBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: web error behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_web_error.json"))
+
+	if err := writeI18nBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: i18n behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_i18n.json"))
+
 	if err := writeJSONFoldBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: json fold behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1241,6 +1307,18 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_metadata.json"))
+
+	if err := writeOpenGraphBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: opengraph behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_opengraph.json"))
+
+	if err := writeLinkPreviewBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link preview behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_preview.json"))
 
 	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
@@ -1335,6 +1413,11 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_email.json"))
+
+	if err := writeImagingBehaviourFixtures(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: imaging behaviour fixtures: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := writeTeamPrivacyBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: team privacy behaviour fixture: %v\n", err)

@@ -320,8 +320,21 @@ fn send(state: &AppState, conn: &Arc<WebConn>, response: WebSocketResponse) {
         .send_message(conn, OutgoingFrame::Response(Box::new(response)));
 }
 
-/// `err.WipeDetailed(); NewWebSocketError(r.Seq, err)`.
+/// `err.WipeDetailed(); NewWebSocketError(r.Seq, err)` (wsapi/websocket_handler.go:66).
+///
+/// The message is the **`DefaultServerLocale`** translation `model.NewAppError` set at
+/// construction; nothing on the websocket path re-translates, so unlike an HTTP error it does not
+/// depend on the client's `Accept-Language`. Applied here rather than at the constructor because
+/// `Translate` overwrites `Message` from the id and params every time and nothing reads it in
+/// between — the same arrangement as `websocket::return_error`.
 fn reply_error(state: &AppState, conn: &Arc<WebConn>, seq: i64, mut err: AppError) {
+    if let Some(bundle) = mm_app::i18n::loaded() {
+        let config = state.app.config();
+        bundle.translate_app_error(
+            bundle.server_locale(&config.default_server_locale),
+            &mut err,
+        );
+    }
     err.wipe_detailed();
     send(state, conn, WebSocketResponse::new_error(seq, err));
 }

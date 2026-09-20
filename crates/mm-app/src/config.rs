@@ -208,7 +208,7 @@ pub struct Config {
     /// The single gate on `DELETE /api/v4/users/{user_id}?permanent=true`. Off — which is the
     /// default and what this deployment runs — the route answers 401 with one of two ids
     /// depending on whether the *caller* is a system admin, and writes nothing. On, it runs
-    /// `App.PermanentDeleteUser`, eighteen store families deep; see [D-470].
+    /// `App.PermanentDeleteUser` (`mm_app::App::permanent_delete_user`).
     pub enable_api_user_deletion: bool,
 
     /// `ServiceSettings.EnableAPITriggerAdminNotifications` (config.go:889). Go default
@@ -257,6 +257,21 @@ pub struct Config {
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
     pub allowed_untrusted_internal_connections: String,
+
+    /// `ServiceSettings.RestrictLinkPreviews` (config.go:398). Go default `""`. The comma-,
+    /// space- or `@`-separated domains `isLinkAllowedForPreview` (post_metadata.go:735) refuses
+    /// to preview — a **substring** test on the IDNA-mapped host, so `example.com` also blocks
+    /// `notexample.com`. Read by [`crate::link_metadata`].
+    pub restrict_link_previews: String,
+
+    /// `ExperimentalSettings.LinkMetadataTimeoutMilliseconds` (config.go:1246). Go default
+    /// **5000**. The whole-request timeout of a link-preview fetch (`getLinkMetadataForURL`,
+    /// `getLinkMetadataFromOEmbed`); `Config.IsValid` refuses a value `<= 0`, so one never loads.
+    pub link_metadata_timeout_milliseconds: i64,
+
+    /// `LocalizationSettings.DefaultServerLocale` (config.go:2892). Go default `"en"`. Sent as
+    /// the `Accept-Language` of a link-preview fetch.
+    pub default_server_locale: String,
 
     /// `ServiceSettings.EnableInsecureOutgoingConnections` (config.go). Go default **`false`**.
     /// On, the guard's client accepts any TLS certificate.
@@ -574,10 +589,45 @@ pub struct Config {
     /// a bundle synced from the file store must carry a signature that verifies.
     pub plugin_require_signature: bool,
 
+    /// `PluginSettings.EnableHealthCheck` (config.go:3606, defaulted **`true`** at :3633): whether
+    /// the environment runs the health-check job that restarts, then deactivates, a plugin that
+    /// stops answering (public/plugin/health_check.go).
+    pub plugin_enable_health_check: bool,
+
+    /// `PluginSettings.AutomaticPrepackagedPlugins` (config.go:3613, defaulted **`true`** at
+    /// :3681): whether a prepackaged plugin that `PluginStates` enables is installed at start-up.
+    pub plugin_automatic_prepackaged_plugins: bool,
+
     /// `PluginSettings.EnableUploads` (config.go:3604, defaulted **`false`** at :3626): off,
     /// `POST /plugins` is the 501 `app.plugin.upload_disabled.app_error`. The API cannot change it
     /// (`patchConfig` refuses), so the environment is how a server gets it on.
     pub plugin_enable_uploads: bool,
+
+    /// `PluginSettings.EnableRemoteMarketplace` (config.go:3612, defaulted **`true`** at :3678):
+    /// whether `GET`/`POST /plugins/marketplace` ask the Marketplace server at all, and whether a
+    /// locally installed plugin the Marketplace does not list carries the `Local` label.
+    pub plugin_enable_remote_marketplace: bool,
+
+    /// `PluginSettings.MarketplaceURL` (config.go:3615). `SetDefaults` (:3685) replaces an absent
+    /// value, `""`, **and the old** `PluginSettingsOldMarketplaceURL` with
+    /// `PluginSettingsDefaultMarketplaceURL`. `patchConfig` refuses to change it while uploads are
+    /// off, so on a stock server the environment is how a test points it elsewhere.
+    pub plugin_marketplace_url: String,
+
+    /// `PluginSettings.AllowInsecureDownloadURL` (config.go:3605, defaulted **`false`** at
+    /// :3630): off, `downloadFromURL` refuses any scheme but `https`.
+    pub plugin_allow_insecure_download_url: bool,
+
+    /// `PluginSettings.SignaturePublicKeyFiles` (config.go:3616, defaulted to an empty list at
+    /// :3690): the names of configuration files (`ConfigurationFiles`) holding the extra public
+    /// keys `verifyPlugin` accepts. Go's environment decoder splits a `[]string` on **spaces**
+    /// (config/environment.go:80).
+    pub plugin_signature_public_key_files: Vec<String>,
+
+    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
+    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key. Environment-only, like
+    /// every feature flag.
+    pub feature_flag_enable_mfi_plugin_signature_public_key: bool,
 
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
@@ -1423,6 +1473,9 @@ impl Default for Config {
             enable_permalink_previews: true,
             enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
+            restrict_link_previews: String::new(),
+            link_metadata_timeout_milliseconds: 5000,
+            default_server_locale: "en".to_owned(),
             enable_insecure_outgoing_connections: false,
             // config.go:2174 — `new(true)`.
             enable_sign_up_with_email: true,
@@ -1481,7 +1534,14 @@ impl Default for Config {
             plugin_client_directory: "./client/plugins".to_owned(),
             plugin_states: default_plugin_states(true),
             plugin_require_signature: false,
+            plugin_enable_health_check: true,
+            plugin_automatic_prepackaged_plugins: true,
             plugin_enable_uploads: false,
+            plugin_enable_remote_marketplace: true,
+            plugin_marketplace_url: DEFAULT_MARKETPLACE_URL.to_owned(),
+            plugin_allow_insecure_download_url: false,
+            plugin_signature_public_key_files: Vec::new(),
+            feature_flag_enable_mfi_plugin_signature_public_key: true,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1776,6 +1836,15 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
             .unwrap_or(default.allowed_untrusted_internal_connections),
+            restrict_link_previews: lookup("MM_SERVICESETTINGS_RESTRICTLINKPREVIEWS")
+                .unwrap_or(default.restrict_link_previews),
+            link_metadata_timeout_milliseconds: lookup_int(
+                lookup,
+                "MM_EXPERIMENTALSETTINGS_LINKMETADATATIMEOUTMILLISECONDS",
+                default.link_metadata_timeout_milliseconds,
+            ),
+            default_server_locale: lookup("MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE")
+                .unwrap_or(default.default_server_locale),
             enable_insecure_outgoing_connections: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEINSECUREOUTGOINGCONNECTIONS",
@@ -1963,10 +2032,41 @@ impl Config {
                 "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
                 default.plugin_require_signature,
             ),
+            plugin_enable_health_check: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEHEALTHCHECK",
+                default.plugin_enable_health_check,
+            ),
+            plugin_automatic_prepackaged_plugins: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_AUTOMATICPREPACKAGEDPLUGINS",
+                default.plugin_automatic_prepackaged_plugins,
+            ),
             plugin_enable_uploads: lookup_bool(
                 lookup,
                 "MM_PLUGINSETTINGS_ENABLEUPLOADS",
                 default.plugin_enable_uploads,
+            ),
+            plugin_enable_remote_marketplace: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ENABLEREMOTEMARKETPLACE",
+                default.plugin_enable_remote_marketplace,
+            ),
+            plugin_marketplace_url: lookup("MM_PLUGINSETTINGS_MARKETPLACEURL")
+                .unwrap_or(default.plugin_marketplace_url),
+            plugin_allow_insecure_download_url: lookup_bool(
+                lookup,
+                "MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL",
+                default.plugin_allow_insecure_download_url,
+            ),
+            // `strings.Split(value, " ")`: unlike `split_list`, an empty value is one empty name.
+            plugin_signature_public_key_files: lookup("MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES")
+                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .unwrap_or(default.plugin_signature_public_key_files),
+            feature_flag_enable_mfi_plugin_signature_public_key: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_ENABLEMFIPLUGINSIGNATUREPUBLICKEY",
+                default.feature_flag_enable_mfi_plugin_signature_public_key,
             ),
             send_email_notifications: lookup_bool(
                 lookup,
@@ -2563,6 +2663,17 @@ impl Config {
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
+            restrict_link_previews: service
+                .restrict_link_previews
+                .unwrap_or(default.restrict_link_previews),
+            link_metadata_timeout_milliseconds: parsed
+                .experimental_settings
+                .as_ref()
+                .and_then(|s| s.link_metadata_timeout_milliseconds)
+                .unwrap_or(default.link_metadata_timeout_milliseconds),
+            default_server_locale: localization_settings
+                .default_server_locale
+                .unwrap_or(default.default_server_locale),
             enable_insecure_outgoing_connections: service
                 .enable_insecure_outgoing_connections
                 .unwrap_or(default.enable_insecure_outgoing_connections),
@@ -2694,9 +2805,30 @@ impl Config {
             plugin_require_signature: plugin_settings
                 .require_plugin_signature
                 .unwrap_or(default.plugin_require_signature),
+            plugin_enable_health_check: plugin_settings
+                .enable_health_check
+                .unwrap_or(default.plugin_enable_health_check),
+            plugin_automatic_prepackaged_plugins: plugin_settings
+                .automatic_prepackaged_plugins
+                .unwrap_or(default.plugin_automatic_prepackaged_plugins),
             plugin_enable_uploads: plugin_settings
                 .enable_uploads
                 .unwrap_or(default.plugin_enable_uploads),
+            plugin_enable_remote_marketplace: plugin_settings
+                .enable_remote_marketplace
+                .unwrap_or(default.plugin_enable_remote_marketplace),
+            plugin_marketplace_url: match plugin_settings.marketplace_url {
+                Some(url) if !url.is_empty() && url != OLD_MARKETPLACE_URL => url,
+                _ => default.plugin_marketplace_url,
+            },
+            plugin_allow_insecure_download_url: plugin_settings
+                .allow_insecure_download_url
+                .unwrap_or(default.plugin_allow_insecure_download_url),
+            plugin_signature_public_key_files: plugin_settings
+                .signature_public_key_files
+                .unwrap_or(default.plugin_signature_public_key_files),
+            feature_flag_enable_mfi_plugin_signature_public_key: default
+                .feature_flag_enable_mfi_plugin_signature_public_key,
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3221,6 +3353,8 @@ struct EmailSettingsDocument {
 struct LocalizationSettingsDocument {
     #[serde(rename = "DefaultClientLocale")]
     default_client_locale: Option<String>,
+    #[serde(rename = "DefaultServerLocale")]
+    default_server_locale: Option<String>,
 }
 
 /// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
@@ -3333,6 +3467,8 @@ struct ServiceSettingsDocument {
     enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
+    #[serde(rename = "RestrictLinkPreviews")]
+    restrict_link_previews: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
     enable_insecure_outgoing_connections: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
@@ -3434,6 +3570,8 @@ struct ExperimentalSettingsDocument {
     /// `ConnectedWorkspacesSettings.EnableSharedChannels`.
     #[serde(rename = "EnableSharedChannels")]
     enable_shared_channels: Option<bool>,
+    #[serde(rename = "LinkMetadataTimeoutMilliseconds")]
+    link_metadata_timeout_milliseconds: Option<i64>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -3492,12 +3630,24 @@ struct PluginSettingsDocument {
     plugin_states: Option<std::collections::BTreeMap<String, Option<PluginStateDocument>>>,
     #[serde(rename = "RequirePluginSignature")]
     require_plugin_signature: Option<bool>,
+    #[serde(rename = "EnableHealthCheck")]
+    enable_health_check: Option<bool>,
+    #[serde(rename = "AutomaticPrepackagedPlugins")]
+    automatic_prepackaged_plugins: Option<bool>,
     #[serde(rename = "EnableUploads")]
     enable_uploads: Option<bool>,
     #[serde(rename = "Enable")]
     enable: Option<bool>,
     #[serde(rename = "EnableMarketplace")]
     enable_marketplace: Option<bool>,
+    #[serde(rename = "EnableRemoteMarketplace")]
+    enable_remote_marketplace: Option<bool>,
+    #[serde(rename = "MarketplaceURL")]
+    marketplace_url: Option<String>,
+    #[serde(rename = "AllowInsecureDownloadURL")]
+    allow_insecure_download_url: Option<bool>,
+    #[serde(rename = "SignaturePublicKeyFiles")]
+    signature_public_key_files: Option<Vec<String>>,
 }
 
 /// `model.PluginState`: one untagged field.
@@ -4373,8 +4523,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 119,
-            "the fixture covers {keys} settings and Config reads 119 from the document. \
+            keys, 128,
+            "the fixture covers {keys} settings and Config reads 128 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -4407,12 +4557,14 @@ mod go_parity {
                 "EnablePostSearch": false,
                 "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
+                "RestrictLinkPreviews": "example.com",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true,
                 "EnforceMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
-            "ExperimentalSettings": { "RestrictSystemAdmin": true },
+            "ExperimentalSettings": { "RestrictSystemAdmin": true, "LinkMetadataTimeoutMilliseconds": 250 },
+            "LocalizationSettings": { "DefaultServerLocale": "de" },
             "ImageProxySettings": { "Enable": true },
             "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
             "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
@@ -4430,7 +4582,13 @@ mod go_parity {
                 "EnableMarketplace": false,
                 "ClientDirectory": "/elsewhere",
                 "RequirePluginSignature": true,
+                "EnableHealthCheck": false,
+                "AutomaticPrepackagedPlugins": false,
                 "EnableUploads": true,
+                "EnableRemoteMarketplace": false,
+                "MarketplaceURL": "http://marketplace.invalid",
+                "AllowInsecureDownloadURL": true,
+                "SignaturePublicKeyFiles": ["a.asc", "b.asc"],
                 "PluginStates": { "playbooks": { "Enable": false }, "x": { "Enable": true } }
             },
             "EmailSettings": {
@@ -4470,6 +4628,9 @@ mod go_parity {
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
         );
+        assert_eq!(config.restrict_link_previews, "example.com");
+        assert_eq!(config.link_metadata_timeout_milliseconds, 250);
+        assert_eq!(config.default_server_locale, "de");
         assert!(config.enable_insecure_outgoing_connections);
         assert!(config.enable_shared_channels);
         assert!(!config.enable_custom_emoji);
@@ -4528,7 +4689,13 @@ mod go_parity {
         // The plugin host's: a document entry wins over SetDefaults', which fills only the gaps.
         assert_eq!(config.plugin_client_directory, "/elsewhere");
         assert!(config.plugin_require_signature);
+        assert!(!config.plugin_enable_health_check);
+        assert!(!config.plugin_automatic_prepackaged_plugins);
         assert!(config.plugin_enable_uploads);
+        assert!(!config.plugin_enable_remote_marketplace);
+        assert_eq!(config.plugin_marketplace_url, "http://marketplace.invalid");
+        assert!(config.plugin_allow_insecure_download_url);
+        assert_eq!(config.plugin_signature_public_key_files, ["a.asc", "b.asc"]);
         assert_eq!(config.plugin_states.get("playbooks"), Some(&false));
         assert_eq!(config.plugin_states.get("x"), Some(&true));
         assert_eq!(
@@ -4865,6 +5032,10 @@ mod go_parity {
 
         async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
             Ok(false)
+        }
+
+        async fn get_file(&self, _name: &str) -> Result<Option<Vec<u8>>, mm_store::StoreError> {
+            Ok(None)
         }
     }
 
@@ -5491,6 +5662,8 @@ const GIPHY_SDK_KEY_TEST: &str = "s0glxvzVg9azvPipKxcPLpXV0q1x1fVP";
 const LOCK_PROFILE_FIELDS_NONE: &str = "none";
 /// `model.PluginSettingsDefaultMarketplaceURL` (config.go:271).
 const DEFAULT_MARKETPLACE_URL: &str = "https://api.integrations.mattermost.com";
+/// `model.PluginSettingsOldMarketplaceURL` (config.go:272), which `SetDefaults` replaces.
+const OLD_MARKETPLACE_URL: &str = "https://marketplace.integrations.mattermost.com";
 /// `model.PluginIdApps` (plugin_constants.go:9).
 const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 
@@ -6727,6 +6900,8 @@ struct EcdsaKeyRow {
     curve: String,
     x: Box<serde_json::value::RawValue>,
     y: Box<serde_json::value::RawValue>,
+    /// The private scalar, the same ~78-digit bare integer. Only the signer reads it.
+    d: Option<Box<serde_json::value::RawValue>>,
 }
 
 /// Port of the `AsymmetricSigningPublicKey` line of `regenerateClientConfig`
@@ -6759,6 +6934,27 @@ pub(crate) fn asymmetric_signing_verifying_key(row: &str) -> Option<p256::ecdsa:
         false,
     );
     p256::ecdsa::VerifyingKey::from_encoded_point(&point).ok()
+}
+
+/// The same row as a P-256 **signing** key, for `utils.RenderWebError`'s `s.Sign` — the private
+/// scalar `D`, checked against the stored public point.
+///
+/// `None` when there is no usable private key: no row, another curve, no `d`, a scalar out of
+/// range, or a `d` whose public point is not the stored `x`/`y`. The first four are a server Go
+/// could not have started with (`ensureAsymmetricSigningKey` writes all four fields). The last is
+/// Go's too: `ecdsa.PrivateKey.Sign` rebuilds the key from both halves and refuses a mismatch,
+/// which `RenderWebError` answers with an empty 500 — a caller that gets `None` hands the request
+/// to Go rather than guessing which.
+pub(crate) fn asymmetric_signing_key(row: &str) -> Option<p256::ecdsa::SigningKey> {
+    let parsed: AsymmetricSigningKeyRow = serde_json::from_str(row).ok()?;
+    let key = parsed.ecdsa_key?;
+    if key.curve != "P-256" {
+        return None;
+    }
+    let d = decimal_to_fixed_bytes(key.d?.get(), 32)?;
+    let signing = p256::ecdsa::SigningKey::from_slice(&d).ok()?;
+    let stored = asymmetric_signing_verifying_key(row)?;
+    (signing.verifying_key() == &stored).then_some(signing)
 }
 
 fn asymmetric_signing_public_key(row: &str) -> Option<String> {
@@ -6920,6 +7116,45 @@ impl crate::App {
 
     /// `if key := ps.AsymmetricSigningKey(); key != nil { … }` (platform/config.go:234) — the
     /// property is added to **both** client maps or to neither.
+    /// Port of `PlatformService.ClientConfigHash` (platform/config.go:216) — the third field of
+    /// every `X-Version-Id` Go writes.
+    ///
+    /// Go computes it in `regenerateClientConfig` (platform/config.go:220) and caches it until the
+    /// next config or licence change: the SHA-256, hex, of `json.Marshal` of the **full** client
+    /// map, before any of the computed properties `ClientConfigWithComputed` adds per request. So
+    /// `NoAccounts`, `MaxPostSize` and friends are not in it, while `CustomTermsOfServiceId` (only
+    /// when `EnableCustomTermsOfService` is `"true"`, and only if the latest row loads) and
+    /// `AsymmetricSigningPublicKey` are. `json.Marshal` of a `map[string]string` sorts the keys and
+    /// HTML-escapes `<`, `>` and `&`, which [`mm_model::utils::go_json_marshal_string_map`] does.
+    ///
+    /// Recomputed per call here rather than cached; the value only moves when its inputs do.
+    pub async fn client_config_hash(
+        &self,
+        config: &mm_model::config::Config,
+    ) -> Result<String, ConfigError> {
+        use sha2::Digest as _;
+        let license = self.license().await.map_err(ConfigError::License)?;
+        let mut props =
+            generate_client_config(config, &self.telemetry_id().await, license.as_deref());
+        if props.get("EnableCustomTermsOfService").map(String::as_str) == Some("true") {
+            // `GetLatest(true)` failing is logged and skipped, exactly as Go's `mlog.Err(err)`.
+            match self.get_latest_terms_of_service().await {
+                Ok(terms) => {
+                    props.insert("CustomTermsOfServiceId".to_owned(), terms.id);
+                }
+                Err(err) => tracing::warn!(error = %err.id, "no terms of service for the hash"),
+            }
+        }
+        self.add_signing_key(&mut props).await;
+        let json = mm_model::utils::go_json_marshal_string_map(Some(&props));
+        let digest = sha2::Sha256::digest(json.as_bytes());
+        Ok(digest.iter().fold(String::with_capacity(64), |mut out, b| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{b:02x}");
+            out
+        }))
+    }
+
     async fn add_signing_key(&self, props: &mut mm_model::utils::StringMap) {
         let Some(row) = self.system_value(SYSTEM_ASYMMETRIC_SIGNING_KEY).await else {
             return;
@@ -7203,6 +7438,44 @@ mod document {
             .is_none()
         );
         assert!(asymmetric_signing_public_key("not json").is_none());
+    }
+
+    /// A row Go's `json.Marshal` wrote for a fixed private scalar —
+    /// `fixtures/behaviour_web_error.json`, from `reference/dump/behaviour_web_error.go`.
+    fn go_signing_key_row() -> String {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_web_error.json"))
+                .expect("behaviour_web_error.json is generated by reference/dump");
+        fixture["signing_key_row"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn the_signing_key_signs_what_its_stored_public_half_verifies() {
+        use p256::ecdsa::signature::hazmat::{PrehashSigner as _, PrehashVerifier as _};
+        let row = go_signing_key_row();
+        let signing = asymmetric_signing_key(&row).expect("Go's row yields a signing key");
+        let verifying = asymmetric_signing_verifying_key(&row).expect("and a verifying key");
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(b"/error?message=x");
+        let signature: p256::ecdsa::Signature = signing.sign_prehash(&digest).unwrap();
+        assert!(verifying.verify_prehash(&digest, &signature).is_ok());
+    }
+
+    #[test]
+    fn no_signing_key_without_a_private_half_that_matches_the_public_one() {
+        let row = go_signing_key_row();
+        // No `d`: the shape `asymmetric_signing_public_key` is tested with.
+        assert!(asymmetric_signing_key(SIGNING_KEY_ROW).is_none());
+        // Another curve.
+        assert!(asymmetric_signing_key(&row.replace("P-256", "P-384")).is_none());
+        // A `d` that is not the stored point's: `ecdsa.PrivateKey.Sign` refuses it.
+        let (head, tail) = row.split_once(r#""d":"#).unwrap();
+        let d: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        let other = format!("{head}\"d\":1{}", &tail[d.len()..]);
+        assert!(asymmetric_signing_key(&other).is_none());
+        // Zero is not a scalar.
+        let zero = format!("{head}\"d\":0{}", &tail[d.len()..]);
+        assert!(asymmetric_signing_key(&zero).is_none());
+        assert!(asymmetric_signing_key("{}").is_none());
     }
 
     #[test]

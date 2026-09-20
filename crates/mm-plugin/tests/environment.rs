@@ -148,6 +148,9 @@ fn plugin_log(path: &Path) -> Vec<String> {
     lines
 }
 
+/// Held by each test that points `ENV_PLUGIN_LOG` at its own log for the plugins it launches.
+static PLUGIN_LOG: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn go_transcript() -> (Json, Vec<String>) {
     let root = build_root("environment-go");
     let log = root.join("plugin.log");
@@ -343,7 +346,11 @@ fn environment_matches_go_step_for_step() {
 
     let root = build_root("environment-rust");
     let log = root.join("plugin.log");
-    // SAFETY: set before the runtime starts, and nothing else in this test binary reads it.
+    let _log = PLUGIN_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // SAFETY: set before the runtime starts, while holding `PLUGIN_LOG`, which every writer of
+    // the variable holds; the plugins this environment launches inherit it.
     unsafe { std::env::set_var("ENV_PLUGIN_LOG", &log) };
     let rust = tokio::runtime::Runtime::new()
         .unwrap()
@@ -363,4 +370,469 @@ fn environment_matches_go_step_for_step() {
     }
     report(&failures);
     assert_eq!(plugin_log(&log), go_log, "what the plugins logged");
+}
+
+/// plugingen/reattach.go's `ReattachManifests`.
+fn reattach_manifest(name: &str) -> mm_model::manifest::Manifest {
+    let json = match name {
+        "webonly" => r#"{"id":"webonly","version":"1.0.0","webapp":{"bundle_path":"main.js"}}"#,
+        "minversion" => {
+            r#"{"id":"reminv","version":"1.0.0","min_server_version":"99.0.0","server":{"executable":"x"}}"#
+        }
+        "dead" => {
+            r#"{"id":"dead","version":"1.0.0","server":{"executable":"x"},"webapp":{"bundle_path":"main.js"}}"#
+        }
+        "ok" => {
+            r#"{"id":"ok","name":"OK","version":"1.0.0","server":{"executable":"server/env_plugin"}}"#
+        }
+        "refuse" => {
+            r#"{"id":"refuse","name":"Refuses","version":"1.0.0","server":{"executable":"server/env_plugin_refuse"}}"#
+        }
+        other => panic!("no manifest {other}"),
+    };
+    serde_json::from_str(json).unwrap()
+}
+
+/// plugingen/reattach.go's `launch`: start the executable as a plugin ourselves, as a developer's
+/// tooling would, and hand the environment only its reattach configuration.
+async fn launch(
+    path: &Path,
+    log: &Path,
+) -> (
+    goplugin::Client,
+    mm_model::plugin_reattach::PluginReattachConfig,
+) {
+    let mut config = goplugin::ClientConfig::new(mm_plugin::rpc::handshake());
+    // The log path goes on the command rather than into this process's environment, which
+    // `environment_matches_go_step_for_step` sets for itself on another thread.
+    let mut command = goplugin::PluginCommand::new(path);
+    command
+        .env
+        .push(("ENV_PLUGIN_LOG".into(), log.as_os_str().to_owned()));
+    config.cmd = Some(command);
+    let client = goplugin::Client::start(config).await.unwrap();
+    let r = client.reattach_config();
+    let reattach = mm_model::plugin_reattach::PluginReattachConfig {
+        protocol: r.protocol,
+        protocol_version: 1,
+        addr: mm_model::plugin_reattach::UnixAddr {
+            name: r.addr.to_string(),
+            net: r.addr.network().to_owned(),
+        },
+        pid: i64::from(r.pid),
+        test: r.test,
+    };
+    (client, reattach)
+}
+
+/// plugingen/reattach.go's `runReattach`, over the Rust environment.
+async fn reattach_script(root: &Path, log: &Path) -> Json {
+    let plugin_dir = root.join("plugins");
+    let env = Environment::new(
+        Box::new(|_| Arc::new(NoApi)),
+        Arc::new(NoDriver),
+        plugin_dir.clone(),
+        root.join("webapp"),
+    );
+
+    let mut gone = Command::new("true").spawn().unwrap();
+    let gone_pid = gone.id();
+    gone.wait().unwrap();
+    let dead = mm_model::plugin_reattach::PluginReattachConfig {
+        protocol: "netrpc".into(),
+        protocol_version: 1,
+        addr: mm_model::plugin_reattach::UnixAddr {
+            name: root.join("nobody.sock").to_string_lossy().into_owned(),
+            net: "unix".into(),
+        },
+        pid: i64::from(gone_pid),
+        test: false,
+    };
+    let (ok_client, ok_config) = launch(&plugin_dir.join("ok/server/env_plugin"), log).await;
+    let (refuse_client, refuse_config) =
+        launch(&plugin_dir.join("refuse/server/env_plugin_refuse"), log).await;
+
+    let ids = ["webonly", "reminv", "dead", "ok", "refuse"];
+    let observe = |env: &Environment<NoApi, NoDriver>, label: &str| {
+        let mut state = serde_json::Map::new();
+        let mut hooks = serde_json::Map::new();
+        for id in ids {
+            state.insert(id.into(), json!(env.get_plugin_state(id)));
+            hooks.insert(
+                id.into(),
+                json!(err_string(env.hooks_for_plugin(id).map(drop))),
+            );
+        }
+        let mut active: Vec<String> = env
+            .active()
+            .into_iter()
+            .map(|i| format!("{} {}", i.manifest.unwrap().id, i.path))
+            .collect();
+        active.sort();
+        let (errs, statuses_error) = match env.statuses() {
+            Ok(st) => (
+                st.0.iter()
+                    .filter(|s| s.plugin_id == "ok" || s.plugin_id == "refuse")
+                    .map(|s| (s.plugin_id.clone(), json!(s.error)))
+                    .collect::<serde_json::Map<_, _>>(),
+                String::new(),
+            ),
+            Err(e) => (serde_json::Map::new(), e.to_string()),
+        };
+        json!({"step": "observe", "label": label, "state": state, "hooks": hooks,
+            "active": active, "status_errors": errs, "statuses_error": statuses_error})
+    };
+
+    let mut steps = Vec::new();
+    for (name, config) in [
+        ("webonly", &dead),
+        ("minversion", &dead),
+        ("dead", &dead),
+        ("ok", &ok_config),
+        ("ok", &ok_config),
+        ("refuse", &refuse_config),
+    ] {
+        let error = err_string(env.reattach(&reattach_manifest(name), config).await);
+        steps.push(json!({"step": "reattach", "name": name, "error": error}));
+    }
+    steps.push(observe(&env, "after reattaching"));
+
+    let mut deactivated = serde_json::Map::new();
+    for id in ids {
+        deactivated.insert(id.into(), json!(env.deactivate(id).await));
+    }
+    steps.push(json!({"step": "deactivate", "deactivated": deactivated}));
+    steps.push(observe(&env, "after deactivating"));
+
+    for id in ids {
+        env.remove_plugin(id);
+    }
+    steps.push(observe(&env, "after removing"));
+    env.shutdown().await;
+    ok_client.kill().await;
+    refuse_client.kill().await;
+
+    let text = serde_json::to_string(&steps)
+        .unwrap()
+        .replace(&root.to_string_lossy().into_owned(), "$ROOT");
+    serde_json::from_str(&text).unwrap()
+}
+
+/// `Environment.Reattach` against Go's, step for step: the one error (no server component), the
+/// failures it swallows and marks running (a version check, a process that is gone, a plugin
+/// that refuses `OnActivate`), a real reattach whose hooks answer, a second one that is a no-op,
+/// and what `Deactivate` and `RemovePlugin` make of each.
+#[test]
+fn reattach_matches_go_step_for_step() {
+    let go_root = build_root("reattach-go");
+    let go_log = go_root.join("plugin.log");
+    let out = Command::new(plugingen())
+        .arg("reattach")
+        .arg(&go_root)
+        .current_dir(root_dir())
+        .env("ENV_PLUGIN_LOG", &go_log)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "plugingen reattach: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let go: Json = serde_json::from_slice(&out.stdout).unwrap();
+
+    let root = build_root("reattach-rust");
+    let log = root.join("plugin.log");
+    let rust = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(reattach_script(&root, &log));
+
+    let (go_steps, rust_steps) = (go.as_array().unwrap(), rust.as_array().unwrap());
+    assert_eq!(go_steps.len(), rust_steps.len(), "step count");
+    let mut failures = Vec::new();
+    for (i, (g, r)) in go_steps.iter().zip(rust_steps).enumerate() {
+        if g != r {
+            failures.push(format!(
+                "step {i}:\nGo:   {}\nRust: {}",
+                serde_json::to_string_pretty(g).unwrap(),
+                serde_json::to_string_pretty(r).unwrap()
+            ));
+        }
+    }
+    report(&failures);
+    assert_eq!(
+        plugin_log(&log),
+        plugin_log(&go_log),
+        "what the plugins logged"
+    );
+}
+
+/// The two bundles `plugingen health` checks: `ok`, and `crashy`, which exits on request.
+fn build_health_root(name: &str) -> PathBuf {
+    let root = scratch(name);
+    let plugins = root.join("plugins");
+    put(
+        &plugins.join("ok/plugin.json"),
+        r#"{"id":"ok","name":"OK","version":"1.0.0","server":{"executable":"server/env_plugin"}}"#,
+    );
+    executable(&plugins.join("ok"), "env_plugin");
+    put(
+        &plugins.join("crashy/plugin.json"),
+        r#"{"id":"crashy","name":"Crashes","version":"2.0.0","server":{"executable":"server/env_plugin_crashy"}}"#,
+    );
+    executable(&plugins.join("crashy"), "env_plugin_crashy");
+    std::fs::create_dir_all(root.join("webapp")).unwrap();
+    root
+}
+
+/// plugingen/health.go's `HealthIDs`.
+const HEALTH_IDS: [&str; 3] = ["ok", "crashy", "absent"];
+
+type HealthEnv = Environment<NoApi, NoDriver>;
+
+async fn health(env: &HealthEnv) -> Json {
+    let mut out = serde_json::Map::new();
+    for id in HEALTH_IDS {
+        out.insert(
+            id.into(),
+            json!(err_string(env.perform_health_check(id).await)),
+        );
+    }
+    Json::Object(out)
+}
+
+fn health_observe(env: &HealthEnv, label: &str) -> Json {
+    let (statuses, statuses_error) = match env.statuses() {
+        Ok(st) => (
+            st.0.iter()
+                .map(|s| {
+                    (
+                        s.plugin_id.clone(),
+                        json!({"state": s.state, "error": s.error, "version": s.version}),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>(),
+            String::new(),
+        ),
+        Err(e) => (serde_json::Map::new(), e.to_string()),
+    };
+    let mut active: Vec<String> = env
+        .active()
+        .into_iter()
+        .filter_map(|i| i.manifest.map(|m| m.id))
+        .collect();
+    active.sort();
+    let mut hooks = serde_json::Map::new();
+    for id in HEALTH_IDS {
+        hooks.insert(
+            id.into(),
+            json!(err_string(env.hooks_for_plugin(id).map(drop))),
+        );
+    }
+    json!({"step": "observe", "label": label, "statuses": statuses,
+        "statuses_error": statuses_error, "active": active, "hooks": hooks,
+        "job": env.health_check_job().is_some()})
+}
+
+/// plugingen/health.go's `crash`: ask `crashy` to exit, then wait until it stops answering.
+async fn crash(env: &HealthEnv, request: &Path, label: &str) -> Json {
+    std::fs::write(request, b"").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while request.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "crashy never took the crash request"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    while env.perform_health_check("crashy").await.is_ok() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "crashy still answers after crashing"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    json!({"step": "crash", "label": label, "health": health(env).await})
+}
+
+/// plugingen/health.go's `runHealth`, over the Rust environment.
+async fn health_script(root: &Path, log: &Path) -> Json {
+    let plugin_dir = root.join("plugins");
+    let env = Arc::new(Environment::new(
+        Box::new(|_| Arc::new(NoApi)),
+        Arc::new(NoDriver),
+        plugin_dir.clone(),
+        root.join("webapp"),
+    ));
+    let mut request = log.as_os_str().to_owned();
+    request.push(".crash");
+    let request = PathBuf::from(request);
+    let mut steps = Vec::new();
+
+    let before = env.health_check_job().is_some();
+    env.toggle_plugin_health_check_job(true).await;
+    let job = env.health_check_job().unwrap();
+    env.toggle_plugin_health_check_job(true).await;
+    let same = env
+        .health_check_job()
+        .is_some_and(|j| Arc::ptr_eq(&j, &job));
+    steps.push(json!({"step": "toggle on", "before": before, "on": true, "same": same}));
+
+    for id in HEALTH_IDS {
+        let (activated, error) = match env.activate(id).await {
+            Ok(m) => (m.is_some(), String::new()),
+            Err(e) => (false, e.to_string()),
+        };
+        steps.push(json!({"step": "activate", "id": id, "activated": activated, "error": error}));
+    }
+    steps.push(health_observe(&env, "activated"));
+
+    for id in HEALTH_IDS {
+        job.check_plugin(id).await;
+    }
+    steps.push(json!({"step": "healthy", "health": health(&env).await}));
+    steps.push(health_observe(&env, "after checking healthy plugins"));
+
+    for label in ["first", "second", "third"] {
+        steps.push(crash(&env, &request, label).await);
+        job.check_plugin("crashy").await;
+        job.check_plugin("ok").await;
+        steps.push(health_observe(&env, &format!("after the {label} failure")));
+    }
+
+    job.check_plugin("crashy").await;
+    steps.push(health_observe(&env, "a check after deactivation"));
+
+    steps.push(crash(&env, &request, "before a failed restart").await);
+    let exe = plugin_dir.join("crashy/server/env_plugin_crashy");
+    let away = plugin_dir.join("crashy/server/env_plugin_crashy.away");
+    std::fs::rename(&exe, &away).unwrap();
+    job.check_plugin("crashy").await;
+    steps.push(health_observe(&env, "after a failed restart"));
+    job.check_plugin("crashy").await;
+    steps.push(json!({"step": "no supervisor", "health": health(&env).await}));
+    steps.push(health_observe(&env, "a check with no supervisor"));
+    std::fs::rename(&away, &exe).unwrap();
+
+    env.toggle_plugin_health_check_job(false).await;
+    steps.push(json!({"step": "toggle off", "job": env.health_check_job().is_some()}));
+    env.toggle_plugin_health_check_job(true).await;
+    let again = env.health_check_job();
+    steps.push(json!({"step": "toggle on again", "job": again.is_some(),
+        "new": again.is_some_and(|j| !Arc::ptr_eq(&j, &job))}));
+
+    env.shutdown().await;
+    steps.push(health_observe(&env, "after shutdown"));
+
+    let text = serde_json::to_string(&steps)
+        .unwrap()
+        .replace(&root.to_string_lossy().into_owned(), "$ROOT");
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The health check against Go's, step for step: healthy plugins are left alone; a plugin that
+/// stops answering is restarted twice and deactivated on its third failure inside the hour, into
+/// state 4 with its failures forgotten; its dead supervisor still answers a direct check (a new
+/// first failure, so a restart); a restart that fails leaves it failed to start with no supervisor,
+/// which passes every check; the toggle starts one job and stops it; and `Shutdown` stops it too.
+#[test]
+fn health_check_matches_go_step_for_step() {
+    let go_root = build_health_root("health-go");
+    let go_log = go_root.join("plugin.log");
+    let out = Command::new(plugingen())
+        .arg("health")
+        .arg(&go_root)
+        .current_dir(root_dir())
+        .env("ENV_PLUGIN_LOG", &go_log)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "plugingen health: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let go: Json = serde_json::from_slice(&out.stdout).unwrap();
+
+    let root = build_health_root("health-rust");
+    let log = root.join("plugin.log");
+    // The plugins the environment launches read the log path, and so their crash request, from
+    // this process's environment, which `environment_matches_go_step_for_step` sets too.
+    let _log = PLUGIN_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // SAFETY: set while holding `PLUGIN_LOG`, which every writer of the variable holds.
+    unsafe { std::env::set_var("ENV_PLUGIN_LOG", &log) };
+    let rust = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(health_script(&root, &log));
+
+    let (go_steps, rust_steps) = (go.as_array().unwrap(), rust.as_array().unwrap());
+    let mut failures = Vec::new();
+    for (i, (g, r)) in go_steps.iter().zip(rust_steps).enumerate() {
+        if g != r {
+            failures.push(format!(
+                "step {i}:\nGo:   {}\nRust: {}",
+                serde_json::to_string_pretty(g).unwrap(),
+                serde_json::to_string_pretty(r).unwrap()
+            ));
+        }
+    }
+    report(&failures);
+    assert_eq!(go_steps.len(), rust_steps.len(), "step count");
+    assert_eq!(
+        plugin_log(&log),
+        plugin_log(&go_log),
+        "what the plugins logged"
+    );
+}
+
+/// The job's own loop (health_check.go, `run`), which the Go comparison cannot wait thirty seconds
+/// for: on each tick it checks every running plugin, so a crashed one is restarted without anyone
+/// asking, and a plugin that is not running is not checked at all.
+#[test]
+fn the_health_check_job_checks_running_plugins_on_each_tick() {
+    let root = build_health_root("health-loop");
+    let log = root.join("plugin.log");
+    let _log = PLUGIN_LOG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // SAFETY: as in `health_check_matches_go_step_for_step`.
+    unsafe { std::env::set_var("ENV_PLUGIN_LOG", &log) };
+    let mut request = log.as_os_str().to_owned();
+    request.push(".crash");
+    let request = PathBuf::from(request);
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let env: Arc<HealthEnv> = Arc::new(Environment::new(
+            Box::new(|_| Arc::new(NoApi)),
+            Arc::new(NoDriver),
+            root.join("plugins"),
+            root.join("webapp"),
+        ));
+        env.activate("crashy").await.unwrap();
+        crash(&env, &request, "loop").await;
+        env.toggle_health_check_job_every(true, std::time::Duration::from_millis(50))
+            .await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        // Restarted: running again, with a supervisor that answers.
+        while env.hooks_for_plugin("crashy").is_err()
+            || env.perform_health_check("crashy").await.is_err()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the job never restarted the crashed plugin"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let activations = plugin_log(&log)
+            .iter()
+            .filter(|l| l.as_str() == "env_plugin_crashy: OnActivate")
+            .count();
+        assert_eq!(activations, 2, "started, then restarted by the job");
+
+        // Not running: the loop leaves it alone even though its dead supervisor would fail.
+        env.deactivate("crashy").await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!env.is_active("crashy"), "a stopped plugin is not checked");
+        env.shutdown().await;
+        assert!(env.health_check_job().is_none(), "Shutdown stops the job");
+    });
 }

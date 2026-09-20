@@ -544,6 +544,29 @@ pub fn new_random_string(length: usize) -> String {
     encoded.chars().take(length).collect()
 }
 
+/// `utils.LOWERCASE` (channels/utils/textgeneration.go:15).
+pub const LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
+
+/// Port of `utils.RandString` (channels/utils/textgeneration.go:470): `length` bytes, each drawn
+/// uniformly from `charset`.
+///
+/// Go draws from `math/rand`'s **global** source, which is randomly seeded and — since Go 1.24 —
+/// cannot be re-seeded by `rand.Seed`, so no caller can observe which generator produced the
+/// bytes. This one is `rand`'s thread generator. An empty `charset` yields an empty string where
+/// Go's `rand.Intn(0)` panics. Go indexes bytes, so the charset is meant to be ASCII, as every
+/// one in `textgeneration.go` is.
+pub fn rand_string(length: usize, charset: &str) -> String {
+    use rand::Rng as _;
+    let bytes = charset.as_bytes();
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let mut rng = rand::rng();
+    (0..length)
+        .map(|_| char::from(bytes[rng.random_range(0..bytes.len())]))
+        .collect()
+}
+
 /// z-base-32, no padding — the encoding half of `base32.NewEncoding(...)` at utils.go:378.
 fn zbase32_encode(input: &[u8]) -> String {
     let mut out = String::with_capacity(input.len().div_ceil(5) * 8);
@@ -992,6 +1015,47 @@ pub fn decode_one_from_json<T: serde::de::DeserializeOwned>(
     let data = replace_lone_surrogates(data);
     let mut deserializer = serde_json::Deserializer::from_slice(&data);
     T::deserialize(&mut deserializer)
+}
+
+/// [`decode_one_from_json`] for a body whose Go target is a **struct**, which a JSON array is
+/// never a valid encoding of.
+///
+/// serde's derived `Deserialize` accepts a *sequence* as well as a map — the fields are read
+/// positionally — so `[]` decodes into a struct with every field at its default, where
+/// `encoding/json` answers `cannot unmarshal array into Go value of type model.X`. The difference
+/// is on the wire: Go's handler answers `invalid_body_param` naming the **body**, and a port that
+/// accepted the array walks on to a later validation branch and names some *field* instead. Found
+/// 2026-09-20 by `parity::channel_creates`, once error messages started being compared.
+///
+/// A leading `[` is the whole test, because that is the only token serde and `encoding/json`
+/// disagree about here: a string, a number and a bare `true` are errors for both, and `null` is
+/// the caller's to model — `T = Option<Struct>` for Go's `var x *model.T`, and
+/// [`decode_one_value_from_json`] for its `var x model.T`.
+pub fn decode_one_object_from_json<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    if data
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b'[')
+    {
+        return Err(serde::de::Error::custom(
+            "json: cannot unmarshal array into Go value",
+        ));
+    }
+    decode_one_from_json(data)
+}
+
+/// [`decode_one_object_from_json`] for Go's `var x model.T` — a **value**, not a pointer.
+///
+/// `json.Decode(&x)` of a `null` body into a non-pointer is a no-op *success*: `x` keeps its zero
+/// value and the handler walks on to its field checks. serde rejects `null` for a struct, so a
+/// port that used the plain decoder answers `invalid_body_param` naming the body where Go names
+/// the first empty field. Found 2026-09-20 by `parity::properties`.
+pub fn decode_one_value_from_json<T: serde::de::DeserializeOwned + Default>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    Ok(decode_one_object_from_json::<Option<T>>(data)?.unwrap_or_default())
 }
 
 /// Port of `model.SortedArrayFromJSON` (utils.go:546): `json.Decoder.Decode` into `[]string`,
@@ -2035,6 +2099,16 @@ pub fn parse_hashtags(text: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rand_string_draws_length_bytes_from_the_charset() {
+        let name = super::rand_string(20, super::LOWERCASE);
+        assert_eq!(name.len(), 20);
+        assert!(name.bytes().all(|b| b.is_ascii_lowercase()), "{name}");
+        assert_eq!(super::rand_string(3, "x"), "xxx");
+        assert_eq!(super::rand_string(0, super::LOWERCASE), "");
+        assert_eq!(super::rand_string(5, ""), "");
+    }
+
     use super::*;
 
     // -- encoding / IDs ----------------------------------------------------
@@ -3186,7 +3260,7 @@ pub fn go_quote(s: &str) -> String {
 /// ranges `reference/dump/quote_gen.go` emits from the linked Go toolchain, and the corpus probes
 /// **both sides of every one of those boundaries**, so a range that moves fails at the code point
 /// that moved.
-fn go_is_print(c: char) -> bool {
+pub fn go_is_print(c: char) -> bool {
     in_ranges(crate::go_unicode_generated::IS_PRINT_RANGES, c)
 }
 

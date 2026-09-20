@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO linkmetadata (hash, url, \"timestamp\", type, data)\n               VALUES ($1, $2, $3, $4, $5)\n               ON CONFLICT (hash) DO UPDATE\n                 SET url = $2, \"timestamp\" = $3, type = $4, data = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Int8",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a407d73e10b3f3008f980325dad46be67c88c790d7c3c15f6faa14a2704601d"
+}

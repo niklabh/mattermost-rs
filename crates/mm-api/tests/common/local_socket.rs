@@ -189,10 +189,10 @@ pub async fn both_with_body(
 
 /// Assert a **forwarded** body is Go's own, byte for byte apart from the per-request id.
 ///
-/// [`super::assert_error_bodies_match_except_known_gaps`] is the wrong instrument here: it pins
-/// our `message` to the raw error id, which is the D-092 i18n gap in errors *this server renders*.
-/// A forwarded response was rendered by Go, so it carries Go's translated message — and a helper
-/// that tolerated both would no longer be able to tell a forward from a local answer.
+/// Since D-092 closed this is very nearly
+/// [`super::assert_error_bodies_match_except_known_gaps`]; it is kept separate because it
+/// compares the whole `Value`, including a key only one side might carry, where that helper
+/// compares key sets and then values. Either would pass for a forward.
 ///
 /// `request_id` is minted per request and the two calls are two requests, so it is dropped rather
 /// than compared.

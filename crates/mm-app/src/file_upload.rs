@@ -3,16 +3,15 @@
 //!
 //! # What is served and what is handed to Go
 //!
-//! Everything up to and including the write is here: the storage and size refusals, the
-//! `FileInfo` an upload mints (id, dated path, extension, mime type), the SVG and PNG header
-//! reads that put `width`/`height` on the wire, the resolution refusal, the write itself, the
-//! over-length removal and the row. What is not here is `postprocessImage`: decoding the raster,
-//! resizing it to a `_thumb` and a `_preview`, and encoding the 16×16 `mini_preview` — the pixel
-//! work [D-380] and [D-411] defer. So a raster image this port can measure and Go would resize
-//! is refused as [`PrepareError::Unreproducible`] **before anything is written**, and the
-//! handler forwards the untouched request. A raster image Go *cannot* decode is served: Go's
-//! `preprocessImage` returns "as is" and its `postprocessImage` only logs, so the row is the
-//! plain one with no dimensions.
+//! Everything: the storage and size refusals, the `FileInfo` an upload mints (id, dated path,
+//! extension, mime type), `preprocessImage` (the SVG and raster header reads, the resolution
+//! refusal, the EXIF axis swap, the derived paths), the write, the over-length removal,
+//! `postprocessImage` (the `_thumb` and `_preview` files and the 16×16 `mini_preview`, byte for
+//! byte through [`crate::image_pipeline`]) and the row — **for PNG and JPEG**. A GIF, BMP, TIFF or
+//! WebP is recognised by its header and refused as [`PrepareError::Unreproducible`] **before
+//! anything is written**, and the handler forwards the untouched request: those decoders are not
+//! ported ([D-650]). A raster Go cannot decode is served: `preprocessImage` returns "as is" and
+//! `postprocessImage` only logs, so the row is the plain one with no dimensions.
 //!
 //! The plugin hook (`runPluginsHook`) has no plugin host to run against and takes Go's own early
 //! return; content extraction is [D-651].
@@ -33,7 +32,12 @@ use mm_store::error::StoreError;
 use mm_store::file_info_store::FileInfoStore;
 
 use crate::App;
-use crate::imaging::{ImageConfig, decode_config, file_ext_from_mime_type};
+use crate::image_pipeline::{self, PipelineError};
+use crate::imaging::file_ext_from_mime_type;
+use crate::imaging_orientation::{
+    Input, ROTATED_CCW, ROTATED_CCW_MIRRORED, ROTATED_CW, ROTATED_CW_MIRRORED,
+    get_image_orientation,
+};
 use crate::post::PrepareError;
 
 /// `FileTeamId` (api4/file.go:26) — every REST upload is filed under this team.
@@ -165,8 +169,11 @@ impl App {
         let input_len = usize::try_from(limit.saturating_add(1)).unwrap_or(usize::MAX);
         let input = &task.data[..task.data.len().min(input_len)];
 
+        // `t.imageOrientation`: Go's zero value when preprocessing stopped early.
+        let mut orientation = 0;
         if info.is_image() {
-            self.preprocess_image(&mut info, &name, &prefix, input)
+            orientation = self
+                .preprocess_image(&mut info, &name, &prefix, input)
                 .map_err(|reason| match reason {
                     Preprocess::TooLarge => refusal(
                         "api.file.upload_file.large_image_detailed.app_error",
@@ -187,8 +194,12 @@ impl App {
         }
         info.size = written;
 
-        // `runPluginsHook`: no plugin host. `postprocessImage`: an image reaching here is one
-        // the decoder refuses, and Go's only action on that is a log line.
+        // `runPluginsHook`: no plugin host.
+
+        if info.is_image() && !info.is_svg() {
+            self.postprocess_image(&mut info, input, orientation)
+                .await?;
+        }
 
         match self.store().file_info().save(info).await {
             Ok(info) => Ok(info),
@@ -207,22 +218,24 @@ impl App {
         // `ExtractContent`: [D-651].
     }
 
-    /// Port of `UploadFileTask.preprocessImage` (app/file.go:892), up to the point Go starts
-    /// caching decoded pixels for `postprocessImage`.
+    /// Port of `UploadFileTask.preprocessImage` (app/file.go:892). Returns the EXIF orientation
+    /// `postprocessImage` will turn the image upright with.
     ///
     /// An SVG goes to `ParseSVG` for its dimensions and never gets a preview — see
-    /// [`crate::imaging::parse_svg`]. A raster is `DecodeConfig`: a refusal there is "as is"
-    /// (no dimensions, no preview, and the upload proceeds); a header this port measures gives
-    /// the dimensions and the resolution refusal; and then — `HasPreviewImage`, the two derived
-    /// paths, EXIF orientation, the GIF frame walk — is the part only Go finishes, so a measured
-    /// image inside the limit is handed over here, before the write.
+    /// [`crate::imaging::parse_svg`]. A raster is `DecodeConfig`: a refusal there is "as is" (no
+    /// dimensions, no preview, and the upload proceeds with orientation 0); otherwise the
+    /// dimensions, the resolution refusal, `HasPreviewImage` and the two derived paths, then the
+    /// orientation — read through the **non-seekable** reader Go hands in, which is not always the
+    /// answer a seekable one gives — swapping width and height for the four orientations that
+    /// turn the image on its side. A file the mime table calls `image/gif` is decoded whole, and
+    /// when that works it gets no preview (an animated GIF's first frame is not one).
     fn preprocess_image(
         &self,
         info: &mut FileInfo,
         name: &str,
         prefix: &str,
         input: &[u8],
-    ) -> Result<(), Preprocess> {
+    ) -> Result<i64, Preprocess> {
         if info.is_svg() {
             let (dims, err) = crate::imaging::parse_svg(input);
             if let Some(err) = err {
@@ -233,37 +246,121 @@ impl App {
                 info.height = dims.height;
             }
             info.has_preview_image = false;
-            return Ok(());
+            return Ok(0);
         }
 
-        match decode_config(input) {
-            // "If we fail to decode, return as is."
-            ImageConfig::NoFormat => Ok(()),
-            ImageConfig::Known { width, height, .. } => {
-                info.width = width;
-                info.height = height;
-                if crate::imaging::check_image_resolution_limit(
-                    width,
-                    height,
-                    self.config().file_max_image_resolution,
-                )
-                .is_err()
-                {
-                    return Err(Preprocess::TooLarge);
-                }
-                info.has_preview_image = true;
-                // `t.Name[:strings.LastIndex(t.Name, ".")]` — an image mime type implies an
-                // extension, so the dot is there.
-                let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-                let ext = file_ext_from_mime_type(&info.mime_type);
-                info.preview_path = format!("{prefix}{stem}_preview.{ext}");
-                info.thumbnail_path = format!("{prefix}{stem}_thumb.{ext}");
-                Err(Preprocess::Unreproducible(
-                    "an image upload's preview, thumbnail and mini preview are Go's",
-                ))
+        let config = match image_pipeline::decode_config(input) {
+            Ok(config) => config,
+            Err(PipelineError::NotPorted(_)) => {
+                return Err(Preprocess::Unreproducible(
+                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                ));
             }
-            ImageConfig::Undecidable(reason) => Err(Preprocess::Unreproducible(reason)),
+            // "If we fail to decode, return as is."
+            Err(PipelineError::Go(_)) => return Ok(0),
+        };
+        info.width = config.width;
+        info.height = config.height;
+        if crate::imaging::check_image_resolution_limit(
+            config.width,
+            config.height,
+            self.config().file_max_image_resolution,
+        )
+        .is_err()
+        {
+            return Err(Preprocess::TooLarge);
         }
+        info.has_preview_image = true;
+        // `t.Name[:strings.LastIndex(t.Name, ".")]` — an image mime type implies an extension, so
+        // the dot is there.
+        let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+        let ext = file_ext_from_mime_type(&info.mime_type);
+        info.preview_path = format!("{prefix}{stem}_preview.{ext}");
+        info.thumbnail_path = format!("{prefix}{stem}_thumb.{ext}");
+
+        let outcome = get_image_orientation(Input::Stream(input), config.format).map_err(
+            |crate::imaging_orientation::Unreproducible(why)| Preprocess::Unreproducible(why),
+        )?;
+        if let Some(err) = &outcome.err {
+            tracing::warn!(error = %err, "Failed to get image orientation");
+        } else if matches!(
+            outcome.orientation,
+            ROTATED_CW_MIRRORED | ROTATED_CCW | ROTATED_CCW_MIRRORED | ROTATED_CW
+        ) {
+            std::mem::swap(&mut info.width, &mut info.height);
+        }
+
+        if info.mime_type == "image/gif" {
+            match image_pipeline::decode(input, self.config().file_max_image_resolution) {
+                Ok(_) => info.has_preview_image = false,
+                Err(PipelineError::NotPorted(_)) => {
+                    return Err(Preprocess::Unreproducible(
+                        "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                    ));
+                }
+                Err(PipelineError::Go(_)) => {}
+            }
+        }
+        Ok(outcome.orientation)
+    }
+
+    /// Port of `UploadFileTask.postprocessImage` (app/file.go:951): decode what was written, make
+    /// it upright, and write the `_thumb` and `_preview` files and set `MiniPreview` — PNG when
+    /// the decoder said `png`, JPEG at quality 90 otherwise, the mini preview always JPEG. A
+    /// decode failure writes nothing and keeps the row as preprocessing left it; an encode or
+    /// write failure is logged and skips only that file, as Go's goroutines do.
+    async fn postprocess_image(
+        &self,
+        info: &mut FileInfo,
+        written: &[u8],
+        orientation: i64,
+    ) -> Result<(), PrepareError> {
+        let data = written.to_vec(); // moved to the blocking pool; the pixels outlive the borrow
+        let max_res = self.config().file_max_image_resolution;
+        let result = tokio::task::spawn_blocking(move || {
+            image_pipeline::postprocess_image(&data, max_res, orientation)
+        })
+        .await
+        .map_err(|err| {
+            tracing::error!(error = %err, "image postprocessing panicked");
+            PrepareError::App(AppError::boxed(
+                "UploadFileX",
+                "app.file_info.save.app_error",
+                None,
+                String::new(),
+                500,
+            ))
+        })?;
+        let processed = match result {
+            Ok(Some(processed)) => processed,
+            Ok(None) => return Ok(()),
+            // Refused before the write for every format that reaches here; kept as a guard.
+            Err(_) => {
+                return Err(PrepareError::Unreproducible(
+                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                ));
+            }
+        };
+        for (bytes, path) in [
+            (processed.derived.thumbnail, &info.thumbnail_path),
+            (processed.derived.preview, &info.preview_path),
+        ] {
+            match bytes {
+                Ok(bytes) => {
+                    if let Err(err) = self.write_file(&bytes, path).await {
+                        tracing::error!(error = ?err, path, "Unable to upload");
+                    }
+                }
+                Err(err) => tracing::error!(error = %err, path, "Unable to encode image"),
+            }
+        }
+        if info.mini_preview.is_none() {
+            match processed.mini_preview {
+                Ok(mini) => info.mini_preview = Some(mini),
+                Err(err) => tracing::info!(error = %err, "Unable to generate mini preview image"),
+            }
+        }
+        Ok(())
     }
 }
 

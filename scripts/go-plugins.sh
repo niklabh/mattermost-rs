@@ -10,7 +10,8 @@
 # `uploadPlugin` refuses with a 501 unless `PluginSettings.EnableUploads` is on (api4/plugin.go:47),
 # and `patchConfig` refuses to change that setting over the API (api4/config.go:306), so the main
 # server — which runs on the stock `false` — can never answer an upload. This one sets it from the
-# environment. It is the oracle `parity::plugin_upload` compares the Rust plugin host against.
+# environment. It is the oracle `parity::plugin_upload` compares the Rust plugin host against, and
+# `parity::marketplace` too, which is why it also points at a mock Marketplace.
 #
 # # What it shares and what it does not
 #
@@ -56,6 +57,13 @@ case "${1:-start}" in
     export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
     # The one difference that matters.
     export MM_PLUGINSETTINGS_ENABLEUPLOADS=true
+    # `parity::marketplace`: the Marketplace is the mock that suite serves on Go's port + 39,
+    # bundles may come over plain http from it, and its signatures verify with the test key the
+    # suite plants as this configuration file. `patchConfig` refuses the URL while uploads are
+    # off on the main server, so the environment is the only way to set it.
+    export MM_PLUGINSETTINGS_MARKETPLACEURL="http://127.0.0.1:$((MMRS_GO_PORT + 39))"
+    export MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL=true
+    export MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES=mmrs-marketplace-test.plugin.asc
     mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1

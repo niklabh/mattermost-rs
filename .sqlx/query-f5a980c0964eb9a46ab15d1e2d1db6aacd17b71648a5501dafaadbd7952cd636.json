@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM incomingwebhooks WHERE userid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f5a980c0964eb9a46ab15d1e2d1db6aacd17b71648a5501dafaadbd7952cd636"
+}

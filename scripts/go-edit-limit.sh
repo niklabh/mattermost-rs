@@ -5,6 +5,9 @@
 #   scripts/go-edit-limit.sh stop    stop it
 #   scripts/go-edit-limit.sh port    print the port it uses on this stack
 #
+#   MMRS_EDITLIMIT_VARIANT=testing scripts/go-edit-limit.sh start|stop|port
+#                                    instead: MM_SERVICESETTINGS_ENABLETESTING=true, on +70
+#
 # # Why a separate server
 #
 # `postEditTimeLimitExpired` (api4/post.go:1052) returns false on the stock `-1` before it looks
@@ -22,16 +25,34 @@
 # Same Postgres and the same `MM_CONFIG` DSN, so the same `Sessions` and `Posts` tables — a post
 # created through the main server is edited here. The override is an environment variable, which
 # Go does not write back into the shared configuration document. Its own run directory.
+#
+# # The `testing` variant
+#
+# The same shape for a different override: `ServiceSettings.EnableTesting`, which Go reads **once**
+# at `api4.Init` to decide whether `GET /manualtest` is a route at all (api4/api.go:414). Off, the
+# path is the web client's page; on, it is `manualtesting.ManualTest`. It cannot be flipped on the
+# stack server: it is read at start, and it also turns on the `/test` slash command. Its only
+# client is `parity::manualtest`. It keeps the stock `PostEditTimeLimit`.
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 SRC="$ROOT/reference/mattermost/server"
 BUILD="$ROOT/reference/.build"
 source "$ROOT/scripts/stack-env.sh"
-# +35, above the licensed oracles' +32..+34, still below the next stack's block.
-PORT=$((MMRS_GO_PORT + 35))
-RUN="$BUILD/mmeditlimit$MMRS_RUN_SUFFIX"
-LOG="$BUILD/editlimit$MMRS_STACK_SUFFIX.log"
+case "${MMRS_EDITLIMIT_VARIANT:-}" in
+  '')
+    # +35, above the licensed oracles' +32..+34, still below the next stack's block.
+    PORT=$((MMRS_GO_PORT + 35))
+    RUN="$BUILD/mmeditlimit$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/editlimit$MMRS_STACK_SUFFIX.log"
+    ;;
+  testing)
+    PORT=$((MMRS_GO_PORT + 70))
+    RUN="$BUILD/mmtesting$MMRS_RUN_SUFFIX"
+    LOG="$BUILD/testing$MMRS_STACK_SUFFIX.log"
+    ;;
+  *) echo "MMRS_EDITLIMIT_VARIANT must be unset or 'testing'"; exit 2 ;;
+esac
 DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmode=disable&connect_timeout=10"
 
 case "${1:-start}" in
@@ -59,7 +80,11 @@ case "${1:-start}" in
     export MM_FILESETTINGS_DIRECTORY="$BUILD/mmroot$MMRS_RUN_SUFFIX/data/"
     export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
     # The one difference from `go-server.sh`, and the entire point of this script.
-    export MM_SERVICESETTINGS_POSTEDITTIMELIMIT=0
+    if [ "${MMRS_EDITLIMIT_VARIANT:-}" = testing ]; then
+      export MM_SERVICESETTINGS_ENABLETESTING=true
+    else
+      export MM_SERVICESETTINGS_POSTEDITTIMELIMIT=0
+    fi
     mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1
@@ -69,8 +94,12 @@ case "${1:-start}" in
       sleep 1
     done
     curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/v4/system/ping" \
-      || { echo "the edit-limit oracle never came up — see $LOG"; exit 1; }
-    echo "the PostEditTimeLimit=0 Go oracle is listening on :$PORT (log: $LOG)"
+      || { echo "the ${MMRS_EDITLIMIT_VARIANT:-edit-limit} oracle never came up — see $LOG"; exit 1; }
+    if [ "${MMRS_EDITLIMIT_VARIANT:-}" = testing ]; then
+      echo "the EnableTesting=true Go oracle is listening on :$PORT (log: $LOG)"
+    else
+      echo "the PostEditTimeLimit=0 Go oracle is listening on :$PORT (log: $LOG)"
+    fi
     ;;
   *) sed -n '2,6p' "$0"; exit 2 ;;
 esac

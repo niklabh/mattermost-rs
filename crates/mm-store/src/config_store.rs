@@ -81,6 +81,15 @@ pub trait ConfigStore {
         &self,
         name: &str,
     ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Port of `DatabaseStore.GetFile` (config/database.go:243): the file's bytes, or `None` where
+    /// Go's `row.Scan` fails with `sql.ErrNoRows` ("failed to scan data from row for <name>"). The
+    /// one caller, `verifyPlugin`, logs either failure and moves on to the next key, so the two
+    /// are kept apart only for the log line.
+    fn get_file(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -151,5 +160,20 @@ impl ConfigStore for SqlConfigStore {
         let found = count.unwrap_or(0) != 0;
         tracing::Span::current().record("found", found);
         Ok(found)
+    }
+
+    /// `SELECT Data FROM ConfigurationFiles WHERE Name = ?` (database.go:244). `Data` is `text`;
+    /// Go scans it into a `[]byte`, so the bytes are the column's UTF-8.
+    #[tracing::instrument(skip_all, fields(name = %name, found))]
+    async fn get_file(&self, name: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let data = sqlx::query_scalar!("SELECT data FROM configurationfiles WHERE name = $1", name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to scan data from row for {name}"),
+                source,
+            })?;
+        tracing::Span::current().record("found", data.is_some());
+        Ok(data.map(String::into_bytes))
     }
 }

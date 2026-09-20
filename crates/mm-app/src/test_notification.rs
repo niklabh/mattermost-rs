@@ -88,7 +88,11 @@ impl App {
     /// `create_post` — with the underlying error wrapped, so a `CreatePost` 400 or 403 still
     /// reaches the client as the 500 `create_post`.
     #[tracing::instrument(skip_all, fields(user_id = %session.user_id))]
-    pub async fn send_test_message(&self, session: &Session) -> AppResult<SendTestMessage> {
+    pub async fn send_test_message(
+        &self,
+        session: &Session,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<SendTestMessage> {
         let bot = self.get_system_bot().await.map_err(|err| {
             send_test_message_error("app.notifications.send_test_message.errors.no_bot", *err)
         })?;
@@ -129,6 +133,7 @@ impl App {
                     force_notification: true,
                     ..CreatePostFlags::default()
                 },
+                hook_ctx,
             )
             .await
         {

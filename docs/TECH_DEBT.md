@@ -2893,13 +2893,21 @@ Two places where Go puts a live credential into a string that reaches logs:
 - `store.NewErrNotFound("Session", fmt.Sprintf("sessionIdOrToken=%s", ...))` (session_store.go:107)
 - `model.NewAppError(..., map[string]any{"Token": token, ...})` (app/session.go:96, :115)
 
-Both are reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
+Both were reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
 code and detail string are unchanged, so nothing a client sees differs — `AppError.params` is
 `json:"-"` and never serialised.
 
-**Accepted deliberately, and it is the one place this port is intentionally not bug-compatible.**
-The miss path runs on every request with a bad token, which is exactly the path most likely to be
-high-volume in a log aggregator. A test in `session_store.rs` asserts the token does not appear.
+**Narrowed 2026-09-20, because that last premise stopped being true.** `AppError.params` is not
+serialised, but since [D-092] closed it is *rendered*: the id's sentence is
+`Invalid session token={{.Token}}, err={{.Error}}`, so withholding the token put `<no value>` on
+the wire where Go writes the token. `parity::remote_cluster` failed on it the first time messages
+were compared. The **params** now carry the token (`mm_app::session`, `mm_app::remote_cluster`),
+and nothing in either path logs them.
+
+What stays redacted is the half that never reaches a client: the store's
+`NewErrNotFound("Session", "sessionIdOrToken=<redacted>")`, which lands in `detailed_error` and is
+wiped unless `EnableDeveloper`. The `session_store.rs` test still asserts the token does not
+appear there.
 
 ---
 
@@ -2932,6 +2940,11 @@ rest, and separately asserts our prefix is `CURRENT_VERSION` so the exemption ca
 `ParseAuthTokenFromRequest` reads six locations. Four are ported — cookie, `Bearer`, `token`,
 `?access_token=`. Two are not: `X-Cloud-Token` (`TokenLocationCloudHeader`) and the
 remote-cluster token header.
+
+**Narrowed 2026-09-19:** both are parsed by `auth::parse_service_token` and honoured by the five
+`RemoteClusterTokenRequired` routes. Still owed: any other handler, where a cloud licence would
+make a wrong `X-Cloud-Token` Go's `invalid_token` 401 rather than our `session_expired` (no cloud
+licence can be signed here, so unobservable).
 
 Neither is reachable by a normal client, and both authenticate a *different kind* of principal
 than a session — mishandling them is worse than not handling them. A request carrying only one
@@ -3281,7 +3294,7 @@ here, but nothing is broken until then.
 
 ## D-092 · Error messages are untranslated ids where Go sends prose
 
-**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
+**Status** CLOSED (2026-09-20) · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
 **Affects** every error body this server produces.
 
 Go turns an `AppError` into a response in `web.Handler.ServeHTTP` (handlers.go:424-455), and
@@ -3303,13 +3316,19 @@ Two of the three were closed the moment they were measured, in `ApiError::into_r
 - **`RequestId`.** Set on every error. Ours omitted the key entirely (`omitempty`), so the shapes
   differed as well as the values.
 
-What remains is `Translate`, which needs the i18n bundle — the same dependency
-`post_deletion_report.go` is blocked on. Until then our `message` equals our `id`, which is
-exactly what an unconfigured Go server emits before `AppErrorInit` runs, so it is the same
-degradation rather than a novel one.
+**Closed 2026-09-20.** `Translate` is ported: `mm_app::i18n::Translations::translate_app_error`
+renders the id's template against the error's params, `mm_api::translate_error_messages` picks the
+request's locale exactly as `GetTranslationsAndLocaleFromRequest` does, and `mm_api::error` applies
+it where `handleContextError` does — so the message is Go's sentence in Go's language, on the
+TCP router, the unix socket, the signed web error page and the websocket's error frames (those in
+`DefaultServerLocale`, because `NewAppError` translates at construction and nothing re-translates
+a frame). The parity harness's `assert_error_bodies_match_except_known_gaps` now compares
+`message`, which makes every error assertion in the binary a check of it; `parity::error_i18n`
+adds eight `Accept-Language` values over the 400/401/403/404/413/501 families.
 
-**To pay off** port the i18n bundle loader and `AppError::Translate`. Worth noting the webapp
-branches on `id`, not `message`, so the practical impact is on humans reading errors.
+Two constructs of Go's template language are still not rendered — [D-940] — and no id this port
+raises uses either, which `mm_app::i18n`'s `go_parity_no_reachable_id_needs_a_construct_we_skip`
+asserts against the whole source tree on every run.
 
 ---
 
@@ -3720,7 +3739,12 @@ regenerated.
 
 ## D-105 · `link_metadata.go`'s OpenGraph half needs a third-party package
 
-**Status** ACCEPTED · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Status** CLOSED 2026-09-19 · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Closed** by porting it, not by a crate: `dyatlov/go-opengraph` is `mm_model::opengraph`, the
+`x/net/html` tokenizer and `html/charset` it stands on are `mm_model::go_html` and
+`mm_model::go_charset`, and `TruncateOpenGraph`/`FilterSVGImages`/`truncateText` are in
+`mm_model::link_metadata` — all pinned by `fixtures/behaviour_opengraph.json`, generated by calling
+the package itself. The "decided: forward" below predates 2026-09-07 and no longer binds.
 **Blocks** `TruncateOpenGraph`, `FilterSVGImages`, `firstNImages`, `truncateText`, and the
 OpenGraph branches of `IsValid` and `DeserializeDataToConcreteType`.
 
@@ -3758,7 +3782,13 @@ through `TruncateOpenGraph`, so it is untested here and lands with whichever opt
 
 ## D-106 · `LinkMetadata.Data` is a `Value`, so a struct inside it loses field order
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Status** CLOSED 2026-09-19 · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Closed** where it reached the wire: `PostEmbed.data` is `mm_model::post_embed::PostEmbedData`,
+whose `Encoded` arm carries a typed OpenGraph or `PreviewPost` in Go's field order, and
+`GetPreviewPost`'s type assertion is `decode_typed`. `LinkMetadata.Data` stays a `Value`: no route
+returns a `LinkMetadata`, and the one place it is written is a `jsonb` column, which keeps no key
+order. `IsValid` is ported with its nil half; the concrete-type half is decided by the only writer,
+which derives `Type` from the value it holds.
 
 `Data` is `any` in Go, holding `*PostImage`, `*opengraph.OpenGraph` or nil according to `Type`.
 It is `Option<serde_json::Value>` here, and `serde_json::Value::Object` is a **BTreeMap** — so it
@@ -3858,6 +3888,9 @@ waiting on.
 
 Status moves to **ACCEPTED** for the `message` field specifically; the two fixed thirds stay
 closed.
+
+**Superseded 2026-09-20.** The bundle landed with `/manualtest`, so the reason to accept went
+away; D-092 is CLOSED and the residue is [D-940].
 
 ---
 
@@ -6328,6 +6361,9 @@ browser would see it.
 
 **What is owed:** a `tower-http` `CompressionLayer` on the locally-served routes, matched to
 gzhttp's content-type and minimum-size rules. The rules are the work, not the compression.
+*2026-09-19:* the rules exist now — `mm_api::gzhttp::wrap`, pinned by `behaviour_web_static.json`
+and wrapped around the web client's static handlers (zstd preferred, as Go's default wrapper
+does). The API routes still owe the wrap.
 
 ---
 
@@ -7317,9 +7353,14 @@ and the mux's refusal of a third syncable type. One arm still hands over: a grou
 
 ---
 
-## D-380 · `createEmoji` forwards every image it does not measure, and every resize
+## D-380 · `createEmoji` forwards the GIF branch and the formats it does not decode
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+**Narrowed** 2026-09-20 — every PNG and JPEG header is measured, and the resize (`image.Decode`,
+`imaging.Fit`, `EncodePNG`) is served byte for byte for a `.png` filename
+(`parity::emoji_writes::a_gif_filename_is_go_and_a_resize_is_served_byte_for_byte`). What still
+forwards: a GIF/BMP/TIFF/WebP header ([D-650]) and any non-`.png` filename (the GIF branch below).
+The table that follows is the 2026-09-12 state.
 
 `POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
 400, the permission 403, the model's name errors, the duplicate, the missing image part, the
@@ -7338,11 +7379,9 @@ the file backend is touched, so a forwarded create leaves nothing behind:
 both directions: 128×128 and 1028×1028 sit on the near side of their thresholds and are handled
 here and by Go respectively, which is what makes an off-by-one in either limit visible.
 
-**What is owed:** the GIF frame walk (`imgutils.CountGIFFrames`, an LZW decode per frame) and a
-resize whose output is byte-identical to `imaging.Fit` + Go's PNG encoder. The second is the hard
-one and may never be worth it; if it is not, the honest end state is that this route keeps a
-forward for the resize path and the strangler does not fully retire here. Recorded now rather than
-discovered later.
+**What is owed:** the GIF branch — `imgutils.CountGIFFrames`, `gif.DecodeAll`, `resizeEmojiGif`'s
+per-frame redraw and Floyd–Steinberg dither, `gif.EncodeAll` — and with it the host-dependent
+`mime.TypeByExtension` question that decides whether a filename takes that branch.
 
 ---
 
@@ -7509,7 +7548,11 @@ be done without claiming on shapes we then forward.
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
 **Narrowed** 2026-09-14 — replies and mentions are served ([D-221] closed), then `file_ids`
-(`attachFilesToPost`) and a `PostPriority`; the rows below are what still forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
+(`attachFilesToPost`) and a `PostPriority`; 2026-09-19 — a message with a link is served
+(`mm_app::link_metadata`: OpenGraph, image and plain-link previews, the image dimensions, the
+permalink preview and its `previewed_post` prop, the `LinkMetadata` row), and a permalink to a post
+with a link of its own once the read path was ([D-860] closed); the rows below are what still
+forwards. `mm_app::post_create::App::refuse_create_post_shapes` and
 `App::notification_forward_reason` carry the Go branch behind each arm.
 
 `POST /api/v4/posts` answers a message or a reply, mentions included, in an open or private
@@ -7524,14 +7567,22 @@ it:
 | any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
 | a DM whose receiver has the auto-responder on | `SendAutoResponseIfNecessary`, which writes the response as a second post (group messages, and DMs with it off, are served since 2026-09-14) |
 | a shared channel | the shared-channel sync service |
-| a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
+| a link with the image proxy on | `PostWithProxyAddedToImageURLs` and `ImageProxyAdder` — the proxy is not ported (refused for every post, link or not, before the write) |
+| a link whose host is non-ASCII or has an `xn--` label, with `RestrictLinkPreviews` set | `idna.Lookup.ToASCII`'s UTS #46 tables and Punycode (`mm_app::link_metadata::idna_lookup_to_ascii`) |
+| `{SiteURL}/api/v4/image?…` | `ImageProxy().GetImageDirect` |
+| the fetched page or image is one of the parser's unreproducible shapes | a charset decoder `encoding_rs` does not match, a JPEG segment skip past 10 MiB, a body that fails part-way (`mm_app::link_image`, `mm_app::opengraph`) |
 | a message that mentions a non-member, a group, or the whole channel past `MaxNotificationsPerChannel` | the translated ephemeral notices — [D-591] |
 | a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
 | the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
 
-## D-402 · email, push and plugin hooks do not fire for a post this server writes
+## D-402 · email and push do not fire for a post this server writes
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+**Narrowed** 2026-09-20 — the plugin half is served. Under `MMRS_PLUGIN_HOST=rust`,
+`MessageWillBePosted` and `MessageHasBeenPosted` fire where Go fires them, rejection and
+replacement included (`mm_app::plugin_hooks`, `parity::plugin_hooks`); under the default Go host
+nothing fires, which is [D-811]. What is still owed is email and push. The text below is the
+2026-09-12 state.
 
 A post served here publishes the `posted` websocket event, the `thread_updated` events and the
 mention-count increments (`mm_app::notification`, since 2026-09-14) and nothing else.
@@ -7572,9 +7623,14 @@ divergence at the one call site that would show it, before a route echoes a file
 
 ---
 
-## D-411 · every write on the four image routes is Go's; only the refusals are served
+## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+**Narrowed** 2026-09-20 — items 1 and 3 are served for PNG and JPEG: `SetProfileImage` (including
+`UpdateLastPictureUpdate`, the identical-bytes early return and `invalidateUserCacheAndPublish`)
+and `SaveBrandImage` (including the archive `MoveFile`), byte for byte
+(`parity::image_writes`). A GIF/BMP/TIFF/WebP upload still forwards before the write ([D-650]).
+Item 2 is unchanged. The text below is the 2026-09-13 state.
 
 `POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
 `GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
@@ -7600,11 +7656,8 @@ refusal passes and Go's own decode then rejects, and checks `LastPictureUpdate` 
 `the_brand_upload_forwards_before_it_writes` does the same against `GET /api/v4/brand/image`, so
 the archive `MoveFile` and the `WriteFile` are both provably past the forward.
 
-**What is owed:** a decision about pixel-exact image work, which is the same decision [D-380]
-deferred. Until it is taken these four are refusal-only, and the `Go server that is not running`
-end state is not reached for them. The profile POST additionally needs `SetProfileImage`'s
-`Users.UpdateAt` bump, its `LastPictureUpdate` write and its `user_updated` websocket event; the
-DELETE needs `ResetLastPictureUpdate` and the same event.
+**What is owed:** item 2 only — the freetype rasteriser of [D-204] (and the embedded bot PNG);
+the DELETE also needs `ResetLastPictureUpdate` and the `user_updated` event.
 
 ---
 
@@ -7984,7 +8037,9 @@ it is in the same position about.
 
 ## D-440 · `managed_categories` is not a route on an unlicensed, flag-off server
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+**Closed** 2026-09-19 — the flag is read from the environment, the route layer forwards while it
+is off, and the handler is served behind it; see D-740 and `tests/parity/managed_categories.rs`.
 
 `GET /api/v4/teams/{team_id}/channels/managed_categories` is registered by Go **only inside**
 `if api.srv.Config().FeatureFlags.ManagedChannelCategories` (api4/channel.go:72), and that flag is
@@ -8080,7 +8135,11 @@ team**, then `channel_id` matching the URL.
 
 ## D-470 · `?permanent=true` forwards, because `PermanentDeleteUser` is eighteen store families
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-13 (the user-delete vertical)
+**Closed** 2026-09-19 — `mm_app::App::permanent_delete_user` ports every store call in Go's order
+with Go's per-call error ids, plus the file sweep and the 202 arm; served on both routes for an
+owner of no live bot (the rest is [D-472]'s forward). Pinned row-for-row by
+`parity::user_permanent_delete`. What remains is [D-472] and Go's cached profile ([D-190]).
 
 `App.PermanentDeleteUser` (app/user.go:2134) erases a user from `Sessions`, `UserAccessTokens`,
 `OAuthAccessData`, both `Webhooks` tables, `Commands`, `Preferences`, `ChannelMembers`,
@@ -8112,9 +8171,10 @@ an empty list and the two servers agree by accident rather than by construction.
 That accident is the whole reason the deactivation could be served. On a server with a plugin
 that implements the hook, a deactivation served here would skip it silently.
 
-**What is owed:** the plugin host, which is out of scope for a route session and is the same
-dependency several other entries name. Until then, a deployment with plugins should not point at
-this server for `DELETE /users/{user_id}`.
+**What is owed:** the call site. The host exists since 2026-09-18 and fires seven hooks since
+2026-09-20 ([D-932]); `UserHasBeenDeactivated` is one of the 28 that do not, and it is the whole
+of this entry now. Until then, a deployment with plugins should not point at this server for
+`DELETE /users/{user_id}`.
 
 ---
 
@@ -8572,8 +8632,9 @@ no plugins either, measured by `parity::cpa_licensed::access_modes_filter_reads_
 — and a protected field cannot be created over REST at all, so the divergence needs a plugin
 installed on Go and a row that plugin created. Recorded where `mm_app::property_hooks` says it.
 
-**What is owed:** the plugin host, or at least `GetPluginStatus` against the `PluginStatuses`
-the Go server keeps, which is cluster state and not a table.
+**What is owed:** `GetPluginStatus` at that call site. `App::get_plugin_status` exists since
+2026-09-18 and answers from the Rust host's own environment, so under `MMRS_PLUGIN_HOST=rust` the
+checker can be wired; under the Go host it is still that process's cluster state and not a table.
 
 ---
 
@@ -8673,26 +8734,21 @@ so a Greek hashtag ending in one of those letters would compare differently here
 rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
 lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
 
-## D-650 · The image write-through for the upload routes is Go's
+## D-650 · GIF, BMP, TIFF and WebP uploads are Go's
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
+**Narrowed** 2026-09-20 — PNG and JPEG are served byte for byte (`crates/goimage`,
+`mm_app::image_pipeline`; `parity::image_uploads`).
 
-`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve every
-refusal and the write for a **non-image** file, and forward a raster image to Go before writing —
-`mm_app::App::upload_file_x` and `mm_app::App::upload_data` return
-`PrepareError::Unreproducible` the moment `decode_config` measures an image inside the resolution
-limit. The reason is exactly [D-380]/[D-411]'s: `postprocessImage`/`HandleImages` resize the
-original to a `_thumb` and a `_preview` and encode a 16×16 `mini_preview`, and `imaging.Fit` plus
-Go's PNG/JPEG encoders do not reproduce byte-for-byte from a second implementation.
+`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve the raster
+branch — `preprocessImage`/`postprocessImage` and `HandleImages`, the `_thumb`, `_preview` and
+`mini_preview` — for every file whose header `image.Decode`'s registry hands to the PNG or JPEG
+decoder. A header it hands to `image/gif`, `x/image/bmp`, `x/image/tiff` or `x/image/webp` is still
+forwarded before any write (`goimage::format::DecodeError::NotPorted`).
 
-The forward is taken from the file's head **before** the write, so a forwarded `uploadData` chunk
-reaches Go with the session's `FileOffset` still behind and is written there, not double-written.
-An SVG is not forwarded (it has no raster preview); a raster image Go cannot decode is served here
-(Go's own `preprocessImage` returns "as is").
-
-**What is owed:** the same decision [D-380] deferred — pixel-exact `imaging.Fit` and the two
-encoders — after which the completing image chunk and the multipart image upload are served rather
-than forwarded. Until then these two routes are write-through only for non-images.
+**What is owed:** ports of those four decoders against the oracle (GIF also needs its LZW and the
+whole-file decode `preprocessImage` does for an `image/gif` mime), plus the TIFF and WebP EXIF walks
+`GetImageOrientation` supports (`mm_app::imaging_orientation` answers `Unreproducible` for them).
 
 ---
 
@@ -8738,7 +8794,10 @@ names, if a client is ever found that depends on one of these edges. Until then 
 stands, pinned by `parity::file_upload::a_multipart_text_upload_matches_go`.
 ## D-600 · `DELETE /api/v4/users` (localPermanentDeleteAllUsers) needs an isolated database to test
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (user_local.go)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-14 (user_local.go)
+**Closed** 2026-09-19 — served (`mm_api::local_users::local_permanent_delete_all_users`), and
+tested by `parity::users_wipe` through `scripts/wipe-parity.sh`, which recreates a spare stack,
+erases it through Go and through us from one copied database, and compares every table.
 
 `localPermanentDeleteAllUsers` (api4/user_local.go) wipes **every** user in the database. The
 parity stacks share one Postgres between the two servers and every other suite, so exercising it
@@ -8897,14 +8956,18 @@ parity tests as the unsharded one. The headroom is about 80 users; per-test reti
 owed, and `MMRS_PARITY_SHARDS=3` is the stopgap if the peak climbs back.
 ## D-720 · `setPostReminder` on a DM or group-channel post forwards: its permalink is fetched, not previewed
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (postrest)
+**Closed** 2026-09-19 — the team-less `{SiteURL}/pl/{id}` goes through `getLinkMetadata` like any
+other URL (`mm_app::post_rest::App::set_post_reminder`); `parity::postrest` compares the
+confirmation.
 
-Narrows [D-420]. The team-channel reminder is served, confirmation embed included
-(`mm_app::post::sole_permalink_in`, `App::link_metadata_for_permalink`). A post whose channel has
-no team gets `{SiteURL}/pl/{id}`, which `looksLikeAPermalink` rejects, so Go sends the URL
-through `getLinkMetadataForURL`: an outbound fetch plus a `LinkMetadata` row. `App::set_post_reminder`
-refuses that branch before writing. **What is owed:** the generic link-metadata path
-(OpenGraph fetch, `LinkMetadata` store, the link cache), which [D-401] also owes.
+## D-860 · Reading a post whose message has a link forwards: `getEmbedsAndImages` on the read path
+
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-19 (createPost with a link)
+**Closed** 2026-09-19 — every read runs `App::get_embeds_and_images` with `is_new_post = false`
+(the `LinkMetadata` row before a fetch); the process-cache decision is on `mm_app::link_metadata::LinkCache`.
+What still forwards is [D-401]'s parser and proxy rows, an edit that previews a permalink
+([D-880]) and a burn-on-read reveal with a link ([D-881]).
 
 ## D-721 · The author's own `burnPost` forwards: `PermanentDeletePostDataRetainStub` is unported
 
@@ -8958,7 +9021,10 @@ host's inter-plugin request path, then the prompt builders (`getRewritePromptFor
 `buildThreadContextForRewrite`, `buildRewriteSystemPrompt`).
 ## D-740 · `GET /teams/{team_id}/channels/managed_categories` is forwarded: no oracle registers it
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (channel.go, searchmisc)
+**Closed** 2026-09-19 — `go-licensed.sh` variants `managedcat` (+37) and `managedcat-unlicensed`
+(+38), `mm_api::channels::get_managed_categories`, `App::get_visible_managed_category_mappings`;
+parity in `tests/parity/managed_categories.rs` against both.
 
 `getManagedCategories` (api4/channel.go:3302) is registered only when
 `FeatureFlags.ManagedChannelCategories` is on (channel.go:71), and the flag is off on the stack's
@@ -8974,20 +9040,18 @@ answered as a `channel_id → name` map. **What is owed:** a Go process with the
 `go-licensed.sh` variant with `MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES=true`, as the guest
 variant does for its setting), then the handler with the flag, licence and team-id gates, the
 group/field-id lookup by name, and a parity suite against that process.
-## D-780 · The five RemoteClusterTokenRequired routes are served as their gate; the licensed session path forwards
+## D-780 · Four RemoteClusterTokenRequired handlers forward once a remote passes the gate
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go)
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (remote_cluster.go) · **Narrowed**
+2026-09-19
 
-`ping`, `msg`, `confirm_invite`, `upload/{upload_id}` and `{user_id}/image`
-(`crates/mm-api/src/remote_cluster.rs`) are gated by `RemoteClusterTokenRequired`, which needs a
-licence carrying `HasRemoteClusterService` **and** a session whose type is `RemoteClusterToken`.
-On this unlicensed build every request is the 401 `api.context.session_expired.app_error` before
-any handler runs, which is served and proven by parity. A licence with the remote-cluster service
-present would make the answer turn on resolving an `X-RemoteCluster-Token` against the
-`RemoteClusters` table (`GetRemoteClusterSession`); that session path and its store are unported,
-so a licensed request forwards. Owed: the remote-cluster session and the five handler bodies
-(`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`, `doUploadData`, `SetProfileImage`), which need
-the `RemoteClusterService`, nil on this build.
+The gate and the remote-cluster session behind it (`X-RemoteCluster-Token` against the
+`RemoteClusters` row, `GetRemoteClusterSession`) are served on all five routes
+(`crates/mm-api/src/remote_cluster.rs`), and `{user_id}/image` serves its handler's refusals too.
+A remote past the gate on `ping`, `msg`, `confirm_invite` or `upload/{upload_id}` forwards: those
+bodies drive the `RemoteClusterService` (`ReceiveIncomingMsg`, `ReceiveInviteConfirmation`,
+`doUploadData`), Go process state that is nil on the stack's builds. The image write forwards
+under [D-411], not here.
 
 ## D-781 · Slash commands that would run, and suggestions that fetch a list, are forwarded
 
@@ -9005,13 +9069,22 @@ the custom-command webhook path, then the providers one file at a time, then i18
 
 ## D-782 · `GET /manualtest` is forwarded
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+**Status** CLOSED 2026-09-20 · **Severity** coverage · **Raised** 2026-09-15 (api.go)
+
+**Closed:** the `EnableTesting` branch is served by `mm_api::manualtest` (dispatched from
+`web_static::classify`), errors as `mm_api::web_error`'s signed page; `parity::manualtest` against
+the testing oracle (`MMRS_EDITLIMIT_VARIANT=testing scripts/go-edit-limit.sh`, +70). What it
+forwards is in the module doc.
 
 Registered only when `ServiceSettings.EnableTesting` is on (api4/api.go:414). Off — the stack's
 value — the path is not an api4 route at all and falls to the webapp's static root handler, whose
 answer is a 500 naming Go's own `client/root.html` path; on, `manualtesting.ManualTest` drives Go's
 REST client against its own listen address to seed users and teams. Neither is an API handler this
 server can reproduce without porting the static webapp handler, so both forward.
+
+**Narrowed 2026-09-19:** the off-branch is served — `mm_api::web_static`'s `root` answers it like
+any other page path (the SPA, or the same 500 naming `root.html` when no build is linked;
+`parity::web_client`). **What is still owed:** the `EnableTesting` branch, which forwards.
 ## D-680 · `POST /api/v4/notifications/test` forwards: `CreatePost` has no `ForceNotification`
 
 **Status** CLOSED · **Severity** coverage · **Raised** 2026-09-15 (system.go)
@@ -9176,22 +9249,334 @@ query-string token too and answer `auth::token_provided_rejection`, shared with 
 here where Go answered 401, and the PR #30 review found `AuthenticatedSession` accepted it too —
 both extractors now refuse it.
 
-## D-811 · The Rust plugin host starts from the plugin directory alone
+## D-811 · The Rust plugin host is not yet a drop-in for Go's
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-18 (app/plugin.go:172-259) · **Owner** the plugin host
 
-With `MMRS_PLUGIN_HOST=rust`, `mm_app::plugins` ports `initPlugins`, `syncPluginsActiveState`,
-`ShutDownPlugins` and the `PluginSettings` config listener, and `GET /plugins/statuses` answers from
-it. Four parts of Go's start-up are not there yet, so a Rust host is not a drop-in for Go's:
+With `MMRS_PLUGIN_HOST=rust`, start-up follows Go's `initPlugins` step for step: the environment,
+the health-check job (`EnableHealthCheck`), the file-store sync with signatures checked when
+`RequirePluginSignature` is on, the prepackaged and transitionally prepackaged plugins, then the
+active state (closed 2026-09-20: `mm_app::plugin_prepackaged`, `mm_plugin::environment::HealthCheckJob`,
+measured by `parity::plugin_startup` and `environment::health_check_matches_go_step_for_step`).
+What still keeps it from being a drop-in:
 
-- Signatures (`plugin_signature.go`, OpenPGP): `syncPlugins` is ported (2026-09-18,
-  `mm_app::plugin_install`), but with `RequirePluginSignature` on it skips every bundle with an
-  error where Go would verify it, and an install stores no signature.
-- Prepackaged and transitionally prepackaged plugins (`processPrepackagedPlugins`,
-  `persistTransitionallyPrepackagedPlugins`).
-- The health-check job (`health_check.go`, `EnableHealthCheck`).
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
+- The hook call sites: 7 of the 35 are wired (2026-09-20 — the post family and reactions, which
+  closes D-402's plugin half). The other 28 are [D-932]; D-471's and D-542's are among them.
 
-`MMRS_PLUGIN_HOST` stays `go` by default until these land and D-402, D-471 and D-542's hook call
-sites fire from Rust write paths (plugin plan Phase 5).
+`MMRS_PLUGIN_HOST` stays `go` by default until both land.
+
+## D-850 · Under a Go plugin host, the local plugin routes forward past their gates
+
+**Status** OPEN · **Severity** forward · **Raised** 2026-09-19 (api4/plugin_local.go) · **Owner** the plugin host
+
+`crate::local_plugins` serves all ten `plugin_local.go` pairs when `MMRS_PLUGIN_HOST=rust`. Under
+the default Go host it answers only what needs no plugin environment — each config 501, the
+marketplace filter's 500 and body's 501, reattach's decoder and `IsValid` 400s — and forwards the
+rest over Go's socket: the list, install, enable/disable/remove, reattach and detach all read or
+change plugins that run inside the Go process. The HTTP router forwards the same family whole
+under a Go host. Closes when the Rust host becomes the default (D-811).
+
+---
+
+## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
+
+`mm_api::go_cache::clear_user_sessions` makes Go forget a user's sessions by having it revoke a
+probe session through `POST /users/{id}/sessions/revoke`, authenticated as
+`MM_API_GO_CACHE_USER`. Go audits that request, so every deactivation (and permanent delete)
+served here adds an `Audits` row — action `/api/v4/users/<id>/sessions/revoke`, attributed to the
+cache administrator — that the same operation through Go does not. Measured by
+`parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
+route that Go does not audit, or deleting the row after the call.
+
+## D-880 · An edit that previews a permalink forwards: `addPostPreviewProp` and the edit's `PermalinkFate`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (post reads with a link)
+
+`UpdatePost` (app/post.go:1019) prepares the edited post, then `addPostPreviewProp` writes the row
+a second time with `previewed_post`, and `publishWebsocketEventForPost` takes the preview and the
+prop off the post it answers with and puts them back for an author who may read the channel.
+`App::update_post` serves every other link and forwards, **before its write**, an edit whose post
+carries `previewed_post` or whose first link is a permalink. **What is owed:** the second
+`Update`, and applying the returned `PermalinkFate` to the edit's answer as `create_post` does.
+`parity::post_link_reads` asserts the forward (Go's history holds three rows, not four).
+
+## D-881 · `revealPost` of a burn-on-read message with a link forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (post reads with a link)
+
+The read path now previews links, but `App::reveal_post` still refuses a revealed message with any
+link but a lone permalink (`message_may_contain_a_link`) before it writes the read receipt: a
+parser or proxy refusal after that write would hand Go a reveal whose receipt already exists, and
+Go would then skip the first-reveal event. **What is owed:** a burn-on-read oracle on the links
+pair, then the refusal lifted to exactly the shapes `get_embeds_and_images` can still refuse.
+
+
+---
+
+## D-890 · `setTeamIcon`'s write forwards: its orientation read has no seek
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-20 (the image pipeline)
+
+Everything `SetTeamIconFromFile` does is now ported (`mm_app::image_pipeline`: decode, orientation,
+`FillCenter` 128×128, `EncodePNG`) except one input: unlike `AdjustImage`, it calls
+`GetImageOrientation(file, format)` **without seeking back** after `imgDecoder.Decode`
+(app/team.go:2377-2382), so the walk starts wherever `image.Decode`'s `bufio.Reader` left the
+multipart file — a position set by each decoder's read pattern, not by the image. **What is owed:**
+modelling that position (a corpus of Go's `file.Seek(0, io.SeekCurrent)` after `Decode`), then
+serving the write, `LastTeamIconUpdate` and `update_team`.
+
+---
+
+## D-891 · the mini-preview repair on reads and `createPost` still forwards
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-20 (the image pipeline)
+
+`App::mini_preview_would_be_generated` still hands `GET /files/{id}/info`, the post file-info reads,
+drafts and `createPost` to Go when an image row has a NULL `MiniPreview` — which the uploads route
+now produces from Rust, as it did from Go. The pixels are ported
+(`image_pipeline::generate_mini_preview`); what is not is the side effect after
+`FileInfo().Upsert`: `InvalidateFileInfosForPostCache` in the **Go** process, whose
+`localcachelayer` serves `GetForPost`/`GetByIds` from memory, and no REST call purges it
+(`crate::peer_cache` has no file-info method). **What is owed:** a purge path Go honours, then the
+repair.
+
+---
+
+## D-892 · no oracle input for a progressive JPEG with padding MCUs
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the JPEG decoder)
+
+The JPEG decoder's non-interleaved progressive scan skips padding blocks with a `>=` whose `>`
+mutant survives (hand mutation, F4): no corpus file is progressive with a width or height that
+needs padding MCUs. Go cannot encode progressive JPEGs, so the input has to be a committed file fed
+through `reference/dump`. **What is owed:** that file in the JPEG corpus.
+
+---
+
+## D-893 · nothing checks the brand image's archive name
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (`SaveBrandImage`)
+
+`App::save_brand_image` moves the old image to `brand/<2006-01-02T15:04:05>.png` in the server's
+local time before writing the new one. `parity::image_writes` checks the stored image and the 201,
+not the archive, so the name format is transcribed, not measured. **What is owed:** a test that
+lists `brand/` in the shared file store after an upload over an existing image, on each server.
+
+---
+
+## D-894 · two reader shapes of Go's the EXIF oracle does not separate
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the EXIF walk)
+
+1. `preprocessImage` hands `GetImageOrientation` an `io.MultiReader(buffered head, tee of the
+   body)`; the oracle and `imaging_orientation::Input::Stream` model it as one reader. The two can
+   differ only after a failing seek past the 10 MiB scan limit (bufio's read-ahead meets the
+   MultiReader's short read at the seam).
+2. Go's `imgDecoder` captures `MaxImageResolution` once, at server start (channels.go:224); the
+   Rust pipeline reads the current config, so the two disagree after a runtime change of that
+   setting until Go restarts.
+
+**What is owed:** a two-part-reader oracle case over 10 MiB, and a startup snapshot of the limit.
+
+---
+
+## D-895 · the resampler's arithmetic is proven on arm64 only
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-20 (the image pipeline)
+
+Go fuses `a + x*y` on arm64 and not on amd64 (`GOAMD64=v1`), so the Lanczos bytes are an
+architecture property; `goimage::fma` mirrors Go per target and the oracle was generated on arm64.
+The unfused (amd64) branch compiles and is the same code with the fusion removed, but no amd64
+oracle has measured it. **What is owed:** the imaging oracle regenerated on an amd64 host and the
+suite run there.
+
+## D-900 · The unsupported-browser and unsupported-desktop-app pages forward
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (web client)
+
+`root` (web/static.go:61) renders `templates/unsupported_browser.html` for an IE or Safari older
+than 12 and `unsupported_desktop_app.html` for a desktop app older than
+`MinimumDesktopAppVersion`: Go `html/template` renders with translated strings, neither of which
+this server has. `mm_api::web_static` ports the decisions and forwards the pages — the browser
+check exactly (`CheckClientCompatibility` over the uasurfer port), the desktop one whenever the
+setting is set and the agent is the desktop app, because the Masterminds `semver` comparison is not
+ported either. **What is owed:** the two renders (template engine + i18n) and `semver`.
+
+## D-901 · The static handler's error pages forward: `RenderWebAppError`
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-19 (web client)
+
+On the page handler, `handleContextError` answers a request URI over `MaximumURLLength`, a valid
+non-OAuth session token in `?access_token=`, a `GetSession` 500 and the cloud/remote-cluster token
+headers with `utils.RenderWebAppError` (utils/api.go:50): a redirect page to `/error?…&s=<ECDSA
+signature by the server's key>`. `mm_api::web_static::root` forwards all four before it writes
+anything, and so does a session under `FeatureFlags.SessionAttributes`
+(`ProcessSessionAttributesRequest`, Enterprise Advanced). **What is owed:** `RenderWebError` with
+the `AsymmetricSigningKey` (the verifying half is already in `mm_app::config`), then the four
+branches.
+
+**Narrowed 2026-09-20:** `RenderWebError`, the request translation and the signing key are ported
+(`mm_api::web_error`, `mm_app::i18n::Translations`) and serve `/manualtest`'s errors, and
+`web_static::session_preamble` now returns the `token_provided` and `GetSession` errors instead of
+dropping them. **What is still owed:** `root` renders them instead of forwarding, and the
+over-long-URL page.
+
+## D-902 · `UpdateAssetsSubpathFromConfig` is not ported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-19 (web client)
+
+`InitStatic` (web/static.go:30) **rewrites** `root.html`, `manifest.json` and every `*.css` in the
+client directory at startup so a subpath deployment's `/static/` URLs and CSP hashes are right
+(utils/subpath.go:71). The Go server sharing the directory does it at its own start, and every
+numbered stack links one shared webapp build, so a second writer here would race it for nothing.
+`mm_api::web_static` computes the same CSP hashes (`get_static_script_hashes`, oracle-pinned) and
+serves whatever is on disk. **What is owed:** the rewrite, once mm-api can be the only server.
+
+## D-903 · A forwarded `HEAD` loses its `Content-Length`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (web client)
+
+`proxy::forward` drops the upstream `Content-Length` as hop-by-hop and rebuilds the body from the
+bytes it read — which for a `HEAD` is none, so hyper writes `Content-Length: 0` where Go sent the
+entity's length (`HEAD /api/v5/x`: Go 248, forwarded 0). Found by `parity::web_client`, pre-existing
+for every forwarded `HEAD`. **What is owed:** keep Go's `Content-Length` on a `HEAD` answer.
+
+## D-930 · `TrustedProxyIPHeader` is not modelled, so a hook's `IPAddress` is the peer's
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+
+`utils.GetIPAddress` (channels/utils/utils.go:94) walks
+`ServiceSettings.TrustedProxyIPHeader` for the first header holding a parseable address and only
+then falls back to `RemoteAddr`'s host. That setting is not in `mm_app::config` at all, and
+`mm_api::plugin_context` ports the `RemoteAddr` half alone.
+
+Its Go default is the **empty list** (`config.go:679`), so a stock server takes the same branch and
+`parity::plugin_hooks` compares the two byte for byte. It diverges only behind a proxy with the
+setting on, where Go would read the header and this reads the socket.
+
+**What is owed:** the config field and the header walk, when something other than a plugin hook
+reads an IP address — the audit trail is the likely first caller.
+
+## D-931 · A `MessageWillBePosted` replacement's own `PostMetadata` is dropped
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (plugin hook call sites)
+
+`runGuardedMessageWillBePosted` (guarded_hooks.go:139) keeps a replacement post's `Metadata` when
+it has one and overwrites only its `Priority` from the pre-hook copy; it restores the pre-hook
+value wholesale only when the replacement has none. `mm_app::plugin_hooks::post_from_wire` always
+restores the pre-hook value, because `mm_plugin::wire::model::PostMetadata` is not converted back
+to `mm_model` — that means the embed `Data` interface values, the emoji, file and acknowledgement
+lists, and nothing on the ported write paths reads them.
+
+Reachable only when a plugin *invents* a metadata on the way back: Go strips metadata on the way
+out (`Post.ForPlugin`), so a plugin that leaves the field alone cannot tell the difference, and
+gob's merge keeps the caller's `nil`.
+
+**What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
+plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
+
+## D-932 · 28 of the 35 plugin hook call sites do not fire from the Rust host
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
+
+`channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
+seven fire from `mm_app::plugin_hooks` exactly where Go fires them: `MessageWillBePosted`,
+`MessageHasBeenPosted`, `MessageWillBeUpdated`, `MessageHasBeenUpdated`, `MessageHasBeenDeleted`,
+`ReactionHasBeenAdded` and `ReactionHasBeenRemoved`. The remaining 28 do not, and the paths that
+would fire them behave exactly as they did before:
+
+```text
+channel.go   ChannelHasBeenCreated (×3), UserHasJoinedChannel (×2), UserHasLeftChannel,
+             ChannelWillBeUpdated, ChannelWillBeRestored, ChannelWillBeArchived,
+             ChannelMemberWillBeAdded
+team.go      UserHasJoinedTeam, UserHasLeftTeam, TeamMemberWillBeAdded
+user.go      UserHasBeenCreated, UserHasBeenDeactivated ([D-471])
+login.go     UserWillLogIn, UserHasLoggedIn
+file.go      FileWillBeUploaded (×2), FileWillBeDownloaded
+upload.go    FileWillBeUploaded
+post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
+             ScheduledPostWillBeCreated
+draft        DraftWillBeUpserted
+preference   PreferencesHaveChanged
+notification EmailNotificationWillBeSent, NotificationWillBePushed
+plugin.go    OnPluginClusterEvent, OnInstall
+support      GenerateSupportData
+properties   the `checkFieldDeleteAccess` plugin check ([D-542])
+```
+
+`ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
+are served already.
+
+**What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
+channel and team membership family next. The pattern is `mm_app::plugin_hooks` plus a
+`parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
+
+## D-933 · The channel-guard cache is a per-dispatch read, and nothing can register a guard
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+
+Two halves of `app/channel_guards.go` are unported, and both are invisible today:
+
+1. **The cache.** Go loads the whole `ChannelGuards` table into a `sync.Map` in `NewChannels` and
+   reloads it on a register, an unregister and a cluster invalidation, with a backoff retry.
+   `App::resolve_guards` reads the table per dispatch instead. The answers agree; the failure
+   modes do not — a row written while Go runs is invisible to Go until it reloads and visible here
+   at once, and a database blip is "no guards" here where Go would serve its cache.
+2. **`RegisterChannelGuard` / `UnregisterChannelGuard`**, two of the 258 plugin API methods, so
+   nothing hosted here can write a guard at all. They are Phase 6.
+
+`parity::plugin_hooks` plants a row by SQL before either server starts — which is the only way to
+reach the guarded branch — and both refuse the post at 503.
+
+**What is owed:** the two API methods, and the cache with them, since a register has to invalidate
+something for the reload path to exist.
+
+## D-940 · Two `text/template` constructs in the translation files are not rendered
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (D-092, the error translation)
+
+`mm_app::i18n::Template` renders text and `{{ .Field }}` actions, which is every action in every
+entry of the 22 loaded locale files bar two, and every action of every id this port can raise.
+What it does not render:
+
+- **`{{if}}`/`{{else}}`/`{{end}}`** — one id, `app.bot.get_disable_bot_sysadmin_message`, the DM
+  posted when a bot owner is deactivated. It needs Go's truthiness rules, not just substitution.
+- **A plural translation** (`{"one": …, "other": …}`), ten ids, all notification or digest text.
+  Selecting a form needs `language.Plural`, which is a CLDR table per language.
+
+Both currently answer as though the entry were absent, which is the id — never a wrong sentence.
+`go_parity_no_reachable_id_needs_a_construct_we_skip` greps the whole crate tree for translation
+ids on every test run and fails if any of them needs either construct, so this cannot start
+mattering silently; `Translations::can_render` lets the **signed** web error page forward to Go
+rather than sign a message Go would not have written.
+
+**What is owed:** the `{{if}}` branch and the CLDR plural specs, when a route raises one of those
+thirteen ids. Nothing does today.
+
+## D-941 · Body decoders: serde takes a JSON array for a struct, and refuses `null` for one
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+
+Two habits of `encoding/json` that serde does not share, both reachable from any route that
+decodes a body, and both invisible until error *messages* started being compared — the answers
+agree on `id` and `status_code` and differ only in which parameter the sentence names:
+
+- **A JSON array decodes into a struct.** serde's derive reads a sequence positionally, so `[]`
+  becomes a struct with every field at its default and the handler walks on to a later validation
+  branch. Go answers `cannot unmarshal array into Go value` and the handler names the *body*.
+  `POST /channels` with `[]`: Go `channel`, ours `team_id`.
+- **`null` into a Go *value* struct is a zero, not an error.** `var x model.T; Decode(&x)` of
+  `null` succeeds and leaves `x` zero; serde rejects `null` for a struct.
+  `POST /properties/groups/{name}/fields/search` with `null`: Go `object_types`, ours
+  `property_field_search`.
+
+`mm_model::utils::decode_one_object_from_json` and `decode_one_value_from_json` are the two
+fixed forms, and the three call sites the parity suite caught use them.
+
+**What is owed:** the remaining ~80 `decode_one_from_json` call sites have not been audited
+against their Go declaration (pointer or value), and a route whose suite never posts `[]` or
+`null` would not have shown up. Convert each as its suite grows a malformed-body case.

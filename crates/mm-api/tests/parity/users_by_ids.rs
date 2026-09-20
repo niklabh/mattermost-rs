@@ -366,15 +366,9 @@ async fn refusals_match_go() {
         assert_eq!(go["id"], expected_id, "{context}");
         if let Some(name) = expected_name {
             assert_eq!(go["detailed_error"], "", "{context}: developer mode is off");
-            let rs: serde_json::Value = serde_json::from_slice(&rs_body).expect("json");
-            assert_eq!(
-                rs["message"]
-                    .as_str()
-                    .map(|m| m.contains("invalid_body_param")),
-                Some(true)
-            );
-            // The parameter name is interpolated into Go's translated message only; pin ours
-            // through the unit tests and here just that Go named the same branch.
+            // The parameter name is interpolated into the translated sentence, which both
+            // servers now render — `assert_error_bodies_match_except_known_gaps` above already
+            // compared them, so naming it here pins that the branch is the one we think it is.
             assert!(
                 go["message"].as_str().is_some_and(|m| m.contains(name)),
                 "{context}: Go's message names {name}: {}",

@@ -65,18 +65,19 @@ impl App {
                         500,
                     ));
                 }
-                return Err(invalid_token("session not found"));
+                return Err(invalid_token(token, "session not found"));
             }
         };
 
         if session.token != token {
             return Err(invalid_token(
+                token,
                 "session token is different from the one in DB",
             ));
         }
 
         if session.id.is_empty() || session.is_expired() {
-            return Err(invalid_token("session is either nil or expired"));
+            return Err(invalid_token(token, "session is either nil or expired"));
         }
 
         if session_is_idle_past_timeout(&self.config(), &session, get_millis()) {
@@ -94,7 +95,7 @@ impl App {
             if let Err(err) = self.store().session().remove(&session.id).await {
                 tracing::warn!(error = %err, session_id = %session.id, "error while revoking session");
             }
-            return Err(invalid_token("idle timeout"));
+            return Err(invalid_token(token, "idle timeout"));
         }
 
         tracing::Span::current().record("session_id", &session.id);
@@ -158,12 +159,22 @@ impl App {
     }
 }
 
-/// Go passes `map[string]any{"Token": token, "Error": ""}` as the params. The token is a live
-/// credential and `AppError`'s params are not serialised (`json:"-"`), but they do reach the i18n
-/// layer and any logger that formats the struct — so the token is omitted rather than carried.
-/// See D-079.
-fn invalid_token(details: &str) -> Box<AppError> {
+/// Go's `map[string]any{"Token": token, "Error": ""}` (app/session.go:96, :115, :137).
+///
+/// **The token is carried**, although it is a live credential, because the sentence this id
+/// renders is `Invalid session token={{.Token}}, err={{.Error}}` and it goes to the client:
+/// withholding it was [D-079]'s choice on the premise that params never reach the wire, which
+/// stopped being true when `Translate` landed. Nothing here logs the params.
+///
+/// One Go branch differs and is not reproduced: `createSessionForUserAccessToken`'s failure
+/// (session.go:110) passes **only** `Token`, so its sentence ends `err=<no value>`, and takes the
+/// wrapped error's status rather than 401. This port answers that miss from the same helper.
+fn invalid_token(token: &str, details: &str) -> Box<AppError> {
     let mut params: HashMap<String, serde_json::Value> = HashMap::new();
+    params.insert(
+        "Token".to_owned(),
+        serde_json::Value::String(token.to_owned()),
+    );
     params.insert("Error".to_owned(), serde_json::Value::String(String::new()));
     AppError::boxed("GetSession", INVALID_TOKEN, Some(params), details, 401)
 }
@@ -764,8 +775,8 @@ mod tests {
     /// deliberate one — the client must not be able to tell a revoked session from a wrong token.
     #[test]
     fn the_idle_refusal_is_indistinguishable_from_a_bad_token() {
-        let idle = invalid_token("idle timeout");
-        let unknown = invalid_token("session not found");
+        let idle = invalid_token("tok", "idle timeout");
+        let unknown = invalid_token("tok", "session not found");
         assert_eq!(idle.id, unknown.id);
         assert_eq!(idle.status_code, unknown.status_code);
         assert_eq!(idle.message, unknown.message);
@@ -774,7 +785,7 @@ mod tests {
 
     #[test]
     fn invalid_token_is_401_with_gos_error_id() {
-        let err = invalid_token("session is either nil or expired");
+        let err = invalid_token("tok", "session is either nil or expired");
         assert_eq!(err.id, INVALID_TOKEN);
         assert_eq!(err.status_code, 401);
         assert_eq!(err.where_, "GetSession");
@@ -783,10 +794,16 @@ mod tests {
 
     /// The params map reaches loggers. Go puts the token in it; we must not.
     #[test]
-    fn invalid_token_params_omit_the_token() {
-        let err = invalid_token("whatever");
+    fn invalid_token_params_carry_the_token_and_an_empty_error() {
+        let err = invalid_token("tok", "whatever");
         let params = err.params.expect("params are set");
-        assert!(!params.contains_key("Token"));
+        // The sentence is `Invalid session token={{.Token}}, err={{.Error}}` and it reaches the
+        // client, so both keys must be there — [D-079] withheld the token while `message` was
+        // the id, and that is no longer what the client reads.
+        assert_eq!(
+            params.get("Token"),
+            Some(&serde_json::Value::String("tok".to_owned()))
+        );
         assert_eq!(
             params.get("Error"),
             Some(&serde_json::Value::String(String::new()))
@@ -797,7 +814,7 @@ mod tests {
     /// as. The client sees this string, so it is part of the wire format.
     #[test]
     fn message_defaults_to_the_error_id() {
-        let err = invalid_token("x");
+        let err = invalid_token("tok", "x");
         assert_eq!(err.message, INVALID_TOKEN);
     }
 

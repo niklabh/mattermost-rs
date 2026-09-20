@@ -26,6 +26,10 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// `RequestTimeout` (client.go:23), the whole request.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// `defaultUserAgent` (client.go:119), which `MattermostTransport.RoundTrip` **sets** on every
+/// request the client makes, replacing whatever the caller put there (transport.go:18).
+pub const USER_AGENT: &str = "Mattermost-Bot/1.1";
+
 /// The thirty reserved ranges of `client.go`'s `init`, in its order, as `(network, prefix)`.
 const RESERVED_V4: &[(Ipv4Addr, u32)] = &[
     (Ipv4Addr::new(10, 0, 0, 0), 8),
@@ -254,9 +258,81 @@ impl GuardedClient {
             .map_err(|err| GuardError::Transport(err.to_string()))?;
         client
             .head(parsed)
+            .header(reqwest::header::USER_AGENT, USER_AGENT)
             .send()
             .await
             .map_err(|err| GuardError::Transport(err.to_string()))
+    }
+}
+
+impl GuardedClient {
+    /// A `GET` through the guard that follows redirects as Go's client does: `301`, `302`, `303`,
+    /// `307` and `308` with a `Location`, at most ten, and every hop dialled through the guard —
+    /// a redirect is exactly how an allowed host would hand the request to a forbidden one.
+    #[tracing::instrument(skip(self), fields(hops))]
+    pub async fn get(&self, url: &str, timeout: Duration) -> Result<reqwest::Response, GuardError> {
+        self.get_with_headers(url, timeout, &[]).await
+    }
+
+    /// [`GuardedClient::get`] with request headers, sent on **every hop**: Go's client copies a
+    /// request's headers onto each redirect it follows (dropping only `Authorization`,
+    /// `Cookie` and `WWW-Authenticate` on a cross-domain hop, none of which a caller here sets).
+    /// A header named twice is sent twice, as `Header.Add` does.
+    #[tracing::instrument(skip(self, headers), fields(hops))]
+    pub async fn get_with_headers(
+        &self,
+        url: &str,
+        timeout: Duration,
+        headers: &[(&str, &str)],
+    ) -> Result<reqwest::Response, GuardError> {
+        let mut current =
+            reqwest::Url::parse(url).map_err(|err| GuardError::Url(err.to_string()))?;
+        for hop in 0..=10 {
+            tracing::Span::current().record("hops", hop);
+            let host = current
+                .host_str()
+                .ok_or_else(|| GuardError::Url("no host".to_owned()))?
+                .to_owned();
+            let port = current
+                .port_or_known_default()
+                .ok_or_else(|| GuardError::Url("no port".to_owned()))?;
+            let mut builder = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(CONNECT_TIMEOUT)
+                .timeout(timeout)
+                .danger_accept_invalid_certs(self.insecure);
+            if let Some(addrs) = self.resolve(&host, port).await? {
+                builder = builder.resolve_to_addrs(&host, &addrs);
+            }
+            let client = builder
+                .build()
+                .map_err(|err| GuardError::Transport(err.to_string()))?;
+            let mut request = client.get(current.clone());
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            let response = request
+                .header(reqwest::header::USER_AGENT, USER_AGENT)
+                .send()
+                .await
+                .map_err(|err| GuardError::Transport(err.to_string()))?;
+            let redirect = matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308);
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok());
+            match (redirect, location) {
+                (true, Some(location)) => {
+                    current = current
+                        .join(location)
+                        .map_err(|err| GuardError::Url(err.to_string()))?;
+                }
+                _ => return Ok(response),
+            }
+        }
+        Err(GuardError::Transport(
+            "stopped after 10 redirects".to_owned(),
+        ))
     }
 }
 

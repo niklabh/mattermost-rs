@@ -59,6 +59,17 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => DEFAULT_MAX_DB_CONNECTIONS,
     };
 
+    // `utils.TranslationsPreInit` (cmd/mattermost/commands/init.go:41), and fatal for the same
+    // reason it is in Go: `handleContextError` translates every error body it writes, so a server
+    // without the bundle answers an id where the Go server beside it answers a sentence — on
+    // every route at once, with nothing in the response to say why. `FindDirRelBinary` looks
+    // beside the working directory first, which is the Go server's run directory
+    // (`scripts/mm-api-env.sh`), so both processes read the same `i18n/`.
+    mm_app::i18n::init().await.context(
+        "could not load the translations. This process must run from the same directory as the \
+         Go server, which is where its `i18n/` lives — see scripts/mm-api-env.sh",
+    )?;
+
     let store = SqlStore::connect(&database_url, max_connections)
         .await
         .context("could not connect to the shared Postgres")?;
@@ -323,7 +334,16 @@ async fn main() -> anyhow::Result<()> {
     } else {
         router(state)
     };
-    axum::serve(listener, app).await.context("server error")?;
+    // `into_make_service_with_connect_info` is what puts the peer address in the request's
+    // extensions, which is the `RemoteAddr` half of Go's `utils.GetIPAddress` and so the
+    // `IPAddress` a plugin hook sees (`mm_api::plugin_context`). The local-mode socket is served
+    // by `local::serve` and gets none, exactly as Go's unix `RemoteAddr` yields none.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .context("server error")?;
 
     Ok(())
 }

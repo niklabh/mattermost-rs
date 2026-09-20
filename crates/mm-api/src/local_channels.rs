@@ -917,10 +917,20 @@ async fn local_delete_post(
         return ApiError::from(err).into_response();
     }
 
+    // A local-socket request has no session and no peer address, which is what Go's
+    // `pluginContext` reads off one: every field but `RequestId` is empty there too.
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     let outcome = if permanent {
-        state.app.permanent_delete_post(&post_id, "").await
+        state
+            .app
+            .permanent_delete_post(&post_id, "", &hook_ctx)
+            .await
     } else {
-        state.app.delete_post(&post_id, "").await.map(|_deleted| ())
+        state
+            .app
+            .delete_post(&post_id, "", &hook_ctx)
+            .await
+            .map(|_deleted| ())
     };
     match outcome {
         Ok(()) => channel_writes::status_ok(),

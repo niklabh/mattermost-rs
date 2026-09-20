@@ -398,7 +398,7 @@ pub async fn delete_brand_image(
 
 /// `model.NewAppError("uploadProfileImage", …)` — every refusal in `setProfileImage` names
 /// `uploadProfileImage` as its `where`, including the ones raised by `setDefaultProfileImage`.
-fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
+pub(crate) fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
     ApiError::from(*mm_model::utils::AppError::boxed(
         where_,
         id,
@@ -414,7 +414,7 @@ fn profile_image_error(where_: &str, id: &str, status: i32) -> ApiError {
 /// The `where` differs between them and the id does not: `setDefaultProfileImage` raises
 /// `api.user.upload_profile_user.storage.app_error` under its own name (api4/user.go:706) while
 /// `setProfileImage` raises the same id under `uploadProfileImage` (api4/user.go:619).
-fn storage_not_configured(state: &AppState, where_: &'static str) -> Option<ApiError> {
+pub(crate) fn storage_not_configured(state: &AppState, where_: &'static str) -> Option<ApiError> {
     state.app.config().file_driver_name.is_empty().then(|| {
         profile_image_error(
             where_,
@@ -460,7 +460,7 @@ pub(crate) fn declared_content_length(headers: &HeaderMap) -> Option<i64> {
 ///
 /// One config value, two limits, and the same over-long body is a 413 on one route and a 400 on
 /// the other.
-enum BodyRefusal {
+pub(crate) enum BodyRefusal {
     /// `r.ContentLength` exceeded `MaxFileSize`; the caller's own `too_large` error id.
     DeclaredTooLarge,
     /// The `MaxBytesReader` cap was hit — `MaxFileSize + 512`. `setProfileImage` turns this into
@@ -474,7 +474,7 @@ enum BodyRefusal {
 /// that "file sizes close to max file size do not get cut off".
 pub(crate) const BYTES_MIN_READ: i64 = 512;
 
-async fn read_multipart_body(
+pub(crate) async fn read_multipart_body(
     state: &AppState,
     parts: &axum::http::request::Parts,
     body: axum::body::Body,
@@ -510,7 +510,7 @@ async fn read_multipart_body(
 
 /// `handleContextError`'s rewrite of a `MaxBytesError` (web/handlers.go:406) — global, and
 /// reached only by a handler that **wrapped** the read failure into its `AppError`.
-fn request_body_too_large(where_: &str) -> ApiError {
+pub(crate) fn request_body_too_large(where_: &str) -> ApiError {
     ApiError::from(*mm_model::utils::AppError::boxed(
         where_,
         "api.context.request_body_too_large.app_error",
@@ -526,7 +526,7 @@ fn request_body_too_large(where_: &str) -> ApiError {
 /// Port of `setProfileImage` (api4/user.go:610), reached as
 /// `POST /api/v4/users/{user_id}/image`.
 ///
-/// # Ten refusals, and the last one is the only thing this route does not answer
+/// # Ten refusals, then the write
 ///
 /// | # | check | answer |
 /// |---|---|---|
@@ -553,12 +553,12 @@ fn request_body_too_large(where_: &str) -> ApiError {
 /// * **The permission check precedes the storage check**, so an unprivileged caller on a
 ///   driverless server gets the 403 and never learns the server cannot store images.
 ///
-/// # The write forwards, before anything is written
+/// # The write is served for PNG and JPEG
 ///
 /// `SetProfileImage` decodes the upload, rotates it by its EXIF orientation, `FillCenter`s it to
-/// 128×128 and re-encodes it as PNG — every accepted upload, PNG or not, is replaced by Go's
-/// encoder's output. There is no write-through case as there is for `createEmoji`, so this route
-/// serves its ten refusals and hands over the moment one of them has not fired. See [D-411].
+/// 128×128 and re-encodes it as PNG — every accepted upload is replaced by Go's encoder's output,
+/// reproduced byte for byte by [`mm_app::App::set_profile_image`]. A GIF, BMP, TIFF or WebP is
+/// handed to Go before anything is decoded or written ([D-411]).
 #[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded))]
 pub async fn set_profile_image(
     State(state): State<AppState>,
@@ -590,11 +590,8 @@ pub async fn set_profile_image(
     }
 }
 
-/// Everything `setProfileImage` answers, as `Err`; `Ok(None)` is the hand-over.
-///
-/// Returns `Ok(Some(_))` for nothing at all — the success path of this route is entirely Go's —
-/// but keeps the shape the other handlers in this module use so the forward is one branch rather
-/// than a sentinel error.
+/// Everything `setProfileImage` answers: a refusal as `Err`, the served write as `Ok(Some(_))`,
+/// and `Ok(None)` for the hand-over of a format this port does not decode.
 async fn refuse_profile_image(
     state: &AppState,
     user_id: &str,
@@ -683,7 +680,22 @@ async fn refuse_profile_image(
         ));
     }
 
-    Ok(None)
+    // `imageArray[0]` — present, checked above.
+    let Some(image) = form.first_file("image") else {
+        return Err(profile_image_error(
+            WHERE,
+            "api.user.upload_profile_user.no_file.app_error",
+            400,
+        ));
+    };
+    match state.app.set_profile_image(user_id, &image.data).await {
+        Ok(()) => Ok(Some(crate::thread_writes::status_ok())),
+        Err(mm_app::post::PrepareError::App(err)) => Err(ApiError::from(*err)),
+        Err(mm_app::post::PrepareError::Unreproducible(why)) => {
+            tracing::debug!(why, "the profile image is Go's to decode");
+            Ok(None)
+        }
+    }
 }
 
 /// `IsProfileImageLockedForUser`, answered here on every server since 2026-09-13 — the licence
@@ -876,15 +888,14 @@ async fn refuse_default_image_read(
 /// wrap (api4/brand.go:50), so an over-long body is indistinguishable from a malformed one.
 ///
 /// 5 lives in `SaveBrandImage` rather than the handler, which is why it comes after the
-/// permission — see [`mm_app::App::save_brand_image`]. Everything past it re-encodes the image
-/// and forwards ([D-411]); the forward is before the archive `MoveFile` and before the write.
+/// permission — see [`mm_app::App::save_brand_image`], which serves the re-encode, the archive
+/// `MoveFile` and the write for PNG and JPEG, and forwards any other format before touching the
+/// backend ([D-411]).
 ///
 /// # Success is 201, and it still has a body
 ///
 /// `w.WriteHeader(http.StatusCreated)` followed by `ReturnStatusOK(w)` — so the response is a
 /// **201** carrying `{"status":"OK"}`, not the 200 every other `ReturnStatusOK` route gives.
-/// Never produced here, since the write forwards; recorded because it is the one thing about this
-/// route a reader would get wrong.
 #[tracing::instrument(skip_all, fields(forwarded))]
 pub async fn upload_brand_image(
     State(state): State<AppState>,
@@ -896,7 +907,8 @@ pub async fn upload_brand_image(
     let mut forwarded_body = axum::body::Bytes::new();
 
     match refuse_brand_image(&state, &session, &parts, body, &mut forwarded_body).await {
-        Ok(()) => {
+        Ok(Some(response)) => response,
+        Ok(None) => {
             tracing::Span::current().record("forwarded", true);
             let request = Request::from_parts(parts, axum::body::Body::from(forwarded_body));
             proxy::forward_to_go(State(state), request).await
@@ -911,7 +923,7 @@ async fn refuse_brand_image(
     parts: &axum::http::request::Parts,
     body: axum::body::Body,
     forwarded_body: &mut axum::body::Bytes,
-) -> Result<(), ApiError> {
+) -> Result<Option<Response>, ApiError> {
     const WHERE: &str = "uploadBrandImage";
 
     let parse_error =
@@ -951,12 +963,33 @@ async fn refuse_brand_image(
         )));
     }
 
-    match state.app.save_brand_image().await {
-        Ok(()) => Ok(()),
+    let Some(image) = form.first_file("image") else {
+        return Err(profile_image_error(
+            WHERE,
+            "api.admin.upload_brand_image.no_file.app_error",
+            400,
+        ));
+    };
+    match state.app.save_brand_image(&image.data).await {
+        // `w.WriteHeader(http.StatusCreated)` then `ReturnStatusOK(w)`: a 201 with the OK body.
+        Ok(()) => Ok(Some(
+            (
+                axum::http::StatusCode::CREATED,
+                [
+                    (
+                        axum::http::header::CONTENT_TYPE.as_str(),
+                        "application/json",
+                    ),
+                    ("x-mmrs-served-by", "rust"),
+                ],
+                r#"{"status":"OK"}"#,
+            )
+                .into_response(),
+        )),
         Err(PrepareError::App(err)) => Err(ApiError::from(*err)),
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, "forwarding to Go");
-            Ok(())
+            Ok(None)
         }
     }
 }

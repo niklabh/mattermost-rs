@@ -134,8 +134,8 @@ fn app_error(where_: &'static str, id: &str, status: i32) -> ApiError {
 ///
 /// `RequirePostId().RequireUserId()`: the post id is checked first and `me` is the session's
 /// user. Then the two permissions — the caller may act for the user, and may read the post —
-/// then the body, whose only field is `target_time` in **seconds**. Forwards a reminder on a DM
-/// or group-channel post; see [`mm_app::App::set_post_reminder`].
+/// then the body, whose only field is `target_time` in **seconds**. Forwards only what the
+/// confirmation's link preview cannot reproduce; see [`mm_app::App::set_post_reminder`].
 #[tracing::instrument(skip_all, fields(post_id = %post_id, user_id = %user_id, forwarded))]
 pub async fn set_post_reminder(
     State(state): State<AppState>,
@@ -237,11 +237,12 @@ pub async fn restore_post_version(
         file_ids: Some(to_restore.file_ids.clone().unwrap_or_default()),
         ..PostPatch::default()
     };
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let outcome = async {
         post_patch_checks(&state, &post_id, &session, &patch).await?;
         let (updated, _is_member_for_preview) = state
             .app
-            .restore_post_version(&session.0, &post_id, &restore_version_id)
+            .restore_post_version(&session.0, &post_id, &restore_version_id, &hook_ctx)
             .await?;
         encoded_post(updated)
     }
@@ -606,6 +607,7 @@ pub async fn start_users_batch_export(
     State(state): State<AppState>,
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
+    request: Request,
 ) -> Response {
     if let Err(err) = require_system_admin(&state, &session).await {
         return err.into_response();
@@ -625,7 +627,13 @@ pub async fn start_users_batch_export(
 
     match state
         .app
-        .start_users_batch_export(&session.0, &options, start_at, end_at)
+        .start_users_batch_export(
+            &session.0,
+            &options,
+            start_at,
+            end_at,
+            &crate::plugin_context::hook_context_of(&request, Some(&session.0)),
+        )
         .await
     {
         Ok(()) => status_ok(),

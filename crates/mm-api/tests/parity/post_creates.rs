@@ -942,12 +942,10 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
             serde_json::json!({ "message": "mmrs fwd at @nobody" }),
         ),
         (
-            "a link needs the embed pipeline",
-            serde_json::json!({ "message": "mmrs fwd link https://example.com" }),
-        ),
-        (
-            "a markdown image needs getImagesForPost",
-            serde_json::json!({ "message": "mmrs fwd image ![alt](x)" }),
+            // Links are served since 2026-09-19 (`parity::post_create_links`); a client-set
+            // `previewed_post` still is not — it bypasses `getLinkMetadata`'s caches.
+            "a client-set previewed_post prop",
+            serde_json::json!({ "message": "mmrs fwd previewed", "props": { "previewed_post": "x" } }),
         ),
         (
             "a non-default post type",

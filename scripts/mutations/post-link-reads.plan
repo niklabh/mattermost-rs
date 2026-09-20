@@ -1,0 +1,21 @@
+# post-link-reads.plan — the read path of getEmbedsAndImages (D-860, D-720), 2026-09-19.
+# Suite `api`, filter per line. The website is withdrawn after planting, so a read that fetches
+# instead of using the row changes the preview as well as the request log.
+read-embed-as-new-post	crates/mm-app/src/link_metadata.rs	.get_embed_for_post(post, &first_link, is_new_post)	.get_embed_for_post(post, &first_link, true)	api	post_link_reads
+read-images-as-new-post	crates/mm-app/src/link_metadata.rs	self.get_images_for_post(post, is_new_post)	self.get_images_for_post(post, true)	api	post_link_reads
+prepare-drops-is-new-post	crates/mm-app/src/post.rs	self.get_embeds_and_images(&mut post, opts.is_new_post)	self.get_embeds_and_images(&mut post, true)	api	post_link_reads
+row-lookup-inverted	crates/mm-app/src/link_metadata.rs	        if !is_new_post {	        if is_new_post {	api	post_link_reads
+row-ignores-previewed-prop	crates/mm-app/src/link_metadata.rs	            {\n                if previewed_post_prop_val.is_empty() {\n                    let open_graph	            {\n                if true {\n                    let open_graph	api	post_link_reads
+cache-ignores-previewed-prop	crates/mm-app/src/link_metadata.rs	            if previewed_post_prop_val.is_empty() {\n                return Ok(Ok(LinkMetadataFound {	            if true {\n                return Ok(Ok(LinkMetadataFound {	api	post_link_reads
+row-keeps-svg-image	crates/mm-app/src/link_metadata.rs	let post_image = filter_svg_image(post_image, &request_url);	let post_image = post_image;	api	post_link_reads
+none-row-is-a-miss	crates/mm-app/src/link_metadata.rs	            _ => (None, None),	            _ => return None,	api	post_link_reads
+prepare-refuses-previewed-prop	crates/mm-app/src/post.rs	        }\n\n        refuse_on_props_with(&post, PreviewedPostProp::Allow)?;	        }\n\n        refuse_on_props_with(&post, PreviewedPostProp::Refuse)?;	api	post_link_reads
+sanitize-refuses-previewed-prop	crates/mm-app/src/post.rs	    ) -> Result<(Post, bool), PrepareError> {\n        refuse_on_props_with(&post, PreviewedPostProp::Allow)?;	    ) -> Result<(Post, bool), PrepareError> {\n        refuse_on_props_with(&post, PreviewedPostProp::Refuse)?;	api	post_link_reads
+sanitize-keeps-hidden-preview	crates/mm-app/src/post.rs	                if !has_permission {	                if false {	api	post_link_reads
+edit-permalink-served	crates/mm-app/src/post_write.rs	        if new_post.get_prop(POST_PROPS_PREVIEWED_POST).is_some()\n            || self.contains_permalink(&new_post)?\n	        if new_post.get_prop(POST_PROPS_PREVIEWED_POST).is_some()\n	api	post_link_reads
+edit-previewed-prop-served	crates/mm-app/src/post_write.rs	        if new_post.get_prop(POST_PROPS_PREVIEWED_POST).is_some()\n            || self.contains_permalink(&new_post)?\n	        if self.contains_permalink(&new_post)?\n	api	post_link_reads
+dm-reminder-team-segment	crates/mm-app/src/post_rest.rs	format!("{site_url}/pl/{post_id}")	format!("{site_url}/x/pl/{post_id}")	api	postrest
+by-ids-previews-links	crates/mm-api/src/posts.rs	state.app.prepare_post_for_client(post, opts).await	state.app.prepare_post_for_client_with_embeds_and_images(post, opts).await	api	post_link_reads
+ephemeral-prepared-once	crates/mm-api/src/post_writes.rs	Ok(sent) => prepare_ephemeral_answer(&state, &session, sent).await,	Ok(sent) => Ok(sent),	api	post_link_reads
+control-rename-binding	crates/mm-api/src/post_writes.rs	    let (sanitized, _is_member_for_previews) = state\n        .app\n        .sanitize_post_metadata_for_user(prepared, &session.0.user_id)\n        .await?;\n    Ok(sanitized)	    let (clean, _is_member_for_previews) = state\n        .app\n        .sanitize_post_metadata_for_user(prepared, &session.0.user_id)\n        .await?;\n    Ok(clean)	api	post_link_reads
+control-reorder-independent-lets	crates/mm-app/src/post_rest.rs	        let parsed_time = rfc822_utc(target_time);\n        let site_url = self.config().site_url.clone().unwrap_or_default();	        let site_url = self.config().site_url.clone().unwrap_or_default();\n        let parsed_time = rfc822_utc(target_time);	api	postrest

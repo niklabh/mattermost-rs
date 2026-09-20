@@ -1,0 +1,32 @@
+# Mutation plan for POST /api/v4/remotecluster/{user_id}/image (remoteSetProfileImage) and the
+# remote-cluster session behind all five RemoteClusterTokenRequired routes (2026-09-19).
+#
+#   scripts/mutate-batch.sh scripts/mutations/remote-profile-image.plan
+#
+# Every line is proven against the licensed pair (common::licensed) or the unlicensed stack by the
+# remote_cluster parity suite. Not planned, because equivalent: dropping `!has_service` from the
+# gate (the session can only be RemoteClusterToken when the licence has the service, which
+# remote_cluster_session already checks). Not planned, because no fixture reaches it on this
+# stack: the MaxBytesReader 413 (MaxFileSize is 100 MiB; image_writes covers the shared helper on
+# a SecondServer) and the 501 (DriverName is set).
+rpi-gate-ignores-the-session-type	crates/mm-api/src/remote_cluster.rs	    if !has_service || !is_remote_token {	    if !has_service {	api	remote_cluster
+rpi-session-ignores-the-licence	crates/mm-api/src/remote_cluster.rs	            if !license.is_some_and(License::has_remote_cluster_service) {\n                return Ok(None);	            if false {\n                return Ok(None);	api	remote_cluster
+rpi-cloud-branch-inverted	crates/mm-api/src/remote_cluster.rs	            if !license.is_some_and(License::is_cloud) {	            if license.is_some_and(License::is_cloud) {	api	remote_cluster
+rpi-remote-id-missing-skipped	crates/mm-api/src/remote_cluster.rs	            if remote_id.is_empty() {	            if false && remote_id.is_empty() {	api	remote_cluster
+rpi-gate-skipped-on-the-four	crates/mm-api/src/remote_cluster.rs	    if let Err(err) = remote_cluster_token_required(&state, &parts).await {\n        return err.into_response();\n    }	    let _ = remote_cluster_token_required;	api	remote_cluster
+rpi-require-user-id-dropped	crates/mm-api/src/remote_cluster.rs	    require_id(user_id, "user_id")?;	    let _ = require_id;	api	remote_cluster
+rpi-declared-too-large-status	crates/mm-api/src/remote_cluster.rs	                "api.user.upload_profile_user.too_large.app_error",\n                413,	                "api.user.upload_profile_user.too_large.app_error",\n                400,	api	remote_cluster
+rpi-parse-error-status	crates/mm-api/src/remote_cluster.rs	                "api.user.upload_profile_user.parse.app_error",\n                500,	                "api.user.upload_profile_user.parse.app_error",\n                400,	api	remote_cluster
+rpi-no-image-inverted	crates/mm-api/src/remote_cluster.rs	    if form.first_file("image").is_none() {	    if form.first_file("image").is_some() {	api	remote_cluster
+rpi-is-remote-dropped	crates/mm-api/src/remote_cluster.rs	        Ok(user) if user.is_remote() => user,	        Ok(user) => user,	api	remote_cluster
+rpi-is-remote-as-some	crates/mm-api/src/remote_cluster.rs	        Ok(user) if user.is_remote() => user,	        Ok(user) if user.remote_id.is_some() => user,	api	remote_cluster
+rpi-remote-mismatch-skipped	crates/mm-api/src/remote_cluster.rs	    if user.get_remote_id() != remote_id_header(parts) {	    if false && user.get_remote_id() != remote_id_header(parts) {	api	remote_cluster
+rpi-store-deleted-filter	crates/mm-store/src/remote_cluster_store.rs	             WHERE remoteid = $1 AND (deleteat = 0 OR $2)	             WHERE remoteid = $1 AND (deleteat >= 0 OR $2)	api	remote_cluster
+rpi-store-null-column-coalesced	crates/mm-store/src/remote_cluster_store.rs	                   remoteteamid AS "remote_team_id!",	                   COALESCE(remoteteamid, '') AS "remote_team_id!",	api	remote_cluster
+rpi-store-negative-options-clamped	crates/mm-store/src/remote_cluster_store.rs	        let options = u32::try_from(row.options).map_err(	        let options = u32::try_from(row.options.max(0)).map_err(	api	remote_cluster
+rpi-app-includes-deleted	crates/mm-app/src/remote_cluster.rs	        match self.get_remote_cluster(remote_id, false).await {	        match self.get_remote_cluster(remote_id, true).await {	api	remote_cluster
+rpi-app-compares-remote-token	crates/mm-app/src/remote_cluster.rs	            Ok(rc) if constant_time_equal(&rc.token, token) => {	            Ok(rc) if constant_time_equal(&rc.remote_token, token) => {	api	remote_cluster
+rpi-session-locations-do-not-win	crates/mm-api/src/auth.rs	    if parse_auth_token_untruncated(parts).is_some() {	    if false && parse_auth_token_untruncated(parts).is_some() {	api	remote_cluster
+rpi-remote-beats-cloud	crates/mm-api/src/auth.rs	    let (token, location) = if let Some(token) = header(HEADER_CLOUD_TOKEN) {	    let (token, location) = if let Some(token) = header(HEADER_CLOUD_TOKEN).filter(|_| header(HEADER_REMOTECLUSTER_TOKEN).is_none()) {	api	remote_cluster
+control-rename-a-closure-binding	crates/mm-api/src/remote_cluster.rs	        .and_then(|session| session.prop(SESSION_PROP_TYPE))	        .and_then(|s| s.prop(SESSION_PROP_TYPE))	api	remote_cluster
+control-swap-two-select-columns	crates/mm-store/src/remote_cluster_store.rs	                   createat AS "create_at!",\n                   deleteat AS "delete_at!",	                   deleteat AS "delete_at!",\n                   createat AS "create_at!",	api	remote_cluster

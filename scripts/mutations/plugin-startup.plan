@@ -1,0 +1,23 @@
+# Mutation plan for plugin start-up against a Go server started over the same bundles
+# (parity::plugin_startup): prepackaged plugins, the transitional persistence, the Marketplace
+# list and install that consult them, and the signature-checked file-store sync.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-startup.plan
+#
+# CONTROL- lines must SURVIVE.
+#
+# 2026-09-20: 13 run, 11 caught, both controls survived.
+
+prepackaged-list-empty	crates/mm-app/src/plugin_prepackaged.rs	        environment.set_prepackaged_plugins(prepackaged, transitional);	        environment.set_prepackaged_plugins(Vec::new(), transitional);	api	plugin_startup
+prepackaged-automatic-inverted	crates/mm-app/src/plugin_prepackaged.rs	        if !config.plugin_automatic_prepackaged_plugins {	        if config.plugin_automatic_prepackaged_plugins {	api	plugin_startup
+prepackaged-install-always	crates/mm-app/src/plugin_prepackaged.rs	InstallStrategy::OnlyIfNewOrUpgrade)	InstallStrategy::Always)	api	plugin_startup
+prepackaged-skip-is-failure	crates/mm-app/src/plugin_prepackaged.rs	            && err.id != "app.plugin.skip_installation.app_error"	            && err.id != "app.plugin.never.app_error"	api	plugin_startup
+prepackaged-signature-unchecked	crates/mm-app/src/plugin_prepackaged.rs	        self.verify_plugin(bundle, &signature)\n            .await	        async { Ok::<(), Box<mm_model::utils::AppError>>(()) }\n            .await	api	plugin_startup
+prepackaged-icon-dropped	crates/mm-app/src/plugin_prepackaged.rs	                Ok(data) => icon_data = data,	                Ok(_) => {}	api	plugin_startup
+transitional-never-classified	crates/mm-app/src/plugin_prepackaged.rs	            if is_transitionally_prepackaged(id) {	            if false {	api	plugin_startup
+transitional-always-persisted	crates/mm-app/src/plugin_prepackaged.rs	                if should_persist_transitionally_prepackaged_plugin(	                if true || should_persist_transitionally_prepackaged_plugin(	api	plugin_startup
+transitional-persisted-unsigned	crates/mm-app/src/plugin_prepackaged.rs	                .install_plugin_to_filestore(manifest, &bundle, Some(&signature))	                .install_plugin_to_filestore(manifest, &bundle, None)	api	plugin_startup
+marketplace-install-needs-version	crates/mm-app/src/marketplace.rs	                        && (request.version.is_empty() || m.version == request.version)	                        && m.version == request.version	api	plugin_startup
+sync-signature-not-required-api	crates/mm-app/src/plugin_install.rs	                if let Err(err) = self.verify_plugin(&bundle, &signature).await {	                if let Err(err) = async { Ok::<(), Box<AppError>>(()) }.await {	api	plugin_startup
+CONTROL-persist-finished-message	crates/mm-app/src/plugin_prepackaged.rs	        tracing::info!("Finished persisting transitionally prepackaged plugins");	        tracing::info!("Persisted the transitionally prepackaged plugins");	api	plugin_startup
+CONTROL-no-directory-message	crates/mm-app/src/plugin_prepackaged.rs	            tracing::debug!("No prepackaged plugins directory found");	            tracing::debug!("No prepackaged_plugins directory was found");	api	plugin_startup
