@@ -206,9 +206,9 @@ func riffChunkLen(chunk []byte, n uint32) []byte {
 	return out
 }
 
-// riffFile wraps chunks in a RIFF container. The declared size is the conventional one
+// exifRIFFFile wraps chunks in a RIFF container. The declared size is the conventional one
 // (payload + the 4-byte form type); imagemeta skips those four bytes without reading them.
-func riffFile(form string, chunks ...[]byte) []byte {
+func exifRIFFFile(form string, chunks ...[]byte) []byte {
 	var body []byte
 	for _, c := range chunks {
 		body = append(body, c...)
@@ -219,8 +219,8 @@ func riffFile(form string, chunks ...[]byte) []byte {
 	return append(out, body...)
 }
 
-// vp8xChunk is an extended-format header chunk. flags is its first byte: bit 2 is XMP, bit 3 EXIF.
-func vp8xChunk(flags byte, w, h int) []byte {
+// exifVP8XChunk is an extended-format header chunk. flags is its first byte: bit 2 is XMP, bit 3 EXIF.
+func exifVP8XChunk(flags byte, w, h int) []byte {
 	b := make([]byte, 10)
 	b[0] = flags
 	w, h = w-1, h-1
@@ -620,75 +620,75 @@ func imagingEXIFStage() (map[string]any, error) {
 	}
 	exifChunk := func(o uint16) []byte { return riffChunk("EXIF", exifPayload(true, o), true) }
 	const vp8xEXIF, vp8xXMP = 0x08, 0x04
-	add("webp_vp8x_exif_after_image", "webp", riffFile("WEBP", vp8xChunk(vp8xEXIF, 32, 32), imgChunk, exifChunk(6)))
-	add("webp_vp8x_exif_before_image", "webp", riffFile("WEBP", vp8xChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk))
-	add("webp_vp8x_no_exif_flag", "webp", riffFile("WEBP", vp8xChunk(0, 32, 32), imgChunk, exifChunk(6)))
-	add("webp_vp8x_xmp_flag_only", "webp", riffFile("WEBP", vp8xChunk(vp8xXMP, 32, 32), imgChunk, exifChunk(6)))
-	add("webp_vp8x_both_flags", "webp", riffFile("WEBP", vp8xChunk(vp8xEXIF|vp8xXMP, 32, 32), imgChunk, exifChunk(3)))
-	add("webp_vp8x_all_flags", "webp", riffFile("WEBP", vp8xChunk(0xff, 32, 32), imgChunk, exifChunk(4)))
-	add("webp_vp8x_bad_len", "webp", riffFile("WEBP", riffChunkLen(vp8xChunk(vp8xEXIF, 32, 32), 11), imgChunk, exifChunk(6)))
-	add("webp_vp8x_len_9", "webp", riffFile("WEBP", riffChunkLen(vp8xChunk(vp8xEXIF, 32, 32), 9), imgChunk, exifChunk(6)))
+	add("webp_vp8x_exif_after_image", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_exif_before_image", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk))
+	add("webp_vp8x_no_exif_flag", "webp", exifRIFFFile("WEBP", exifVP8XChunk(0, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_xmp_flag_only", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xXMP, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_both_flags", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF|vp8xXMP, 32, 32), imgChunk, exifChunk(3)))
+	add("webp_vp8x_all_flags", "webp", exifRIFFFile("WEBP", exifVP8XChunk(0xff, 32, 32), imgChunk, exifChunk(4)))
+	add("webp_vp8x_bad_len", "webp", exifRIFFFile("WEBP", riffChunkLen(exifVP8XChunk(vp8xEXIF, 32, 32), 11), imgChunk, exifChunk(6)))
+	add("webp_vp8x_len_9", "webp", exifRIFFFile("WEBP", riffChunkLen(exifVP8XChunk(vp8xEXIF, 32, 32), 9), imgChunk, exifChunk(6)))
 	// Simple format: no VP8X, so nothing can clear the EXIF source.
-	add("webp_simple_exif_after_image", "webp", riffFile("WEBP", imgChunk, exifChunk(8)))
-	add("webp_simple_exif_before_image", "webp", riffFile("WEBP", exifChunk(5), imgChunk))
-	add("webp_simple_exif_be", "webp", riffFile("WEBP", imgChunk, riffChunk("EXIF", exifPayload(false, 7), true)))
+	add("webp_simple_exif_after_image", "webp", exifRIFFFile("WEBP", imgChunk, exifChunk(8)))
+	add("webp_simple_exif_before_image", "webp", exifRIFFFile("WEBP", exifChunk(5), imgChunk))
+	add("webp_simple_exif_be", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", exifPayload(false, 7), true)))
 	// Two real x/image payloads. The lossy one's chunk is 2430 bytes — even, so the EXIF chunk
 	// behind it is found; the lossless one's is 421, and the pad byte the file must carry is the
 	// byte imagemeta does not skip, so the same EXIF chunk is lost.
-	add("webp_real_lossy_then_exif", "webp", riffFile("WEBP", realVP8, exifChunk(7)))
-	add("webp_real_lossless_then_exif", "webp", riffFile("WEBP", realVP8L, exifChunk(7)))
-	add("webp_two_exif", "webp", riffFile("WEBP", imgChunk, exifChunk(4), exifChunk(6)))
-	add("webp_mime_format", "image/webp", riffFile("WEBP", imgChunk, exifChunk(6)))
+	add("webp_real_lossy_then_exif", "webp", exifRIFFFile("WEBP", realVP8, exifChunk(7)))
+	add("webp_real_lossless_then_exif", "webp", exifRIFFFile("WEBP", realVP8L, exifChunk(7)))
+	add("webp_two_exif", "webp", exifRIFFFile("WEBP", imgChunk, exifChunk(4), exifChunk(6)))
+	add("webp_mime_format", "image/webp", exifRIFFFile("WEBP", imgChunk, exifChunk(6)))
 	// The pad byte imagemeta does not skip: the same odd chunk, padded and not.
 	oddPayload := []byte("odd-iccp")[:5]
-	add("webp_odd_chunk_padded_before_exif", "webp", riffFile("WEBP", riffChunk("ICCP", oddPayload, true), imgChunk, exifChunk(6)))
-	add("webp_odd_chunk_unpadded_before_exif", "webp", riffFile("WEBP", riffChunk("ICCP", oddPayload, false), imgChunk, exifChunk(6)))
-	add("webp_odd_exif_then_xmp", "webp", riffFile("WEBP", imgChunk,
+	add("webp_odd_chunk_padded_before_exif", "webp", exifRIFFFile("WEBP", riffChunk("ICCP", oddPayload, true), imgChunk, exifChunk(6)))
+	add("webp_odd_chunk_unpadded_before_exif", "webp", exifRIFFFile("WEBP", riffChunk("ICCP", oddPayload, false), imgChunk, exifChunk(6)))
+	add("webp_odd_exif_then_xmp", "webp", exifRIFFFile("WEBP", imgChunk,
 		riffChunk("EXIF", append(exifPayload(true, 3), 0xff), true), riffChunk("XMP ", []byte("<x/>"), true)))
 	// Chunk length damage.
-	add("webp_exif_len_overrun", "webp", riffFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 60000)))
-	add("webp_exif_len_huge", "webp", riffFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 20*1024*1024)))
-	add("webp_exif_len_zero", "webp", riffFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 0)))
-	add("webp_exif_len_short", "webp", riffFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 10)))
+	add("webp_exif_len_overrun", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 60000)))
+	add("webp_exif_len_huge", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 20*1024*1024)))
+	add("webp_exif_len_zero", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 0)))
+	add("webp_exif_len_short", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 10)))
 	// An "Exif\0\0" prefix is JPEG's alone: here it is read as the byte-order marker.
-	add("webp_exif_with_jpeg_header", "webp", riffFile("WEBP", imgChunk,
+	add("webp_exif_with_jpeg_header", "webp", exifRIFFFile("WEBP", imgChunk,
 		riffChunk("EXIF", append([]byte("Exif\x00\x00"), exifPayload(true, 6)...), true)))
 	// Inside the segment the EXIF walk is the same one JPEG runs: sub-IFDs and IFD1 both count.
-	add("webp_exif_subifd", "webp", riffFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, ifds: [][]ifdEntry{
+	add("webp_exif_subifd", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, ifds: [][]ifdEntry{
 		{ifdEntry{tag: 0x8769, typ: 4, count: 1, subIFD: 1}},
 		{orientationEntry(le, 3, 5)},
 	}}.build(), true)))
-	add("webp_exif_ifd1", "webp", riffFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, chain: true, ifds: [][]ifdEntry{
+	add("webp_exif_ifd1", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, chain: true, ifds: [][]ifdEntry{
 		{ifdEntry{tag: 0x010f, typ: 2, count: 4, value: []byte("abc\x00")}},
 		{orientationEntry(le, 3, 4)},
 	}}.build(), true)))
 	// Container damage. The RIFF size is skipped, never read, so a lying one changes nothing.
-	add("webp_no_chunks", "webp", riffFile("WEBP"))
+	add("webp_no_chunks", "webp", exifRIFFFile("WEBP"))
 	add("webp_lying_riff_size", "webp", func() []byte {
-		b := riffFile("WEBP", imgChunk, exifChunk(6))
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
 		binary.LittleEndian.PutUint32(b[4:], 4)
 		return b
 	}())
 	add("webp_riff_size_huge", "webp", func() []byte {
-		b := riffFile("WEBP", imgChunk, exifChunk(6))
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
 		binary.LittleEndian.PutUint32(b[4:], 0xffffffff)
 		return b
 	}())
 	add("webp_bad_riff_fourcc", "webp", func() []byte {
-		b := riffFile("WEBP", imgChunk, exifChunk(6))
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
 		copy(b[0:4], "RIFX")
 		return b
 	}())
-	add("webp_bad_form_fourcc", "webp", riffFile("WEBQ", imgChunk, exifChunk(6)))
-	add("webp_lowercase_form", "webp", riffFile("webp", imgChunk, exifChunk(6)))
+	add("webp_bad_form_fourcc", "webp", exifRIFFFile("WEBQ", imgChunk, exifChunk(6)))
+	add("webp_lowercase_form", "webp", exifRIFFFile("webp", imgChunk, exifChunk(6)))
 	{
-		full := riffFile("WEBP", vp8xChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk)
+		full := exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk)
 		for _, n := range []int{1, 4, 8, 11, 12, 16, 20, 24, 30, 36, 44} {
 			add("webp_truncated_"+itoa(n), "webp", full[:n])
 		}
 	}
 	add("webp_empty", "webp", nil)
-	webpGood := riffFile("WEBP", imgChunk, exifChunk(6))
+	webpGood := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
 	add("webp_as_jpeg", "jpeg", webpGood)
 	add("webp_as_png", "png", webpGood)
 	add("webp_as_tiff", "tiff", webpGood)

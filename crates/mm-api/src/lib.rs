@@ -2289,7 +2289,7 @@ pub fn router(state: AppState) -> Router {
         // to `partially_migrated`'s method fallback.
         // `BaseRoutes.Upload` (api.go:249): `GET` is `getUpload`, `POST` is `uploadData` — the
         // data leg of the resumable upload, which writes through the file backend and forwards a
-        // completing WebP chunk to Go ([D-650]).
+        // completing alpha-declaring WebP chunk to Go ([D-650]).
         .route(
             "/api/v4/uploads/{upload_id}",
             partially_migrated_with_ids(

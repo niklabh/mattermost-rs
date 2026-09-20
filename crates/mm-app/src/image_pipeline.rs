@@ -12,7 +12,8 @@
 //!
 //! # What this does not decode
 //!
-//! Go's registry also decodes WebP. That is recognised here and answered
+//! Go decodes a lossy WebP carrying an alpha chunk into an `*image.NYCbCrA`, which
+//! `goimage::image::Image` does not model. Such a canvas is recognised here and answered
 //! [`PipelineError::NotPorted`]; every caller hands such a request to Go before it writes.
 
 use std::borrow::Cow;
@@ -394,6 +395,7 @@ mod go_parity {
         let gif = fixture("gif");
         let bmp = fixture("bmp");
         let tiff = fixture("tiff");
+        let webp = fixture("webp");
         let exif = fixture("exif");
         let bytes_of = |c: &Json| -> Vec<u8> {
             let name = &c["name"];
@@ -404,6 +406,7 @@ mod go_parity {
                 "gif" => &gif["decode"],
                 "bmp" => &bmp["decode"],
                 "tiff" => &tiff["decode"],
+                "webp" => &webp["decode"],
                 "exif" => &exif["cases"],
                 other => panic!("{other}"),
             };
@@ -611,17 +614,29 @@ mod go_parity {
         assert!(!exceeds_resolution(0, 4320, MAX_RES));
     }
 
-    /// WebP is the last format `image.Decode`'s registry recognises and this port does not
-    /// decode; every other magic reaches a decoder.
+    /// A WebP canvas declaring alpha is the last thing `image.Decode`'s registry answers and this
+    /// port does not: Go decodes a lossy frame carrying an `ALPH` chunk into an `*image.NYCbCrA`,
+    /// and `goimage::image::Image` has no variant for it. Every other magic reaches a decoder.
     #[test]
     fn unported_formats_are_named_for_the_forward() {
+        let alpha = {
+            let fx = fixture("webp");
+            let c = fx["decode"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == "yellow_rose.lossy-with-alpha.webp")
+                .expect("the corpus carries a lossy WebP with an alpha chunk");
+            b64(c["b64"].as_str().unwrap())
+        };
         assert_eq!(
-            decode(b"RIFF\x00\x00\x00\x00WEBPVP8 ", MAX_RES),
+            decode(&alpha, MAX_RES),
             Err(PipelineError::NotPorted("webp"))
         );
         assert_eq!(
-            decode_config(b"RIFF\x00\x00\x00\x00WEBPVP8L"),
-            Err(PipelineError::NotPorted("webp"))
+            decode_config(&alpha),
+            Err(PipelineError::NotPorted("webp")),
+            "both halves hand over together, so the decision lands before the write"
         );
         // Every walk is ported, WebP's included, so a WebP upload forwards on its *pixels*
         // alone — `GetImageOrientation` is no longer a second reason.

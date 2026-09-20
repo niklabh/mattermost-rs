@@ -1,0 +1,22 @@
+# image-decoders.plan — the `image.Decode` registry wiring and the two gates that decide which
+# uploads this server answers, 2026-09-20. See MIGRATION.md "The remaining image decoders".
+#
+# `pkg` lines run goimage's own tests (MUTATE_PACKAGE=goimage, no stack); `unit` lines run the
+# mm-app lib tests; `api` lines run parity::image_uploads against the Go server on the stack.
+#
+# Two kinds of decision are under test here and they fail in opposite directions. A registry arm
+# that names the wrong decoder or the wrong format string produces a WRONG ANSWER. A gate that
+# lists the wrong formats produces a wrong *forward*: too few and the server answers something it
+# cannot reproduce, too many and it hands Go work it could have done — the second is invisible to
+# every test that only compares served answers, which is why `the_undecoded_formats_still_forward`
+# exists.
+registry-gif-to-bmp	crates/goimage/src/format.rs	Some("gif") => crate::gif::decode(data)\n            .map(|m| (m, "gif"))	Some("gif") => crate::bmp::decode(data)\n            .map(|m| (m, "gif"))	pkg	format::
+registry-bmp-names-tiff	crates/goimage/src/format.rs	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "tiff"))	pkg	format::
+registry-tiff-config-height	crates/goimage/src/format.rs	Some("tiff") => crate::tiff::decode_config(data)\n            .map(|c| {\n                (\n                    Config {\n                        width: c.width,\n                        height: c.height,	Some("tiff") => crate::tiff::decode_config(data)\n            .map(|c| {\n                (\n                    Config {\n                        width: c.width,\n                        height: c.width,	pkg	format::
+registry-webp-decoded	crates/goimage/src/format.rs	Some(other) => Err(DecodeError::NotPorted(other)),\n    }\n}\n\n/// Port of `image.Decode`	Some(other) => Err(DecodeError::Go(ERR_FORMAT.to_owned())),\n    }\n}\n\n/// Port of `image.Decode`	pkg	format::
+uploads-gate-drops-tiff	crates/mm-app/src/upload.rs	Some("png" | "jpeg" | "gif" | "bmp" | "tiff") | None => Ok(()),	Some("png" | "jpeg" | "gif" | "bmp") | None => Ok(()),	api	image_uploads
+uploads-gate-adds-webp	crates/mm-app/src/upload.rs	Some("png" | "jpeg" | "gif" | "bmp" | "tiff") | None => Ok(()),	Some(_) | None => Ok(()),	api	image_uploads
+uploads-gate-forgets-unknown	crates/mm-app/src/upload.rs	Some("png" | "jpeg" | "gif" | "bmp" | "tiff") | None => Ok(()),	Some("png" | "jpeg" | "gif" | "bmp" | "tiff") => Ok(()),	api	image_uploads
+preprocess-gif-mime-any-image	crates/mm-app/src/file_upload.rs	if info.mime_type == "image/gif" {	if info.mime_type.starts_with("image/") {	api	image_uploads
+control-rename-binding	crates/goimage/src/format.rs	pub fn sniff(data: &[u8]) -> Option<&'static str> {\n    FORMATS\n        .iter()\n        .find(|f| {\n            data.len() >= f.magic.len()	pub fn sniff(bytes: &[u8]) -> Option<&'static str> {\n    let data = bytes;\n    FORMATS\n        .iter()\n        .find(|f| {\n            data.len() >= f.magic.len()	pkg	format::
+control-reorder-arms	crates/goimage/src/format.rs	Some("tiff") => crate::tiff::decode(data)\n            .map(|m| (m, "tiff"))\n            .map_err(|e| DecodeError::Go(e.to_string())),\n        Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))\n            .map_err(|e| DecodeError::Go(e.to_string())),	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))\n            .map_err(|e| DecodeError::Go(e.to_string())),\n        Some("tiff") => crate::tiff::decode(data)\n            .map(|m| (m, "tiff"))\n            .map_err(|e| DecodeError::Go(e.to_string())),	pkg	format::

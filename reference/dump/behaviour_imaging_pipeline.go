@@ -247,6 +247,19 @@ func imagingPipelineStage() (map[string]any, error) {
 		"crafted_rgb8_be", "crafted_predictor_rgb16", "crafted_one_by_one_rgb",
 	})
 
+	// WebP is files only — Go has no encoder — so the slice is the real streams x/image ships:
+	// lossy with each in-loop filter, lossless, and the sub-byte-depth lossless gophers.
+	corpusSlice("webp", named(xImageTestdata("testdata", "webp")), []string{
+		"blue-purple-pink.lossy.webp", "blue-purple-pink.lossless.webp",
+		"blue-purple-pink-large.no-filter.lossy.webp",
+		"blue-purple-pink-large.simple-filter.lossy.webp",
+		"blue-purple-pink-large.normal-filter.lossy.webp",
+		"blue-purple-pink-large.lossless.webp",
+		"gopher-doc.1bpp.lossless.webp", "gopher-doc.4bpp.lossless.webp",
+		"gopher-doc.8bpp.lossless.webp", "gopher-doc.with-alpha.lossless.webp",
+		"tux.lossless.webp",
+	})
+
 	exif, eerr := imagingEXIFStage()
 	if eerr != nil {
 		return nil, eerr

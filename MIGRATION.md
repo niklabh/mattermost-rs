@@ -14256,3 +14256,32 @@ Mutation tally (`error-i18n.plan`): 17 run, 15 caught, 2 controls survived, 0 ha
 mutation that swaps `DefaultClientLocale` for `DefaultServerLocale` in the middleware is *not*
 planned: both are `en` on the stack, so it is wire-equivalent in the same way a misnamed
 parameter used to be.
+
+## The remaining image decoders — D-650 narrowed to WebP, D-411 to the avatar (2026-09-20)
+
+No route+method pair is added. `crates/goimage` grew the four decoders `image.Decode`'s registry
+still handed to Go — GIF (with `compress/lzw`), BMP, TIFF (with its own LZW, PackBits and the
+CCITT Group 3/4 fax reader) — and `goimage::exif` grew `imagemeta`'s TIFF and WebP orientation
+walks, which is what the two upload paths read *before* the pixels. Between them they lift the
+forward on `POST /files`, the completing chunk of `POST /uploads/{upload_id}`,
+`POST /users/{user_id}/image`, `POST /brand/image` and `createEmoji`'s resize for every format but
+WebP.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `image/gif` + `compress/lzw` (reader) | `crates/goimage/src/gif/` | DONE | 10 unit over 215 corpus files, incl. `DecodeAll` | `image.Decode` yields frame 0 alone; `decode_all` exists because the emoji path walks frames. `gif: can't recognize format %q` renders a non-ASCII byte as `\xNN`, which is Go's answer for every input the registry can route here but not for one handed to `decode_all` directly. |
+| `golang.org/x/image/bmp` (reader) | `crates/goimage/src/bmp/` | DONE | 5 unit over 215 corpus files | `DecodeConfig` reports `color.RGBAModel` for 24 *and* 32 bpp while `Decode` returns `RGBA` for one and `NRGBA` for the other. |
+| `golang.org/x/image/tiff` + its `lzw` + `golang.org/x/image/ccitt` (readers) | `crates/goimage/src/tiff/` | DONE | 19 unit over 464 corpus cases | Both byte orders, every compression including CCITT G3/G4, strips and tiles, the predictor. An uncompressed strip is a *window* on the file bytes, so the predictor writes through it — `crafted_predictor_overlapping_strips` pins that. |
+| `bep/imagemeta`'s TIFF and WebP EXIF walks (`imagedecoder_tif.go`, `imagedecoder_webp.go`) | `crates/goimage/src/exif.rs`, `mm-app/src/imaging_orientation.rs` | DONE | 4 + 4 unit over 229 corpus cases, both reader shapes | `imaging_orientation::Unreproducible` is no longer constructed. A TIFF's IFD0 *is* its EXIF IFD, so the walk runs over the outer stream and inherits its buffering — which is why a refused seek still moves the position. |
+| the registry (`image.Decode`/`DecodeConfig`) and the two forward gates | `goimage::format`, `mm-app/src/{upload,file_upload}.rs` | DONE | `parity::image_uploads` (4, corpus now 26 files), the `pipeline` stage end to end | A case with no decoder here is a **hand-over**, not a mismatch: the pipeline test still compares both orientation reads for it and stops before the pixels. |
+
+The evidence that matters is the `pipeline` stage, not the decoders on their own: 49 GIF, BMP and
+TIFF corpus files plus four photo-sized inline ones now run through Mattermost's own call
+sequences, so the `_thumb`, `_preview`, 16×16 `mini_preview`, 128×128 profile PNG, brand PNG and
+resized emoji are each compared with Go's bytes for an animated GIF, an interlaced GIF, BMPs at
+every bit depth in both row orders and TIFFs that are LZW, CCITT Group 4, tiled and big-endian.
+
+Mutation tallies, per branch: `wt/dec-bmp` 53 run, 53 caught, 3 controls survived; `wt/dec-gif`
+45 run, 43 caught, 2 controls survived; `wt/dec-tiff` 97 run, 86 caught, 5 controls survived (four
+equivalent mutants argued on the code they constrain, two corpus gaps fixed); `wt/dec-exif` 28 run,
+27 caught, 2 controls survived (one equivalent).

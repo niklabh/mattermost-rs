@@ -7356,11 +7356,11 @@ and the mux's refusal of a third syncable type. One arm still hands over: a grou
 ## D-380 · `createEmoji` forwards the GIF branch and the formats it does not decode
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
-**Narrowed** 2026-09-20 — every PNG and JPEG header is measured, and the resize (`image.Decode`,
-`imaging.Fit`, `EncodePNG`) is served byte for byte for a `.png` filename
+**Narrowed** 2026-09-20 (second time) — every header but WebP's is measured, and the resize
+(`image.Decode`, `imaging.Fit`, `EncodePNG`) is served byte for byte for a `.png` filename
 (`parity::emoji_writes::a_gif_filename_is_go_and_a_resize_is_served_byte_for_byte`). What still
-forwards: a GIF/BMP/TIFF/WebP header ([D-650]) and any non-`.png` filename (the GIF branch below).
-The table that follows is the 2026-09-12 state.
+forwards: a WebP header ([D-650]) and any non-`.png` filename (the GIF branch below). The table
+that follows is the 2026-09-12 state, when the first row still covered GIF, BMP and TIFF too.
 
 `POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
 400, the permission 403, the model's name errors, the duplicate, the missing image part, the
@@ -7626,11 +7626,11 @@ divergence at the one call site that would show it, before a route echoes a file
 ## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
-**Narrowed** 2026-09-20 — items 1 and 3 are served for PNG and JPEG: `SetProfileImage` (including
-`UpdateLastPictureUpdate`, the identical-bytes early return and `invalidateUserCacheAndPublish`)
-and `SaveBrandImage` (including the archive `MoveFile`), byte for byte
-(`parity::image_writes`). A GIF/BMP/TIFF/WebP upload still forwards before the write ([D-650]).
-Item 2 is unchanged. The text below is the 2026-09-13 state.
+**Narrowed** 2026-09-20 (second time) — items 1 and 3 are served for every format but WebP:
+`SetProfileImage` (including `UpdateLastPictureUpdate`, the identical-bytes early return and
+`invalidateUserCacheAndPublish`) and `SaveBrandImage` (including the archive `MoveFile`), byte for
+byte (`parity::image_writes`). A WebP upload still forwards before the write ([D-650]). Item 2 is
+unchanged, and is now the only thing this entry owes. The text below is the 2026-09-13 state.
 
 `POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
 `GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
@@ -8734,21 +8734,22 @@ so a Greek hashtag ending in one of those letters would compare differently here
 rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
 lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
 
-## D-650 · GIF, BMP, TIFF and WebP uploads are Go's
+## D-650 · WebP uploads are Go's
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
-**Narrowed** 2026-09-20 — PNG and JPEG are served byte for byte (`crates/goimage`,
-`mm_app::image_pipeline`; `parity::image_uploads`).
+**Narrowed** 2026-09-20 (second time) — GIF, BMP and TIFF are ported and served, along with
+`imagemeta`'s TIFF and WebP EXIF walks, so `mm_app::imaging_orientation::Unreproducible` is no
+longer constructed at all. The title was "GIF, BMP, TIFF and WebP uploads are Go's".
 
 `POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve the raster
 branch — `preprocessImage`/`postprocessImage` and `HandleImages`, the `_thumb`, `_preview` and
-`mini_preview` — for every file whose header `image.Decode`'s registry hands to the PNG or JPEG
-decoder. A header it hands to `image/gif`, `x/image/bmp`, `x/image/tiff` or `x/image/webp` is still
-forwarded before any write (`goimage::format::DecodeError::NotPorted`).
+`mini_preview` — for every file whose header `image.Decode`'s registry hands to a decoder
+`crates/goimage` has. Only `x/image/webp` is missing, and such a header is still forwarded before
+any write (`goimage::format::DecodeError::NotPorted`).
 
-**What is owed:** ports of those four decoders against the oracle (GIF also needs its LZW and the
-whole-file decode `preprocessImage` does for an `image/gif` mime), plus the TIFF and WebP EXIF walks
-`GetImageOrientation` supports (`mm_app::imaging_orientation` answers `Unreproducible` for them).
+**What is owed:** the WebP decoder — `x/image/riff`, `webp/decode.go`, and the VP8 lossy and VP8L
+lossless bitstreams under them, about 4,300 lines of Go. It is the largest single decoder in the
+registry and the only one with no encoder anywhere in Go, so its corpus can only be files.
 
 ---
 
