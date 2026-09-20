@@ -224,6 +224,28 @@ fn corpus() -> Vec<(&'static str, &'static str, Vec<u8>)> {
             "mmrs-parity-img-alpha.bmp",
             corpus_file("bmp", "crafted_baseline_32_topdown"),
         ),
+        // TIFF, served since `goimage::tiff` and `imagemeta`'s TIFF EXIF walk landed together —
+        // the decoder alone was not enough, because both upload paths read the orientation.
+        (
+            "lzw tiff",
+            "mmrs-parity-img-lzw.tiff",
+            corpus_file("tiff", "blue-purple-pink.lzwcompressed.tiff"),
+        ),
+        (
+            "ccitt group 4 tiff",
+            "mmrs-parity-img-g4.tiff",
+            corpus_file("tiff", "bw-gopher_ccittGroup4.tiff"),
+        ),
+        (
+            "tiled 16-bit tiff",
+            "mmrs-parity-img-tiled.tiff",
+            corpus_file("tiff", "tiled-nrgba16.tiff"),
+        ),
+        (
+            "big-endian paletted tiff",
+            "mmrs-parity-img-be.tiff",
+            corpus_file("tiff", "video-001-paletted.tiff"),
+        ),
     ]
 }
 
@@ -527,46 +549,10 @@ async fn the_uploads_route_completes_images_identically() {
     );
 }
 
-/// A 1×1 black, uncompressed, little-endian, 8-bit grayscale TIFF: the smallest input that
-/// reaches `golang.org/x/image/tiff`'s decoder and comes back with dimensions. Built here rather
-/// than taken from a fixture because the TIFF oracle stage records what the *decoder* answers,
-/// and this test is about the route forwarding before it ever gets that far.
-fn tiny_tiff() -> Vec<u8> {
-    // tag, type (3 = SHORT, 4 = LONG), value. Every entry has count 1, so the value sits inline.
-    const PIXEL_AT: u32 = 8 + 2 + 9 * 12 + 4;
-    let entries: [(u16, u16, u32); 9] = [
-        (256, 3, 1),        // ImageWidth
-        (257, 3, 1),        // ImageLength
-        (258, 3, 8),        // BitsPerSample
-        (259, 3, 1),        // Compression = none
-        (262, 3, 1),        // PhotometricInterpretation = BlackIsZero
-        (273, 4, PIXEL_AT), // StripOffsets
-        (277, 3, 1),        // SamplesPerPixel
-        (278, 4, 1),        // RowsPerStrip
-        (279, 4, 1),        // StripByteCounts
-    ];
-    let mut out = b"II\x2a\x00\x08\x00\x00\x00".to_vec();
-    out.extend_from_slice(&u16::try_from(entries.len()).unwrap().to_le_bytes());
-    for (tag, typ, value) in entries {
-        out.extend_from_slice(&tag.to_le_bytes());
-        out.extend_from_slice(&typ.to_le_bytes());
-        out.extend_from_slice(&1u32.to_le_bytes());
-        if typ == 3 {
-            out.extend_from_slice(&u16::try_from(value).unwrap().to_le_bytes());
-            out.extend_from_slice(&[0, 0]);
-        } else {
-            out.extend_from_slice(&value.to_le_bytes());
-        }
-    }
-    out.extend_from_slice(&0u32.to_le_bytes());
-    assert_eq!(out.len(), PIXEL_AT as usize);
-    out.push(0);
-    out
-}
-
-/// The formats this port does not decode are still Go's, and forward before anything is
-/// written. GIF and BMP are no longer among them — `goimage::gif` and `goimage::bmp` decode
-/// them, and the derived files they produce are compared with everything else in `corpus()`.
+/// WebP — the one format this port does not decode — is still Go's, and forwards before anything
+/// is written. GIF, BMP and TIFF are no longer among them: their decoders and, for TIFF, the EXIF
+/// walk both upload paths need, landed here, and the derived files they produce are compared with
+/// everything else in `corpus()`.
 #[tokio::test]
 async fn the_undecoded_formats_still_forward() {
     if !stack_enabled() {
@@ -577,8 +563,9 @@ async fn the_undecoded_formats_still_forward() {
     let token = go_minted_token(&client).await;
     let (_team, channel) = a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    let tiff = tiny_tiff();
-    for (filename, bytes) in [("mmrs-parity-img.tiff", tiff.as_slice())] {
+    // A 1×1 lossless WebP: the one format left with no decoder here.
+    let webp: &[u8] = b"RIFF\x1a\x00\x00\x00WEBPVP8L\x0e\x00\x00\x00\x2f\x00\x00\x00\x10\x07\x10\x11\x11\x88\x88\xfe\x07\x00";
+    for (filename, bytes) in [("mmrs-parity-img.webp", webp)] {
         let path = format!("/api/v4/files?channel_id={channel}&filename={filename}");
         let (status, served_by, body) = send(
             &client,
