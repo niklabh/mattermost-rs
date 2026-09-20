@@ -1,7 +1,8 @@
-//! Port of the EXIF orientation walk of `github.com/bep/imagemeta` v0.17.2, for JPEG and PNG, as
-//! Mattermost's `imaging.GetImageOrientation` drives it: `Sources: EXIF` only, a `ShouldHandleTag`
-//! that accepts the tag named `Orientation` and nothing else, and a `HandleTag` that stops the walk
-//! on the first `Orientation` whose value decoded as a Go `uint16`.
+//! Port of the EXIF orientation walk of `github.com/bep/imagemeta` v0.17.2, for the four formats
+//! `imaging.GetImageOrientation` accepts — JPEG, PNG, TIFF and WebP — as Mattermost drives it:
+//! `Sources: EXIF` only, a `ShouldHandleTag` that accepts the tag named `Orientation` and nothing
+//! else, and a `HandleTag` that stops the walk on the first `Orientation` whose value decoded as a
+//! Go `uint16`.
 //!
 //! # What the walk answers, and why it is ported rather than re-derived
 //!
@@ -28,7 +29,26 @@
 //!   whatever was buffered. [`Bufio`] models that, because Mattermost's non-seekable wrapper
 //!   fails seeks the plain `bytes.Reader` accepts.
 //!
-//! Only JPEG and PNG are ported; the TIFF and WebP walks are not, and have no entry point here.
+//! # Where the four formats part company
+//!
+//! JPEG, PNG and WebP each copy their EXIF payload into an in-memory segment ([`Stream`] over a
+//! [`BytesReader`]) before walking it, so a bad offset inside the payload cannot reach the file.
+//! **TIFF does not**: `imagedecoder_tif.go:82` hands the EXIF decoder `e.streamReader` itself, so
+//! the walk runs over the caller's reader through the 4 KiB [`Bufio`], inheriting its position,
+//! its buffering and its one-silent-EOF state. Every value offset and sub-IFD pointer in a TIFF is
+//! therefore a seek on the *file*, which is why [`Exif`] borrows its stream rather than owning a
+//! `BytesReader`, and why the two reader shapes Mattermost hands in can disagree about a TIFF far
+//! more readily than about a JPEG.
+//!
+//! Two further per-format traps:
+//!
+//! - TIFF never reads the next-IFD pointer: `decode()` is not called, `decodeTags("IFD0")` is, so
+//!   an orientation that lives only in IFD1 is invisible even though a JPEG's would be found.
+//!   `readerOffset` stays 0 for the same reason, which is correct only because a TIFF's offsets
+//!   really are from the start of the file.
+//! - WebP does not skip the RIFF pad byte after an odd-length chunk (`imagedecoder_webp.go:163`
+//!   skips exactly `chunkLen`), so a spec-conforming odd chunk misaligns every chunk id after it.
+//!   That is a bug in imagemeta and it is reproduced here.
 
 use std::collections::HashSet;
 
@@ -226,11 +246,14 @@ pub enum ExifError {
     Read(ReadError),
 }
 
-/// The image formats this walk is ported for.
+/// The image formats this walk is ported for — the four `GetImageOrientation` maps to an
+/// `imagemeta.ImageFormat` (orientation.go:145-156).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Jpeg,
     Png,
+    Tiff,
+    Webp,
 }
 
 /// How control leaves a Go function in the walk: a returned error, or one of the two panics.
@@ -350,6 +373,17 @@ impl<R: ReadSeek> Stream<R> {
         Err(Flow::Stop)
     }
 
+    /// `readBytes` (io.go:243): `io.ReadFull` into the *caller's* slice, not the scratch buffer,
+    /// with the same one-silent-EOF stop. A short read leaves the bytes that did arrive and the
+    /// rest of the caller's slice untouched — which is how WebP's chunk id can still hold the
+    /// previous chunk's four bytes after a read that returned nothing.
+    fn read_bytes(&mut self, b: &mut [u8]) -> Result<(), Flow> {
+        match read_full(&mut self.r, b) {
+            Ok(()) => Ok(()),
+            Err(e) => self.stop(e),
+        }
+    }
+
     fn read1(&mut self, alt: Alt) -> Result<u8, Flow> {
         self.read(1, alt)?;
         Ok(self.buf[0])
@@ -440,13 +474,16 @@ enum Value {
     Other,
 }
 
-/// Port of `metaDecoderEXIF` (metadecoder_exif.go:196) over its in-memory segment.
-struct Exif<'s> {
-    s: Stream<BytesReader<'s>>,
+/// Port of `metaDecoderEXIF` (metadecoder_exif.go:196). The stream is **borrowed**, not owned:
+/// JPEG, PNG and WebP build one over their in-memory segment and throw it away, but TIFF passes
+/// the file's own `streamReader` (`newMetaDecoderEXIFFromStreamReader`), so the walk must be able
+/// to drive either.
+struct Exif<'a, R: ReadSeek> {
+    s: &'a mut Stream<R>,
     seen: HashSet<&'static str>,
 }
 
-impl Exif<'_> {
+impl<R: ReadSeek> Exif<'_, R> {
     /// `convertValue` for one element (metadecoder_exif.go:205-259): the reads it performs, and
     /// what kind of value comes out.
     fn convert_one(&mut self, typ: u16, alt: &mut Option<BytesReader>) -> Result<Value, Flow> {
@@ -605,8 +642,9 @@ impl Exif<'_> {
                     let mut alt = Some(BytesReader::new(&seg));
                     self.convert_values(typ, count, val_len, &mut alt)
                 });
-            // `defer e.seek(oldPos)`: runs on every exit; a seek to a non-negative position of a
-            // bytes.Reader cannot fail.
+            // `defer e.seek(oldPos)`: runs on every exit, including a panic, and a failure of
+            // *this* seek replaces whatever `res` holds. Over a segment it cannot fail; over a
+            // TIFF's own file reader (or Mattermost's forward-only wrapper) it can.
             self.s.seek(old)?;
             res?
         } else {
@@ -639,10 +677,22 @@ impl Exif<'_> {
     }
 }
 
-/// Runs the EXIF decoder over one in-memory segment.
-fn decode_segment(seg: &[u8], walk: &mut Walk, header: bool) -> Result<(), Flow> {
+/// Runs the EXIF decoder over one in-memory segment, as `newMetaDecoderEXIF` does: a *fresh*
+/// `streamReader` with its own `isEOF`, started in the calling decoder's byte order (which only
+/// the "Exif" header read can observe, since `decode` resets the order from the TIFF marker).
+///
+/// `header` is JPEG's alone: PNG's `eXIf` chunk and WebP's `EXIF` chunk hold a bare TIFF
+/// structure, so an "Exif\0\0" prefix there is read as a byte-order marker and rejected.
+///
+/// `order` is carried for fidelity and is observable from **one** call site only. The single read
+/// that happens before `decode` resets the order from the TIFF marker is JPEG's `read4` of
+/// "Exif", and JPEG passes big-endian; the marker itself reads the same either way, and WebP's
+/// little-endian never reaches anything else. So mutating this to `Order::Big` is an equivalent
+/// mutant — no input can tell — while mutating it to `Order::Little` is caught by every JPEG case.
+fn decode_segment(seg: &[u8], walk: &mut Walk, header: bool, order: Order) -> Result<(), Flow> {
+    let mut s = Stream::new(BytesReader::new(seg), order);
     let mut e = Exif {
-        s: Stream::new(BytesReader::new(seg), Order::Big),
+        s: &mut s,
         seen: HashSet::new(),
     };
     if header {
@@ -685,7 +735,7 @@ fn decode_jpeg(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
             // only requested source, so the loop ends after it.
             let _thumbnail_offset = e.pos();
             let seg = e.buffered_reader(i64::from(length))?;
-            return match decode_segment(&seg, walk, true) {
+            return match decode_segment(&seg, walk, true, e.order) {
                 // recover(): errStop is swallowed.
                 Err(Flow::Stop) => Ok(()),
                 other => other,
@@ -704,7 +754,7 @@ fn decode_png(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
         let tag = [e.buf[0], e.buf[1], e.buf[2], e.buf[3]];
         if &tag == b"eXIf" {
             let seg = e.buffered_reader(i64::from(chunk_length))?;
-            decode_segment(&seg, walk, false)?;
+            decode_segment(&seg, walk, false, e.order)?;
             // e.skip(4) for the CRC; EXIF was the only source, so the walk is done.
             return Ok(());
         } else if &tag == b"zTXt" {
@@ -727,6 +777,106 @@ fn decode_png(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
     }
 }
 
+/// Port of `imageDecoderTIF.decode` (imagedecoder_tif.go:14) with only the EXIF source.
+///
+/// Three differences from every other format, each of which changes an answer:
+///
+/// 1. a header this decoder dislikes is `errInvalidFormat`, where `metaDecoderEXIF.decode`
+///    returns success — so a TIFF with a bad byte-order marker, a magic that is not 42 or an IFD
+///    offset below 8 is an *error*, not "no orientation";
+/// 2. the whole `CONFIG` block (imagedecoder_tif.go:41-80) is dead under `Sources: EXIF`. It is
+///    skipped in Go too, and its `e.seek(ifdPos)` undoes the scan, so omitting it moves nothing;
+/// 3. `decodeTags` is called directly, on the file's own stream. No next-IFD pointer is read
+///    (IFD1 is unreachable) and `readerOffset` stays 0.
+fn decode_tiff(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
+    match e.read2(None)? {
+        0x4d4d => e.order = Order::Big,
+        0x4949 => e.order = Order::Little,
+        _ => return Err(invalid("invalid format")),
+    }
+    // `meaningOfLife`.
+    if e.read2(None)? != 42 {
+        return Err(invalid("invalid format"));
+    }
+    let ifd_offset = e.read4(None)?;
+    if ifd_offset < 8 {
+        return Err(invalid("invalid format"));
+    }
+    e.skip(i64::from(ifd_offset - 8));
+    let mut dec = Exif {
+        s: e,
+        seen: HashSet::new(),
+    };
+    dec.decode_tags(walk)
+}
+
+/// `RIFF` container fourCCs (imagedecoder_webp.go:6).
+const FCC_RIFF: &[u8; 4] = b"RIFF";
+const FCC_WEBP: &[u8; 4] = b"WEBP";
+const FCC_VP8X: &[u8; 4] = b"VP8X";
+const FCC_EXIF: &[u8; 4] = b"EXIF";
+/// `exifMetadataBit` in a `VP8X` chunk's first flags byte (imagedecoder_webp.go:70).
+const VP8X_EXIF_BIT: u8 = 1 << 3;
+
+/// Port of `decoderWebP.decode` (imagedecoder_webp.go:21) with only the EXIF source.
+///
+/// `sourceSet` starts as `(EXIF|XMP|CONFIG) & EXIF` = EXIF, so the `XMP `, `VP8 ` and `VP8L` arms
+/// are all dead and their chunks fall to `default`. That is position-equivalent — each of those
+/// arms consumes exactly `chunkLen` bytes as well — so they are not reproduced. `VP8X` is *not*
+/// dead: it is matched on the chunk id alone, its length is checked against 10, its ten bytes are
+/// read, and its EXIF flag can clear the last source and end the walk before any `EXIF` chunk is
+/// reached.
+///
+/// The byte order is little-endian throughout (`base.byteOrder` is set for WebP in
+/// imagemeta.go:216), which is what makes `chunkLen` read correctly.
+fn decode_webp(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
+    // Go declares these once, outside the loop, so a short read leaves the previous chunk's bytes.
+    let mut buf = [0u8; 10];
+    let mut chunk_id = [0u8; 4];
+    let mut want_exif = true;
+
+    e.read_bytes(&mut chunk_id)?;
+    if &chunk_id != FCC_RIFF {
+        return Err(invalid("invalid format"));
+    }
+    // The RIFF file size is skipped, never checked: a size that lies about the file changes
+    // nothing.
+    e.skip(4);
+    e.read_bytes(&mut chunk_id)?;
+    if &chunk_id != FCC_WEBP {
+        return Err(invalid("invalid format"));
+    }
+    loop {
+        if !want_exif {
+            return Ok(());
+        }
+        e.read_bytes(&mut chunk_id)?;
+        if e.is_eof {
+            return Ok(());
+        }
+        let chunk_len = e.read4(None)?;
+        if &chunk_id == FCC_VP8X {
+            if chunk_len != 10 {
+                return Err(invalid("invalid format"));
+            }
+            e.read_bytes(&mut buf)?;
+            if buf[0] & VP8X_EXIF_BIT == 0 {
+                // `sourceSet.Remove(EXIF)` empties the only source, and the arm's closing
+                // `if sourceSet.IsZero()` returns: an EXIF chunk after this is never read.
+                return Ok(());
+            }
+        } else if &chunk_id == FCC_EXIF && want_exif {
+            want_exif = false;
+            let _thumbnail_offset = e.pos();
+            // No RIFF pad byte is consumed after this, so an odd chunkLen misaligns the rest.
+            let seg = e.buffered_reader(i64::from(chunk_len))?;
+            decode_segment(&seg, walk, false, e.order)?;
+        } else {
+            e.skip(i64::from(chunk_len));
+        }
+    }
+}
+
 /// Port of `imagemeta.Decode` (imagemeta.go:82) with `Sources: EXIF`, Mattermost's
 /// `ShouldHandleTag` (the tag named `Orientation`) and its `HandleTag` (stop on the first
 /// `uint16`): the first uint16 `Orientation` the walk meets, `None` when it meets none, or the
@@ -735,7 +885,12 @@ fn decode_png(e: &mut Stream<Bufio>, walk: &mut Walk) -> Result<(), Flow> {
 /// `errFinal`'s filtering is applied: `ErrStopWalking`, `errStop` and a returned `io.EOF` are
 /// success.
 pub fn decode_orientation(r: &mut dyn ReadSeek, format: Format) -> Result<Option<u16>, ExifError> {
-    let mut stream = Stream::new(Bufio::new(r), Order::Big);
+    // `base.byteOrder` is big-endian for every format but WebP (imagemeta.go:216).
+    let order = match format {
+        Format::Webp => Order::Little,
+        _ => Order::Big,
+    };
+    let mut stream = Stream::new(Bufio::new(r), order);
     let mut walk = Walk {
         tag_count: 0,
         found: None,
@@ -743,6 +898,8 @@ pub fn decode_orientation(r: &mut dyn ReadSeek, format: Format) -> Result<Option
     let res = match format {
         Format::Jpeg => decode_jpeg(&mut stream, &mut walk),
         Format::Png => decode_png(&mut stream, &mut walk),
+        Format::Tiff => decode_tiff(&mut stream, &mut walk),
+        Format::Webp => decode_webp(&mut stream, &mut walk),
     };
     match res {
         Ok(()) | Err(Flow::Stop) | Err(Flow::StopWalking) => Ok(walk.found),
@@ -767,21 +924,39 @@ mod go_parity {
         match f.strip_prefix("image/").unwrap_or(f) {
             "jpeg" => Some(Format::Jpeg),
             "png" => Some(Format::Png),
+            "tiff" => Some(Format::Tiff),
+            "webp" => Some(Format::Webp),
             _ => None,
         }
     }
 
-    /// Every jpeg/png case of the oracle, through a `bytes.Reader` (Mattermost's seekable mode):
-    /// Go answers orientation `o` with no error exactly when this returns `Ok(Some(o))` (or
-    /// `Ok(None)` for 1), and 1 with an error when this returns `Err`.
+    /// The case's bytes. `tiff_pad` is the recipe the oracle carries in place of a payload too
+    /// large to base64: that many zero bytes between the 8-byte header and IFD0, with the
+    /// header's little-endian IFD0 offset raised to match. (`pad`, the PNG recipe, is applied by
+    /// [`crate::testsupport::exif_case_bytes`].)
+    fn case_bytes(c: &serde_json::Value) -> Vec<u8> {
+        let data = crate::testsupport::exif_case_bytes(c);
+        let Some(pad) = c["tiff_pad"].as_u64() else {
+            return data;
+        };
+        let mut out = data[..4].to_vec();
+        out.extend_from_slice(&(8 + pad as u32).to_le_bytes());
+        out.resize(8 + pad as usize, 0);
+        out.extend_from_slice(&data[8..]);
+        out
+    }
+
+    /// Every case of the oracle whose format this walk is ported for, through a `bytes.Reader`
+    /// (Mattermost's seekable mode): Go answers orientation `o` with no error exactly when this
+    /// returns `Ok(Some(o))` (or `Ok(None)` for 1), and 1 with an error when this returns `Err`.
     #[test]
-    fn every_jpeg_and_png_case_matches_imagemeta() {
+    fn every_case_matches_imagemeta() {
         let mut n = 0;
         for c in fixture("exif")["cases"].as_array().unwrap() {
             let Some(format) = format_of(c["format"].as_str().unwrap()) else {
                 continue;
             };
-            let data = crate::testsupport::exif_case_bytes(c);
+            let data = case_bytes(c);
             let got = decode_orientation(&mut BytesReader::new(&data), format);
             let (o, err) = match got {
                 Ok(v) => (i64::from(v.unwrap_or(1)), false),
@@ -799,7 +974,7 @@ mod go_parity {
             );
             n += 1;
         }
-        assert!(n > 80, "{n}");
+        assert!(n > 200, "{n}");
     }
 }
 
