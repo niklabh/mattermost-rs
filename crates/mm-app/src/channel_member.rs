@@ -488,6 +488,7 @@ impl App {
         user_id: &str,
         channel: &Channel,
         opts: &ChannelMemberOpts,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<ChannelMember>, Box<AppError>> {
         match self
             .store()
@@ -530,21 +531,27 @@ impl App {
         };
 
         let member = match self
-            .add_user_to_channel(&user, channel, opts.skip_team_member_integrity_check)
+            .add_user_to_channel(
+                &user,
+                channel,
+                opts.skip_team_member_integrity_check,
+                hook_ctx,
+            )
             .await?
         {
             MemberWrite::Done(member) => member,
             MemberWrite::Forward(why) => return Ok(MemberWrite::Forward(why)),
         };
 
-        // `UserHasJoinedChannel` is a plugin hook run on `a.Srv().Go` — with no plugin
-        // environment it is a no-op, and it cannot fail the request either way.
-
         // `if channel.IsSpace() { return cm, nil }` sits above the hook and the post, so a space's
         // backing channel gets neither.
         if channel.is_space() {
             return Ok(MemberWrite::Done(member));
         }
+
+        // `UserHasJoinedChannel` (channel.go:2044), spawned **before** the join or add-to-channel
+        // system post. `userRequestor` is nil for a self-add.
+        self.user_has_joined_channel(hook_ctx, &member, requestor.as_ref());
 
         match requestor {
             // `opts.UserRequestorID == "" || userID == opts.UserRequestorID` — a self-add, and
@@ -597,6 +604,7 @@ impl App {
         user: &User,
         channel: &Channel,
         skip_team_member_integrity_check: bool,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<ChannelMember>, Box<AppError>> {
         // **Both forwards happen before the write, and that ordering is the point.** They used to
         // sit after `add_user_to_channel_row`, which meant the membership row and its history row
@@ -642,7 +650,10 @@ impl App {
             }
         }
 
-        match self.add_user_to_channel_row(user, channel).await? {
+        match self
+            .add_user_to_channel_row(user, channel, hook_ctx)
+            .await?
+        {
             MemberWrite::Forward(why) => return Ok(MemberWrite::Forward(why)),
             MemberWrite::Done(new_member) => {
                 let mut channel_event = WebSocketEvent::new(
@@ -690,6 +701,7 @@ impl App {
         &self,
         user: &User,
         channel: &Channel,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<ChannelMember>, Box<AppError>> {
         // `!= 'O' && != 'P' && !IsSpace()`. The handler has already refused DM/GM with its own
         // id, and a space channel with a third, so this is Go's belt-and-braces check reproduced
@@ -772,8 +784,16 @@ impl App {
             ..ChannelMember::default()
         };
 
-        // `runGuardedChannelMemberWillBeAdded` is a plugin hook; with no plugin environment it is
-        // the identity, so the member reaches the store unchanged.
+        // `runGuardedChannelMemberWillBeAdded` (channel.go:1919), between the new member's flags
+        // and `SaveMember`, and skipped outright for a space's backing channel. A rejecting
+        // plugin is a 400 and no row is written.
+        let new_member = if channel.is_space() {
+            new_member
+        } else {
+            self.run_guarded_channel_member_will_be_added(hook_ctx, &channel.id, new_member)
+                .await?
+        };
+
         let saved = self
             .store()
             .channel()
@@ -850,6 +870,7 @@ impl App {
         user_id_to_remove: &str,
         remover_user_id: &str,
         channel: &Channel,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<User>, Box<AppError>> {
         let user = self.get_user(user_id_to_remove).await.map_err(|mut err| {
             // Go's ids here are `MissingAccountError`/`app.user.get.app_error`, which is what
@@ -895,7 +916,8 @@ impl App {
         // the load can fail the request — a non-member is a **404** from `GetChannelMember`, which
         // is what makes `DELETE …/members/{user}` idempotent-unfriendly: removing twice is a 404,
         // unlike `deleteDraft`.
-        self.get_channel_member(&channel.id, user_id_to_remove)
+        let member = self
+            .get_channel_member(&channel.id, user_id_to_remove)
             .await?;
 
         self.remove_channel_membership(user_id_to_remove, &channel.id)
@@ -915,6 +937,17 @@ impl App {
                     500,
                 )
             })?;
+
+        // `UserHasLeftChannel` (channel.go:3087), after `channel.IsSpace()` and **before** the
+        // two `user_removed` events. Go loads the actor with `a.GetUser(removerUserId)` and
+        // **discards its error**, so an unresolvable remover is a nil actor, not a failure.
+        if !channel.is_space() {
+            let actor = match remover_user_id {
+                "" => None,
+                id => self.get_user(id).await.ok(),
+            };
+            self.user_has_left_channel(hook_ctx, &member, actor.as_ref());
+        }
 
         let mut channel_event =
             WebSocketEvent::new(WEBSOCKET_EVENT_USER_REMOVED, "", &channel.id, "", None, "");
@@ -952,9 +985,10 @@ impl App {
         user_id_to_remove: &str,
         remover_user_id: &str,
         channel: &Channel,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<()>, Box<AppError>> {
         let user = match self
-            .remove_user_from_channel_inner(user_id_to_remove, remover_user_id, channel)
+            .remove_user_from_channel_inner(user_id_to_remove, remover_user_id, channel, hook_ctx)
             .await?
         {
             MemberWrite::Done(user) => user,
@@ -1108,6 +1142,7 @@ impl App {
         requestor_user_id: &str,
         batch_size: usize,
         batch_delay_ms: usize,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<MemberWrite<String>, Box<AppError>> {
         let current = self
             .store()
@@ -1186,7 +1221,7 @@ impl App {
             let mut result = mm_model::channel_member::SetChannelMembersResponse::default();
             for user_id in batch {
                 match self
-                    .remove_user_from_channel(user_id, requestor_user_id, channel)
+                    .remove_user_from_channel(user_id, requestor_user_id, channel, hook_ctx)
                     .await
                 {
                     Ok(MemberWrite::Done(())) => {
@@ -1216,7 +1251,10 @@ impl App {
                 ..ChannelMemberOpts::default()
             };
             for user_id in batch {
-                match self.add_channel_member(user_id, channel, &opts).await {
+                match self
+                    .add_channel_member(user_id, channel, &opts, hook_ctx)
+                    .await
+                {
                     Ok(MemberWrite::Done(_)) => {
                         result
                             .added

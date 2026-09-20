@@ -1205,11 +1205,18 @@ fn spawn_sync(
     syncable_type: GroupSyncableType,
     group_id: String,
     sync_roles: bool,
+    hook_ctx: mm_app::plugin_hooks::HookContext,
 ) {
     let app = state.app.clone();
     tokio::spawn(async move {
-        app.sync_roles_and_membership(&syncable_id, &syncable_type, &group_id, sync_roles)
-            .await;
+        app.sync_roles_and_membership(
+            &syncable_id,
+            &syncable_type,
+            &group_id,
+            sync_roles,
+            &hook_ctx,
+        )
+        .await;
     });
 }
 
@@ -1273,6 +1280,7 @@ pub async fn link_group_syncable(
     // on the group, which is read after the body in Go. Go's order is kept: the body is parsed
     // first, and a forward re-sends the bytes it read.
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -1354,6 +1362,7 @@ pub async fn link_group_syncable(
         syncable_type,
         group_id,
         patch.scheme_admin.is_some(),
+        hook_ctx,
     );
     marshalled(
         StatusCode::CREATED,
@@ -1420,8 +1429,9 @@ pub async fn unlink_group_syncable(
     }
 
     let app = state.app.clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     tokio::spawn(async move {
-        app.remove_memberships_from_unlinked_syncable(&syncable_id, &syncable_type)
+        app.remove_memberships_from_unlinked_syncable(&syncable_id, &syncable_type, &hook_ctx)
             .await;
     });
 
@@ -1473,6 +1483,7 @@ pub async fn patch_group_syncable(
     let syncable_type = syncable_type_of(&syncable_type);
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -1544,6 +1555,7 @@ pub async fn patch_group_syncable(
         syncable_type,
         group_id,
         patch.scheme_admin.is_some(),
+        hook_ctx,
     );
     marshalled(StatusCode::OK, WHERE, &group_syncable)
 }

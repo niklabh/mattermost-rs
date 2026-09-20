@@ -338,8 +338,15 @@ impl App {
     /// The empty requestor also changes behaviour further down: `JoinDefaultChannels` skips its
     /// requestor lookup, and `JoinUserToTeam` resolves no actor for the plugin hook.
     #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id))]
-    pub async fn add_team_member(&self, team_id: &str, user_id: &str) -> AppResult<TeamMember> {
-        let (_, member) = self.add_user_to_team(team_id, user_id, "").await?;
+    pub async fn add_team_member(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<TeamMember> {
+        let (_, member) = self
+            .add_user_to_team(team_id, user_id, "", hook_ctx)
+            .await?;
         self.publish_added_to_team(team_id, user_id).await;
         Ok(member)
     }
@@ -369,12 +376,13 @@ impl App {
         user_ids: &[String],
         user_requestor_id: &str,
         graceful: bool,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<Vec<TeamMemberWithError>> {
         let mut out: Vec<TeamMemberWithError> = Vec::new();
 
         for user_id in user_ids {
             match self
-                .add_user_to_team(team_id, user_id, user_requestor_id)
+                .add_user_to_team(team_id, user_id, user_requestor_id, hook_ctx)
                 .await
             {
                 Ok((_, member)) => {
@@ -419,6 +427,7 @@ impl App {
         team_id: &str,
         user_id: &str,
         user_requestor_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<(Team, TeamMember)> {
         let team =
             self.store()
@@ -471,7 +480,7 @@ impl App {
                 })?;
 
         let member = self
-            .join_user_to_team(&team, &user, user_requestor_id)
+            .join_user_to_team(&team, &user, user_requestor_id, hook_ctx)
             .await?;
         Ok((team, member))
     }
@@ -489,6 +498,7 @@ impl App {
         &self,
         invite_id: &str,
         user_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<(Team, TeamMember)> {
         let team = self.get_team_by_invite_id(invite_id).await?;
 
@@ -507,7 +517,7 @@ impl App {
             err
         })?;
 
-        let member = self.join_user_to_team(&team, &user, "").await?;
+        let member = self.join_user_to_team(&team, &user, "", hook_ctx).await?;
         Ok((team, member))
     }
 
@@ -538,7 +548,9 @@ impl App {
     /// - **The join system post.** `ExperimentalEnableDefaultChannelLeaveJoinMessages` defaults
     ///   to **`true`** (config.go:874), so a stock Go server *does* post "user joined the team"
     ///   in `town-square`. This port writes no `Posts` rows — **D-243**.
-    /// - **Plugin hooks** (`TeamMemberWillBeAdded`, `UserHasJoinedTeam`) — D-183.
+    /// - **The plugin hooks are here now**: `TeamMemberWillBeAdded` inside both store branches,
+    ///   as `applyPreSaveHooks` runs on the insert *and* the revival, and `UserHasJoinedTeam`
+    ///   before the `added_to_team` event. Both are no-ops unless this process hosts plugins.
     /// - **ABAC**: the private-team branch is gated on
     ///   [`App::team_membership_access_control_enabled`], a constant `false` on this deployment.
     #[tracing::instrument(skip(self, team, user), fields(team_id = %team.id, user_id = %user.id))]
@@ -547,6 +559,7 @@ impl App {
         team: &Team,
         user: &User,
         user_requestor_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<TeamMember> {
         if !self.is_team_email_allowed(user, team) {
             return Err(join_error(
@@ -597,7 +610,14 @@ impl App {
             Err(_) => (
                 self.store()
                     .team()
-                    .save_member(&candidate, self.config().max_users_per_team)
+                    // `applyPreSaveHooks` (app/teams/teams.go:199) — `TeamMemberWillBeAdded`, the
+                    // last thing before the insert.
+                    .save_member(
+                        &self
+                            .run_team_member_will_be_added(hook_ctx, candidate)
+                            .await?,
+                        self.config().max_users_per_team,
+                    )
                     .await
                     .map_err(save_member_error)?,
                 false,
@@ -627,7 +647,13 @@ impl App {
                 (
                     self.store()
                         .team()
-                        .update_member(&candidate)
+                        // The revival path applies the same pre-save hooks (teams.go:226), after
+                        // the member-count check and not before it.
+                        .update_member(
+                            &self
+                                .run_team_member_will_be_added(hook_ctx, candidate)
+                                .await?,
+                        )
                         .await
                         .map_err(save_member_error)?,
                     false,
@@ -679,6 +705,15 @@ impl App {
 
         // `a.ClearSessionCacheForUser(user.Id)` (team.go:872).
         self.clear_session_cache_for_user(&user.id).await;
+
+        // `UserHasJoinedTeam` (team.go:884), spawned **before** the `added_to_team` event. The
+        // actor is `a.GetUser(userRequestorId)` with its error discarded, and nil for a join that
+        // carried no requestor.
+        let actor = match user_requestor_id {
+            "" => None,
+            id => self.get_user(id).await.ok(),
+        };
+        self.user_has_joined_team(hook_ctx, &member, actor.as_ref());
 
         self.publish_added_to_team(&team.id, &user.id).await;
 
@@ -1013,6 +1048,7 @@ impl App {
         team_id: &str,
         user_id: &str,
         requestor_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<()> {
         let team = self.store().team().get(team_id).await.map_err(|err| {
             let status = if err.is_not_found() { 404 } else { 500 };
@@ -1049,7 +1085,7 @@ impl App {
             }
         })?;
 
-        self.leave_team(&team, &user, requestor_id).await
+        self.leave_team(&team, &user, requestor_id, hook_ctx).await
     }
 
     /// Port of `app.App.LeaveTeam` (app/team.go:1331) — the cascade a team departure runs.
@@ -1082,10 +1118,17 @@ impl App {
     /// # What is deliberately not here
     ///
     /// The ABAC audit records (`policyDriven` is `team.PolicyEnforced && requestorId == ""`, and
-    /// this route always passes the session's user id, so it is false), the plugin hook
-    /// ([D-183]), and the three cache invalidations this server has no caches for ([D-190]).
+    /// this route always passes the session's user id, so it is false) and the three cache
+    /// invalidations this server has no caches for ([D-190]). The `UserHasLeftTeam` hook is in
+    /// [`App::post_process_team_member_leave`], where Go fires it.
     #[tracing::instrument(skip(self, team, user), fields(team_id = %team.id, user_id = %user.id))]
-    pub async fn leave_team(&self, team: &Team, user: &User, requestor_id: &str) -> AppResult<()> {
+    pub async fn leave_team(
+        &self,
+        team: &Team,
+        user: &User,
+        requestor_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<()> {
         let mut member = self
             .store()
             .team()
@@ -1194,7 +1237,8 @@ impl App {
         // and `TeamId`, which do not move, so the sharing is not observable — but a clone here
         // would quietly make it unobservable by construction.
         self.remove_team_member(&mut member).await?;
-        self.post_process_team_member_leave(&member).await
+        self.post_process_team_member_leave(&member, requestor_id, hook_ctx)
+            .await
     }
 
     /// The two system posts of `LeaveTeam` — `postLeaveTeamMessage` (team.go:1440) and
@@ -1323,10 +1367,25 @@ impl App {
     /// stale sidebar and a stale "last channel viewed" — and neither has any other trigger, so
     /// dropping one is invisible until a rejoin.
     ///
-    /// The plugin hook is [D-183]; of the three cache calls, the session one is
+    /// `UserHasLeftTeam` is the **first** statement, before the user re-read and the three
+    /// writes that can fail the request; of the three cache calls, the session one is
     /// [`App::clear_session_cache_for_user`] and the other two are [D-190].
     #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
-    async fn post_process_team_member_leave(&self, member: &TeamMember) -> AppResult<()> {
+    async fn post_process_team_member_leave(
+        &self,
+        member: &TeamMember,
+        requestor_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<()> {
+        // `UserHasLeftTeam` (team.go:1295) is `postProcessTeamMemberLeave`'s **first** statement,
+        // before the user re-read and before the three writes that can fail the request. Go loads
+        // the actor with `a.GetUser(requestorId)` and discards its error.
+        let actor = match requestor_id {
+            "" => None,
+            id => self.get_user(id).await.ok(),
+        };
+        self.user_has_left_team(hook_ctx, member, actor.as_ref());
+
         let user = self
             .store()
             .user()

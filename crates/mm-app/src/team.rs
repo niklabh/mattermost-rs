@@ -1780,7 +1780,12 @@ impl App {
     /// is `api.team.is_team_creation_allowed.domain.app_error` at 400 — a *different* id from the
     /// one `JoinUserToTeam` raises for the same predicate a moment later.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn create_team_with_user(&self, team: &mut Team, user_id: &str) -> AppResult<Team> {
+    pub async fn create_team_with_user(
+        &self,
+        team: &mut Team,
+        user_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+    ) -> AppResult<Team> {
         let user = self.get_user(user_id).await?;
         team.email.clone_from(&user.email);
 
@@ -1797,7 +1802,8 @@ impl App {
         let created = self.create_team(team).await?;
         // Go discards the membership and returns the team; a join failure still fails the
         // request, leaving a created team the caller is not a member of.
-        self.join_user_to_team(&created, &user, "").await?;
+        self.join_user_to_team(&created, &user, "", hook_ctx)
+            .await?;
         Ok(created)
     }
 

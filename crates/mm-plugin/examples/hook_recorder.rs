@@ -32,18 +32,38 @@
 //! `!dismiss-edit` answer no post (which is what rejects an edit — the reason alone does not),
 //! `!rewrite-edit <text>` answers the whole new post with its message replaced, and anything else
 //! echoes the new post back unchanged, because answering nothing would reject it.
+//!
+//! # The membership hooks are driven by ids in the environment
+//!
+//! A `ChannelMember` carries nothing a client chooses, so the two rejecting membership hooks key
+//! off the channel or team the member is for, named in the environment the host passes down to
+//! this process:
+//!
+//! | variable | hook | answer |
+//! |---|---|---|
+//! | `HOOK_RECORDER_REJECT_CHANNEL` | `ChannelMemberWillBeAdded` | no member, [`MEMBER_REJECTION`] |
+//! | `HOOK_RECORDER_ADMIN_CHANNEL` | `ChannelMemberWillBeAdded` | a member carrying **only** `SchemeAdmin`, which the merge fills back in |
+//! | `HOOK_RECORDER_REJECT_TEAM` | `TeamMemberWillBeAdded` | no member, [`MEMBER_REJECTION`] |
+//! | `HOOK_RECORDER_ADMIN_TEAM` | `TeamMemberWillBeAdded` | a member carrying **only** `SchemeAdmin` |
+//!
+//! Both hosts read the same ids, because the two servers share one database and therefore one
+//! channel and one team.
 
 use std::io::Write;
 use std::sync::Mutex;
 
 use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
-use mm_plugin::wire::model::Post;
+use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
-    Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns, Z_MessageHasBeenPostedArgs,
-    Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs, Z_MessageHasBeenUpdatedReturns,
-    Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs,
-    Z_MessageWillBeUpdatedReturns, Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns,
-    Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns,
+    Z_ChannelMemberWillBeAddedArgs, Z_ChannelMemberWillBeAddedReturns, Z_MessageHasBeenDeletedArgs,
+    Z_MessageHasBeenDeletedReturns, Z_MessageHasBeenPostedArgs, Z_MessageHasBeenPostedReturns,
+    Z_MessageHasBeenUpdatedArgs, Z_MessageHasBeenUpdatedReturns, Z_MessageWillBePostedArgs,
+    Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns,
+    Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs,
+    Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns,
+    Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs,
+    Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns,
+    Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
 };
 use serde_json::{Value as Json, json};
 
@@ -61,9 +81,13 @@ use render::render_typed;
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
 
+/// The reason the two membership hooks refuse with. Unlike the post hooks' reason it is a
+/// **parameter** of a real translation key on both hosts, so it never reaches a client verbatim.
+const MEMBER_REJECTION: &str = "the hook recorder says no";
+
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 7] = [
+const IMPLEMENTED: [&str; 13] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -71,7 +95,20 @@ const IMPLEMENTED: [&str; 7] = [
     "MessageHasBeenDeleted",
     "ReactionHasBeenAdded",
     "ReactionHasBeenRemoved",
+    "ChannelMemberWillBeAdded",
+    "UserHasJoinedChannel",
+    "UserHasLeftChannel",
+    "TeamMemberWillBeAdded",
+    "UserHasJoinedTeam",
+    "UserHasLeftTeam",
 ];
+
+/// The id in `name`, or the empty string when the host set no such variable. An unset variable
+/// must never match a real id, which is why the empty string is compared against an id that is
+/// always 26 characters.
+fn configured_id(name: &str) -> String {
+    std::env::var(name).unwrap_or_default()
+}
 
 struct Recorder {
     transcript: Mutex<std::fs::File>,
@@ -207,6 +244,91 @@ impl Hooks for Recorder {
     ) -> Result<Z_ReactionHasBeenRemovedReturns, NotImplemented> {
         self.saw("ReactionHasBeenRemoved", &args);
         Ok(Z_ReactionHasBeenRemovedReturns::default())
+    }
+
+    async fn channel_member_will_be_added(
+        &self,
+        args: Z_ChannelMemberWillBeAddedArgs,
+    ) -> Result<Z_ChannelMemberWillBeAddedReturns, NotImplemented> {
+        self.saw("ChannelMemberWillBeAdded", &args);
+        let channel = args.b.as_deref().map_or("", |m| m.channel_id.as_str());
+        let answer = if channel == configured_id("HOOK_RECORDER_REJECT_CHANNEL") {
+            Z_ChannelMemberWillBeAddedReturns {
+                a: None,
+                b: MEMBER_REJECTION.to_owned(),
+            }
+        } else if channel == configured_id("HOOK_RECORDER_ADMIN_CHANNEL") {
+            // Only `SchemeAdmin`: everything else is omitted by gob, and the host's merge is what
+            // puts the channel, the user and the notify props back. A replacement carrying the
+            // whole member would pass whether or not the merge worked.
+            Z_ChannelMemberWillBeAddedReturns {
+                a: Some(Box::new(ChannelMember {
+                    scheme_admin: true,
+                    ..ChannelMember::default()
+                })),
+                b: String::new(),
+            }
+        } else {
+            Z_ChannelMemberWillBeAddedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn user_has_joined_channel(
+        &self,
+        args: Z_UserHasJoinedChannelArgs,
+    ) -> Result<Z_UserHasJoinedChannelReturns, NotImplemented> {
+        self.saw("UserHasJoinedChannel", &args);
+        Ok(Z_UserHasJoinedChannelReturns::default())
+    }
+
+    async fn user_has_left_channel(
+        &self,
+        args: Z_UserHasLeftChannelArgs,
+    ) -> Result<Z_UserHasLeftChannelReturns, NotImplemented> {
+        self.saw("UserHasLeftChannel", &args);
+        Ok(Z_UserHasLeftChannelReturns::default())
+    }
+
+    async fn team_member_will_be_added(
+        &self,
+        args: Z_TeamMemberWillBeAddedArgs,
+    ) -> Result<Z_TeamMemberWillBeAddedReturns, NotImplemented> {
+        self.saw("TeamMemberWillBeAdded", &args);
+        let team = args.b.as_deref().map_or("", |m| m.team_id.as_str());
+        let answer = if team == configured_id("HOOK_RECORDER_REJECT_TEAM") {
+            Z_TeamMemberWillBeAddedReturns {
+                a: None,
+                b: MEMBER_REJECTION.to_owned(),
+            }
+        } else if team == configured_id("HOOK_RECORDER_ADMIN_TEAM") {
+            Z_TeamMemberWillBeAddedReturns {
+                a: Some(Box::new(TeamMember {
+                    scheme_admin: true,
+                    ..TeamMember::default()
+                })),
+                b: String::new(),
+            }
+        } else {
+            Z_TeamMemberWillBeAddedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn user_has_joined_team(
+        &self,
+        args: Z_UserHasJoinedTeamArgs,
+    ) -> Result<Z_UserHasJoinedTeamReturns, NotImplemented> {
+        self.saw("UserHasJoinedTeam", &args);
+        Ok(Z_UserHasJoinedTeamReturns::default())
+    }
+
+    async fn user_has_left_team(
+        &self,
+        args: Z_UserHasLeftTeamArgs,
+    ) -> Result<Z_UserHasLeftTeamReturns, NotImplemented> {
+        self.saw("UserHasLeftTeam", &args);
+        Ok(Z_UserHasLeftTeamReturns::default())
     }
 }
 
