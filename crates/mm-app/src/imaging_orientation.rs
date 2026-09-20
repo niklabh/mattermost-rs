@@ -135,8 +135,13 @@ pub struct Outcome {
     pub err: Option<String>,
 }
 
-/// A format `GetImageOrientation` accepts whose EXIF walk is not ported (TIFF, WebP): the caller
-/// cannot know Go's answer and must hand the request to Go.
+/// A format `GetImageOrientation` accepts whose EXIF walk is not ported: the caller cannot know
+/// Go's answer and must hand the request to Go.
+///
+/// **No longer constructed.** All four formats `GetImageOrientation` accepts — JPEG, PNG, TIFF
+/// and WebP — are ported, so [`get_image_orientation`] always answers. The type and the `Result`
+/// stay because several callers (`file_upload`, `user_image`, `image_pipeline`) map it into their
+/// own forward reasons; the arm is dead code there, not a live forward.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Unreproducible(pub &'static str);
 
@@ -146,8 +151,8 @@ pub fn get_image_orientation(input: Input, format: &str) -> Result<Outcome, Unre
     let fmt = match format {
         "jpeg" => exif::Format::Jpeg,
         "png" => exif::Format::Png,
-        "tiff" => return Err(Unreproducible("the EXIF walk over a TIFF is not ported")),
-        "webp" => return Err(Unreproducible("the EXIF walk over a WebP is not ported")),
+        "tiff" => exif::Format::Tiff,
+        "webp" => exif::Format::Webp,
         other => {
             return Ok(Outcome {
                 orientation: UPRIGHT,
@@ -176,12 +181,22 @@ mod go_parity {
     use super::*;
     use base64::Engine as _;
 
-    /// The case's bytes; the `pad` recipe inserts an `abCD` chunk of that many zero bytes after
-    /// the PNG's IHDR, as the oracle did (`withPNGChunks(pngChunkBytes("abCD", …), …)`).
+    /// The case's bytes. Two recipes stand in for payloads too large to base64: `pad` inserts an
+    /// `abCD` chunk of that many zero bytes after the PNG's IHDR
+    /// (`withPNGChunks(pngChunkBytes("abCD", …), …)`), and `tiff_pad` inserts that many zero bytes
+    /// between the TIFF's 8-byte header and IFD0, raising the header's little-endian IFD0 offset
+    /// to match.
     fn case_bytes(c: &serde_json::Value) -> Vec<u8> {
         let data = base64::engine::general_purpose::STANDARD
             .decode(c["b64"].as_str().unwrap())
             .unwrap();
+        if let Some(pad) = c["tiff_pad"].as_u64() {
+            let mut out = data[..4].to_vec();
+            out.extend_from_slice(&(8 + pad as u32).to_le_bytes());
+            out.resize(8 + pad as usize, 0);
+            out.extend_from_slice(&data[8..]);
+            return out;
+        }
         let Some(pad) = c["pad"].as_u64() else {
             return data;
         };
@@ -195,9 +210,10 @@ mod go_parity {
         out
     }
 
-    /// Every case of the oracle, through both reader shapes. The `png_padded_*` cases are the
-    /// ones where the shapes part: an eXIf behind a chunk ending past the 10 MiB scan limit is
-    /// found through a `bytes.Reader` and lost through the `bufReadSeeker`.
+    /// Every case of the oracle, through both reader shapes. The `png_padded_*` and
+    /// `tiff_padded_*` cases are the ones where the shapes part: metadata behind a hole ending
+    /// past the 10 MiB scan limit is found through a `bytes.Reader` and lost through the
+    /// `bufReadSeeker`.
     #[test]
     fn every_case_matches_go_in_both_reader_modes() {
         let text = std::fs::read_to_string(concat!(
@@ -233,10 +249,10 @@ mod go_parity {
                 }
             }
         }
-        assert!(n > 180, "{n}");
-        // Only the two formats whose walks are not ported; Go answered 1 with an error for both
-        // in this corpus (the bytes are a JPEG, so the TIFF and WebP walks reject them).
-        assert_eq!(forwarded.len(), 4, "{forwarded:?}");
+        assert!(n > 440, "{n}");
+        // Nothing is forwarded any more: all four formats `GetImageOrientation` accepts are
+        // walked here, so every case of the oracle gets an answer.
+        assert_eq!(forwarded.len(), 0, "{forwarded:?}");
     }
 }
 
@@ -287,7 +303,15 @@ mod tests {
         let o = get_image_orientation(Input::Seeker(b""), "image/gif").unwrap();
         assert_eq!(o.orientation, UPRIGHT);
         assert_eq!(o.err.as_deref(), Some("unsupported image format: gif"));
-        assert!(get_image_orientation(Input::Stream(b""), "image/webp").is_err());
+        // Every format the function accepts is now walked here; nothing is forwarded. Empty
+        // bytes are `RIFF`-less, so the WebP walk answers `errInvalidFormat`.
+        assert_eq!(
+            get_image_orientation(Input::Stream(b""), "image/webp").unwrap(),
+            Outcome {
+                orientation: UPRIGHT,
+                err: Some("failed to decode exif data: invalid format: invalid format".to_owned()),
+            }
+        );
         assert_eq!(
             get_image_orientation(Input::Stream(b""), "image/jpeg").unwrap(),
             Outcome {
