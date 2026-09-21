@@ -6159,26 +6159,24 @@ Go's. The i18n half is the harder one — the display strings come from `i18n/en
 
 ---
 
-## D-170 · `/files/{file_id}/public` answers HTML, not JSON
+## D-170 · `/files/{file_id}/public` forwards every failure but one
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, gated reads)
+**Narrowed** 2026-09-21 — the signing key and `RenderWebAppError`'s page have since been ported
+(`crate::web_error`), and the plugin refusal is served (`files::public_file_rejected`).
 
-Its sibling `/api/v4/files/{file_id}/link` is served — same gate, same error id, a JSON
-`AppError`. This one is **not**, and the reason is the path rather than the handler: it sits
-outside `/api/`, so `web.Handler` renders `utils.RenderWebAppError` instead — a `text/html`
-redirect page whose target carries the message **and an ECDSA signature** made with the server's
-`AsymmetricSigningKey` (a `Systems` row).
+The route sits outside `/api/`, so its failures are the signed HTML page rather than an
+`AppError` document. It serves the success path and a `FileWillBeDownloaded` refusal, and still
+forwards the disabled setting, a missing row, and the missing or wrong hash.
 
-Measured: `GET /files/zzzz…/public` on the pinned server is a 403 with
-`Content-Type: text/html` and a 695-byte body containing
-`window.location = '/error?message=Public+links+have+been+disabled.&s=MEQCIF…'`.
+**Go writes some of those pages twice.** The hash failures and the plugin refusal call
+`utils.RenderWebAppError` and then return with `c.Err` set, so `handleContextError` renders the
+page again into the same body — two pages back to back, the first carrying the message as
+`NewAppError` translated it in the server's locale. The disabled setting and a missing row only
+set `c.Err` and are written once. `web_error::render_web_app_error_twice` is the double;
+`handle_context_error` is the single.
 
-So even the *refusal* is out of reach: matching it needs the signing key, Go's exact `s=`
-construction, and the error-page template. Both `GET` and `HEAD` stay forwarded.
-
-**What is owed:** port `AsymmetricSigningKey` loading and `RenderWebAppError`. It is a prerequisite
-for anything else outside `/api/` — there are three such routes in the inventory.
-
+**What is owed:** the four forwarded failures, each with the right one of the two.
 ---
 
 ## D-171 · Five read routes are blocked on in-process state this server does not share
@@ -9277,9 +9275,9 @@ What still keeps it from being a drop-in:
 
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: 17 of the 35 are wired (the post family and reactions, which closed
-  D-402's plugin half; the membership family; and the user lifecycle family, which closed D-453
-  and D-471). The other 18 are [D-932]; D-542's is among them.
+- The hook call sites: 18 of the 35 are wired (the post family and reactions, which closed
+  D-402's plugin half; the membership family; the user lifecycle family, which closed D-453
+  and D-471; and `FileWillBeDownloaded`). The other 17 are [D-932]; D-542's is among them.
 
 `MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
@@ -9495,27 +9493,28 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 18 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 17 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
 **Narrowed** 2026-09-21 — the user lifecycle family, four more: creation, both login hooks,
-deactivation.
+deactivation. Then `FileWillBeDownloaded`, on all four read routes.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-**13** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+**18** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
 `TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`), and the user lifecycle family
-(`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`). That is 19
-of the 46 invocations. The remaining 18 hooks do not fire at all, and the paths that would fire
+(`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`) and
+`FileWillBeDownloaded`. That is 20 of the 46 invocations. The remaining 17 hooks do not fire at
+all, and the paths that would fire
 them behave exactly as they did before:
 
 ```text
 channel.go   ChannelHasBeenCreated (×3), ChannelWillBeUpdated, ChannelWillBeRestored,
              ChannelWillBeArchived
-file.go      FileWillBeUploaded (×2), FileWillBeDownloaded
+file.go      FileWillBeUploaded (×2)
 upload.go    FileWillBeUploaded
 post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
              ScheduledPostWillBeCreated
@@ -9543,7 +9542,7 @@ token or invite id (`UserHasBeenCreated`), and the deactivation of an account th
 (`UserHasBeenDeactivated`, [D-472]). Each closes when its branch is ported.
 
 **What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
-file hooks next (`FileWillBeUploaded` on both upload paths, `FileWillBeDownloaded`), then
+upload hook next (`FileWillBeUploaded` on both upload paths), then
 `PreferencesHaveChanged` and `ChannelHasBeenCreated`. The pattern is `mm_app::plugin_hooks` plus
 a `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
 

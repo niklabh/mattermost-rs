@@ -56,6 +56,11 @@
 //! | `HOOK_RECORDER_REJECT_USER` | `UserWillLogIn` | [`LOGIN_REJECTION`], which refuses the login |
 //!
 //! Anyone else is let in with the empty string.
+//!
+//! # `FileWillBeDownloaded` is driven by the file's name
+//!
+//! A download whose `FileInfo.Name` starts with `hookreject` is refused with
+//! [`DOWNLOAD_REJECTION`]; any other is allowed.
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -63,17 +68,18 @@ use std::sync::Mutex;
 use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
-    Z_ChannelMemberWillBeAddedArgs, Z_ChannelMemberWillBeAddedReturns, Z_MessageHasBeenDeletedArgs,
-    Z_MessageHasBeenDeletedReturns, Z_MessageHasBeenPostedArgs, Z_MessageHasBeenPostedReturns,
-    Z_MessageHasBeenUpdatedArgs, Z_MessageHasBeenUpdatedReturns, Z_MessageWillBePostedArgs,
-    Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns,
-    Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs,
-    Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns,
-    Z_UserHasBeenCreatedArgs, Z_UserHasBeenCreatedReturns, Z_UserHasBeenDeactivatedArgs,
-    Z_UserHasBeenDeactivatedReturns, Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns,
-    Z_UserHasJoinedTeamArgs, Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs,
-    Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
-    Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
+    Z_ChannelMemberWillBeAddedArgs, Z_ChannelMemberWillBeAddedReturns, Z_FileWillBeDownloadedArgs,
+    Z_FileWillBeDownloadedReturns, Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns,
+    Z_MessageHasBeenPostedArgs, Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs,
+    Z_MessageHasBeenUpdatedReturns, Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns,
+    Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns, Z_ReactionHasBeenAddedArgs,
+    Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns,
+    Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns, Z_UserHasBeenCreatedArgs,
+    Z_UserHasBeenCreatedReturns, Z_UserHasBeenDeactivatedArgs, Z_UserHasBeenDeactivatedReturns,
+    Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs,
+    Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns,
+    Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns, Z_UserHasLoggedInArgs,
+    Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use serde_json::{Value as Json, json};
 
@@ -99,9 +105,12 @@ const MEMBER_REJECTION: &str = "the hook recorder says no";
 /// hooks do, and not into a parameter as the membership hooks do.
 const LOGIN_REJECTION: &str = "the hook recorder keeps this one out";
 
+/// The reason `FileWillBeDownloaded` refuses with.
+const DOWNLOAD_REJECTION: &str = "the hook recorder withholds this file";
+
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 17] = [
+const IMPLEMENTED: [&str; 18] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -119,6 +128,7 @@ const IMPLEMENTED: [&str; 17] = [
     "UserHasLoggedIn",
     "UserHasBeenCreated",
     "UserHasBeenDeactivated",
+    "FileWillBeDownloaded",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -385,6 +395,20 @@ impl Hooks for Recorder {
     ) -> Result<Z_UserHasBeenDeactivatedReturns, NotImplemented> {
         self.saw("UserHasBeenDeactivated", &args);
         Ok(Z_UserHasBeenDeactivatedReturns::default())
+    }
+
+    async fn file_will_be_downloaded(
+        &self,
+        args: Z_FileWillBeDownloadedArgs,
+    ) -> Result<Z_FileWillBeDownloadedReturns, NotImplemented> {
+        self.saw("FileWillBeDownloaded", &args);
+        let name = args.b.as_deref().map_or("", |f| f.name.as_str());
+        let a = if name.starts_with("hookreject") {
+            DOWNLOAD_REJECTION.to_owned()
+        } else {
+            String::new()
+        };
+        Ok(Z_FileWillBeDownloadedReturns { a })
     }
 }
 

@@ -213,6 +213,57 @@ pub(crate) async fn handle_context_error(
     })
 }
 
+/// Port of `utils.RenderWebAppError` (utils/api.go:52) called **directly by a handler**, which
+/// then returns with `c.Err` still set — so `ServeHTTP`'s [`handle_context_error`] renders the
+/// error a second time into the same response. Go's body is therefore two pages back to back,
+/// each with its own signature; the status and headers are the first write's.
+///
+/// The two copies can say different things. The first carries `err.Message` as
+/// `model.NewAppError` left it — translated at construction by `i18n.T`, the **server** locale —
+/// and the second the request's translation. `None` when either cannot be drawn here.
+pub(crate) async fn render_web_app_error_twice(
+    state: &crate::AppState,
+    context: &ErrorContext<'_>,
+    headers: HeaderMap,
+    err: impl Fn() -> AppError,
+) -> Option<Response> {
+    let first = {
+        let mut err = err();
+        let bundle = mm_app::i18n::translations().await?;
+        let config = state.app.config();
+        let locale = bundle
+            .server_locale(&config.default_server_locale)
+            .to_owned();
+        if !bundle.can_render(&locale, &err.id) {
+            return None;
+        }
+        bundle.translate_app_error(&locale, &mut err);
+        let key = state.app.asymmetric_signing_key().await?;
+        let mut params = Values::new();
+        params.set("message", &err.message);
+        let status = u16::try_from(err.status_code).ok()?;
+        match render_web_error(&config.subpath(), status, &params, |digest| {
+            use p256::ecdsa::signature::hazmat::PrehashSigner as _;
+            let signature: p256::ecdsa::Signature = key.sign_prehash(digest).ok()?;
+            Some(signature.to_der().as_bytes().to_vec())
+        })? {
+            WebErrorPage::Page { body, .. } => body,
+            // `http.Error` on the first write would fix the status at 500; not reached with a
+            // loaded key, and not reproduced.
+            WebErrorPage::SignFailed => return None,
+        }
+    };
+    let second = handle_context_error(state, context, headers, err()).await?;
+    let (mut parts, body) = second.into_parts();
+    let second = axum::body::to_bytes(body, usize::MAX).await.ok()?;
+    let mut whole = first.into_bytes();
+    whole.extend_from_slice(&second);
+    // The first write fixed the type: a mobile client's JSON second copy does not change it.
+    set_header(&mut parts.headers, "content-type", "text/html");
+    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+    Some(Response::from_parts(parts, Body::from(whole)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

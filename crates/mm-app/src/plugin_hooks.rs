@@ -39,6 +39,7 @@
 use std::sync::Arc;
 
 use mm_model::channel_member::ChannelMember;
+use mm_model::file_info::FileInfo;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
 use mm_model::reaction::Reaction;
 use mm_model::team_member::TeamMember;
@@ -289,6 +290,64 @@ pub fn team_member_from_wire(wire: &wire_model::TeamMember) -> TeamMember {
         create_at: wire.create_at,
     }
 }
+
+/// A file info as gob sends it, field for field (`model.FileInfo`, file_info.go:48). `Path`,
+/// `ThumbnailPath`, `PreviewPath` and `Content` are `json:"-"` and gob carries them anyway, so a
+/// plugin sees where the bytes live.
+pub fn file_info_to_wire(info: &FileInfo) -> wire_model::FileInfo {
+    wire_model::FileInfo {
+        id: info.id.clone(),
+        creator_id: info.creator_id.clone(),
+        post_id: info.post_id.clone(),
+        channel_id: info.channel_id.clone(),
+        create_at: info.create_at,
+        update_at: info.update_at,
+        delete_at: info.delete_at,
+        path: info.path.clone(),
+        thumbnail_path: info.thumbnail_path.clone(),
+        preview_path: info.preview_path.clone(),
+        name: info.name.clone(),
+        extension: info.extension.clone(),
+        size: info.size,
+        mime_type: info.mime_type.clone(),
+        width: info.width,
+        height: info.height,
+        has_preview_image: info.has_preview_image,
+        mini_preview: info.mini_preview.clone(),
+        content: info.content.clone(),
+        remote_id: info.remote_id.clone(),
+        archived: info.archived,
+    }
+}
+
+/// `model.FileDownloadType` (model/file_info.go:27): which of the four read routes is asking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileDownloadType {
+    /// `GET /api/v4/files/{file_id}`.
+    File,
+    /// `GET /api/v4/files/{file_id}/thumbnail`.
+    Thumbnail,
+    /// `GET /api/v4/files/{file_id}/preview`.
+    Preview,
+    /// `GET /files/{file_id}/public`, which has no session.
+    Public,
+}
+
+impl FileDownloadType {
+    /// The string Go sends, to the plugin and in the websocket event.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Thumbnail => "thumbnail",
+            Self::Preview => "preview",
+            Self::Public => "public",
+        }
+    }
+}
+
+/// `model.PluginSettingsDefaultHookTimeoutSeconds` (model/config.go:273) — the budget
+/// `RunFileWillBeDownloadedHook` gives the **whole** dispatch, not each plugin.
+const FILE_DOWNLOAD_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// A post as gob sends it, field for field.
 ///
@@ -1246,5 +1305,125 @@ impl App {
                 }
             },
         );
+    }
+    /// Port of `RunFileWillBeDownloadedHook` (app/file.go:2008) — hook 48,
+    /// `FileWillBeDownloaded` — for the four read routes, after the permission and ABAC checks.
+    /// Answers the rejection reason, `""` to let the download through.
+    ///
+    /// A `RunMultiHook` that stops at the first plugin to refuse, run on its own task under a
+    /// **thirty-second budget for the whole dispatch**. When the budget runs out the download is
+    /// refused with `api.file.get_file.plugin_hook_timeout` in the request's language — Go's
+    /// `rctx.T` — and the task is left to finish on its own, as Go's goroutine is. A refusal of
+    /// either kind is also a `file_download_rejected` event to the downloader
+    /// ([`App::send_file_download_rejected_event`]).
+    pub async fn run_file_will_be_downloaded(
+        &self,
+        ctx: &HookContext,
+        info: &FileInfo,
+        user_id: &str,
+        download_type: FileDownloadType,
+    ) -> String {
+        let Some(environment) = self.hook_environment() else {
+            return String::new();
+        };
+        let args = wire_plugin::Z_FileWillBeDownloadedArgs {
+            a: ctx.boxed_wire(),
+            b: Some(Box::new(file_info_to_wire(info))),
+            c: user_id.to_owned(),
+            d: download_type.as_str().to_owned(),
+        };
+        let dispatch = tokio::spawn(async move {
+            for (hooks, _manifest) in
+                environment.hooks_implementing(hook_id::FILE_WILL_BE_DOWNLOADED)
+            {
+                let returns = hooks.file_will_be_downloaded(args.clone()).await;
+                if !returns.a.is_empty() {
+                    return returns.a;
+                }
+            }
+            String::new()
+        });
+        let reason = match tokio::time::timeout(FILE_DOWNLOAD_HOOK_TIMEOUT, dispatch).await {
+            Ok(Ok(reason)) => reason,
+            Ok(Err(err)) => {
+                // Go's goroutine cannot panic out of `RunMultiHook` (plugin RPC failures answer
+                // zero values), so there is no Go behaviour to match; a download is not refused
+                // because this process failed.
+                tracing::error!(error = %err, "the FileWillBeDownloaded dispatch failed");
+                String::new()
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    file_id = %info.id,
+                    user_id,
+                    "FileWillBeDownloaded hook timed out, blocking download"
+                );
+                const TIMEOUT_ID: &str = "api.file.get_file.plugin_hook_timeout";
+                match crate::i18n::loaded() {
+                    Some(t) => t.translate_for_request(
+                        &ctx.accept_language,
+                        &self.config().default_client_locale,
+                        TIMEOUT_ID,
+                    ),
+                    None => TIMEOUT_ID.to_owned(),
+                }
+            }
+        };
+        if !reason.is_empty() {
+            self.send_file_download_rejected_event(
+                info,
+                user_id,
+                &ctx.connection_id,
+                &reason,
+                download_type,
+            )
+            .await;
+        }
+        reason
+    }
+
+    /// Port of `sendFileDownloadRejectedEvent` (app/file.go:1974): `file_download_rejected` to
+    /// the downloader alone — to one connection of theirs when the request named it — and
+    /// nothing for a public link, which has no user.
+    async fn send_file_download_rejected_event(
+        &self,
+        info: &FileInfo,
+        user_id: &str,
+        connection_id: &str,
+        reason: &str,
+        download_type: FileDownloadType,
+    ) {
+        use mm_model::websocket_message::{WEBSOCKET_EVENT_FILE_DOWNLOAD_REJECTED, WebSocketEvent};
+
+        if user_id.is_empty() {
+            tracing::debug!("Skipping websocket event for public file download rejection");
+            return;
+        }
+        let mut message = WebSocketEvent::new(
+            WEBSOCKET_EVENT_FILE_DOWNLOAD_REJECTED,
+            "",
+            &info.channel_id,
+            user_id,
+            None,
+            "",
+        );
+        if !connection_id.is_empty() {
+            if let Some(broadcast) = message.get_broadcast() {
+                let mut broadcast = broadcast.clone();
+                broadcast.connection_id = connection_id.to_owned();
+                message = message.set_broadcast(broadcast);
+            }
+        }
+        for (key, value) in [
+            ("file_id", info.id.as_str()),
+            ("file_name", info.name.as_str()),
+            ("rejection_reason", reason),
+            ("channel_id", info.channel_id.as_str()),
+            ("post_id", info.post_id.as_str()),
+            ("download_type", download_type.as_str()),
+        ] {
+            message.add(key, serde_json::Value::from(value));
+        }
+        self.publish(message).await;
     }
 }
