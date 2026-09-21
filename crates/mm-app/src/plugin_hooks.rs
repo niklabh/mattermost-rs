@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use mm_model::channel::{Channel, ChannelBannerInfo};
 use mm_model::channel_member::ChannelMember;
+use mm_model::draft::Draft;
 use mm_model::file_info::FileInfo;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
 use mm_model::preference::Preferences;
@@ -385,6 +386,49 @@ pub fn channel_from_wire(wire: &wire_model::Channel) -> Channel {
         default_category_name: wire.default_category_name.clone(),
         managed_category_name: wire.managed_category_name.clone(),
         discoverable: wire.discoverable,
+    }
+}
+
+/// A draft as gob sends it (`model.Draft`, draft.go:13).
+///
+/// **Not `Metadata`.** `mm-plugin`'s `PostMetadata` is not converted either way ([D-931]), so a
+/// draft the client sent with metadata reaches the plugin without it. Go has no `ForPlugin` for
+/// drafts and would send it; clients do not put metadata on a draft they save.
+pub fn draft_to_wire(draft: &Draft) -> wire_model::Draft {
+    wire_model::Draft {
+        create_at: draft.create_at,
+        update_at: draft.update_at,
+        delete_at: draft.delete_at,
+        user_id: draft.user_id.clone(),
+        channel_id: draft.channel_id.clone(),
+        root_id: draft.root_id.clone(),
+        message: draft.message.clone(),
+        r#type: draft.draft_type.clone(),
+        props: props_to_wire(draft.props.as_ref()),
+        file_ids: draft.file_ids.clone().unwrap_or_default(),
+        metadata: None,
+        priority: props_to_wire(draft.priority.as_ref()),
+    }
+}
+
+/// A draft a `DraftWillBeUpserted` plugin answered with, **taken whole**: like
+/// `ChannelWillBeUpdated`, Go leaves this reply unseeded (client_rpc_generated.go:2153), so a
+/// field the plugin left out is zero and a map or list it left empty is nil. `metadata` is kept
+/// from the draft that was sent, since no wire metadata is converted back ([D-931]).
+pub fn draft_from_wire(wire: &wire_model::Draft, source: &Draft) -> Draft {
+    Draft {
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        delete_at: wire.delete_at,
+        user_id: wire.user_id.clone(),
+        channel_id: wire.channel_id.clone(),
+        root_id: wire.root_id.clone(),
+        message: wire.message.clone(),
+        draft_type: wire.r#type.clone(),
+        props: (!wire.props.is_empty()).then(|| props_from_wire(&wire.props)),
+        file_ids: (!wire.file_ids.is_empty()).then(|| wire.file_ids.clone()),
+        metadata: source.metadata.clone(),
+        priority: (!wire.priority.is_empty()).then(|| props_from_wire(&wire.priority)),
     }
 }
 
@@ -2021,5 +2065,82 @@ impl App {
             }
         }
         Ok(())
+    }
+    /// Port of `runGuardedDraftWillBeUpserted` (guarded_hooks.go:437) — hook 55, in
+    /// `UpsertDraft` after the empty-message delete and before the store upsert (which is where
+    /// `PreSave` and `IsValid` run). Guards are resolved for the draft's channel as it arrived.
+    ///
+    /// A refusal is `reason != ""` with a `Reason` parameter of
+    /// `app.draft.upsert.rejected_by_plugin`; a replacement is taken whole
+    /// ([`draft_from_wire`]).
+    pub(crate) async fn run_guarded_draft_will_be_upserted(
+        &self,
+        ctx: &HookContext,
+        draft: Draft,
+    ) -> Result<Draft, Box<AppError>> {
+        const CALLER: &str = "UpsertDraft";
+        let rejected = |reason: &str| {
+            member_rejection_error(CALLER, "app.draft.upsert.rejected_by_plugin", reason)
+        };
+
+        if !self.plugin_host().hosted() {
+            return Ok(draft);
+        }
+        let original_channel_id = draft.channel_id.clone();
+        let (guards, refused) = self.resolve_guards(&original_channel_id, CALLER).await;
+        if let Some(err) = refused {
+            return Err(err);
+        }
+        let Some(environment) = self.hook_environment() else {
+            return Ok(draft);
+        };
+
+        let mut draft = draft;
+        for (hooks, manifest) in environment.hooks_implementing(hook_id::DRAFT_WILL_BE_UPSERTED) {
+            if guards.contains(&manifest.id) {
+                continue;
+            }
+            let returns = hooks
+                .draft_will_be_upserted(wire_plugin::Z_DraftWillBeUpsertedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(draft_to_wire(&draft))),
+                })
+                .await;
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                draft = draft_from_wire(replacement, &draft);
+            }
+        }
+
+        for plugin_id in &guards {
+            let Ok(hooks) = environment.hooks_for_plugin(plugin_id) else {
+                tracing::error!(
+                    error_id = "guard_plugin_inactive",
+                    channel_id = %original_channel_id,
+                    caller = CALLER,
+                    plugin_ids = ?[plugin_id],
+                    "Channel guard rejected operation: claiming plugin is not active",
+                );
+                return Err(inactive_guard_error(CALLER));
+            };
+            let (returns, rpc_err) = hooks
+                .draft_will_be_upserted_with_rpc_err(wire_plugin::Z_DraftWillBeUpsertedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(draft_to_wire(&draft))),
+                })
+                .await;
+            if rpc_err.is_some() {
+                return Err(guard_hook_failed_error(plugin_id, CALLER));
+            }
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                draft = draft_from_wire(replacement, &draft);
+            }
+        }
+        Ok(draft)
     }
 }

@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 24 of 35 (2026-09-21)
+### Phase 5 · Hook call sites — IN PROGRESS, 25 of 35 (2026-09-21)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -592,6 +592,12 @@ the recent statuses. A deletion fires nothing; Go has no hook for it.
 `ChannelWillBeArchived` (plain) — 24 of 35, 28 of 46. The finding: unlike the post and member
 hooks, Go does not seed `ChannelWillBeUpdated`'s reply, so a replacement is taken **whole** — a
 plugin that answers with only a header blanks every other field and the store refuses the rest.
+
+**Done eighth, `DraftWillBeUpserted`** — 25 of 35, 29 of 46 — guarded, and taken whole like the
+channel update. A plugin's one-field draft then made a store validation failure reachable, and
+that exposed a divergence older than the hook: Go wraps **every** failure of the store's
+`Upsert`, `IsValid` included, as a 500 `app.draft.save.app_error`, and this server had been
+answering the validation's own 400.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

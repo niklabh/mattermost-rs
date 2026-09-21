@@ -1,0 +1,14 @@
+# Mutation plan for `DraftWillBeUpserted` and the draft store-error wrap it exposed
+# (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-drafts.plan
+#
+# The oracle is the draft steps of `parity::plugin_hooks::the_channel_hooks_fire_as_go_fires_them`.
+# The last two lines are the no-op controls and must SURVIVE.
+
+draft-hook-skipped	crates/mm-app/src/draft.rs	        let mut draft = self.run_guarded_draft_will_be_upserted(ctx, draft).await?;	        let mut draft = draft;\n        let _ = ctx;	api	plugin_hooks::the_channel
+draft-refusal-ignored	crates/mm-app/src/plugin_hooks.rs	            if !returns.b.is_empty() {\n                return Err(rejected(&returns.b));\n            }\n            if let Some(replacement) = returns.a.as_deref() {\n                draft = draft_from_wire(replacement, &draft);\n            }\n        }\n\n        for plugin_id	            if false {\n                return Err(rejected(&returns.b));\n            }\n            if let Some(replacement) = returns.a.as_deref() {\n                draft = draft_from_wire(replacement, &draft);\n            }\n        }\n\n        for plugin_id	api	plugin_hooks::the_channel
+draft-replacement-merged	crates/mm-app/src/plugin_hooks.rs	            if let Some(replacement) = returns.a.as_deref() {\n                draft = draft_from_wire(replacement, &draft);\n            }\n        }\n\n        for plugin_id	            if let Some(replacement) = returns.a.as_deref() {\n                draft.message.clone_from(&replacement.message);\n            }\n        }\n\n        for plugin_id	api	plugin_hooks::the_channel
+invalid-draft-is-a-400	crates/mm-app/src/draft.rs	                500,\n            )\n        })?;	                400,\n            )\n        })?;	api	plugin_hooks::the_channel
+control-type-the-channel-id	crates/mm-app/src/plugin_hooks.rs	        let original_channel_id = draft.channel_id.clone();	        let original_channel_id: String = draft.channel_id.clone();	api	plugin_hooks::the_channel
+control-reorder-two-draft-fields	crates/mm-app/src/plugin_hooks.rs	        root_id: draft.root_id.clone(),\n        message: draft.message.clone(),	        message: draft.message.clone(),\n        root_id: draft.root_id.clone(),	api	plugin_hooks::the_channel

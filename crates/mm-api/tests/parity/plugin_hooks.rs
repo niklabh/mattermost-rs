@@ -3024,6 +3024,79 @@ async fn run_the_channel_tour(client: &reqwest::Client, admin: &str) {
     assert_eq!(gb["id"], "app.channel.restore_channel.rejected_by_plugin");
     pair.hooks("a refused restore").await;
 
+    // 10a. Drafts, on each side's channel. The hook sits just before the store's upsert.
+    let draft = |message: &str| {
+        let make = |channel: &str| {
+            Some(
+                serde_json::to_vec(&serde_json::json!({
+                    "channel_id": channel,
+                    "message": message,
+                }))
+                .expect("a body"),
+            )
+        };
+        (
+            ("/api/v4/drafts".to_owned(), make(&go_ch)),
+            ("/api/v4/drafts".to_owned(), make(&rs_ch)),
+        )
+    };
+    let (g, r) = draft("a draft the recorder lets through");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!(gs, rs, "Go {gb} / Rust {rb}");
+    assert!((200..300).contains(&gs), "Go {gb}");
+    same_post(&gb, &rb, "a draft");
+    let fired = pair.hooks("a draft").await;
+    assert_eq!(names(&fired), ["DraftWillBeUpserted"]);
+    assert_eq!(fired[0]["args"]["B"]["ChannelId"], "<channel>");
+
+    let (g, r) = draft("!reject-draft not this one");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.draft.upsert.rejected_by_plugin");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a refused draft",
+    );
+    pair.hooks("a refused draft").await;
+
+    let (g, r) = draft("!rewrite-draft");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!(gs, rs, "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a rewritten draft");
+    assert_eq!(gb["message"], "rewritten by the hook recorder");
+    pair.hooks("a rewritten draft").await;
+
+    // A replacement carrying only a message is taken whole: no user, no channel.
+    let (g, r) = draft("!partial-draft");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!(gs, rs, "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a partial draft",
+    );
+    pair.hooks("a partial draft").await;
+
+    // An over-long message: the hook is asked, then the store's `IsValid` refuses, and Go's
+    // `UpsertDraft` wraps that as a 500 like any other store failure.
+    let (g, r) = draft(&"x".repeat(70_000));
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (500, 500), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.draft.save.app_error");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "an over-long draft",
+    );
+    pair.hooks("an over-long draft").await;
+
+    // An empty message deletes the draft before the hook is reached.
+    let (g, r) = draft("");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!(gs, rs, "Go {gb} / Rust {rb}");
+    pair.no_more_hooks("an emptied draft").await;
+
     // 10. A direct message channel, with a counterpart of each side's own. Its name is the two
     //     ids sorted, so it is scrubbed whole before its parts.
     let me: Json = client

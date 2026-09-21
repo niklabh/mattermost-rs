@@ -9275,10 +9275,10 @@ What still keeps it from being a drop-in:
 
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: 24 of the 35 are wired (the post family and reactions, which closed
+- The hook call sites: 25 of the 35 are wired (the post family and reactions, which closed
   D-402's plugin half; the membership family; the user lifecycle family, which closed D-453
-  and D-471; both file hooks; `PreferencesHaveChanged`; the channel lifecycle). The other 11
-  are [D-932]; D-542's is among them.
+  and D-471; both file hooks; `PreferencesHaveChanged`; the channel lifecycle; `DraftWillBeUpserted`). The
+  other 10 are [D-932]; D-542's is among them.
 
 `MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
@@ -9494,30 +9494,30 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 11 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 10 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
 **Narrowed** 2026-09-21 — the user lifecycle family, four more: creation, both login hooks,
 deactivation. Then `FileWillBeDownloaded`, on all four read routes, and `FileWillBeUploaded` on
-both served upload paths. Then `PreferencesHaveChanged`, and the channel lifecycle family.
+both served upload paths. Then `PreferencesHaveChanged`, the channel lifecycle family, and
+`DraftWillBeUpserted`.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-**24** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+**25** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
 `TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`), and the user lifecycle family
 (`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`) and
 both file hooks, `PreferencesHaveChanged`, and `ChannelHasBeenCreated`, `ChannelWillBeUpdated`,
-`ChannelWillBeArchived` and `ChannelWillBeRestored`. That is 28 of the 46 invocations. The
-remaining 11 hooks do not fire at all,
+`ChannelWillBeArchived`, `ChannelWillBeRestored` and `DraftWillBeUpserted`. That is 29 of the
+46 invocations. The remaining 10 hooks do not fire at all,
 and the paths that would fire them behave exactly as they did before:
 
 ```text
 post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
              ScheduledPostWillBeCreated
-draft        DraftWillBeUpserted
 notification EmailNotificationWillBeSent, NotificationWillBePushed
 plugin.go    OnPluginClusterEvent, OnInstall
 support      GenerateSupportData
@@ -9543,8 +9543,9 @@ token or invite id (`UserHasBeenCreated`), and the deactivation of an account th
 (`UserHasBeenDeactivated`, [D-472]). Each closes when its branch is ported.
 
 **What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
-`DraftWillBeUpserted` and `ScheduledPostWillBeCreated` next — both are guarded like the channel
-hooks — then `MessagesWillBeConsumed`. The pattern is `mm_app::plugin_hooks` plus
+`MessagesWillBeConsumed` next. `ScheduledPostWillBeCreated` has no served site: the four
+scheduled-post routes answer only their feature and licence gates here and hand a licensed
+server's request to Go whole, so its guarded dispatcher lands with those routes. The pattern is `mm_app::plugin_hooks` plus
 a `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
 
 ---

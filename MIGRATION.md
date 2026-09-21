@@ -14355,6 +14355,18 @@ The search routes gained a context too: an `in:@user` filter creates the DM it n
 Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
 
+## Plugin hook call sites: `DraftWillBeUpserted` (2026-09-21)
+
+Plugin plan **Phase 5, 25 of 35**; the other 10 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `runGuardedDraftWillBeUpserted` (guarded_hooks.go:437) | `mm_app::plugin_hooks::{run_guarded_draft_will_be_upserted, draft_to_wire, draft_from_wire}`, `App::upsert_draft` | DONE (`Metadata` is not converted, [D-931]) | the draft steps of `parity::plugin_hooks::the_channel_hooks_fire_as_go_fires_them` | After the empty-message delete, before the store upsert; a replacement is taken whole. |
+| `UpsertDraft`'s wrap of the store's `IsValid` (app/draft.go:83) | `App::upsert_draft` | FIXED | same (a partial replacement and an over-long message) | Any invalid draft is 500 `app.draft.save.app_error`; this server had answered the check's own 400. |
+
+Mutation tally (`plugin-hooks-drafts.plan`): 6 run, 4 caught, 2 controls survived, 0 harness
+faults.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

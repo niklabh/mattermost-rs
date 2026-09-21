@@ -163,8 +163,13 @@ impl App {
     /// include-deleted; the query does not filter `DeleteAt`, which is what makes gate 3
     /// reachable.
     #[tracing::instrument(skip(self, draft), fields(user_id = %draft.user_id, channel_id = %draft.channel_id))]
-    pub async fn upsert_draft(&self, draft: &Draft, connection_id: &str) -> AppResult<DraftWrite> {
-        let mut draft = draft.clone();
+    pub async fn upsert_draft(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        draft: &Draft,
+        connection_id: &str,
+    ) -> AppResult<DraftWrite> {
+        let draft = draft.clone();
 
         let channel = self.get_channel(&draft.channel_id).await.map_err(|_| {
             let mut params: std::collections::HashMap<String, serde_json::Value> =
@@ -239,8 +244,7 @@ impl App {
             return Ok(DraftWrite::DeletedBecauseEmpty);
         }
 
-        // `runGuardedDraftWillBeUpserted` is a plugin hook; with no plugin environment it is the
-        // identity, so the draft goes to the store unchanged.
+        let mut draft = self.run_guarded_draft_will_be_upserted(ctx, draft).await?;
         draft.pre_save();
 
         let max_draft_size = self
@@ -249,10 +253,21 @@ impl App {
             .max_draft_size()
             .await
             .map_err(draft_save_error)?;
-        // `IsValid` runs **inside** the store in Go, so its error reaches the handler unwrapped —
-        // a message over the limit answers `model.draft.is_valid.msg.app_error` with `Length` and
-        // `MaxLength` params, not `app.draft.save.app_error`.
-        draft.is_valid(max_draft_size)?;
+        // `IsValid` runs **inside** the store in Go, and `UpsertDraft` wraps every error the
+        // store's `Upsert` returns — so an invalid draft is a **500 `app.draft.save.app_error`**,
+        // whichever check failed, and never the `model.draft.is_valid.*` id. This had been
+        // returned unwrapped (a 400 naming the check) until a plugin replacement made a draft with
+        // no user reachable and `parity::plugin_hooks` compared the two.
+        draft.is_valid(max_draft_size).map_err(|err| {
+            tracing::error!(error_id = %err.id, "draft save failed");
+            AppError::boxed(
+                "CreateDraft",
+                "app.draft.save.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
 
         self.store()
             .draft()

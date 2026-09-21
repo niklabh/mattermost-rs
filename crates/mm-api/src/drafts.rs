@@ -178,6 +178,7 @@ pub async fn upsert_draft(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if !state.app.config().allow_synced_drafts {
         return ApiError::from(AppError::new(
             "upsertDraft",
@@ -226,7 +227,11 @@ pub async fn upsert_draft(
         .into_response();
     }
 
-    match state.app.upsert_draft(&draft, &connection_id).await {
+    match state
+        .app
+        .upsert_draft(&hook_ctx, &draft, &connection_id)
+        .await
+    {
         Ok(DraftWrite::Saved(saved)) => {
             tracing::Span::current().record("forwarded", false);
             match mm_model::utils::go_json_marshal(&*saved) {
