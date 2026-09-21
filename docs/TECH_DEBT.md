@@ -9483,21 +9483,23 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 28 of the 35 plugin hook call sites do not fire from the Rust host
+## D-932 · 22 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
+**Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-seven fire from `mm_app::plugin_hooks` exactly where Go fires them: `MessageWillBePosted`,
-`MessageHasBeenPosted`, `MessageWillBeUpdated`, `MessageHasBeenUpdated`, `MessageHasBeenDeleted`,
-`ReactionHasBeenAdded` and `ReactionHasBeenRemoved`. The remaining 28 do not, and the paths that
-would fire them behave exactly as they did before:
+**13** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+(`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
+`MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
+family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
+`TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`). That is 15 of the 46
+invocations. The remaining 22 hooks do not fire at all, and the paths that would fire them behave
+exactly as they did before:
 
 ```text
-channel.go   ChannelHasBeenCreated (×3), UserHasJoinedChannel (×2), UserHasLeftChannel,
-             ChannelWillBeUpdated, ChannelWillBeRestored, ChannelWillBeArchived,
-             ChannelMemberWillBeAdded
-team.go      UserHasJoinedTeam, UserHasLeftTeam, TeamMemberWillBeAdded
+channel.go   ChannelHasBeenCreated (×3), ChannelWillBeUpdated, ChannelWillBeRestored,
+             ChannelWillBeArchived
 user.go      UserHasBeenCreated, UserHasBeenDeactivated ([D-471])
 login.go     UserWillLogIn, UserHasLoggedIn
 file.go      FileWillBeUploaded (×2), FileWillBeDownloaded
@@ -9512,12 +9514,40 @@ support      GenerateSupportData
 properties   the `checkFieldDeleteAccess` plugin check ([D-542])
 ```
 
-`ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
-are served already.
+**One call site of a hook that does fire is still missing.** `UserHasJoinedChannel` has two
+(channel.go:2044 and :2764); the first fires, and the second is inside `App.JoinChannel`, which
+this server does not port — its only callers are `GetPermalinkPost` and the `/join` slash
+command, neither of them served. It lands with whichever of those is ported first.
 
-**What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
-channel and team membership family next. The pattern is `mm_app::plugin_hooks` plus a
+`ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
+are served already. Nor is [D-950], the message hooks that Go's *system* posts fire and this
+server's do not.
+
+**What is owed:** each site, ported where Go calls it, ordered by what a real client does —
+`UserHasBeenCreated` and the two login hooks next, which need no new wire conversion now that
+`mm_app::plugin_hooks::user_to_wire` exists. The pattern is `mm_app::plugin_hooks` plus a
 `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
+
+---
+
+## D-950 · Go's system posts fire the message hooks and this server's do not
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (the membership hook sites)
+
+Every membership and channel-property system message in Go is written with the whole of
+`a.CreatePost` — nineteen call sites in `channel.go` and `team.go` — so each one dispatches
+`MessageWillBePosted` and `MessageHasBeenPosted`, and a plugin may **refuse** one, in which case
+Go logs the failure and the membership change stands. `App::create_system_post`
+(`mm_app::post_write`) is a deliberately narrow slice of `CreatePost` and dispatches neither. So
+under `MMRS_PLUGIN_HOST=rust` a plugin is told about a channel add and never about the "added to
+the channel" post that follows it.
+
+Found by `parity::plugin_hooks::the_membership_hooks_fire_as_go_fires_them`, which drops those two
+hook names from the transcripts it compares and names this entry where it does. It is invisible
+without a plugin host, which is why the post-family session did not see it.
+
+**What is owed:** the two dispatches inside `create_system_post`, Go's swallow of a rejection, and
+a `HookContext` at its sixteen callers — the membership and post ones already carry one.
 
 ## D-933 · The channel-guard cache is a per-dispatch read, and nothing can register a guard
 

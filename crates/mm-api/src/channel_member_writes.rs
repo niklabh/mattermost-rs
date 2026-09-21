@@ -434,7 +434,12 @@ pub async fn remove_channel_member(
 
     match state
         .app
-        .remove_user_from_channel(&user_id, &session.0.user_id, &channel)
+        .remove_user_from_channel(
+            &user_id,
+            &session.0.user_id,
+            &channel,
+            &crate::plugin_context::hook_context_of(&request, Some(&session.0)),
+        )
         .await
     {
         Ok(MemberWrite::Done(())) => {
@@ -508,6 +513,7 @@ pub async fn add_channel_member(
     }
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -685,7 +691,7 @@ pub async fn add_channel_member(
         };
         match state
             .app
-            .add_channel_member(member_user_id, &channel, &opts)
+            .add_channel_member(member_user_id, &channel, &opts, &hook_ctx)
             .await
         {
             Ok(MemberWrite::Done(member)) => new_members.push(member),
@@ -858,6 +864,7 @@ pub async fn set_channel_members(
     }
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let query = parts.uri.query().unwrap_or_default().to_owned();
 
     let batch_size = match bounded_query_int(&query, "batch_size", 100, 1, 1000) {
@@ -948,6 +955,7 @@ pub async fn set_channel_members(
             &session.0.user_id,
             batch_size,
             batch_delay_ms,
+            &hook_ctx,
         )
         .await
     {

@@ -464,6 +464,7 @@ impl App {
         channel_id: &str,
         patch: &ChannelJoinRequestPatch,
         reviewer_id: &str,
+        hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> AppResult<MemberWrite<ChannelJoinRequest>> {
         if patch.status != CHANNEL_JOIN_REQUEST_STATUS_APPROVED
             && patch.status != CHANNEL_JOIN_REQUEST_STATUS_DENIED
@@ -507,7 +508,7 @@ impl App {
                 ..Default::default()
             };
             match self
-                .add_channel_member(&current.user_id, &channel, &opts)
+                .add_channel_member(&current.user_id, &channel, &opts, hook_ctx)
                 .await?
             {
                 MemberWrite::Done(_) => {}

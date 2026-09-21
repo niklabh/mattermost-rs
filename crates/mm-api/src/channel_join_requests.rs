@@ -541,9 +541,10 @@ pub async fn patch_channel_join_request(
             return ApiError::invalid_param("channel_join_request_patch").into_response();
         }
     };
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let request = Request::from_parts(parts, axum::body::Body::from(body.clone()));
 
-    serve_patch(&state, &channel_id, &request_id, &session, &body)
+    serve_patch(&state, &channel_id, &request_id, &session, &body, &hook_ctx)
         .await
         .finish(state.clone(), request)
         .await
@@ -555,6 +556,7 @@ async fn serve_patch(
     request_id: &str,
     session: &AuthenticatedSession,
     body: &[u8],
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Outcome {
     if let Err(err) = require_id(channel_id, "channel_id") {
         return Outcome::Failed(err);
@@ -576,7 +578,7 @@ async fn serve_patch(
 
     match state
         .app
-        .update_channel_join_request(request_id, channel_id, &patch, &session.0.user_id)
+        .update_channel_join_request(request_id, channel_id, &patch, &session.0.user_id, hook_ctx)
         .await
     {
         Ok(MemberWrite::Done(updated)) => {

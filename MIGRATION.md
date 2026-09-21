@@ -14257,6 +14257,30 @@ mutation that swaps `DefaultClientLocale` for `DefaultServerLocale` in the middl
 planned: both are `en` on the stack, so it is wire-equivalent in the same way a misnamed
 parameter used to be.
 
+## Plugin hook call sites: the channel and team membership family (2026-09-20)
+
+Plugin plan **Phase 5, 13 of 35**. Six more hooks fire under `MMRS_PLUGIN_HOST=rust`, with
+`wire::User`, `wire::ChannelMember` and `wire::TeamMember`, and a `HookContext` threaded through
+the membership write paths; the other 22 are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `runGuardedChannelMemberWillBeAdded` (guarded_hooks.go:239), `TeamMemberWillBeAdded` (team.go:800 and app/teams/teams.go:199, :226) | `mm_app::plugin_hooks`, `channel_member::add_user_to_channel_row`, `team_member::join_user_to_team` | DONE | `parity::plugin_hooks::the_membership_hooks_fire_as_go_fires_them` | A refused member puts the plugin's text in a `Reason` **parameter** of a real translation key, where a refused post puts it in the error id. The team hook is a plain `RunMultiHook` and runs on the revival path too. |
+| `UserHasJoinedChannel` (channel.go:2044), `UserHasLeftChannel` (:3087), `UserHasJoinedTeam` (team.go:884), `UserHasLeftTeam` (:1295) | `mm_app::plugin_hooks`, `channel_member.rs`, `team_member.rs` | DONE (`UserHasJoinedChannel`'s second site needs `App::join_channel`, [D-932]) | same | The actor is `a.GetUser(...)` with its error **discarded**, nil when the caller passed no requestor — and `AddTeamMember` always passes none, so a team join's actor is nil whoever asked. |
+| `model.User`, `model.ChannelMember`, `model.TeamMember` as gob sends them; `Post.Participants` | `mm_app::plugin_hooks::{user_to_wire, channel_member_to_wire, team_member_to_wire}` | DONE | same | Nothing is sanitised: Go hands these hooks the raw store row, so `Password`, `AuthData` and `MfaSecret` cross to the plugin. `Post.Participants` was left nil pending this conversion and is now sent — it is nil on every path reaching a hook, so no byte moved. |
+
+The oracle is the same one binary under both hosts, on its own pair of servers (Go's port + 80, a
+Rust host on :8130) so either tranche can be run alone. Two servers cannot make the *same*
+membership change — the second finds the row and writes nothing — so each side acts on a plain
+user of its own and the transcripts are scrubbed of that one id and username before being compared
+field for field; the actor is shared, because a `model.User` carries a hash no two accounts agree
+on.
+
+Mutation tally (`plugin-hooks-membership.plan`): 19 run, 17 caught, 2 controls survived, 0
+harness faults. Every line was caught first time, as in the post tranche and for the same
+reason: one plugin under two hosts turns almost any change to what is sent into a transcript
+diff.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

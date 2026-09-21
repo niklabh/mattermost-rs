@@ -2157,6 +2157,7 @@ pub async fn create_team(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -2223,7 +2224,7 @@ pub async fn create_team(
 
     let mut created = match state
         .app
-        .create_team_with_user(&mut team, &session.0.user_id)
+        .create_team_with_user(&mut team, &session.0.user_id, &hook_ctx)
         .await
     {
         Ok(created) => created,

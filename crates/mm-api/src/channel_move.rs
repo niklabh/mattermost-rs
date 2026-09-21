@@ -59,6 +59,7 @@ pub async fn move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -121,7 +122,7 @@ pub async fn move_channel(
     if force {
         match state
             .app
-            .remove_users_from_channel_not_member_of_team(Some(&user), &channel, &team)
+            .remove_users_from_channel_not_member_of_team(Some(&user), &channel, &team, &hook_ctx)
             .await
         {
             Ok(MemberWrite::Done(())) => {}
@@ -132,7 +133,7 @@ pub async fn move_channel(
 
     match state
         .app
-        .move_channel(&team, &mut channel, Some(&user))
+        .move_channel(&team, &mut channel, Some(&user), &hook_ctx)
         .await
     {
         Ok(MemberWrite::Done(())) => {}
