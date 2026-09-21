@@ -35,9 +35,6 @@
 //!
 //! - `InvalidateCacheForUser` and `invalidateUserChannelMembersCaches` — in-process caches Go
 //!   keeps and this process does not have. No row, no byte.
-//! - The `UserHasBeenDeactivated` plugin hook, in `Srv().Go(…)` after the response is written.
-//!   There is no plugin host here and none installed on the stack this is tested against, so the
-//!   hook fires over an empty list on both sides. See [D-471].
 //!
 //! # `PermanentDeleteUser` is a deactivation first
 //!
@@ -61,6 +58,7 @@ use mm_store::{
 };
 
 use crate::App;
+use crate::plugin_hooks::HookContext;
 
 impl App {
     /// Whether this account owns at least one bot that is not soft-deleted.
@@ -115,13 +113,15 @@ impl App {
     /// OAuth access-data delete comes last. Sessions first means a client cannot spend the
     /// window re-authenticating; see [`mm_store::OAuthStore::remove_all_access_data`] for the
     /// other direction, where Go's comment says why the opposite order is right there.
+    /// The last step is the `UserHasBeenDeactivated` plugin hook
+    /// ([`App::user_has_been_deactivated`]), after the event and only under the Rust plugin host.
     ///
     /// # Precondition
     ///
     /// The caller has established that `user` owns no bots ([`App::owns_bots`]) — see the module
     /// doc. This function reproduces `userDeactivated`'s bot-free path only.
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
-    pub async fn deactivate_user(&self, user: &User) -> AppResult<User> {
+    pub async fn deactivate_user(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
         let mut user = user.clone();
         user.update_at = mm_model::utils::get_millis();
         user.delete_at = user.update_at;
@@ -137,6 +137,7 @@ impl App {
         self.revoke_all_sessions(&new_user.id).await?;
         self.user_deactivated(&new_user.id).await;
         self.send_updated_user_event(&new_user).await;
+        self.user_has_been_deactivated(ctx, &new_user);
         Ok(new_user)
     }
 
@@ -281,13 +282,13 @@ impl App {
     /// ([`crate::peer_cache::PeerCache::invalidate_user`]) needs the row this has just deleted.
     /// Go may serve the erased profile from its cache until the entry ages out — [D-190].
     #[tracing::instrument(skip_all, fields(user_id = %user.id))]
-    pub async fn permanent_delete_user(&self, user: &User) -> AppResult<()> {
+    pub async fn permanent_delete_user(&self, ctx: &HookContext, user: &User) -> AppResult<()> {
         tracing::warn!(user_id = %user.id, user_email = %user.email, "Attempting to permanently delete account");
         if user.is_in_role(SYSTEM_ADMIN_ROLE_ID) {
             tracing::warn!(user_email = %user.email, "You are deleting a user that is a system administrator.  You may need to set another account as the system administrator using the command line tools.");
         }
 
-        self.deactivate_user(user).await?;
+        self.deactivate_user(ctx, user).await?;
 
         let store = self.store();
         let id = user.id.as_str();
@@ -592,9 +593,9 @@ impl App {
     /// many accounts survived. That includes a user whose erasure stopped half-way — its earlier
     /// tables are gone and its `Users` row is not.
     #[tracing::instrument(skip_all, fields(users = users.len()))]
-    pub async fn permanent_delete_users(&self, users: &[User]) {
+    pub async fn permanent_delete_users(&self, ctx: &HookContext, users: &[User]) {
         for user in users {
-            if let Err(err) = self.permanent_delete_user(user).await {
+            if let Err(err) = self.permanent_delete_user(ctx, user).await {
                 tracing::warn!(user_id = %user.id, error = %err.id, "Error while deleting user");
             }
         }

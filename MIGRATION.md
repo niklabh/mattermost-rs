@@ -14281,6 +14281,25 @@ harness faults. Every line was caught first time, as in the post tranche and for
 reason: one plugin under two hosts turns almost any change to what is sent into a transcript
 diff.
 
+## Plugin hook call sites: the user lifecycle family (2026-09-21)
+
+Plugin plan **Phase 5, 17 of 35**. Four more hooks fire under `MMRS_PLUGIN_HOST=rust`; D-453 and
+D-471 close, and the other 18 are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `UserWillLogIn`, `UserHasLoggedIn` (app/login.go:137, :233) | `mm_app::plugin_hooks::{run_user_will_log_in, user_has_logged_in}`, `App::do_login` | DONE | `parity::plugin_hooks::the_user_lifecycle_hooks_fire_as_go_fires_them` | The refusal runs **before** the device ids are validated, and its reason is concatenated into the error id — which `login`'s mask then turns into a 401 `invalid_credentials_*`. Both handlers now take `OptionalSession`, so a login sent with a live token gives the hooks that session's id, as Go's `APIHandler` does. |
+| `UserHasBeenCreated` (app/user.go:420) | `user_has_been_created`, `App::create_user` | DONE | same | The user is `ruser`, already sanitised. |
+| `UserHasBeenDeactivated` (app/user.go:1283) | `user_has_been_deactivated`, `App::deactivate_user`, `App::update_bot_active` | DONE | same | The user is the row the store's `Update` mutated and sanitised; disabling a bot fires it too, because Go's bot path is `UpdateActive`. |
+
+`UserHasLoggedIn` is handed Go's `*model.User` while the `login` handler goes on to `Sanitize` it,
+so Go's payload is a race; the handler's next step is a database read, and every run so far has
+seen the unsanitised row, which is what this sends (see the doc comment).
+
+Mutation tally (`plugin-hooks-lifecycle.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
+faults — on the second run. The first run's reorder control came back "caught": the suite had
+been reading the transcript mid-write, which `transcript_of` now waits out (see its doc comment).
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

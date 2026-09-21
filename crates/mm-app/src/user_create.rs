@@ -42,6 +42,7 @@ use mm_store::error::StoreError;
 use mm_store::{PreferenceStore, UserStore};
 
 use crate::App;
+use crate::plugin_hooks::HookContext;
 
 impl App {
     /// Port of `App.IsUserSignUpAllowed` (app/user.go:310).
@@ -120,7 +121,7 @@ impl App {
     ///
     /// The order matters: a closed server with sign-ups disabled answers 501, not 403.
     #[tracing::instrument(skip_all, fields(first_account))]
-    pub async fn create_user_from_signup(&self, user: &User) -> AppResult<User> {
+    pub async fn create_user_from_signup(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
         self.is_user_signup_allowed()?;
 
         let first = self.is_first_user_account().await;
@@ -138,7 +139,7 @@ impl App {
         let mut user = user.clone();
         user.email_verified = false;
 
-        let ruser = self.create_user(&user).await?;
+        let ruser = self.create_user(ctx, &user).await?;
         // `SendWelcomeEmail` — see the module docs and [D-450].
         tracing::info!(user_id = %ruser.id, "welcome e-mail not sent: no e-mail service");
         Ok(ruser)
@@ -152,8 +153,8 @@ impl App {
     /// and `SanitizeInput(true)` is what let the flag through. The permission that reaches this
     /// function is the whole authorisation.
     #[tracing::instrument(skip_all)]
-    pub async fn create_user_as_admin(&self, user: &User) -> AppResult<User> {
-        let ruser = self.create_user(user).await?;
+    pub async fn create_user_as_admin(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
+        let ruser = self.create_user(ctx, user).await?;
         tracing::info!(user_id = %ruser.id, "welcome e-mail not sent: no e-mail service");
         Ok(ruser)
     }
@@ -185,7 +186,7 @@ impl App {
     /// role. Reproduced rather than hardened: the divergence would be a client that becomes an
     /// administrator here and does not on Go.
     #[tracing::instrument(skip_all, fields(username = %user.username, roles, locale_reset = false))]
-    pub async fn create_user(&self, user: &User) -> AppResult<User> {
+    pub async fn create_user(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
         // `isAtUserLimit` (app/limits.go:114), and two ids for the one condition: the licensed
         // one when a licence is installed — reachable here since 2026-09-13, when
         // `GetServerLimits` learned to read a seat-enforcing licence.
@@ -363,6 +364,8 @@ impl App {
         );
         message.add("user_id", serde_json::Value::from(ruser.id.as_str()));
         self.publish(message).await;
+
+        self.user_has_been_created(ctx, &ruser);
 
         // The trailing `GetServerLimits` is a **log line only** in Go — it cannot fail the
         // request, and the limit it warns about is the soft one, which the hard-limit check at

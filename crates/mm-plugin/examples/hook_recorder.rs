@@ -48,6 +48,14 @@
 //!
 //! Both hosts read the same ids, because the two servers share one database and therefore one
 //! channel and one team.
+//!
+//! # `UserWillLogIn` is driven the same way
+//!
+//! | variable | hook | answer |
+//! |---|---|---|
+//! | `HOOK_RECORDER_REJECT_USER` | `UserWillLogIn` | [`LOGIN_REJECTION`], which refuses the login |
+//!
+//! Anyone else is let in with the empty string.
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -61,9 +69,11 @@ use mm_plugin::wire::plugin::{
     Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns,
     Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs,
     Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns,
-    Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs,
-    Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns,
-    Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
+    Z_UserHasBeenCreatedArgs, Z_UserHasBeenCreatedReturns, Z_UserHasBeenDeactivatedArgs,
+    Z_UserHasBeenDeactivatedReturns, Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns,
+    Z_UserHasJoinedTeamArgs, Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs,
+    Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
+    Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use serde_json::{Value as Json, json};
 
@@ -85,9 +95,13 @@ const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
 /// **parameter** of a real translation key on both hosts, so it never reaches a client verbatim.
 const MEMBER_REJECTION: &str = "the hook recorder says no";
 
+/// The reason `UserWillLogIn` refuses with. Go concatenates it into the error **id**, as the post
+/// hooks do, and not into a parameter as the membership hooks do.
+const LOGIN_REJECTION: &str = "the hook recorder keeps this one out";
+
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 13] = [
+const IMPLEMENTED: [&str; 17] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -101,6 +115,10 @@ const IMPLEMENTED: [&str; 13] = [
     "TeamMemberWillBeAdded",
     "UserHasJoinedTeam",
     "UserHasLeftTeam",
+    "UserWillLogIn",
+    "UserHasLoggedIn",
+    "UserHasBeenCreated",
+    "UserHasBeenDeactivated",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -329,6 +347,44 @@ impl Hooks for Recorder {
     ) -> Result<Z_UserHasLeftTeamReturns, NotImplemented> {
         self.saw("UserHasLeftTeam", &args);
         Ok(Z_UserHasLeftTeamReturns::default())
+    }
+
+    async fn user_will_log_in(
+        &self,
+        args: Z_UserWillLogInArgs,
+    ) -> Result<Z_UserWillLogInReturns, NotImplemented> {
+        self.saw("UserWillLogIn", &args);
+        let user = args.b.as_deref().map_or("", |u| u.id.as_str());
+        let a = if user == configured_id("HOOK_RECORDER_REJECT_USER") {
+            LOGIN_REJECTION.to_owned()
+        } else {
+            String::new()
+        };
+        Ok(Z_UserWillLogInReturns { a })
+    }
+
+    async fn user_has_logged_in(
+        &self,
+        args: Z_UserHasLoggedInArgs,
+    ) -> Result<Z_UserHasLoggedInReturns, NotImplemented> {
+        self.saw("UserHasLoggedIn", &args);
+        Ok(Z_UserHasLoggedInReturns::default())
+    }
+
+    async fn user_has_been_created(
+        &self,
+        args: Z_UserHasBeenCreatedArgs,
+    ) -> Result<Z_UserHasBeenCreatedReturns, NotImplemented> {
+        self.saw("UserHasBeenCreated", &args);
+        Ok(Z_UserHasBeenCreatedReturns::default())
+    }
+
+    async fn user_has_been_deactivated(
+        &self,
+        args: Z_UserHasBeenDeactivatedArgs,
+    ) -> Result<Z_UserHasBeenDeactivatedReturns, NotImplemented> {
+        self.saw("UserHasBeenDeactivated", &args);
+        Ok(Z_UserHasBeenDeactivatedReturns::default())
     }
 }
 

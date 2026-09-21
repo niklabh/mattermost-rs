@@ -156,9 +156,10 @@ fn string_map_from_wire(map: &wire_model::StringMap) -> mm_model::utils::StringM
 /// `AuthData` and `MfaSecret` are ordinary gob fields — they carry `json:"-"`-ish JSON tags but
 /// gob matches by Go field name (docs/PLUGIN_PLAN.md, §2) — and `AddChannelMember`,
 /// `removeUserFromChannel`, `JoinUserToTeam` and `postProcessTeamMemberLeave` all hand the hook
-/// `a.GetUser(...)`, which is the raw store row. The one user that *is* sanitised is
-/// `UserHasBeenCreated`'s, and its `Sanitize` happens in `userService.createUser`, before the
-/// hook and above this conversion.
+/// `a.GetUser(...)`, which is the raw store row; so do the two login hooks. The two users that
+/// *are* sanitised are `UserHasBeenCreated`'s (`userService.createUser`) and
+/// `UserHasBeenDeactivated`'s (`SqlUserStore.Update`), both before the hook and above this
+/// conversion.
 pub fn user_to_wire(user: &User) -> wire_model::User {
     wire_model::User {
         id: user.id.clone(),
@@ -1126,5 +1127,124 @@ impl App {
                 hooks.user_has_left_team(args).await;
             }
         });
+    }
+    /// Port of `DoLogin`'s first statement (app/login.go:137) — hook 15, `UserWillLogIn`, before
+    /// the device ids are validated and before anything is written.
+    ///
+    /// A plain `RunMultiHook` that **stops at the first rejection**: the closure answers
+    /// `rejectionReason == ""`, so a plugin that refuses ends the iteration and the plugins after
+    /// it are never asked. No plugin can replace the user — the hook returns a string only.
+    ///
+    /// The rejection is the post family's arrangement, not the membership one: the reason is
+    /// concatenated into the error **id**, `"Login rejected by plugin: " + reason`, at 400. On
+    /// `POST /users/login` a client never sees it, because `login`'s deferred mask turns every id
+    /// outside its short list into `invalid_credentials_*` at 401; the desktop-token login has no
+    /// mask and hands the id over as it is.
+    pub(crate) async fn run_user_will_log_in(
+        &self,
+        ctx: &HookContext,
+        user: &User,
+    ) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.hook_environment() else {
+            return Ok(());
+        };
+        let wire = user_to_wire(user);
+        for (hooks, _manifest) in environment.hooks_implementing(hook_id::USER_WILL_LOG_IN) {
+            let returns = hooks
+                .user_will_log_in(wire_plugin::Z_UserWillLogInArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(wire.clone())),
+                })
+                .await;
+            if !returns.a.is_empty() {
+                return Err(AppError::boxed(
+                    "DoLogin",
+                    format!("Login rejected by plugin: {}", returns.a),
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// `UserHasLoggedIn` (hook 16) — app/login.go:233, the last thing `DoLogin` does, after
+    /// `UpdateLastLogin`.
+    ///
+    /// `ctx` is the one taken at the **top** of `DoLogin`, before `rctx.WithSession(session)`, so
+    /// its `SessionId` is whatever session the login request itself carried — usually none — and
+    /// never the session this login just created.
+    ///
+    /// Go hands the goroutine the caller's `*model.User` and the `login` handler goes on to write
+    /// the terms-of-service pair into it and `Sanitize` it, so what gob encodes depends on which
+    /// goroutine gets there first. The handler's next step is a database read, so in practice the
+    /// hook sees the row as `DoLogin` got it — hash included — and that is what is sent here,
+    /// from a copy taken before the spawn.
+    pub(crate) fn user_has_logged_in(&self, ctx: &HookContext, user: &User) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (context, wire) = (ctx.boxed_wire(), user_to_wire(user));
+        spawn_multi_hook(environment, hook_id::USER_HAS_LOGGED_IN, move |hooks| {
+            let args = wire_plugin::Z_UserHasLoggedInArgs {
+                a: context.clone(),
+                b: Some(Box::new(wire.clone())),
+            };
+            async move {
+                hooks.user_has_logged_in(args).await;
+            }
+        });
+    }
+
+    /// `UserHasBeenCreated` (hook 17) — app/user.go:420, in `createUserOrGuest` after the
+    /// `new_user` broadcast and before the soft-limit log line.
+    ///
+    /// The user is `ruser`, which `userService.createUser` has already `Sanitize`d: no password,
+    /// no auth data, no MFA secret — the one user-carrying hook that sends a sanitised row.
+    pub(crate) fn user_has_been_created(&self, ctx: &HookContext, user: &User) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (context, wire) = (ctx.boxed_wire(), user_to_wire(user));
+        spawn_multi_hook(environment, hook_id::USER_HAS_BEEN_CREATED, move |hooks| {
+            let args = wire_plugin::Z_UserHasBeenCreatedArgs {
+                a: context.clone(),
+                b: Some(Box::new(wire.clone())),
+            };
+            async move {
+                hooks.user_has_been_created(args).await;
+            }
+        });
+    }
+
+    /// `UserHasBeenDeactivated` (hook 36) — app/user.go:1283, at the end of `UpdateActive`'s
+    /// deactivating arm, after `sendUpdatedUserEvent`, under `!active && user.DeleteAt != 0`.
+    ///
+    /// The user is the **caller's** `*model.User`, which `SqlUserStore.Update` has mutated in
+    /// place — `PreUpdate`, the protected columns copied back from the old row, and
+    /// `Sanitize` — before deep-copying it into `UserUpdate.New`. So it is the same value as the
+    /// updated row the event carries, sanitised, and callers pass that.
+    pub(crate) fn user_has_been_deactivated(&self, ctx: &HookContext, user: &User) {
+        if user.delete_at == 0 {
+            return;
+        }
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (context, wire) = (ctx.boxed_wire(), user_to_wire(user));
+        spawn_multi_hook(
+            environment,
+            hook_id::USER_HAS_BEEN_DEACTIVATED,
+            move |hooks| {
+                let args = wire_plugin::Z_UserHasBeenDeactivatedArgs {
+                    a: context.clone(),
+                    b: Some(Box::new(wire.clone())),
+                };
+                async move {
+                    hooks.user_has_been_deactivated(args).await;
+                }
+            },
+        );
     }
 }

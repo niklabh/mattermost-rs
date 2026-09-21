@@ -426,7 +426,8 @@ async fn local_delete_user(
             Ok(false) => {}
             Err(err) => return ApiError::from(err).into_response(),
         }
-        if let Err(err) = state.app.permanent_delete_user(&user).await {
+        let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
+        if let Err(err) = state.app.permanent_delete_user(&hook_ctx, &user).await {
             return ApiError::from(err).into_response();
         }
         return user_updates::status_ok();
@@ -440,7 +441,8 @@ async fn local_delete_user(
         Ok(false) => {}
         Err(err) => return ApiError::from(err).into_response(),
     }
-    if let Err(err) = state.app.deactivate_user(&user).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
+    if let Err(err) = state.app.deactivate_user(&hook_ctx, &user).await {
         return ApiError::from(err).into_response();
     }
     user_updates::status_ok()
@@ -477,7 +479,8 @@ async fn local_permanent_delete_all_users(
         Ok(false) => {}
         Err(err) => return ApiError::from(err).into_response(),
     }
-    state.app.permanent_delete_users(&users).await;
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
+    state.app.permanent_delete_users(&hook_ctx, &users).await;
     user_updates::status_ok()
 }
 

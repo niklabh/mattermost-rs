@@ -413,8 +413,9 @@ pub async fn disable_bot(
     state: State<AppState>,
     path: Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Response {
-    update_bot_active(state, path, session, false).await
+    update_bot_active(state, path, session, parts, false).await
 }
 
 /// Port of `enableBot` (api4/bot.go:194) — `POST /api/v4/bots/{bot_user_id}/enable`.
@@ -423,8 +424,9 @@ pub async fn enable_bot(
     state: State<AppState>,
     path: Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Response {
-    update_bot_active(state, path, session, true).await
+    update_bot_active(state, path, session, parts, true).await
 }
 
 /// Port of `updateBotActive` (api4/bot.go:200).
@@ -436,6 +438,7 @@ async fn update_bot_active(
     State(state): State<AppState>,
     Path(bot_user_id): Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
     active: bool,
 ) -> Response {
     if !is_valid_id(&bot_user_id) {
@@ -447,7 +450,11 @@ async fn update_bot_active(
             .app
             .session_has_permission_to_manage_bot(&session.0, &bot_user_id)
             .await?;
-        let bot = state.app.update_bot_active(&bot_user_id, active).await?;
+        let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+        let bot = state
+            .app
+            .update_bot_active(&hook_ctx, &bot_user_id, active)
+            .await?;
         encoded(StatusCode::OK, &bot, "updateBotActive")
     };
     match served.await {

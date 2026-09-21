@@ -84,7 +84,7 @@ async fn new_user_notices_are_marked_viewed_once() {
     );
 
     let created = app
-        .create_user(&new_user())
+        .create_user(&mm_app::plugin_hooks::HookContext::default(), &new_user())
         .await
         .expect("the user is created");
 

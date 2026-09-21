@@ -472,13 +472,21 @@ async fn local_patch_bot(
 }
 
 /// `disableBot` through `APILocal` (bot_local.go:11).
-async fn local_disable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {
-    bots::disable_bot(state, path, local_session()).await
+async fn local_disable_bot(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    parts: axum::http::request::Parts,
+) -> Response {
+    bots::disable_bot(state, path, local_session(), parts).await
 }
 
 /// `enableBot` through `APILocal` (bot_local.go:12).
-async fn local_enable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {
-    bots::enable_bot(state, path, local_session()).await
+async fn local_enable_bot(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    parts: axum::http::request::Parts,
+) -> Response {
+    bots::enable_bot(state, path, local_session(), parts).await
 }
 
 /// `assignBot` through `APILocal` (bot_local.go:14).
