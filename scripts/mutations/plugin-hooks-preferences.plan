@@ -1,0 +1,13 @@
+# Mutation plan for `PreferencesHaveChanged` (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-preferences.plan
+#
+# The oracle is the preference steps of
+# `parity::plugin_hooks::the_user_lifecycle_hooks_fire_as_go_fires_them`. The last two lines are
+# the no-op controls and must SURVIVE.
+
+the-hook-does-not-fire	crates/mm-app/src/preference.rs	        self.preferences_have_changed(ctx, preferences);	        let _ = ctx;	api	plugin_hooks::the_user_lifecycle
+name-and-value-swapped	crates/mm-app/src/plugin_hooks.rs	                name: p.name.clone(),\n                value: p.value.clone(),	                name: p.value.clone(),\n                value: p.name.clone(),	api	plugin_hooks::the_user_lifecycle
+custom-status-loses-the-request	crates/mm-app/src/status.rs	self.add_recent_custom_status(ctx, user_id, cs)	self.add_recent_custom_status(\n                &crate::plugin_hooks::HookContext::default(),\n                user_id,\n                cs,\n            )	api	plugin_hooks::the_user_lifecycle
+control-infer-the-batch-type	crates/mm-app/src/plugin_hooks.rs	        let wire: Vec<wire_model::Preference> = preferences	        let wire: Vec<_> = preferences	api	plugin_hooks::the_user_lifecycle
+control-reorder-two-fields	crates/mm-app/src/plugin_hooks.rs	                user_id: p.user_id.clone(),\n                category: p.category.clone(),	                category: p.category.clone(),\n                user_id: p.user_id.clone(),	api	plugin_hooks::the_user_lifecycle

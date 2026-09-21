@@ -41,6 +41,7 @@ use std::sync::Arc;
 use mm_model::channel_member::ChannelMember;
 use mm_model::file_info::FileInfo;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
+use mm_model::preference::Preferences;
 use mm_model::reaction::Reaction;
 use mm_model::team_member::TeamMember;
 use mm_model::user::User;
@@ -1657,5 +1658,38 @@ impl App {
             serde_json::Value::from(info.channel_id.as_str()),
         );
         self.publish(message).await;
+    }
+    /// `PreferencesHaveChanged` (hook 42) — app/preference.go:78, the last thing
+    /// `UpdatePreferences` does, after the `preferences_changed` event. **Not** fired by
+    /// `DeletePreferences`: Go has no hook for a deletion.
+    ///
+    /// The batch is the one the caller saved, in its order.
+    pub(crate) fn preferences_have_changed(&self, ctx: &HookContext, preferences: &Preferences) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let context = ctx.boxed_wire();
+        let wire: Vec<wire_model::Preference> = preferences
+            .iter()
+            .map(|p| wire_model::Preference {
+                user_id: p.user_id.clone(),
+                category: p.category.clone(),
+                name: p.name.clone(),
+                value: p.value.clone(),
+            })
+            .collect();
+        spawn_multi_hook(
+            environment,
+            hook_id::PREFERENCES_HAVE_CHANGED,
+            move |hooks| {
+                let args = wire_plugin::Z_PreferencesHaveChangedArgs {
+                    a: context.clone(),
+                    b: wire.clone(),
+                };
+                async move {
+                    hooks.preferences_have_changed(args).await;
+                }
+            },
+        );
     }
 }

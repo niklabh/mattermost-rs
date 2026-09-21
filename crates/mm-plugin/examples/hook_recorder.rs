@@ -85,14 +85,15 @@ use mm_plugin::wire::plugin::{
     Z_FileWillBeDownloadedReturns, Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns,
     Z_MessageHasBeenPostedArgs, Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs,
     Z_MessageHasBeenUpdatedReturns, Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns,
-    Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns, Z_ReactionHasBeenAddedArgs,
-    Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns,
-    Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns, Z_UserHasBeenCreatedArgs,
-    Z_UserHasBeenCreatedReturns, Z_UserHasBeenDeactivatedArgs, Z_UserHasBeenDeactivatedReturns,
-    Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs,
-    Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns,
-    Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns, Z_UserHasLoggedInArgs,
-    Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
+    Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns, Z_PreferencesHaveChangedArgs,
+    Z_PreferencesHaveChangedReturns, Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns,
+    Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs,
+    Z_TeamMemberWillBeAddedReturns, Z_UserHasBeenCreatedArgs, Z_UserHasBeenCreatedReturns,
+    Z_UserHasBeenDeactivatedArgs, Z_UserHasBeenDeactivatedReturns, Z_UserHasJoinedChannelArgs,
+    Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs, Z_UserHasJoinedTeamReturns,
+    Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs,
+    Z_UserHasLeftTeamReturns, Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs,
+    Z_UserWillLogInReturns,
 };
 use serde_json::{Value as Json, json};
 
@@ -129,7 +130,7 @@ const REPLACEMENT: &[u8] = b"replaced by the hook recorder";
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 19] = [
+const IMPLEMENTED: [&str; 20] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -149,6 +150,7 @@ const IMPLEMENTED: [&str; 19] = [
     "UserHasBeenDeactivated",
     "FileWillBeDownloaded",
     "FileWillBeUploaded",
+    "PreferencesHaveChanged",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -415,6 +417,14 @@ impl Hooks for Recorder {
     ) -> Result<Z_UserHasBeenDeactivatedReturns, NotImplemented> {
         self.saw("UserHasBeenDeactivated", &args);
         Ok(Z_UserHasBeenDeactivatedReturns::default())
+    }
+
+    async fn preferences_have_changed(
+        &self,
+        args: Z_PreferencesHaveChangedArgs,
+    ) -> Result<Z_PreferencesHaveChangedReturns, NotImplemented> {
+        self.saw("PreferencesHaveChanged", &args);
+        Ok(Z_PreferencesHaveChangedReturns::default())
     }
 
     async fn file_will_be_downloaded(

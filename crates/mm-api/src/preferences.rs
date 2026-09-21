@@ -255,8 +255,9 @@ pub async fn update_preferences_me(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     match read_body(request).await {
-        Ok(bytes) => update_preferences_for(&state, &session, ME, &bytes).await,
+        Ok(bytes) => update_preferences_for(&state, &session, &hook_ctx, ME, &bytes).await,
         Err(err) => err.into_response(),
     }
 }
@@ -272,8 +273,9 @@ pub async fn update_preferences(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     match read_body(request).await {
-        Ok(bytes) => update_preferences_for(&state, &session, &user_id, &bytes).await,
+        Ok(bytes) => update_preferences_for(&state, &session, &hook_ctx, &user_id, &bytes).await,
         Err(err) => err.into_response(),
     }
 }
@@ -311,10 +313,11 @@ async fn read_body(request: Request) -> Result<axum::body::Bytes, ApiError> {
 pub(crate) async fn update_preferences_for(
     state: &AppState,
     session: &AuthenticatedSession,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
     user_id: &str,
     bytes: &[u8],
 ) -> Response {
-    match update_preferences_checked(state, session, user_id, bytes).await {
+    match update_preferences_checked(state, session, hook_ctx, user_id, bytes).await {
         // `ReturnStatusOK` — `{"status":"OK"}` written with `w.Write`, so no trailing newline
         // (web.go:127). Not an encoder call site; see [D-086].
         Ok(()) => (
@@ -333,6 +336,7 @@ pub(crate) async fn update_preferences_for(
 async fn update_preferences_checked(
     state: &AppState,
     session: &AuthenticatedSession,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
     user_id: &str,
     bytes: &[u8],
 ) -> Result<(), ApiError> {
@@ -389,7 +393,7 @@ async fn update_preferences_checked(
 
     state
         .app
-        .update_preferences(user_id, &Preferences(preferences))
+        .update_preferences(hook_ctx, user_id, &Preferences(preferences))
         .await
         .map_err(|err| ApiError::from(*err))
 }

@@ -309,6 +309,7 @@ pub async fn update_user_custom_status(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(user_id): Path<String>,
+    parts: axum::http::request::Parts,
     body: axum::body::Bytes,
 ) -> Response {
     let user_id = resolve_me(&session, user_id);
@@ -339,7 +340,15 @@ pub async fn update_user_custom_status(
     }
 
     custom_status.pre_save();
-    match state.app.set_custom_status(&user_id, &custom_status).await {
+    match state
+        .app
+        .set_custom_status(
+            &crate::plugin_context::hook_context(&parts, Some(&session.0)),
+            &user_id,
+            &custom_status,
+        )
+        .await
+    {
         Ok(()) => status_ok(),
         Err(err) => ApiError::from(*err).into_response(),
     }
@@ -396,6 +405,7 @@ pub async fn remove_user_recent_custom_status(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     Path(user_id): Path<String>,
+    parts: axum::http::request::Parts,
     body: axum::body::Bytes,
 ) -> Response {
     let user_id = resolve_me(&session, user_id);
@@ -424,7 +434,11 @@ pub async fn remove_user_recent_custom_status(
 
     match state
         .app
-        .remove_recent_custom_status(&user_id, &status)
+        .remove_recent_custom_status(
+            &crate::plugin_context::hook_context(&parts, Some(&session.0)),
+            &user_id,
+            &status,
+        )
         .await
     {
         Ok(()) => status_ok(),

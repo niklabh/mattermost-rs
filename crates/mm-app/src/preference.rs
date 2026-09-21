@@ -130,8 +130,8 @@ impl App {
     ///
     /// # Not reproduced
     ///
-    /// The `PreferencesHaveChanged` plugin hook: plugins run in the Go process, and a write
-    /// served here fires no Go hook — the gap [D-402] records for posts.
+    /// Nothing, since 2026-09-21: the `PreferencesHaveChanged` plugin hook fires last under the
+    /// Rust plugin host ([`App::preferences_have_changed`]).
     ///
     /// # The two events
     ///
@@ -146,6 +146,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(user_id = %user_id, count = preferences.len()))]
     pub async fn update_preferences(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         preferences: &Preferences,
     ) -> AppResult<()> {
@@ -164,7 +165,9 @@ impl App {
         }
 
         self.save_preferences_then_publish(user_id, preferences)
-            .await
+            .await?;
+        self.preferences_have_changed(ctx, preferences);
+        Ok(())
     }
 
     /// The store call and the two events, split out so the ownership loop above reads as one
