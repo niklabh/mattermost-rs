@@ -54,7 +54,7 @@ impl App {
     /// `brand/<2006-01-02T15:04:05>.png` in the server's local time (both failures only logged);
     /// and the write (500 `save_image`).
     ///
-    /// A GIF, BMP, TIFF or WebP is [`PrepareError::Unreproducible`] — handed to Go before the
+    /// A WebP canvas declaring alpha is [`PrepareError::Unreproducible`] — handed to Go before the
     /// archive and the write, so a forwarded upload has not touched the backend ([D-411]).
     pub async fn save_brand_image(&self, data: &[u8]) -> Result<(), PrepareError> {
         use crate::image_pipeline::{self, PipelineError};
@@ -78,7 +78,7 @@ impl App {
         match goimage::format::decode_config(data) {
             Err(goimage::format::DecodeError::NotPorted(_)) => {
                 return Err(PrepareError::Unreproducible(
-                    "GIF, BMP, TIFF and WebP brand images are decoded by Go",
+                    "a WebP canvas that declares alpha is decoded by Go",
                 ));
             }
             Err(goimage::format::DecodeError::Go(err)) => {
@@ -126,7 +126,7 @@ impl App {
             }
             Err(PipelineError::NotPorted(_)) => {
                 return Err(PrepareError::Unreproducible(
-                    "GIF, BMP, TIFF and WebP brand images are decoded by Go",
+                    "a WebP canvas that declares alpha is decoded by Go",
                 ));
             }
             Err(err) => {
@@ -238,16 +238,41 @@ mod go_parity {
         assert_eq!(err.where_, "SaveBrandImage");
     }
 
+    /// A lossy WebP carrying an `ALPH` chunk, out of the imaging oracle's own corpus: Go decodes
+    /// it into an `*image.NYCbCrA`, which `goimage::image::Image` does not model.
+    fn alpha_webp() -> Vec<u8> {
+        use base64::Engine as _;
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/behaviour_imaging_webp.json"
+        ))
+        .unwrap();
+        let fx: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let c = fx["decode"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "yellow_rose.lossy-with-alpha.webp")
+            .unwrap();
+        base64::engine::general_purpose::STANDARD
+            .decode(c["b64"].as_str().unwrap())
+            .unwrap()
+    }
+
     /// With a driver configured a format this port does not decode is handed over — **before**
     /// the archive `MoveFile` and before the `WriteFile`, so a forwarded upload has left nothing
     /// in the backend for Go to trip over. (The store is unreachable: a write would fail loudly.)
+    ///
+    /// The bytes are a WebP canvas declaring alpha — the one answer this port does not have —
+    /// rather than the GIF this test used to send: every other format is decoded here now, so a
+    /// GIF would reach the store and this test would be measuring the store.
     #[tokio::test]
     async fn an_unported_format_forwards_without_writing() {
         let app = crate::App::with_config(unreachable_store(), crate::config::Config::default());
         let err = app
-            .save_brand_image(b"GIF89a\x01\x00\x01\x00")
+            .save_brand_image(&alpha_webp())
             .await
-            .expect_err("a GIF is Go's to decode");
+            .expect_err("a lossy WebP with an alpha chunk is Go's to decode");
         assert!(
             matches!(err, PrepareError::Unreproducible(_)),
             "a configured server forwards rather than answering"

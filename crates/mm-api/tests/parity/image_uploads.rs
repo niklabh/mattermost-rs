@@ -185,6 +185,84 @@ fn corpus() -> Vec<(&'static str, &'static str, Vec<u8>)> {
             "mmrs-parity-img-flip.jpg",
             corpus_file("jpeg", "flip_330"),
         ),
+        // GIF and BMP, served since `goimage::gif` and `goimage::bmp` landed. The mime table
+        // calls a `.gif` `image/gif`, which is the one branch of `preprocessImage` that decodes
+        // the whole file and clears `has_preview_image` — so the animated case exercises both
+        // that and the fact that `image.Decode` yields frame 0 alone.
+        (
+            "gif photo",
+            "mmrs-parity-img-photo.gif",
+            corpus_file("pipeline", "gif_1400x900"),
+        ),
+        (
+            "animated gif",
+            "mmrs-parity-img-anim.gif",
+            corpus_file("pipeline", "gif_animated_300x200"),
+        ),
+        (
+            "interlaced gif",
+            "mmrs-parity-img-inter.gif",
+            corpus_file("gif", "crafted_interlaced_17"),
+        ),
+        (
+            "24-bit bmp photo",
+            "mmrs-parity-img-photo.bmp",
+            corpus_file("pipeline", "bmp_1400x900_24"),
+        ),
+        (
+            "8-bit gray bmp",
+            "mmrs-parity-img-gray.bmp",
+            corpus_file("pipeline", "bmp_2000x120_gray"),
+        ),
+        (
+            "1-bit paletted bmp",
+            "mmrs-parity-img-1bpp.bmp",
+            corpus_file("bmp", "bmp_1bpp.bmp"),
+        ),
+        (
+            "32-bit bmp with alpha",
+            "mmrs-parity-img-alpha.bmp",
+            corpus_file("bmp", "crafted_baseline_32_topdown"),
+        ),
+        // TIFF, served since `goimage::tiff` and `imagemeta`'s TIFF EXIF walk landed together —
+        // the decoder alone was not enough, because both upload paths read the orientation.
+        (
+            "lzw tiff",
+            "mmrs-parity-img-lzw.tiff",
+            corpus_file("tiff", "blue-purple-pink.lzwcompressed.tiff"),
+        ),
+        (
+            "ccitt group 4 tiff",
+            "mmrs-parity-img-g4.tiff",
+            corpus_file("tiff", "bw-gopher_ccittGroup4.tiff"),
+        ),
+        (
+            "tiled 16-bit tiff",
+            "mmrs-parity-img-tiled.tiff",
+            corpus_file("tiff", "tiled-nrgba16.tiff"),
+        ),
+        (
+            "big-endian paletted tiff",
+            "mmrs-parity-img-be.tiff",
+            corpus_file("tiff", "video-001-paletted.tiff"),
+        ),
+        // WebP, served since `goimage::webp` landed: VP8 lossy through each in-loop filter and
+        // VP8L lossless, including a sub-byte colour depth.
+        (
+            "lossy webp",
+            "mmrs-parity-img-lossy.webp",
+            corpus_file("webp", "blue-purple-pink-large.normal-filter.lossy.webp"),
+        ),
+        (
+            "lossless webp",
+            "mmrs-parity-img-lossless.webp",
+            corpus_file("webp", "blue-purple-pink-large.lossless.webp"),
+        ),
+        (
+            "1bpp lossless webp",
+            "mmrs-parity-img-1bpp.webp",
+            corpus_file("webp", "gopher-doc.1bpp.lossless.webp"),
+        ),
     ]
 }
 
@@ -488,10 +566,11 @@ async fn the_uploads_route_completes_images_identically() {
     );
 }
 
-/// The formats this port does not decode are still Go's, and forward before anything is
-/// written: a GIF (its frame walk and palette decode) and a BMP.
+/// The one answer this port does not have — a WebP canvas declaring alpha — is still Go's, and
+/// forwards before anything is written. GIF, BMP, TIFF and every other WebP are no longer among
+/// them, and the derived files they produce are compared with everything else in `corpus()`.
 #[tokio::test]
-async fn gif_and_bmp_uploads_still_forward() {
+async fn the_undecoded_formats_still_forward() {
     if !stack_enabled() {
         return;
     }
@@ -500,10 +579,10 @@ async fn gif_and_bmp_uploads_still_forward() {
     let token = go_minted_token(&client).await;
     let (_team, channel) = a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    // A 1x1 GIF89a and a 1x1 24-bit BMP.
-    let gif: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
-    let bmp: &[u8] = b"BM:\x00\x00\x00\x00\x00\x00\x006\x00\x00\x00(\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x01\x00\x18\x00\x00\x00\x00\x00\x04\x00\x00\x00\x13\x0b\x00\x00\x13\x0b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\x00";
-    for (filename, bytes) in [("mmrs-parity-img.gif", gif), ("mmrs-parity-img.bmp", bmp)] {
+    // A lossy WebP carrying an alpha chunk: Go decodes it into an `*image.NYCbCrA`, which
+    // `goimage::image::Image` does not model, and it is the only answer left that forwards.
+    let webp = corpus_file("webp", "yellow_rose.lossy-with-alpha.webp");
+    for (filename, bytes) in [("mmrs-parity-img.webp", webp.as_slice())] {
         let path = format!("/api/v4/files?channel_id={channel}&filename={filename}");
         let (status, served_by, body) = send(
             &client,
@@ -526,6 +605,62 @@ async fn gif_and_bmp_uploads_still_forward() {
             Some("rust"),
             "{filename} must forward: this port does not decode it"
         );
-        assert_eq!(first_info(&body)["width"], 1, "{filename}: Go measured it");
+        // Go measured it, so the row is Go's and complete — the point of the forward.
+        assert_eq!(
+            first_info(&body)["width"],
+            400,
+            "{filename}: Go measured it"
+        );
+        assert_eq!(
+            first_info(&body)["has_preview_image"],
+            true,
+            "{filename}: Go derived from it"
+        );
+
+        // …and the same through the *uploads* route, whose gate is a second copy of the
+        // decision — `mm_app::upload::refuse_if_completion_needs_derived_images`, which reads
+        // the chunk's head before it is written. A mutation that made that gate never forward
+        // survived the whole suite until this half existed, because every other case here goes
+        // through `POST /files`.
+        let session = serde_json::json!({
+            "channel_id": channel,
+            "filename": filename,
+            "file_size": bytes.len(),
+            "type": "attachment",
+        });
+        let (status, _, reply) = send(
+            &client,
+            RUST,
+            reqwest::Method::POST,
+            "/api/v4/uploads",
+            &token,
+            Some("application/json"),
+            serde_json::to_vec(&session).unwrap(),
+        )
+        .await;
+        assert_eq!(status, 201, "{}", String::from_utf8_lossy(&reply));
+        let session: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        let upload_id = session["id"].as_str().unwrap().to_owned();
+
+        let (status, served_by, reply) = send(
+            &client,
+            RUST,
+            reqwest::Method::POST,
+            &format!("/api/v4/uploads/{upload_id}"),
+            &token,
+            Some("application/octet-stream"),
+            bytes.to_vec(),
+        )
+        .await;
+        // The completing chunk answers 200, not the 201 `POST /files` gives.
+        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&reply));
+        assert_ne!(
+            served_by.as_deref(),
+            Some("rust"),
+            "{filename} must forward on the uploads route too"
+        );
+        let info: serde_json::Value = serde_json::from_slice(&reply).unwrap();
+        // `UploadData`'s reply is the FileInfo without `has_preview_image`, unlike `POST /files`.
+        assert_eq!(info["width"], 400, "{filename}: Go completed the upload");
     }
 }

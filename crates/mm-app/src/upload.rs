@@ -4,8 +4,8 @@
 //! # Where the port stops, and why it stops *before* writing
 //!
 //! `UploadData`'s completion step for an image runs `HandleImages` (app/file.go:1161): it decodes
-//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. PNG and JPEG are
-//! served, byte for byte, through [`crate::image_pipeline`]. GIF, BMP, TIFF and WebP are not
+//! the file, resizes it twice and encodes a `_preview` and a `_thumb` beside it. Every format is
+//! served, byte for byte, through [`crate::image_pipeline`]. A WebP declaring alpha is not
 //! decoded here ([D-650]), so an upload whose last chunk would reach one of them is handed to Go
 //! as [`PrepareError::Unreproducible`] — and the decision is taken from the file's first bytes
 //! **before the chunk is written**, because a request forwarded after the write would find
@@ -435,7 +435,8 @@ impl App {
     /// Only a name whose mime type says image matters. A first chunk carries its own head; a
     /// later one reads the head of what is already on disk (chunks are at least 5 MiB, so the
     /// header is there). A format `image.Decode` would hand to a decoder this port does not
-    /// have — GIF, BMP, TIFF, WebP — is forwarded; PNG, JPEG and bytes no decoder claims are
+    /// have — a lossy WebP carrying alpha — is forwarded; every other format and bytes no
+    /// decoder claims are
     /// served (the last is `genFileInfoFromReader`'s 500).
     async fn refuse_if_completion_needs_derived_images(
         &self,
@@ -461,10 +462,10 @@ impl App {
         };
 
         match goimage::format::sniff(&head) {
-            Some("png" | "jpeg") | None => Ok(()),
-            Some(_) => Err(PrepareError::Unreproducible(
-                "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+            Some("webp") if webp_declares_alpha(&head) => Err(PrepareError::Unreproducible(
+                "a WebP canvas that declares alpha is decoded by Go",
             )),
+            _ => Ok(()),
         }
     }
 
@@ -489,7 +490,7 @@ impl App {
                 // The head was sniffed before the write; a format reaching here is decoded.
                 .map_err(|_| {
                     PrepareError::Unreproducible(
-                        "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                        "a WebP canvas that declares alpha is decoded by Go",
                     )
                 })?;
         let Some(derived) = derived else {
@@ -659,12 +660,24 @@ pub fn gen_file_info_from_reader(
             Err(PipelineError::Go(text)) => return Err(GenFileInfoError::Decode(text)),
             Err(PipelineError::NotPorted(_)) => {
                 return Err(GenFileInfoError::Unreproducible(
-                    "GIF, BMP, TIFF and WebP uploads are decoded by Go",
+                    "a WebP canvas that declares alpha is decoded by Go",
                 ));
             }
         }
     }
     Ok(info)
+}
+
+/// Whether a WEBP header declares an alpha channel, which `goimage::format` hands to Go.
+///
+/// The gate reads the *header*, because this route decides before it writes the chunk;
+/// `goimage::format::decode_config` makes the same call on the same evidence, so the two never
+/// disagree about which requests are forwarded. See [D-650].
+fn webp_declares_alpha(head: &[u8]) -> bool {
+    matches!(
+        goimage::webp::decode_config(head),
+        Ok(c) if c.model == goimage::webp::ConfigModel::Nycbcra
+    )
 }
 
 #[cfg(test)]

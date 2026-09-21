@@ -532,15 +532,24 @@ mod go_parity {
         let cases = oracle["compute_next"].as_array().unwrap();
         assert_eq!(cases.len(), 295, "the compute_next corpus changed size");
 
-        // The names whose Go answer is a host artifact rather than a property of Go. Both are
-        // rejected by `base_is_valid` long before `ComputeNextScheduledAt` runs. See [D-065].
-        const HOST_DEPENDENT: [&str; 2] = ["timezone Local", "timezone lowercase"];
+        // `"Local"` resolves to the generating machine's own zone, so Go accepts it and we do
+        // not; it is rejected by `base_is_valid` long before `ComputeNextScheduledAt` runs.
+        // See [D-065]. A mis-cased name (`"timezone lowercase"`) has no recorded answer at all —
+        // the oracle masks it with `host_dependent` because the answer is the generating
+        // filesystem's, not Go's — and is skipped below.
+        const HOST_DEPENDENT: [&str; 1] = ["timezone Local"];
 
         let mut errors = 0;
+        let mut masked = 0;
         for case in cases {
+            let name = case["name"].as_str().unwrap();
+            if let Some(reason) = case["host_dependent"].as_str() {
+                assert!(!reason.is_empty(), "{name}: masked without a reason");
+                masked += 1;
+                continue;
+            }
             assert!(!case["panicked"].as_bool().unwrap());
 
-            let name = case["name"].as_str().unwrap();
             let s = ScheduledPost {
                 scheduled_at: case["scheduled_at"].as_i64().unwrap(),
                 repeat_type: case["repeat_type"].as_str().unwrap().to_string(),
@@ -590,6 +599,7 @@ mod go_parity {
         }
 
         assert!(errors >= 6, "the error corpus shrank to {errors} cases");
+        assert_eq!(masked, 1, "the masked host-dependent corpus changed size");
     }
 
     /// The series preserves the **wall clock**, not the elapsed time, so it is not

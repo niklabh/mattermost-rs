@@ -5,8 +5,8 @@
 //! Every accepted upload is **re-encoded** — decoded, turned upright by its EXIF orientation,
 //! `FillCenter`ed to 128×128 and written as a best-compression PNG — so the stored
 //! `users/<id>/profile.png` is Go's encoder's output, never the client's bytes. That output is
-//! reproduced byte for byte through [`crate::image_pipeline`] for PNG and JPEG uploads. A GIF,
-//! BMP, TIFF or WebP is refused as [`PrepareError::Unreproducible`] before anything is decoded or
+//! reproduced byte for byte through [`crate::image_pipeline`] for every format. A WebP canvas
+//! declaring alpha is refused as [`PrepareError::Unreproducible`] before anything is decoded or
 //! written, and the handler forwards the request ([D-411]).
 
 use mm_model::utils::AppError;
@@ -53,7 +53,7 @@ impl App {
         match goimage::format::decode_config(data) {
             Err(goimage::format::DecodeError::NotPorted(_)) => {
                 return Err(PrepareError::Unreproducible(
-                    "GIF, BMP, TIFF and WebP profile pictures are decoded by Go",
+                    "a WebP canvas that declares alpha is decoded by Go",
                 ));
             }
             Err(goimage::format::DecodeError::Go(err)) => {
@@ -177,7 +177,7 @@ fn adjust_image(data: &[u8], max_resolution: i64) -> Result<Vec<u8>, Adjust> {
         Ok(decoded) => decoded,
         Err(PipelineError::NotPorted(_)) => {
             return Err(Adjust::Unreproducible(
-                "GIF, BMP, TIFF and WebP profile pictures are decoded by Go",
+                "a WebP canvas that declares alpha is decoded by Go",
             ));
         }
         Err(err) => return Err(Adjust::Decode(err)),

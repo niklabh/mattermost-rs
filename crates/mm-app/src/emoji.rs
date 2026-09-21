@@ -752,9 +752,9 @@ impl App {
     /// Go decodes the image header, refuses anything over 1028×1028, counts the frames of a GIF,
     /// and then either writes the bytes through untouched (≤128×128) or **resizes and re-encodes**
     /// them: `image.Decode`, `imaging.Fit` to 128×128, `EncodePNG` — served here byte for byte
-    /// through [`crate::image_pipeline`] for PNG and JPEG sources. Still handed to Go:
+    /// through [`crate::image_pipeline`] for every source but a WebP canvas declaring alpha. Still handed to Go:
     ///
-    /// * a GIF, BMP, TIFF or WebP header — those decoders are not ported, so neither the
+    /// * a WebP canvas declaring alpha — those decoders are not ported, so neither the
     ///   dimensions nor the resize are known here ([D-380]);
     /// * any filename that is not `.png`, which is what keeps the GIF branch (the frame walk and
     ///   `gif.EncodeAll` after a per-frame redraw) out of reach: `isGIF` is read off the name.

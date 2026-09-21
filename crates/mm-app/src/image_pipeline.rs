@@ -12,7 +12,8 @@
 //!
 //! # What this does not decode
 //!
-//! Go's registry also decodes GIF, BMP, TIFF and WebP. Those are recognised here and answered
+//! Go decodes a lossy WebP carrying an alpha chunk into an `*image.NYCbCrA`, which
+//! `goimage::image::Image` does not model. Such a canvas is recognised here and answered
 //! [`PipelineError::NotPorted`]; every caller hands such a request to Go before it writes.
 
 use std::borrow::Cow;
@@ -376,15 +377,25 @@ mod go_parity {
         }
     }
 
+    /// `GetImageOrientation`'s answer. Every format the registry recognises has a ported walk
+    /// now, so the `Unreproducible` arm is unreachable and this may assert.
     fn orientation(input: Input, format: &str) -> Json {
-        let o = get_image_orientation(input, format).expect("jpeg/png only in this corpus");
+        let o = get_image_orientation(input, format).expect("every walk is ported");
         serde_json::json!({ "orientation": o.orientation, "err": o.err.is_some() })
     }
+
+    /// How many corpus cases reach a decoder this port does not have. Every one is a WebP, and
+    /// each is a request the server hands to Go — counted, so the gap closing is visible.
+    static UNDECODED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     #[test]
     fn every_pipeline_case_matches_go() {
         let png = fixture("png");
         let jpeg = fixture("jpeg");
+        let gif = fixture("gif");
+        let bmp = fixture("bmp");
+        let tiff = fixture("tiff");
+        let webp = fixture("webp");
         let exif = fixture("exif");
         let bytes_of = |c: &Json| -> Vec<u8> {
             let name = &c["name"];
@@ -392,6 +403,10 @@ mod go_parity {
                 "inline" => return b64(c["b64"].as_str().unwrap()),
                 "png" => &png["decode"],
                 "jpeg" => &jpeg["decode"],
+                "gif" => &gif["decode"],
+                "bmp" => &bmp["decode"],
+                "tiff" => &tiff["decode"],
+                "webp" => &webp["decode"],
                 "exif" => &exif["cases"],
                 other => panic!("{other}"),
             };
@@ -420,6 +435,11 @@ mod go_parity {
             }
         });
         assert!(cases.len() > 250, "{}", cases.len());
+        // Every WebP is handed to Go; nothing else is.
+        assert!(
+            UNDECODED.load(std::sync::atomic::Ordering::Relaxed) > 0,
+            "the corpus should still carry the format that forwards"
+        );
     }
 
     fn run_case(c: &Json, data: Vec<u8>) {
@@ -433,6 +453,34 @@ mod go_parity {
                     assert_eq!(c["config"]["h"], cfg.height, "{label}");
                     assert_eq!(c["config"]["format"], cfg.format, "{label}");
                     cfg.format
+                }
+                // A format with no decoder here: the server forwards the request rather than
+                // answering it, so there is nothing to compare past this point. The orientation
+                // walk *is* ported for it, and `GetImageOrientation` is driven by the format
+                // name, so take the oracle's and keep checking that half.
+                Err(PipelineError::NotPorted(name)) => {
+                    UNDECODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    assert_eq!(*name, "webp", "{label}: only WebP has no decoder");
+                    // `preprocessImage` passes `DecodeConfig`'s format name and `prepareImage`
+                    // passes `Decode`'s, and for a WebP whose pixels Go cannot decode the second
+                    // is `""` where the first is `"webp"`. Both come off the oracle here.
+                    assert_eq!(
+                        c["orientation_stream"],
+                        orientation(
+                            Input::Stream(&data),
+                            c["config"]["format"].as_str().unwrap_or_default()
+                        ),
+                        "{label} stream orientation"
+                    );
+                    assert_eq!(
+                        c["orientation_seeker"],
+                        orientation(
+                            Input::Seeker(&data),
+                            c["decode"]["format"].as_str().unwrap_or_default()
+                        ),
+                        "{label} seeker orientation"
+                    );
+                    return;
                 }
                 Err(e) => {
                     assert_eq!(c["config"]["err"], e.to_string(), "{label}");
@@ -566,15 +614,38 @@ mod go_parity {
         assert!(!exceeds_resolution(0, 4320, MAX_RES));
     }
 
+    /// A WebP canvas declaring alpha is the last thing `image.Decode`'s registry answers and this
+    /// port does not: Go decodes a lossy frame carrying an `ALPH` chunk into an `*image.NYCbCrA`,
+    /// and `goimage::image::Image` has no variant for it. Every other magic reaches a decoder.
     #[test]
     fn unported_formats_are_named_for_the_forward() {
+        let alpha = {
+            let fx = fixture("webp");
+            let c = fx["decode"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == "yellow_rose.lossy-with-alpha.webp")
+                .expect("the corpus carries a lossy WebP with an alpha chunk");
+            b64(c["b64"].as_str().unwrap())
+        };
         assert_eq!(
-            decode(b"GIF89a\x01\x00\x01\x00", MAX_RES),
-            Err(PipelineError::NotPorted("gif"))
-        );
-        assert_eq!(
-            decode_config(b"RIFF\x00\x00\x00\x00WEBPVP8 "),
+            decode(&alpha, MAX_RES),
             Err(PipelineError::NotPorted("webp"))
         );
+        assert_eq!(
+            decode_config(&alpha),
+            Err(PipelineError::NotPorted("webp")),
+            "both halves hand over together, so the decision lands before the write"
+        );
+        // Every walk is ported, WebP's included, so a WebP upload forwards on its *pixels*
+        // alone — `GetImageOrientation` is no longer a second reason.
+        for format in ["png", "jpeg", "gif", "bmp", "tiff", "webp"] {
+            assert!(
+                crate::imaging_orientation::get_image_orientation(Input::Seeker(b""), format)
+                    .is_ok(),
+                "{format}"
+            );
+        }
     }
 }

@@ -553,11 +553,11 @@ pub(crate) fn request_body_too_large(where_: &str) -> ApiError {
 /// * **The permission check precedes the storage check**, so an unprivileged caller on a
 ///   driverless server gets the 403 and never learns the server cannot store images.
 ///
-/// # The write is served for PNG and JPEG
+/// # The write is served for every format but an alpha-declaring WebP
 ///
 /// `SetProfileImage` decodes the upload, rotates it by its EXIF orientation, `FillCenter`s it to
 /// 128×128 and re-encodes it as PNG — every accepted upload is replaced by Go's encoder's output,
-/// reproduced byte for byte by [`mm_app::App::set_profile_image`]. A GIF, BMP, TIFF or WebP is
+/// reproduced byte for byte by [`mm_app::App::set_profile_image`]. A WebP declaring alpha is
 /// handed to Go before anything is decoded or written ([D-411]).
 #[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded))]
 pub async fn set_profile_image(
@@ -889,7 +889,8 @@ async fn refuse_default_image_read(
 ///
 /// 5 lives in `SaveBrandImage` rather than the handler, which is why it comes after the
 /// permission — see [`mm_app::App::save_brand_image`], which serves the re-encode, the archive
-/// `MoveFile` and the write for PNG and JPEG, and forwards any other format before touching the
+/// `MoveFile` and the write for every format but an alpha-declaring WebP, which it forwards
+/// before touching the
 /// backend ([D-411]).
 ///
 /// # Success is 201, and it still has a body

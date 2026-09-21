@@ -7356,11 +7356,12 @@ and the mux's refusal of a third syncable type. One arm still hands over: a grou
 ## D-380 · `createEmoji` forwards the GIF branch and the formats it does not decode
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
-**Narrowed** 2026-09-20 — every PNG and JPEG header is measured, and the resize (`image.Decode`,
+**Narrowed** 2026-09-20 (second time) — every header is measured, and the resize (`image.Decode`,
 `imaging.Fit`, `EncodePNG`) is served byte for byte for a `.png` filename
 (`parity::emoji_writes::a_gif_filename_is_go_and_a_resize_is_served_byte_for_byte`). What still
-forwards: a GIF/BMP/TIFF/WebP header ([D-650]) and any non-`.png` filename (the GIF branch below).
-The table that follows is the 2026-09-12 state.
+forwards: a WebP canvas declaring alpha ([D-961]) and any non-`.png` filename — the GIF branch
+below, which is the **only** thing this entry now owes. The table that follows is the 2026-09-12
+state, when the first row still covered GIF, BMP and TIFF too.
 
 `POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
 400, the permission 403, the model's name errors, the duplicate, the missing image part, the
@@ -7626,11 +7627,12 @@ divergence at the one call site that would show it, before a route echoes a file
 ## D-411 · the default-avatar writes are Go's; the profile and brand writes only for unported formats
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
-**Narrowed** 2026-09-20 — items 1 and 3 are served for PNG and JPEG: `SetProfileImage` (including
-`UpdateLastPictureUpdate`, the identical-bytes early return and `invalidateUserCacheAndPublish`)
-and `SaveBrandImage` (including the archive `MoveFile`), byte for byte
-(`parity::image_writes`). A GIF/BMP/TIFF/WebP upload still forwards before the write ([D-650]).
-Item 2 is unchanged. The text below is the 2026-09-13 state.
+**Narrowed** 2026-09-20 (second time) — items 1 and 3 are served for every format:
+`SetProfileImage` (including `UpdateLastPictureUpdate`, the identical-bytes early return and
+`invalidateUserCacheAndPublish`) and `SaveBrandImage` (including the archive `MoveFile`), byte for
+byte (`parity::image_writes`). Only a WebP canvas declaring alpha still forwards before the write
+([D-961]). Item 2 is unchanged, and is now the only thing this entry owes. The text below is the
+2026-09-13 state.
 
 `POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
 `GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
@@ -8734,21 +8736,23 @@ so a Greek hashtag ending in one of those letters would compare differently here
 rune where `unicode.ToUpper(r)` differs from the first character of Rust's full mapping — and a
 lookup in `go_to_upper` before the fallback. The generator already emits four such tables.
 
-## D-650 · GIF, BMP, TIFF and WebP uploads are Go's
+## D-650 · CLOSED — every registry decoder is ported
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
-**Narrowed** 2026-09-20 — PNG and JPEG are served byte for byte (`crates/goimage`,
-`mm_app::image_pipeline`; `parity::image_uploads`).
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-14 (the file-writing routes)
+**Closed** 2026-09-20 — GIF (with `compress/lzw`), BMP, TIFF (with its own LZW, PackBits and the
+CCITT Group 3/4 reader) and WebP (`riff`, VP8, VP8L) are all in `crates/goimage`, and
+`imagemeta`'s TIFF and WebP EXIF walks are in `goimage::exif`, so
+`mm_app::imaging_orientation::Unreproducible` is no longer constructed at all. The title was
+"GIF, BMP, TIFF and WebP uploads are Go's".
 
-`POST /api/v4/files` and the completing chunk of `POST /api/v4/uploads/{upload_id}` serve the raster
-branch — `preprocessImage`/`postprocessImage` and `HandleImages`, the `_thumb`, `_preview` and
-`mini_preview` — for every file whose header `image.Decode`'s registry hands to the PNG or JPEG
-decoder. A header it hands to `image/gif`, `x/image/bmp`, `x/image/tiff` or `x/image/webp` is still
-forwarded before any write (`goimage::format::DecodeError::NotPorted`).
+`POST /api/v4/files`, the completing chunk of `POST /api/v4/uploads/{upload_id}`,
+`POST /api/v4/users/{user_id}/image`, `POST /api/v4/brand/image` and `createEmoji`'s resize now
+serve the raster branch — `preprocessImage`/`postprocessImage`, `HandleImages`, the `_thumb`,
+`_preview` and `mini_preview` — for every format `image.Decode`'s registry recognises, compared
+byte for byte in `parity::image_uploads` and in the imaging oracle's `pipeline` stage.
 
-**What is owed:** ports of those four decoders against the oracle (GIF also needs its LZW and the
-whole-file decode `preprocessImage` does for an `image/gif` mime), plus the TIFF and WebP EXIF walks
-`GetImageOrientation` supports (`mm_app::imaging_orientation` answers `Unreproducible` for them).
+Two things this entry used to cover live on elsewhere rather than here: the one image *type* that
+still forwards is [D-961], and the seven unproven VP8 decisions are [D-960].
 
 ---
 
@@ -9610,3 +9614,60 @@ fixed forms, and the three call sites the parity suite caught use them.
 **What is owed:** the remaining ~80 `decode_one_from_json` call sites have not been audited
 against their Go declaration (pointer or value), and a route whose suite never posts `[]` or
 `null` would not have shown up. Convert each as its suite grows a malformed-body case.
+
+---
+
+## D-960 · Seven WebP mutations survive, so seven decisions in the VP8 path are unproven
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-20 (the remaining image decoders)
+
+`crates/goimage/src/webp/` decodes every real stream `golang.org/x/image` ships byte for byte —
+Y, Cb and Cr hashes, or the NRGBA pixels, for 342 corpus cases. That is a strong oracle and it is
+not a complete one. A mutation run of 160 lines caught 141 first time; two further rounds over the
+17 survivors caught 10 after the corpus grew, and these seven were still alive when the branch
+ended:
+
+| mutation | what it changes |
+|---|---|
+| `tfm_predictor_mode_mask` | the VP8L cross-colour transform's predictor mode mask |
+| `vl_hgroup_index_shift` | the VP8L Huffman group index's shift |
+| `flt_level_cap_63` | the in-loop filter level's upper clamp |
+| `flt_ilevel_min_1` | the in-loop filter's interior-limit floor |
+| `flt_hlevel_keyframe_40` | the keyframe high-edge-variance threshold |
+| `rc_chroma_pack_shift` | the shift that packs a chroma block back into its plane |
+| `vp_partition_header_bytes` | how many bytes the VP8 partition header is read from |
+
+Each is a constant or a shift that the corpus's streams happen not to distinguish: the real files
+x/image ships do not exercise every filter level, every predictor mode or a multi-partition frame,
+and Go has **no WebP encoder anywhere**, so a corpus cannot simply be generated — it has to be
+found or hand-assembled from a real bitstream.
+
+**What is owed:** inputs that discriminate those seven. The practical route is hand-assembling VP8
+frames with chosen filter levels, sharpness and partition counts around a real payload, the way
+`reference/dump/behaviour_imaging_webp.go` already crafts its container cases, and re-running
+`scripts/mutations/` against them. Until then the seven lines are asserted by reading, not by test.
+
+---
+
+## D-961 · A lossy WebP with an alpha chunk is Go's, and a lossless one under the same canvas with it
+
+**Status** OPEN · **Severity** fidelity · **Raised** 2026-09-20 (the remaining image decoders)
+
+Go decodes a lossy WebP frame carrying an `ALPH` chunk into an `*image.NYCbCrA`.
+`goimage::image::Image` models the concrete types Go's PNG and JPEG encoders and the `imaging`
+resampler dispatch on, and that is not one of them — so `goimage::webp::decode` answers
+`Error::NycbcraUnsupported` and the registry turns it into `DecodeError::NotPorted("webp")`. The
+planes themselves *are* decoded correctly and `webp::decode_frame` returns them; the parity tests
+assert them against Go's hashes.
+
+The hand-over is decided from the **header**, by `goimage::format::webp_is_nycbcra`, because
+`UploadFileTask` measures an upload with `DecodeConfig` and decodes it only after it has written
+the file — a hand-over decided by the decode would arrive after the write. So both halves of the
+registry refuse a canvas whose VP8X alpha bit is set, and that **over-approximates**: a canvas
+with the alpha bit whose frame turns out to be *lossless* decodes to an `*image.NRGBA` this port
+can produce, and is forwarded anyway.
+
+**What is owed:** an `Image::NYCbCrA` variant, the `imaging` scanner arm for it, and the
+`color.NYCbCrA` conversions — after which the gate can narrow to the lossy case, or disappear.
+Nothing needs it until a client uploads one; `parity::image_uploads::the_undecoded_formats_still_
+forward` sends exactly this file and checks Go answers it completely.

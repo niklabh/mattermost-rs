@@ -1134,6 +1134,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gofont"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "goimage",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "goimage"
 version = "0.1.0"
 dependencies = [

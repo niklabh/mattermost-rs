@@ -1,0 +1,28 @@
+# image-decoders.plan — the `image.Decode` registry wiring and the two gates that decide which
+# uploads this server answers, 2026-09-20. See MIGRATION.md "The remaining image decoders".
+#
+# `pkg` lines run goimage's own tests (MUTATE_PACKAGE=goimage, no stack); `api` lines run
+# parity::image_uploads against the Go server on the stack.
+#
+# Two kinds of decision are under test here and they fail in opposite directions. A registry arm
+# that names the wrong decoder or the wrong format string produces a WRONG ANSWER. A gate that
+# forwards the wrong set produces a wrong *hand-over*: too few and the server answers something it
+# cannot reproduce, too many and it hands Go work it could have done — the second is invisible to
+# every test that only compares served answers, which is why
+# `the_undecoded_formats_still_forward` exists and why it asserts Go's measurements too.
+#
+# `uploads-gate-forgets-unknown` was dropped after 2026-09-20: dropping `| None` from the old
+# match left it non-exhaustive, so the line was a HARNESS FAULT rather than a verdict. The gate is
+# now a guarded arm and the three lines below mutate the guard instead.
+registry-gif-to-bmp	crates/goimage/src/format.rs	Some("gif") => crate::gif::decode(data)\n            .map(|m| (m, "gif"))	Some("gif") => crate::bmp::decode(data)\n            .map(|m| (m, "gif"))	pkg	format::
+registry-bmp-names-tiff	crates/goimage/src/format.rs	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "tiff"))	pkg	format::
+registry-tiff-config-height	crates/goimage/src/format.rs	Some("tiff") => crate::tiff::decode_config(data)\n            .map(|c| {\n                (\n                    Config {\n                        width: c.width,\n                        height: c.height,	Some("tiff") => crate::tiff::decode_config(data)\n            .map(|c| {\n                (\n                    Config {\n                        width: c.width,\n                        height: c.width,	pkg	format::
+registry-decode-keeps-nycbcra	crates/goimage/src/format.rs	            if webp_is_nycbcra(data) {\n                return Err(DecodeError::NotPorted("webp"));\n            }	            if false {\n                return Err(DecodeError::NotPorted("webp"));\n            }	pkg	format::
+registry-config-keeps-nycbcra	crates/goimage/src/format.rs	        Some("webp") if webp_is_nycbcra(data) => Err(DecodeError::NotPorted("webp")),	        Some("webp") if false => Err(DecodeError::NotPorted("webp")),	pkg	format::
+nycbcra-test-inverted	crates/goimage/src/format.rs	Ok(c) if c.model == crate::webp::ConfigModel::Nycbcra	Ok(c) if c.model != crate::webp::ConfigModel::Nycbcra	pkg	format::
+gate-forwards-every-webp	crates/mm-app/src/upload.rs	Some("webp") if webp_declares_alpha(&head) => Err(PrepareError::Unreproducible(	Some("webp") if true => Err(PrepareError::Unreproducible(	api	image_uploads
+gate-forwards-no-webp	crates/mm-app/src/upload.rs	Some("webp") if webp_declares_alpha(&head) => Err(PrepareError::Unreproducible(	Some("webp") if false => Err(PrepareError::Unreproducible(	api	image_uploads
+gate-alpha-helper-inverted	crates/mm-app/src/upload.rs	Ok(c) if c.model == goimage::webp::ConfigModel::Nycbcra	Ok(c) if c.model != goimage::webp::ConfigModel::Nycbcra	api	image_uploads
+preprocess-gif-mime-any-image	crates/mm-app/src/file_upload.rs	if info.mime_type == "image/gif" {	if info.mime_type.starts_with("image/") {	api	image_uploads
+control-rename-binding	crates/goimage/src/format.rs	pub fn sniff(data: &[u8]) -> Option<&'static str> {\n    FORMATS\n        .iter()\n        .find(|f| {\n            data.len() >= f.magic.len()	pub fn sniff(bytes: &[u8]) -> Option<&'static str> {\n    let data = bytes;\n    FORMATS\n        .iter()\n        .find(|f| {\n            data.len() >= f.magic.len()	pkg	format::
+control-reorder-arms	crates/goimage/src/format.rs	Some("tiff") => crate::tiff::decode(data)\n            .map(|m| (m, "tiff"))\n            .map_err(|e| DecodeError::Go(e.to_string())),\n        Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))\n            .map_err(|e| DecodeError::Go(e.to_string())),	Some("bmp") => crate::bmp::decode(data)\n            .map(|m| (m, "bmp"))\n            .map_err(|e| DecodeError::Go(e.to_string())),\n        Some("tiff") => crate::tiff::decode(data)\n            .map(|m| (m, "tiff"))\n            .map_err(|e| DecodeError::Go(e.to_string())),	pkg	format::

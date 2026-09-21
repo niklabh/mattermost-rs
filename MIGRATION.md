@@ -14256,6 +14256,7 @@ Mutation tally (`error-i18n.plan`): 17 run, 15 caught, 2 controls survived, 0 ha
 mutation that swaps `DefaultClientLocale` for `DefaultServerLocale` in the middleware is *not*
 planned: both are `en` on the stack, so it is wire-equivalent in the same way a misnamed
 parameter used to be.
+
 ## Plugin hook call sites: the channel and team membership family (2026-09-20)
 
 Plugin plan **Phase 5, 13 of 35**. Six more hooks fire under `MMRS_PLUGIN_HOST=rust`, with
@@ -14279,3 +14280,49 @@ Mutation tally (`plugin-hooks-membership.plan`): 19 run, 17 caught, 2 controls s
 harness faults. Every line was caught first time, as in the post tranche and for the same
 reason: one plugin under two hosts turns almost any change to what is sent into a transcript
 diff.
+
+## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
+
+No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s
+registry still handed to Go — GIF (with `compress/lzw`), BMP, TIFF (with its own LZW, PackBits and
+the CCITT Group 3/4 fax reader) and WebP (`x/image/riff`, VP8 lossy, VP8L lossless) — and
+`goimage::exif` grew `imagemeta`'s TIFF and WebP orientation walks, which is what the two upload
+paths read *before* the pixels. Between them they lift the format forward on `POST /files`, the
+completing chunk of `POST /uploads/{upload_id}`, `POST /users/{user_id}/image`,
+`POST /brand/image` and `createEmoji`'s resize entirely.
+
+What is left is a *type*, not a format: Go decodes a lossy WebP carrying an `ALPH` chunk into an
+`*image.NYCbCrA`, which `goimage::image::Image` does not model. Both halves of the registry hand
+that over together — `decode_config` refuses a canvas whose VP8X alpha bit is set even when the
+frame behind it is lossless and this port could decode it — because `UploadFileTask` measures with
+`DecodeConfig` and decodes only after it has written the file, so a hand-over decided by the decode
+would arrive after the write.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `image/gif` + `compress/lzw` (reader) | `crates/goimage/src/gif/` | DONE | 10 unit over 215 corpus files, incl. `DecodeAll` | `image.Decode` yields frame 0 alone; `decode_all` exists because the emoji path walks frames. `gif: can't recognize format %q` renders a non-ASCII byte as `\xNN`, which is Go's answer for every input the registry can route here but not for one handed to `decode_all` directly. |
+| `golang.org/x/image/bmp` (reader) | `crates/goimage/src/bmp/` | DONE | 5 unit over 215 corpus files | `DecodeConfig` reports `color.RGBAModel` for 24 *and* 32 bpp while `Decode` returns `RGBA` for one and `NRGBA` for the other. |
+| `golang.org/x/image/tiff` + its `lzw` + `golang.org/x/image/ccitt` (readers) | `crates/goimage/src/tiff/` | DONE | 19 unit over 464 corpus cases | Both byte orders, every compression including CCITT G3/G4, strips and tiles, the predictor. An uncompressed strip is a *window* on the file bytes, so the predictor writes through it — `crafted_predictor_overlapping_strips` pins that. |
+| `bep/imagemeta`'s TIFF and WebP EXIF walks (`imagedecoder_tif.go`, `imagedecoder_webp.go`) | `crates/goimage/src/exif.rs`, `mm-app/src/imaging_orientation.rs` | DONE | 4 + 4 unit over 229 corpus cases, both reader shapes | `imaging_orientation::Unreproducible` is no longer constructed. A TIFF's IFD0 *is* its EXIF IFD, so the walk runs over the outer stream and inherits its buffering — which is why a refused seek still moves the position. |
+| `golang.org/x/image/webp` + `riff` + `vp8` + `vp8l` | `crates/goimage/src/webp/` | DONE (`*image.NYCbCrA` excepted) | 47 unit over 342 corpus cases | Go has no WebP encoder anywhere, so the corpus is x/image's own streams plus truncations, byte flips and hand-assembled containers. A lossy frame's Y/Cb/Cr hashes are an all-or-nothing oracle. |
+| the registry (`image.Decode`/`DecodeConfig`) and the two forward gates | `goimage::format`, `mm-app/src/{upload,file_upload}.rs` | DONE | `parity::image_uploads` (4, corpus now 29 files), the `pipeline` stage end to end | A case with no answer here is a **hand-over**, not a mismatch: the pipeline test still compares both orientation reads for it and stops before the pixels. The WebP stage records the decoder's answers *directly* plus what the registry's sniff said, so the registry is checked against the latter. |
+
+The evidence that matters is the `pipeline` stage, not the decoders on their own: 60 GIF, BMP,
+TIFF and WebP corpus files plus four photo-sized inline ones now run through Mattermost's own call
+sequences, so the `_thumb`, `_preview`, 16×16 `mini_preview`, 128×128 profile PNG, brand PNG and
+resized emoji are each compared with Go's bytes for an animated GIF, an interlaced GIF, BMPs at
+every bit depth in both row orders, TIFFs that are LZW, CCITT Group 4, tiled and big-endian, and
+WebPs lossy through each in-loop filter and lossless down to one bit per pixel.
+
+Mutation tallies, per branch: `wt/dec-bmp` 53 run, 53 caught, 3 controls survived; `wt/dec-gif`
+45 run, 43 caught, 2 controls survived; `wt/dec-tiff` 97 run, 86 caught, 5 controls survived (four
+equivalent mutants argued on the code they constrain, two corpus gaps fixed); `wt/dec-exif` 28 run,
+27 caught, 2 controls survived (one equivalent).
+
+`wt/dec-webp`'s is **incomplete and its gaps are open**: 160 run, 141 caught, 2 controls survived,
+17 real survivors; two further rounds over those 17 caught 10 after corpus fixes, and the branch
+ended before the last **seven** were resolved. They are listed on [D-960] and they are all in the
+VP8 lossy path — the in-loop filter's level arithmetic, the VP8L Huffman group index, the
+cross-colour transform's mode mask, the chroma pack shift and the partition-header length. The
+decoder matches Go on every one of the corpus's real streams; what is unproven is that the corpus
+would *notice* those seven lines being wrong.

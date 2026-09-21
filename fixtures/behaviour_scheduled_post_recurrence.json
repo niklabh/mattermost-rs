@@ -4469,19 +4469,12 @@
             "timezone": "../etc/passwd"
         },
         {
-            "err": null,
             "group": "timezone",
-            "is_recurring": true,
+            "host_dependent": "differs from a real zone only by case: time.LoadLocation resolves it on a case-insensitive filesystem and not on a case-sensitive one",
             "name": "timezone lowercase",
-            "next": 1678519800000,
-            "next_offset_seconds": -18000,
-            "next_wall": "2023-03-11T02:30:00.000",
             "now": 1677915000000,
-            "ok": true,
-            "panicked": false,
             "repeat_type": "weekly",
             "scheduled_at": 1677915000000,
-            "scheduled_wall": "2023-03-04T02:30:00.000",
             "timezone": "america/new_york"
         },
         {

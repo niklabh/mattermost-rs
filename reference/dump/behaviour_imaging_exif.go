@@ -11,11 +11,20 @@ package main
 //   - "stream": a plain `io.Reader` (preprocessImage's `io.MultiReader`), which the function wraps
 //     in its own `bufReadSeeker` with different seek-past-the-end semantics.
 //
-// The corpus is hand-built TIFF structures inside JPEG APP1 and PNG eXIf, walking the branches
-// that decide the number: tag type (SHORT and SSHORT are read, LONG is not), count, which IFD it
-// sits in (IFD1 and sub-IFDs count, because Mattermost's ShouldHandleTag replaces imagemeta's
-// IFD0-only default), what comes before it (an unknown type aborts the walk), pointer loops, and
-// the JPEG segment order (an XMP APP1 uses the same marker as EXIF and consumes the EXIF source).
+// The corpus is hand-built TIFF structures carried all four ways GetImageOrientation accepts —
+// inside a JPEG APP1, inside a PNG eXIf, as a TIFF file in its own right, and inside a WebP EXIF
+// chunk — walking the branches that decide the number: tag type (SHORT and SSHORT are read, LONG
+// is not), count, which IFD it sits in (IFD1 and sub-IFDs count, because Mattermost's
+// ShouldHandleTag replaces imagemeta's IFD0-only default), what comes before it (an unknown type
+// aborts the walk), pointer loops, and the JPEG segment order (an XMP APP1 uses the same marker as
+// EXIF and consumes the EXIF source).
+//
+// The two container formats added later each have a trap of their own, and both are recorded here
+// rather than reasoned about: a TIFF's EXIF walk runs on the *caller's* reader, so it is the one
+// format where the seeker and the stream shapes give different answers for the same bytes
+// (tiff_padded_*); and imagemeta skips exactly chunkLen in a WebP and never the RIFF pad byte, so
+// a spec-conforming odd chunk hides everything behind it (webp_odd_chunk_padded_before_exif
+// against webp_odd_chunk_unpadded_before_exif).
 
 import (
 	"bytes"
@@ -42,6 +51,13 @@ type tiffSpec struct {
 	// Overrides for broken headers.
 	ifd0Offset *uint32
 	order      string // replaces the byte-order marker when set
+	magic      *uint16
+	// numTags replaces IFD0's entry count, so the walk can be pointed past the entries that
+	// are really there.
+	numTags *uint16
+	// pad inserts zero bytes between the 8-byte header and the first IFD, so an IFD offset
+	// larger than 8 can still be a *correct* one.
+	pad int
 }
 
 func (t tiffSpec) bo() binary.ByteOrder {
@@ -55,7 +71,7 @@ func (t tiffSpec) build() []byte {
 	bo := t.bo()
 	// Offsets of each IFD, laid out one after another after the 8-byte header.
 	offs := make([]uint32, len(t.ifds))
-	pos := uint32(8)
+	pos := uint32(8 + t.pad)
 	for i, ifd := range t.ifds {
 		offs[i] = pos
 		size := uint32(2 + 12*len(ifd) + 4)
@@ -74,15 +90,23 @@ func (t tiffSpec) build() []byte {
 	} else {
 		copy(out[0:2], "MM")
 	}
-	bo.PutUint16(out[2:4], 42)
-	ifd0 := uint32(8)
+	magic := uint16(42)
+	if t.magic != nil {
+		magic = *t.magic
+	}
+	bo.PutUint16(out[2:4], magic)
+	ifd0 := uint32(8 + t.pad)
 	if t.ifd0Offset != nil {
 		ifd0 = *t.ifd0Offset
 	}
 	bo.PutUint32(out[4:8], ifd0)
 	for i, ifd := range t.ifds {
 		p := offs[i]
-		bo.PutUint16(out[p:], uint16(len(ifd)))
+		n := uint16(len(ifd))
+		if i == 0 && t.numTags != nil {
+			n = *t.numTags
+		}
+		bo.PutUint16(out[p:], n)
 		p += 2
 		extra := offs[i] + uint32(2+12*len(ifd)+4)
 		for _, e := range ifd {
@@ -161,15 +185,83 @@ func withPNGChunks(chunks ...[]byte) []byte {
 	return append(out, exifBasePNG[33:]...)
 }
 
+// riffChunk builds one RIFF chunk: the fourCC, a little-endian payload length, the payload, and —
+// when pad is set — the RIFF pad byte that makes an odd chunk even. imagemeta skips exactly
+// chunkLen and never the pad byte, so which of the two a file uses decides where it looks for the
+// next chunk id. Both shapes are in the corpus.
+func riffChunk(id string, payload []byte, pad bool) []byte {
+	b := append([]byte(id), 0, 0, 0, 0)
+	binary.LittleEndian.PutUint32(b[4:], uint32(len(payload)))
+	b = append(b, payload...)
+	if pad && len(payload)%2 == 1 {
+		b = append(b, 0)
+	}
+	return b
+}
+
+// riffChunkLen overrides a chunk's declared length, leaving the payload as it is.
+func riffChunkLen(chunk []byte, n uint32) []byte {
+	out := bytes.Clone(chunk)
+	binary.LittleEndian.PutUint32(out[4:], n)
+	return out
+}
+
+// exifRIFFFile wraps chunks in a RIFF container. The declared size is the conventional one
+// (payload + the 4-byte form type); imagemeta skips those four bytes without reading them.
+func exifRIFFFile(form string, chunks ...[]byte) []byte {
+	var body []byte
+	for _, c := range chunks {
+		body = append(body, c...)
+	}
+	out := append([]byte("RIFF"), 0, 0, 0, 0)
+	binary.LittleEndian.PutUint32(out[4:], uint32(len(body)+4))
+	out = append(out, form...)
+	return append(out, body...)
+}
+
+// exifVP8XChunk is an extended-format header chunk. flags is its first byte: bit 2 is XMP, bit 3 EXIF.
+func exifVP8XChunk(flags byte, w, h int) []byte {
+	b := make([]byte, 10)
+	b[0] = flags
+	w, h = w-1, h-1
+	b[4], b[5], b[6] = byte(w), byte(w>>8), byte(w>>16)
+	b[7], b[8], b[9] = byte(h), byte(h>>8), byte(h>>16)
+	return riffChunk("VP8X", b, true)
+}
+
+// webpImageChunk lifts the single image chunk out of one of golang.org/x/image's simple-format
+// WebP test files: bytes 12 onwards of `RIFF <size> WEBP <chunk>`. No WebP encoder exists in Go,
+// so a real VP8/VP8L payload can only come from a file.
+func webpImageChunk(name string) []byte {
+	for _, f := range xImageTestdata("testdata", "webp") {
+		if f.Name != name {
+			continue
+		}
+		if len(f.Data) < 16 || string(f.Data[:4]) != "RIFF" || string(f.Data[8:12]) != "WEBP" {
+			panic("not a RIFF/WEBP file: " + name)
+		}
+		fcc := string(f.Data[12:16])
+		if fcc != "VP8 " && fcc != "VP8L" {
+			panic("not a simple-format WebP: " + name + " starts with " + fcc)
+		}
+		return f.Data[12:]
+	}
+	panic("no such x/image WebP testdata file: " + name)
+}
+
 type exifCase struct {
 	Name   string `json:"name"`
 	Format string `json:"format"`
 	B64    string `json:"b64"`
 	// PNG only: the bytes are B64 with an ancillary "abCD" chunk of Pad zero bytes inserted
 	// after IHDR — the recipe for inputs too large to carry (the 10 MiB scan limit).
-	Pad    int            `json:"pad,omitempty"`
-	Seeker map[string]any `json:"seeker"`
-	Stream map[string]any `json:"stream"`
+	Pad int `json:"pad,omitempty"`
+	// TIFF only: the bytes are B64 with TiffPad zero bytes inserted between the 8-byte header
+	// and IFD0, and the header's IFD0 offset raised to match — the same trick as Pad, for the
+	// one structure whose walk runs on the caller's reader and so feels the 10 MiB scan limit.
+	TiffPad int            `json:"tiff_pad,omitempty"`
+	Seeker  map[string]any `json:"seeker"`
+	Stream  map[string]any `json:"stream"`
 }
 
 func orientationOf(r io.Reader, format string) map[string]any {
@@ -371,5 +463,234 @@ func imagingEXIFStage() (map[string]any, error) {
 	add("truncated_value_count_2", "jpeg", jpegWith(truncated2))
 	add("png_truncated", "png", exifBasePNG[:20])
 	add("png_empty", "png", nil)
+
+	// ---- TIFF ---------------------------------------------------------------------------
+	//
+	// A TIFF *is* the EXIF structure, and imagedecoder_tif.go hands the EXIF walk the file's own
+	// streamReader rather than an in-memory copy. Three consequences the corpus pins:
+	//
+	//   - a header the walk dislikes is errInvalidFormat here (a bad byte-order marker, a magic
+	//     that is not 42, an IFD offset below 8), where the same shapes inside a JPEG APP1 are
+	//     simply "no orientation";
+	//   - every value offset and sub-IFD pointer is a seek on the *input*, so the seekable and
+	//     the stream shapes can disagree where they never do on a JPEG;
+	//   - decodeTags is called directly, so the next-IFD pointer is never read and an
+	//     orientation that lives only in IFD1 is invisible.
+	off16 := func(v uint16) *uint16 { return &v }
+	for o := uint16(0); o <= 9; o++ {
+		add("tiff_le_"+itoa(int(o)), "tiff", simple(true, orientationEntry(le, 3, o)))
+		add("tiff_be_"+itoa(int(o)), "tiff", simple(false, orientationEntry(be, 3, o)))
+	}
+	add("tiff_mime_format", "image/tiff", simple(true, orientationEntry(le, 3, 6)))
+	add("tiff_type_sshort", "tiff", simple(true, orientationEntry(le, 8, 5)))
+	add("tiff_type_long", "tiff", simple(true, ifdEntry{tag: 0x112, typ: 4, count: 1, value: u32(le, 6)}))
+	add("tiff_type_byte", "tiff", simple(true, ifdEntry{tag: 0x112, typ: 1, count: 1, value: []byte{6, 0, 0, 0}}))
+	add("tiff_type_unknown_before", "tiff", simple(true,
+		ifdEntry{tag: 0x010f, typ: 99, count: 1, value: []byte{1, 2, 3, 4}}, orientationEntry(le, 3, 6)))
+	add("tiff_count_2", "tiff", simple(true, ifdEntry{tag: 0x112, typ: 3, count: 2, value: append(u16(le, 6), u16(le, 3)...)}))
+	add("tiff_after_config_tags", "tiff", simple(true,
+		ifdEntry{tag: 0x0100, typ: 4, count: 1, value: u32(le, 100)},
+		ifdEntry{tag: 0x0101, typ: 4, count: 1, value: u32(le, 50)},
+		orientationEntry(le, 3, 7)))
+	// A value wider than the four inline bytes is fetched by seeking the file and seeking back.
+	add("tiff_value_at_offset", "tiff", simple(true,
+		ifdEntry{tag: 0x0131, typ: 2, count: 20, value: []byte("mattermost-rs oracle")},
+		orientationEntry(le, 3, 3)))
+	add("tiff_value_offset_past_end", "tiff", simple(true,
+		ifdEntry{tag: 0x0131, typ: 2, count: 20, rawOff: off(9000)},
+		orientationEntry(le, 3, 3)))
+	add("tiff_value_offset_far_past_end", "tiff", simple(true,
+		ifdEntry{tag: 0x0131, typ: 2, count: 20, rawOff: off(20000000)},
+		orientationEntry(le, 3, 3)))
+	// IFD0 where the header says, rather than at 8; and past the 4 KiB bufio buffer.
+	add("tiff_ifd0_at_64", "tiff", tiffSpec{le: true, pad: 56, ifds: [][]ifdEntry{{orientationEntry(le, 3, 4)}}}.build())
+	add("tiff_ifd0_past_4k", "tiff", tiffSpec{le: true, pad: 5000, ifds: [][]ifdEntry{{orientationEntry(le, 3, 2)}}}.build())
+	add("tiff_ifd0_offset_0", "tiff", tiffSpec{le: true, ifd0Offset: off(0), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_ifd0_offset_7", "tiff", tiffSpec{le: true, ifd0Offset: off(7), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_ifd0_offset_9", "tiff", tiffSpec{le: true, ifd0Offset: off(9), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_ifd0_offset_past_end", "tiff", tiffSpec{le: true, ifd0Offset: off(900), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_ifd0_offset_far_past_end", "tiff", tiffSpec{le: true, ifd0Offset: off(20000000), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	// Sub-IFDs are followed; IFD1 is not, because decodeTags never reads the next-IFD pointer.
+	add("tiff_exif_subifd", "tiff", tiffSpec{le: true, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x8769, typ: 4, count: 1, subIFD: 1}},
+		{orientationEntry(le, 3, 8)},
+	}}.build())
+	add("tiff_gps_subifd_be", "tiff", tiffSpec{le: false, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x8825, typ: 4, count: 1, subIFD: 1}},
+		{orientationEntry(be, 3, 5)},
+	}}.build())
+	add("tiff_subifd_past_end", "tiff", simple(true,
+		ifdEntry{tag: 0x8769, typ: 4, count: 1, value: u32(le, 9000)}, orientationEntry(le, 3, 6)))
+	// The only tag shape whose value is wide enough to be fetched from an offset *and* still
+	// handled: a SubIFD pointer array. Two LONGs are 8 bytes, so the walk seeks the file, reads
+	// them, seeks back, and then follows them. IFD0 is 18 bytes plus its 8-byte out-of-line
+	// value, so IFD1 starts at 8+26.
+	subArrayOff := u32(le, 8+26)
+	add("tiff_subifd_array_at_offset", "tiff", tiffSpec{le: true, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x014a, typ: 4, count: 2, value: append(subArrayOff, subArrayOff...)}},
+		{orientationEntry(le, 3, 6)},
+	}}.build())
+	add("tiff_subifd_array_offset_past_end", "tiff", simple(true,
+		ifdEntry{tag: 0x014a, typ: 4, count: 2, rawOff: off(9000)}, orientationEntry(le, 3, 7)))
+	add("tiff_subifd_array_offset_past_scan_limit", "tiff", simple(true,
+		ifdEntry{tag: 0x014a, typ: 4, count: 2, rawOff: off(20000000)}, orientationEntry(le, 3, 7)))
+	add("tiff_ifd1_only", "tiff", tiffSpec{le: true, chain: true, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x010f, typ: 2, count: 4, value: []byte("abc\x00")}},
+		{orientationEntry(le, 3, 6)},
+	}}.build())
+	add("tiff_ifd0_and_ifd1", "tiff", tiffSpec{le: true, chain: true, ifds: [][]ifdEntry{
+		{orientationEntry(le, 3, 3)},
+		{orientationEntry(le, 3, 6)},
+	}}.build())
+	// Header damage.
+	add("tiff_bad_magic", "tiff", tiffSpec{le: true, magic: off16(43), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_magic_wrong_order", "tiff", tiffSpec{le: true, magic: off16(0x2a00), ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_bad_byte_order", "tiff", tiffSpec{le: true, order: "XX", ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_byte_order_mm_body_le", "tiff", tiffSpec{le: true, order: "MM", ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build())
+	add("tiff_num_tags_overrun", "tiff", tiffSpec{le: true, numTags: off16(100), ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x010f, typ: 2, count: 4, value: []byte("abc\x00")}},
+	}}.build())
+	add("tiff_num_tags_overrun_found_first", "tiff", tiffSpec{le: true, numTags: off16(100), ifds: [][]ifdEntry{
+		{orientationEntry(le, 3, 9)},
+	}}.build())
+	add("tiff_num_tags_zero", "tiff", tiffSpec{le: true, numTags: off16(0), ifds: [][]ifdEntry{
+		{orientationEntry(le, 3, 6)},
+	}}.build())
+	{
+		// Truncations: at the byte-order marker, inside the magic, inside the IFD offset, at the
+		// IFD start, inside the tag count, inside the entry, and one byte short of the value.
+		full := simple(true, ifdEntry{tag: 0x0131, typ: 2, count: 20, value: []byte("mattermost-rs oracle")}, orientationEntry(le, 3, 3))
+		for _, n := range []int{1, 2, 3, 4, 6, 8, 9, 10, 14, 20, 26, 33, len(full) - 1} {
+			add("tiff_truncated_"+itoa(n), "tiff", full[:n])
+		}
+	}
+	// Where the two reader shapes part on a TIFF: IFD0 behind a hole whose far side is past
+	// `bufReadSeeker`'s 10 MiB scan limit. A `bytes.Reader` seeks there; the stream wrapper
+	// refuses, `skip` swallows the refusal, and the walk reads on from where it stood.
+	for _, pad := range []int{1000, mib - 100, mib + 100, 2 * mib} {
+		small := tiffSpec{le: true, ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build()
+		big := tiffSpec{le: true, pad: pad, ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}}}.build()
+		cases = append(cases, exifCase{
+			Name: "tiff_padded_" + itoa(pad), Format: "tiff", B64: b64(small), TiffPad: pad,
+			Seeker: orientationOf(bytes.NewReader(big), "tiff"),
+			Stream: orientationOf(io.MultiReader(bytes.NewReader(big)), "tiff"),
+		})
+	}
+	// `skip` is a *relative* seek whose error is discarded, and both halves of that matter here.
+	// The header says IFD0 is at 20000000, which `bufReadSeeker` refuses (past its 10 MiB scan
+	// limit); the refusal is swallowed, the 4 KiB bufio buffer is dropped, and the walk reads on
+	// from the underlying reader's position — 4096, where a real IFD is planted. So the stream
+	// shape finds 6 and the seekable shape, which seeks to 20000000 and reads nothing, finds
+	// none. An absolute `seek` in place of the relative `skip` would answer 1 both ways.
+	add("tiff_ifd0_offset_refused_lands_at_4096", "tiff", tiffSpec{
+		le: true, pad: 4096 - 8, ifd0Offset: off(20000000),
+		ifds: [][]ifdEntry{{orientationEntry(le, 3, 6)}},
+	}.build())
+	add("tiff_ifd0_offset_4096", "tiff", tiffSpec{
+		le: true, pad: 4096 - 8, ifds: [][]ifdEntry{{orientationEntry(le, 3, 8)}},
+	}.build())
+	add("tiff_empty", "tiff", nil)
+	// The wrong arm: a TIFF read as the other three formats, and a JPEG read as a TIFF
+	// (format_tiff, above).
+	tiffGood := simple(true, orientationEntry(le, 3, 6))
+	add("tiff_as_jpeg", "jpeg", tiffGood)
+	add("tiff_as_png", "png", tiffGood)
+	add("tiff_as_webp", "webp", tiffGood)
+
+	// ---- WebP ---------------------------------------------------------------------------
+	//
+	// imagemeta walks the RIFF chunk list and decodes the EXIF chunk's payload as a bare TIFF
+	// structure in its own in-memory reader — but it skips exactly chunkLen and never the RIFF
+	// pad byte, so a spec-conforming odd-length chunk misaligns every chunk id after it. A VP8X
+	// header chunk is read whatever the requested sources, and its EXIF flag can end the walk
+	// before an EXIF chunk is reached.
+	//
+	// The image chunk of the structural cases is a stub with an **even** payload length: the walk
+	// only skips it, so its bytes need not decode, and an even length keeps every chunk after it
+	// aligned. The two real x/image files are kept as their own cases — and the lossless one has
+	// a 421-byte payload, so its pad byte is exactly the misalignment this note is about.
+	imgChunk := riffChunk("VP8L", []byte{0x2f, 0x00, 0x00, 0x00, 0x00, 0x00}, false)
+	realVP8L := webpImageChunk("gopher-doc.1bpp.lossless.webp")
+	realVP8 := webpImageChunk("blue-purple-pink.lossy.webp")
+	exifPayload := func(isLE bool, o uint16) []byte {
+		if isLE {
+			return simple(true, orientationEntry(le, 3, o))
+		}
+		return simple(false, orientationEntry(be, 3, o))
+	}
+	exifChunk := func(o uint16) []byte { return riffChunk("EXIF", exifPayload(true, o), true) }
+	const vp8xEXIF, vp8xXMP = 0x08, 0x04
+	add("webp_vp8x_exif_after_image", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_exif_before_image", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk))
+	add("webp_vp8x_no_exif_flag", "webp", exifRIFFFile("WEBP", exifVP8XChunk(0, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_xmp_flag_only", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xXMP, 32, 32), imgChunk, exifChunk(6)))
+	add("webp_vp8x_both_flags", "webp", exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF|vp8xXMP, 32, 32), imgChunk, exifChunk(3)))
+	add("webp_vp8x_all_flags", "webp", exifRIFFFile("WEBP", exifVP8XChunk(0xff, 32, 32), imgChunk, exifChunk(4)))
+	add("webp_vp8x_bad_len", "webp", exifRIFFFile("WEBP", riffChunkLen(exifVP8XChunk(vp8xEXIF, 32, 32), 11), imgChunk, exifChunk(6)))
+	add("webp_vp8x_len_9", "webp", exifRIFFFile("WEBP", riffChunkLen(exifVP8XChunk(vp8xEXIF, 32, 32), 9), imgChunk, exifChunk(6)))
+	// Simple format: no VP8X, so nothing can clear the EXIF source.
+	add("webp_simple_exif_after_image", "webp", exifRIFFFile("WEBP", imgChunk, exifChunk(8)))
+	add("webp_simple_exif_before_image", "webp", exifRIFFFile("WEBP", exifChunk(5), imgChunk))
+	add("webp_simple_exif_be", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", exifPayload(false, 7), true)))
+	// Two real x/image payloads. The lossy one's chunk is 2430 bytes — even, so the EXIF chunk
+	// behind it is found; the lossless one's is 421, and the pad byte the file must carry is the
+	// byte imagemeta does not skip, so the same EXIF chunk is lost.
+	add("webp_real_lossy_then_exif", "webp", exifRIFFFile("WEBP", realVP8, exifChunk(7)))
+	add("webp_real_lossless_then_exif", "webp", exifRIFFFile("WEBP", realVP8L, exifChunk(7)))
+	add("webp_two_exif", "webp", exifRIFFFile("WEBP", imgChunk, exifChunk(4), exifChunk(6)))
+	add("webp_mime_format", "image/webp", exifRIFFFile("WEBP", imgChunk, exifChunk(6)))
+	// The pad byte imagemeta does not skip: the same odd chunk, padded and not.
+	oddPayload := []byte("odd-iccp")[:5]
+	add("webp_odd_chunk_padded_before_exif", "webp", exifRIFFFile("WEBP", riffChunk("ICCP", oddPayload, true), imgChunk, exifChunk(6)))
+	add("webp_odd_chunk_unpadded_before_exif", "webp", exifRIFFFile("WEBP", riffChunk("ICCP", oddPayload, false), imgChunk, exifChunk(6)))
+	add("webp_odd_exif_then_xmp", "webp", exifRIFFFile("WEBP", imgChunk,
+		riffChunk("EXIF", append(exifPayload(true, 3), 0xff), true), riffChunk("XMP ", []byte("<x/>"), true)))
+	// Chunk length damage.
+	add("webp_exif_len_overrun", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 60000)))
+	add("webp_exif_len_huge", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 20*1024*1024)))
+	add("webp_exif_len_zero", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 0)))
+	add("webp_exif_len_short", "webp", exifRIFFFile("WEBP", imgChunk, riffChunkLen(exifChunk(6), 10)))
+	// An "Exif\0\0" prefix is JPEG's alone: here it is read as the byte-order marker.
+	add("webp_exif_with_jpeg_header", "webp", exifRIFFFile("WEBP", imgChunk,
+		riffChunk("EXIF", append([]byte("Exif\x00\x00"), exifPayload(true, 6)...), true)))
+	// Inside the segment the EXIF walk is the same one JPEG runs: sub-IFDs and IFD1 both count.
+	add("webp_exif_subifd", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x8769, typ: 4, count: 1, subIFD: 1}},
+		{orientationEntry(le, 3, 5)},
+	}}.build(), true)))
+	add("webp_exif_ifd1", "webp", exifRIFFFile("WEBP", imgChunk, riffChunk("EXIF", tiffSpec{le: true, chain: true, ifds: [][]ifdEntry{
+		{ifdEntry{tag: 0x010f, typ: 2, count: 4, value: []byte("abc\x00")}},
+		{orientationEntry(le, 3, 4)},
+	}}.build(), true)))
+	// Container damage. The RIFF size is skipped, never read, so a lying one changes nothing.
+	add("webp_no_chunks", "webp", exifRIFFFile("WEBP"))
+	add("webp_lying_riff_size", "webp", func() []byte {
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
+		binary.LittleEndian.PutUint32(b[4:], 4)
+		return b
+	}())
+	add("webp_riff_size_huge", "webp", func() []byte {
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
+		binary.LittleEndian.PutUint32(b[4:], 0xffffffff)
+		return b
+	}())
+	add("webp_bad_riff_fourcc", "webp", func() []byte {
+		b := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
+		copy(b[0:4], "RIFX")
+		return b
+	}())
+	add("webp_bad_form_fourcc", "webp", exifRIFFFile("WEBQ", imgChunk, exifChunk(6)))
+	add("webp_lowercase_form", "webp", exifRIFFFile("webp", imgChunk, exifChunk(6)))
+	{
+		full := exifRIFFFile("WEBP", exifVP8XChunk(vp8xEXIF, 32, 32), exifChunk(2), imgChunk)
+		for _, n := range []int{1, 4, 8, 11, 12, 16, 20, 24, 30, 36, 44} {
+			add("webp_truncated_"+itoa(n), "webp", full[:n])
+		}
+	}
+	add("webp_empty", "webp", nil)
+	webpGood := exifRIFFFile("WEBP", imgChunk, exifChunk(6))
+	add("webp_as_jpeg", "jpeg", webpGood)
+	add("webp_as_png", "png", webpGood)
+	add("webp_as_tiff", "tiff", webpGood)
 	return map[string]any{"cases": cases}, nil
 }
