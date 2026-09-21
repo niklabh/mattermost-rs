@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 17 of 35 (2026-09-21)
+### Phase 5 · Hook call sites — IN PROGRESS, 18 of 35 (2026-09-21)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -572,6 +572,10 @@ closing D-453 and D-471. No new wire conversion was needed. One finding: a branc
 *forwards* fires no hook under the Rust host, because the Go process then hosts no plugins; for
 these four that is the MFA, LDAP and magic-link logins, the token and invite signups, and the
 deactivation of a bot owner ([D-932]).
+
+**Done fourth, `FileWillBeDownloaded`** on the four read routes — 18 of 35, 20 of 46. Two
+findings: the preview checks for a missing image *before* asking the plugins and the thumbnail
+*after*, and Go writes a refused public link's signed page **twice** ([D-170]).
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

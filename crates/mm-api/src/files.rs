@@ -22,6 +22,8 @@ use crate::error::ApiError;
 use crate::posts::FILE_CACHE_CONTROL;
 use crate::proxy;
 use crate::serve_content::{FileResponse, FileResponseSpec, write_file_response};
+use axum::http::{HeaderName, HeaderValue};
+use mm_app::plugin_hooks::{FileDownloadType, HookContext};
 
 /// Port of `getFileInfo` (api4/file.go:841).
 ///
@@ -184,6 +186,26 @@ impl ByteRoute {
         }
     }
 
+    /// What the plugin is told is being fetched.
+    fn download_type(self) -> FileDownloadType {
+        match self {
+            Self::Original => FileDownloadType::File,
+            Self::Thumbnail => FileDownloadType::Thumbnail,
+            Self::Preview => FileDownloadType::Preview,
+        }
+    }
+
+    /// The 403 a `FileWillBeDownloaded` refusal becomes: a translation key per route, with the
+    /// plugin's text as its `Reason` **parameter** — the membership hooks' arrangement.
+    fn rejected_by_plugin(self, reason: &str) -> AppError {
+        let id = match self {
+            Self::Original => "api.file.get_file.rejected_by_plugin",
+            Self::Thumbnail => "api.file.get_file_thumbnail.rejected_by_plugin",
+            Self::Preview => "api.file.get_file_preview.rejected_by_plugin",
+        };
+        rejected_by_plugin(self.where_(), id, reason)
+    }
+
     /// The `Content-Type` handed to `WriteFileResponse`. Only the original uses the stored
     /// `MimeType`; the two derived images are always `image/jpeg`, whatever the original was.
     fn content_type(self, info: &FileInfo) -> &str {
@@ -317,6 +339,33 @@ pub async fn get_file_preview(
     .await
 }
 
+/// `model.NewAppError(where, id, {"Reason": reason}, "", 403)`.
+fn rejected_by_plugin(where_: &str, id: &str, reason: &str) -> AppError {
+    AppError::new(
+        where_,
+        id,
+        Some(std::collections::HashMap::from([(
+            "Reason".to_owned(),
+            serde_json::Value::String(reason.to_owned()),
+        )])),
+        String::new(),
+        403,
+    )
+}
+
+/// `w.Header().Set(model.HeaderRejectReason, reason)`, which Go sets before it raises the 403, so
+/// the header rides on the error response. A reason that cannot be a header value (a line break)
+/// is left off rather than failing the response; Go would write it and the client would see a
+/// malformed header.
+fn reject_reason_header(reason: &str) -> Option<(HeaderName, HeaderValue)> {
+    HeaderValue::from_bytes(reason.as_bytes())
+        .ok()
+        .map(|value| (HeaderName::from_static(REJECT_REASON_HEADER), value))
+}
+
+/// `model.HeaderRejectReason` (model/client4.go:44).
+const REJECT_REASON_HEADER: &str = "x-reject-reason";
+
 /// The body all three share.
 ///
 /// # The order of the checks is the specification
@@ -326,8 +375,7 @@ pub async fn get_file_preview(
 /// only*, the empty-path 400 → plugin hook → backend read. The preview checks its empty path
 /// **before** the plugin hook and the thumbnail checks it **after** — Go's comment says so
 /// explicitly ("no point in running hook if there's no preview") — which is invisible here
-/// because there is no plugin host, and reproduced in the ordering anyway so that adding one
-/// later does not silently move it.
+/// and a client sees the difference: a preview request for a non-image never reaches a plugin.
 async fn serve_bytes(
     route: ByteRoute,
     State(state): State<AppState>,
@@ -343,6 +391,7 @@ async fn serve_bytes(
     // about the cause.
     let method = request.method().clone();
     let headers = request.headers().clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
     match serve_bytes_inner(
         route,
@@ -352,6 +401,7 @@ async fn serve_bytes(
         query.as_deref(),
         &method,
         &headers,
+        &hook_ctx,
     )
     .await
     {
@@ -370,6 +420,7 @@ async fn serve_bytes_inner(
     query: Option<&str>,
     method: &axum::http::Method,
     headers: &axum::http::HeaderMap,
+    hook_ctx: &HookContext,
 ) -> Result<Option<Response>, ApiError> {
     require_id(file_id, "file_id")?;
 
@@ -436,16 +487,30 @@ async fn serve_bytes_inner(
         return Err(ApiError::from(*mm_app::file::abac_denied(route.where_())));
     }
 
-    // `RunFileWillBeDownloadedHook` sits here. There is no plugin host, so `rejectionReason` is
-    // always `""` and the 403 it would raise is unreachable — the same treatment every other
-    // migrated route gives a plugin hook.
-
+    // The preview checks for a missing image *before* asking the plugins — "no point in running
+    // hook if there's no preview" — and the thumbnail after.
     let path = route.backend_path(&info);
-    if path.is_empty() {
-        if let Some(err) = route.missing_derived_image(&info.id) {
-            return Err(ApiError::from(*err));
-        }
+    let missing = || match route.missing_derived_image(&info.id) {
+        Some(err) if path.is_empty() => Err(ApiError::from(*err)),
+        _ => Ok(()),
+    };
+    if route == ByteRoute::Preview {
+        missing()?;
     }
+
+    let reason = state
+        .app
+        .run_file_will_be_downloaded(hook_ctx, &info, &session.0.user_id, route.download_type())
+        .await;
+    if !reason.is_empty() {
+        let mut response = ApiError::from(route.rejected_by_plugin(&reason)).into_response();
+        if let Some((name, value)) = reject_reason_header(&reason) {
+            response.headers_mut().insert(name, value);
+        }
+        return Ok(Some(response));
+    }
+
+    missing()?;
 
     let (file, size) = match state.app.file_reader(path).await {
         Ok(open) => open,
@@ -483,6 +548,48 @@ async fn serve_bytes_inner(
     }
 }
 
+/// A public link a plugin refused: `RenderWebAppError`'s signed page, 403, with the reason header
+/// Go set before raising it — **twice**, because `getPublicFile` renders it and returns with
+/// `c.Err` set, and `ServeHTTP` renders it again ([`crate::web_error::render_web_app_error_twice`]).
+///
+/// **Never forwarded**, unlike every other failure on this route: the plugin has already been
+/// asked, and under the Rust host the Go process has no plugins, so it would serve the file. When
+/// the page cannot be drawn here the refusal is answered as the JSON error instead — the wrong
+/// shape, but still a 403 and still no bytes.
+async fn public_file_rejected(
+    state: &AppState,
+    hook_ctx: &HookContext,
+    request_headers: &axum::http::HeaderMap,
+    reason: &str,
+) -> Response {
+    let err = || {
+        rejected_by_plugin(
+            "getPublicFile",
+            "api.file.get_public_file.rejected_by_plugin",
+            reason,
+        )
+    };
+    let mut headers = axum::http::HeaderMap::new();
+    if let Some((name, value)) = reject_reason_header(reason) {
+        headers.insert(name, value);
+    }
+    let context = crate::web_error::ErrorContext {
+        accept_language: &hook_ctx.accept_language,
+        mobile_app: request_headers.contains_key("x-mobile-app"),
+        request_id: &hook_ctx.request_id,
+    };
+    match crate::web_error::render_web_app_error_twice(state, &context, headers.clone(), err).await
+    {
+        Some(page) => page,
+        None => {
+            tracing::warn!("the public-link rejection page cannot be drawn here; answering JSON");
+            let mut response = ApiError::from(err()).into_response();
+            response.headers_mut().extend(headers);
+            response
+        }
+    }
+}
+
 /// `?h=` — the public link hash `getPublicFile` compares.
 const PUBLIC_LINK_HASH_PARAM: &str = "h";
 
@@ -495,10 +602,9 @@ const PUBLIC_LINK_HASH_PARAM: &str = "h";
 /// `AppError` document. Reproducing even its 403 therefore means porting ECDSA signing and the
 /// web-app error template ([D-170]).
 ///
-/// So this handler serves **only the fully successful path** and forwards everything else: the
-/// disabled setting, an unknown salt, a missing or wrong hash, a missing row, a missing file.
-/// That is not a gap in coverage — the bytes are the whole point of the route, and every failure
-/// is answered by the server that can render it.
+/// This handler serves the fully successful path and a plugin's refusal, and forwards everything
+/// else: the disabled setting, an unknown salt, a missing or wrong hash, a missing row, a missing
+/// file ([D-170]).
 ///
 /// # `EnablePublicLink` defaults to `false`, so a stock server forwards every request here
 ///
@@ -514,7 +620,18 @@ pub async fn get_public_file(
     let method = request.method().clone();
     let headers = request.headers().clone();
 
-    match serve_public_file(&state, &file_id, query.as_deref(), &method, &headers).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
+
+    match serve_public_file(
+        &state,
+        &file_id,
+        query.as_deref(),
+        &method,
+        &headers,
+        &hook_ctx,
+    )
+    .await
+    {
         Some(response) => response,
         None => proxy::forward_to_go(State(state), request).await,
     }
@@ -527,6 +644,7 @@ async fn serve_public_file(
     query: Option<&str>,
     method: &axum::http::Method,
     headers: &axum::http::HeaderMap,
+    hook_ctx: &HookContext,
 ) -> Option<Response> {
     // `c.RequireFileId()` — a 400 rendered as HTML, so it forwards like every other failure.
     if require_id(file_id, "file_id").is_err() {
@@ -557,8 +675,15 @@ async fn serve_public_file(
         return None;
     }
 
-    // `RunFileWillBeDownloadedHook` with an empty user id sits here; no plugin host, so it never
-    // rejects.
+    // `RunFileWillBeDownloadedHook` with an empty user id — a public link has no session, so no
+    // websocket event either.
+    let reason = state
+        .app
+        .run_file_will_be_downloaded(hook_ctx, &info, "", FileDownloadType::Public)
+        .await;
+    if !reason.is_empty() {
+        return Some(public_file_rejected(state, hook_ctx, headers, &reason).await);
+    }
 
     let (file, size) = state.app.file_reader(&info.path).await.ok()?;
 

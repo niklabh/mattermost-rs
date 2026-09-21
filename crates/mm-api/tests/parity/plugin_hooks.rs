@@ -59,6 +59,10 @@ const MEMBERSHIP_GO_OFFSET: u16 = 80;
 const LIFECYCLE_HOST_PORT: u16 = 8131;
 /// Its Go server.
 const LIFECYCLE_GO_OFFSET: u16 = 81;
+/// The Rust host of the file download tranche.
+const DOWNLOAD_HOST_PORT: u16 = 8132;
+/// Its Go server.
+const DOWNLOAD_GO_OFFSET: u16 = 82;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -2059,6 +2063,324 @@ async fn run_the_lifecycle_tour(client: &reqwest::Client, admin: &str) {
     drop(go);
 }
 
+/// Cross-server parity for `FileWillBeDownloaded` on the four read routes (docs/PLUGIN_PLAN.md,
+/// Phase 5; [D-932]): `GET /api/v4/files/{id}`, `/thumbnail`, `/preview` and the unauthenticated
+/// `GET /files/{id}/public`.
+///
+/// A download changes nothing, so both servers fetch the **same** files with the same session and
+/// the transcripts are compared with nothing scrubbed. The recorder refuses any file whose name
+/// starts with `hookreject`.
+#[tokio::test]
+async fn the_download_hook_fires_as_go_fires_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_download_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// One `GET` to each server, answering status, the `X-Reject-Reason` header, the content type
+/// and the body. `served_by` is asserted on the Rust side, as `MemberPair::each` does.
+async fn fetch_both(
+    client: &reqwest::Client,
+    token: Option<&str>,
+    go_base: &str,
+    rust_base: &str,
+    path: &str,
+) -> [(u16, Option<String>, String, Vec<u8>); 2] {
+    let mut out = Vec::new();
+    for base in [go_base, rust_base] {
+        let mut request = client.get(format!("{base}{path}"));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        let response = request.send().await.expect("the server answers");
+        let header = |name: &str| {
+            response
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        if base == rust_base {
+            common::assert_served_by_rust(response.headers(), path);
+        }
+        let status = response.status().as_u16();
+        let reason = header("X-Reject-Reason");
+        let content_type = header("Content-Type").unwrap_or_default();
+        let body = response.bytes().await.expect("a body").to_vec();
+        out.push((status, reason, content_type, body));
+    }
+    let rust = out.pop().expect("two answers");
+    let go = out.pop().expect("two answers");
+    [go, rust]
+}
+
+/// A `RenderWebAppError` page with each signature replaced by `<sig>`. The signature is ECDSA,
+/// randomised in Go, so it differs on every request; everything around it must not. It appears
+/// escaped for JavaScript (`\u0026s\u003D`) and for HTML (`&amp;s=`), and its base64 padding is
+/// escaped the same way.
+fn unsigned_page(page: &str) -> String {
+    const MARKERS: [&str; 3] = [r"\u0026s\u003D", "&amp;s=", "&s="];
+    const PADDING: [&str; 3] = [r"\u003D", "%3D", "="];
+    let mut out = String::new();
+    let mut rest = page;
+    loop {
+        let next = MARKERS
+            .iter()
+            .filter_map(|m| rest.find(m).map(|at| (at, *m)))
+            .min_by_key(|(at, _)| *at);
+        let Some((at, marker)) = next else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..at + marker.len()]);
+        out.push_str("<sig>");
+        rest = rest[at + marker.len()..]
+            .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        while let Some(pad) = PADDING.iter().find(|p| rest.starts_with(**p)) {
+            rest = &rest[pad.len()..];
+        }
+    }
+}
+
+async fn run_the_download_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-downloads");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+
+    let team = common::create_team(&client, &admin, "hookdl").await;
+    let channel = common::create_channel(&client, &admin, &team, "hookdl").await;
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(&admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let go_env: Vec<(&str, &str)> = vec![
+        ("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str()),
+        ("MM_FILESETTINGS_ENABLEPUBLICLINK", "true"),
+    ];
+    let go = start_go(&go_run, &go_env, DOWNLOAD_GO_OFFSET).await;
+    wait_until_running(&client, &admin, &go.base).await;
+
+    // The files go in through the **pair's** Go server, into its file store, and the Rust host is
+    // pointed at the same directory — which also holds the bundle, so it installs the same
+    // plugin. The recorder does not implement `FileWillBeUploaded`, so the uploads leave no
+    // transcript.
+    let upload = |name: &'static str, content_type: &'static str, bytes: &'static [u8]| {
+        let (client, admin, base, channel) = (
+            client.clone(),
+            admin.clone(),
+            go.base.clone(),
+            channel.clone(),
+        );
+        async move {
+            let response = client
+                .post(format!(
+                    "{base}/api/v4/files?channel_id={channel}&filename={name}"
+                ))
+                .bearer_auth(&admin)
+                .header("Content-Type", content_type)
+                .body(bytes)
+                .send()
+                .await
+                .expect("Go answers");
+            assert!(response.status().is_success(), "uploading {name}");
+            let uploaded: Json = response.json().await.expect("the upload decodes");
+            uploaded["file_infos"][0]["id"]
+                .as_str()
+                .expect("an id")
+                .to_owned()
+        }
+    };
+    let image = upload("hookplain.png", "image/png", common::TINY_PNG).await;
+    let text = upload(
+        "hookplain.txt",
+        "text/plain",
+        b"a file the recorder lets through",
+    )
+    .await;
+    let refused = upload(
+        "hookreject.txt",
+        "text/plain",
+        b"a file the recorder withholds",
+    )
+    .await;
+    // `getFileLink` refuses a file no post claims, so the two the public tour fetches are
+    // attached — through **main** Go, which hosts no plugins, so the post fires nothing here.
+    common::post_message_with_files(
+        &client,
+        &admin,
+        &channel,
+        "files for the public tour",
+        &[image.clone(), refused.clone()],
+    )
+    .await;
+    assert_eq!(
+        names(&transcript(&go_log)),
+        Vec::<String>::new(),
+        "the setup reached the recorder"
+    );
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir) = (s("plugins"), s("client"));
+    let data = format!("{}/", go_run.join("data").to_string_lossy());
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("MM_FILESETTINGS_ENABLEPUBLICLINK", "true"),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    let rust = SecondServer::start_in(DOWNLOAD_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: Vec::new(),
+        rust_scrub: Vec::new(),
+        seen: 0,
+    };
+    let get = |path: String| {
+        let (client, admin, go, rust) = (
+            client.clone(),
+            admin.clone(),
+            go.base.clone(),
+            rust.base.clone(),
+        );
+        async move { fetch_both(&client, Some(&admin), &go, &rust, &path).await }
+    };
+
+    // 1-3. The original and both derived images of an image. Each asks the plugin once, with the
+    //      route's download type and the session's user.
+    for (suffix, kind) in [
+        ("", "file"),
+        ("/thumbnail", "thumbnail"),
+        ("/preview", "preview"),
+    ] {
+        let [g, r] = get(format!("/api/v4/files/{image}{suffix}")).await;
+        assert_eq!((g.0, r.0), (200, 200), "{kind}");
+        assert_eq!(g.3, r.3, "{kind}: the bytes");
+        let fired = pair.hooks(kind).await;
+        assert_eq!(names(&fired), ["FileWillBeDownloaded"], "{kind}");
+        assert_eq!(fired[0]["args"]["D"], kind);
+        assert_eq!(fired[0]["args"]["C"], admin_id.as_str());
+        assert_eq!(fired[0]["args"]["B"]["Name"], "hookplain.png");
+        assert!(
+            fired[0]["args"]["B"]["Path"].is_string(),
+            "{kind}: gob carries the json:\"-\" path"
+        );
+    }
+
+    // 4. A preview of a file with none: the 400 comes **before** the plugin is asked.
+    let [g, r] = get(format!("/api/v4/files/{text}/preview")).await;
+    assert_eq!((g.0, r.0), (400, 400));
+    pair.no_more_hooks("a preview that does not exist").await;
+
+    // 5. A thumbnail of a file with none: the plugin is asked **first**, then the 400.
+    let [g, r] = get(format!("/api/v4/files/{text}/thumbnail")).await;
+    assert_eq!((g.0, r.0), (400, 400));
+    let fired = pair.hooks("a thumbnail that does not exist").await;
+    assert_eq!(names(&fired), ["FileWillBeDownloaded"]);
+
+    // 6. A refusal: 403, the reason as a `Reason` parameter of a real key, and the same reason in
+    //    `X-Reject-Reason`.
+    let [g, r] = get(format!("/api/v4/files/{refused}")).await;
+    assert_eq!((g.0, r.0), (403, 403));
+    assert_eq!(
+        g.1.as_deref(),
+        Some("the hook recorder withholds this file")
+    );
+    assert_eq!(g.1, r.1, "X-Reject-Reason");
+    common::assert_error_bodies_match_except_known_gaps(&g.3, &r.3, "a refused download");
+    let body: Json = serde_json::from_slice(&g.3).expect("a JSON error");
+    assert_eq!(body["id"], "api.file.get_file.rejected_by_plugin");
+    let fired = pair.hooks("a refused download").await;
+    assert_eq!(names(&fired), ["FileWillBeDownloaded"]);
+
+    // 7-8. The public link, which has no session: the user is `""`, and a refusal is the signed
+    //      HTML page. Its `s=` signature is ECDSA and differs on every request, so the page is
+    //      compared up to it.
+    let link_of = |id: String| {
+        let (client, admin, go) = (client.clone(), admin.clone(), go.base.clone());
+        async move {
+            let link: Json = client
+                .get(format!("{go}/api/v4/files/{id}/link"))
+                .bearer_auth(&admin)
+                .send()
+                .await
+                .expect("Go answers")
+                .json()
+                .await
+                .expect("a link");
+            let link = link["link"].as_str().expect("the link").to_owned();
+            link[link.find("/files/").expect("a public path")..].to_owned()
+        }
+    };
+    let public = link_of(image.clone()).await;
+    let [g, r] = fetch_both(&client, None, &go.base, &rust.base, &public).await;
+    assert_eq!((g.0, r.0), (200, 200));
+    assert_eq!(g.3, r.3, "the public bytes");
+    let fired = pair.hooks("a public download").await;
+    assert_eq!(names(&fired), ["FileWillBeDownloaded"]);
+    assert_eq!(fired[0]["args"]["D"], "public");
+    assert_eq!(
+        fired[0]["args"]["C"],
+        Json::Null,
+        "no user, and gob omits \"\""
+    );
+    assert_eq!(fired[0]["args"]["A"]["SessionId"], Json::Null);
+
+    let public = link_of(refused.clone()).await;
+    let [g, r] = fetch_both(&client, None, &go.base, &rust.base, &public).await;
+    assert_eq!((g.0, r.0), (403, 403));
+    assert_eq!(g.1, r.1, "X-Reject-Reason on the page");
+    assert_eq!(g.2, r.2, "the page's content type");
+    let (go_page, rust_page) = (
+        unsigned_page(&String::from_utf8_lossy(&g.3)),
+        unsigned_page(&String::from_utf8_lossy(&r.3)),
+    );
+    assert!(go_page.contains("<sig>"), "the page is signed: {go_page}");
+    assert_eq!(go_page, rust_page, "the page, signatures aside");
+    let fired = pair.hooks("a refused public download").await;
+    assert_eq!(names(&fired), ["FileWillBeDownloaded"]);
+
+    drop(rust);
+    drop(go);
+    common::delete_channel(&client, &admin, &channel).await;
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]
@@ -2107,6 +2429,16 @@ fn a_blank_line_is_not_an_entry() {
     let path = dir.join("hooks.jsonl");
     std::fs::write(&path, "{\"hook\":\"One\"}\n\n{\"hook\":\"Two\"}\n").expect("the file");
     assert_eq!(names(&transcript(&path)), ["One", "Two"]);
+}
+
+/// Both escaped forms of the signature, and its padding, go; the text around them stays.
+#[test]
+fn unsigned_page_drops_every_signature() {
+    let page = r#"x = '/error?m\u003Dno\u0026s\u003DMEUC_x-y\u003D\u003D'; url=/error?m=no&amp;s=MEUC_x-y%3D%3D">"#;
+    assert_eq!(
+        unsigned_page(page),
+        r#"x = '/error?m\u003Dno\u0026s\u003D<sig>'; url=/error?m=no&amp;s=<sig>">"#
+    );
 }
 
 /// A line the plugin has not finished writing is not read yet — neither parsed nor counted.

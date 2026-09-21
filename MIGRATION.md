@@ -14300,6 +14300,20 @@ Mutation tally (`plugin-hooks-lifecycle.plan`): 13 run, 11 caught, 2 controls su
 faults — on the second run. The first run's reorder control came back "caught": the suite had
 been reading the transcript mid-write, which `transcript_of` now waits out (see its doc comment).
 
+## Plugin hook call sites: `FileWillBeDownloaded` (2026-09-21)
+
+Plugin plan **Phase 5, 18 of 35**. Under `MMRS_PLUGIN_HOST=rust` the four file read routes ask
+the plugins before serving bytes; the other 17 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `RunFileWillBeDownloadedHook`, `sendFileDownloadRejectedEvent` (app/file.go:1974, :2008) | `mm_app::plugin_hooks::{run_file_will_be_downloaded, file_info_to_wire, FileDownloadType}` | DONE (the 30 s timeout and the websocket event are untested) | `parity::plugin_hooks::the_download_hook_fires_as_go_fires_it` | Thirty seconds for the whole dispatch, then a refusal in the request's language. |
+| the hook in `getFile`, `getFileThumbnail`, `getFilePreview`, `getPublicFile` (api4/file.go:614, :677, :814, :922) | `mm_api::files` | DONE | same | A refusal is 403 with `X-Reject-Reason`. The preview 400s on a missing image *before* asking the plugins, the thumbnail *after*. |
+| `RenderWebAppError` followed by `handleContextError` | `mm_api::web_error::render_web_app_error_twice` | DONE | same + 1 unit | Go writes a refused public link's page **twice**, each copy with its own signature ([D-170]). |
+
+Mutation tally (`plugin-hooks-downloads.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
+faults.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

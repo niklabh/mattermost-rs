@@ -1,0 +1,25 @@
+# Mutation plan for `FileWillBeDownloaded` on the four read routes (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-downloads.plan
+#
+# The oracle is `parity::plugin_hooks::the_download_hook_fires_as_go_fires_it`.
+#
+# Not mutated: the thirty-second budget and its translated message (the tour has no plugin that
+# sleeps, since a test that waits thirty seconds is a bug), the `file_download_rejected` event
+# (the tour holds no websocket), the first page's server-locale translation (`en` on both sides),
+# and stopping at the first refusal (the tour has one plugin). The last two lines are the no-op
+# controls and must SURVIVE.
+
+download-rejection-ignored	crates/mm-api/src/files.rs	    if !reason.is_empty() {\n        let mut response = ApiError::from(route.rejected_by_plugin(&reason)).into_response();	    if false {\n        let mut response = ApiError::from(route.rejected_by_plugin(&reason)).into_response();	api	plugin_hooks::the_download
+public-rejection-ignored	crates/mm-api/src/files.rs	    if !reason.is_empty() {\n        return Some(public_file_rejected(	    if false {\n        return Some(public_file_rejected(	api	plugin_hooks::the_download
+preview-asks-the-plugin-before-its-400	crates/mm-api/src/files.rs	    if route == ByteRoute::Preview {	    if false {	api	plugin_hooks::the_download
+thumbnail-400s-before-the-plugin	crates/mm-api/src/files.rs	    if route == ByteRoute::Preview {	    if route != ByteRoute::Original {	api	plugin_hooks::the_download
+thumbnail-sent-as-preview	crates/mm-api/src/files.rs	            Self::Thumbnail => FileDownloadType::Thumbnail,	            Self::Thumbnail => FileDownloadType::Preview,	api	plugin_hooks::the_download
+public-sent-as-file	crates/mm-api/src/files.rs	        .run_file_will_be_downloaded(hook_ctx, &info, "", FileDownloadType::Public)	        .run_file_will_be_downloaded(hook_ctx, &info, "", FileDownloadType::File)	api	plugin_hooks::the_download
+downloader-not-sent	crates/mm-api/src/files.rs	        .run_file_will_be_downloaded(hook_ctx, &info, &session.0.user_id, route.download_type())	        .run_file_will_be_downloaded(hook_ctx, &info, "", route.download_type())	api	plugin_hooks::the_download
+reject-reason-header-misnamed	crates/mm-api/src/files.rs	const REJECT_REASON_HEADER: &str = "x-reject-reason";	const REJECT_REASON_HEADER: &str = "x-rejection-reason";	api	plugin_hooks::the_download
+rejection-is-a-400	crates/mm-api/src/files.rs	        String::new(),\n        403,	        String::new(),\n        400,	api	plugin_hooks::the_download
+public-page-written-once	crates/mm-api/src/web_error.rs	    whole.extend_from_slice(&second);	    let _ = &second;	api	plugin_hooks::the_download
+file-info-to-wire-drops-the-path	crates/mm-app/src/plugin_hooks.rs	        path: info.path.clone(),\n        thumbnail_path: info.thumbnail_path.clone(),	        path: String::new(),\n        thumbnail_path: info.thumbnail_path.clone(),	api	plugin_hooks::the_download
+control-name-the-budget	crates/mm-app/src/plugin_hooks.rs	        let reason = match tokio::time::timeout(FILE_DOWNLOAD_HOOK_TIMEOUT, dispatch).await {	        let budget = FILE_DOWNLOAD_HOOK_TIMEOUT;\n        let reason = match tokio::time::timeout(budget, dispatch).await {	api	plugin_hooks::the_download
+control-reorder-width-and-height	crates/mm-app/src/plugin_hooks.rs	        width: info.width,\n        height: info.height,	        height: info.height,\n        width: info.width,	api	plugin_hooks::the_download
