@@ -1107,6 +1107,60 @@ async fn rpc_a_replacement_file_is_complete_when_the_hook_answers() {
     );
 }
 
+/// Answers a file info carrying only `Name`, and writes nothing.
+struct Renamer;
+impl Hooks for Renamer {
+    fn implemented(&self) -> Vec<String> {
+        vec!["FileWillBeUploaded".into()]
+    }
+}
+impl mm_plugin::rpc::HooksHttp for Renamer {}
+impl mm_plugin::rpc::Plugin for Renamer {}
+impl mm_plugin::rpc::HooksFileUpload for Renamer {
+    async fn file_will_be_uploaded(
+        &self,
+        _: Option<Box<mm_plugin::wire::plugin::Context>>,
+        _: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        _: mm_plugin::io_rpc::RemoteReader,
+        _: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        Ok(mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+            a: Some(Box::new(mm_plugin::wire::model::FileInfo {
+                name: "renamed.txt".into(),
+                ..Default::default()
+            })),
+            b: String::new(),
+        })
+    }
+}
+
+/// Go seeds the reply with the caller's file info and decodes into it (client_rpc.go:839), so an
+/// answer carrying one field is that field **merged** into what the host sent — not a file info
+/// with every other field zeroed, which would lose the id and the path the host then writes to.
+#[tokio::test]
+async fn rpc_a_partial_file_info_is_merged_into_the_callers() {
+    let client = rust_plugin_pair(Arc::new(Renamer)).await;
+    within(client.implemented()).await.unwrap();
+    let returns = within(client.file_will_be_uploaded(
+        None,
+        Some(Box::new(mm_plugin::wire::model::FileInfo {
+            id: "given".into(),
+            name: "upload.txt".into(),
+            path: "a/b/upload.txt".into(),
+            size: 42,
+            ..Default::default()
+        })),
+        std::io::Cursor::new(stream_payload()),
+        SharedWriter(Arc::new(tokio::sync::Mutex::new(Vec::new()))),
+    ))
+    .await;
+    let info = returns.a.expect("the seeded info survives");
+    assert_eq!(info.name, "renamed.txt", "the plugin's field wins");
+    assert_eq!(info.id, "given", "an omitted field keeps the caller's");
+    assert_eq!(info.path, "a/b/upload.txt");
+    assert_eq!(info.size, 42);
+}
+
 /// A plugin that does not implement the hook is not called, and the file info the caller passed
 /// is the answer (client_rpc.go).
 #[tokio::test]

@@ -1,0 +1,24 @@
+# Mutation plan for `FileWillBeUploaded` (`runPluginsHook`) on the simple upload and on the
+# completing chunk of a resumable one, and the host client's merge (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-uploads.plan
+#
+# The oracle is `parity::plugin_hooks::the_upload_hook_fires_as_go_fires_it`.
+#
+# Not mutated: the `file_upload_rejected` event (the tour holds no websocket), the move-failure
+# 500 (unreachable on a working disk), several plugins sharing one reader and one writer (the
+# tour has one plugin), and a plugin moving `Path` (the recorder never does). The last two lines
+# are the no-op controls and must SURVIVE.
+
+no-plugin-ever-runs	crates/mm-app/src/plugin_hooks.rs	        if plugins.is_empty() {	        if true || plugins.is_empty() {	api	plugin_hooks::the_upload
+the-answer-is-not-merged	crates/mm-app/src/plugin_hooks.rs	                *info = file_info_from_wire(merged);	                let _ = merged;	api	plugin_hooks::the_upload
+a-refusing-answer-is-not-merged	crates/mm-app/src/plugin_hooks.rs	                *info = file_info_from_wire(merged);	                if returns.b.is_empty() {\n                    *info = file_info_from_wire(merged);\n                }	api	plugin_hooks::the_upload
+the-refusal-is-ignored	crates/mm-app/src/plugin_hooks.rs	            if !returns.b.is_empty() {\n                self.send_file_upload_rejected_event(	            if false {\n                self.send_file_upload_rejected_event(	api	plugin_hooks::the_upload
+the-size-is-not-the-replacements	crates/mm-app/src/plugin_hooks.rs	            info.size = i64::try_from(replacement.len()).unwrap_or(i64::MAX);	            let _ = replacement.len();	api	plugin_hooks::the_upload
+the-replacement-is-not-stored	crates/mm-app/src/plugin_hooks.rs	self.write_file(&replacement, &info.path)	self.write_file(b"", &info.path)	api	plugin_hooks::the_upload
+the-plugins-read-nothing-on-a-simple-upload	crates/mm-app/src/file_upload.rs	            .run_plugins_hook(task.hook_ctx, &mut info, input.to_vec())	            .run_plugins_hook(task.hook_ctx, &mut info, Vec::new())	api	plugin_hooks::the_upload
+the-images-come-from-the-request	crates/mm-app/src/file_upload.rs	            let image: &[u8] = if ran {	            let image: &[u8] = if false && ran {	api	plugin_hooks::the_upload
+the-plugins-read-a-resumable-upload	crates/mm-app/src/upload.rs	            .run_plugins_hook(hook_ctx, &mut info, Vec::new())	            .run_plugins_hook(hook_ctx, &mut info, file.clone())	api	plugin_hooks::the_upload
+the-client-does-not-merge	crates/mm-plugin/src/rpc/file_upload.rs	            .call_into("Plugin.FileWillBeUploaded", &args, default.clone())	            .call_into(\n                "Plugin.FileWillBeUploaded",\n                &args,\n                Z_FileWillBeUploadedReturns::default(),\n            )	api	plugin_hooks::the_upload
+control-type-the-rejection	crates/mm-app/src/plugin_hooks.rs	        let mut rejection = None;	        let mut rejection: Option<String> = None;	api	plugin_hooks::the_upload
+control-order-of-an-unordered-map	crates/mm-app/src/plugin_hooks.rs	        message.add("file_name", serde_json::Value::from(info.name.as_str()));\n        message.add("rejection_reason", serde_json::Value::from(reason));	        message.add("rejection_reason", serde_json::Value::from(reason));\n        message.add("file_name", serde_json::Value::from(info.name.as_str()));	api	plugin_hooks::the_upload

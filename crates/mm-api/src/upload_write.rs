@@ -306,7 +306,15 @@ async fn serve_upload_data(
         },
     };
 
-    match state.app.upload_data(us, &chunk).await {
+    match state
+        .app
+        .upload_data(
+            &crate::plugin_context::hook_context(parts, Some(&session.0)),
+            us,
+            &chunk,
+        )
+        .await
+    {
         Ok(None) => Ok(no_content()),
         Ok(Some(info)) => {
             let mut out =

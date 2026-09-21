@@ -61,6 +61,19 @@
 //!
 //! A download whose `FileInfo.Name` starts with `hookreject` is refused with
 //! [`DOWNLOAD_REJECTION`]; any other is allowed.
+//!
+//! # `FileWillBeUploaded` is driven by the file's name too
+//!
+//! The entry records the context, the file info and **what the plugin could read**, since the
+//! reader is the part a host most easily gets wrong.
+//!
+//! | name starts with | answer |
+//! |---|---|
+//! | `hookrefuse` | [`UPLOAD_REJECTION`], with a file info carrying only `Name: renamed-on-reject.txt` — Go merges it before it looks at the reason |
+//! | `hookreplace` | writes [`REPLACEMENT`], answers no file info |
+//! | `hookrename` | a file info carrying only `Name: renamed.txt`, writes nothing |
+//! | `hookunimage` | writes [`REPLACEMENT`] over an image, so its thumbnails cannot be made from it |
+//! | anything else | nothing written, no file info |
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -108,9 +121,15 @@ const LOGIN_REJECTION: &str = "the hook recorder keeps this one out";
 /// The reason `FileWillBeDownloaded` refuses with.
 const DOWNLOAD_REJECTION: &str = "the hook recorder withholds this file";
 
+/// The reason `FileWillBeUploaded` refuses with.
+const UPLOAD_REJECTION: &str = "the hook recorder turns this upload away";
+
+/// What `FileWillBeUploaded` writes over a file it replaces.
+const REPLACEMENT: &[u8] = b"replaced by the hook recorder";
+
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 18] = [
+const IMPLEMENTED: [&str; 19] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -129,6 +148,7 @@ const IMPLEMENTED: [&str; 18] = [
     "UserHasBeenCreated",
     "UserHasBeenDeactivated",
     "FileWillBeDownloaded",
+    "FileWillBeUploaded",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -413,7 +433,55 @@ impl Hooks for Recorder {
 }
 
 impl mm_plugin::rpc::HooksHttp for Recorder {}
-impl mm_plugin::rpc::HooksFileUpload for Recorder {}
+impl mm_plugin::rpc::HooksFileUpload for Recorder {
+    async fn file_will_be_uploaded(
+        &self,
+        context: Option<Box<mm_plugin::wire::plugin::Context>>,
+        info: Option<Box<mm_plugin::wire::model::FileInfo>>,
+        mut file: mm_plugin::io_rpc::RemoteReader,
+        output: goplugin::yamux::Stream,
+    ) -> Result<mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns, NotImplemented> {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let mut read = Vec::new();
+        let _ = file.read_to_end(&mut read).await;
+        let name = info.as_deref().map_or("", |f| f.name.as_str()).to_owned();
+        self.record(&json!({
+            "hook": "FileWillBeUploaded",
+            "args": {
+                "A": render_typed(&context),
+                "B": render_typed(&info),
+                "read": String::from_utf8_lossy(&read),
+            },
+        }));
+
+        let only_name = |name: &str| {
+            Some(Box::new(mm_plugin::wire::model::FileInfo {
+                name: name.to_owned(),
+                ..Default::default()
+            }))
+        };
+        let mut output = output;
+        let answer = if name.starts_with("hookrefuse") {
+            mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+                a: only_name("renamed-on-reject.txt"),
+                b: UPLOAD_REJECTION.to_owned(),
+            }
+        } else if name.starts_with("hookreplace") || name.starts_with("hookunimage") {
+            let _ = output.write_all(REPLACEMENT).await;
+            mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns::default()
+        } else if name.starts_with("hookrename") {
+            mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns {
+                a: only_name("renamed.txt"),
+                b: String::new(),
+            }
+        } else {
+            mm_plugin::wire::plugin::Z_FileWillBeUploadedReturns::default()
+        };
+        let _ = output.shutdown().await;
+        Ok(answer)
+    }
+}
 impl Plugin for Recorder {}
 
 #[tokio::main]
