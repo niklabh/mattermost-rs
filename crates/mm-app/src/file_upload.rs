@@ -13,8 +13,8 @@
 //! ported ([D-650]). A raster Go cannot decode is served: `preprocessImage` returns "as is" and
 //! `postprocessImage` only logs, so the row is the plain one with no dimensions.
 //!
-//! The plugin hook (`runPluginsHook`) has no plugin host to run against and takes Go's own early
-//! return; content extraction is [D-651].
+//! The plugin hook (`runPluginsHook`) runs under the Rust plugin host ([`App::run_plugins_hook`])
+//! and takes Go's early return otherwise; content extraction is [D-651].
 //!
 //! # The two size limits are not the same number
 //!
@@ -55,6 +55,8 @@ pub struct UploadFileTask<'a> {
     pub content_length: i64,
     pub client_id: &'a str,
     pub data: &'a [u8],
+    /// `pluginContext(rctx)`, for `FileWillBeUploaded`.
+    pub hook_ctx: &'a crate::plugin_hooks::HookContext,
 }
 
 impl App {
@@ -194,10 +196,23 @@ impl App {
         }
         info.size = written;
 
-        // `runPluginsHook`: no plugin host.
+        let ran = self
+            .run_plugins_hook(task.hook_ctx, &mut info, input.to_vec())
+            .await
+            .map_err(PrepareError::App)?;
 
+        // Go makes the images from `a.FileReader(t.fileinfo.Path)` — storage, at the path as the
+        // plugins left it — so a replacement is what the thumbnails show. With no plugin run
+        // that is the bytes just written.
         if info.is_image() && !info.is_svg() {
-            self.postprocess_image(&mut info, input, orientation)
+            let stored;
+            let image: &[u8] = if ran {
+                stored = self.read_stored_upload(&info.path).await?;
+                &stored
+            } else {
+                input
+            };
+            self.postprocess_image(&mut info, image, orientation)
                 .await?;
         }
 
@@ -216,6 +231,25 @@ impl App {
             }
         }
         // `ExtractContent`: [D-651].
+    }
+
+    /// `a.FileReader(path)` read to the end, with `FileReader`'s own error — the one `UploadFileX`
+    /// returns when the file the plugins left behind cannot be opened.
+    async fn read_stored_upload(&self, path: &str) -> Result<Vec<u8>, PrepareError> {
+        use tokio::io::AsyncReadExt as _;
+        let (mut file, _size) = self.file_reader(path).await?;
+        let mut out = Vec::new();
+        file.read_to_end(&mut out).await.map_err(|err| {
+            tracing::error!(error = %err, path, "reading the stored upload failed");
+            PrepareError::App(AppError::boxed(
+                "ReadFile",
+                "api.file.read_file.reading_local.app_error",
+                None,
+                String::new(),
+                500,
+            ))
+        })?;
+        Ok(out)
     }
 
     /// Port of `UploadFileTask.preprocessImage` (app/file.go:892). Returns the EXIF orientation

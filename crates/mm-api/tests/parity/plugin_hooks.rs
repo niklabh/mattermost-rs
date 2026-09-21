@@ -63,6 +63,10 @@ const LIFECYCLE_GO_OFFSET: u16 = 81;
 const DOWNLOAD_HOST_PORT: u16 = 8132;
 /// Its Go server.
 const DOWNLOAD_GO_OFFSET: u16 = 82;
+/// The Rust host of the file upload tranche.
+const UPLOAD_HOST_PORT: u16 = 8133;
+/// Its Go server.
+const UPLOAD_GO_OFFSET: u16 = 83;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -386,6 +390,29 @@ const TIME_KEYS: [&str; 9] = [
     "LastPasswordUpdate",
 ];
 
+/// A `FileInfo`'s storage paths, which carry the file's own id (and, for a resumable upload,
+/// the session's) as a segment.
+const PATH_KEYS: [&str; 3] = ["Path", "ThumbnailPath", "PreviewPath"];
+
+/// Every 26-character id segment of a storage path as `<id>`, the rest untouched — so the date,
+/// the layout and the file name are still compared.
+fn path_without_ids(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            if segment.len() == 26
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            {
+                "<id>"
+            } else {
+                segment
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// Replace what cannot be compared with a token that keeps the only thing worth asserting about
 /// it: an id is `""` or `"<id>"`, a timestamp is `0` or `"<set>"`. A mutation that stopped
 /// setting one, or set one it should not, still shows.
@@ -407,6 +434,12 @@ fn normalise(value: &mut Json) {
                         } else {
                             Json::String("<set>".to_owned())
                         };
+                        continue;
+                    }
+                }
+                if PATH_KEYS.contains(&key.as_str()) {
+                    if let Some(path) = entry.as_str() {
+                        *entry = Json::String(path_without_ids(path));
                         continue;
                     }
                 }
@@ -2239,11 +2272,15 @@ async fn run_the_download_tour(client: &reqwest::Client, admin: &str) {
         &[image.clone(), refused.clone()],
     )
     .await;
+    // The three uploads went through a server hosting the recorder, which records
+    // `FileWillBeUploaded`; this tour is about downloads, so they are wiped before either side
+    // is compared.
     assert_eq!(
         names(&transcript(&go_log)),
-        Vec::<String>::new(),
-        "the setup reached the recorder"
+        ["FileWillBeUploaded"; 3],
+        "only the uploads reached the recorder"
     );
+    std::fs::write(&go_log, "").expect("the transcript is reset");
 
     let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
     let (dir, client_dir) = (s("plugins"), s("client"));
@@ -2375,6 +2412,231 @@ async fn run_the_download_tour(client: &reqwest::Client, admin: &str) {
     assert_eq!(go_page, rust_page, "the page, signatures aside");
     let fired = pair.hooks("a refused public download").await;
     assert_eq!(names(&fired), ["FileWillBeDownloaded"]);
+
+    drop(rust);
+    drop(go);
+    common::delete_channel(&client, &admin, &channel).await;
+}
+
+/// Cross-server parity for `FileWillBeUploaded` (docs/PLUGIN_PLAN.md, Phase 5; [D-932]) on the
+/// simple upload behind `POST /api/v4/files` and on the completing chunk of
+/// `POST /api/v4/uploads/{upload_id}`.
+///
+/// Each server stores its own copy of each file, so ids and paths differ and are tokenised; the
+/// recorder's entry also says what it could **read**, which is the whole file on the first path
+/// and nothing at all on the second.
+#[tokio::test]
+async fn the_upload_hook_fires_as_go_fires_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_upload_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// The bytes of the one file called `name` anywhere under `root`.
+fn find_stored(root: &Path, name: &str) -> Option<Vec<u8>> {
+    let entries = std::fs::read_dir(root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_stored(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().is_some_and(|n| n == name) {
+            return std::fs::read(&path).ok();
+        }
+    }
+    None
+}
+
+async fn run_the_upload_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-uploads");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+    let team = common::create_team(&client, &admin, "hookul").await;
+    let channel = common::create_channel(&client, &admin, &team, "hookul").await;
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let go = start_go(
+        &go_run,
+        &[("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())],
+        UPLOAD_GO_OFFSET,
+    )
+    .await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust = SecondServer::start_in(
+        UPLOAD_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: Vec::new(),
+        rust_scrub: Vec::new(),
+        seen: 0,
+    };
+    let simple = |name: &str, bytes: &[u8]| {
+        let call = (
+            format!("/api/v4/files?channel_id={channel}&filename={name}"),
+            Some(bytes.to_vec()),
+        );
+        (call.clone(), call)
+    };
+    // What each server stored, read from its own data directory rather than through a download,
+    // which would fire `FileWillBeDownloaded` and carry the text Go extracts and this server does
+    // not ([D-651]).
+    let (go_data, rust_data) = (go_run.join("data"), rs_run.join("data"));
+    let stored = |name: &str| {
+        [&go_data, &rust_data].map(|root| {
+            find_stored(root, name).unwrap_or_else(|| panic!("{name} under {}", root.display()))
+        })
+    };
+
+    // 1. An upload the recorder leaves alone. It reads the whole file.
+    let content = b"an upload the recorder leaves alone";
+    let (g, r) = simple("hookplain.txt", content);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a plain upload");
+    let fired = pair.hooks("a plain upload").await;
+    assert_eq!(names(&fired), ["FileWillBeUploaded"]);
+    assert_eq!(
+        fired[0]["args"]["read"],
+        "an upload the recorder leaves alone"
+    );
+    assert_eq!(fired[0]["args"]["B"]["Name"], "hookplain.txt");
+
+    // 2. A replacement: the size is the replacement's, and so are the stored bytes.
+    let (g, r) = simple("hookreplace.txt", b"the bytes the client sent");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a replaced upload");
+    assert_eq!(gb["file_infos"][0]["size"], 29, "the replacement's length");
+    let [go_bytes, rust_bytes] = stored("hookreplace.txt");
+    assert_eq!(go_bytes, b"replaced by the hook recorder");
+    assert_eq!(rust_bytes, go_bytes, "the stored replacement");
+    pair.hooks("a replaced upload").await;
+
+    // 3. An answer carrying one field is **merged** into the upload's own file info.
+    let (g, r) = simple("hookrename.txt", b"renamed on the way in");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a renamed upload");
+    assert_eq!(gb["file_infos"][0]["name"], "renamed.txt");
+    assert_eq!(gb["file_infos"][0]["extension"], "txt", "the rest survives");
+    pair.hooks("a renamed upload").await;
+
+    // 4. A refusal. The refusing answer is merged **before** the reason is looked at, so the
+    //    error names the file by the plugin's name for it.
+    let (g, r) = simple("hookrefuse.txt", b"turned away");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a refused upload",
+    );
+    assert_eq!(gb["id"], "app.upload.run_plugins_hook.rejected");
+    assert!(
+        gb["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("renamed-on-reject.txt")),
+        "{gb}"
+    );
+    let fired = pair.hooks("a refused upload").await;
+    assert_eq!(names(&fired), ["FileWillBeUploaded"]);
+
+    // 5. An image replaced by bytes that are not one. Go makes the thumbnails from storage
+    //    after the hook, so there are none — and no mini preview.
+    let (g, r) = simple("hookunimage.png", common::TINY_PNG);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "an image replaced by a non-image");
+    assert_eq!(
+        gb["file_infos"][0]["mini_preview"],
+        Json::Null,
+        "the images come from the replacement"
+    );
+    pair.hooks("an image replaced by a non-image").await;
+
+    // 6. A resumable upload. Go hands the plugins the reader it has already closed, so they read
+    //    **nothing** — and can still replace the file.
+    let session_of = |base: String| {
+        let (client, admin, channel) = (client.clone(), admin.clone(), channel.clone());
+        async move {
+            let created: Json = client
+                .post(format!("{base}/api/v4/uploads"))
+                .bearer_auth(&admin)
+                .json(&serde_json::json!({
+                    "channel_id": channel,
+                    "filename": "hookreplace-session.txt",
+                    "file_size": 21,
+                }))
+                .send()
+                .await
+                .expect("the server answers")
+                .json()
+                .await
+                .expect("an upload session");
+            created["id"].as_str().expect("an upload id").to_owned()
+        }
+    };
+    let (go_upload, rust_upload) = (
+        session_of(go.base.clone()).await,
+        session_of(rust.base.clone()).await,
+    );
+    let chunk = Some(b"a resumable upload!!!".to_vec());
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (format!("/api/v4/uploads/{go_upload}"), chunk.clone()),
+            (format!("/api/v4/uploads/{rust_upload}"), chunk),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a completed resumable upload");
+    assert_eq!(gb["size"], 29, "the replacement's length");
+    let fired = pair.hooks("a completed resumable upload").await;
+    assert_eq!(names(&fired), ["FileWillBeUploaded"]);
+    assert_eq!(
+        fired[0]["args"]["read"], "",
+        "the plugin is lent a reader Go has already closed"
+    );
 
     drop(rust);
     drop(go);

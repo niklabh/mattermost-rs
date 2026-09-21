@@ -320,6 +320,95 @@ pub fn file_info_to_wire(info: &FileInfo) -> wire_model::FileInfo {
     }
 }
 
+/// The model a `FileWillBeUploaded` answer merges back into — every field, because the host
+/// client already decoded the reply **into** a copy of what it sent (see
+/// [`mm_plugin::rpc::HooksClient::file_will_be_uploaded`]), so a field the plugin left out holds
+/// the caller's value by the time it gets here.
+pub fn file_info_from_wire(wire: &wire_model::FileInfo) -> FileInfo {
+    FileInfo {
+        id: wire.id.clone(),
+        creator_id: wire.creator_id.clone(),
+        post_id: wire.post_id.clone(),
+        channel_id: wire.channel_id.clone(),
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        delete_at: wire.delete_at,
+        path: wire.path.clone(),
+        thumbnail_path: wire.thumbnail_path.clone(),
+        preview_path: wire.preview_path.clone(),
+        name: wire.name.clone(),
+        extension: wire.extension.clone(),
+        size: wire.size,
+        mime_type: wire.mime_type.clone(),
+        width: wire.width,
+        height: wire.height,
+        has_preview_image: wire.has_preview_image,
+        mini_preview: wire.mini_preview.clone(),
+        content: wire.content.clone(),
+        remote_id: wire.remote_id.clone(),
+        archived: wire.archived,
+    }
+}
+
+/// The one `io.Reader` `runPluginsHook` lends **every** plugin in turn: a plugin that reads the
+/// upload leaves the next one what is left, which is usually nothing.
+#[derive(Clone)]
+struct SharedReader {
+    data: Arc<Vec<u8>>,
+    at: Arc<std::sync::Mutex<usize>>,
+}
+
+impl tokio::io::AsyncRead for SharedReader {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let mut at = self
+            .at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let rest = self.data.get(*at..).unwrap_or_default();
+        let n = rest.len().min(buf.remaining());
+        buf.put_slice(&rest[..n]);
+        *at += n;
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+/// The one pipe writer `runPluginsHook` lends every plugin: what each writes is appended, and the
+/// whole is what replaces the file.
+#[derive(Clone, Default)]
+struct SharedBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl tokio::io::AsyncWrite for SharedBuffer {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(data);
+        std::task::Poll::Ready(Ok(data.len()))
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
 /// `model.FileDownloadType` (model/file_info.go:27): which of the four read routes is asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileDownloadType {
@@ -1424,6 +1513,149 @@ impl App {
         ] {
             message.add(key, serde_json::Value::from(value));
         }
+        self.publish(message).await;
+    }
+    /// Port of `runPluginsHook` (app/upload.go:56) — hook 14, `FileWillBeUploaded` — after the
+    /// upload is written and before its images are made. Answers whether any plugin ran, which
+    /// is when Go goes back to storage for the bytes it makes the images from.
+    ///
+    /// `file` is what the plugins can read, and they share it: Go lends every plugin the **same**
+    /// reader and the same pipe writer, so the second plugin reads what the first left, and the
+    /// file's replacement is everything all of them wrote, concatenated.
+    ///
+    /// **`info` is mutated in place**, as Go's is: each answer is decoded into the caller's
+    /// `*FileInfo`, so a plugin's fields land on the upload's own row — on a refusal too, before
+    /// the refusal is looked at. When anything was written the size becomes its length and the
+    /// bytes go to `info.Path` as it stands after the plugins, which a plugin may have moved.
+    ///
+    /// A refusal stops the iteration, sends `file_upload_rejected` to the uploader, removes the
+    /// file at `info.Path` and is a 400 `app.upload.run_plugins_hook.rejected` with the file name
+    /// and the reason as parameters.
+    ///
+    /// Go streams the replacement to `<original path>.tmp` and then moves it; this writes it once
+    /// to the destination, which leaves the same file and never shows a `.tmp` to anyone.
+    pub(crate) async fn run_plugins_hook(
+        &self,
+        ctx: &HookContext,
+        info: &mut FileInfo,
+        file: Vec<u8>,
+    ) -> Result<bool, Box<AppError>> {
+        let Some(environment) = self.hook_environment() else {
+            return Ok(false);
+        };
+        let plugins = environment.hooks_implementing(hook_id::FILE_WILL_BE_UPLOADED);
+        // "If the plugin hook has not run we can return early."
+        if plugins.is_empty() {
+            return Ok(false);
+        }
+
+        let reader = SharedReader {
+            data: Arc::new(file),
+            at: Arc::default(),
+        };
+        let output = SharedBuffer::default();
+        let mut rejection = None;
+        for (hooks, _manifest) in plugins {
+            let returns = hooks
+                .file_will_be_uploaded(
+                    ctx.boxed_wire(),
+                    Some(Box::new(file_info_to_wire(info))),
+                    reader.clone(),
+                    output.clone(),
+                )
+                .await;
+            if let Some(merged) = returns.a.as_deref() {
+                *info = file_info_from_wire(merged);
+            }
+            if !returns.b.is_empty() {
+                self.send_file_upload_rejected_event(
+                    info,
+                    &info.creator_id,
+                    &ctx.connection_id,
+                    &returns.b,
+                )
+                .await;
+                rejection = Some(returns.b);
+                break;
+            }
+        }
+
+        if let Some(reason) = rejection {
+            if let Err(err) = self.remove_file(&info.path).await {
+                tracing::warn!(error = %err, "Failed to remove file");
+            }
+            return Err(AppError::boxed(
+                "runPluginsHook",
+                "app.upload.run_plugins_hook.rejected",
+                Some(std::collections::HashMap::from([
+                    (
+                        "Filename".to_owned(),
+                        serde_json::Value::String(info.name.clone()),
+                    ),
+                    ("Reason".to_owned(), serde_json::Value::String(reason)),
+                ])),
+                String::new(),
+                400,
+            ));
+        }
+
+        let replacement = std::mem::take(
+            &mut *output
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        if !replacement.is_empty() {
+            info.size = i64::try_from(replacement.len()).unwrap_or(i64::MAX);
+            if let Err(err) = self.write_file(&replacement, &info.path).await {
+                tracing::error!(error = %err, path = %info.path, "writing the plugins' replacement failed");
+                return Err(AppError::boxed(
+                    "runPluginsHook",
+                    "app.upload.run_plugins_hook.move_fail",
+                    None,
+                    String::new(),
+                    500,
+                ));
+            }
+        }
+        Ok(true)
+    }
+
+    /// Port of `sendFileUploadRejectedEvent` (app/file.go:1996): `file_upload_rejected` to the
+    /// uploader, to one connection of theirs when the request named it.
+    async fn send_file_upload_rejected_event(
+        &self,
+        info: &FileInfo,
+        user_id: &str,
+        connection_id: &str,
+        reason: &str,
+    ) {
+        use mm_model::websocket_message::{WEBSOCKET_EVENT_FILE_UPLOAD_REJECTED, WebSocketEvent};
+
+        if user_id.is_empty() {
+            return;
+        }
+        let mut message = WebSocketEvent::new(
+            WEBSOCKET_EVENT_FILE_UPLOAD_REJECTED,
+            "",
+            &info.channel_id,
+            user_id,
+            None,
+            "",
+        );
+        if !connection_id.is_empty() {
+            if let Some(broadcast) = message.get_broadcast() {
+                let mut broadcast = broadcast.clone();
+                broadcast.connection_id = connection_id.to_owned();
+                message = message.set_broadcast(broadcast);
+            }
+        }
+        message.add("file_name", serde_json::Value::from(info.name.as_str()));
+        message.add("rejection_reason", serde_json::Value::from(reason));
+        message.add(
+            "channel_id",
+            serde_json::Value::from(info.channel_id.as_str()),
+        );
         self.publish(message).await;
     }
 }

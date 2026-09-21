@@ -76,9 +76,11 @@ impl HooksClient {
     /// Go: `FileWillBeUploaded(c *Context, info *model.FileInfo, file io.Reader, output
     /// io.Writer) (*model.FileInfo, string)`.
     ///
-    /// The file info the caller passes is the default answer, as it is for the other hooks that
-    /// may rewrite their argument — but this one does not decode into it, so a plugin that
-    /// answers replaces it outright (client_rpc.go).
+    /// The file info the caller passes is the default answer, and the reply is decoded **into**
+    /// it, as for the other hooks that may rewrite their argument: Go seeds
+    /// `_returns := &Z_FileWillBeUploadedReturns{A: _args.B}` (client_rpc.go:839), so a field
+    /// the plugin's answer leaves at its zero value keeps the caller's, and a plugin answering
+    /// `nil` leaves the caller's info as it was.
     pub async fn file_will_be_uploaded<R, W>(
         &self,
         context: Option<Box<Context>>,
@@ -140,7 +142,11 @@ impl HooksClient {
             uploaded_file_stream,
             replacement_file_stream,
         };
-        let returns = match self.rpc("FileWillBeUploaded", &args).await {
+        let returns = match self
+            .client
+            .call_into("Plugin.FileWillBeUploaded", &args, default.clone())
+            .await
+        {
             Ok(returns) => returns,
             Err(e) => {
                 tracing::error!(error = %e, "RPC call FileWillBeUploaded to plugin failed.");

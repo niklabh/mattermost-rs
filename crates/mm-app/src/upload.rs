@@ -12,9 +12,11 @@
 //! `FileOffset == FileSize` on Go's side and be refused as over-long
 //! (`api.upload.upload_data.invalid_content_length`).
 //!
-//! The `FileWillBeUploaded` plugin hook (`runPluginsHook`) is not applicable: there is no plugin
-//! host, so the hook list is empty and Go's own early return (`hookHasRunCh` closed unread) is the
-//! path taken. Content extraction (`ExtractContentFromFileInfo`, a goroutine) is [D-651].
+//! The `FileWillBeUploaded` plugin hook (`runPluginsHook`) runs under the Rust plugin host, and
+//! **the plugins cannot read the upload**: Go closes the reader it made the `FileInfo` from and
+//! then hands that same closed reader to the hook, so `serveIOReader`'s first read fails and every
+//! plugin sees an empty file. They can still replace it, refuse it or rewrite its `FileInfo`.
+//! Content extraction (`ExtractContentFromFileInfo`, a goroutine) is [D-651].
 
 use std::collections::HashMap;
 
@@ -213,6 +215,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(upload_id = %us.id, file_offset = us.file_offset, bytes = data.len()))]
     pub async fn upload_data(
         &self,
+        hook_ctx: &crate::plugin_hooks::HookContext,
         mut us: UploadSession,
         data: &[u8],
     ) -> Result<Option<FileInfo>, PrepareError> {
@@ -353,7 +356,12 @@ impl App {
             info.id.clone_from(&us.req_file_id);
         }
 
-        // `runPluginsHook`: no plugin host, so the hook has not run and Go returns early.
+        // `runPluginsHook(rctx, info, file)` with the reader `genFileInfoFromReader` read and Go
+        // then closed: nothing left to lend (see the module docs).
+        let ran = self
+            .run_plugins_hook(hook_ctx, &mut info, Vec::new())
+            .await
+            .map_err(PrepareError::App)?;
 
         // Image post-processing.
         if info.is_image() && !info.is_svg() {
@@ -388,6 +396,13 @@ impl App {
             let dir = go_path::dir(&info.path);
             info.preview_path = format!("{dir}/{stem}_preview.{ext}");
             info.thumbnail_path = format!("{dir}/{stem}_thumb.{ext}");
+            // `a.ReadFile(uploadPath)`: storage again, so a plugin's replacement is what the
+            // images show when it landed on the upload's own path.
+            let file = if ran {
+                self.read_file(&upload_path).await?
+            } else {
+                file
+            };
             self.handle_images(&info, file).await?;
         }
 

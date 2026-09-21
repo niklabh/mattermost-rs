@@ -14314,6 +14314,20 @@ the plugins before serving bytes; the other 17 hooks are [D-932].
 Mutation tally (`plugin-hooks-downloads.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
 
+## Plugin hook call sites: `FileWillBeUploaded` (2026-09-21)
+
+Plugin plan **Phase 5, 19 of 35**. Under `MMRS_PLUGIN_HOST=rust` the two served upload paths run
+`runPluginsHook`; the other 16 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `runPluginsHook`, `sendFileUploadRejectedEvent` (app/upload.go:56, app/file.go:1996) | `mm_app::plugin_hooks::{run_plugins_hook, file_info_from_wire}` | DONE (the event is untested) | `parity::plugin_hooks::the_upload_hook_fires_as_go_fires_it` | One reader and one writer for every plugin; each answer lands on the upload's own `FileInfo` before a refusal is looked at; a refusal removes the file and is a 400 naming the file by the plugin's name for it. |
+| the hook in `UploadFileX` and `UploadData` (app/file.go:853, app/upload.go:312) | `App::upload_file_x`, `App::upload_data` | DONE | same | Both go back to storage for the images once a plugin ran, so a replacement is what the thumbnails show. The resumable path lends the plugins a reader Go has already closed: they read nothing. |
+| `hooksRPCClient.FileWillBeUploaded`'s seeded reply (client_rpc.go:839) | `mm_plugin::rpc::HooksClient::file_will_be_uploaded` | FIXED | 1 conformance + same | Go decodes the answer **into** the caller's info; this client had been taking the answer as it came, so a one-field answer zeroed the rest. |
+
+Mutation tally (`plugin-hooks-uploads.plan`): 12 run, 10 caught, 2 controls survived, 0 harness
+faults.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

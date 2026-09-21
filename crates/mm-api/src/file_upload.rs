@@ -117,14 +117,26 @@ async fn serve(
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok());
     let query = parts.uri.query().unwrap_or_default();
+    let hook_ctx = crate::plugin_context::hook_context(parts, Some(&session.0));
 
     let response = match crate::multipart::boundary_of(content_type) {
-        Ok(_) => upload_multipart(state, session, content_type, &bytes, query, timestamp).await?,
+        Ok(_) => {
+            upload_multipart(
+                state,
+                session,
+                content_type,
+                &bytes,
+                query,
+                timestamp,
+                &hook_ctx,
+            )
+            .await?
+        }
         // `ErrNotMultipart` and `ErrMissingBoundary` both fall to the simple path in Go's
         // `switch err { case nil / case ErrNotMultipart / default }` — no: `ErrMissingBoundary`
         // is `default`, the 400. Only a genuinely non-multipart type is the simple upload.
         Err(crate::multipart::MultipartError::NotMultipart) => {
-            upload_simple(state, session, &bytes, query, timestamp).await?
+            upload_simple(state, session, &bytes, query, timestamp, &hook_ctx).await?
         }
         Err(err) => {
             return Err(read_request_error(&err.to_string()).into());
@@ -161,6 +173,7 @@ async fn upload_simple(
     body: &[u8],
     query: &str,
     timestamp: chrono::DateTime<chrono::Local>,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Result<FileUploadResponse, ForwardWholeRequest>, Outcome> {
     let params = query_params(query);
     let channel_id = params.first("channel_id");
@@ -185,6 +198,7 @@ async fn upload_simple(
         content_length: declared_content_length_simple(body),
         client_id,
         data: body,
+        hook_ctx,
     };
     match state.app.upload_file_x(&task).await {
         Ok(info) => Ok(Ok(one_file_response(info, client_id))),
@@ -202,6 +216,7 @@ async fn upload_multipart(
     body: &[u8],
     query: &str,
     timestamp: chrono::DateTime<chrono::Local>,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Result<FileUploadResponse, ForwardWholeRequest>, Outcome> {
     let form = crate::multipart::parse_form(content_type, body)
         .map_err(|err| Outcome::from(read_request_error(&err.to_string())))?;
@@ -269,6 +284,7 @@ async fn upload_multipart(
             content_length: -1,
             client_id,
             data: &file.data,
+            hook_ctx,
         };
         match state.app.upload_file_x(&task).await {
             Ok(info) => {
