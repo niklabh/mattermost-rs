@@ -14339,6 +14339,22 @@ Plugin plan **Phase 5, 20 of 35**; the other 15 hooks are [D-932].
 Mutation tally (`plugin-hooks-preferences.plan`): 5 run, 3 caught, 2 controls survived, 0 harness
 faults.
 
+## Plugin hook call sites: the channel lifecycle (2026-09-21)
+
+Plugin plan **Phase 5, 24 of 35**; the other 11 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `ChannelHasBeenCreated` in `CreateChannel`, `handleCreationEvent`, `createGroupChannel` (channel.go:340, :430, :716) | `mm_app::plugin_hooks::channel_has_been_created`, `App::{create_channel, get_or_create_direct_channel, create_group_channel}` | DONE | `parity::plugin_hooks::the_channel_hooks_fire_as_go_fires_them` | Not for a channel that already existed. The DM hook fires before `direct_added`. |
+| `runGuardedChannelWillBeUpdated` (guarded_hooks.go:298) | `run_guarded_channel_will_be_updated`, `channel_to_wire`, `channel_from_wire` | DONE (the type-mutation refusal needs a guard, which no route writes) | same | A replacement is taken whole, not merged: Go leaves this reply unseeded. |
+| `runGuardedChannelWillBeRestored` (guarded_hooks.go:497), `ChannelWillBeArchived` (channel.go:1745) | `run_guarded_channel_will_be_restored`, `run_channel_will_be_archived` | DONE | same | Archive is a plain `RunMultiHook`; restore is guarded. Both refuse with a `Reason` parameter. |
+
+The search routes gained a context too: an `in:@user` filter creates the DM it names
+(`parseAndFetchChannelIdByNameFromInFilter`), and that creation fires the hook.
+
+Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
+faults.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

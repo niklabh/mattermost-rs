@@ -33,6 +33,7 @@ pub async fn convert_group_message_to_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -95,7 +96,7 @@ pub async fn convert_group_message_to_channel(
 
     let updated = match state
         .app
-        .convert_group_message_to_channel(&session.0.user_id, &conversion)
+        .convert_group_message_to_channel(&hook_ctx, &session.0.user_id, &conversion)
         .await
     {
         Ok(MemberWrite::Done(updated)) => updated,

@@ -1,0 +1,25 @@
+# Mutation plan for the channel lifecycle hooks — `ChannelHasBeenCreated` on its three paths,
+# `ChannelWillBeUpdated`, `ChannelWillBeArchived` and `ChannelWillBeRestored`
+# (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-channels.plan
+#
+# The oracle is `parity::plugin_hooks::the_channel_hooks_fire_as_go_fires_them`.
+#
+# Not mutated: the guarded phase B and the type-mutation refusal (no route writes a
+# `ChannelGuards` row, and the recorder never changes a type). The last two lines are the no-op
+# controls and must SURVIVE.
+
+open-channel-created-fires-nothing	crates/mm-app/src/channel_create.rs	            self.channel_has_been_created(ctx, channel);	            let _ = ctx;	api	plugin_hooks::the_channel
+direct-channel-created-fires-nothing	crates/mm-app/src/channel_create.rs	            .invalidate_channel_members_for_user(other_user_id);\n        self.channel_has_been_created(ctx, channel);	            .invalidate_channel_members_for_user(other_user_id);\n        let _ = ctx;	api	plugin_hooks::the_channel
+group-channel-created-fires-nothing	crates/mm-app/src/channel_create.rs	        self.channel_has_been_created(ctx, &channel);	        let _ = ctx;	api	plugin_hooks::the_channel
+update-hook-skipped	crates/mm-app/src/channel_write.rs	        if !channel.is_space() {\n            *channel = self	        if false {\n            *channel = self	api	plugin_hooks::the_channel
+update-refusal-ignored	crates/mm-app/src/plugin_hooks.rs	            if !returns.b.is_empty() {\n                return Err(rejected(&returns.b));\n            }\n            if let Some(replacement) = returns.a.as_deref() {\n                channel = channel_from_wire(replacement);\n                last_replacing	            if false {\n                return Err(rejected(&returns.b));\n            }\n            if let Some(replacement) = returns.a.as_deref() {\n                channel = channel_from_wire(replacement);\n                last_replacing	api	plugin_hooks::the_channel
+update-replacement-merged-not-taken-whole	crates/mm-app/src/plugin_hooks.rs	                channel = channel_from_wire(replacement);\n                last_replacing	                channel.header.clone_from(&replacement.header);\n                last_replacing	api	plugin_hooks::the_channel
+update-old-channel-is-the-new-one	crates/mm-app/src/plugin_hooks.rs	                    c: Some(Box::new(old_wire.clone())),\n                })\n                .await;\n            if !returns.b.is_empty() {	                    c: Some(Box::new(channel_to_wire(&channel))),\n                })\n                .await;\n            if !returns.b.is_empty() {	api	plugin_hooks::the_channel
+archive-hook-skipped	crates/mm-app/src/channel_write.rs	            self.run_channel_will_be_archived(ctx, channel).await?;	            let _ = ctx;	api	plugin_hooks::the_channel
+archive-refusal-ignored	crates/mm-app/src/plugin_hooks.rs	            if !returns.a.is_empty() {\n                return Err(member_rejection_error(\n                    "DeleteChannel",	            if false {\n                return Err(member_rejection_error(\n                    "DeleteChannel",	api	plugin_hooks::the_channel
+restore-hook-skipped	crates/mm-app/src/channel_write.rs	            self.run_guarded_channel_will_be_restored(ctx, channel)\n                .await?;	            let _ = ctx;	api	plugin_hooks::the_channel
+restore-refusal-ignored	crates/mm-app/src/plugin_hooks.rs	                .await;\n            if !returns.a.is_empty() {\n                return Err(rejected(&returns.a));\n            }\n        }\n\n        for plugin_id in &guards {	                .await;\n            if false {\n                return Err(rejected(&returns.a));\n            }\n        }\n\n        for plugin_id in &guards {	api	plugin_hooks::the_channel
+control-type-the-last-replacer	crates/mm-app/src/plugin_hooks.rs	        let mut last_replacing = None;	        let mut last_replacing: Option<String> = None;	api	plugin_hooks::the_channel
+control-reorder-two-channel-fields	crates/mm-app/src/plugin_hooks.rs	        header: channel.header.clone(),\n        purpose: channel.purpose.clone(),	        purpose: channel.purpose.clone(),\n        header: channel.header.clone(),	api	plugin_hooks::the_channel

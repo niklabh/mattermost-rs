@@ -38,6 +38,7 @@
 
 use std::sync::Arc;
 
+use mm_model::channel::{Channel, ChannelBannerInfo};
 use mm_model::channel_member::ChannelMember;
 use mm_model::file_info::FileInfo;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
@@ -289,6 +290,101 @@ pub fn team_member_from_wire(wire: &wire_model::TeamMember) -> TeamMember {
         scheme_admin: wire.scheme_admin,
         explicit_roles: wire.explicit_roles.clone(),
         create_at: wire.create_at,
+    }
+}
+
+/// A channel as gob sends it, field for field (`model.Channel`, channel.go:64).
+pub fn channel_to_wire(channel: &Channel) -> wire_model::Channel {
+    wire_model::Channel {
+        id: channel.id.clone(),
+        create_at: channel.create_at,
+        update_at: channel.update_at,
+        delete_at: channel.delete_at,
+        team_id: channel.team_id.clone(),
+        r#type: channel.channel_type.clone(),
+        display_name: channel.display_name.clone(),
+        name: channel.name.clone(),
+        header: channel.header.clone(),
+        purpose: channel.purpose.clone(),
+        last_post_at: channel.last_post_at,
+        total_msg_count: channel.total_msg_count,
+        extra_update_at: channel.extra_update_at,
+        creator_id: channel.creator_id.clone(),
+        scheme_id: channel.scheme_id.clone(),
+        props: props_to_wire(channel.props.as_ref()),
+        group_constrained: channel.group_constrained,
+        auto_translation: channel.auto_translation,
+        shared: channel.shared,
+        total_msg_count_root: channel.total_msg_count_root,
+        policy_id: channel.policy_id.clone(),
+        last_root_post_at: channel.last_root_post_at,
+        banner_info: channel.banner_info.as_ref().map(|b| {
+            Box::new(wire_model::ChannelBannerInfo {
+                enabled: b.enabled,
+                text: b.text.clone(),
+                background_color: b.background_color.clone(),
+            })
+        }),
+        policy_enforced: channel.policy_enforced,
+        policy_actions: channel
+            .policy_actions
+            .iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
+        policy_is_active: channel.policy_is_active,
+        default_category_name: channel.default_category_name.clone(),
+        managed_category_name: channel.managed_category_name.clone(),
+        discoverable: channel.discoverable,
+    }
+}
+
+/// A channel a `ChannelWillBeUpdated` plugin answered with.
+///
+/// **Taken whole, not merged.** Unlike the post and member hooks, Go's client leaves this reply
+/// unseeded (`_returns := &Z_ChannelWillBeUpdatedReturns{}`, client_rpc_generated.go:1992), so the
+/// replacement is a fresh struct: a field the plugin left out is zero, and a map it left empty is
+/// nil. A plugin that answers a channel carrying only its new header has blanked the name.
+pub fn channel_from_wire(wire: &wire_model::Channel) -> Channel {
+    Channel {
+        id: wire.id.clone(),
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        delete_at: wire.delete_at,
+        team_id: wire.team_id.clone(),
+        channel_type: wire.r#type.clone(),
+        display_name: wire.display_name.clone(),
+        name: wire.name.clone(),
+        header: wire.header.clone(),
+        purpose: wire.purpose.clone(),
+        last_post_at: wire.last_post_at,
+        total_msg_count: wire.total_msg_count,
+        extra_update_at: wire.extra_update_at,
+        creator_id: wire.creator_id.clone(),
+        scheme_id: wire.scheme_id.clone(),
+        props: (!wire.props.is_empty()).then(|| props_from_wire(&wire.props)),
+        group_constrained: wire.group_constrained,
+        auto_translation: wire.auto_translation,
+        shared: wire.shared,
+        total_msg_count_root: wire.total_msg_count_root,
+        policy_id: wire.policy_id.clone(),
+        last_root_post_at: wire.last_root_post_at,
+        banner_info: wire.banner_info.as_deref().map(|b| ChannelBannerInfo {
+            enabled: b.enabled,
+            text: b.text.clone(),
+            background_color: b.background_color.clone(),
+        }),
+        policy_enforced: wire.policy_enforced,
+        policy_actions: (!wire.policy_actions.is_empty()).then(|| {
+            wire.policy_actions
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect()
+        }),
+        policy_is_active: wire.policy_is_active,
+        default_category_name: wire.default_category_name.clone(),
+        managed_category_name: wire.managed_category_name.clone(),
+        discoverable: wire.discoverable,
     }
 }
 
@@ -1691,5 +1787,239 @@ impl App {
                 }
             },
         );
+    }
+    /// `ChannelHasBeenCreated` (hook 13) — the three creation sites: the end of `CreateChannel`
+    /// (channel.go:340, not for a space), `handleCreationEvent` for a new DM (:430, **before** the
+    /// `direct_added` event), and the end of `createGroupChannel` (:716). None fires when the
+    /// channel already existed.
+    pub(crate) fn channel_has_been_created(&self, ctx: &HookContext, channel: &Channel) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let (context, wire) = (ctx.boxed_wire(), channel_to_wire(channel));
+        spawn_multi_hook(
+            environment,
+            hook_id::CHANNEL_HAS_BEEN_CREATED,
+            move |hooks| {
+                let args = wire_plugin::Z_ChannelHasBeenCreatedArgs {
+                    a: context.clone(),
+                    b: Some(Box::new(wire.clone())),
+                };
+                async move {
+                    hooks.channel_has_been_created(args).await;
+                }
+            },
+        );
+    }
+
+    /// Port of `runGuardedChannelWillBeUpdated` (guarded_hooks.go:298) — hook 52, between
+    /// `UpdateChannel`'s re-read of the old channel and the store update.
+    ///
+    /// A refusal is `reason != ""` with the reason as a `Reason` parameter of
+    /// `app.channel.update_channel.rejected_by_plugin`. A replacement is taken whole
+    /// ([`channel_from_wire`]). **On a guarded channel only**, a replacement that changes `Type`
+    /// is refused, naming the plugin that last replaced it — after phase A as a whole, and after
+    /// each phase B answer.
+    pub(crate) async fn run_guarded_channel_will_be_updated(
+        &self,
+        ctx: &HookContext,
+        new_channel: Channel,
+        old_channel: &Channel,
+    ) -> Result<Channel, Box<AppError>> {
+        const CALLER: &str = "UpdateChannel";
+        let rejected = |reason: &str| {
+            member_rejection_error(
+                CALLER,
+                "app.channel.update_channel.rejected_by_plugin",
+                reason,
+            )
+        };
+        let type_mutation = |plugin_id: &str| {
+            AppError::boxed(
+                CALLER,
+                "app.channel.update_channel.plugin_type_mutation.app_error",
+                Some(std::collections::HashMap::from([(
+                    "PluginID".to_owned(),
+                    serde_json::Value::String(plugin_id.to_owned()),
+                )])),
+                String::new(),
+                400,
+            )
+        };
+
+        if !self.plugin_host().hosted() {
+            return Ok(new_channel);
+        }
+        let (guards, refused) = self.resolve_guards(&new_channel.id, CALLER).await;
+        if let Some(err) = refused {
+            return Err(err);
+        }
+        let Some(environment) = self.hook_environment() else {
+            return Ok(new_channel);
+        };
+
+        let old_wire = channel_to_wire(old_channel);
+        let mut channel = new_channel;
+        let mut last_replacing = None;
+        for (hooks, manifest) in environment.hooks_implementing(hook_id::CHANNEL_WILL_BE_UPDATED) {
+            if guards.contains(&manifest.id) {
+                continue;
+            }
+            let returns = hooks
+                .channel_will_be_updated(wire_plugin::Z_ChannelWillBeUpdatedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(channel_to_wire(&channel))),
+                    c: Some(Box::new(old_wire.clone())),
+                })
+                .await;
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                channel = channel_from_wire(replacement);
+                last_replacing = Some(manifest.id.clone());
+            }
+        }
+        if !guards.is_empty() {
+            if let Some(plugin_id) = &last_replacing {
+                if channel.channel_type != old_channel.channel_type {
+                    return Err(type_mutation(plugin_id));
+                }
+            }
+        }
+
+        for plugin_id in &guards {
+            let Ok(hooks) = environment.hooks_for_plugin(plugin_id) else {
+                tracing::error!(
+                    error_id = "guard_plugin_inactive",
+                    channel_id = %channel.id,
+                    caller = CALLER,
+                    plugin_ids = ?[plugin_id],
+                    "Channel guard rejected operation: claiming plugin is not active",
+                );
+                return Err(inactive_guard_error(CALLER));
+            };
+            let (returns, rpc_err) = hooks
+                .channel_will_be_updated_with_rpc_err(wire_plugin::Z_ChannelWillBeUpdatedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(channel_to_wire(&channel))),
+                    c: Some(Box::new(old_wire.clone())),
+                })
+                .await;
+            if rpc_err.is_some() {
+                return Err(guard_hook_failed_error(plugin_id, CALLER));
+            }
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                channel = channel_from_wire(replacement);
+                if channel.channel_type != old_channel.channel_type {
+                    return Err(type_mutation(plugin_id));
+                }
+            }
+        }
+        Ok(channel)
+    }
+
+    /// Port of `runGuardedChannelWillBeRestored` (guarded_hooks.go:497) — hook 53, before the
+    /// store restore. Refuse-only: there is no replacement.
+    pub(crate) async fn run_guarded_channel_will_be_restored(
+        &self,
+        ctx: &HookContext,
+        channel: &Channel,
+    ) -> Result<(), Box<AppError>> {
+        const CALLER: &str = "RestoreChannel";
+        let rejected = |reason: &str| {
+            member_rejection_error(
+                CALLER,
+                "app.channel.restore_channel.rejected_by_plugin",
+                reason,
+            )
+        };
+
+        if !self.plugin_host().hosted() {
+            return Ok(());
+        }
+        let (guards, refused) = self.resolve_guards(&channel.id, CALLER).await;
+        if let Some(err) = refused {
+            return Err(err);
+        }
+        let Some(environment) = self.hook_environment() else {
+            return Ok(());
+        };
+        let wire = channel_to_wire(channel);
+
+        for (hooks, manifest) in environment.hooks_implementing(hook_id::CHANNEL_WILL_BE_RESTORED) {
+            if guards.contains(&manifest.id) {
+                continue;
+            }
+            let returns = hooks
+                .channel_will_be_restored(wire_plugin::Z_ChannelWillBeRestoredArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(wire.clone())),
+                })
+                .await;
+            if !returns.a.is_empty() {
+                return Err(rejected(&returns.a));
+            }
+        }
+
+        for plugin_id in &guards {
+            let Ok(hooks) = environment.hooks_for_plugin(plugin_id) else {
+                tracing::error!(
+                    error_id = "guard_plugin_inactive",
+                    channel_id = %channel.id,
+                    caller = CALLER,
+                    plugin_ids = ?[plugin_id],
+                    "Channel guard rejected operation: claiming plugin is not active",
+                );
+                return Err(inactive_guard_error(CALLER));
+            };
+            let (returns, rpc_err) = hooks
+                .channel_will_be_restored_with_rpc_err(wire_plugin::Z_ChannelWillBeRestoredArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(wire.clone())),
+                })
+                .await;
+            if rpc_err.is_some() {
+                return Err(guard_hook_failed_error(plugin_id, CALLER));
+            }
+            if !returns.a.is_empty() {
+                return Err(rejected(&returns.a));
+            }
+        }
+        Ok(())
+    }
+
+    /// `ChannelWillBeArchived` (hook 51) — channel.go:1745, after `DeleteChannel`'s default-channel
+    /// refusal and before the store write. **A plain `RunMultiHook`**, not guarded: archiving is
+    /// the one channel lifecycle step guards do not claim. Stops at the first refusal.
+    pub(crate) async fn run_channel_will_be_archived(
+        &self,
+        ctx: &HookContext,
+        channel: &Channel,
+    ) -> Result<(), Box<AppError>> {
+        let Some(environment) = self.hook_environment() else {
+            return Ok(());
+        };
+        let wire = channel_to_wire(channel);
+        for (hooks, _manifest) in environment.hooks_implementing(hook_id::CHANNEL_WILL_BE_ARCHIVED)
+        {
+            let returns = hooks
+                .channel_will_be_archived(wire_plugin::Z_ChannelWillBeArchivedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(wire.clone())),
+                })
+                .await;
+            if !returns.a.is_empty() {
+                return Err(member_rejection_error(
+                    "DeleteChannel",
+                    "app.channel.delete_channel.rejected_by_plugin",
+                    &returns.a,
+                ));
+            }
+        }
+        Ok(())
     }
 }

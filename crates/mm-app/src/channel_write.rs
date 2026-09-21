@@ -35,8 +35,6 @@
 //!
 //! - `ChannelAccessControlled` (ABAC) — `MinimumEnterpriseAdvancedLicense` gates it to `false`
 //!   on an unlicensed installation, and the handlers forward a licensed one outright.
-//! - `runGuardedChannelWillBeUpdated` / `…WillBeArchived` / `…WillBeRestored` — plugin hooks,
-//!   the identity with no plugin environment, the same reading as `runGuardedDraftWillBeUpserted`.
 //! - `addChannelToDefaultCategory` — a sidebar write; the handler forwards the patches that
 //!   would reach it. See [`default_category_after_patch`].
 //! - `cleanupChannelAccessControlPolicy` and `CancelPendingChannelJoinRequestsOnConvert` —
@@ -123,12 +121,17 @@ impl App {
     /// `app.channel.update.bad_id`: `patchChannel` has no archived-channel guard of its own, so
     /// the store's is the one that fires. Measured against the running Go server.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
-    pub async fn update_channel(&self, channel: &mut Channel) -> AppResult<()> {
+    pub async fn update_channel(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        channel: &mut Channel,
+    ) -> AppResult<()> {
         let params = std::collections::HashMap::from([(
             "channel_id".to_owned(),
             serde_json::Value::String(channel.id.clone()),
         )]);
-        self.store()
+        let old_channel = self
+            .store()
             .channel()
             .get(&channel.id)
             .await
@@ -152,6 +155,14 @@ impl App {
                     )
                 }
             })?;
+
+        // `runGuardedChannelWillBeUpdated`, not for a space. The dispatcher takes the channel by
+        // value because a plugin's answer replaces it whole; the clone is the value it replaces.
+        if !channel.is_space() {
+            *channel = self
+                .run_guarded_channel_will_be_updated(ctx, channel.clone(), &old_channel)
+                .await?;
+        }
 
         self.store()
             .channel()
@@ -215,6 +226,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
     pub async fn patch_channel(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         channel: &mut Channel,
         patch: &ChannelPatch,
         user_id: &str,
@@ -242,7 +254,7 @@ impl App {
         let old_purpose = channel.purpose.clone();
 
         channel.patch(patch);
-        self.update_channel(channel).await?;
+        self.update_channel(ctx, channel).await?;
 
         if old_display_name != channel.display_name {
             self.post_update_channel_display_name_message(
@@ -307,6 +319,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
     pub async fn update_channel_privacy(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         channel: &mut Channel,
         user: Option<&User>,
     ) -> AppResult<ChannelWrite> {
@@ -327,7 +340,7 @@ impl App {
             channel.discoverable = false;
         }
 
-        self.update_channel(channel).await?;
+        self.update_channel(ctx, channel).await?;
 
         // `postChannelPrivacyMessage`: the author is the user, or the system bot when there is
         // none (the local-mode handler) — and a bot that cannot be fetched fails the post the
@@ -349,7 +362,7 @@ impl App {
             } else {
                 channel.channel_type = CHANNEL_TYPE_OPEN.to_owned();
             }
-            if let Err(err) = self.update_channel(channel).await {
+            if let Err(err) = self.update_channel(ctx, channel).await {
                 tracing::error!(
                     error = %err,
                     "Failed to revert channel privacy after posting an update message failed",
@@ -404,7 +417,12 @@ impl App {
     /// The websocket event carries it and the handler's body does not, so it is a return value
     /// rather than a field on the channel the caller holds.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
-    pub async fn delete_channel(&self, channel: &Channel, user_id: &str) -> AppResult<i64> {
+    pub async fn delete_channel(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        channel: &Channel,
+        user_id: &str,
+    ) -> AppResult<i64> {
         // Go runs the two webhook reads in goroutines and joins them below; sequential here,
         // because the join order is what decides which error wins and concurrency would make it
         // a race. Go's join order is incoming, then outgoing.
@@ -478,6 +496,10 @@ impl App {
                 String::new(),
                 400,
             ));
+        }
+
+        if !channel.is_space() {
+            self.run_channel_will_be_archived(ctx, channel).await?;
         }
 
         let delete_at = get_millis();
@@ -624,7 +646,12 @@ impl App {
     /// The unarchive post is the only reason the lookup exists, which is exactly why a port that
     /// dropped it would look tidier and answer differently.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
-    pub async fn restore_channel(&self, channel: &mut Channel, user_id: &str) -> AppResult<()> {
+    pub async fn restore_channel(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        channel: &mut Channel,
+        user_id: &str,
+    ) -> AppResult<()> {
         if channel.delete_at == 0 {
             return Err(AppError::boxed(
                 "restoreChannel",
@@ -633,6 +660,11 @@ impl App {
                 String::new(),
                 400,
             ));
+        }
+
+        if !channel.is_space() {
+            self.run_guarded_channel_will_be_restored(ctx, channel)
+                .await?;
         }
 
         self.store()

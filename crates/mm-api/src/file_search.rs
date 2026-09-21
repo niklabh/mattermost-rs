@@ -114,6 +114,7 @@ async fn search_files(
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -122,7 +123,7 @@ async fn search_files(
         }
     };
 
-    match serve_search(&state, team_id, session, &bytes).await {
+    match serve_search(&state, team_id, session, &bytes, &hook_ctx).await {
         Outcome::Served(response) => response,
         Outcome::Failed(err) => err.into_response(),
         Outcome::Forward => {
@@ -148,6 +149,7 @@ async fn serve_search(
     team_id: &str,
     session: &AuthenticatedSession,
     bytes: &[u8],
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Outcome {
     let params = match decode_search_parameter(bytes) {
         Ok(params) => params,
@@ -170,6 +172,7 @@ async fn serve_search(
     let (results, _all_files_have_membership) = match state
         .app
         .search_files_in_team_for_user(
+            hook_ctx,
             terms,
             user_id,
             team_id,

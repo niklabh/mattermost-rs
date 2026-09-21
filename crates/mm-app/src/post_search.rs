@@ -84,6 +84,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub async fn search_posts_for_user(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         terms: &str,
         user_id: &str,
         team_id: &str,
@@ -112,6 +113,7 @@ impl App {
             if params.terms != "*" {
                 params.in_channels = self
                     .convert_channel_names_to_channel_ids(
+                        ctx,
                         params.in_channels,
                         user_id,
                         team_id,
@@ -120,6 +122,7 @@ impl App {
                     .await?;
                 params.excluded_channels = self
                     .convert_channel_names_to_channel_ids(
+                        ctx,
                         params.excluded_channels,
                         user_id,
                         team_id,
@@ -172,6 +175,7 @@ impl App {
     /// `in:nonexistent` is an empty page rather than an error.
     pub(crate) async fn convert_channel_names_to_channel_ids(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         mut channels: StringArray,
         user_id: &str,
         team_id: &str,
@@ -180,6 +184,7 @@ impl App {
         for name in channels.iter_mut() {
             match self
                 .parse_and_fetch_channel_id_by_name_from_in_filter(
+                    ctx,
                     name,
                     user_id,
                     team_id,
@@ -230,6 +235,7 @@ impl App {
     /// above `convertChannelNamesToChannelIds` records.
     async fn parse_and_fetch_channel_id_by_name_from_in_filter(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         channel_name: &str,
         user_id: &str,
         team_id: &str,
@@ -248,7 +254,10 @@ impl App {
 
             let user = self.get_user_by_username(rest).await?;
             return Ok(
-                match self.get_or_create_direct_channel(user_id, &user.id).await? {
+                match self
+                    .get_or_create_direct_channel(ctx, user_id, &user.id)
+                    .await?
+                {
                     ChannelCreate::Created(channel) => InFilterChannel::Found(channel),
                     ChannelCreate::Forward(reason) => InFilterChannel::Forward(reason),
                 },

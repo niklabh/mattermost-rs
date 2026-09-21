@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 20 of 35 (2026-09-21)
+### Phase 5 · Hook call sites — IN PROGRESS, 24 of 35 (2026-09-21)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -586,6 +586,12 @@ resumable path Go lends the plugins a reader it has already closed, so they read
 **Done sixth, `PreferencesHaveChanged`** — 20 of 35, 22 of 46 — from every served caller of
 `UpdatePreferences`: the preferences route, its local twin, and the custom-status writes that save
 the recent statuses. A deletion fires nothing; Go has no hook for it.
+
+**Done seventh, the channel lifecycle:** `ChannelHasBeenCreated` on all three creation paths,
+`ChannelWillBeUpdated` and `ChannelWillBeRestored` (guarded, two-phase) and
+`ChannelWillBeArchived` (plain) — 24 of 35, 28 of 46. The finding: unlike the post and member
+hooks, Go does not seed `ChannelWillBeUpdated`'s reply, so a replacement is taken **whole** — a
+plugin that answers with only a header blanks every other field and the store refuses the rest.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 
