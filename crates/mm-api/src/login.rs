@@ -40,6 +40,7 @@ use mm_model::session::{
 use mm_model::utils::{AppError, StringMap, get_millis};
 
 use crate::AppState;
+use crate::auth_writes::OptionalSession;
 use crate::error::ApiError;
 use crate::proxy;
 use crate::sessions::{check_embedded_cookie, render_session_cookie};
@@ -161,10 +162,13 @@ fn mask_login_error(state: &AppState, err: ApiError) -> ApiError {
 #[tracing::instrument(skip_all, fields(forwarded = false, outcome))]
 pub async fn login(
     State(state): State<AppState>,
-    _csrf: crate::auth::CsrfGuard,
+    session: OptionalSession,
     request: Request,
 ) -> Response {
     let headers = request.headers().clone();
+    // `pluginContext(rctx)` — `APIHandler` resolves any token the request carries, so a login
+    // sent with a live session hands that session's id to `UserWillLogIn`.
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
     let (request, bytes) = match split_body(request).await {
         Ok(pair) => pair,
         Err(err) => return mask_login_error(&state, err).into_response(),
@@ -222,6 +226,7 @@ pub async fn login(
     match serve_login(
         &state,
         &headers,
+        &hook_ctx,
         id,
         login_id,
         password,
@@ -246,6 +251,7 @@ pub async fn login(
 async fn serve_login(
     state: &AppState,
     headers: &HeaderMap,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
     id: &str,
     login_id: &str,
     password: &str,
@@ -321,7 +327,7 @@ async fn serve_login(
     };
     let session = state
         .app
-        .do_login(&user, &opts, user_agent(headers))
+        .do_login(hook_ctx, &user, &opts, user_agent(headers))
         .await?;
 
     // `GetUserTermsOfService` is **not** gated on anything here — unlike `getUser`, which only
@@ -631,17 +637,22 @@ pub async fn login_cws(
 #[tracing::instrument(skip_all, fields(outcome))]
 pub async fn login_with_desktop_token(
     State(state): State<AppState>,
-    _csrf: crate::auth::CsrfGuard,
+    session: OptionalSession,
     request: Request,
 ) -> Response {
-    match desktop_token_login(state, request).await {
+    match desktop_token_login(state, session, request).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
 }
 
-async fn desktop_token_login(state: AppState, request: Request) -> Result<Response, ApiError> {
+async fn desktop_token_login(
+    state: AppState,
+    session: OptionalSession,
+    request: Request,
+) -> Result<Response, ApiError> {
     let headers = request.headers().clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
     let (_, bytes) = split_body(request).await?;
     let props = map_from_json(&bytes);
     let get = |key: &str| props.get(key).map_or("", String::as_str);
@@ -680,7 +691,7 @@ async fn desktop_token_login(state: AppState, request: Request) -> Result<Respon
     };
     let session = state
         .app
-        .do_login(&user, &opts, user_agent(&headers))
+        .do_login(&hook_ctx, &user, &opts, user_agent(&headers))
         .await?;
     tracing::Span::current().record("outcome", "session");
 

@@ -202,7 +202,8 @@ async fn delete_resolved_user(
                 Ok(false) => {}
                 Err(err) => return ApiError::from(err).into_response(),
             }
-            if let Err(err) = state.app.permanent_delete_user(&user).await {
+            let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+            if let Err(err) = state.app.permanent_delete_user(&hook_ctx, &user).await {
                 return ApiError::from(err).into_response();
             }
             return status_ok();
@@ -239,7 +240,8 @@ async fn delete_resolved_user(
         Err(err) => return ApiError::from(err).into_response(),
     }
 
-    if let Err(err) = state.app.deactivate_user(&user).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    if let Err(err) = state.app.deactivate_user(&hook_ctx, &user).await {
         return ApiError::from(err).into_response();
     }
 

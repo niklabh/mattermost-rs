@@ -233,6 +233,7 @@ pub async fn create_user(
     };
     tracing::Span::current().record("admin", is_admin);
 
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());
     let (_request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -247,10 +248,10 @@ pub async fn create_user(
 
     let created = if is_admin {
         tracing::Span::current().record("branch", "admin");
-        state.app.create_user_as_admin(&user).await
+        state.app.create_user_as_admin(&hook_ctx, &user).await
     } else {
         tracing::Span::current().record("branch", "signup");
-        state.app.create_user_from_signup(&user).await
+        state.app.create_user_from_signup(&hook_ctx, &user).await
     };
 
     match created {

@@ -24,6 +24,7 @@ use mm_model::utils::{AppError, AppResult, get_millis};
 use mm_store::{BotStore, StoreError, UserStore};
 
 use crate::App;
+use crate::plugin_hooks::HookContext;
 
 /// `app.MissingAccountError` (channels/app/constants.go:7).
 const MISSING_ACCOUNT_ERROR: &str = "app.user.missing_account.const";
@@ -281,7 +282,12 @@ impl App {
     /// update 500 all name `PatchBot`. `where` is not serialised, so this costs a client nothing
     /// — but changing it would be inventing a difference rather than removing one.
     #[tracing::instrument(skip_all, fields(bot_user_id = %bot_user_id, active, changed))]
-    pub async fn update_bot_active(&self, bot_user_id: &str, active: bool) -> AppResult<Bot> {
+    pub async fn update_bot_active(
+        &self,
+        ctx: &HookContext,
+        bot_user_id: &str,
+        active: bool,
+    ) -> AppResult<Bot> {
         let user = self.store().user().get(bot_user_id).await.map_err(|err| {
             if err.is_not_found() {
                 return AppError::boxed(
@@ -302,7 +308,7 @@ impl App {
             )
         })?;
 
-        self.update_active_for_bot(&user, active).await?;
+        self.update_active_for_bot(ctx, &user, active).await?;
 
         let mut bot = self
             .store()
@@ -411,12 +417,18 @@ impl App {
     /// # Not reproduced
     ///
     /// `userDeactivated` — offline status, the sysadmin notice, the `disableUserBots` cascade and
-    /// the two OAuth auth-data deletions — and the `UserHasBeenDeactivated` plugin hook. None is
-    /// visible in this route's answer; the cascade is the one with teeth, and it is [D-282].
+    /// the two OAuth auth-data deletions. None is visible in this route's answer; the cascade is
+    /// the one with teeth, and it is [D-282]. The `UserHasBeenDeactivated` plugin hook *is*
+    /// reproduced: a bot is a user, and disabling one tells every plugin so.
     /// `InvalidateCacheForUser` and `invalidateUserChannelMembersCaches` are in-process caches
     /// this server does not have.
     #[tracing::instrument(skip_all, fields(user_id = %user.id, active))]
-    async fn update_active_for_bot(&self, user: &User, active: bool) -> AppResult {
+    async fn update_active_for_bot(
+        &self,
+        ctx: &HookContext,
+        user: &User,
+        active: bool,
+    ) -> AppResult {
         if active {
             let limits = self.get_server_limits(true).await?;
             // "Zero means no limit" — a comparison without this guard would refuse every
@@ -457,6 +469,9 @@ impl App {
         }
 
         self.send_updated_user_event(&update.new).await;
+        if !active {
+            self.user_has_been_deactivated(ctx, &update.new);
+        }
         Ok(())
     }
 }

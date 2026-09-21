@@ -38,6 +38,7 @@ use mm_store::{SessionStore, UserStore};
 
 use crate::App;
 use crate::auth::{CHECK_USER_PASSWORD_INVALID, attempts_error, clamp_attempts};
+use crate::plugin_hooks::HookContext;
 use crate::user_agent;
 
 /// `maxSessionsLimit` (app/session.go:24). MM-55320.
@@ -513,7 +514,8 @@ impl App {
     ///
     /// # The order, and the two writes it leaves behind on failure
     ///
-    /// 1. The `UserWillLogIn` plugin hook — no plugin host here, so no rejection is possible.
+    /// 1. The `UserWillLogIn` plugin hook, which can refuse — only under the Rust plugin host
+    ///    ([`App::run_user_will_log_in`]); under Go's the plugins are the other process's.
     /// 2. **Validate both device ids**, each against its own allowlist and with its own 400.
     /// 3. **Force `IsMobile`** when either device id is present. Go's comment: the explicit
     ///    signal beats the user-agent sniff.
@@ -533,15 +535,19 @@ impl App {
     /// `w.Header().Set(model.HeaderToken, session.Token)` is step 8½ in Go and is the caller's
     /// job here — this function returns the session and `mm_api::login` writes the header.
     ///
-    /// The LDAP profile-picture refresh and the `UserHasLoggedIn` hook are both `a.Srv().Go(...)`
-    /// background work with no local equivalent.
+    /// Then two `a.Srv().Go(...)` tasks: the LDAP profile-picture refresh, which needs an LDAP
+    /// implementation no build of this tree has, and the `UserHasLoggedIn` hook
+    /// ([`App::user_has_logged_in`]), which fires with the same `ctx` step 1 used.
     #[tracing::instrument(skip_all, fields(user_id = %user.id, is_mobile, session_id))]
     pub async fn do_login(
         &self,
+        ctx: &HookContext,
         user: &User,
         opts: &LoginOptions,
         user_agent_header: &str,
     ) -> AppResult<Session> {
+        self.run_user_will_log_in(ctx, user).await?;
+
         if !opts.device_id.is_empty() && !is_valid_standard_device_id(&opts.device_id) {
             return Err(AppError::boxed(
                 "DoLogin",
@@ -649,6 +655,7 @@ impl App {
                 )
             })?;
 
+        self.user_has_logged_in(ctx, user);
         Ok(session)
     }
 }

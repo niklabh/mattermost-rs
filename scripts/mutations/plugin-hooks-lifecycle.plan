@@ -1,0 +1,27 @@
+# Mutation plan for the user lifecycle plugin hook sites — `UserHasBeenCreated`,
+# `UserWillLogIn`, `UserHasLoggedIn` and `UserHasBeenDeactivated` (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-lifecycle.plan
+#
+# The oracle is `parity::plugin_hooks::the_user_lifecycle_hooks_fire_as_go_fires_them`: one plugin
+# binary under a real Go host and under the Rust host, the same client action against each.
+#
+# Not mutated: the rejection's id text and status, which `login`'s mask replaces with a 401
+# `invalid_credentials_*` on the only login route the tour can drive (the desktop-token route
+# needs an SSO account the stack cannot mint); and `update_active_for_bot`'s `!active` guard,
+# which `user_has_been_deactivated`'s own `DeleteAt` check makes equivalent. The last two lines are
+# the no-op controls and must SURVIVE.
+
+login-will-log-in-dropped	crates/mm-app/src/login.rs	        self.run_user_will_log_in(ctx, user).await?;\n	\n	api	plugin_hooks::the_user_lifecycle
+login-will-log-in-after-device-validation	crates/mm-app/src/login.rs	        self.run_user_will_log_in(ctx, user).await?;\n	        if opts.device_id.is_empty() || is_valid_standard_device_id(&opts.device_id) {\n            self.run_user_will_log_in(ctx, user).await?;\n        }\n	api	plugin_hooks::the_user_lifecycle
+login-rejection-ignored	crates/mm-app/src/plugin_hooks.rs	            if !returns.a.is_empty() {	            if false {	api	plugin_hooks::the_user_lifecycle
+login-has-logged-in-dropped	crates/mm-app/src/login.rs	        self.user_has_logged_in(ctx, user);	        let _ = ctx;	api	plugin_hooks::the_user_lifecycle
+login-context-without-the-callers-session	crates/mm-api/src/login.rs	    // sent with a live session hands that session's id to `UserWillLogIn`.\n    let hook_ctx = crate::plugin_context::hook_context_of(&request, session.0.as_ref());	    // sent with a live session hands that session's id to `UserWillLogIn`.\n    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);	api	plugin_hooks::the_user_lifecycle
+created-hook-dropped	crates/mm-app/src/user_create.rs	        self.user_has_been_created(ctx, &ruser);	        let _ = ctx;	api	plugin_hooks::the_user_lifecycle
+created-hook-sends-the-unsanitised-request	crates/mm-app/src/user_create.rs	        self.user_has_been_created(ctx, &ruser);	        self.user_has_been_created(ctx, &User { id: ruser.id.clone(), create_at: ruser.create_at, update_at: ruser.update_at, last_password_update: ruser.last_password_update, ..user.clone() });	api	plugin_hooks::the_user_lifecycle
+deactivated-guard-inverted	crates/mm-app/src/plugin_hooks.rs	        if user.delete_at == 0 {	        if user.delete_at != 0 {	api	plugin_hooks::the_user_lifecycle
+deactivated-dropped-from-deactivate-user	crates/mm-app/src/user_delete.rs	        self.user_has_been_deactivated(ctx, &new_user);	        let _ = ctx;	api	plugin_hooks::the_user_lifecycle
+deactivated-sends-the-pre-update-user	crates/mm-app/src/user_delete.rs	        self.user_has_been_deactivated(ctx, &new_user);	        self.user_has_been_deactivated(ctx, &user);	api	plugin_hooks::the_user_lifecycle
+deactivated-dropped-from-the-bot	crates/mm-app/src/bot.rs	            self.user_has_been_deactivated(ctx, &update.new);	            let _ = ctx;	api	plugin_hooks::the_user_lifecycle
+control-rename-the-will-log-in-payload	crates/mm-app/src/plugin_hooks.rs	        let wire = user_to_wire(user);\n        for (hooks, _manifest) in environment.hooks_implementing(hook_id::USER_WILL_LOG_IN) {	        let payload = user_to_wire(user);\n        let wire = payload;\n        for (hooks, _manifest) in environment.hooks_implementing(hook_id::USER_WILL_LOG_IN) {	api	plugin_hooks::the_user_lifecycle
+control-reorder-two-independent-user-fields	crates/mm-app/src/plugin_hooks.rs	        update_at: user.update_at,\n        delete_at: user.delete_at,\n        username: user.username.clone(),	        delete_at: user.delete_at,\n        update_at: user.update_at,\n        username: user.username.clone(),	api	plugin_hooks::the_user_lifecycle

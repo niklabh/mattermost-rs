@@ -55,6 +55,10 @@ const GO_OFFSET: u16 = 74;
 const MEMBERSHIP_HOST_PORT: u16 = 8130;
 /// Its Go server.
 const MEMBERSHIP_GO_OFFSET: u16 = 80;
+/// The Rust host of the user lifecycle tranche — creation, the two login hooks, deactivation.
+const LIFECYCLE_HOST_PORT: u16 = 8131;
+/// Its Go server.
+const LIFECYCLE_GO_OFFSET: u16 = 81;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -362,8 +366,11 @@ const ID_KEYS: [&str; 6] = [
 /// Epoch milliseconds, likewise. `DeleteAt` is one of them on the history row, and its
 /// zero-or-not is still asserted where it matters (the deleted post the delete hook carries).
 /// `LastUpdateAt` and `LastViewedAt` are the `ChannelMember` pair: both are stamped by the save,
-/// so the two servers' members differ by the milliseconds between the two requests.
-const TIME_KEYS: [&str; 7] = [
+/// so the two servers' members differ by the milliseconds between the two requests. `LastLogin`
+/// is the lifecycle tranche's: one account logs in to both servers, and the second login reads
+/// the time the first one wrote. `LastPasswordUpdate` is too: each side's created account is
+/// stamped by its own save.
+const TIME_KEYS: [&str; 9] = [
     "CreateAt",
     "UpdateAt",
     "EditAt",
@@ -371,6 +378,8 @@ const TIME_KEYS: [&str; 7] = [
     "DeleteAt",
     "LastUpdateAt",
     "LastViewedAt",
+    "LastLogin",
+    "LastPasswordUpdate",
 ];
 
 /// Replace what cannot be compared with a token that keeps the only thing worth asserting about
@@ -468,9 +477,15 @@ fn scrub(text: &str, pairs: &[(String, String)]) -> String {
 }
 
 /// The transcript so far, scrubbed of this side's subject and normalised.
+///
+/// **Only complete lines.** The plugin appends while the suite polls, so a read can land in the
+/// middle of an entry; a tail with no newline yet is an entry still being written, not a
+/// malformed one. Measured: 2 of 15 runs of the lifecycle tour died parsing half a deactivated
+/// user, and one of them was a no-op mutation control reported as "caught".
 fn transcript_of(path: &Path, pairs: &[(String, String)]) -> Vec<Json> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let complete = text.rfind('\n').map_or("", |end| &text[..end]);
+    complete
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
@@ -1141,6 +1156,17 @@ impl MemberPair {
         go: (String, Option<Vec<u8>>),
         rust: (String, Option<Vec<u8>>),
     ) -> ((u16, Json), (u16, Json)) {
+        self.each_as(method, Some(token), go, rust).await
+    }
+
+    /// [`MemberPair::each`] with an optional token — a login is sent with none.
+    async fn each_as(
+        &self,
+        method: reqwest::Method,
+        token: Option<&str>,
+        go: (String, Option<Vec<u8>>),
+        rust: (String, Option<Vec<u8>>),
+    ) -> ((u16, Json), (u16, Json)) {
         let decode = |bytes: Vec<u8>, pairs: &[(String, String)]| -> Json {
             let text = scrub(&String::from_utf8_lossy(&bytes), pairs);
             serde_json::from_str(&text).unwrap_or_else(|_| Json::String(text.trim_end().to_owned()))
@@ -1149,7 +1175,7 @@ impl MemberPair {
             &self.client,
             &self.go_base,
             method.clone(),
-            Some(token),
+            token,
             &go.0,
             go.1.as_deref(),
         )
@@ -1158,7 +1184,7 @@ impl MemberPair {
             &self.client,
             &self.rust_base,
             method,
-            Some(token),
+            token,
             &rust.0,
             rust.1.as_deref(),
         )
@@ -1674,6 +1700,365 @@ async fn run_the_membership_tour(client: &reqwest::Client, admin: &str) {
     }
 }
 
+/// What the lifecycle tour creates, so the cleanup can find it after a panic: plain users by id,
+/// and planted bots by id.
+static LIFECYCLE_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static LIFECYCLE_BOTS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the four user lifecycle hook sites (docs/PLUGIN_PLAN.md, Phase 5;
+/// [D-932]): `UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn` and
+/// `UserHasBeenDeactivated`, on the admin create, `POST /users/login`, `DELETE /users/{id}`,
+/// `PUT /users/{id}/active` and `POST /bots/{id}/disable`.
+///
+/// Creations and deactivations cannot be repeated on a second server, so each side acts on a
+/// user of its own and the transcripts are scrubbed, as in the membership tour. Logins can, so
+/// **one** account logs in to both — which is what lets the unsanitised row, bcrypt hash and all,
+/// be compared exactly.
+#[tokio::test]
+async fn the_user_lifecycle_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let _bots = common::BOT_FIXTURES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_lifecycle_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *LIFECYCLE_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    let bots = std::mem::take(
+        &mut *LIFECYCLE_BOTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in bots {
+        common::unplant_bot(&id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_lifecycle_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-lifecycle");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+
+    // Fixtures through **main** Go, which hosts no plugins. `create_plain_user` logs each account
+    // in once, so the login account's `LastLogin` is already set when the pair first reads it.
+    let home = common::create_team(&client, &admin, "hooklc").await;
+    let login_user = common::create_plain_user(&client, &admin, &home, "lclogin").await;
+    let reject_user = common::create_plain_user(&client, &admin, &home, "lcreject").await;
+    LIFECYCLE_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .extend([login_user.id.clone(), reject_user.id.clone()]);
+
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(&admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+    let go_bot = common::plant_bot("lcbotgo", &admin_id, 0)
+        .await
+        .expect("a bot");
+    let rs_bot = common::plant_bot("lcbotrs", &admin_id, 0)
+        .await
+        .expect("a bot");
+    LIFECYCLE_BOTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .extend([go_bot.clone(), rs_bot.clone()]);
+
+    let reject_env = [("HOOK_RECORDER_REJECT_USER", reject_user.id.as_str())];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    go_env.extend(reject_env);
+    let go = start_go(&go_run, &go_env, LIFECYCLE_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    rust_env.extend(reject_env);
+    let rust = SecondServer::start_in(LIFECYCLE_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let (go_name, rs_name) = (
+        common::plain_username("lcnewgo"),
+        common::plain_username("lcnewrs"),
+    );
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: vec![
+            (go_bot.clone(), "<bot>".to_owned()),
+            ("lcbotgo".to_owned(), "<bot-tag>".to_owned()),
+            (go_name.clone(), "<subject-name>".to_owned()),
+        ],
+        rust_scrub: vec![
+            (rs_bot.clone(), "<bot>".to_owned()),
+            ("lcbotrs".to_owned(), "<bot-tag>".to_owned()),
+            (rs_name.clone(), "<subject-name>".to_owned()),
+        ],
+        seen: 0,
+    };
+    let body = |value: Json| Some(serde_json::to_vec(&value).expect("a body"));
+
+    // 1. An admin creates an account. `UserHasBeenCreated` carries `ruser` after
+    //    `userService.createUser` sanitised it: no password, no auth data.
+    let new_user = |name: &str| {
+        (
+            "/api/v4/users".to_owned(),
+            body(serde_json::json!({
+                "username": name,
+                "email": format!("{name}@mmrs.invalid"),
+                "password": common::PLAIN_USER_PASSWORD,
+            })),
+        )
+    };
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            new_user(&go_name),
+            new_user(&rs_name),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    let (go_new, rs_new) = (
+        gb["id"].as_str().expect("an id").to_owned(),
+        rb["id"].as_str().expect("an id").to_owned(),
+    );
+    LIFECYCLE_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .extend([go_new.clone(), rs_new.clone()]);
+    pair.go_scrub
+        .insert(0, (go_new.clone(), "<subject>".to_owned()));
+    pair.rust_scrub
+        .insert(0, (rs_new.clone(), "<subject>".to_owned()));
+    // Stamped by each server's own save.
+    let (mut go_created, mut rs_created) = (gb.clone(), rb.clone());
+    for body in [&mut go_created, &mut rs_created] {
+        body.as_object_mut()
+            .map(|m| m.remove("last_password_update"));
+    }
+    same_post(&go_created, &rs_created, "a created user");
+    let fired = pair.hooks("an admin create").await;
+    assert_eq!(names(&fired), ["UserHasBeenCreated"]);
+    assert_eq!(fired[0]["args"]["B"]["Id"], "<id>");
+    assert_eq!(fired[0]["args"]["B"]["Username"], "<subject-name>");
+    assert_eq!(
+        fired[0]["args"]["B"]["Password"],
+        Json::Null,
+        "the created user is sanitised, and gob omits the empty hash"
+    );
+    assert_eq!(fired[0]["args"]["B"]["Roles"], "system_user");
+
+    // 2. The shared account logs in to each server with no session. The two hooks bracket
+    //    `DoLogin`, and both carry the row as it was read — the stored hash included.
+    let login = |name: &str, device: Option<&str>| {
+        let mut value = serde_json::json!({
+            "login_id": name,
+            "password": common::PLAIN_USER_PASSWORD,
+        });
+        if let Some(device) = device {
+            value["device_id"] = Json::from(device);
+        }
+        ("/api/v4/users/login".to_owned(), body(value))
+    };
+    let login_name = common::plain_username("lclogin");
+    let ((gs, mut gb), (rs, mut rb)) = pair
+        .each_as(
+            reqwest::Method::POST,
+            None,
+            login(&login_name, None),
+            login(&login_name, None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    // The second login reads the `LastLogin` the first one wrote.
+    for body in [&mut gb, &mut rb] {
+        body.as_object_mut().map(|m| m.remove("last_login"));
+    }
+    same_post(&gb, &rb, "the logged-in user");
+    let fired = pair.hooks("a login").await;
+    assert_eq!(names(&fired), ["UserWillLogIn", "UserHasLoggedIn"]);
+    for entry in &fired {
+        assert_eq!(entry["args"]["B"]["Id"], "<id>");
+        assert!(
+            entry["args"]["B"]["Password"].is_string(),
+            "{}: the login hooks see the stored row, hash and all",
+            entry["hook"]
+        );
+        assert_eq!(
+            entry["args"]["A"]["SessionId"],
+            Json::Null,
+            "{}: a login sent with no token has no session in its context",
+            entry["hook"]
+        );
+    }
+
+    // 3. The same login sent **with** a session. `APIHandler` resolves it, so the context carries
+    //    its id — the caller's session, never the one the login creates.
+    let ((gs, gb), (rs, rb)) = pair
+        .each_as(
+            reqwest::Method::POST,
+            Some(&admin),
+            login(&login_name, None),
+            login(&login_name, None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a login from a live session").await;
+    assert_eq!(names(&fired), ["UserWillLogIn", "UserHasLoggedIn"]);
+    // `hooks` has already compared the two contexts field for field; what is left is that the
+    // field is filled at all — a context built with no session is `""` on both sides and would
+    // pass that comparison.
+    for entry in &fired {
+        let id = entry["args"]["A"]["SessionId"].as_str().unwrap_or_default();
+        assert_eq!(
+            id.len(),
+            26,
+            "{}: the context carries the caller's session, got {id:?}",
+            entry["hook"]
+        );
+    }
+
+    // 4. A login the plugin refuses. `Login rejected by plugin: <reason>` is the error id, and
+    //    `login`'s mask turns it into an ordinary bad-credentials 401 on both.
+    let reject_name = common::plain_username("lcreject");
+    let ((gs, gb), (rs, rb)) = pair
+        .each_as(
+            reqwest::Method::POST,
+            None,
+            login(&reject_name, None),
+            login(&reject_name, None),
+        )
+        .await;
+    assert_eq!((gs, rs), (401, 401), "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a login the plugin refused",
+    );
+    let fired = pair.hooks("a refused login").await;
+    assert_eq!(names(&fired), ["UserWillLogIn"]);
+    pair.no_more_hooks("a refused login never logs in").await;
+
+    // 5. A malformed device id. `UserWillLogIn` runs **before** `DoLogin` validates it, so the
+    //    plugin is asked about a login that then fails for a reason of its own.
+    let ((gs, gb), (rs, rb)) = pair
+        .each_as(
+            reqwest::Method::POST,
+            None,
+            login(&login_name, Some("not-a-device")),
+            login(&login_name, Some("not-a-device")),
+        )
+        .await;
+    assert_eq!((gs, rs), (401, 401), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a login with a bad device id").await;
+    assert_eq!(names(&fired), ["UserWillLogIn"]);
+    pair.no_more_hooks("a bad device id never logs in").await;
+
+    // 6. A deactivation through `DELETE`. The user the hook sees is the one the store's `Update`
+    //    left behind: sanitised, with `DeleteAt` set.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &admin,
+            (format!("/api/v4/users/{go_new}"), None),
+            (format!("/api/v4/users/{rs_new}"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("a deactivation").await;
+    assert_eq!(names(&fired), ["UserHasBeenDeactivated"]);
+    assert_eq!(fired[0]["args"]["B"]["Id"], "<id>");
+    assert_eq!(fired[0]["args"]["B"]["DeleteAt"], "<set>");
+    assert_eq!(fired[0]["args"]["B"]["Password"], Json::Null, "sanitised");
+
+    // 7. Reactivation fires nothing — the hook is `!active && DeleteAt != 0` — and deactivating
+    //    again through `PUT /active` fires it once more.
+    let active = |on: bool| body(serde_json::json!({ "active": on }));
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::PUT,
+            &admin,
+            (format!("/api/v4/users/{go_new}/active"), active(true)),
+            (format!("/api/v4/users/{rs_new}/active"), active(true)),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    pair.no_more_hooks("a reactivation").await;
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::PUT,
+            &admin,
+            (format!("/api/v4/users/{go_new}/active"), active(false)),
+            (format!("/api/v4/users/{rs_new}/active"), active(false)),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a deactivation through /active").await;
+    assert_eq!(names(&fired), ["UserHasBeenDeactivated"]);
+
+    // 8. Disabling a bot is `UpdateActive(bot, false)` in Go, so it tells every plugin a user was
+    //    deactivated.
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (format!("/api/v4/bots/{go_bot}/disable"), None),
+            (format!("/api/v4/bots/{rs_bot}/disable"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a bot disabled").await;
+    assert_eq!(names(&fired), ["UserHasBeenDeactivated"]);
+    assert_eq!(fired[0]["args"]["B"]["Id"], "<id>");
+    assert_eq!(fired[0]["args"]["B"]["IsBot"], true);
+
+    drop(rust);
+    drop(go);
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]
@@ -1721,6 +2106,18 @@ fn a_blank_line_is_not_an_entry() {
     std::fs::create_dir_all(&dir).expect("the directory");
     let path = dir.join("hooks.jsonl");
     std::fs::write(&path, "{\"hook\":\"One\"}\n\n{\"hook\":\"Two\"}\n").expect("the file");
+    assert_eq!(names(&transcript(&path)), ["One", "Two"]);
+}
+
+/// A line the plugin has not finished writing is not read yet — neither parsed nor counted.
+#[test]
+fn a_torn_last_line_waits_for_its_newline() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-unit-torn");
+    std::fs::create_dir_all(&dir).expect("the directory");
+    let path = dir.join("hooks.jsonl");
+    std::fs::write(&path, "{\"hook\":\"One\"}\n{\"hook\":\"Tw").expect("the file");
+    assert_eq!(names(&transcript(&path)), ["One"]);
+    std::fs::write(&path, "{\"hook\":\"One\"}\n{\"hook\":\"Two\"}\n").expect("the file");
     assert_eq!(names(&transcript(&path)), ["One", "Two"]);
 }
 

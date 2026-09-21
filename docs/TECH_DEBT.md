@@ -7899,9 +7899,14 @@ receive, so these land together or not at all.
 
 ---
 
-## D-453 · two side effects of account creation are not reproduced
+## D-453 · CLOSED — both side effects of account creation are reproduced
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+**Closed** 2026-09-21 — the notice write is `App::update_viewed_product_notices_for_new_user`,
+and under the Rust plugin host `UserHasBeenCreated` fires from `App::create_user`
+(`mm_app::plugin_hooks::user_has_been_created`, `parity::plugin_hooks`). The title was "two side
+effects of account creation are not reproduced". A signup this server *forwards* fires nothing
+under the Rust host; that is [D-932]'s.
 
 `createUserOrGuest` ends with two things this port does not do:
 
@@ -8161,9 +8166,15 @@ configuration that turns the flag on.
 
 ---
 
-## D-471 · the `UserHasBeenDeactivated` plugin hook has no host
+## D-471 · CLOSED — the `UserHasBeenDeactivated` plugin hook fires
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-13 (the user-delete vertical)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-13 (the user-delete vertical)
+**Closed** 2026-09-21 — under the Rust plugin host the hook fires from `App::deactivate_user` (so
+from `DELETE /users/{user_id}`, `PUT /users/{user_id}/active`, both permanent deletes and their
+local-mode twins) and from `POST /bots/{bot_user_id}/disable`, with the sanitised row the store's
+`Update` leaves behind; measured by `parity::plugin_hooks::the_user_lifecycle_hooks_fire_as_go_fires_them`.
+The title was "the `UserHasBeenDeactivated` plugin hook has no host". Under the default Go host
+nothing fires from this server, which is [D-811]'s.
 
 `UpdateActive` ends with `Srv().Go(…)` running `hooks.UserHasBeenDeactivated` over every loaded
 plugin (app/user.go:1279). There is no plugin host in this tree, and none installed on the stack
@@ -9266,8 +9277,9 @@ What still keeps it from being a drop-in:
 
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: 7 of the 35 are wired (2026-09-20 — the post family and reactions, which
-  closes D-402's plugin half). The other 28 are [D-932]; D-471's and D-542's are among them.
+- The hook call sites: 17 of the 35 are wired (the post family and reactions, which closed
+  D-402's plugin half; the membership family; and the user lifecycle family, which closed D-453
+  and D-471). The other 18 are [D-932]; D-542's is among them.
 
 `MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
@@ -9483,25 +9495,26 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 22 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 18 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
+**Narrowed** 2026-09-21 — the user lifecycle family, four more: creation, both login hooks,
+deactivation.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
 **13** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
-`TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`). That is 15 of the 46
-invocations. The remaining 22 hooks do not fire at all, and the paths that would fire them behave
-exactly as they did before:
+`TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`), and the user lifecycle family
+(`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`). That is 19
+of the 46 invocations. The remaining 18 hooks do not fire at all, and the paths that would fire
+them behave exactly as they did before:
 
 ```text
 channel.go   ChannelHasBeenCreated (×3), ChannelWillBeUpdated, ChannelWillBeRestored,
              ChannelWillBeArchived
-user.go      UserHasBeenCreated, UserHasBeenDeactivated ([D-471])
-login.go     UserWillLogIn, UserHasLoggedIn
 file.go      FileWillBeUploaded (×2), FileWillBeDownloaded
 upload.go    FileWillBeUploaded
 post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
@@ -9523,10 +9536,16 @@ command, neither of them served. It lands with whichever of those is ported firs
 are served already. Nor is [D-950], the message hooks that Go's *system* posts fire and this
 server's do not.
 
-**What is owed:** each site, ported where Go calls it, ordered by what a real client does —
-`UserHasBeenCreated` and the two login hooks next, which need no new wire conversion now that
-`mm_app::plugin_hooks::user_to_wire` exists. The pattern is `mm_app::plugin_hooks` plus a
-`parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
+**A branch this server forwards fires nothing under the Rust host**, because the Go process it
+forwards to hosts no plugins then (docs/PLUGIN_PLAN.md, D6). For the hooks that do fire, that is:
+an MFA, LDAP or magic-link login (`UserWillLogIn`/`UserHasLoggedIn`), a signup by invitation
+token or invite id (`UserHasBeenCreated`), and the deactivation of an account that owns bots
+(`UserHasBeenDeactivated`, [D-472]). Each closes when its branch is ported.
+
+**What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
+file hooks next (`FileWillBeUploaded` on both upload paths, `FileWillBeDownloaded`), then
+`PreferencesHaveChanged` and `ChannelHasBeenCreated`. The pattern is `mm_app::plugin_hooks` plus
+a `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
 
 ---
 
