@@ -84,12 +84,16 @@
 //! | new header is `!partial-header` | `ChannelWillBeUpdated` | a channel carrying **only** the header — Go takes it whole |
 //! | name starts with `hookkeepalive` | `ChannelWillBeArchived` | [`CHANNEL_REJECTION`] |
 //! | name starts with `hookkeeparchived` | `ChannelWillBeRestored` | [`CHANNEL_REJECTION`] |
+//!
+//! `DraftWillBeUpserted` reads the draft's message: `!reject-draft <reason>` refuses,
+//! `!rewrite-draft` answers the whole draft with the message replaced by [`REWRITTEN_HEADER`],
+//! and `!partial-draft` answers a draft carrying **only** a message, which Go takes whole.
 
 use std::io::Write;
 use std::sync::Mutex;
 
 use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
-use mm_plugin::wire::model::Channel;
+use mm_plugin::wire::model::{Channel, Draft};
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
     Z_ChannelHasBeenCreatedArgs, Z_ChannelHasBeenCreatedReturns, Z_ChannelMemberWillBeAddedArgs,
@@ -108,6 +112,7 @@ use mm_plugin::wire::plugin::{
     Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
     Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
+use mm_plugin::wire::plugin::{Z_DraftWillBeUpsertedArgs, Z_DraftWillBeUpsertedReturns};
 use serde_json::{Value as Json, json};
 
 /// `render.rs` reads a gob oracle for its fixture helpers; this plugin loads no fixture, so the
@@ -149,7 +154,7 @@ const CHANNEL_REJECTION: &str = "the hook recorder keeps this channel as it is";
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 24] = [
+const IMPLEMENTED: [&str; 25] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -174,6 +179,7 @@ const IMPLEMENTED: [&str; 24] = [
     "ChannelWillBeUpdated",
     "ChannelWillBeArchived",
     "ChannelWillBeRestored",
+    "DraftWillBeUpserted",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -479,6 +485,39 @@ impl Hooks for Recorder {
             }
         } else {
             Z_ChannelWillBeUpdatedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn draft_will_be_upserted(
+        &self,
+        args: Z_DraftWillBeUpsertedArgs,
+    ) -> Result<Z_DraftWillBeUpsertedReturns, NotImplemented> {
+        self.saw("DraftWillBeUpserted", &args);
+        let draft = args.b.as_deref();
+        let message = draft.map_or("", |d| d.message.as_str());
+        let answer = if let Some(reason) = after(message, "!reject-draft ") {
+            Z_DraftWillBeUpsertedReturns {
+                a: None,
+                b: reason.to_owned(),
+            }
+        } else if message == "!rewrite-draft" {
+            let mut replaced = draft.cloned().unwrap_or_default();
+            replaced.message = REWRITTEN_HEADER.to_owned();
+            Z_DraftWillBeUpsertedReturns {
+                a: Some(Box::new(replaced)),
+                b: String::new(),
+            }
+        } else if message == "!partial-draft" {
+            Z_DraftWillBeUpsertedReturns {
+                a: Some(Box::new(Draft {
+                    message: REWRITTEN_HEADER.to_owned(),
+                    ..Draft::default()
+                })),
+                b: String::new(),
+            }
+        } else {
+            Z_DraftWillBeUpsertedReturns::default()
         };
         Ok(answer)
     }
