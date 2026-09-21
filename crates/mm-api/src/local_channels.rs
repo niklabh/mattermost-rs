@@ -396,6 +396,7 @@ async fn local_groups_common(
 /// is the **store's** `model.channel.is_valid.team_id.app_error`, not the handler's
 /// `invalid_body_param`. `addMember` is false: the channel has no creator and no members.
 async fn local_create_channel(State(state): State<AppState>, request: Request) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -412,7 +413,11 @@ async fn local_create_channel(State(state): State<AppState>, request: Request) -
         }
     };
 
-    if let Err(err) = state.app.create_channel(&mut channel, false).await {
+    if let Err(err) = state
+        .app
+        .create_channel(&hook_ctx, &mut channel, false)
+        .await
+    {
         return ApiError::from(err).into_response();
     }
     match channel_creates::created("localCreateChannel", &channel) {
@@ -435,6 +440,7 @@ async fn local_delete_channel(
     UrlPath(channel_id): UrlPath<String>,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     if let Err(err) = channels::require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -459,7 +465,7 @@ async fn local_delete_channel(
         tracing::debug!("handing a permanent channel deletion to Go over the socket");
         return forward_over_unix(&go.0, request).await;
     }
-    match state.app.delete_channel(&channel, "").await {
+    match state.app.delete_channel(&hook_ctx, &channel, "").await {
         Ok(_) => channel_writes::status_ok(),
         Err(err) => ApiError::from(err).into_response(),
     }
@@ -481,6 +487,7 @@ async fn local_patch_channel(
     UrlPath(channel_id): UrlPath<String>,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     if let Err(err) = channels::require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -516,7 +523,7 @@ async fn local_patch_channel(
     }
 
     channel.patch(&patch);
-    if let Err(err) = state.app.update_channel(&mut channel).await {
+    if let Err(err) = state.app.update_channel(&hook_ctx, &mut channel).await {
         return ApiError::from(err).into_response();
     }
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
@@ -638,6 +645,7 @@ async fn local_update_channel_privacy(
     UrlPath(channel_id): UrlPath<String>,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     if let Err(err) = channels::require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -679,7 +687,11 @@ async fn local_update_channel_privacy(
     }
     channel.channel_type = privacy.to_owned();
 
-    match state.app.update_channel_privacy(&mut channel, None).await {
+    match state
+        .app
+        .update_channel_privacy(&hook_ctx, &mut channel, None)
+        .await
+    {
         Ok(ChannelWrite::Done) => {
             match channel_writes::channel_response("updateChannelPrivacy", &channel) {
                 Ok(response) => response,
@@ -704,6 +716,7 @@ async fn local_update_channel_privacy(
 async fn local_restore_channel(
     State(state): State<AppState>,
     UrlPath(channel_id): UrlPath<String>,
+    parts: axum::http::request::Parts,
 ) -> Response {
     if let Err(err) = channels::require_id(&channel_id, "channel_id") {
         return err.into_response();
@@ -712,7 +725,15 @@ async fn local_restore_channel(
         Ok(channel) => channel,
         Err(err) => return ApiError::from(err).into_response(),
     };
-    if let Err(err) = state.app.restore_channel(&mut channel, "").await {
+    if let Err(err) = state
+        .app
+        .restore_channel(
+            &crate::plugin_context::hook_context(&parts, None),
+            &mut channel,
+            "",
+        )
+        .await
+    {
         return ApiError::from(err).into_response();
     }
     match channel_writes::channel_response("restoreChannel", &channel) {

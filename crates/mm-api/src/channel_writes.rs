@@ -221,6 +221,7 @@ pub async fn update_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -263,7 +264,7 @@ pub async fn update_channel(
         Err(err) => return err.into_response(),
     }
 
-    match serve_update_channel(&state, &session.0, &channel_id, &submitted).await {
+    match serve_update_channel(&state, &session.0, &channel_id, &submitted, &hook_ctx).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -274,6 +275,7 @@ async fn serve_update_channel(
     session: &Session,
     channel_id: &str,
     submitted: &Channel,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Response, ApiError> {
     let mut channel = state.app.get_channel(channel_id).await?;
 
@@ -365,7 +367,7 @@ async fn serve_update_channel(
 
     apply_update(&mut channel, submitted);
 
-    state.app.update_channel(&mut channel).await?;
+    state.app.update_channel(hook_ctx, &mut channel).await?;
 
     // `oldChannelDisplayName != channel.DisplayName` — and `channel` on Go's right-hand side is
     // the **submitted** body, not the channel that was written. A body that omits `display_name`
@@ -456,6 +458,7 @@ pub async fn patch_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -494,7 +497,7 @@ pub async fn patch_channel(
 
     match state
         .app
-        .patch_channel(&mut channel, &patch, &session.0.user_id)
+        .patch_channel(&hook_ctx, &mut channel, &patch, &session.0.user_id)
         .await
     {
         Ok(ChannelWrite::Done) => {}
@@ -812,6 +815,7 @@ pub async fn update_channel_privacy(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -848,7 +852,7 @@ pub async fn update_channel_privacy(
 
     match state
         .app
-        .update_channel_privacy(&mut channel, Some(&author))
+        .update_channel_privacy(&hook_ctx, &mut channel, Some(&author))
         .await
     {
         Ok(ChannelWrite::Done) => match channel_response("updateChannelPrivacy", &channel) {
@@ -982,6 +986,7 @@ pub async fn delete_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
@@ -994,7 +999,7 @@ pub async fn delete_channel(
     // `cleanupChannelAccessControlPolicy` runs on this path on every server; its store fallback
     // is ported in `App::delete_channel`, so a licensed installation is no longer forwarded here
     // ([D-371], closed 2026-09-13).
-    match serve_delete_channel(&state, &session.0, &channel_id, permanent).await {
+    match serve_delete_channel(&state, &session.0, &channel_id, permanent, &hook_ctx).await {
         Ok(Some(response)) => response,
         Ok(None) => {
             tracing::Span::current().record("forwarded", true);
@@ -1011,6 +1016,7 @@ async fn serve_delete_channel(
     session: &Session,
     channel_id: &str,
     permanent: bool,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Option<Response>, ApiError> {
     let channel = state.app.get_channel(channel_id).await?;
 
@@ -1080,7 +1086,10 @@ async fn serve_delete_channel(
         )));
     }
 
-    state.app.delete_channel(&channel, &session.user_id).await?;
+    state
+        .app
+        .delete_channel(hook_ctx, &channel, &session.user_id)
+        .await?;
 
     Ok(Some(status_ok()))
 }
@@ -1125,12 +1134,14 @@ pub async fn restore_channel(
     State(state): State<AppState>,
     Path(channel_id): Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     if let Err(err) = require_id(&channel_id, "channel_id") {
         return err.into_response();
     }
 
-    match serve_restore_channel(&state, &session.0, &channel_id).await {
+    match serve_restore_channel(&state, &session.0, &channel_id, &hook_ctx).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -1140,6 +1151,7 @@ async fn serve_restore_channel(
     state: &AppState,
     session: &Session,
     channel_id: &str,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Response, ApiError> {
     let mut channel = state.app.get_channel(channel_id).await?;
 
@@ -1160,7 +1172,7 @@ async fn serve_restore_channel(
 
     state
         .app
-        .restore_channel(&mut channel, &session.user_id)
+        .restore_channel(hook_ctx, &mut channel, &session.user_id)
         .await?;
 
     channel_response("restoreChannel", &channel)

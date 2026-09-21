@@ -67,6 +67,10 @@ const DOWNLOAD_GO_OFFSET: u16 = 82;
 const UPLOAD_HOST_PORT: u16 = 8133;
 /// Its Go server.
 const UPLOAD_GO_OFFSET: u16 = 83;
+/// The Rust host of the channel lifecycle tranche.
+const CHANNEL_HOST_PORT: u16 = 8134;
+/// Its Go server.
+const CHANNEL_GO_OFFSET: u16 = 84;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -377,8 +381,9 @@ const ID_KEYS: [&str; 6] = [
 /// so the two servers' members differ by the milliseconds between the two requests. `LastLogin`
 /// is the lifecycle tranche's: one account logs in to both servers, and the second login reads
 /// the time the first one wrote. `LastPasswordUpdate` is too: each side's created account is
-/// stamped by its own save.
-const TIME_KEYS: [&str; 9] = [
+/// stamped by its own save. `LastPostAt` and `LastRootPostAt` are the channel tour's: two channels
+/// Go made a second apart carry join posts a second apart.
+const TIME_KEYS: [&str; 11] = [
     "CreateAt",
     "UpdateAt",
     "EditAt",
@@ -388,6 +393,8 @@ const TIME_KEYS: [&str; 9] = [
     "LastViewedAt",
     "LastLogin",
     "LastPasswordUpdate",
+    "LastPostAt",
+    "LastRootPostAt",
 ];
 
 /// A `FileInfo`'s storage paths, which carry the file's own id (and, for a resumable upload,
@@ -455,12 +462,14 @@ fn normalise(value: &mut Json) {
 /// metadata, the file id list — is compared and not just the message.
 fn normalise_body(value: &mut Json) {
     const ID_KEYS: [&str; 5] = ["id", "post_id", "pending_post_id", "root_id", "original_id"];
-    const TIME_KEYS: [&str; 5] = [
+    const TIME_KEYS: [&str; 7] = [
         "create_at",
         "update_at",
         "edit_at",
         "delete_at",
         "last_reply_at",
+        "last_post_at",
+        "last_root_post_at",
     ];
     match value {
         Json::Array(items) => items.iter_mut().for_each(normalise_body),
@@ -2692,6 +2701,443 @@ async fn run_the_upload_tour(client: &reqwest::Client, admin: &str) {
     drop(rust);
     drop(go);
     common::delete_channel(&client, &admin, &channel).await;
+}
+
+/// The plain users the channel tour creates, for the cleanup.
+static CHANNEL_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the channel lifecycle hooks (docs/PLUGIN_PLAN.md, Phase 5;
+/// [D-932]): `ChannelHasBeenCreated` on all three creation paths, `ChannelWillBeUpdated`,
+/// `ChannelWillBeArchived` and `ChannelWillBeRestored`.
+///
+/// Each side creates channels of its own, so their ids and names are scrubbed — and a DM's or
+/// GM's name is a function of its members' ids, so it is scrubbed whole rather than piecewise.
+#[tokio::test]
+async fn the_channel_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_channel_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *CHANNEL_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Create an open channel for each side, scrub its id and name, and return (Go's id, Rust's id).
+///
+/// With `through_main_go` both are created by the stack's Go server, which hosts no plugins, so
+/// nothing is recorded and both rows carry Go's join post. Otherwise each is created by its own
+/// side's server — the path `ChannelHasBeenCreated` is about, and one where this server writes
+/// no join post ([D-231]), which every later payload would carry as a different `LastPostAt`.
+async fn create_open_channel(
+    pair: &mut MemberPair,
+    admin: &str,
+    team: &str,
+    prefix: &str,
+    nonce: &str,
+    through_main_go: bool,
+) -> (String, String) {
+    let (go_name, rs_name) = (format!("{prefix}go{nonce}"), format!("{prefix}rs{nonce}"));
+    let make = |name: &str| {
+        (
+            "/api/v4/channels".to_owned(),
+            Some(
+                serde_json::to_vec(&serde_json::json!({
+                    "team_id": team,
+                    "name": name,
+                    "display_name": format!("Display {name}"),
+                    "type": "O",
+                }))
+                .expect("a body"),
+            ),
+        )
+    };
+    let ((gs, gb), (rs, rb)) = if through_main_go {
+        let mut out = Vec::new();
+        for name in [&go_name, &rs_name] {
+            let (path, bytes) = make(name);
+            let (status, bytes, _) = request_raw(
+                &pair.client,
+                GO,
+                reqwest::Method::POST,
+                Some(admin),
+                &path,
+                bytes.as_deref(),
+            )
+            .await;
+            out.push((
+                status,
+                serde_json::from_slice::<Json>(&bytes).unwrap_or(Json::Null),
+            ));
+        }
+        let rust = out.pop().expect("two");
+        (out.pop().expect("two"), rust)
+    } else {
+        pair.each(reqwest::Method::POST, admin, make(&go_name), make(&rs_name))
+            .await
+    };
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    let (gid, rid) = (
+        gb["id"].as_str().expect("an id").to_owned(),
+        rb["id"].as_str().expect("an id").to_owned(),
+    );
+    pair.go_scrub.push((gid.clone(), "<channel>".to_owned()));
+    pair.go_scrub.push((go_name, "<channel-name>".to_owned()));
+    pair.rust_scrub.push((rid.clone(), "<channel>".to_owned()));
+    pair.rust_scrub.push((rs_name, "<channel-name>".to_owned()));
+    (gid, rid)
+}
+
+async fn run_the_channel_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-channels");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+    let team = common::create_team(&client, &admin, "hookch").await;
+    let mut users = std::collections::BTreeMap::new();
+    for tag in [
+        "chdmgo", "chdmrs", "chgmgo1", "chgmgo2", "chgmrs1", "chgmrs2",
+    ] {
+        let user = common::create_plain_user(&client, &admin, &team, tag).await;
+        CHANNEL_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(user.id.clone());
+        users.insert(tag, user.id);
+    }
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let go = start_go(
+        &go_run,
+        &[("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())],
+        CHANNEL_GO_OFFSET,
+    )
+    .await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust = SecondServer::start_in(
+        CHANNEL_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: Vec::new(),
+        rust_scrub: Vec::new(),
+        seen: 0,
+    };
+    // A run-unique suffix: channel names outlive the run.
+    let nonce = format!(
+        "{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis())
+    );
+    let body = |value: Json| Some(serde_json::to_vec(&value).expect("a body"));
+
+    let patch = |header: &str, go_id: &str, rust_id: &str| {
+        let b = body(serde_json::json!({ "header": header }));
+        (
+            (format!("/api/v4/channels/{go_id}/patch"), b.clone()),
+            (format!("/api/v4/channels/{rust_id}/patch"), b),
+        )
+    };
+
+    // 1. An open channel. The hook runs at the end of `CreateChannel`, with the saved channel.
+    let (go_ch, rs_ch) =
+        create_open_channel(&mut pair, &admin, &team, "hookplain", &nonce, false).await;
+    let fired = pair.hooks("an open channel").await;
+    assert_eq!(names(&fired), ["ChannelHasBeenCreated"]);
+    assert_eq!(fired[0]["args"]["B"]["Id"], "<id>");
+    assert_eq!(fired[0]["args"]["B"]["Name"], "<channel-name>");
+    assert_eq!(fired[0]["args"]["B"]["Type"], "O");
+    let (created_go, created_rs) = (go_ch, rs_ch);
+
+    // The rest of the lifecycle acts on channels main Go made, for the reason
+    // `create_open_channel` gives.
+    let (go_ch, rs_ch) =
+        create_open_channel(&mut pair, &admin, &team, "hookupdated", &nonce, true).await;
+
+    // 2. An ordinary update: the new channel and the old, in that order.
+    let (g, r) = patch("a header the recorder lets through", &go_ch, &rs_ch);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "an updated channel");
+    let fired = pair.hooks("an update").await;
+    assert_eq!(names(&fired), ["ChannelWillBeUpdated"]);
+    assert_eq!(
+        fired[0]["args"]["B"]["Header"],
+        "a header the recorder lets through"
+    );
+    assert_eq!(
+        fired[0]["args"]["C"]["Header"],
+        Json::Null,
+        "the old one had none"
+    );
+
+    // 3. A refused update: the reason is a `Reason` parameter, and nothing is written.
+    let (g, r) = patch("!reject-update not this header", &go_ch, &rs_ch);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a refused update",
+    );
+    assert_eq!(gb["id"], "app.channel.update_channel.rejected_by_plugin");
+    pair.hooks("a refused update").await;
+
+    // 4. A replacement carrying the whole channel with a new header.
+    let (g, r) = patch("!rewrite-header", &go_ch, &rs_ch);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a rewritten channel");
+    assert_eq!(gb["header"], "rewritten by the hook recorder");
+    pair.hooks("a rewritten update").await;
+
+    // 5. A replacement carrying **only** a header: Go takes it whole, blanking every other field,
+    //    and the store refuses what is left. Both must refuse it the same way.
+    let (g, r) = patch("!partial-header", &go_ch, &rs_ch);
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!(gs, rs, "Go {gb} / Rust {rb}");
+    assert_ne!(gs, 200, "a channel with no id cannot be written: {gb}");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a partial replacement",
+    );
+    pair.hooks("a partial replacement").await;
+
+    // 6-7. Archive, then restore.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &admin,
+            (format!("/api/v4/channels/{go_ch}"), None),
+            (format!("/api/v4/channels/{rs_ch}"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("an archive").await;
+    assert_eq!(names(&fired), ["ChannelWillBeArchived"]);
+    assert_eq!(
+        fired[0]["args"]["B"]["DeleteAt"],
+        Json::Null,
+        "asked before the write"
+    );
+
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (format!("/api/v4/channels/{go_ch}/restore"), None),
+            (format!("/api/v4/channels/{rs_ch}/restore"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("a restore").await;
+    assert_eq!(names(&fired), ["ChannelWillBeRestored"]);
+    assert_eq!(
+        fired[0]["args"]["B"]["DeleteAt"], "<set>",
+        "asked before the write"
+    );
+
+    // 8. A refused archive.
+    let (go_alive, rs_alive) =
+        create_open_channel(&mut pair, &admin, &team, "hookkeepalive", &nonce, true).await;
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &admin,
+            (format!("/api/v4/channels/{go_alive}"), None),
+            (format!("/api/v4/channels/{rs_alive}"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.channel.delete_channel.rejected_by_plugin");
+    common::assert_error_bodies_match_except_known_gaps(
+        &serde_json::to_vec(&gb).expect("bytes"),
+        &serde_json::to_vec(&rb).expect("bytes"),
+        "a refused archive",
+    );
+    pair.hooks("a refused archive").await;
+
+    // 9. A refused restore.
+    let (go_arch, rs_arch) =
+        create_open_channel(&mut pair, &admin, &team, "hookkeeparchived", &nonce, true).await;
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &admin,
+            (format!("/api/v4/channels/{go_arch}"), None),
+            (format!("/api/v4/channels/{rs_arch}"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    pair.hooks("its archive").await;
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (format!("/api/v4/channels/{go_arch}/restore"), None),
+            (format!("/api/v4/channels/{rs_arch}/restore"), None),
+        )
+        .await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.channel.restore_channel.rejected_by_plugin");
+    pair.hooks("a refused restore").await;
+
+    // 10. A direct message channel, with a counterpart of each side's own. Its name is the two
+    //     ids sorted, so it is scrubbed whole before its parts.
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(&admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (
+                "/api/v4/channels/direct".to_owned(),
+                body(serde_json::json!([admin_id, users["chdmgo"]])),
+            ),
+            (
+                "/api/v4/channels/direct".to_owned(),
+                body(serde_json::json!([admin_id, users["chdmrs"]])),
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    for (scrub, body, user) in [
+        (&mut pair.go_scrub, &gb, &users["chdmgo"]),
+        (&mut pair.rust_scrub, &rb, &users["chdmrs"]),
+    ] {
+        scrub.insert(
+            0,
+            (
+                body["name"].as_str().expect("a name").to_owned(),
+                "<dm-name>".to_owned(),
+            ),
+        );
+        scrub.push((
+            body["id"].as_str().expect("an id").to_owned(),
+            "<dm>".to_owned(),
+        ));
+        scrub.push((user.clone(), "<dm-user>".to_owned()));
+    }
+    let fired = pair.hooks("a direct channel").await;
+    assert_eq!(names(&fired), ["ChannelHasBeenCreated"]);
+    assert_eq!(fired[0]["args"]["B"]["Type"], "D");
+    assert_eq!(fired[0]["args"]["B"]["Name"], "<dm-name>");
+
+    // 11. The same DM again: it exists, so nothing fires.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (
+                "/api/v4/channels/direct".to_owned(),
+                body(serde_json::json!([admin_id, users["chdmgo"]])),
+            ),
+            (
+                "/api/v4/channels/direct".to_owned(),
+                body(serde_json::json!([admin_id, users["chdmrs"]])),
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201));
+    pair.no_more_hooks("an existing direct channel").await;
+
+    // 12. A group channel. Its name is a hash of the member ids and its display name lists the
+    //     usernames, so both are scrubbed.
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &admin,
+            (
+                "/api/v4/channels/group".to_owned(),
+                body(serde_json::json!([users["chgmgo1"], users["chgmgo2"]])),
+            ),
+            (
+                "/api/v4/channels/group".to_owned(),
+                body(serde_json::json!([users["chgmrs1"], users["chgmrs2"]])),
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    for (scrub, body, side) in [
+        (&mut pair.go_scrub, &gb, "go"),
+        (&mut pair.rust_scrub, &rb, "rs"),
+    ] {
+        scrub.insert(
+            0,
+            (
+                body["name"].as_str().expect("a name").to_owned(),
+                "<gm-name>".to_owned(),
+            ),
+        );
+        scrub.push((
+            body["id"].as_str().expect("an id").to_owned(),
+            "<gm>".to_owned(),
+        ));
+        for n in ["1", "2"] {
+            let tag = format!("chgm{side}{n}");
+            scrub.push((users[tag.as_str()].clone(), format!("<gm-user-{n}>")));
+            scrub.push((common::plain_username(&tag), format!("<gm-username-{n}>")));
+        }
+    }
+    let fired = pair.hooks("a group channel").await;
+    assert_eq!(names(&fired), ["ChannelHasBeenCreated"]);
+    assert_eq!(fired[0]["args"]["B"]["Type"], "G");
+
+    drop(rust);
+    drop(go);
+    for id in [created_go, created_rs, go_ch, rs_ch, go_alive, rs_alive] {
+        common::delete_channel(&client, &admin, &id).await;
+    }
 }
 
 /// The rendering the transcript is written in is a pure function of the value, so the

@@ -145,6 +145,7 @@ pub async fn create_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let (request, bytes) = match split_body(request, "channel").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -175,7 +176,7 @@ pub async fn create_channel(
         Err(err) => return err.into_response(),
     }
 
-    match serve_create_channel(&state, &session.0, &mut channel).await {
+    match serve_create_channel(&state, &session.0, &mut channel, &hook_ctx).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -185,6 +186,7 @@ async fn serve_create_channel(
     state: &AppState,
     session: &Session,
     channel: &mut Channel,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Response, ApiError> {
     if channel.team_id.is_empty() {
         return Err(ApiError::invalid_param("team_id"));
@@ -248,7 +250,7 @@ async fn serve_create_channel(
 
     state
         .app
-        .create_channel_with_user(channel, &session.user_id)
+        .create_channel_with_user(hook_ctx, channel, &session.user_id)
         .await?;
     created("createChannel", channel)
 }
@@ -283,6 +285,7 @@ pub async fn create_direct_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let (request, bytes) = match split_body(request, "user_ids").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -323,7 +326,7 @@ pub async fn create_direct_channel(
         }
     }
 
-    match serve_create_direct_channel(&state, &session.0, &user_ids, allowed).await {
+    match serve_create_direct_channel(&state, &session.0, &user_ids, allowed, &hook_ctx).await {
         Ok(Some(response)) => response,
         Ok(None) => {
             tracing::Span::current().record("forwarded", true);
@@ -340,6 +343,7 @@ async fn serve_create_direct_channel(
     session: &Session,
     user_ids: &[String],
     allowed: bool,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Option<Response>, ApiError> {
     if !state
         .app
@@ -381,7 +385,7 @@ async fn serve_create_direct_channel(
     // The two ids keep the **body's** order, which is what decides `creator_id` on the event.
     match state
         .app
-        .get_or_create_direct_channel(&user_ids[0], &user_ids[1])
+        .get_or_create_direct_channel(hook_ctx, &user_ids[0], &user_ids[1])
         .await?
     {
         ChannelCreate::Created(channel) => created("createDirectChannel", &channel).map(Some),
@@ -421,6 +425,7 @@ pub async fn create_group_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let (request, bytes) = match split_body(request, "user_ids").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -459,7 +464,7 @@ pub async fn create_group_channel(
     }
     tracing::Span::current().record("members", user_ids.len());
 
-    match serve_create_group_channel(&state, &session.0, &user_ids).await {
+    match serve_create_group_channel(&state, &session.0, &user_ids, &hook_ctx).await {
         Ok(Some(response)) => response,
         Ok(None) => {
             tracing::Span::current().record("forwarded", true);
@@ -473,6 +478,7 @@ async fn serve_create_group_channel(
     state: &AppState,
     session: &Session,
     user_ids: &[String],
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Option<Response>, ApiError> {
     if !state
         .app
@@ -504,7 +510,7 @@ async fn serve_create_group_channel(
 
     let channel = state
         .app
-        .create_group_channel(user_ids, &session.user_id)
+        .create_group_channel(hook_ctx, user_ids, &session.user_id)
         .await?;
     created("createGroupChannel", &channel).map(Some)
 }

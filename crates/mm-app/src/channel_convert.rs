@@ -52,6 +52,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %request.channel_id, team_id = %request.team_id))]
     pub async fn convert_group_message_to_channel(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         converted_by_user_id: &str,
         request: &GroupMessageConversionRequestBody,
     ) -> Result<MemberWrite<Channel>, Box<AppError>> {
@@ -71,7 +72,7 @@ impl App {
         updated.team_id = request.team_id.clone();
         updated.name = request.name.clone();
         updated.display_name = request.display_name.clone();
-        self.update_channel(&mut updated).await?;
+        self.update_channel(ctx, &mut updated).await?;
 
         // `GetUsersInChannelPage(…, PerPage: ChannelGroupMaxUsers, asAdmin: false)`.
         let users = self

@@ -36,7 +36,6 @@
 //!
 //! # What is deliberately absent
 //!
-//! - `ChannelHasBeenCreated` — a plugin hook, the identity with no plugin environment.
 //! - `SetChannelManagedCategory` — `MinimumEnterpriseLicense` **and** a feature flag; on an
 //!   unlicensed installation Go takes the `else` branch, logs a warning and **blanks
 //!   `managed_category_name` on the answer**, which is reproduced because it is wire surface.
@@ -201,6 +200,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(team_id = %channel.team_id, channel_type = %channel.channel_type, user_id = %user_id))]
     pub async fn create_channel_with_user(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         channel: &mut Channel,
         user_id: &str,
     ) -> AppResult<()> {
@@ -261,7 +261,7 @@ impl App {
 
         channel.creator_id = user_id.to_owned();
 
-        self.create_channel(channel, true).await?;
+        self.create_channel(ctx, channel, true).await?;
 
         self.add_channel_to_default_category(user_id, channel).await;
 
@@ -351,7 +351,12 @@ impl App {
     /// group-channel path calls this same function and treats the identical outcome as a
     /// success, so the branch cannot live in the store.
     #[tracing::instrument(skip_all, fields(channel_type = %channel.channel_type, add_member))]
-    pub async fn create_channel(&self, channel: &mut Channel, add_member: bool) -> AppResult<()> {
+    pub async fn create_channel(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        channel: &mut Channel,
+        add_member: bool,
+    ) -> AppResult<()> {
         if channel.is_board() {
             return Err(AppError::boxed(
                 "CreateChannel",
@@ -467,6 +472,9 @@ impl App {
             channel.managed_category_name = String::new();
         }
 
+        if !channel.is_space() {
+            self.channel_has_been_created(ctx, channel);
+        }
         Ok(())
     }
 
@@ -579,6 +587,7 @@ impl App {
     #[tracing::instrument(skip(self), fields(user_id = %user_id, other_user_id = %other_user_id, existed))]
     pub async fn get_or_create_direct_channel(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         other_user_id: &str,
     ) -> AppResult<ChannelCreate> {
@@ -607,7 +616,7 @@ impl App {
             Err(err) => return Err(err),
         };
 
-        self.handle_creation_event(user_id, other_user_id, &channel)
+        self.handle_creation_event(ctx, user_id, other_user_id, &channel)
             .await;
         Ok(ChannelCreate::Created(Box::new(channel)))
     }
@@ -777,10 +786,17 @@ impl App {
     ///
     /// `creator_id` is the *first* id the request listed, which need not be the session's user:
     /// the handler passes `userIds[0]` and `userIds[1]` positionally.
-    async fn handle_creation_event(&self, user_id: &str, other_user_id: &str, channel: &Channel) {
+    async fn handle_creation_event(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        user_id: &str,
+        other_user_id: &str,
+        channel: &Channel,
+    ) {
         self.hub().invalidate_channel_members_for_user(user_id);
         self.hub()
             .invalidate_channel_members_for_user(other_user_id);
+        self.channel_has_been_created(ctx, channel);
 
         let mut message =
             WebSocketEvent::new(WEBSOCKET_EVENT_DIRECT_ADDED, "", &channel.id, "", None, "");
@@ -809,6 +825,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(creator_id = %creator_id, members = user_ids.len()))]
     pub async fn create_group_channel(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_ids: &[String],
         creator_id: &str,
     ) -> AppResult<Channel> {
@@ -831,6 +848,8 @@ impl App {
             }
             Err(err) => return Err(err),
         };
+        // The last thing Go's `createGroupChannel` does, before `CreateGroupChannel`'s events.
+        self.channel_has_been_created(ctx, &channel);
 
         let mut sorted: Vec<String> = user_ids.to_vec();
         sorted.sort_unstable();

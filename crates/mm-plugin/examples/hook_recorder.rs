@@ -74,26 +74,39 @@
 //! | `hookrename` | a file info carrying only `Name: renamed.txt`, writes nothing |
 //! | `hookunimage` | writes [`REPLACEMENT`] over an image, so its thumbnails cannot be made from it |
 //! | anything else | nothing written, no file info |
+//!
+//! # The channel hooks are driven by the channel's header and name
+//!
+//! | the channel | hook | answer |
+//! |---|---|---|
+//! | new header starts with `!reject-update ` | `ChannelWillBeUpdated` | the rest, as the reason |
+//! | new header is `!rewrite-header` | `ChannelWillBeUpdated` | the whole new channel, header replaced by [`REWRITTEN_HEADER`] |
+//! | new header is `!partial-header` | `ChannelWillBeUpdated` | a channel carrying **only** the header — Go takes it whole |
+//! | name starts with `hookkeepalive` | `ChannelWillBeArchived` | [`CHANNEL_REJECTION`] |
+//! | name starts with `hookkeeparchived` | `ChannelWillBeRestored` | [`CHANNEL_REJECTION`] |
 
 use std::io::Write;
 use std::sync::Mutex;
 
 use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
+use mm_plugin::wire::model::Channel;
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
-    Z_ChannelMemberWillBeAddedArgs, Z_ChannelMemberWillBeAddedReturns, Z_FileWillBeDownloadedArgs,
-    Z_FileWillBeDownloadedReturns, Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns,
-    Z_MessageHasBeenPostedArgs, Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs,
-    Z_MessageHasBeenUpdatedReturns, Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns,
-    Z_MessageWillBeUpdatedArgs, Z_MessageWillBeUpdatedReturns, Z_PreferencesHaveChangedArgs,
-    Z_PreferencesHaveChangedReturns, Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns,
-    Z_ReactionHasBeenRemovedArgs, Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs,
-    Z_TeamMemberWillBeAddedReturns, Z_UserHasBeenCreatedArgs, Z_UserHasBeenCreatedReturns,
-    Z_UserHasBeenDeactivatedArgs, Z_UserHasBeenDeactivatedReturns, Z_UserHasJoinedChannelArgs,
-    Z_UserHasJoinedChannelReturns, Z_UserHasJoinedTeamArgs, Z_UserHasJoinedTeamReturns,
-    Z_UserHasLeftChannelArgs, Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs,
-    Z_UserHasLeftTeamReturns, Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs,
-    Z_UserWillLogInReturns,
+    Z_ChannelHasBeenCreatedArgs, Z_ChannelHasBeenCreatedReturns, Z_ChannelMemberWillBeAddedArgs,
+    Z_ChannelMemberWillBeAddedReturns, Z_ChannelWillBeArchivedArgs, Z_ChannelWillBeArchivedReturns,
+    Z_ChannelWillBeRestoredArgs, Z_ChannelWillBeRestoredReturns, Z_ChannelWillBeUpdatedArgs,
+    Z_ChannelWillBeUpdatedReturns, Z_FileWillBeDownloadedArgs, Z_FileWillBeDownloadedReturns,
+    Z_MessageHasBeenDeletedArgs, Z_MessageHasBeenDeletedReturns, Z_MessageHasBeenPostedArgs,
+    Z_MessageHasBeenPostedReturns, Z_MessageHasBeenUpdatedArgs, Z_MessageHasBeenUpdatedReturns,
+    Z_MessageWillBePostedArgs, Z_MessageWillBePostedReturns, Z_MessageWillBeUpdatedArgs,
+    Z_MessageWillBeUpdatedReturns, Z_PreferencesHaveChangedArgs, Z_PreferencesHaveChangedReturns,
+    Z_ReactionHasBeenAddedArgs, Z_ReactionHasBeenAddedReturns, Z_ReactionHasBeenRemovedArgs,
+    Z_ReactionHasBeenRemovedReturns, Z_TeamMemberWillBeAddedArgs, Z_TeamMemberWillBeAddedReturns,
+    Z_UserHasBeenCreatedArgs, Z_UserHasBeenCreatedReturns, Z_UserHasBeenDeactivatedArgs,
+    Z_UserHasBeenDeactivatedReturns, Z_UserHasJoinedChannelArgs, Z_UserHasJoinedChannelReturns,
+    Z_UserHasJoinedTeamArgs, Z_UserHasJoinedTeamReturns, Z_UserHasLeftChannelArgs,
+    Z_UserHasLeftChannelReturns, Z_UserHasLeftTeamArgs, Z_UserHasLeftTeamReturns,
+    Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use serde_json::{Value as Json, json};
 
@@ -128,9 +141,15 @@ const UPLOAD_REJECTION: &str = "the hook recorder turns this upload away";
 /// What `FileWillBeUploaded` writes over a file it replaces.
 const REPLACEMENT: &[u8] = b"replaced by the hook recorder";
 
+/// What `!rewrite-header` becomes.
+const REWRITTEN_HEADER: &str = "rewritten by the hook recorder";
+
+/// The reason the archive and restore hooks refuse with.
+const CHANNEL_REJECTION: &str = "the hook recorder keeps this channel as it is";
+
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 20] = [
+const IMPLEMENTED: [&str; 24] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -151,6 +170,10 @@ const IMPLEMENTED: [&str; 20] = [
     "FileWillBeDownloaded",
     "FileWillBeUploaded",
     "PreferencesHaveChanged",
+    "ChannelHasBeenCreated",
+    "ChannelWillBeUpdated",
+    "ChannelWillBeArchived",
+    "ChannelWillBeRestored",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -417,6 +440,77 @@ impl Hooks for Recorder {
     ) -> Result<Z_UserHasBeenDeactivatedReturns, NotImplemented> {
         self.saw("UserHasBeenDeactivated", &args);
         Ok(Z_UserHasBeenDeactivatedReturns::default())
+    }
+
+    async fn channel_has_been_created(
+        &self,
+        args: Z_ChannelHasBeenCreatedArgs,
+    ) -> Result<Z_ChannelHasBeenCreatedReturns, NotImplemented> {
+        self.saw("ChannelHasBeenCreated", &args);
+        Ok(Z_ChannelHasBeenCreatedReturns::default())
+    }
+
+    async fn channel_will_be_updated(
+        &self,
+        args: Z_ChannelWillBeUpdatedArgs,
+    ) -> Result<Z_ChannelWillBeUpdatedReturns, NotImplemented> {
+        self.saw("ChannelWillBeUpdated", &args);
+        let new_channel = args.b.as_deref();
+        let header = new_channel.map_or("", |c| c.header.as_str());
+        let answer = if let Some(reason) = after(header, "!reject-update ") {
+            Z_ChannelWillBeUpdatedReturns {
+                a: None,
+                b: reason.to_owned(),
+            }
+        } else if header == "!rewrite-header" {
+            let mut channel = new_channel.cloned().unwrap_or_default();
+            channel.header = REWRITTEN_HEADER.to_owned();
+            Z_ChannelWillBeUpdatedReturns {
+                a: Some(Box::new(channel)),
+                b: String::new(),
+            }
+        } else if header == "!partial-header" {
+            Z_ChannelWillBeUpdatedReturns {
+                a: Some(Box::new(Channel {
+                    header: REWRITTEN_HEADER.to_owned(),
+                    ..Channel::default()
+                })),
+                b: String::new(),
+            }
+        } else {
+            Z_ChannelWillBeUpdatedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn channel_will_be_archived(
+        &self,
+        args: Z_ChannelWillBeArchivedArgs,
+    ) -> Result<Z_ChannelWillBeArchivedReturns, NotImplemented> {
+        self.saw("ChannelWillBeArchived", &args);
+        let name = args.b.as_deref().map_or("", |c| c.name.as_str());
+        Ok(Z_ChannelWillBeArchivedReturns {
+            a: if name.starts_with("hookkeepalive") {
+                CHANNEL_REJECTION.to_owned()
+            } else {
+                String::new()
+            },
+        })
+    }
+
+    async fn channel_will_be_restored(
+        &self,
+        args: Z_ChannelWillBeRestoredArgs,
+    ) -> Result<Z_ChannelWillBeRestoredReturns, NotImplemented> {
+        self.saw("ChannelWillBeRestored", &args);
+        let name = args.b.as_deref().map_or("", |c| c.name.as_str());
+        Ok(Z_ChannelWillBeRestoredReturns {
+            a: if name.starts_with("hookkeeparchived") {
+                CHANNEL_REJECTION.to_owned()
+            } else {
+                String::new()
+            },
+        })
     }
 
     async fn preferences_have_changed(

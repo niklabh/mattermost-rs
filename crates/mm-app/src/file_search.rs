@@ -77,6 +77,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub async fn search_files_in_team_for_user(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         terms: &str,
         user_id: &str,
         team_id: &str,
@@ -106,6 +107,7 @@ impl App {
             if params.terms != "*" {
                 params.in_channels = self
                     .convert_channel_names_to_channel_ids(
+                        ctx,
                         params.in_channels,
                         user_id,
                         team_id,
@@ -114,6 +116,7 @@ impl App {
                     .await?;
                 params.excluded_channels = self
                     .convert_channel_names_to_channel_ids(
+                        ctx,
                         params.excluded_channels,
                         user_id,
                         team_id,
