@@ -584,6 +584,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
     pub async fn set_custom_status(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         cs: &mm_model::custom_status::CustomStatus,
     ) -> AppResult<()> {
@@ -613,7 +614,7 @@ impl App {
         }
         self.update_user(&user, true).await?;
 
-        if let Err(err) = self.add_recent_custom_status(user_id, cs).await {
+        if let Err(err) = self.add_recent_custom_status(ctx, user_id, cs).await {
             tracing::error!(error = %err, user_id, "Can't add recent custom status for");
         }
 
@@ -640,6 +641,7 @@ impl App {
     /// failing both end up with their history replaced rather than extended.
     async fn add_recent_custom_status(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         status: &mm_model::custom_status::CustomStatus,
     ) -> AppResult<()> {
@@ -683,6 +685,7 @@ impl App {
         })?;
 
         self.update_preferences(
+            ctx,
             user_id,
             &mm_model::preference::Preferences(vec![mm_model::preference::Preference {
                 user_id: user_id.to_owned(),
@@ -704,6 +707,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
     pub async fn remove_recent_custom_status(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         status: &mm_model::custom_status::CustomStatus,
     ) -> AppResult<()> {
@@ -753,6 +757,7 @@ impl App {
         let mut preference = preference;
         preference.value = encoded;
         self.update_preferences(
+            ctx,
             user_id,
             &mm_model::preference::Preferences(vec![preference]),
         )

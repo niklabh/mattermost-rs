@@ -9275,9 +9275,9 @@ What still keeps it from being a drop-in:
 
 - The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
   not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
-- The hook call sites: 19 of the 35 are wired (the post family and reactions, which closed
+- The hook call sites: 20 of the 35 are wired (the post family and reactions, which closed
   D-402's plugin half; the membership family; the user lifecycle family, which closed D-453
-  and D-471; and both file hooks). The other 16 are [D-932]; D-542's is among them.
+  and D-471; both file hooks; `PreferencesHaveChanged`). The other 15 are [D-932]; D-542's is among them.
 
 `MMRS_PLUGIN_HOST` stays `go` by default until both land.
 
@@ -9493,22 +9493,23 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 16 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 15 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
 **Narrowed** 2026-09-21 — the user lifecycle family, four more: creation, both login hooks,
 deactivation. Then `FileWillBeDownloaded`, on all four read routes, and `FileWillBeUploaded` on
-both served upload paths.
+both served upload paths. Then `PreferencesHaveChanged`.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-**19** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+**20** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
 `TeamMemberWillBeAdded`, `UserHasJoinedTeam`, `UserHasLeftTeam`), and the user lifecycle family
 (`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`) and
-both file hooks. That is 21 of the 46 invocations. The remaining 16 hooks do not fire at all,
+both file hooks and `PreferencesHaveChanged`. That is 22 of the 46 invocations. The remaining
+15 hooks do not fire at all,
 and the paths that would fire them behave exactly as they did before:
 
 ```text
@@ -9517,7 +9518,6 @@ channel.go   ChannelHasBeenCreated (×3), ChannelWillBeUpdated, ChannelWillBeRes
 post.go      MessagesWillBeConsumed, MessagesWillBeConsumedWithContext,
              ScheduledPostWillBeCreated
 draft        DraftWillBeUpserted
-preference   PreferencesHaveChanged
 notification EmailNotificationWillBeSent, NotificationWillBePushed
 plugin.go    OnPluginClusterEvent, OnInstall
 support      GenerateSupportData
@@ -9543,8 +9543,7 @@ token or invite id (`UserHasBeenCreated`), and the deactivation of an account th
 (`UserHasBeenDeactivated`, [D-472]). Each closes when its branch is ported.
 
 **What is owed:** each site, ported where Go calls it, ordered by what a real client does — the
-`PreferencesHaveChanged` next, then `ChannelHasBeenCreated` and the three channel `WillBe*`
-hooks. The pattern is `mm_app::plugin_hooks` plus
+`ChannelHasBeenCreated` and the three channel `WillBe*` hooks next. The pattern is `mm_app::plugin_hooks` plus
 a `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under each host.
 
 ---

@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 19 of 35 (2026-09-21)
+### Phase 5 · Hook call sites — IN PROGRESS, 20 of 35 (2026-09-21)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -582,6 +582,10 @@ chunk of a resumable one — 19 of 35, 21 of 46. Three findings: every plugin sh
 and **one** writer; each answer is gob-decoded **into** the upload's own `FileInfo` — which the
 host client had not been doing for this hook — before a refusal is even looked at; and on the
 resumable path Go lends the plugins a reader it has already closed, so they read nothing.
+
+**Done sixth, `PreferencesHaveChanged`** — 20 of 35, 22 of 46 — from every served caller of
+`UpdatePreferences`: the preferences route, its local twin, and the custom-status writes that save
+the recent statuses. A deletion fires nothing; Go has no hook for it.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

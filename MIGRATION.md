@@ -14328,6 +14328,17 @@ Plugin plan **Phase 5, 19 of 35**. Under `MMRS_PLUGIN_HOST=rust` the two served 
 Mutation tally (`plugin-hooks-uploads.plan`): 12 run, 10 caught, 2 controls survived, 0 harness
 faults.
 
+## Plugin hook call sites: `PreferencesHaveChanged` (2026-09-21)
+
+Plugin plan **Phase 5, 20 of 35**; the other 15 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PreferencesHaveChanged` (app/preference.go:78) | `mm_app::plugin_hooks::preferences_have_changed`, `App::update_preferences` | DONE | the preference steps of `parity::plugin_hooks::the_user_lifecycle_hooks_fire_as_go_fires_them` | Last, after `preferences_changed`, and from every caller of `UpdatePreferences` — including `SetCustomStatus` and `RemoveRecentCustomStatus`, which save the recents through it. `DeletePreferences` has no hook. |
+
+Mutation tally (`plugin-hooks-preferences.plan`): 5 run, 3 caught, 2 controls survived, 0 harness
+faults.
+
 ## The remaining image decoders — D-650 narrowed to one image type, D-411 to the avatar (2026-09-20)
 
 No route+method pair is added. `crates/goimage` grew the **four** decoders `image.Decode`'s

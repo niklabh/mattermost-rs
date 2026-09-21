@@ -2092,6 +2092,57 @@ async fn run_the_lifecycle_tour(client: &reqwest::Client, admin: &str) {
     assert_eq!(fired[0]["args"]["B"]["Id"], "<id>");
     assert_eq!(fired[0]["args"]["B"]["IsBot"], true);
 
+    // 9. A preference save, as the account that logged in. Both servers write the same row, so
+    //    the batch the hook sees is compared as it is.
+    let batch = body(serde_json::json!([{
+        "user_id": login_user.id,
+        "category": "display_settings",
+        "name": "hooktour",
+        "value": "on",
+    }]));
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::PUT,
+            &login_user.token,
+            ("/api/v4/users/me/preferences".to_owned(), batch.clone()),
+            ("/api/v4/users/me/preferences".to_owned(), batch.clone()),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    let fired = pair.hooks("a preference save").await;
+    assert_eq!(names(&fired), ["PreferencesHaveChanged"]);
+    assert_eq!(fired[0]["args"]["B"][0]["Name"], "hooktour");
+
+    // 10. A custom status, which saves the recent statuses through the same `UpdatePreferences`.
+    let status = body(serde_json::json!({ "emoji": "smile", "text": "from the hook tour" }));
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::PUT,
+            &login_user.token,
+            ("/api/v4/users/me/status/custom".to_owned(), status.clone()),
+            ("/api/v4/users/me/status/custom".to_owned(), status),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a custom status").await;
+    assert_eq!(names(&fired), ["PreferencesHaveChanged"]);
+    assert_eq!(fired[0]["args"]["B"][0]["Category"], "custom_status");
+
+    // 11. A deletion fires nothing: Go has no hook for it.
+    let ((gs, _), (rs, _)) = pair
+        .each(
+            reqwest::Method::POST,
+            &login_user.token,
+            (
+                "/api/v4/users/me/preferences/delete".to_owned(),
+                batch.clone(),
+            ),
+            ("/api/v4/users/me/preferences/delete".to_owned(), batch),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200));
+    pair.no_more_hooks("a preference deletion").await;
+
     drop(rust);
     drop(go);
 }

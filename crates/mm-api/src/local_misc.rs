@@ -319,6 +319,7 @@ async fn local_update_preferences(
     Path(user_id): Path<String>,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -326,7 +327,7 @@ async fn local_update_preferences(
             return ApiError::invalid_param("preferences").into_response();
         }
     };
-    preferences::update_preferences_for(&state, &local_session(), &user_id, &bytes).await
+    preferences::update_preferences_for(&state, &local_session(), &hook_ctx, &user_id, &bytes).await
 }
 
 /// `deletePreferences` through `APILocal` (preference_local.go:9).
