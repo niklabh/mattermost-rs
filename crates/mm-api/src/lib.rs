@@ -2838,10 +2838,8 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/system/schema/version",
             partially_migrated(get(system::get_applied_schema_migrations)),
         )
-        // Go registers a GET and a POST on this path; only the GET is migrated, so the POST falls
-        // to `partially_migrated`'s fallback and Go still completes onboarding. That is not a
-        // deferral of convenience: `completeOnboarding` installs marketplace plugins in
-        // goroutines, and there is no plugin host here.
+        // Both methods are served. The POST hands Go a request that names plugins only under the
+        // Go plugin host, where the plugins it would install live (`system::complete_onboarding`).
         .route(
             "/api/v4/system/onboarding/complete",
             partially_migrated(get(system::get_onboarding).post(system::complete_onboarding)),

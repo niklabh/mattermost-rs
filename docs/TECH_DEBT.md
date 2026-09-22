@@ -9494,7 +9494,7 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 8 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 7 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
@@ -9503,10 +9503,11 @@ deactivation. Then `FileWillBeDownloaded`, on all four read routes, and `FileWil
 both served upload paths. Then `PreferencesHaveChanged`, the channel lifecycle family, and
 `DraftWillBeUpserted`.
 **Narrowed** 2026-09-22 — `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, on
-every served post read and on the post a create or an edit answers with.
+every served post read and on the post a create or an edit answers with. Then `OnInstall`, on
+onboarding's plugin installs.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-**27** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+**28** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
@@ -9514,14 +9515,14 @@ family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`
 (`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`) and
 both file hooks, `PreferencesHaveChanged`, and `ChannelHasBeenCreated`, `ChannelWillBeUpdated`,
 `ChannelWillBeArchived`, `ChannelWillBeRestored`, `DraftWillBeUpserted`, and the two consumed
-hooks `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`. That is 31 of the 46
-invocations. The remaining 8 hooks do not fire at all, and the paths that would fire them behave
+hooks `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, and `OnInstall`. That is
+32 of the 46 invocations. The remaining 7 hooks do not fire at all, and the paths that would fire them behave
 exactly as they did before:
 
 ```text
 post.go      ScheduledPostWillBeCreated
 notification EmailNotificationWillBeSent, NotificationWillBePushed
-plugin.go    OnPluginClusterEvent, OnInstall
+plugin.go    OnPluginClusterEvent
 support      GenerateSupportData
 properties   the `checkFieldDeleteAccess` plugin check ([D-542])
 ```
@@ -9544,8 +9545,7 @@ an MFA, LDAP or magic-link login (`UserWillLogIn`/`UserHasLoggedIn`), a signup b
 token or invite id (`UserHasBeenCreated`), and the deactivation of an account that owns bots
 (`UserHasBeenDeactivated`, [D-472]). Each closes when its branch is ported.
 
-**What is owed:** each site, ported where Go calls it, ordered by what a real client does —
-`OnInstall` next, on the served install routes. The consumed pair still has three Go sites with
+**What is owed:** each site, ported where Go calls it, ordered by what a real client does. The consumed pair still has three Go sites with
 no Rust caller, `GetPermalinkPost`, `GetPostAfterTime` and `GetPosts`, which land with whatever
 ports them. `ScheduledPostWillBeCreated` has no served site: the four
 scheduled-post routes answer only their feature and licence gates here and hand a licensed

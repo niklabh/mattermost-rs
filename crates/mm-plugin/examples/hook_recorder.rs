@@ -134,6 +134,7 @@ use mm_plugin::wire::plugin::{
     Z_MessagesWillBeConsumedArgs, Z_MessagesWillBeConsumedReturns,
     Z_MessagesWillBeConsumedWithContextArgs, Z_MessagesWillBeConsumedWithContextReturns,
 };
+use mm_plugin::wire::plugin::{Z_OnInstallArgs, Z_OnInstallReturns};
 use serde_json::{Value as Json, json};
 
 /// `render.rs` reads a gob oracle for its fixture helpers; this plugin loads no fixture, so the
@@ -190,7 +191,7 @@ const CONSUMED: [&str; 2] = [
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 25] = [
+const IMPLEMENTED: [&str; 26] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -216,6 +217,7 @@ const IMPLEMENTED: [&str; 25] = [
     "ChannelWillBeArchived",
     "ChannelWillBeRestored",
     "DraftWillBeUpserted",
+    "OnInstall",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -636,6 +638,14 @@ impl Hooks for Recorder {
                 String::new()
             },
         })
+    }
+
+    async fn on_install(
+        &self,
+        args: Z_OnInstallArgs,
+    ) -> Result<Z_OnInstallReturns, NotImplemented> {
+        self.saw("OnInstall", &args);
+        Ok(Z_OnInstallReturns::default())
     }
 
     async fn preferences_have_changed(
