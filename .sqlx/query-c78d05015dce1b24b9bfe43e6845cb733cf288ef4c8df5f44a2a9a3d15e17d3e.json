@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT sp.id                   AS \"id!\",\n                   sp.createat             AS \"create_at!\",\n                   sp.updateat             AS \"update_at!\",\n                   sp.userid               AS \"user_id!\",\n                   sp.channelid            AS \"channel_id!\",\n                   sp.rootid               AS \"root_id!\",\n                   sp.message              AS \"message!\",\n                   sp.props                AS \"props?\",\n                   sp.fileids              AS \"file_ids?\",\n                   sp.priority             AS \"priority?\",\n                   sp.scheduledat          AS \"scheduled_at!\",\n                   sp.processedat          AS \"processed_at!\",\n                   sp.errorcode            AS \"error_code!\",\n                   sp.repeattype           AS \"repeat_type!\",\n                   sp.repeattimezone       AS \"repeat_timezone!\",\n                   COALESCE(sp.type, '')   AS \"draft_type!\"\n              FROM scheduledposts AS sp\n              INNER JOIN channels AS c ON sp.channelid = c.id\n             WHERE sp.userid = $1 AND c.teamid = $2\n             ORDER BY sp.scheduledat, sp.createat\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "props?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "priority?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "scheduled_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "processed_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "error_code!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "repeat_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "repeat_timezone!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "draft_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "c78d05015dce1b24b9bfe43e6845cb733cf288ef4c8df5f44a2a9a3d15e17d3e"
+}

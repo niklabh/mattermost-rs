@@ -93,6 +93,7 @@ pub mod redirect_location;
 pub mod reports;
 pub mod retention_search;
 pub mod roles;
+pub mod scheduled_posts;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
 pub mod serve_content;
@@ -2398,19 +2399,19 @@ pub fn router(state: AppState) -> Router {
         // registers them first, so the routers agree.
         .route(
             "/api/v4/posts/schedule",
-            partially_migrated(post(feature_gates::create_schedule_post)),
+            partially_migrated(post(scheduled_posts::create_schedule_post)),
         )
         .route(
             "/api/v4/posts/schedule/{scheduled_post_id}",
             partially_migrated_with_ids(
                 &state,
-                put(feature_gates::update_scheduled_post)
-                    .delete(feature_gates::delete_scheduled_post),
+                put(scheduled_posts::update_scheduled_post)
+                    .delete(scheduled_posts::delete_scheduled_post),
             ),
         )
         .route(
             "/api/v4/posts/scheduled/team/{team_id}",
-            partially_migrated_with_ids(&state, get(feature_gates::get_team_scheduled_posts)),
+            partially_migrated_with_ids(&state, get(scheduled_posts::get_team_scheduled_posts)),
         )
         // ---- cloud and connected workspaces (2026-09-07) ----
         //

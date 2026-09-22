@@ -594,7 +594,7 @@ pub(crate) async fn post_patch_checks(
 /// Two arms, and Go's own comment on the second says "temporary permission check method until
 /// advanced permissions, please do not copy". Its `GetChannel` error is **swallowed**, so a channel
 /// that cannot be read simply fails the fallback.
-async fn user_create_post_permission_check(
+pub(crate) async fn user_create_post_permission_check(
     state: &AppState,
     session: &AuthenticatedSession,
     channel_id: &str,
@@ -634,7 +634,7 @@ async fn user_create_post_permission_check(
 /// `ExperimentalEnableHardenedMode` would be silent: every post would be accepted. `isIntegration`
 /// here is `Session.IsIntegration()`, the **wide** one that includes personal access tokens, not
 /// the narrower `isIntegrationPostAuthor` the notification path uses.
-fn post_hardened_mode_check(
+pub(crate) fn post_hardened_mode_check(
     state: &AppState,
     session: &AuthenticatedSession,
     props: Option<&mm_model::utils::StringInterface>,
@@ -664,7 +664,7 @@ fn post_hardened_mode_check(
 ///
 /// Only fires for an id the post does not already carry, so a caller who lost `upload_file` can
 /// still edit the message of a post with attachments.
-async fn check_upload_file_permission_for_new_files(
+pub(crate) async fn check_upload_file_permission_for_new_files(
     state: &AppState,
     session: &AuthenticatedSession,
     new_file_ids: &[String],
@@ -1356,7 +1356,7 @@ async fn create_post_checks(
     }
 
     post_hardened_mode_check(state, session, post.get_props())?;
-    post_priority_check(where_, state, session, post).await?;
+    post_priority_check(where_, state, session, post.get_priority(), &post.root_id).await?;
     post_card_type_check(where_, state, &post.post_type)?;
     state
         .app
@@ -1379,13 +1379,18 @@ async fn create_post_checks(
 /// answer `license_error.feature_unavailable` at **501** when they do not have one. That is
 /// before the `IsPersistentNotificationsEnabled` 403 and before the urgent-priority 400, so an
 /// unlicensed server never reaches either.
-async fn post_priority_check(
+///
+/// Takes the priority and the root id rather than a `Post` because `scheduledPostChecks` calls
+/// it too, with `ScheduledPost::get_priority` — the typed `metadata.priority`, not the draft's
+/// untyped `priority` map a client sends.
+pub(crate) async fn post_priority_check(
     where_: &'static str,
     state: &AppState,
     session: &AuthenticatedSession,
-    post: &Post,
+    priority: Option<&mm_model::post_metadata::PostPriority>,
+    root_id: &str,
 ) -> Result<(), PrepareError> {
-    let Some(priority) = post.get_priority() else {
+    let Some(priority) = priority else {
         return Ok(());
     };
 
@@ -1406,7 +1411,7 @@ async fn post_priority_check(
         return Err(forbidden());
     }
 
-    if !post.root_id.is_empty() {
+    if !root_id.is_empty() {
         return Err(PrepareError::App(AppError::boxed(
             where_,
             "api.post.post_priority.priority_post_only_allowed_for_root_post.request_error",
@@ -1470,7 +1475,7 @@ fn license_feature_unavailable(where_: &'static str) -> PrepareError {
 /// `IntegratedBoards` is off. The flag is not in the configuration document either server
 /// persists, so a `card` post is forwarded rather than refused — which is the same decision
 /// `updatePost`, `patchPost` and `deletePost` already make for the type.
-fn post_card_type_check(
+pub(crate) fn post_card_type_check(
     _where: &'static str,
     _state: &AppState,
     post_type: &str,

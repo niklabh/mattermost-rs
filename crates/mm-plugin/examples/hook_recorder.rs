@@ -89,6 +89,11 @@
 //! `!rewrite-draft` answers the whole draft with the message replaced by [`REWRITTEN_HEADER`],
 //! and `!partial-draft` answers a draft carrying **only** a message, which Go takes whole.
 //!
+//! `ScheduledPostWillBeCreated` does the same off the scheduled post's message, on create and on
+//! update alike: `!reject-scheduled <reason>` refuses, `!rewrite-scheduled` answers the whole
+//! post with the message replaced by [`REWRITTEN_HEADER`], and `!partial-scheduled` answers a
+//! post carrying **only** a message — no id, no user, no channel — which Go takes whole.
+//!
 //! # The two consumed hooks are opt-in, and driven by each post's message
 //!
 //! `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext` are implemented only when
@@ -110,7 +115,7 @@ use std::io::Write;
 use std::sync::Mutex;
 
 use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
-use mm_plugin::wire::model::{Channel, Draft};
+use mm_plugin::wire::model::{Channel, Draft, ScheduledPost};
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
     Z_ChannelHasBeenCreatedArgs, Z_ChannelHasBeenCreatedReturns, Z_ChannelMemberWillBeAddedArgs,
@@ -135,6 +140,9 @@ use mm_plugin::wire::plugin::{
     Z_MessagesWillBeConsumedWithContextArgs, Z_MessagesWillBeConsumedWithContextReturns,
 };
 use mm_plugin::wire::plugin::{Z_OnInstallArgs, Z_OnInstallReturns};
+use mm_plugin::wire::plugin::{
+    Z_ScheduledPostWillBeCreatedArgs, Z_ScheduledPostWillBeCreatedReturns,
+};
 use serde_json::{Value as Json, json};
 
 /// `render.rs` reads a gob oracle for its fixture helpers; this plugin loads no fixture, so the
@@ -191,7 +199,7 @@ const CONSUMED: [&str; 2] = [
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 26] = [
+const IMPLEMENTED: [&str; 27] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -218,6 +226,7 @@ const IMPLEMENTED: [&str; 26] = [
     "ChannelWillBeRestored",
     "DraftWillBeUpserted",
     "OnInstall",
+    "ScheduledPostWillBeCreated",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -606,6 +615,38 @@ impl Hooks for Recorder {
             }
         } else {
             Z_DraftWillBeUpsertedReturns::default()
+        };
+        Ok(answer)
+    }
+
+    async fn scheduled_post_will_be_created(
+        &self,
+        args: Z_ScheduledPostWillBeCreatedArgs,
+    ) -> Result<Z_ScheduledPostWillBeCreatedReturns, NotImplemented> {
+        self.saw("ScheduledPostWillBeCreated", &args);
+        let post = args.b.as_deref();
+        let message = post.map_or("", |p| p.draft.message.as_str());
+        let answer = if let Some(reason) = after(message, "!reject-scheduled ") {
+            Z_ScheduledPostWillBeCreatedReturns {
+                a: None,
+                b: reason.to_owned(),
+            }
+        } else if message == "!rewrite-scheduled" {
+            let mut replaced = post.cloned().unwrap_or_default();
+            replaced.draft.message = REWRITTEN_HEADER.to_owned();
+            Z_ScheduledPostWillBeCreatedReturns {
+                a: Some(Box::new(replaced)),
+                b: String::new(),
+            }
+        } else if message == "!partial-scheduled" {
+            let mut partial = ScheduledPost::default();
+            partial.draft.message = REWRITTEN_HEADER.to_owned();
+            Z_ScheduledPostWillBeCreatedReturns {
+                a: Some(Box::new(partial)),
+                b: String::new(),
+            }
+        } else {
+            Z_ScheduledPostWillBeCreatedReturns::default()
         };
         Ok(answer)
     }

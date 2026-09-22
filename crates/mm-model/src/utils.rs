@@ -1118,7 +1118,7 @@ pub fn non_sorted_array_from_json(data: &[u8]) -> Result<Vec<String>, serde_json
 /// Only escape sequences are inspected, so `\\ud800` (an escaped backslash and then text) is
 /// untouched: the scan consumes two bytes for every non-`u` escape. Outside a string a backslash
 /// is a syntax error either way, so not tracking string boundaries costs nothing.
-fn replace_lone_surrogates(data: &[u8]) -> Cow<'_, [u8]> {
+pub fn replace_lone_surrogates(data: &[u8]) -> Cow<'_, [u8]> {
     fn hex4(bytes: &[u8]) -> Option<u32> {
         bytes
             .get(..4)
