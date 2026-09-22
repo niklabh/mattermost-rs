@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 27 of 35 (2026-09-22)
+### Phase 5 · Hook call sites — IN PROGRESS, 28 of 35 (2026-09-22)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -608,6 +608,11 @@ the metadata pipeline's permalink read included; and a replacement is taken **wh
 comment above the context-aware client promises a decode-into-original that its code does not
 do — with only `Metadata` carried across, so a plugin answering an id and a message hands the
 client a post with no channel and no author.
+
+**Done tenth, `OnInstall`** — 28 of 35, 32 of 46 — on its one site, onboarding's plugin
+installs, which this server had forwarded whole. It is the one hook Go calls on a **single**
+plugin through `HooksForPlugin` rather than fanning out, after that plugin is installed from the
+Marketplace and enabled, on a goroutine the response does not wait for.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

@@ -59,3 +59,8 @@ p256.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 # The parity suite connects a real websocket to both servers and compares the frames.
 tokio-tungstenite.workspace = true
+# `parity::plugin_hooks` signs the hook recorder's bundle at test time with the test key of
+# `reference/dump/behaviour_plugin_signature.go`, so that a Marketplace install — onboarding's —
+# can verify it on both hosts. rpgp takes its RNG from rand 0.8, which it already pulls in.
+pgp.workspace = true
+rand08 = { package = "rand", version = "0.8" }

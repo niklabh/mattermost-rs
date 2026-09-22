@@ -14378,6 +14378,19 @@ The search routes gained a context too: an `in:@user` filter creates the DM it n
 Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
 
+## Plugin hook call sites: `OnInstall` (2026-09-22)
+
+Plugin plan **Phase 5, 28 of 35**; the other 7 hooks are [D-932]. `POST /system/onboarding/complete`
+naming plugins is now served under `MMRS_PLUGIN_HOST=rust` instead of forwarded.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `CompleteOnboarding`'s install goroutines (app/onboarding.go:47-85) | `App::install_onboarding_plugins`, `App::on_install`, `system::complete_onboarding` | DONE | `parity::plugin_hooks::the_install_hook_fires_as_go_fires_it` | One task per id, not awaited: install, enable, then **that plugin's** `OnInstall`; every failure is only logged and ends the task. Still forwarded under the Go host, where the plugins live. |
+
+Mutation tally (`plugin-hooks-onboarding.plan`): 9 run, 7 caught, 2 controls survived, 0 harness
+faults. The test signs the recorder bundle at run time with the signature oracle's test key;
+rpgp's inner `Signature` serialises without its packet header, which Go refuses at byte one.
+
 ## Plugin hook call sites: `MessagesWillBeConsumed` and its context-aware twin (2026-09-22)
 
 Plugin plan **Phase 5, 27 of 35**; the other 8 hooks are [D-932].

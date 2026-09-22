@@ -5,7 +5,8 @@
 //! ```
 //!
 //! Both servers write the same two `Systems` rows, so the write is made on each and read back
-//! from the table; a request naming plugins is handed to Go.
+//! from the table; a request naming plugins is handed to Go when Go hosts the plugins, which is
+//! this stack's configuration. Under the Rust host it is served: `parity::plugin_hooks`.
 
 use crate::common;
 
@@ -158,5 +159,9 @@ async fn the_rows_are_written_and_the_plugin_install_is_gos() {
         r#"{"organization":"Acme","install_plugins":["com.mattermost.nps"]}"#,
     )
     .await;
-    assert_eq!(served.as_deref(), Some("go"), "the plugin install is Go's");
+    assert_eq!(
+        served.as_deref(),
+        Some("go"),
+        "under the Go plugin host the plugin install is Go's"
+    );
 }

@@ -1967,6 +1967,39 @@ impl App {
             },
         );
     }
+    /// `OnInstall` (onboarding.go:81) — the one hook Go calls on **one** plugin, through
+    /// `HooksForPlugin`, rather than fanning out: the plugin onboarding just installed and
+    /// enabled, with `UserId` the onboarding session's user. Awaited, where the `*HasBeen*`
+    /// hooks are spawned: the caller is already its own task.
+    ///
+    /// A plugin that is not active is Go's `Warn` and no call; an error the plugin answers is
+    /// only logged. Unlike every other entry point here, the Go host is not consulted: the only
+    /// caller runs under the Rust host by construction ([`App::install_onboarding_plugins`]).
+    pub(crate) async fn on_install(&self, ctx: &HookContext, user_id: String, id: &str) {
+        let Some(environment) = self.plugins_environment() else {
+            tracing::warn!(
+                plugin_id = id,
+                "Getting hooks for plugin failed: plugins are not initialized"
+            );
+            return;
+        };
+        let hooks = match environment.hooks_for_plugin(id) {
+            Ok(hooks) => hooks,
+            Err(err) => {
+                tracing::warn!(plugin_id = id, error = %err, "Getting hooks for plugin failed");
+                return;
+            }
+        };
+        let args = wire_plugin::Z_OnInstallArgs {
+            a: ctx.boxed_wire(),
+            b: wire_model::OnInstallEvent { user_id },
+        };
+        let returns = hooks.on_install(args).await;
+        if let Some(err) = mm_plugin::error::decodable_error(returns.a.as_ref()) {
+            tracing::error!(plugin_id = id, error = %err.go_error(), "Plugin OnInstall hook failed");
+        }
+    }
+
     /// `ChannelHasBeenCreated` (hook 13) — the three creation sites: the end of `CreateChannel`
     /// (channel.go:340, not for a space), `handleCreationEvent` for a new DM (:430, **before** the
     /// `direct_added` event), and the end of `createGroupChannel` (:716). None fires when the

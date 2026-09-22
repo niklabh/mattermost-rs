@@ -71,6 +71,10 @@ const UPLOAD_GO_OFFSET: u16 = 83;
 const CHANNEL_HOST_PORT: u16 = 8134;
 /// Its Go server.
 const CHANNEL_GO_OFFSET: u16 = 84;
+/// The Rust host of the onboarding tranche, `OnInstall`.
+const ONBOARDING_HOST_PORT: u16 = 8135;
+/// Its Go server.
+const ONBOARDING_GO_OFFSET: u16 = 85;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -3231,6 +3235,249 @@ async fn run_the_channel_tour(client: &reqwest::Client, admin: &str) {
     for id in [created_go, created_rs, go_ch, rs_ch, go_alive, rs_alive] {
         common::delete_channel(&client, &admin, &id).await;
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The onboarding tranche: OnInstall
+// ---------------------------------------------------------------------------------------------
+
+/// The armored private half of `pluginSigTestKey`, read out of the Go source that holds it
+/// (`reference/dump/behaviour_plugin_signature.go`). Its public half is the fixture's
+/// `keys.armored`, which `parity::marketplace::plant_key` puts where
+/// `SignaturePublicKeyFiles` points. A TEST KEY: nothing trusts it outside this repository.
+fn test_signing_key() -> pgp::composed::SignedSecretKey {
+    use pgp::composed::Deserializable as _;
+
+    let source =
+        std::fs::read_to_string(repo().join("reference/dump/behaviour_plugin_signature.go"))
+            .expect("the signature oracle's source");
+    let start = source
+        .find("const pluginSigTestKey = `")
+        .expect("the test key's declaration")
+        + "const pluginSigTestKey = `".len();
+    let end = start + source[start..].find('`').expect("the key's closing quote");
+    let (key, _) = pgp::composed::SignedSecretKey::from_string(&source[start..end])
+        .expect("the test key parses");
+    key
+}
+
+/// A run directory for the onboarding tranche: the file store **empty**, so start-up installs
+/// nothing, and the signed bundle in `prepackaged_plugins`, which is where a Marketplace install
+/// finds it with the remote Marketplace off (plugin_install.go:268). Neither server installs a
+/// prepackaged plugin at start-up unless `PluginStates` enables it, and the tranche leaves it
+/// unset.
+fn lay_out_prepackaged(run: &Path, signature: &[u8]) -> PathBuf {
+    let transcript = lay_out(run);
+    std::fs::remove_file(run.join("data/plugins").join(format!("{PLUGIN_ID}.tar.gz")))
+        .expect("the file store's bundle goes");
+    let prepackaged = run.join("prepackaged_plugins");
+    std::fs::create_dir_all(&prepackaged).expect("the prepackaged directory");
+    let file = prepackaged.join(format!("{PLUGIN_ID}.tar.gz"));
+    std::fs::copy(bundle(), &file).expect("the prepackaged bundle");
+    std::fs::write(
+        prepackaged.join(format!("{PLUGIN_ID}.tar.gz.sig")),
+        signature,
+    )
+    .expect("its signature");
+    transcript
+}
+
+/// Wait until `path` holds `expected` entries, then return them.
+async fn transcript_reaches(path: &Path, expected: usize, side: &str) -> Vec<Json> {
+    for _ in 0..300 {
+        let entries = transcript(path);
+        if entries.len() >= expected {
+            return entries;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "{side}: waited for {expected} hooks, saw {:?}",
+        names(&transcript(path))
+    );
+}
+
+/// Cross-server parity for `OnInstall` (docs/PLUGIN_PLAN.md, Phase 5; [D-932]), whose one call
+/// site is `POST /api/v4/system/onboarding/complete` naming plugins: each is installed from the
+/// Marketplace, enabled, and then told `OnInstall` — on its own goroutine, after the response.
+///
+/// The recorder's bundle is signed here with the signature oracle's test key and offered as a
+/// prepackaged plugin, so both hosts install the same bytes through the same verification. The
+/// two onboardings run one after the other, with `PluginStates` cleared between them, so each
+/// host starts from a plugin that is not enabled.
+#[tokio::test]
+async fn the_install_hook_fires_as_go_fires_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_onboarding_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_onboarding_tour(client: &reqwest::Client, admin: &str) {
+    use pgp::ser::Serialize as _;
+
+    super::marketplace::plant_key(&super::marketplace::fixture()).await;
+    plant_state(client, admin, None).await;
+    let signature = pgp::composed::DetachedSignature::sign_binary_data(
+        rand08::thread_rng(),
+        &test_signing_key().primary_key,
+        &pgp::types::Password::empty(),
+        pgp::crypto::hash::HashAlgorithm::Sha256,
+        std::fs::File::open(bundle()).expect("the bundle"),
+    )
+    .expect("the bundle is signed")
+    // The framed packet, header and all: the inner `Signature` serialises its body alone,
+    // which Go's reader refuses at the first byte.
+    .to_bytes()
+    .expect("the signature serialises");
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-onboarding");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out_prepackaged(&go_run, &signature);
+    let rust_log = lay_out_prepackaged(&rs_run, &signature);
+    let settings = [
+        (
+            "MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES",
+            "mmrs-marketplace-test.plugin.asc",
+        ),
+        ("MM_PLUGINSETTINGS_ENABLEREMOTEMARKETPLACE", "false"),
+    ];
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    go_env.extend(settings);
+    let go = start_go(&go_run, &go_env, ONBOARDING_GO_OFFSET).await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    rust_env.extend(settings);
+    let rust = SecondServer::start_in(ONBOARDING_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "organization": "Hook Recorder Org",
+        "install_plugins": [PLUGIN_ID],
+    }))
+    .expect("a body");
+
+    let mut answers = Vec::new();
+    let mut fired = Vec::new();
+    for (base, log, side) in [
+        (go.base.as_str(), go_log.as_path(), "Go"),
+        (rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        assert!(
+            transcript(log).is_empty(),
+            "{side}: the recorder ran before onboarding installed it"
+        );
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(admin),
+            "/api/v4/system/onboarding/complete",
+            Some(&body),
+        )
+        .await;
+        if side == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the onboarding was forwarded"
+            );
+        }
+        answers.push((status, String::from_utf8_lossy(&answer).into_owned()));
+        wait_until_running(client, admin, base).await;
+        let entries = transcript_reaches(log, 1, side).await;
+        // Nothing else follows: the recorder is told once, and by nobody but onboarding.
+        tokio::time::sleep(QUIET).await;
+        let entries_after = transcript(log);
+        assert_eq!(entries, entries_after, "{side}: a hook after OnInstall");
+        fired.push(entries);
+        // Each host starts from a plugin that is not enabled.
+        plant_state(client, admin, None).await;
+    }
+
+    assert_eq!(answers[0], answers[1], "the onboarding answer");
+    assert_eq!(answers[0].0, 200, "{}", answers[0].1);
+    assert_eq!(names(&fired[0]), ["OnInstall"]);
+    assert_eq!(fired[0], fired[1], "what OnInstall was handed");
+    let args = &fired[1][0]["args"];
+    assert_eq!(
+        args["B"]["UserId"],
+        admin_id.as_str(),
+        "the event names the onboarding user"
+    );
+    assert!(
+        args["A"]["SessionId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()),
+        "the plugin.Context carries the session: {args}"
+    );
+    assert_eq!(args["A"]["RequestId"], "<id>", "a request id is minted");
+
+    // A failed install ends that plugin's goroutine: no enable, no `OnInstall`. The bundle is
+    // taken away, so the prepackaged entry both hosts loaded at start-up no longer opens — and
+    // the recorder, installed by the first round, would be enabled and told again by a host
+    // that carried on.
+    for (run, base, log, side) in [
+        (&go_run, go.base.as_str(), go_log.as_path(), "Go"),
+        (&rs_run, rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        std::fs::remove_file(
+            run.join("prepackaged_plugins")
+                .join(format!("{PLUGIN_ID}.tar.gz")),
+        )
+        .expect("the prepackaged bundle goes");
+        let (status, _, _) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(admin),
+            "/api/v4/system/onboarding/complete",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(status, 200, "{side}: a failed install is only logged");
+        tokio::time::sleep(QUIET * 3).await;
+        assert_eq!(
+            names(&transcript(log)),
+            ["OnInstall"],
+            "{side}: a failed install went on to OnInstall"
+        );
+    }
+
+    drop(rust);
+    drop(go);
 }
 
 // ---------------------------------------------------------------------------------------------

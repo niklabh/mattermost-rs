@@ -363,9 +363,14 @@ pub async fn get_applied_schema_migrations(
 /// at 403, not the generic permission error — then `CompleteOnboardingRequestFromReader`, a
 /// `json.Decode` into a pointer whose failure is the 400 `complete_onboarding_request.app_error`
 /// (a `null` leaves the pointer nil and Go dereferences it; forwarded rather than reproduced).
-/// Then [`mm_app::App::save_onboarding_organization`] and, when the request names no plugins,
-/// [`mm_app::App::mark_admin_onboarding_complete`] and `{"status":"OK"}`; a request that names
-/// plugins is forwarded whole, since the marketplace installs need the plugin host.
+/// Then [`mm_app::App::save_onboarding_organization`], the plugins, and
+/// [`mm_app::App::mark_admin_onboarding_complete`] and `{"status":"OK"}`.
+///
+/// The plugins are installed, enabled and told `OnInstall` in the background
+/// ([`mm_app::App::install_onboarding_plugins`]) when this process hosts them
+/// (`MMRS_PLUGIN_HOST=rust`), and skipped when plugins are off, as Go skips them on a nil
+/// environment. Under the Go host a request that names plugins is forwarded whole, since the
+/// plugins live in that process.
 #[tracing::instrument(skip_all, fields(forwarded = false, plugins))]
 pub async fn complete_onboarding(
     State(state): State<AppState>,
@@ -388,6 +393,8 @@ pub async fn complete_onboarding(
     }
 
     let (parts, body) = request.into_parts();
+    // `pluginContext(rctx)`, taken on the request's goroutine before the installs start.
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -428,7 +435,14 @@ pub async fn complete_onboarding(
     }
 
     if !onboarding.install_plugins.is_empty() {
-        return forward(state, "the marketplace installs need the plugin host").await;
+        if !state.app.plugin_host().hosted() {
+            return forward(state, "the marketplace installs need the plugin host").await;
+        }
+        state.app.install_onboarding_plugins(
+            &hook_ctx,
+            &session.0.user_id,
+            &onboarding.install_plugins,
+        );
     }
 
     if let Err(err) = state.app.mark_admin_onboarding_complete().await {

@@ -1,0 +1,16 @@
+# Mutation plan for `OnInstall` (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-onboarding.plan
+#
+# The oracle is `parity::plugin_hooks::the_install_hook_fires_as_go_fires_it`. The last two lines
+# are the no-op controls and must SURVIVE.
+
+the-hook-does-not-fire	crates/mm-app/src/onboarding.rs	        self.on_install(ctx, user_id, id).await;	        let _ = (ctx, user_id, id);	api	plugin_hooks::the_install_hook
+hook-before-enable	crates/mm-app/src/onboarding.rs	        if let Err(err) = self.enable_plugin(id).await {\n            tracing::error!(id, error = %err, "Failed to enable plugin for onboarding");\n            return;\n        }\n        self.on_install(ctx, user_id, id).await;	        self.on_install(ctx, user_id, id).await;\n        if let Err(err) = self.enable_plugin(id).await {\n            tracing::error!(id, error = %err, "Failed to enable plugin for onboarding");\n            return;\n        }	api	plugin_hooks::the_install_hook
+enable-skipped	crates/mm-app/src/onboarding.rs	        if let Err(err) = self.enable_plugin(id).await {	        if let Err(err) = Ok::<(), Box<mm_model::utils::AppError>>(()) {	api	plugin_hooks::the_install_hook
+failed-install-carries-on	crates/mm-app/src/onboarding.rs	            tracing::error!(id, error = %err, "Failed to install plugin for onboarding");\n            return;	            tracing::error!(id, error = %err, "Failed to install plugin for onboarding");	api	plugin_hooks::the_install_hook
+event-names-the-session	crates/mm-app/src/plugin_hooks.rs	            b: wire_model::OnInstallEvent { user_id },	            b: wire_model::OnInstallEvent { user_id: ctx.session_id.clone() },	api	plugin_hooks::the_install_hook
+context-dropped	crates/mm-app/src/plugin_hooks.rs	        let args = wire_plugin::Z_OnInstallArgs {\n            a: ctx.boxed_wire(),	        let args = wire_plugin::Z_OnInstallArgs {\n            a: HookContext::default().boxed_wire(),	api	plugin_hooks::the_install_hook
+rust-host-forwards	crates/mm-api/src/system.rs	        if !state.app.plugin_host().hosted() {\n            return forward(state, "the marketplace installs need the plugin host").await;	        if state.app.plugin_host().hosted() {\n            return forward(state, "the marketplace installs need the plugin host").await;	api	plugin_hooks::the_install_hook
+control-rename-the-task-binding	crates/mm-app/src/onboarding.rs	                app.install_onboarding_plugin(&ctx, user_id, &id).await;	                let task_app = app;\n                task_app.install_onboarding_plugin(&ctx, user_id, &id).await;	api	plugin_hooks::the_install_hook
+control-name-the-request-fields-differently	crates/mm-app/src/onboarding.rs	            id: id.to_owned(),\n            version: String::new(),	            version: String::new(),\n            id: id.to_owned(),	api	plugin_hooks::the_install_hook
