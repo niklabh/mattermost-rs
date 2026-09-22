@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 29/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14377,6 +14377,29 @@ The search routes gained a context too: an `in:@user` filter creates the DM it n
 
 Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
+
+## The support packet, licensed, and `GenerateSupportData` (2026-09-23)
+
+`GET /api/v4/system/support_packet` (and its local-mode twin) is served past the licence gate
+instead of forwarded; plugin plan **Phase 5, 30 of 35**, the other 5 hooks are [D-932]. Three
+cases still go to Go whole, each decided before anything is read: a non-local file store, an
+SMTP probe needing TLS or auth ([D-981]), and plugins hosted by Go while its plugin directory
+may hold a bundle.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `generateSupportPacket`, `supportPacketFileName` (api4/system.go:83, :141); `WriteZipFile` (app/file.go:1433) | `gated_reads::{generate_support_packet, support_packet_answer}`, `local_misc::local_generate_support_packet`, `mm_app::support_packet::{write_zip, support_packet_file_name}` | DONE | `parity::support_packet` (6, licensed oracle) + 4 unit | Go ranges maps for its producers, so its file order is random; ours is the declared order. No `heap.prof`, `goroutines` or `cpu.prof`, and no five-second wait ([D-980]). |
+| `App.GenerateSupportPacket` and its six producers (app/support_packet.go) | `mm_app::support_packet` | DONE | same | Stats, jobs and permissions restart their error list on every failure (`multierror.Append(err)`), so only the last is reported. `SqlUserStore.Count` now honours `ExcludeRegularUsers` — the bot count read 21 where Go read 4. |
+| `PlatformService.GenerateSupportPacket`, `getSupportPacketDiagnostics`, the probes, `getSanitizedConfig` (platform/support_packet.go, config.go:45); `Config.Sanitize` with `PartiallyRedactDataSources`, `PluginSettings.Sanitize`, `SanitizeDataSource` (model/config.go) | `mm_app::support_packet`, `mm_app::config::sanitize_with`, `mm_model::config::{sanitize_data_source, PluginSettings::sanitize}` | DONE | same + 11 unit | `FeatureFlags` is the **last** key of `sanitized_config.json` (the outer field dominates the embedded one); `LdapDiagnostic`, `SamlDiagnostic` and Elasticsearch are nil, so those three say `disabled`. |
+| `GetSchemaDefinition`, `GetDiagnostics`, `GetDBSchemaVersion`, `AnalyticsGetGuestCount` | `mm_store::support_packet_store`, `UserStore::analytics_get_guest_count` | DONE | same | sqlx keeps no wait or close counters, so those pool figures are 0. |
+| goccy/go-yaml's encoder, go-multierror's text | `mm_model::goyaml`, `mm_app::support_packet::multierror_text` | DONE | 16 unit against `fixtures/behaviour_goyaml.json` and `behaviour_support_packet.json` | Quoting is `token.IsNeedQuoted` — every `FormatMillis` time is quoted, as is anything overflowing an integer — and a sequence re-indents on `\n` only. |
+| The `GenerateSupportData` loop (app/support_packet.go:103-126) | `App::run_generate_support_data`, `support_data_requested` | DONE | `parity::plugin_hooks::the_support_data_hook_fires_as_go_fires_it` | An error drops the plugin's files even when it sent some. |
+
+Mutation tally (`support-packet.plan`): 23 run, 21 caught, 2 controls survived, 0 harness
+faults. The first full parity run found the suite's own weak spot, not the port's: whole-file
+bracketing never settled `stats.yaml` under concurrent writers (now bracketed per counter), and
+the licensed oracle's memoised `ChannelHigherScopedPermissions` merged a scheme `parity::roles`
+had deleted, so that suite's `mmrs_*` roles are left out of the comparison.
 
 ## The scheduled-post routes, licensed, and `ScheduledPostWillBeCreated` (2026-09-22)
 

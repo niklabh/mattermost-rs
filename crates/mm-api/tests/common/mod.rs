@@ -2749,6 +2749,26 @@ pub async fn licensed() -> LicensedPair {
     }
 }
 
+/// A licensed mm-api of the caller's own on `port`, beside the licensed Go oracle, with `extra`
+/// overlaid — for a suite that needs the licensed pair under a setting the shared one does not
+/// carry. Not a static: the caller owns it and it dies with the caller. Panics when the oracle
+/// is absent, as [`licensed`] does.
+pub async fn licensed_rust_with(port: u16, extra: &[(&str, &str)]) -> (LicensedPair, SecondServer) {
+    let (signed, key_file) = stack_license_files();
+    let go = licensed_go();
+    require_licensed_go(&go, "licensed").await;
+    let server = start_licensed_rust(port, &go, go_port() + 32, &signed, &key_file, extra).await;
+    (
+        LicensedPair {
+            go,
+            rust: server.base.clone(),
+            signed,
+            key_file,
+        },
+        server,
+    )
+}
+
 /// The licensed **guest** oracle's base URL — `MMRS_LICENSED_VARIANT=guest scripts/go-licensed.sh
 /// port`: the same licence, `GuestAccountsSettings.Enable` on as an environment override.
 pub fn licensed_guest_go() -> String {

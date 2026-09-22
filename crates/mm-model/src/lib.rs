@@ -81,6 +81,8 @@ pub mod go_path;
 /// script tables `model.ContainsCJK` needs.
 mod go_unicode_generated;
 pub mod go_url;
+/// goccy/go-yaml's block encoder, for the Support Packet's YAML files.
+pub mod goyaml;
 pub mod group;
 pub mod group_member;
 pub mod group_syncable;

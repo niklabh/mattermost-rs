@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 29 of 35 (2026-09-22)
+### Phase 5 · Hook call sites — IN PROGRESS, 30 of 35 (2026-09-23)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -621,6 +621,14 @@ answer: a replacement carrying only a message is saved with no user, no channel 
 and on an update it names no row, so the update succeeds and writes nothing. The tranche is the
 first to run both hosts **licensed** — `MM_LICENSE` and the verifying key in each environment,
 and the enterprise-ready Go build — since the routes refuse without one.
+
+**Done twelfth, `GenerateSupportData`** — 30 of 35, 35 of 46 — on its one site, the end of
+`GenerateSupportPacket`, which landed with the packet itself served past its licence gate. It is
+`RunMultiHook` without a short-circuit, with one gate in front: a plugin whose manifest declares
+the `support_packet` prop is asked only when the admin ticked it (`plugin_packets`). An error is
+a line of `warning.txt` and drops that plugin's files **even when it sent some**; the recorder
+answers with both to prove it. The hook's only input is the `plugin.Context`, so the tranche
+drives the error branch through the request's `User-Agent`.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

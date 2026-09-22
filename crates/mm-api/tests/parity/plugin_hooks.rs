@@ -79,6 +79,10 @@ const ONBOARDING_GO_OFFSET: u16 = 85;
 const SCHEDULED_HOST_PORT: u16 = 8136;
 /// Its Go server — the **licensed** build, since the scheduled-post routes refuse without one.
 const SCHEDULED_GO_OFFSET: u16 = 86;
+/// The Rust host of the support-packet tranche, `GenerateSupportData`.
+const SUPPORT_HOST_PORT: u16 = 8137;
+/// Its Go server — licensed too: the packet is refused without a licence.
+const SUPPORT_GO_OFFSET: u16 = 87;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -149,6 +153,53 @@ fn bundle() -> PathBuf {
             tarball
         })
         .clone()
+}
+
+/// [`bundle`] with the manifest carrying a `support_packet` prop — the System Console's
+/// checkbox, which makes `GenerateSupportData` ask for the plugin to be ticked. Its own staging
+/// directory, so the plain bundle the older tours install is untouched.
+fn bundle_with_support_prop() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let scratch =
+                PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-bundle-support");
+            let stage = scratch.join(PLUGIN_ID);
+            let _ = std::fs::remove_dir_all(&scratch);
+            std::fs::create_dir_all(&stage).expect("the staging directory");
+            std::fs::write(
+                stage.join("plugin.json"),
+                format!(
+                    r#"{{"id": "{PLUGIN_ID}", "name": "Hook Recorder", "version": "0.1.0", "server": {{"executable": "plugin"}}, "props": {{"support_packet": "The hook recorder's transcript"}}}}"#
+                ),
+            )
+            .expect("the manifest");
+            std::fs::copy(hook_recorder(), stage.join("plugin")).expect("the executable");
+            let tarball = scratch.join(format!("{PLUGIN_ID}.tar.gz"));
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "tar -c -C {stage} {PLUGIN_ID} | gzip -1 > {out}",
+                    stage = scratch.display(),
+                    out = tarball.display()
+                ))
+                .status()
+                .expect("tar runs");
+            assert!(status.success(), "packing the bundle failed");
+            tarball
+        })
+        .clone()
+}
+
+/// [`lay_out`] with `tarball` in the file store instead of the plain bundle.
+fn lay_out_bundle(run: &Path, tarball: &Path) -> PathBuf {
+    let transcript = lay_out(run);
+    std::fs::copy(
+        tarball,
+        run.join("data/plugins").join(format!("{PLUGIN_ID}.tar.gz")),
+    )
+    .expect("the bundle reaches the file store");
+    transcript
 }
 
 /// A run directory: the bundle in the file store, and the two plugin directories empty.
@@ -3797,6 +3848,191 @@ async fn run_the_scheduled_tour(client: &reqwest::Client, admin: &str) {
     );
     assert_eq!(gb["scheduled_at"], scheduled_at);
     pair.no_more_hooks("a delete").await;
+
+    drop(rust);
+    drop(go);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The support-packet tranche: GenerateSupportData
+// ---------------------------------------------------------------------------------------------
+
+/// Cross-server parity for `GenerateSupportData` (docs/PLUGIN_PLAN.md, Phase 5; [D-932]), the
+/// plugin loop at the end of `GenerateSupportPacket` — against the licensed Go build, with the
+/// recorder's manifest declaring the `support_packet` prop, so its checkbox decides.
+///
+/// Three packets, each with the logs off so the only warnings are the plugin's: one the recorder
+/// is not ticked for (the hook must not fire), one it is (it fires, and its two files join the
+/// zip), and one whose `User-Agent` makes it answer an error alongside a file (the warning is
+/// written and the file dropped).
+#[tokio::test]
+async fn the_support_data_hook_fires_as_go_fires_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_support_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_support_tour(client: &reqwest::Client, admin: &str) {
+    use crate::parity::support_packet::{read_zip, warning_points};
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-support");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out_bundle(&go_run, &bundle_with_support_prop());
+    let rust_log = lay_out_bundle(&rs_run, &bundle_with_support_prop());
+
+    plant_state(client, admin, Some(true)).await;
+    let (signed, key_file) = common::stack_license_files();
+    let licence = [
+        ("MM_LICENSE", signed.as_str()),
+        ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
+    ];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    go_env.extend(licence);
+    let go = start_go_binary("mattermost-licensed", &go_run, &go_env, SUPPORT_GO_OFFSET).await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    rust_env.extend(licence);
+    let rust = SecondServer::start_in(SUPPORT_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: Vec::new(),
+        rust_scrub: Vec::new(),
+        seen: 0,
+    };
+    let packet = |base: String, query: &'static str, agent: &'static str| {
+        let client = client.clone();
+        let admin = admin.to_owned();
+        async move {
+            let response = client
+                .get(format!("{base}/api/v4/system/support_packet{query}"))
+                .bearer_auth(&admin)
+                .header("User-Agent", agent)
+                .timeout(Duration::from_secs(120))
+                .send()
+                .await
+                .expect("the server answers");
+            let status = response.status().as_u16();
+            let served_by = response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let body = response.bytes().await.expect("a body").to_vec();
+            assert_eq!(
+                status,
+                200,
+                "{base}{query}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            (read_zip(&body), served_by)
+        }
+    };
+    let plugin_files = |entries: &[(String, Vec<u8>)]| -> Vec<(String, Vec<u8>)> {
+        entries
+            .iter()
+            .filter(|(name, _)| name.starts_with("mmrs.hookrecorder/"))
+            .cloned()
+            .collect()
+    };
+    let file = |entries: &[(String, Vec<u8>)], name: &str| {
+        entries
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, b)| String::from_utf8_lossy(b).into_owned())
+    };
+
+    // 1. Not ticked: the prop is declared and the id is not in `plugin_packets`.
+    let untick = "?basic_server_logs=false&plugin_packets=someone.else";
+    let (go_zip, _) = packet(go.base.clone(), untick, "mmrs-parity").await;
+    let (rs_zip, served_by) = packet(rust.base.clone(), untick, "mmrs-parity").await;
+    assert_eq!(
+        served_by.as_deref(),
+        Some("rust"),
+        "the Rust host builds the packet"
+    );
+    pair.no_more_hooks("a packet the recorder is not ticked for")
+        .await;
+    assert!(plugin_files(&go_zip).is_empty() && plugin_files(&rs_zip).is_empty());
+    // The environment half: the recorder is listed, enabled, on both.
+    let (gp, rp) = (file(&go_zip, "plugins.json"), file(&rs_zip, "plugins.json"));
+    assert_eq!(rp, gp, "plugins.json");
+    assert!(gp.is_some_and(|p| p.contains(PLUGIN_ID)));
+    assert_eq!(file(&go_zip, "warning.txt"), None);
+    assert_eq!(file(&rs_zip, "warning.txt"), None);
+
+    // 2. Ticked: the hook fires, and its files join the packet in the order it sent them.
+    let tick = "?basic_server_logs=false&plugin_packets=mmrs.hookrecorder";
+    let (go_zip, _) = packet(go.base.clone(), tick, "mmrs-parity").await;
+    let (rs_zip, _) = packet(rust.base.clone(), tick, "mmrs-parity").await;
+    let fired = pair.hooks("a ticked packet").await;
+    assert_eq!(names(&fired), ["GenerateSupportData"]);
+    assert_eq!(fired[0]["args"]["A"]["UserAgent"], "mmrs-parity");
+    let (go_files, rs_files) = (plugin_files(&go_zip), plugin_files(&rs_zip));
+    assert_eq!(rs_files, go_files, "the plugin's files");
+    assert_eq!(
+        rs_files.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+        [
+            "mmrs.hookrecorder/recorded.txt",
+            "mmrs.hookrecorder/raw.bin"
+        ]
+    );
+    let names_of = |entries: &[(String, Vec<u8>)]| -> Vec<String> {
+        entries.iter().map(|(n, _)| n.clone()).collect()
+    };
+    let rs_names = names_of(&rs_zip);
+    assert_eq!(
+        rs_names.last().map(String::as_str),
+        Some("mmrs.hookrecorder/raw.bin"),
+        "after every file the server wrote: {rs_names:?}"
+    );
+    assert_eq!(file(&rs_zip, "warning.txt"), None);
+
+    // 3. The plugin answers an error with a file: a warning, and no file.
+    let (go_zip, _) = packet(go.base.clone(), tick, "mmrs-parity hookfail").await;
+    let (rs_zip, _) = packet(rust.base.clone(), tick, "mmrs-parity hookfail").await;
+    let fired = pair.hooks("a failing plugin").await;
+    assert_eq!(names(&fired), ["GenerateSupportData"]);
+    assert!(plugin_files(&go_zip).is_empty(), "Go drops the files");
+    assert!(plugin_files(&rs_zip).is_empty(), "so does the Rust host");
+    let (gw, rw) = (
+        file(&go_zip, "warning.txt").expect("Go writes the warning"),
+        file(&rs_zip, "warning.txt").expect("so does the Rust host"),
+    );
+    assert_eq!(warning_points(&rw), warning_points(&gw));
+    assert!(
+        gw.contains("the hook recorder has nothing to report"),
+        "{gw}"
+    );
 
     drop(rust);
     drop(go);

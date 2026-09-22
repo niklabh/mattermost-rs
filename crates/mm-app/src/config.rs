@@ -5573,6 +5573,27 @@ pub async fn load_model_config_with_env(
 /// stored settings from the map. The live document's `Plugins` is `{}`, so the two agree today;
 /// a server with configured plugin settings would not. See [D-311].
 pub fn sanitize(config: &mut mm_model::config::Config) {
+    sanitize_secrets(config, false);
+}
+
+/// Port of `(*model.Config).Sanitize(manifests, &SanitizeOptions{PartiallyRedactDataSources})`
+/// (config.go:5346) in full — [`sanitize`]'s masking, the data sources through
+/// `SanitizeDataSource` when `partially_redact_data_sources` (falling back to the whole
+/// `FakeSetting` when that fails, as Go does), and then `PluginSettings.Sanitize(manifests)`.
+///
+/// The Support Packet's `sanitized_config.json` is the caller: `getSanitizedConfig` passes the
+/// installed manifests and `PartiallyRedactDataSources: true`, so a support engineer sees which
+/// host and database the server uses, and never who it connects as.
+pub fn sanitize_with(
+    config: &mut mm_model::config::Config,
+    manifests: Option<&[mm_model::manifest::Manifest]>,
+    partially_redact_data_sources: bool,
+) {
+    sanitize_secrets(config, partially_redact_data_sources);
+    config.plugin_settings.sanitize(manifests);
+}
+
+fn sanitize_secrets(config: &mut mm_model::config::Config, partially_redact_data_sources: bool) {
     use mm_model::utils::FAKE_SETTING;
 
     /// `if p != nil && *p != "" { *p = FakeSetting }`.
@@ -5599,7 +5620,24 @@ pub fn sanitize(config: &mut mm_model::config::Config) {
     mask_if_set(&mut config.google_settings.secret);
     mask_if_set(&mut config.office365_settings.secret);
     mask_if_set(&mut config.open_id_settings.secret);
-    mask_always(&mut config.sql_settings.data_source);
+    let driver_name = config.sql_settings.driver_name.clone().unwrap_or_default();
+    // `sanitizeDataSourceField`: the partial form only when asked for and a driver is set; a
+    // DSN `SanitizeDataSource` cannot parse is logged and fully masked.
+    let data_source = |value: &str, field: &str| -> String {
+        if partially_redact_data_sources && !driver_name.is_empty() {
+            match mm_model::config::sanitize_data_source(&driver_name, value) {
+                Ok(sanitized) => return sanitized,
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    "Failed to sanitize {field}. Falling back to fully sanitizing the setting."
+                ),
+            }
+        }
+        FAKE_SETTING.to_owned()
+    };
+    if let Some(value) = config.sql_settings.data_source.as_mut() {
+        *value = data_source(value, "SqlSettings.DataSource");
+    }
     mask_always(&mut config.sql_settings.at_rest_encrypt_key);
     mask_always(&mut config.elasticsearch_settings.password);
 
@@ -5609,7 +5647,7 @@ pub fn sanitize(config: &mut mm_model::config::Config) {
         .iter_mut()
         .flatten()
     {
-        *replica = FAKE_SETTING.to_owned();
+        *replica = data_source(replica, "SqlSettings.DataSourceReplicas");
     }
     for replica in config
         .sql_settings
@@ -5617,7 +5655,7 @@ pub fn sanitize(config: &mut mm_model::config::Config) {
         .iter_mut()
         .flatten()
     {
-        *replica = FAKE_SETTING.to_owned();
+        *replica = data_source(replica, "SqlSettings.DataSourceSearchReplicas");
     }
     for lag in config
         .sql_settings
@@ -5626,8 +5664,8 @@ pub fn sanitize(config: &mut mm_model::config::Config) {
         .flatten()
     {
         // Go rebuilds the pointer rather than testing it for emptiness: `if p != nil { p = new(…) }`.
-        if lag.data_source.is_some() {
-            lag.data_source = Some(FAKE_SETTING.to_owned());
+        if let Some(value) = lag.data_source.as_deref() {
+            lag.data_source = Some(data_source(value, "SqlSettings.ReplicaLagSettings"));
         }
     }
 
@@ -7109,7 +7147,7 @@ impl crate::App {
     }
 
     /// `ps.telemetryId`, which the platform loads from the `DiagnosticId` system row.
-    async fn telemetry_id(&self) -> String {
+    pub(crate) async fn telemetry_id(&self) -> String {
         self.system_value(SYSTEM_DIAGNOSTIC_ID)
             .await
             .unwrap_or_default()

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tablename::text AS \"tablename!\", indexname::text AS \"indexname!\", indexdef AS \"indexdef!\"\n                 FROM pg_indexes\n                WHERE schemaname = current_schema()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tablename!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "indexname!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "indexdef!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "5f294beaee80339c57fde626e265a86dfaac10913ebd1d1abb03bac6081921c7"
+}

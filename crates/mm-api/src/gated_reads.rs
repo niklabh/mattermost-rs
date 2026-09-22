@@ -204,27 +204,47 @@ pub async fn get_ldap_groups(
 ///   through to a role test;
 /// - the licence refusal is a **403** carrying `api.no_license`, where the file's other licence
 ///   gates are 501s. Go's comment calls it "e10 or e20", but the test is `License() == nil`.
-#[tracing::instrument(skip_all, fields(licensed))]
+///
+/// Past the gate the packet is built here ([`mm_app::support_packet`]) and streamed as
+/// `mm_support_packet_<company>_<time>.zip`. Three cases still go to Go whole, each decided
+/// before anything is read: a file store this server does not implement, an SMTP probe that
+/// needs TLS or auth ([D-981]), and plugins hosted by Go while its plugin directory may hold a
+/// bundle — the plugin list, the manifests the configuration is sanitised against and the
+/// `GenerateSupportData` hooks are then state only the Go process has.
+///
+/// The audit record Go writes (`generateSupportPacket` audit event) is not written: this server
+/// has no audit log, as for every other route.
+#[tracing::instrument(skip_all, fields(licensed, forwarded))]
 pub async fn generate_support_packet(
     State(state): State<AppState>,
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    match support_packet_answer(&state, &session).await {
-        Ok(Some(response)) => response,
-        Ok(None) => crate::proxy::forward_to_go(State(state), request).await,
+    let query = request.uri().query().map(str::to_owned);
+    let ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match support_packet_answer(&state, &session, query.as_deref(), ctx).await {
+        Ok(PacketAnswer::Served(response)) => response,
+        Ok(PacketAnswer::Forward) => crate::proxy::forward_to_go(State(state), request).await,
         Err(err) => err.into_response(),
     }
 }
 
-/// [`generate_support_packet`] minus the transport, shared with the local router: the permission
-/// (`Err`), then the licence — `Some` is the unlicensed 403, `None` is "licensed — forward", and
-/// the caller picks the transport, because the packet itself (`GenerateSupportPacket`, a zip of
-/// logs, config and diagnostics) is not ported on either router.
+/// What [`support_packet_answer`] decided; the caller picks the transport for a forward.
+pub(crate) enum PacketAnswer {
+    Served(Response),
+    Forward,
+}
+
+/// [`generate_support_packet`] minus the transport, shared with the local router: the
+/// permission (`Err`), the licence (the 403 is `Served`), then the packet or the forward.
+/// `query` and `ctx` are taken from the request up front, because a borrowed request held
+/// across an await would make the handler's future `!Send`.
 pub(crate) async fn support_packet_answer(
     state: &AppState,
     session: &AuthenticatedSession,
-) -> Result<Option<Response>, ApiError> {
+    query: Option<&str>,
+    ctx: mm_app::plugin_hooks::HookContext,
+) -> Result<PacketAnswer, ApiError> {
     if !state
         .app
         .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_MANAGE_SYSTEM)
@@ -235,21 +255,104 @@ pub(crate) async fn support_packet_answer(
             &[&PERMISSION_MANAGE_SYSTEM],
         )));
     }
-    match state.app.license_state().await {
+    // `r.FormValue("basic_server_logs") == "false"` and `r.Form["plugin_packets"]` — read
+    // before the licence, as Go reads them, though nothing observable depends on the order.
+    let (form, _) = mm_model::go_url::parse_query(query.unwrap_or(""));
+    let include_logs = form.get("basic_server_logs") != Some(b"false".as_slice());
+    let plugin_packets: Vec<String> = form
+        .get_all("plugin_packets")
+        .unwrap_or_default()
+        .iter()
+        .map(|v| String::from_utf8_lossy(v).into_owned())
+        .collect();
+
+    let license = match state.app.license_state().await {
         Ok(mm_app::license::LicenseState::Licensed) => {
             tracing::Span::current().record("licensed", true);
-            Ok(None)
+            state.app.license().await?
         }
         Ok(mm_app::license::LicenseState::Unlicensed) => {
             tracing::Span::current().record("licensed", false);
-            Ok(Some(refusal(
+            return Ok(PacketAnswer::Served(refusal(
                 "Api4.generateSupportPacket",
                 "api.no_license",
                 403,
-            )))
+            )));
         }
-        Err(err) => Err(ApiError::from(err)),
+        Err(err) => return Err(ApiError::from(err)),
+    };
+
+    let config = match mm_app::config::load_model_config(state.app.store().config()).await {
+        Ok(config) => config,
+        Err(err) => {
+            tracing::warn!(error = %err, "the configuration is unreadable; the packet goes to Go");
+            tracing::Span::current().record("forwarded", true);
+            return Ok(PacketAnswer::Forward);
+        }
+    };
+    if let Some(reason) = mm_app::App::support_packet_forward(&config) {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!(?reason, "support packet forwarded");
+        return Ok(PacketAnswer::Forward);
     }
+    let plugins =
+        if state.app.plugin_host().hosted() || !config.plugin_settings.enable.unwrap_or(false) {
+            mm_app::support_packet::PacketPlugins::Environment
+        } else if crate::commands::go_may_have_plugins() {
+            tracing::Span::current().record("forwarded", true);
+            return Ok(PacketAnswer::Forward);
+        } else {
+            mm_app::support_packet::PacketPlugins::NoneRunning
+        };
+
+    let options = mm_model::support_packet::SupportPacketOptions {
+        include_logs,
+        plugin_packets,
+        cpu_profile_duration: None,
+    };
+    let files = state
+        .app
+        .generate_support_packet(&ctx, &options, plugins, &config)
+        .await;
+
+    let now = chrono::Local::now();
+    // `c.App.License().Customer.Company` — Go dereferences `Customer`, which every licence it
+    // can load carries.
+    let company = license
+        .as_deref()
+        .and_then(|l| l.customer.as_ref())
+        .map(|c| c.company.as_str())
+        .unwrap_or_default();
+    let filename = mm_app::support_packet::support_packet_file_name(&now, company);
+    let body = match mm_app::support_packet::write_zip(&files, now) {
+        Ok(body) => body,
+        Err(err) => {
+            return Err(ApiError::from(
+                AppError::new(
+                    "Api4.generateSupportPacket",
+                    "api.unable_to_create_zip_file",
+                    None,
+                    String::new(),
+                    403,
+                )
+                .wrap(err),
+            ));
+        }
+    };
+    // `WriteStreamResponse`'s `setHeaders`, which keeps a `Cache-Control` already set — and the
+    // handler sets one first, so support packets are never cached.
+    let mut headers = crate::serve_content::stream_headers("application/zip", true, &filename);
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+    );
+    headers.insert(
+        "x-mmrs-served-by",
+        axum::http::HeaderValue::from_static("rust"),
+    );
+    Ok(PacketAnswer::Served(
+        (StatusCode::OK, headers, body).into_response(),
+    ))
 }
 
 /// Port of `getCPAGroup` (api4/custom_profile_attributes.go:295).

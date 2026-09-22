@@ -2391,6 +2391,96 @@ pub struct GetConfigOptions {
     pub remove_defaults: bool,
 }
 
+/// Port of `model.SanitizedPassword` (config.go:95).
+pub const SANITIZED_PASSWORD: &str = "****";
+
+/// The errors [`sanitize_data_source`] returns, with Go's text.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SanitizeDataSourceError {
+    #[error("invalid drivername: only postgres is supported")]
+    Driver,
+    #[error("{0}")]
+    Parse(#[from] crate::go_url::UrlError),
+    #[error("{0}")]
+    Unescape(#[from] crate::go_url::UrlParseError),
+}
+
+/// Port of `model.SanitizeDataSource` (config.go:5474): the user and password replaced by
+/// [`SANITIZED_PASSWORD`] — **added** when the DSN had none — `user` and `password` dropped from
+/// the query, the query re-encoded (so sorted), and the whole URL `QueryUnescape`d for reading.
+///
+/// A key=value DSN is not a URL, and Go parses it as a relative path anyway: the result is
+/// `//****:****@host=localhost user=…`, password and all. Reproduced, and pinned by the corpus,
+/// because it is what `diagnostics.yaml` and the partially redacted config print for one.
+pub fn sanitize_data_source(
+    driver_name: &str,
+    data_source: &str,
+) -> Result<String, SanitizeDataSourceError> {
+    if data_source.is_empty() {
+        return Ok(String::new());
+    }
+    if driver_name != DATABASE_DRIVER_POSTGRES {
+        return Err(SanitizeDataSourceError::Driver);
+    }
+    let mut url = crate::go_url::go_parse(data_source)?;
+    url.user = Some(crate::go_url::Userinfo::user_password(
+        SANITIZED_PASSWORD.as_bytes().to_vec(),
+        SANITIZED_PASSWORD.as_bytes().to_vec(),
+    ));
+    let mut params = url.query();
+    params.del("user");
+    params.del("password");
+    url.raw_query = params.encode();
+    Ok(crate::go_url::query_unescape(&url.to_go_string())?)
+}
+
+/// Port of `model.DatabaseDriverPostgres` (config.go).
+pub const DATABASE_DRIVER_POSTGRES: &str = "postgres";
+
+impl PluginSettings {
+    /// Port of `(*PluginSettings).Sanitize` (config.go:3707): a secret setting of an installed
+    /// plugin becomes `FakeSetting`, and the stored settings of a plugin with no manifest are
+    /// dropped — **except** an empty settings map, which Go never iterates and so never deletes.
+    /// `None` (plugins off) has no manifests, so every non-empty entry goes.
+    ///
+    /// Keys match a schema key case-insensitively (`strings.EqualFold`), and a plugin whose
+    /// manifest has no settings schema keeps every value: none of them can be secret.
+    pub fn sanitize(&mut self, manifests: Option<&[crate::manifest::Manifest]>) {
+        let Some(plugins) = self.plugins.as_mut() else {
+            return;
+        };
+        let by_id: std::collections::HashMap<&str, &crate::manifest::Manifest> = manifests
+            .unwrap_or_default()
+            .iter()
+            .map(|m| (m.id.as_str(), m))
+            .collect();
+        plugins.retain(|id, settings| settings.is_empty() || by_id.contains_key(id.as_str()));
+        for (id, settings) in plugins.iter_mut() {
+            let Some(schema) = by_id
+                .get(id.as_str())
+                .and_then(|m| m.settings_schema.as_ref())
+            else {
+                continue;
+            };
+            let secret = |key: &str| {
+                let top = schema.settings.iter().flatten();
+                let sections = schema
+                    .sections
+                    .iter()
+                    .flatten()
+                    .flat_map(|section| section.settings.iter().flatten());
+                top.chain(sections)
+                    .any(|s| s.secret && crate::utils::go_equal_fold(&s.key, key))
+            };
+            for (key, value) in settings.iter_mut() {
+                if secret(key) {
+                    *value = serde_json::Value::String(crate::utils::FAKE_SETTING.to_owned());
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod wire_parity {
     use super::*;
