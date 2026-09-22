@@ -4034,6 +4034,62 @@ async fn run_the_support_tour(client: &reqwest::Client, admin: &str) {
         "{gw}"
     );
 
+    // A protected property field whose source plugin is **installed** is its plugin's alone:
+    // `checkFieldDeleteAccess` asks the plugin host (`pluginChecker`, server.go:328), and both
+    // servers here host the recorder. A field naming a plugin neither hosts is anyone's with the
+    // field permission. Planted, because the REST API cannot create a protected field ([D-542]).
+    {
+        use crate::parity::cpa_licensed::{plant_field, planted_id};
+        let _rows = common::PROPERTY_ROWS.lock().await;
+        let attrs = |source: &str| {
+            format!(r#"{{"protected":true,"source_plugin_id":"{source}","visibility":"always"}}"#)
+        };
+        let mut planted = Vec::new();
+        for (side, base) in [("go", &go.base), ("rs", &rust.base)] {
+            for (tag, source, expected) in
+                [("inst", PLUGIN_ID, 403), ("gone", "mmrs.absentsource", 200)]
+            {
+                let id = planted_id(&format!("hk{side}{tag}"));
+                plant_field(&id, &format!("hook {side} {tag}"), "text", &attrs(source)).await;
+                planted.push(id.clone());
+                let (status, body, served_by) = request_raw(
+                    client,
+                    base,
+                    reqwest::Method::DELETE,
+                    Some(admin),
+                    &format!("/api/v4/custom_profile_attributes/fields/{id}"),
+                    None,
+                )
+                .await;
+                if side == "rs" {
+                    assert_eq!(
+                        served_by.as_deref(),
+                        Some("rust"),
+                        "the delete was forwarded"
+                    );
+                }
+                assert_eq!(
+                    status,
+                    expected,
+                    "{side}: deleting a field whose source plugin is {tag}: {}",
+                    String::from_utf8_lossy(&body)
+                );
+                if expected == 403 {
+                    let error: Json = serde_json::from_slice(&body).expect("an error body");
+                    assert_eq!(error["id"], "app.property.access_denied.app_error");
+                }
+            }
+        }
+        let pool = common::fixture_pool().await.expect("the stack database");
+        for id in planted {
+            sqlx::query("DELETE FROM propertyfields WHERE id = $1")
+                .bind(&id)
+                .execute(&pool)
+                .await
+                .expect("the planted field goes");
+        }
+    }
+
     drop(rust);
     drop(go);
 }

@@ -29,14 +29,14 @@
 //! an `ldap` or `saml` attr is sync-locked for values. All of those are reachable on a licensed
 //! server by planting the field row, which is how they are measured.
 //!
-//! # What this side cannot know: which plugins are installed
+//! # Which plugins are installed
 //!
 //! `checkFieldDeleteAccess` (access_control.go:840) lets a protected field be deleted by anyone
-//! when its source plugin is **not installed** — `pluginChecker` asks the plugin host. There is no
-//! plugin host here, so no plugin is ever installed from this side's point of view, and a
-//! protected field whose plugin *is* installed on the Go server would be deletable here and not
-//! there. That is the one arm of this chain that depends on state this server does not hold; it
-//! is recorded, not guarded, because a protected field cannot be created over REST at all.
+//! when its source plugin is **not installed** — `pluginChecker` asks the plugin host. Under
+//! `MMRS_PLUGIN_HOST=rust` this process is the host and answers from its own environment. Under
+//! the Go host the plugins live in the Go process, so no plugin is installed from this side's
+//! point of view, and a protected field whose plugin *is* installed there would be deletable here
+//! and not there ([D-542]). A protected field cannot be created over REST at all.
 //!
 //! # The audit hook is a log line
 //!
@@ -116,9 +116,9 @@ impl PropertyCaller {
         }
     }
 
-    /// `isCallerPlugin` (access_control.go:631): there is no plugin host on this side, so the
-    /// answer is always no — and over REST it would be no on Go's side too, since a session's
-    /// user id is never a plugin manifest id.
+    /// `isCallerPlugin` (access_control.go:631): `pluginChecker(callerID)`. Every caller here comes
+    /// over REST, whose id is a session's user id and never a plugin manifest id, so the checker
+    /// answers no on either host. A plugin calling the property API is the plugin plan's Phase 6.
     fn is_plugin(&self) -> bool {
         false
     }
@@ -408,11 +408,13 @@ fn validate_protected_field_update(
     Ok(())
 }
 
-/// `checkFieldDeleteAccess` (access_control.go:842). See the module docs for the plugin-host
-/// arm: with no plugin host, an installed source plugin is unknowable and the field is deletable.
+/// `checkFieldDeleteAccess` (access_control.go:842). `plugin_installed` is Go's `pluginChecker`
+/// (server.go:328, `GetPluginStatus(id)` without an error); see the module docs for which host
+/// can answer it.
 fn check_field_delete_access(
     field: &PropertyField,
     caller: &PropertyCaller,
+    plugin_installed: impl Fn(&str) -> bool,
 ) -> Result<(), PropertyServiceError> {
     if has_property_field_owners(field) {
         if caller.is_machine() && !is_listed_owner(field, caller) {
@@ -430,9 +432,9 @@ fn check_field_delete_access(
     if source.is_empty() {
         return Ok(());
     }
-    // `h.pluginChecker != nil && !h.pluginChecker(sourcePluginID)` — nothing is installed here.
-    let plugin_installed = false;
-    if !plugin_installed {
+    // `h.pluginChecker != nil && !h.pluginChecker(sourcePluginID)`: an uninstalled source plugin
+    // leaves the field to anyone with the field permission.
+    if !plugin_installed(source) {
         return Ok(());
     }
     if source != caller.id {
@@ -636,7 +638,15 @@ impl App {
         existing: &PropertyField,
         caller: &PropertyCaller,
     ) -> Result<(), PropertyServiceError> {
-        check_field_delete_access(existing, caller)
+        check_field_delete_access(existing, caller, |id| self.plugin_installed(id))
+    }
+
+    /// Go's `pluginChecker` (server.go:328): `GetPluginStatus(id)` answers without an error, which
+    /// with no plugins environment it never does. Under the Go plugin host the plugins live in the
+    /// other process, whose statuses this one cannot read, so the answer is "not installed" —
+    /// what that host's arm of [D-542] still owes.
+    fn plugin_installed(&self, id: &str) -> bool {
+        self.plugin_host().hosted() && self.get_plugin_status(id).is_ok()
     }
 
     // -----------------------------------------------------------------------------------------
@@ -2128,6 +2138,34 @@ mod tests {
         assert!(check_value_write_access(&public, &caller).is_ok());
     }
 
+    /// The installed arm: a protected field whose source plugin is installed is deletable by that
+    /// plugin alone. Which plugin the checker is asked about is the field's source, not the caller.
+    #[test]
+    fn an_installed_source_plugin_keeps_its_field() {
+        let protected = field(
+            PropertyFieldType::TEXT,
+            serde_json::json!({"protected":true,"source_plugin_id":"com.x"}),
+        );
+        let only_com_x = |id: &str| id == "com.x";
+        assert!(matches!(
+            check_field_delete_access(&protected, &human(), only_com_x),
+            Err(PropertyServiceError::AccessDenied(_))
+        ));
+        let plugin = PropertyCaller {
+            id: "com.x".to_owned(),
+            acting_as_scope: String::new(),
+        };
+        assert!(check_field_delete_access(&protected, &plugin, only_com_x).is_ok());
+        let other = field(
+            PropertyFieldType::TEXT,
+            serde_json::json!({"protected":true,"source_plugin_id":"com.y"}),
+        );
+        assert!(
+            check_field_delete_access(&other, &human(), only_com_x).is_ok(),
+            "com.y is not installed, so its field is anyone's"
+        );
+    }
+
     /// The delete gate: owners let a human through; a protected field with an uninstalled source
     /// plugin is deletable (no plugin host here); a protected field with no source plugin is too.
     #[test]
@@ -2139,7 +2177,8 @@ mod tests {
                     PropertyFieldType::TEXT,
                     serde_json::json!({"owners":[{"id":"p","type":"plugin"}]})
                 ),
-                &caller
+                &caller,
+                |_| false
             )
             .is_ok()
         );
@@ -2149,7 +2188,8 @@ mod tests {
                     PropertyFieldType::TEXT,
                     serde_json::json!({"protected":true,"source_plugin_id":"com.x"})
                 ),
-                &caller
+                &caller,
+                |_| false
             )
             .is_ok()
         );
@@ -2159,7 +2199,8 @@ mod tests {
                     PropertyFieldType::TEXT,
                     serde_json::json!({"protected":true})
                 ),
-                &caller
+                &caller,
+                |_| false
             )
             .is_ok()
         );
