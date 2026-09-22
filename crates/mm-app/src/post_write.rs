@@ -1009,9 +1009,14 @@ impl App {
     /// # What of `CreatePost` runs, in Go's order
     ///
     /// `SanitizeProps`; the author lookup (whose 404 is `MissingAccountError`); the `from_bot`
-    /// prop for a bot author; `ParseHashtags` over the message; `CreateAt`; `Post().Save`. The
-    /// `post.Type == ""` guard means the mention-highlight ephemeral post is skipped outright,
-    /// and `FillInPostProps` reduces to the channel-mention branch, which runs.
+    /// prop for a bot author; `ParseHashtags` over the message; `MessageWillBePosted` through
+    /// the guarded dispatcher; `CreateAt`; `Post().Save`; `MessageHasBeenPosted`; the consumed
+    /// hooks on the saved post, whose answer the `posted` event carries. The `post.Type == ""`
+    /// guard means the mention-highlight ephemeral post is skipped outright, and
+    /// `FillInPostProps` reduces to the channel-mention branch, which runs.
+    ///
+    /// The plugin hooks take `ctx`, the request that caused the notice — Go hands `CreatePost`
+    /// the caller's `rctx`, and the `a.Srv().Go` wrappers capture it.
     ///
     /// # The message text is English, and that is a deliberate exception to [D-092]
     ///
@@ -1030,6 +1035,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, post_type = %post.post_type))]
     pub async fn create_system_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         mut post: Post,
         channel: &Channel,
     ) -> Result<Post, Box<AppError>> {
@@ -1062,6 +1068,13 @@ impl App {
         let (hashtags, _) = parse_hashtags(&post.message);
         post.hashtags = hashtags;
 
+        // `runGuardedMessageWillBePosted`, after `FillInPostProps` and before `CreateAt`, as for
+        // any post: a plugin may replace a system message or refuse it, and a refusal is this
+        // function's error — which ten of the twelve callers only log, so the membership change
+        // stands without its notice. Go's burn-on-read gate cannot fire: every type here is a
+        // `system_*` one.
+        post = self.run_guarded_message_will_be_posted(ctx, post).await?;
+
         if post.create_at == 0 {
             post.create_at = get_millis();
         }
@@ -1083,7 +1096,13 @@ impl App {
             )
         })?;
 
-        self.publish_posted_event(&saved, channel, &user).await;
+        self.message_has_been_posted(ctx, &saved);
+
+        // `applyPostWillBeConsumedHook(rctx, &rpost)`, and the `posted` event carries what the
+        // plugins answered, as it does for a user's post.
+        let mut saved = saved;
+        self.apply_post_will_be_consumed_hook(ctx, &mut saved).await;
+        self.publish_posted_event(ctx, &saved, channel, &user).await;
 
         Ok(saved)
     }
@@ -1095,9 +1114,14 @@ impl App {
     /// that *do* fail their route (a self-add's join post, a self-removal's leave post) call
     /// [`App::create_system_post`] directly and propagate.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, post_type = %post.post_type))]
-    pub async fn post_system_message(&self, post: Post, channel: &Channel) {
+    pub async fn post_system_message(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        post: Post,
+        channel: &Channel,
+    ) {
         let post_type = post.post_type.clone();
-        if let Err(err) = self.create_system_post(post, channel).await {
+        if let Err(err) = self.create_system_post(ctx, post, channel).await {
             tracing::warn!(
                 error = %err,
                 channel_id = %channel.id,
@@ -1127,7 +1151,13 @@ impl App {
     /// not run hooks, [D-183] — and the `otherFile`/`image` keys, which need a file id set a
     /// system post never has. A **group** channel's `channel_display_name` is Go's sorted member
     /// list and falls back to the stored display name here; see D-235.
-    async fn publish_posted_event(&self, post: &Post, channel: &Channel, sender: &User) {
+    async fn publish_posted_event(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        post: &Post,
+        channel: &Channel,
+        sender: &User,
+    ) {
         // `SendNotifications` opens with `if channel.DeleteAt > 0 { return }` (notification.go:55),
         // so a post written into an archived channel publishes nothing.
         //
@@ -1172,15 +1202,8 @@ impl App {
         // `publishWebsocketEventForPost`: the serialisation, the `channel_mentions` hook for a
         // notice that quotes a `~name`, and the publish.
         //
-        // The context is the empty one because nothing here can observe it: the only read it
-        // reaches is the permalink hook's, and a system post carries no permalink preview. The
-        // request's own context at `create_system_post`'s sixteen callers is [D-950]'s.
         if let Err(err) = self
-            .publish_websocket_event_for_post_with_hooks(
-                &crate::plugin_hooks::HookContext::default(),
-                post,
-                message,
-            )
+            .publish_websocket_event_for_post_with_hooks(ctx, post, message)
             .await
         {
             tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");

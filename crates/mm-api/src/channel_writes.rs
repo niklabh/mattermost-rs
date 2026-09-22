@@ -378,6 +378,7 @@ async fn serve_update_channel(
         state
             .app
             .post_update_channel_display_name_message(
+                hook_ctx,
                 &session.user_id,
                 &channel,
                 &old_display_name,

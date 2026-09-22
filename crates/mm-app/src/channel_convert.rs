@@ -96,6 +96,7 @@ impl App {
             tracing::warn!(error = %err, "sidebar categories for the converted group message");
         }
         self.post_message_for_convert_group_message_to_channel(
+            ctx,
             &updated,
             converted_by_user_id,
             &users,
@@ -236,6 +237,7 @@ impl App {
     /// a localised sentence from. Logged on failure; see [`App::create_system_post`].
     async fn post_message_for_convert_group_message_to_channel(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         channel: &Channel,
         converted_by_user_id: &str,
         users: &[User],
@@ -273,7 +275,7 @@ impl App {
             "gmMembersDuringConversionIDs",
             serde_json::Value::Array(user_ids),
         );
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 }
 
