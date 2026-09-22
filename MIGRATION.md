@@ -1,7 +1,30 @@
 # Migration Ledger
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
-Current phase: 1 — Core Types (with a phase 2-4 vertical slice landed, see below)
+
+## Status (measured 2026-09-22)
+
+A snapshot, dated because every number in it goes stale. Re-measure rather than edit by hand:
+`scripts/routes.py` for the routes, `grep -c '^\*\*Status\*\* OPEN' docs/TECH_DEBT.md` for the
+backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
+
+| Component | State | Done |
+|---|---|---|
+| api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
+| …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
+| Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 25/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
+| Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
+
+Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
+on routes, websocket, plugins and jobs**. The backlog is 159 OPEN entries in
+[`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
+methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
+missing e-mail ([D-238]) and push-notification ([D-215]) services.
+
+The "~65%" counts functions, not routes: a helper that forwards for several routes counts once,
+and a branch that forwards only because the code is private is counted although it is permanent.
 
 ## The vertical slice — the architecture is proven end to end (2026-08-17)
 
