@@ -751,7 +751,8 @@ async fn values_core(
         Group::Failed(err) => return err.into_response(),
     };
 
-    match has_target_access(&state, &session, object_type, target_id).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match has_target_access(&state, &session, object_type, target_id, &hook_ctx).await {
         TargetAccess::Allowed => {}
         TargetAccess::Denied(err) => return err.into_response(),
     }
@@ -825,6 +826,7 @@ async fn has_target_access(
     session: &AuthenticatedSession,
     object_type: &str,
     target_id: &str,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> TargetAccess {
     match object_type {
         PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {
@@ -840,7 +842,7 @@ async fn has_target_access(
             }
         }
         PROPERTY_FIELD_OBJECT_TYPE_POST => {
-            let post = match state.app.get_single_post(target_id, false).await {
+            let post = match state.app.get_single_post(hook_ctx, target_id, false).await {
                 Ok(post) => post,
                 Err(err) => return TargetAccess::Denied(ApiError::from(err)),
             };

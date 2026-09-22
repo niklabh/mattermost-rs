@@ -179,7 +179,9 @@ impl App {
         // `go_to_lower`, not `str::to_lowercase` — see the note on the delete path below.
         reaction.emoji_name = mm_model::utils::go_to_lower(&reaction.emoji_name);
 
-        let post = self.get_single_post(&reaction.post_id, false).await?;
+        let post = self
+            .get_single_post(hook_ctx, &reaction.post_id, false)
+            .await?;
 
         if post.post_type == mm_model::post::POST_TYPE_BURN_ON_READ
             && post.user_id != reaction.user_id
@@ -316,7 +318,9 @@ impl App {
         // exact case.
         reaction.emoji_name = mm_model::utils::go_to_lower(&reaction.emoji_name);
 
-        let post = self.get_single_post(&reaction.post_id, false).await?;
+        let post = self
+            .get_single_post(hook_ctx, &reaction.post_id, false)
+            .await?;
         let channel = self.get_channel(&post.channel_id).await?;
 
         match self.check_if_channel_is_restricted_dm(&channel).await? {

@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 25/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 27/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14377,6 +14377,25 @@ The search routes gained a context too: an `in:@user` filter creates the DM it n
 
 Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
+
+## Plugin hook call sites: `MessagesWillBeConsumed` and its context-aware twin (2026-09-22)
+
+Plugin plan **Phase 5, 27 of 35**; the other 8 hooks are [D-932].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `applyPostsWillBeConsumedHook`, `applyPostWillBeConsumedHook` (post.go:2999, :3057) | `mm_app::plugin_hooks::{apply_posts_will_be_consumed_hook, apply_post_will_be_consumed_hook, post_from_wire_whole, user_from_wire}` | DONE | `parity::plugin_hooks::the_consumed_hooks_fire_as_go_fires_them` + 7 unit | A replacement is taken **whole** — the comment above the `WithContext` client in client_rpc.go promises a decode-into-original that the code beneath it does not do — and only `Metadata` is carried across. |
+| The fourteen sites: `GetSinglePost`, the eleven list readers, and the post `CreatePost` and `UpdatePost` answer with (post.go:474, :1056, :1360–1828) | `App::get_single_post` and every list reader take a `HookContext`; `create_post_claimed`, `update_post` | DONE (`GetPermalinkPost`, `GetPostAfterTime` and `GetPosts` have no Rust caller yet) | same | Go fires the hook from **inside** `GetSinglePost`, so the context had to reach its thirty callers — the metadata pipeline's permalink read included. A system post's `posted` event gets the empty context ([D-950] owes the real one), which nothing can observe. |
+| `GetFileInfosForPostWithMigration`'s post read (post.go:2374) | `App::get_file_infos_for_post_with_migration` | FIXED | the download tour, unchanged | It reads the **store**, not `GetSinglePost`; this port had gone through the app function and would have told the plugins about a read Go never mentions. |
+
+Mutation tally (`plugin-hooks-consumed.plan`): 14 run, 12 caught, 2 controls survived, 0 harness
+faults. The two `unit` lines are caught by `plugin_hooks::consumed_tests`, because no served
+route can write a burn-on-read post and the recorder's replacements carry only an id and a
+message.
+
+One stack finding, in `docker-compose.yml`: a fresh stack's Postgres came up at
+`max_connections=100`, which one full parity run exhausts — 94 failures with `PoolTimedOut` in
+suites that never touch the database — so the compose file now starts it at 400.
 
 ## Plugin hook call sites: `DraftWillBeUpserted` (2026-09-21)
 

@@ -205,7 +205,11 @@ async fn serve_search(
     let PostSearchResults { post_list, matches } = results;
     let list = post_list.unwrap_or_else(PostList::new);
 
-    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let prepared = match state
+        .app
+        .prepare_post_list_for_client(hook_ctx, &list)
+        .await
+    {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, "forwarding the search to Go");

@@ -892,10 +892,18 @@ pub async fn get_posts_for_view(
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
-    serve_posts(&state, &channel_id, &view_id, &session, query.as_deref())
-        .await
-        .finish(state.clone(), request)
-        .await
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    serve_posts(
+        &state,
+        &channel_id,
+        &view_id,
+        &session,
+        query.as_deref(),
+        &hook_ctx,
+    )
+    .await
+    .finish(state.clone(), request)
+    .await
 }
 
 async fn serve_posts(
@@ -904,6 +912,7 @@ async fn serve_posts(
     view_id: &str,
     session: &AuthenticatedSession,
     query: Option<&str>,
+    ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Outcome {
     if let Err(err) =
         require_id(channel_id, "channel_id").and_then(|()| require_id(view_id, "view_id"))
@@ -954,12 +963,12 @@ async fn serve_posts(
         include_deleted: false,
     };
 
-    let list = match state.app.get_posts_for_view(opts).await {
+    let list = match state.app.get_posts_for_view(ctx, opts).await {
         Ok(list) => list,
         Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
-    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let prepared = match state.app.prepare_post_list_for_client(ctx, &list).await {
         Ok(prepared) => prepared,
         Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, channel_id, "forwarding the view's posts to Go");

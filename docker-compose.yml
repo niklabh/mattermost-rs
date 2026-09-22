@@ -37,6 +37,12 @@ services:
     # both at their defaults, so an existing checkout, its container and its volume are untouched.
     container_name: mmrs-postgres${MMRS_STACK_SUFFIX:-}
     restart: unless-stopped
+    # A stack's Go servers — main plus its oracles — hold ~80 idle connections between them (Go's
+    # default `MaxIdleConns` is 50), and every mm-api a suite starts adds a pool. At Postgres's
+    # default of 100 a full parity run fails dozens of tests with `PoolTimedOut` in suites that
+    # never touch the database themselves; measured on stacks 5 and 6, which were raised by hand.
+    # An existing container keeps its old command until it is recreated (`stack.sh down`/`up`).
+    command: postgres -c max_connections=400
     environment:
       POSTGRES_USER: mmuser
       POSTGRES_PASSWORD: mmuser_password

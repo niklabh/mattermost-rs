@@ -118,7 +118,7 @@ async fn serve(
 ) -> Result<Response, PrepareError> {
     let post = state
         .app
-        .get_single_post(post_id, false)
+        .get_single_post(hook_ctx, post_id, false)
         .await
         // Go throws the app error away. Every failure — not found, or a database fault — becomes
         // the same 403.
@@ -242,7 +242,7 @@ async fn serve_delete(
 ) -> Result<Response, PrepareError> {
     // Unlike the pin and edit routes, this one lets `GetSinglePost`'s error through: a post that
     // does not exist is a **404 `app.post.get.app_error`** here and a 403 there.
-    let post = state.app.get_single_post(post_id, false).await?;
+    let post = state.app.get_single_post(hook_ctx, post_id, false).await?;
 
     if post.post_type == POST_TYPE_CARD {
         // The card arm gives *any* holder of `delete_post` the right to delete somebody else's
@@ -365,7 +365,7 @@ async fn serve_update(
 
     let original = state
         .app
-        .get_single_post(post_id, false)
+        .get_single_post(hook_ctx, post_id, false)
         .await
         .map_err(|_| make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]))?;
 
@@ -518,7 +518,7 @@ async fn serve_patch(
         post_hardened_mode_check(state, session, Some(props))?;
     }
 
-    post_patch_checks(state, post_id, session, patch).await?;
+    post_patch_checks(state, post_id, session, patch, hook_ctx).await?;
 
     if let Some(message) = patch.message.as_ref() {
         reject_oversized_message(state, "Api4.patchPost", message).await?;
@@ -526,7 +526,7 @@ async fn serve_patch(
 
     let original = state
         .app
-        .get_single_post(post_id, false)
+        .get_single_post(hook_ctx, post_id, false)
         .await
         .map_err(|_| make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]))?;
 
@@ -549,10 +549,11 @@ pub(crate) async fn post_patch_checks(
     post_id: &str,
     session: &AuthenticatedSession,
     patch: &PostPatch,
+    hook_ctx: &HookContext,
 ) -> Result<(), PrepareError> {
     let original = state
         .app
-        .get_single_post(post_id, false)
+        .get_single_post(hook_ctx, post_id, false)
         .await
         .map_err(|_| make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]))?;
 
@@ -1001,6 +1002,7 @@ pub async fn create_ephemeral_post(
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -1043,10 +1045,10 @@ pub async fn create_ephemeral_post(
 
     let answered = match state
         .app
-        .send_ephemeral_post(&ephemeral.user_id, post)
+        .send_ephemeral_post(&hook_ctx, &ephemeral.user_id, post)
         .await
     {
-        Ok(sent) => prepare_ephemeral_answer(&state, &session, sent).await,
+        Ok(sent) => prepare_ephemeral_answer(&state, &session, sent, &hook_ctx).await,
         Err(err) => Err(err),
     };
     match answered {
@@ -1082,10 +1084,12 @@ async fn prepare_ephemeral_answer(
     state: &AppState,
     session: &AuthenticatedSession,
     sent: mm_model::post::Post,
+    hook_ctx: &HookContext,
 ) -> Result<mm_model::post::Post, PrepareError> {
     let prepared = state
         .app
         .prepare_post_for_client_with_embeds_and_images(
+            hook_ctx,
             &sent,
             mm_app::post::PreparePostForClientOpts {
                 is_new_post: true,
@@ -1252,9 +1256,15 @@ pub async fn set_post_unread(
         .into_response();
     }
 
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     match state
         .app
-        .mark_channel_as_unread_from_post(&post_id, &user_id, collapsed_threads_supported)
+        .mark_channel_as_unread_from_post(
+            &hook_ctx,
+            &post_id,
+            &user_id,
+            collapsed_threads_supported,
+        )
         .await
     {
         Ok(state_) => match channel_unread_at_response(&state_) {

@@ -96,6 +96,7 @@ impl App {
     )]
     pub async fn mark_channel_as_unread_from_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         post_id: &str,
         user_id: &str,
         collapsed_threads_supported: bool,
@@ -106,7 +107,7 @@ impl App {
         tracing::Span::current().record("crt", crt_path);
 
         // `incl_deleted = false` on both arms: a soft-deleted post cannot be marked unread.
-        let post = self.get_single_post(post_id, false).await?;
+        let post = self.get_single_post(ctx, post_id, false).await?;
         let user = self.get_user(user_id).await?;
 
         // `markChannelAsUnreadFromPostCRTUnsupported` computes `threadId` here and then uses it

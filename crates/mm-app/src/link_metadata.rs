@@ -36,6 +36,7 @@ use mm_model::utils::{AppError, go_to_lower};
 use crate::App;
 use crate::http_guard::GuardedClient;
 use crate::link_image::ImageProbe;
+use crate::plugin_hooks::HookContext;
 use crate::post::{PrepareError, PreparePostForClientOpts};
 
 /// A decision this port cannot make the way Go makes it; the request is forwarded.
@@ -409,9 +410,10 @@ impl App {
     ///    fetch failed** ("we want to save that there is no metadata for this link");
     /// 6. the cache is written whatever happened, except after a failed permalink lookup, which
     ///    returns first.
-    #[tracing::instrument(skip(self), fields(timestamp))]
+    #[tracing::instrument(skip(self, ctx), fields(timestamp))]
     pub(crate) async fn get_link_metadata(
         &self,
+        ctx: &HookContext,
         request_url: &str,
         timestamp: i64,
         is_new_post: bool,
@@ -476,7 +478,10 @@ impl App {
         let (found, error) = if looks_like_a_permalink(&request_url, site_url)
             && config.enable_permalink_previews
         {
-            match self.get_link_metadata_for_permalink(&request_url).await? {
+            match self
+                .get_link_metadata_for_permalink(ctx, &request_url)
+                .await?
+            {
                 Ok(preview) => (
                     LinkMetadataFound {
                         permalink: Some(preview),
@@ -640,6 +645,7 @@ impl App {
     /// autotranslation service and is inert without it.
     async fn get_link_metadata_for_permalink(
         &self,
+        ctx: &HookContext,
         request_url: &str,
     ) -> Result<Result<PreviewPost, LinkMetadataError>, PrepareError> {
         let from_app_error = |err: Box<AppError>| LinkMetadataError {
@@ -649,7 +655,9 @@ impl App {
         let referenced_post_id = request_url
             .get(request_url.len().saturating_sub(26)..)
             .unwrap_or(request_url);
-        let referenced = match self.get_single_post(referenced_post_id, false).await {
+        // `a.GetSinglePost(rctx, ...)`: the previewed post is told to the plugins too, which is
+        // why the context reaches this far down the metadata pipeline.
+        let referenced = match self.get_single_post(ctx, referenced_post_id, false).await {
             Ok(post) => post,
             Err(err) => return Ok(Err(from_app_error(err))),
         };
@@ -681,6 +689,7 @@ impl App {
             referenced
         } else {
             Box::pin(self.prepare_post_for_client_with_embeds_and_images(
+                ctx,
                 &referenced,
                 PreparePostForClientOpts {
                     include_priority: true,
@@ -846,6 +855,7 @@ impl App {
     /// when it was created — by either server — is answered from the row and not fetched again.
     pub(crate) async fn get_embeds_and_images(
         &self,
+        ctx: &HookContext,
         post: &mut Post,
         is_new_post: bool,
     ) -> Result<(), PrepareError> {
@@ -862,7 +872,7 @@ impl App {
         }
 
         match self
-            .get_embed_for_post(post, &first_link, is_new_post)
+            .get_embed_for_post(ctx, post, &first_link, is_new_post)
             .await?
         {
             Ok(Some(embed)) => {
@@ -878,7 +888,7 @@ impl App {
                 }
             }
         }
-        let images = self.get_images_for_post(post, is_new_post).await?;
+        let images = self.get_images_for_post(ctx, post, is_new_post).await?;
         if let Some(metadata) = post.metadata.as_mut() {
             metadata.images = images;
         }
@@ -895,6 +905,7 @@ impl App {
     /// metadata at all is a `link` embed too.
     async fn get_embed_for_post(
         &self,
+        ctx: &HookContext,
         post: &Post,
         first_link: &str,
         is_new_post: bool,
@@ -930,6 +941,7 @@ impl App {
 
         let found = match self
             .get_link_metadata(
+                ctx,
                 first_link,
                 post.create_at,
                 is_new_post,
@@ -1001,6 +1013,7 @@ impl App {
     /// same post's permalink" — and one whose lookup fails or finds no image is left out.
     async fn get_images_for_post(
         &self,
+        ctx: &HookContext,
         post: &Post,
         is_new_post: bool,
     ) -> Result<std::collections::BTreeMap<String, PostImage>, PrepareError> {
@@ -1064,6 +1077,7 @@ impl App {
             }
             match self
                 .get_link_metadata(
+                    ctx,
                     &image_url,
                     post.create_at,
                     is_new_post,

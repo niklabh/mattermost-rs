@@ -2684,8 +2684,9 @@ pub async fn get_pinned_posts(
     request: Request,
 ) -> Response {
     let headers = request.headers().clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
-    match serve_pinned_posts(&state, &channel_id, &session, &headers).await {
+    match serve_pinned_posts(&state, &channel_id, &session, &headers, &hook_ctx).await {
         Ok(Some(response)) => response,
         Ok(None) => crate::proxy::forward_to_go(State(state), request).await,
         Err(err) => err.into_response(),
@@ -2697,6 +2698,7 @@ async fn serve_pinned_posts(
     channel_id: &str,
     session: &AuthenticatedSession,
     headers: &HeaderMap,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Result<Option<Response>, ApiError> {
     // `c.RequireChannelId()` (web/context.go:395).
     require_id(channel_id, "channel_id")?;
@@ -2727,7 +2729,11 @@ async fn serve_pinned_posts(
         ));
     }
 
-    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let prepared = match state
+        .app
+        .prepare_post_list_for_client(hook_ctx, &list)
+        .await
+    {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, channel_id, "forwarding to Go");

@@ -371,7 +371,7 @@ async fn update_preferences_checked(
         }
         let post = state
             .app
-            .get_single_post(&preference.name, false)
+            .get_single_post(hook_ctx, &preference.name, false)
             .await
             .map_err(|_| ApiError::invalid_param("preference.name"))?;
         let channel = state

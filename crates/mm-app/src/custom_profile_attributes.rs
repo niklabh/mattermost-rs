@@ -800,6 +800,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(group_id = %group.id, target_id = %target_id, values = values.len()))]
     pub async fn cpa_upsert_values(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         group: &PropertyGroup,
         caller: &PropertyCaller,
         values: Vec<PropertyValue>,
@@ -807,6 +808,7 @@ impl App {
         connection_id: &str,
     ) -> AppResult<Vec<PropertyValue>> {
         self.upsert_property_values(
+            ctx,
             group,
             caller,
             values,
@@ -823,9 +825,11 @@ impl App {
     /// broadcast always run; the broadcast's scope is `resolveValueBroadcastParams`'s
     /// ([`App::resolve_value_broadcast_params`]), and a failure there is logged and the event
     /// skipped, as Go does.
+    #[allow(clippy::too_many_arguments)] // Go's signature plus the request context.
     #[tracing::instrument(skip_all, fields(group_id = %group.id, object_type = %object_type, target_id = %target_id, values = values.len()))]
     pub async fn upsert_property_values(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         group: &PropertyGroup,
         caller: &PropertyCaller,
         mut values: Vec<PropertyValue>,
@@ -921,7 +925,7 @@ impl App {
             .map_err(|err| err.into_app_error(WHERE, "app.property_value.upsert_many.app_error"))?;
 
         let (team_id, channel_id) = match self
-            .resolve_value_broadcast_params(object_type, target_id)
+            .resolve_value_broadcast_params(ctx, object_type, target_id)
             .await
         {
             Ok(scope) => scope,
@@ -960,12 +964,13 @@ impl App {
     /// system-wide for `user` and `system`; any other object type is the 400.
     async fn resolve_value_broadcast_params(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         object_type: &str,
         target_id: &str,
     ) -> AppResult<(String, String)> {
         match object_type {
             mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
-                let post = self.get_single_post(target_id, false).await?;
+                let post = self.get_single_post(ctx, target_id, false).await?;
                 Ok((String::new(), post.channel_id))
             }
             mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {

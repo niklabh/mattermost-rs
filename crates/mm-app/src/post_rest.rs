@@ -228,12 +228,13 @@ impl App {
     #[tracing::instrument(skip(self, session), fields(post_id = %post_id, user_id = %user_id, target_time))]
     pub async fn set_post_reminder(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         session: &Session,
         post_id: &str,
         user_id: &str,
         target_time: i64,
     ) -> Result<(), PrepareError> {
-        let reminded = self.get_single_post(post_id, false).await?;
+        let reminded = self.get_single_post(ctx, post_id, false).await?;
         let ephemeral_root_id = if reminded.root_id.is_empty() {
             reminded.id.clone()
         } else {
@@ -313,6 +314,7 @@ impl App {
         // `AddPostActionCookies` walks `props.attachments`; a reminder has none.
         let prepared = self
             .prepare_post_for_client_with_embeds_and_images(
+                ctx,
                 &ephemeral,
                 PreparePostForClientOpts {
                     is_new_post: true,
@@ -408,6 +410,7 @@ impl App {
     #[tracing::instrument(skip(self, post), fields(post_id = %post.id, user_id = %user_id, first_reveal))]
     pub async fn reveal_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         post: &Post,
         user_id: &str,
         connection_id: &str,
@@ -473,6 +476,7 @@ impl App {
 
         let revealed = self
             .prepare_post_for_client_with_embeds_and_images(
+                ctx,
                 &revealed,
                 PreparePostForClientOpts {
                     include_priority: true,
@@ -722,13 +726,15 @@ impl App {
     #[tracing::instrument(skip(self, session), fields(root_id = %root_id, action = %action))]
     pub async fn rewrite_message_gates(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         session: &Session,
         message: &str,
         action: &str,
         root_id: &str,
     ) -> Result<(), PrepareError> {
         if !root_id.is_empty() {
-            self.get_post_if_authorized(root_id, session, false).await?;
+            self.get_post_if_authorized(ctx, root_id, session, false)
+                .await?;
         }
         if !mm_model::post_rest::rewrite_action_is_accepted(action, message) {
             return Err(PrepareError::App(AppError::boxed(

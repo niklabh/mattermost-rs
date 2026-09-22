@@ -443,6 +443,7 @@ impl App {
     /// the level is evaluated against the **value's target**, not the field's.
     pub async fn session_has_permission_to_set_property_field_values(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         session: &Session,
         field: &PropertyField,
         value_target_id: &str,
@@ -454,6 +455,7 @@ impl App {
             return true;
         }
         self.has_property_field_value_permission_level(
+            ctx,
             &session.user_id,
             field,
             value_target_id,
@@ -467,6 +469,7 @@ impl App {
     /// `sysadmin` and `none` are the same as at field level.
     async fn has_property_field_value_permission_level(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         field: &PropertyField,
         value_target_id: &str,
@@ -478,11 +481,11 @@ impl App {
                     .await
             }
             PermissionLevel::ADMIN => {
-                self.has_property_field_value_admin(user_id, field, value_target_id)
+                self.has_property_field_value_admin(ctx, user_id, field, value_target_id)
                     .await
             }
             PermissionLevel::MEMBER => {
-                self.has_property_field_value_scope_access(user_id, field, value_target_id)
+                self.has_property_field_value_scope_access(ctx, user_id, field, value_target_id)
                     .await
             }
             _ => false,
@@ -495,6 +498,7 @@ impl App {
     /// `admin` dispatch.
     async fn has_property_field_value_admin(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         field: &PropertyField,
         value_target_id: &str,
@@ -510,7 +514,7 @@ impl App {
                 .0
             }
             mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
-                match self.get_single_post(value_target_id, false).await {
+                match self.get_single_post(ctx, value_target_id, false).await {
                     Ok(post) => {
                         self.has_permission_to_channel(
                             user_id,
@@ -551,6 +555,7 @@ impl App {
     /// field's target scope.
     async fn has_property_field_value_scope_access(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         field: &PropertyField,
         value_target_id: &str,
@@ -562,7 +567,7 @@ impl App {
                     .0
             }
             mm_model::property_field::PROPERTY_FIELD_OBJECT_TYPE_POST => {
-                match self.get_single_post(value_target_id, false).await {
+                match self.get_single_post(ctx, value_target_id, false).await {
                     Ok(post) => {
                         self.has_permission_to_channel(
                             user_id,

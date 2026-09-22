@@ -187,9 +187,16 @@ pub async fn set_post_reminder(
         }
     };
 
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     match state
         .app
-        .set_post_reminder(&session.0, &post_id, user_id, reminder.target_time)
+        .set_post_reminder(
+            &hook_ctx,
+            &session.0,
+            &post_id,
+            user_id,
+            reminder.target_time,
+        )
         .await
     {
         Ok(()) => status_ok(),
@@ -220,7 +227,12 @@ pub async fn restore_post_version(
         return ApiError::invalid_url_param("post_id").into_response();
     }
 
-    let to_restore = match state.app.get_single_post(&restore_version_id, true).await {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    let to_restore = match state
+        .app
+        .get_single_post(&hook_ctx, &restore_version_id, true)
+        .await
+    {
         Ok(post) => post,
         Err(_) => {
             return ApiError::from(make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]))
@@ -237,9 +249,8 @@ pub async fn restore_post_version(
         file_ids: Some(to_restore.file_ids.clone().unwrap_or_default()),
         ..PostPatch::default()
     };
-    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let outcome = async {
-        post_patch_checks(&state, &post_id, &session, &patch).await?;
+        post_patch_checks(&state, &post_id, &session, &patch, &hook_ctx).await?;
         let (updated, _is_member_for_preview) = state
             .app
             .restore_post_version(&session.0, &post_id, &restore_version_id, &hook_ctx)
@@ -318,9 +329,16 @@ pub async fn rewrite_message(
         return ApiError::invalid_param("root_id").into_response();
     }
 
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     match state
         .app
-        .rewrite_message_gates(&session.0, &req.message, &req.action, &req.root_id)
+        .rewrite_message_gates(
+            &hook_ctx,
+            &session.0,
+            &req.message,
+            &req.action,
+            &req.root_id,
+        )
         .await
     {
         Ok(()) | Err(PrepareError::Unreproducible(_)) => {
@@ -368,9 +386,10 @@ pub async fn reveal_post(
     }
 
     let user_id = session.0.user_id.clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let (post, _is_member) = match state
         .app
-        .get_post_if_authorized(&post_id, &session.0, false)
+        .get_post_if_authorized(&hook_ctx, &post_id, &session.0, false)
         .await
     {
         Ok(found) => found,
@@ -400,7 +419,11 @@ pub async fn reveal_post(
         .into_response();
     }
 
-    match state.app.reveal_post(&post, &user_id, &connection_id).await {
+    match state
+        .app
+        .reveal_post(&hook_ctx, &post, &user_id, &connection_id)
+        .await
+    {
         Ok(revealed) => match encoded_post(revealed) {
             Ok(response) => response,
             Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
@@ -432,10 +455,11 @@ pub async fn burn_post(
     }
     let connection_id = header_value(request.headers(), CONNECTION_ID_HEADER).to_owned();
     let user_id = session.0.user_id.clone();
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
     let (post, _) = match state
         .app
-        .get_post_if_authorized(&post_id, &session.0, false)
+        .get_post_if_authorized(&hook_ctx, &post_id, &session.0, false)
         .await
     {
         Ok(found) => found,

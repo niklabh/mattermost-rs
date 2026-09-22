@@ -212,7 +212,9 @@ pub async fn update_read_state_thread_by_user(
     State(state): State<AppState>,
     Path((user_id, team_id, thread_id, timestamp)): Path<(String, String, String, String)>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Result<Response, ApiError> {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let user_id = resolve_me(&user_id, &session);
     let timestamp = parse_timestamp_param(&timestamp);
     if let Some(parameter) = first_invalid_read_param(user_id, &team_id, &thread_id, timestamp) {
@@ -223,7 +225,14 @@ pub async fn update_read_state_thread_by_user(
 
     let thread = state
         .app
-        .update_thread_read_for_user(&session.0.id, user_id, &team_id, &thread_id, timestamp)
+        .update_thread_read_for_user(
+            &hook_ctx,
+            &session.0.id,
+            user_id,
+            &team_id,
+            &thread_id,
+            timestamp,
+        )
         .await?;
 
     thread_response(&state, thread, "updateReadStateThreadByUser")
@@ -248,7 +257,9 @@ pub async fn set_unread_thread_by_post_id(
     State(state): State<AppState>,
     Path((user_id, team_id, thread_id, post_id)): Path<(String, String, String, String)>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Result<Response, ApiError> {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let user_id = resolve_me(&user_id, &session);
     if let Some(parameter) = first_invalid_set_unread_param(user_id, &team_id, &thread_id, &post_id)
     {
@@ -264,7 +275,14 @@ pub async fn set_unread_thread_by_post_id(
 
     let thread = state
         .app
-        .update_thread_read_for_user_by_post(&session.0.id, user_id, &team_id, &thread_id, &post_id)
+        .update_thread_read_for_user_by_post(
+            &hook_ctx,
+            &session.0.id,
+            user_id,
+            &team_id,
+            &thread_id,
+            &post_id,
+        )
         .await?;
 
     thread_response(&state, thread, "setUnreadThreadByPostId")

@@ -538,10 +538,30 @@ fn transcript_of(path: &Path, pairs: &[(String, String)]) -> Vec<Json> {
             let line = scrub(l, pairs);
             let mut value: Json = serde_json::from_str(&line)
                 .unwrap_or_else(|e| panic!("transcript line {line:?}: {e}"));
+            sort_slices_by_id(&mut value);
             normalise(&mut value);
             value
         })
         .collect()
+}
+
+/// The two consumed hooks are handed a **slice**, and Go builds it by walking a map, so its order
+/// is whatever the runtime gave that iteration; this server walks a `BTreeMap`. Neither order is
+/// a promise, so a slice of posts is sorted by id before the ids are turned into tokens — both
+/// servers read the same rows, so the same ids sort the same way on both sides.
+fn sort_slices_by_id(value: &mut Json) {
+    let Some(args) = value.get_mut("args").and_then(Json::as_object_mut) else {
+        return;
+    };
+    for key in ["A", "B"] {
+        let Some(items) = args.get_mut(key).and_then(Json::as_array_mut) else {
+            continue;
+        };
+        if items.is_empty() || !items.iter().all(|item| item["Id"].is_string()) {
+            continue;
+        }
+        items.sort_by(|a, b| a["Id"].as_str().cmp(&b["Id"].as_str()));
+    }
 }
 
 /// [`transcript_of`] with nothing to scrub.
@@ -3213,6 +3233,728 @@ async fn run_the_channel_tour(client: &reqwest::Client, admin: &str) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The consumed tranche: MessagesWillBeConsumed and MessagesWillBeConsumedWithContext
+// ---------------------------------------------------------------------------------------------
+
+/// Cross-server parity for `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`
+/// (docs/PLUGIN_PLAN.md, Phase 5; [D-932]) — the hooks Go fires on the way **out** of every post
+/// read, `GetSinglePost` included, and on the `rpost` a create or an edit answers with.
+///
+/// The recorder implements them only when `HOOK_RECORDER_CONSUME` is set, so the older tours'
+/// transcripts are untouched. The posts are made by the stack's own Go server, which hosts no
+/// plugins, so their creation records nothing and both hosts then read the same rows. What the
+/// plugin answers is keyed off each post's message: `!consume ` and `!consume-ctx ` ask for a
+/// replacement carrying **only** an id and a message, which Go takes whole — the channel, the
+/// author and the timestamps come back blank to the client — and `!consume-stranger` answers a
+/// post under an id the host never asked about.
+#[tokio::test]
+async fn the_consumed_hooks_fire_as_go_fires_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_consumed_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// A post written by the stack's Go server, which records nothing.
+async fn post_via_main_go(
+    client: &reqwest::Client,
+    admin: &str,
+    channel: &str,
+    root_id: &str,
+    message: &str,
+) -> String {
+    let (status, body, _) = request_raw(
+        client,
+        GO,
+        reqwest::Method::POST,
+        Some(admin),
+        "/api/v4/posts",
+        Some(
+            &serde_json::to_vec(&serde_json::json!({
+                "channel_id": channel,
+                "root_id": root_id,
+                "message": message,
+                "props": { "mmrs_consumed": "yes", "mmrs_n": 2 },
+            }))
+            .expect("a body"),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{}", String::from_utf8_lossy(&body));
+    serde_json::from_slice::<Json>(&body).expect("a post")["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned()
+}
+
+impl Pair {
+    /// Wait until both transcripts have stopped growing and agree in length, then compare what
+    /// this step added. With `ordered` the comparison is entry for entry; without it each side's
+    /// entries are sorted first, for a step that also fires a `*HasBeen*` hook — dispatched on a
+    /// detached task on both sides, so its place among the consumed hooks is a race, not a fact.
+    async fn quiet_hooks(&mut self, what: &str, ordered: bool) -> Vec<Json> {
+        let read = || (transcript(&self.go_log), transcript(&self.rust_log));
+        let (mut go, mut rust) = read();
+        let mut quiet_since = std::time::Instant::now();
+        for _ in 0..300 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let (g, r) = read();
+            if g.len() == go.len() && r.len() == rust.len() {
+                if quiet_since.elapsed() >= QUIET && g.len() == r.len() && g.len() > self.seen {
+                    break;
+                }
+            } else {
+                quiet_since = std::time::Instant::now();
+            }
+            go = g;
+            rust = r;
+        }
+        let mut fresh_go = go[self.seen.min(go.len())..].to_vec();
+        let mut fresh_rust = rust[self.seen.min(rust.len())..].to_vec();
+        if !ordered {
+            let key = |e: &Json| (e["hook"].as_str().unwrap_or("").to_owned(), e.to_string());
+            fresh_go.sort_by_key(key);
+            fresh_rust.sort_by_key(key);
+        }
+        assert_eq!(
+            names(&fresh_go),
+            names(&fresh_rust),
+            "{what}: the hooks that fired\n  go:   {:?}\n  rust: {:?}",
+            names(&fresh_go),
+            names(&fresh_rust)
+        );
+        for (index, (g, r)) in fresh_go.iter().zip(fresh_rust.iter()).enumerate() {
+            assert_eq!(g, r, "{what}: hook {index} differs");
+        }
+        self.seen = go.len();
+        fresh_go
+    }
+}
+
+/// The messages of a consumed hook's slice, in the (sorted) order the transcript holds them.
+fn slice_messages(entry: &Json, key: &str) -> Vec<String> {
+    entry["args"][key]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|p| p["Message"].as_str().unwrap_or("").to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn run_the_consumed_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-consumed");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+
+    let team = common::create_team(&client, &admin, "hookcs").await;
+    let channel = common::create_channel(&client, &admin, &team, "hookcs").await;
+
+    let go = start_go(
+        &go_run,
+        &[
+            ("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy()),
+            ("HOOK_RECORDER_CONSUME", "1"),
+        ],
+        GO_OFFSET + 1,
+    )
+    .await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust = SecondServer::start_in(
+        HOST_PORT + 1,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", &rust_log.to_string_lossy()),
+            ("HOOK_RECORDER_CONSUME", "1"),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let mut pair = Pair {
+        client: client.clone(),
+        admin: admin.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        seen: 0,
+    };
+
+    // The rows both hosts read, written by a server that hosts no plugins.
+    let plain = post_via_main_go(&client, &admin, &channel, "", "consumed plain").await;
+    let reply = post_via_main_go(&client, &admin, &channel, &plain, "consumed reply").await;
+    let consume = post_via_main_go(&client, &admin, &channel, "", "!consume two").await;
+    let consume_ctx = post_via_main_go(&client, &admin, &channel, "", "!consume-ctx three").await;
+    let stranger = post_via_main_go(&client, &admin, &channel, "", "!consume-stranger").await;
+    tokio::time::sleep(QUIET).await;
+    assert_eq!(
+        (
+            transcript(&pair.go_log).len(),
+            transcript(&pair.rust_log).len()
+        ),
+        (0, 0),
+        "the stack's Go server hosts no plugins"
+    );
+
+    // 1. A single read: the plain hook, then the context-aware one, over a one-post slice.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{plain}"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a plain read");
+    let fired = pair.quiet_hooks("a plain read", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext"
+        ],
+        "the plain hook first, then the context-aware one"
+    );
+    assert_eq!(slice_messages(&fired[0], "A"), ["consumed plain"]);
+    assert_eq!(slice_messages(&fired[1], "B"), ["consumed plain"]);
+    assert_eq!(
+        fired[0]["args"]["A"][0]["Metadata"],
+        Json::Null,
+        "ForPlugin nils the metadata"
+    );
+    assert_eq!(
+        fired[0]["args"]["A"][0]["Props"]["$map"]["mmrs_n"]["$iface"], "float64",
+        "props cross as Go's float64"
+    );
+    assert_eq!(fired[1]["args"]["A"]["IPAddress"], "127.0.0.1");
+    assert_eq!(
+        fired[1]["args"]["A"]["SessionId"].as_str().map(str::len),
+        Some(26)
+    );
+
+    // 2. A replacement carrying only an id and a message is taken **whole** — and on a single
+    //    read that is fatal: `GetPostIfAuthorized` goes on to look up the post's channel, which
+    //    is now the empty string, so the route is a 404 `app.channel.get.existing.app_error` on
+    //    both hosts, after the hooks have run. The context-aware hook is handed the post as the
+    //    plain hook's answer left it.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{consume}"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (404, 404), "Go {gb} / Rust {rb}");
+    assert_eq!(error_of(&gb), error_of(&rb), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.channel.get.existing.app_error");
+    let fired = pair.quiet_hooks("a consumed read", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext"
+        ]
+    );
+    assert_eq!(slice_messages(&fired[0], "A"), ["!consume two"]);
+    assert_eq!(
+        slice_messages(&fired[1], "B"),
+        ["consumed: two"],
+        "the slice is rebuilt from the plain hook's answer"
+    );
+    assert_eq!(
+        fired[1]["args"]["B"][0]["ChannelId"],
+        Json::Null,
+        "and the rebuilt post is the replacement, whole"
+    );
+
+    // 3. The context-aware hook's own replacement: the same 404, and the plain hook saw the
+    //    original message because it runs first.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{consume_ctx}"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (404, 404), "Go {gb} / Rust {rb}");
+    assert_eq!(error_of(&gb), error_of(&rb), "Go {gb} / Rust {rb}");
+    let fired = pair.quiet_hooks("a read consumed with context", true).await;
+    assert_eq!(slice_messages(&fired[0], "A"), ["!consume-ctx three"]);
+    assert_eq!(slice_messages(&fired[1], "B"), ["!consume-ctx three"]);
+
+    // 4. A replacement under an id the host never asked about is ignored.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{stranger}"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    assert_eq!(
+        gb["message"], "!consume-stranger",
+        "the stranger was ignored"
+    );
+    same_post(&gb, &rb, "a stranger's replacement");
+    pair.quiet_hooks("a stranger's replacement", true).await;
+
+    // 5. A channel page: one slice with every post, rewritten in place. Both hosts read the
+    //    same rows, so the ids agree and the comparison sorts by them.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/channels/{channel}/posts"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a channel page");
+    // The list route looks nothing up after the hook, so here the client sees what "taken
+    // whole" means: the new message, and no channel, author or timestamps.
+    assert_eq!(gb["posts"][&consume]["message"], "consumed: two");
+    assert_eq!(gb["posts"][&consume]["channel_id"], "");
+    assert_eq!(gb["posts"][&consume]["create_at"], 0);
+    assert_eq!(
+        gb["posts"][&consume_ctx]["message"],
+        "consumed with context: three"
+    );
+    assert_eq!(gb["posts"][&plain]["message"], "consumed plain");
+    let fired = pair.quiet_hooks("a channel page", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext"
+        ]
+    );
+    assert_eq!(fired[0]["args"]["A"].as_array().map(Vec::len), Some(6));
+
+    // 6. The since branch, which reads through `GetPostsSince`.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/channels/{channel}/posts?since=1"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a since page");
+    pair.quiet_hooks("a since page", true).await;
+
+    // 7. A thread: `GetPostThread` over the root and its reply, then `GetPostIfAuthorized` over
+    //    the root alone — two slices, in that order.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{plain}/thread"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a thread");
+    let fired = pair.quiet_hooks("a thread", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+        ]
+    );
+    let mut thread = slice_messages(&fired[0], "A");
+    thread.sort();
+    assert_eq!(thread, ["consumed plain", "consumed reply"]);
+    assert_eq!(slice_messages(&fired[2], "A"), ["consumed plain"]);
+    let _ = reply;
+
+    // 8. Around the last unread: the thread of the first unread post, then the window before
+    //    it, then the window after — an empty window fires nothing, on both sides alike.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!(
+                "/api/v4/users/me/channels/{channel}/posts/unread?limit_before=2&limit_after=2"
+            ),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "around the last unread");
+    pair.quiet_hooks("around the last unread", true).await;
+
+    // 9. The post info route reads through `GetSinglePost` too.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::GET,
+            &format!("/api/v4/posts/{plain}/info"),
+            None,
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    assert_eq!(gb, rb, "the post info");
+    let fired = pair.quiet_hooks("the post info", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext"
+        ]
+    );
+
+    // 10. Flagging a post: `updatePreferences` reads the post through `GetSinglePost` before it
+    //     saves, and `PreferencesHaveChanged` follows on a detached task.
+    let me: Json = serde_json::from_slice(
+        &request_raw(
+            &client,
+            &go.base,
+            reqwest::Method::GET,
+            Some(&admin),
+            "/api/v4/users/me",
+            None,
+        )
+        .await
+        .1,
+    )
+    .expect("the caller");
+    let me = me["id"].as_str().expect("an id").to_owned();
+    let flag = serde_json::to_vec(&serde_json::json!([{
+        "user_id": me,
+        "category": "flagged_post",
+        "name": plain,
+        "value": "true",
+    }]))
+    .expect("a body");
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::PUT,
+            "/api/v4/users/me/preferences",
+            Some(&flag),
+        )
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    let fired = pair.quiet_hooks("flagging a post", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+            "PreferencesHaveChanged",
+        ]
+    );
+
+    // 11. The flagged list.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(reqwest::Method::GET, "/api/v4/users/me/posts/flagged", None)
+        .await;
+    assert_eq!((gs, rs), (200, 200), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "the flagged list");
+    let fired = pair.quiet_hooks("the flagged list", true).await;
+    // `contains`, not equality: the flagged list is the shared admin's, and a concurrent suite
+    // may have flagged posts of its own — the transcripts still agree, which is the assertion.
+    assert!(
+        slice_messages(&fired[0], "A").contains(&"consumed plain".to_owned()),
+        "the flagged list carries this tour's post: {:?}",
+        slice_messages(&fired[0], "A")
+    );
+
+    // 13. A create answered by each host: the two post hooks, then the consumed pair over the
+    //     prepared post — `CreatePost` fires it on the `rpost` it answers with.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::POST,
+            "/api/v4/posts",
+            Some(
+                &serde_json::to_vec(&serde_json::json!({
+                    "channel_id": channel,
+                    "message": "consumed on create",
+                }))
+                .expect("a body"),
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a created post");
+    let (go_created, rs_created) = (
+        gb["id"].as_str().expect("an id").to_owned(),
+        rb["id"].as_str().expect("an id").to_owned(),
+    );
+    let fired = pair.quiet_hooks("a created post", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessageHasBeenPosted",
+            "MessageWillBePosted",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name"
+    );
+    assert_eq!(
+        fired[2]["args"]["A"][0]["Id"], "<id>",
+        "the consumed slice carries the saved post"
+    );
+
+    // 13b. A create whose answer the context-aware hook replaces: the client gets the
+    //      replacement whole — no channel, no author — with the **prepared** post's metadata put
+    //      back on it, which is the one field the hook cannot take away.
+    let ((gs, gb), (rs, rb)) = pair
+        .both(
+            reqwest::Method::POST,
+            "/api/v4/posts",
+            Some(
+                &serde_json::to_vec(&serde_json::json!({
+                    "channel_id": channel,
+                    "message": "!consume-ctx on create",
+                }))
+                .expect("a body"),
+            ),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["message"], "consumed with context: on create");
+    assert_eq!(gb["channel_id"], "", "taken whole");
+    assert!(
+        gb["metadata"].is_object(),
+        "the prepared metadata is put back: {gb}"
+    );
+    same_post(&gb, &rb, "a create consumed with context");
+    let fired = pair
+        .quiet_hooks("a create consumed with context", false)
+        .await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessageHasBeenPosted",
+            "MessageWillBePosted",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name"
+    );
+
+    // 12. A reaction, one post per host: `SaveReactionForPost` reads the post through
+    //     `GetSinglePost` first. One post each, because the second host to react to a shared
+    //     post reads the first host's reaction back — `HasReactions` — and the transcripts
+    //     would differ for a reason that is not the hook's.
+    for (base, id) in [(&go.base, &go_created), (&rust.base, &rs_created)] {
+        let reaction = serde_json::to_vec(&serde_json::json!({
+            "user_id": me,
+            "post_id": id,
+            "emoji_name": "+1",
+        }))
+        .expect("a body");
+        let (status, body, _) = request_raw(
+            &client,
+            base,
+            reqwest::Method::POST,
+            Some(&admin),
+            "/api/v4/reactions",
+            Some(&reaction),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&body));
+    }
+    let fired = pair.quiet_hooks("a reaction", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+            "ReactionHasBeenAdded",
+        ]
+    );
+
+    // 14. A patch, one post per host: the handler's two reads and `PatchPost`'s one — three
+    //     consumed pairs — then the edit hooks and the consumed pair `UpdatePost` fires over
+    //     the post it answers with.
+    let patch =
+        serde_json::to_vec(&serde_json::json!({ "message": "consumed on patch" })).expect("a body");
+    let (gs, gb, _) = request_raw(
+        &client,
+        &go.base,
+        reqwest::Method::PUT,
+        Some(&admin),
+        &format!("/api/v4/posts/{go_created}/patch"),
+        Some(&patch),
+    )
+    .await;
+    let (rs, rb, served_by) = request_raw(
+        &client,
+        &rust.base,
+        reqwest::Method::PUT,
+        Some(&admin),
+        &format!("/api/v4/posts/{rs_created}/patch"),
+        Some(&patch),
+    )
+    .await;
+    assert_eq!(served_by.as_deref(), Some("rust"));
+    assert_eq!(
+        (gs, rs),
+        (200, 200),
+        "Go {} / Rust {}",
+        String::from_utf8_lossy(&gb),
+        String::from_utf8_lossy(&rb)
+    );
+    let fired = pair.quiet_hooks("a patch", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessageHasBeenUpdated",
+            "MessageWillBeUpdated",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name: three reads and the answered post"
+    );
+    let mut messages: Vec<String> = fired
+        .iter()
+        .filter(|e| e["hook"] == "MessagesWillBeConsumed")
+        .map(|e| slice_messages(e, "A").join(""))
+        .collect();
+    messages.sort();
+    assert_eq!(
+        messages,
+        [
+            "consumed on create",
+            "consumed on create",
+            "consumed on create",
+            "consumed on patch",
+        ],
+        "three reads of the old text, one of the new"
+    );
+
+    // 15. The edit history reads the current post through `GetSinglePost`.
+    let (gs, gb, _) = request_raw(
+        &client,
+        &go.base,
+        reqwest::Method::GET,
+        Some(&admin),
+        &format!("/api/v4/posts/{go_created}/edit_history"),
+        None,
+    )
+    .await;
+    let (rs, rb, served_by) = request_raw(
+        &client,
+        &rust.base,
+        reqwest::Method::GET,
+        Some(&admin),
+        &format!("/api/v4/posts/{rs_created}/edit_history"),
+        None,
+    )
+    .await;
+    assert_eq!(served_by.as_deref(), Some("rust"));
+    assert_eq!(
+        (gs, rs),
+        (200, 200),
+        "Go {} / Rust {}",
+        String::from_utf8_lossy(&gb),
+        String::from_utf8_lossy(&rb)
+    );
+    let fired = pair.quiet_hooks("the edit history", true).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext"
+        ]
+    );
+
+    // 16. A pin: the handler's read, `PatchPost`'s read, the edit hooks, the answered post.
+    for (base, id) in [(&go.base, &go_created), (&rust.base, &rs_created)] {
+        let (status, body, _) = request_raw(
+            &client,
+            base,
+            reqwest::Method::POST,
+            Some(&admin),
+            &format!("/api/v4/posts/{id}/pin"),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&body));
+    }
+    let fired = pair.quiet_hooks("a pin", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessageHasBeenUpdated",
+            "MessageWillBeUpdated",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumedWithContext",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name: two reads and the answered post"
+    );
+
+    // 17. A delete: the handler reads through `GetSinglePost`; `DeletePost` itself reads the
+    //     store directly and fires nothing.
+    for (base, id) in [(&go.base, &go_created), (&rust.base, &rs_created)] {
+        let (status, body, _) = request_raw(
+            &client,
+            base,
+            reqwest::Method::DELETE,
+            Some(&admin),
+            &format!("/api/v4/posts/{id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&body));
+    }
+    let fired = pair.quiet_hooks("a delete", false).await;
+    assert_eq!(
+        names(&fired),
+        [
+            "MessageHasBeenDeleted",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name: one read, then the deletion"
+    );
+
+    drop(rust);
+    drop(go);
+    common::delete_channel(&client, &admin, &channel).await;
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]
@@ -3244,6 +3986,36 @@ fn normalise_keeps_empty_apart_from_set() {
 }
 
 /// `names` reads the key the recorder writes, and nothing else in the line.
+#[test]
+fn a_slice_of_posts_is_sorted_by_id_before_the_ids_become_tokens() {
+    let mut value: Json = serde_json::json!({
+        "hook": "MessagesWillBeConsumedWithContext",
+        "args": {
+            "A": { "RequestId": "r" },
+            "B": [
+                { "Id": "zzzzzzzzzzzzzzzzzzzzzzzzzz", "Message": "last" },
+                { "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaa", "Message": "first" }
+            ]
+        }
+    });
+    sort_slices_by_id(&mut value);
+    normalise(&mut value);
+    assert_eq!(value["args"]["B"][0]["Message"], "first");
+    assert_eq!(value["args"]["B"][0]["Id"], "<id>");
+    assert_eq!(
+        value["args"]["A"]["RequestId"], "<id>",
+        "an object is left alone"
+    );
+
+    // A slice whose elements carry no id — the preferences — keeps its order.
+    let mut value: Json = serde_json::json!({
+        "hook": "PreferencesHaveChanged",
+        "args": { "B": [ { "Name": "b" }, { "Name": "a" } ] }
+    });
+    sort_slices_by_id(&mut value);
+    assert_eq!(value["args"]["B"][0]["Name"], "b");
+}
+
 #[test]
 fn names_reads_the_hook_key() {
     let entries = vec![

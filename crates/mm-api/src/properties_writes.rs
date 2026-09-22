@@ -480,6 +480,7 @@ async fn has_target_write_access(
     session: &AuthenticatedSession,
     object_type: &str,
     target_id: &str,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> WriteAccess {
     match object_type {
         PROPERTY_FIELD_OBJECT_TYPE_CHANNEL => {
@@ -501,7 +502,7 @@ async fn has_target_write_access(
             }
         }
         PROPERTY_FIELD_OBJECT_TYPE_POST => {
-            let post = match state.app.get_single_post(target_id, false).await {
+            let post = match state.app.get_single_post(hook_ctx, target_id, false).await {
                 Ok(post) => post,
                 Err(err) => return WriteAccess::Denied(ApiError::from(err)),
             };
@@ -578,6 +579,7 @@ async fn patch_values_core(
         Group::Failed(err) => return err.into_response(),
     };
 
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let Ok((bytes, connection_id)) = body_and_connection_id(request).await else {
         return ApiError::invalid_param("property_values").into_response();
     };
@@ -586,7 +588,7 @@ async fn patch_values_core(
     };
 
     if let WriteAccess::Denied(err) =
-        has_target_write_access(&state, &session, object_type, target_id).await
+        has_target_write_access(&state, &session, object_type, target_id, &hook_ctx).await
     {
         return err.into_response();
     }
@@ -666,7 +668,9 @@ async fn patch_values_core(
         }
         if !state
             .app
-            .session_has_permission_to_set_property_field_values(&session.0, field, target_id)
+            .session_has_permission_to_set_property_field_values(
+                &hook_ctx, &session.0, field, target_id,
+            )
             .await
         {
             return refusal(
@@ -696,6 +700,7 @@ async fn patch_values_core(
     match state
         .app
         .upsert_property_values(
+            &hook_ctx,
             &group,
             &caller,
             values,

@@ -53,6 +53,7 @@ use mm_store::post_store::{
 use mm_store::{EmojiStore, FileInfoStore, PostStore, ReactionStore, StoreError};
 
 use crate::App;
+use crate::plugin_hooks::HookContext;
 
 /// Port of `model.PreparePostForClientOpts` (post.go:1449). Not a wire type.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -224,9 +225,23 @@ impl App {
     ///
     /// The cloud-limit check that follows in Go is a no-op without a licence carrying a post
     /// history limit; see the module docs.
-    #[tracing::instrument(skip(self), fields(post_id = %post_id, incl_deleted))]
-    pub async fn get_single_post(&self, post_id: &str, incl_deleted: bool) -> AppResult<Post> {
-        self.store()
+    ///
+    /// **Last, the plugins are asked** — `applyPostWillBeConsumedHook`,
+    /// [`App::apply_post_will_be_consumed_hook`] — which is why every caller carries a
+    /// [`HookContext`]: Go fires `MessagesWillBeConsumed` from inside `GetSinglePost`, so a
+    /// reaction save, a pin, a patch and a thread read each tell the plugins about the post they
+    /// looked up, not only the routes that answer with it. `revealSingleBurnOnReadPost` sits
+    /// between the store and the hook in Go and runs in [`App::get_post_if_authorized`] here,
+    /// after it; the hook leaves a burn-on-read post alone, so nothing can tell.
+    #[tracing::instrument(skip(self, ctx), fields(post_id = %post_id, incl_deleted))]
+    pub async fn get_single_post(
+        &self,
+        ctx: &HookContext,
+        post_id: &str,
+        incl_deleted: bool,
+    ) -> AppResult<Post> {
+        let mut post = self
+            .store()
             .post()
             .get_single(post_id, incl_deleted)
             .await
@@ -244,7 +259,9 @@ impl App {
                     String::new(),
                     status,
                 )
-            })
+            })?;
+        self.apply_post_will_be_consumed_hook(ctx, &mut post).await;
+        Ok(post)
     }
 
     /// Port of `app.App.GetPostIfAuthorized` (post.go:2754).
@@ -261,14 +278,15 @@ impl App {
     /// `O` **only**. That repetition cannot grant anything the first one refused, so its whole
     /// effect is on *which permission id* the 403 names — `read_public_channel` for an open
     /// channel, `read_channel_content` otherwise. Clients read that id, so it is wire format.
-    #[tracing::instrument(skip(self, session), fields(post_id = %post_id, incl_deleted))]
+    #[tracing::instrument(skip(self, ctx, session), fields(post_id = %post_id, incl_deleted))]
     pub async fn get_post_if_authorized(
         &self,
+        ctx: &HookContext,
         post_id: &str,
         session: &Session,
         incl_deleted: bool,
     ) -> AppResult<(Post, bool)> {
-        let post = self.get_single_post(post_id, incl_deleted).await?;
+        let post = self.get_single_post(ctx, post_id, incl_deleted).await?;
         // `GetSinglePost` ends with `revealSingleBurnOnReadPost` for the session's user
         // (app/post.go:1537) — a no-op on every other type. Applied here rather than inside
         // `get_single_post`, which has no session to reveal for.
@@ -329,11 +347,12 @@ impl App {
     #[tracing::instrument(skip_all, fields(post_id = %post.id))]
     pub async fn prepare_post_for_client_with_embeds_and_images(
         &self,
+        ctx: &HookContext,
         post: &Post,
         opts: PreparePostForClientOpts,
     ) -> Result<Post, PrepareError> {
         let mut post = self.prepare_post_for_client(post, opts).await?;
-        self.get_embeds_and_images(&mut post, opts.is_new_post)
+        self.get_embeds_and_images(ctx, &mut post, opts.is_new_post)
             .await?;
         self.prepare_post_files_for_client(&mut post, opts).await;
         Ok(post)
@@ -351,8 +370,11 @@ impl App {
         original: &Post,
         opts: PreparePostForClientOpts,
     ) -> Result<Post, PrepareError> {
-        // The plugin `MessageWillBeConsumed` hook can rewrite any post; the shapes where that
-        // is observable on this deployment are the plugins' own, which all carry a custom type.
+        // Refused since before this server hosted plugins, when `MessagesWillBeConsumed` could
+        // only run in the Go process and a plugin's own posts were the shapes it would rewrite.
+        // The hook now runs here too ([`App::apply_posts_will_be_consumed_hook`]), so that reason
+        // is gone; what keeps the forward is that no custom-typed post has been measured through
+        // this pipeline against Go, and [`crate::post_create`] refuses to write one.
         if original.post_type.starts_with(POST_CUSTOM_TYPE_PREFIX) {
             return Err(PrepareError::Unreproducible("plugin post type"));
         }
@@ -537,10 +559,28 @@ impl App {
         post_id: &str,
         include_deleted: bool,
     ) -> Result<Vec<FileInfo>, PrepareError> {
+        // `a.Srv().Store().Post().GetSingle(...)` — the **store**, not `GetSinglePost`, so the
+        // plugins are not told about this read; `Where` is this function's own name.
         let post = self
-            .get_single_post(post_id, include_deleted)
+            .store()
+            .post()
+            .get_single(post_id, include_deleted)
             .await
-            .map_err(PrepareError::App)?;
+            .map_err(|err| {
+                let status = if err.is_not_found() {
+                    404
+                } else {
+                    tracing::error!(error = %err, "post lookup failed");
+                    500
+                };
+                PrepareError::App(AppError::boxed(
+                    "GetFileInfosForPostWithMigration",
+                    "app.post.get.app_error",
+                    None,
+                    String::new(),
+                    status,
+                ))
+            })?;
 
         let file_ids = post.file_ids.as_deref().unwrap_or_default();
         let infos = self
@@ -747,21 +787,27 @@ impl App {
 
     /// Port of `app.App.GetPostsPage` (post.go:1337).
     ///
-    /// Three of the four stages Go runs after the store are inert here and one is unreachable:
+    /// Of the four stages Go runs after the store, two are inert here, one is unreachable and
+    /// the last runs:
     ///
     /// - `revealBurnOnReadPostsForUser` only does work when the list carries burn-on-read posts,
     ///   and any list that does is refused by [`App::prepare_post_list_for_client`] a moment
     ///   later, so the request is forwarded whole rather than half-reproduced.
     /// - `filterInaccessiblePosts` needs a licence with a `PostHistory` limit; without one
     ///   `GetLastAccessiblePostTime` returns `0` and the function returns immediately.
-    /// - `applyPostsWillBeConsumedHook` is a plugin hook, refused per post by post type.
+    /// - `applyPostsWillBeConsumedHook` is [`App::apply_posts_will_be_consumed_hook`], and it
+    ///   is why every list reader below takes a [`HookContext`].
     ///
     /// Only Go's 500 branch is reachable from here. Its 400 sibling
     /// (`app.post.get_posts.app_error`) is raised for `ErrInvalidInput`, which the store returns
     /// for `PerPage > 1000` — a value `parse_per_page` clamps away before the handler runs.
-    #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id))]
-    pub async fn get_posts_page(&self, opts: GetPostsOptions<'_>) -> AppResult<PostList> {
-        self.store().post().get_posts(opts).await.map_err(|err| {
+    #[tracing::instrument(skip(self, ctx), fields(channel_id = %opts.channel_id))]
+    pub async fn get_posts_page(
+        &self,
+        ctx: &HookContext,
+        opts: GetPostsOptions<'_>,
+    ) -> AppResult<PostList> {
+        let mut list = self.store().post().get_posts(opts).await.map_err(|err| {
             tracing::error!(error = %err, "post page lookup failed");
             AppError::boxed(
                 "GetPostsPage",
@@ -770,7 +816,10 @@ impl App {
                 String::new(),
                 500,
             )
-        })
+        })?;
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
+        Ok(list)
     }
 
     /// Port of `app.App.GetPostsSince` (post.go:1435): the store's list, or
@@ -779,18 +828,20 @@ impl App {
     /// The stages after the store are those [`App::get_posts_page`] documents and inert for the
     /// same reasons: no auto-translation to supplement from, no licence carrying a post-history
     /// limit for `filterInaccessiblePosts`, a burn-on-read post refused later by
-    /// [`App::prepare_post_list_for_client`] (so forwarded), and no plugin running here for
-    /// `PostsWillBeConsumed`.
-    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, since, collapsed_threads))]
+    /// [`App::prepare_post_list_for_client`] (so forwarded) — and `applyPostsWillBeConsumedHook`
+    /// last, which runs.
+    #[tracing::instrument(skip(self, ctx), fields(channel_id = %channel_id, since, collapsed_threads))]
     pub async fn get_posts_since(
         &self,
+        ctx: &HookContext,
         channel_id: &str,
         since: i64,
         user_id: &str,
         collapsed_threads: bool,
         skip_fetch_threads: bool,
     ) -> AppResult<PostList> {
-        self.store()
+        let mut list = self
+            .store()
             .post()
             .get_posts_since(
                 channel_id,
@@ -809,14 +860,17 @@ impl App {
                     String::new(),
                     500,
                 )
-            })
+            })?;
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
+        Ok(list)
     }
 
     /// Port of `app.App.GetPostThread` (post.go:1555).
     ///
     /// The four stages Go runs after the store are the same four
-    /// [`App::get_posts_page`] documents, and they are inert or unreachable for the same
-    /// reasons — with one difference worth naming: `revealBurnOnReadPostsForUser` is **not**
+    /// [`App::get_posts_page`] documents, and the three that are inert or unreachable are so
+    /// for the same reasons — with one difference worth naming: `revealBurnOnReadPostsForUser` is **not**
     /// inert here, because `SqlPostStore.Get` really does populate `BurnOnReadPosts` where the
     /// channel-page query never does. It stays unported anyway, because any list carrying a
     /// burn-on-read post is refused a moment later by
@@ -836,13 +890,15 @@ impl App {
     /// a 404, anything else a 500. `Where` differs (`GetPostThread` against `GetSinglePost`) and
     /// `Where` is `json:"-"`, so a client cannot tell the two functions apart at all. The 400 is
     /// unreachable — see [`mm_store::PostStore::get_thread`].
-    #[tracing::instrument(skip(self), fields(post_id = %post_id, collapsed = opts.collapsed_threads))]
+    #[tracing::instrument(skip(self, ctx), fields(post_id = %post_id, collapsed = opts.collapsed_threads))]
     pub async fn get_post_thread(
         &self,
+        ctx: &HookContext,
         post_id: &str,
         opts: GetPostThreadOptions<'_>,
     ) -> AppResult<PostList> {
-        self.store()
+        let mut list = self
+            .store()
             .post()
             .get_thread(post_id, opts)
             .await
@@ -860,7 +916,10 @@ impl App {
                     String::new(),
                     status,
                 )
-            })
+            })?;
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
+        Ok(list)
     }
 
     /// Port of `app.App.GetEditHistoryForPost` (post.go:2800), plus the
@@ -892,8 +951,8 @@ impl App {
     /// **All three carry the same error id and the same status**, `app.post.get_flagged_posts`
     /// / 500, so the api4 handler's three-way branch is invisible in an error.
     ///
-    /// The three stages after the store call are all no-ops on this deployment and are not
-    /// ported:
+    /// The first two stages after the store call are no-ops on this deployment and are not
+    /// ported; the third, `applyPostsWillBeConsumedHook`, runs last:
     ///
     /// - `revealBurnOnReadPostsForUser` returns immediately unless `postList.BurnOnReadPosts` is
     ///   non-empty *and* both `FeatureFlags.BurnOnRead` and `ServiceSettings.EnableBurnOnRead`
@@ -901,21 +960,20 @@ impl App {
     ///   would be refused by [`App::prepare_post_for_client`] anyway.
     /// - `filterInaccessiblePosts` needs a Cloud licence carrying a `PostHistory` limit — see
     ///   the module docs.
-    /// - `applyPostsWillBeConsumedHook` is a plugin hook; the port refuses `custom_*` post types,
-    ///   which is where a plugin's own posts land.
     #[tracing::instrument(
-        skip(self),
+        skip(self, ctx),
         fields(user_id = %user_id, channel_id = %channel_id, team_id = %team_id, found)
     )]
     pub async fn get_flagged_posts(
         &self,
+        ctx: &HookContext,
         user_id: &str,
         channel_id: &str,
         team_id: &str,
         offset: i64,
         limit: i64,
     ) -> AppResult<PostList> {
-        let list = self
+        let mut list = self
             .store()
             .post()
             .get_flagged_posts(user_id, channel_id, team_id, offset, limit)
@@ -931,6 +989,8 @@ impl App {
                 )
             })?;
         tracing::Span::current().record("found", list.order.as_ref().map_or(0, Vec::len));
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
         Ok(list)
     }
 
@@ -1077,14 +1137,17 @@ impl App {
     /// validated.
     ///
     /// The four stages Go runs after the store are the ones [`App::get_posts_page`] documents,
-    /// inert here for the same reasons.
-    #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id, before))]
+    /// inert here for the same reasons — bar the hook, which runs, and runs for **each** window
+    /// separately: `GetPostsForChannelAroundLastUnread` fires it three times.
+    #[tracing::instrument(skip(self, ctx), fields(channel_id = %opts.channel_id, before))]
     pub async fn get_posts_around_post(
         &self,
+        ctx: &HookContext,
         opts: GetPostsAroundOptions<'_>,
         before: bool,
     ) -> AppResult<PostList> {
-        self.store()
+        let mut list = self
+            .store()
             .post()
             .get_posts_around(opts, before)
             .await
@@ -1101,7 +1164,10 @@ impl App {
                     String::new(),
                     500,
                 )
-            })
+            })?;
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
+        Ok(list)
     }
 
     /// Port of `app.App.GetPostsForChannelAroundLastUnread` (post.go:1928).
@@ -1135,9 +1201,11 @@ impl App {
     ///
     /// The after-window asks for one fewer than the caller's limit, because the unread post
     /// itself already occupies a slot. `limit_after` is validated non-zero by the handler.
-    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, user_id = %user_id))]
+    #[allow(clippy::too_many_arguments)] // Go's signature plus the request context.
+    #[tracing::instrument(skip(self, ctx), fields(channel_id = %channel_id, user_id = %user_id))]
     pub async fn get_posts_for_channel_around_last_unread(
         &self,
+        ctx: &HookContext,
         channel_id: &str,
         user_id: &str,
         limit_before: i64,
@@ -1171,7 +1239,7 @@ impl App {
             from_update_at: 0,
         };
         let mut list = self
-            .get_post_thread(&last_unread_post_id, thread_opts)
+            .get_post_thread(ctx, &last_unread_post_id, thread_opts)
             .await?;
 
         // `postList.Order = []string{}` — materialised, not nil, so a list that ends here still
@@ -1196,13 +1264,13 @@ impl App {
             list.add_order(last_unread_post_id.clone());
 
             let before = self
-                .get_posts_around_post(window(limit_before), true)
+                .get_posts_around_post(ctx, window(limit_before), true)
                 .await?;
             list.extend(&before);
         }
 
         let after = self
-            .get_posts_around_post(window(limit_after - 1), false)
+            .get_posts_around_post(ctx, window(limit_after - 1), false)
             .await?;
         list.extend(&after);
 
@@ -1258,6 +1326,7 @@ impl App {
     #[tracing::instrument(skip_all)]
     pub async fn prepare_post_list_for_client(
         &self,
+        ctx: &HookContext,
         original: &PostList,
     ) -> Result<PostList, PrepareError> {
         let mut list = PostList {
@@ -1275,6 +1344,7 @@ impl App {
             // `IncludePriority` included, which is why the batch reads below exist at all.
             let post = self
                 .prepare_post_for_client_with_embeds_and_images(
+                    ctx,
                     original_post,
                     PreparePostForClientOpts::default(),
                 )
