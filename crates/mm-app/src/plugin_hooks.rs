@@ -47,6 +47,7 @@ use mm_model::post_list::PostMap;
 use mm_model::post_metadata::PostMetadata;
 use mm_model::preference::Preferences;
 use mm_model::reaction::Reaction;
+use mm_model::scheduled_post::ScheduledPost;
 use mm_model::team_member::TeamMember;
 use mm_model::user::User;
 use mm_model::utils::AppError;
@@ -477,6 +478,41 @@ pub fn draft_from_wire(wire: &wire_model::Draft, source: &Draft) -> Draft {
         file_ids: (!wire.file_ids.is_empty()).then(|| wire.file_ids.clone()),
         metadata: source.metadata.clone(),
         priority: (!wire.priority.is_empty()).then(|| props_from_wire(&wire.priority)),
+    }
+}
+
+/// A scheduled post as gob sends it (`model.ScheduledPost`, scheduled_post.go:31): the embedded
+/// `Draft` as one field named after its type, then the six of its own. The draft half is
+/// [`draft_to_wire`], so it carries no `Metadata` either ([D-931]).
+pub fn scheduled_post_to_wire(scheduled_post: &ScheduledPost) -> wire_model::ScheduledPost {
+    wire_model::ScheduledPost {
+        draft: draft_to_wire(&scheduled_post.draft),
+        id: scheduled_post.id.clone(),
+        scheduled_at: scheduled_post.scheduled_at,
+        processed_at: scheduled_post.processed_at,
+        error_code: scheduled_post.error_code.clone(),
+        repeat_type: scheduled_post.repeat_type.clone(),
+        repeat_timezone: scheduled_post.repeat_timezone.clone(),
+    }
+}
+
+/// A scheduled post a `ScheduledPostWillBeCreated` plugin answered with, **taken whole**: Go
+/// leaves `Z_ScheduledPostWillBeCreatedReturns` unseeded (client_rpc_generated.go:2099), so a
+/// field the plugin left out is zero — the id included, which `CreateScheduledPost`'s second
+/// `PreSave` then mints afresh. `metadata` is kept from the value that was sent, as
+/// [`draft_from_wire`] keeps it.
+pub fn scheduled_post_from_wire(
+    wire: &wire_model::ScheduledPost,
+    source: &ScheduledPost,
+) -> ScheduledPost {
+    ScheduledPost {
+        draft: draft_from_wire(&wire.draft, &source.draft),
+        id: wire.id.clone(),
+        scheduled_at: wire.scheduled_at,
+        processed_at: wire.processed_at,
+        error_code: wire.error_code.clone(),
+        repeat_type: wire.repeat_type.clone(),
+        repeat_timezone: wire.repeat_timezone.clone(),
     }
 }
 
@@ -2312,6 +2348,90 @@ impl App {
         Ok(draft)
     }
 
+    /// Port of `runGuardedScheduledPostWillBeCreated` (guarded_hooks.go:376) — hook 54, shared
+    /// by `SaveScheduledPost` and `UpdateScheduledPost`. It runs **after** `IsValid` and every
+    /// channel check, and nothing validates the answer: a replacement goes straight to the
+    /// store.
+    ///
+    /// The two callers differ only in `caller` (the name the guard errors carry) and
+    /// `rejection_id` — `app.scheduled_post.save.rejected_by_plugin` or
+    /// `app.scheduled_post.update.rejected_by_plugin`, 400 with the reason as a `Reason`
+    /// parameter. Guards are resolved for the channel as it arrived; a replacement is taken whole
+    /// ([`scheduled_post_from_wire`]).
+    pub(crate) async fn run_guarded_scheduled_post_will_be_created(
+        &self,
+        ctx: &HookContext,
+        scheduled_post: ScheduledPost,
+        caller: &'static str,
+        rejection_id: &'static str,
+    ) -> Result<ScheduledPost, Box<AppError>> {
+        let rejected = |reason: &str| member_rejection_error(caller, rejection_id, reason);
+
+        if !self.plugin_host().hosted() {
+            return Ok(scheduled_post);
+        }
+        let original_channel_id = scheduled_post.channel_id.clone();
+        let (guards, refused) = self.resolve_guards(&original_channel_id, caller).await;
+        if let Some(err) = refused {
+            return Err(err);
+        }
+        let Some(environment) = self.hook_environment() else {
+            return Ok(scheduled_post);
+        };
+
+        let mut scheduled_post = scheduled_post;
+        for (hooks, manifest) in
+            environment.hooks_implementing(hook_id::SCHEDULED_POST_WILL_BE_CREATED)
+        {
+            if guards.contains(&manifest.id) {
+                continue;
+            }
+            let returns = hooks
+                .scheduled_post_will_be_created(wire_plugin::Z_ScheduledPostWillBeCreatedArgs {
+                    a: ctx.boxed_wire(),
+                    b: Some(Box::new(scheduled_post_to_wire(&scheduled_post))),
+                })
+                .await;
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                scheduled_post = scheduled_post_from_wire(replacement, &scheduled_post);
+            }
+        }
+
+        for plugin_id in &guards {
+            let Ok(hooks) = environment.hooks_for_plugin(plugin_id) else {
+                tracing::error!(
+                    error_id = "guard_plugin_inactive",
+                    channel_id = %original_channel_id,
+                    caller,
+                    plugin_ids = ?[plugin_id],
+                    "Channel guard rejected operation: claiming plugin is not active",
+                );
+                return Err(inactive_guard_error(caller));
+            };
+            let (returns, rpc_err) = hooks
+                .scheduled_post_will_be_created_with_rpc_err(
+                    wire_plugin::Z_ScheduledPostWillBeCreatedArgs {
+                        a: ctx.boxed_wire(),
+                        b: Some(Box::new(scheduled_post_to_wire(&scheduled_post))),
+                    },
+                )
+                .await;
+            if rpc_err.is_some() {
+                return Err(guard_hook_failed_error(plugin_id, caller));
+            }
+            if !returns.b.is_empty() {
+                return Err(rejected(&returns.b));
+            }
+            if let Some(replacement) = returns.a.as_deref() {
+                scheduled_post = scheduled_post_from_wire(replacement, &scheduled_post);
+            }
+        }
+        Ok(scheduled_post)
+    }
+
     /// Port of `applyPostsWillBeConsumedHook` (post.go:2999) — hooks 38 and 56,
     /// `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, which Go runs on the
     /// way **out** of every post read: the eleven list readers, `GetSinglePost`, and the
@@ -2548,5 +2668,58 @@ mod consumed_tests {
         assert_eq!(participants.len(), 1);
         assert_eq!(participants[0].username, "who");
         assert_eq!(participants[0].props, None, "an empty map is nil");
+    }
+}
+
+#[cfg(test)]
+mod scheduled_post_wire_tests {
+    use super::*;
+
+    fn scheduled() -> ScheduledPost {
+        let mut post = ScheduledPost {
+            id: "sp".to_owned(),
+            scheduled_at: 9,
+            processed_at: 8,
+            error_code: "unknown".to_owned(),
+            repeat_type: "weekly".to_owned(),
+            repeat_timezone: "UTC".to_owned(),
+            ..ScheduledPost::default()
+        };
+        post.draft.message = "hello".to_owned();
+        post.draft.channel_id = "c".to_owned();
+        post.draft.metadata = Some(PostMetadata {
+            expire_at: 7,
+            ..PostMetadata::default()
+        });
+        post
+    }
+
+    /// Every field crosses in both directions, the embedded draft included — except `metadata`,
+    /// which no wire conversion carries ([D-931]).
+    #[test]
+    fn a_scheduled_post_crosses_the_wire_and_back() {
+        let sent = scheduled();
+        let wire = scheduled_post_to_wire(&sent);
+        assert_eq!(wire.draft.message, "hello");
+        assert_eq!(wire.draft.metadata, None);
+        assert_eq!(wire.repeat_timezone, "UTC");
+        let back = scheduled_post_from_wire(&wire, &sent);
+        assert_eq!(back, sent);
+    }
+
+    /// A replacement is taken whole: what the plugin left out is zero, the id included — only
+    /// `metadata` comes from the value that was sent.
+    #[test]
+    fn a_partial_replacement_is_taken_whole() {
+        let sent = scheduled();
+        let mut wire = wire_model::ScheduledPost::default();
+        wire.draft.message = "only this".to_owned();
+        let back = scheduled_post_from_wire(&wire, &sent);
+        assert_eq!(back.message, "only this");
+        assert_eq!(back.id, "");
+        assert_eq!(back.channel_id, "");
+        assert_eq!(back.scheduled_at, 0);
+        assert_eq!(back.repeat_type, "");
+        assert_eq!(back.metadata, sent.metadata);
     }
 }

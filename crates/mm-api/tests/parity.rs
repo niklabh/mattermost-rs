@@ -155,6 +155,7 @@ mod parity {
     pub mod rest_mfa;
     pub mod role_patch;
     pub mod roles;
+    pub mod scheduled_posts;
     pub mod schemes;
     pub mod server_limits;
     pub mod session_activity;

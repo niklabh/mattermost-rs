@@ -519,7 +519,7 @@ This is route-sized work from here on, so the ledger counts it.
 - **Exit:** all 22 plugin route pairs served with parity suites. The stack gains a real plugin
   installed on both sides, not an empty `plugins/` directory.
 
-### Phase 5 · Hook call sites — IN PROGRESS, 28 of 35 (2026-09-22)
+### Phase 5 · Hook call sites — IN PROGRESS, 29 of 35 (2026-09-22)
 
 Wire the 35 `RunMultiHook` sites into the Rust write paths already served, ordered by client
 traffic. Each site's parity test runs one plugin under a real Go host and under the Rust host and
@@ -613,6 +613,14 @@ client a post with no channel and no author.
 installs, which this server had forwarded whole. It is the one hook Go calls on a **single**
 plugin through `HooksForPlugin` rather than fanning out, after that plugin is installed from the
 Marketplace and enabled, on a goroutine the response does not wait for.
+
+**Done eleventh, `ScheduledPostWillBeCreated`** — 29 of 35, 34 of 46 — on both of its sites,
+`SaveScheduledPost` and `UpdateScheduledPost`, which landed with the four scheduled-post routes
+behind their licence gate. Guarded and taken whole, like the draft hook, and nothing validates the
+answer: a replacement carrying only a message is saved with no user, no channel and no send time,
+and on an update it names no row, so the update succeeds and writes nothing. The tranche is the
+first to run both hosts **licensed** — `MM_LICENSE` and the verifying key in each environment,
+and the enterprise-ready Go build — since the routes refuse without one.
 
 Still to decide nothing; the remaining sites are ordinary route-sized work.
 

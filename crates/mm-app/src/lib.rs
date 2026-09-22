@@ -108,6 +108,7 @@ pub mod reaction;
 pub mod remote_cluster;
 pub mod report;
 pub mod role;
+pub mod scheduled_post;
 pub mod scheme;
 pub mod session;
 /// The read side of `app/channel_category.go`.

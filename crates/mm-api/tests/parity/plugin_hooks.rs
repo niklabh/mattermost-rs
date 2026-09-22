@@ -75,6 +75,10 @@ const CHANNEL_GO_OFFSET: u16 = 84;
 const ONBOARDING_HOST_PORT: u16 = 8135;
 /// Its Go server.
 const ONBOARDING_GO_OFFSET: u16 = 85;
+/// The Rust host of the scheduled-post tranche, `ScheduledPostWillBeCreated`.
+const SCHEDULED_HOST_PORT: u16 = 8136;
+/// Its Go server — the **licensed** build, since the scheduled-post routes refuse without one.
+const SCHEDULED_GO_OFFSET: u16 = 86;
 /// The bundle id, which `PluginStates` has to enable on both sides.
 const PLUGIN_ID: &str = "mmrs.hookrecorder";
 
@@ -194,7 +198,14 @@ fn go_port() -> u16 {
 /// already hold most of the ceiling, and a server with Go's default `MaxIdleConns` takes the
 /// database down for every suite running beside this one.
 async fn start_go(run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
-    let binary = repo().join("reference/.build/mattermost");
+    start_go_binary("mattermost", run, env, offset).await
+}
+
+/// [`start_go`] with the binary under `reference/.build/` named — `mattermost-licensed`, the
+/// enterprise-ready build `scripts/go-licensed.sh` makes, for a tranche whose routes need a
+/// licence. The licence itself still has to arrive in `env`.
+async fn start_go_binary(name: &str, run: &Path, env: &[(&str, &str)], offset: u16) -> GoServer {
+    let binary = repo().join("reference/.build").join(name);
     assert!(
         binary.exists(),
         "no Go binary at {} — run scripts/go-server.sh",
@@ -3475,6 +3486,265 @@ async fn run_the_onboarding_tour(client: &reqwest::Client, admin: &str) {
             "{side}: a failed install went on to OnInstall"
         );
     }
+
+    drop(rust);
+    drop(go);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The scheduled-post tranche: ScheduledPostWillBeCreated
+// ---------------------------------------------------------------------------------------------
+
+/// The channel the scheduled-post tour writes into, for the cleanup.
+static SCHEDULED_CHANNEL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Cross-server parity for `ScheduledPostWillBeCreated` (docs/PLUGIN_PLAN.md, Phase 5; [D-932]),
+/// which `SaveScheduledPost` and `UpdateScheduledPost` both run after their validation and
+/// before the store.
+///
+/// The scheduled-post routes refuse on an unlicensed server, so **both** hosts carry the licence
+/// the licensed oracle uses — `MM_LICENSE` and the key that verifies it, in the environment, never
+/// in the shared `Licenses` table — and the Go side is the enterprise-ready build. The recorder
+/// answers off the post's message, as it does for drafts.
+#[tokio::test]
+async fn the_scheduled_post_hook_fires_as_go_fires_it() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_scheduled_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let channel = SCHEDULED_CHANNEL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    if let (Some(channel), Some(pool)) = (channel, common::fixture_pool().await) {
+        // The partial replacement is saved with no user and no channel, so it is found by the
+        // message the recorder gave it rather than by the channel.
+        let _ = sqlx::query(
+            "DELETE FROM scheduledposts WHERE channelid = $1
+                OR (userid = '' AND message = 'rewritten by the hook recorder')",
+        )
+        .bind(&channel)
+        .execute(&pool)
+        .await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn run_the_scheduled_tour(client: &reqwest::Client, admin: &str) {
+    let client = client.clone();
+    let admin = admin.to_owned();
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-scheduled");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(&client, &admin, Some(true)).await;
+    let team = common::create_team(&client, &admin, "hooksp").await;
+    let channel = common::create_channel(&client, &admin, &team, "hooksp").await;
+    *SCHEDULED_CHANNEL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(channel.clone());
+
+    let (signed, key_file) = common::stack_license_files();
+    let licence = [
+        ("MM_LICENSE", signed.as_str()),
+        ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
+    ];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    go_env.extend(licence);
+    let go = start_go_binary("mattermost-licensed", &go_run, &go_env, SCHEDULED_GO_OFFSET).await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    rust_env.extend(licence);
+    let rust = SecondServer::start_in(SCHEDULED_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(&client, &admin, &go.base).await;
+    wait_until_running(&client, &admin, &rust.base).await;
+
+    let mut pair = MemberPair {
+        client: client.clone(),
+        go_base: go.base.clone(),
+        rust_base: rust.base.clone(),
+        go_log,
+        rust_log,
+        go_scrub: Vec::new(),
+        rust_scrub: Vec::new(),
+        seen: 0,
+    };
+    let scheduled_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+        + 3_600_000;
+    let create = |message: &str| {
+        let b = Some(
+            serde_json::to_vec(&serde_json::json!({
+                "channel_id": channel,
+                "message": message,
+                "scheduled_at": scheduled_at,
+            }))
+            .expect("a body"),
+        );
+        (
+            ("/api/v4/posts/schedule".to_owned(), b.clone()),
+            ("/api/v4/posts/schedule".to_owned(), b),
+        )
+    };
+    let same_error = |gb: &Json, rb: &Json, what: &str| {
+        common::assert_error_bodies_match_except_known_gaps(
+            &serde_json::to_vec(gb).expect("bytes"),
+            &serde_json::to_vec(rb).expect("bytes"),
+            what,
+        );
+    };
+
+    // 1. A create the recorder lets through: the hook sees the post after `PreSave`, with its id.
+    let (g, r) = create("a scheduled post the recorder lets through");
+    let ((gs, go_post), (rs, rs_post)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {go_post} / Rust {rs_post}");
+    same_post(&go_post, &rs_post, "a scheduled post");
+    let fired = pair.hooks("a scheduled post").await;
+    assert_eq!(names(&fired), ["ScheduledPostWillBeCreated"]);
+    let seen = &fired[0]["args"]["B"];
+    assert_eq!(
+        seen["Id"], "<id>",
+        "PreSave minted the id before the hook: {seen}"
+    );
+    assert_eq!(seen["Draft"]["ChannelId"], channel.as_str());
+    assert_eq!(seen["ScheduledAt"], scheduled_at);
+
+    // 2. Refused: the reason is a parameter of the save's own id.
+    let (g, r) = create("!reject-scheduled not this one");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.scheduled_post.save.rejected_by_plugin");
+    same_error(&gb, &rb, "a refused scheduled post");
+    pair.hooks("a refused scheduled post").await;
+
+    // 3. Rewritten whole.
+    let (g, r) = create("!rewrite-scheduled");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a rewritten scheduled post");
+    assert_eq!(gb["message"], "rewritten by the hook recorder");
+    pair.hooks("a rewritten scheduled post").await;
+
+    // 4. A replacement carrying only a message is taken whole and saved unvalidated: no user,
+    //    no channel, no send time — and an id and timestamps from the store's second `PreSave`.
+    let (g, r) = create("!partial-scheduled");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a partial scheduled post");
+    assert_eq!(gb["user_id"], "", "taken whole: {gb}");
+    assert_eq!(gb["scheduled_at"], 0, "taken whole: {gb}");
+    pair.hooks("a partial scheduled post").await;
+
+    // 5. No message: `IsValid` refuses before the hook is reached.
+    let (g, r) = create("");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::POST, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    same_error(&gb, &rb, "an empty scheduled post");
+    pair.no_more_hooks("an empty scheduled post").await;
+
+    // Updates, each side on its own post from step 1. The hook sees the post after
+    // `RestoreNonUpdatableFields`, with `error_code` and `processed_at` reset.
+    let update = |post: &Json, message: &str| {
+        let mut post = post.clone();
+        post["message"] = serde_json::json!(message);
+        let id = post["id"].as_str().expect("an id").to_owned();
+        (
+            format!("/api/v4/posts/schedule/{id}"),
+            Some(serde_json::to_vec(&post).expect("a body")),
+        )
+    };
+    let edit = |message: &str| (update(&go_post, message), update(&rs_post, message));
+
+    // 6. An edit the recorder lets through.
+    let (g, r) = edit("an edit the recorder lets through");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "an edited scheduled post");
+    let fired = pair.hooks("an edited scheduled post").await;
+    assert_eq!(names(&fired), ["ScheduledPostWillBeCreated"]);
+    assert_eq!(
+        fired[0]["args"]["B"]["Draft"]["Message"],
+        "an edit the recorder lets through"
+    );
+
+    // 7. An edit refused, with the update's own id.
+    let (g, r) = edit("!reject-scheduled no edits");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (400, 400), "Go {gb} / Rust {rb}");
+    assert_eq!(gb["id"], "app.scheduled_post.update.rejected_by_plugin");
+    same_error(&gb, &rb, "a refused edit");
+    pair.hooks("a refused edit").await;
+
+    // 8. An edit rewritten.
+    let (g, r) = edit("!rewrite-scheduled");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a rewritten edit");
+    assert_eq!(gb["message"], "rewritten by the hook recorder");
+    pair.hooks("a rewritten edit").await;
+
+    // 9. An edit answered with a partial post: taken whole, id and all, so the store's update
+    //    names no row and succeeds.
+    let (g, r) = edit("!partial-scheduled");
+    let ((gs, gb), (rs, rb)) = pair.each(reqwest::Method::PUT, &admin, g, r).await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a partial edit");
+    assert_eq!(gb["id"], "", "taken whole: {gb}");
+    pair.hooks("a partial edit").await;
+
+    // 10. A delete asks no plugin.
+    let del = |post: &Json| {
+        (
+            format!(
+                "/api/v4/posts/schedule/{}",
+                post["id"].as_str().expect("an id")
+            ),
+            None,
+        )
+    };
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::DELETE,
+            &admin,
+            del(&go_post),
+            del(&rs_post),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    same_post(&gb, &rb, "a deleted scheduled post");
+    // The partial edit named no row: the post is still the admin's, as the rewrite left it. Had
+    // it landed on the real id, the owner check would have refused this delete with a 403.
+    assert_eq!(gb["message"], "rewritten by the hook recorder");
+    assert_eq!(
+        gb["user_id"], go_post["user_id"],
+        "the partial edit wrote nothing"
+    );
+    assert_eq!(gb["scheduled_at"], scheduled_at);
+    pair.no_more_hooks("a delete").await;
 
     drop(rust);
     drop(go);

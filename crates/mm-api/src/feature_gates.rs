@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | `ip_filtering.go` | licence — and a **cloud** one, at Enterprise tier | `api.context.ip_filtering.not_available.app_error`, 501 |
 //! | `ai_bridge_test_helper.go` | `ServiceSettings.EnableTesting`, default **false** | `api.ai_bridge_test_helper.disabled.app_error`, 501 |
-//! | `scheduled_post.go` | `ServiceSettings.ScheduledPosts` (default **true**), *then* a licence | `api.scheduled_posts.license_error`, **400** |
+//! | `scheduled_post.go` | `ServiceSettings.ScheduledPosts` (default **true**), *then* a licence | `api.scheduled_posts.license_error`, **400** — and past it, the port in [`crate::scheduled_posts`] |
 //!
 //! They are one module because the mistake they invite is the same one: reaching for a
 //! neighbouring family's status or id. Two of the three refuse with 501 and one with 400; the
@@ -114,58 +114,42 @@ ai_bridge_route!(get_ai_bridge_test_helper, "getAIBridgeTestHelper");
 ai_bridge_route!(put_ai_bridge_test_helper, "putAIBridgeTestHelper");
 ai_bridge_route!(delete_ai_bridge_test_helper, "deleteAIBridgeTestHelper");
 
-macro_rules! scheduled_post_route {
-    ($fn_name:ident, $go:literal) => {
-        #[doc = concat!("Port of `", $go, "`, whose first statement is `requireScheduledPostsEnabled`.")]
-        ///
-        /// Two arms, one status. The config arm fires first and answers
-        /// `api.scheduled_posts.feature_disabled`; the licence arm answers
-        /// `api.scheduled_posts.license_error`. Both are **400**, and the setting defaults to
-        /// `true`, so the licence arm is the one a stock server reaches.
-        #[tracing::instrument(skip_all, fields(scheduled_posts, licensed))]
-        pub async fn $fn_name(
-            State(state): State<AppState>,
-            _session: AuthenticatedSession,
-            request: Request,
-        ) -> Response {
-            scheduled_posts_gate(state, $go, request).await
-        }
-    };
-}
-
-/// `requireScheduledPostsEnabled` (scheduled_post.go:62), both arms and in Go's order.
-async fn scheduled_posts_gate(state: AppState, where_: &'static str, request: Request) -> Response {
+/// `requireScheduledPostsEnabled` (scheduled_post.go:62), both arms and in Go's order — the
+/// first statement of all four handlers in [`crate::scheduled_posts`]. `Ok` means licensed and
+/// enabled, and the handler carries on; there is no forward any more.
+pub(crate) async fn scheduled_posts_gate(
+    state: &AppState,
+    where_: &'static str,
+) -> Result<(), ApiError> {
     let enabled = state.app.config().scheduled_posts;
     tracing::Span::current().record("scheduled_posts", enabled);
     if !enabled {
-        return ApiError::from(AppError::new(
+        return Err(ApiError::from(AppError::new(
             where_,
             SCHEDULED_POSTS_FEATURE_DISABLED,
             None,
             String::new(),
             400,
-        ))
-        .into_response();
+        )));
     }
-
-    match crate::channels::licence_gate(&state, request).await {
-        LicenceGate::Forward(response) => response,
-        LicenceGate::Unlicensed => ApiError::from(AppError::new(
-            where_,
-            SCHEDULED_POSTS_LICENSE_ERROR,
-            None,
-            String::new(),
-            400,
-        ))
-        .into_response(),
-        LicenceGate::Failed(err) => err.into_response(),
+    match state.app.license_state().await {
+        Ok(mm_app::license::LicenseState::Licensed) => {
+            tracing::Span::current().record("licensed", true);
+            Ok(())
+        }
+        Ok(mm_app::license::LicenseState::Unlicensed) => {
+            tracing::Span::current().record("licensed", false);
+            Err(ApiError::from(AppError::new(
+                where_,
+                SCHEDULED_POSTS_LICENSE_ERROR,
+                None,
+                String::new(),
+                400,
+            )))
+        }
+        Err(err) => Err(ApiError::from(err)),
     }
 }
-
-scheduled_post_route!(create_schedule_post, "createSchedulePost");
-scheduled_post_route!(update_scheduled_post, "updateScheduledPost");
-scheduled_post_route!(delete_scheduled_post, "deleteScheduledPost");
-scheduled_post_route!(get_team_scheduled_posts, "getTeamScheduledPosts");
 
 #[cfg(test)]
 mod tests {

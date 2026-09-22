@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE scheduledposts\n               SET updateat = $2, message = $3, props = $4, fileids = $5, priority = $6,\n                   scheduledat = $7, processedat = $8, errorcode = $9, type = $10,\n                   repeattype = $11, repeattimezone = $12\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fd2757113a2ddab626416a32071876cf1b644669e1806fb8f4261cc44700c87c"
+}

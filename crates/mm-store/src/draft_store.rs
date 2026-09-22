@@ -388,7 +388,7 @@ impl DraftStore for SqlDraftStore {
 
 /// The write half of the read path's decoders: a `None` becomes the four bytes `null`, matching
 /// Go's `ArrayToJSON(nil)` and `StringInterfaceToJSON(nil)`.
-fn json_text<T: serde::Serialize>(value: Option<&T>) -> Result<String, StoreError> {
+pub(crate) fn json_text<T: serde::Serialize>(value: Option<&T>) -> Result<String, StoreError> {
     match value {
         Some(value) => serde_json::to_string(value).map_err(|source| StoreError::Decode {
             entity: "Draft",
@@ -400,7 +400,7 @@ fn json_text<T: serde::Serialize>(value: Option<&T>) -> Result<String, StoreErro
 }
 
 /// `StringArray.Scan` (model/utils.go:118): NULL stays nil, anything else is parsed as JSON.
-fn decode_array(
+pub(crate) fn decode_array(
     column: &'static str,
     raw: Option<String>,
 ) -> Result<Option<StringArray>, StoreError> {
@@ -419,7 +419,7 @@ fn decode_array(
 /// NULL column is an *empty map*, not nil. Only the JSON text `null` unmarshals the map back to
 /// nil. `Draft.Props` has no `omitempty`, so the two are distinguishable on the wire: `{}` versus
 /// `null`.
-fn decode_map(
+pub(crate) fn decode_map(
     column: &'static str,
     raw: Option<String>,
 ) -> Result<Option<StringInterface>, StoreError> {

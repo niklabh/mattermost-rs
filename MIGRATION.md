@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 27/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 29/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14377,6 +14377,28 @@ The search routes gained a context too: an `in:@user` filter creates the DM it n
 
 Mutation tally (`plugin-hooks-channels.plan`): 13 run, 11 caught, 2 controls survived, 0 harness
 faults.
+
+## The scheduled-post routes, licensed, and `ScheduledPostWillBeCreated` (2026-09-22)
+
+The four routes of `api4/scheduled_post.go` are served past `requireScheduledPostsEnabled`
+instead of forwarded once a licence is present; plugin plan **Phase 5, 29 of 35**, the other 6
+hooks are [D-932]. Nothing is private: the three branches still handed to Go (a `card` type, a
+bot in a restricted DM, a file needing a mini-preview) are the ones `createPost` and the drafts
+already forward.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `createSchedulePost`, `updateScheduledPost`, `deleteScheduledPost`, `getTeamScheduledPosts`, `scheduledPostChecks` (api4/scheduled_post.go) | `mm_api::scheduled_posts`, `feature_gates::scheduled_posts_gate` | DONE | `parity::scheduled_posts` (6, licensed pair) + 4 unit | The update and delete answer **201**; an unknown id is a **500**, because the store's `Get` errors on no rows and the handlers' 404 is dead code. |
+| `App.SaveScheduledPost`, `GetUserTeamScheduledPosts`, `UpdateScheduledPost`, `DeleteScheduledPost`, `PublishScheduledPostEvent` (app/scheduled_post.go) | `mm_app::scheduled_post` | DONE | same + 2 unit | `FeatureFlags.RecurringScheduledPosts` is a new env-only `Config` field. The event is user-only, with the post as a JSON **string** under `scheduledPost`. |
+| `SqlScheduledPostStore` create, list, `Get`, update, delete, `GetMaxMessageSize` | `mm_store::scheduled_post_store` | DONE (the job's three queries are not ported) | same + 3 unit | A failed column-size lookup memoises **0**, not the seeded 16383. |
+| `runGuardedScheduledPostWillBeCreated` (guarded_hooks.go:376) | `mm_app::plugin_hooks::{run_guarded_scheduled_post_will_be_created, scheduled_post_to_wire, scheduled_post_from_wire}` | DONE | `parity::plugin_hooks::the_scheduled_post_hook_fires_as_go_fires_it` + 2 unit | Taken whole (the reply is unseeded, client_rpc_generated.go:2099) and never validated after. |
+
+The one rule a reader would get wrong is in `scheduled_posts::names_repeat_type`: an update keeps
+the stored series unless the body **names** `repeat_type` — in any casing, and `null` counts.
+
+Mutation tally (`scheduled-posts.plan`): 33 run, 31 caught, 2 controls survived, 0 harness
+faults. A first run was void: a key-order assertion in the direct-channels test assumed
+`directChannels` sorts first, and a team id starting `a`–`c` sorts ahead of it.
 
 ## Plugin hook call sites: `OnInstall` (2026-09-22)
 

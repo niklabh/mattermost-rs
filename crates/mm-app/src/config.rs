@@ -507,6 +507,13 @@ pub struct Config {
     /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
     pub feature_flag_apps_enabled: bool,
 
+    /// `FeatureFlags.RecurringScheduledPosts` (feature_flags.go:156), defaulted **`false`** at
+    /// :222, environment-only. Off, `SaveScheduledPost` refuses any `repeat_type` and
+    /// `UpdateScheduledPost` refuses turning one **on** — both with
+    /// `app.scheduled_post.recurring_disabled.app_error` at 400 — while an existing series can
+    /// still be edited or ended.
+    pub feature_flag_recurring_scheduled_posts: bool,
+
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
     ///
@@ -1518,6 +1525,7 @@ impl Default for Config {
             feature_flag_move_threads_enabled: false,
             feature_flag_mm_blocks_enabled: true,
             feature_flag_apps_enabled: false,
+            feature_flag_recurring_scheduled_posts: false,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1995,6 +2003,11 @@ impl Config {
                 lookup,
                 "MM_FEATUREFLAGS_APPSENABLED",
                 default.feature_flag_apps_enabled,
+            ),
+            feature_flag_recurring_scheduled_posts: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_RECURRINGSCHEDULEDPOSTS",
+                default.feature_flag_recurring_scheduled_posts,
             ),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
@@ -2776,6 +2789,7 @@ impl Config {
             feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
             feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
             feature_flag_apps_enabled: default.feature_flag_apps_enabled,
+            feature_flag_recurring_scheduled_posts: default.feature_flag_recurring_scheduled_posts,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),

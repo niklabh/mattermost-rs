@@ -88,7 +88,10 @@ impl App {
     ///
     /// Both return `(nil, nil)`, so both end at `metadata: {}`. A draft naming three ids that all
     /// fail the rules above is indistinguishable on the wire from one naming none.
-    async fn prepare_draft_with_file_infos(&self, draft: &mut Draft) -> Result<(), PrepareError> {
+    pub(crate) async fn prepare_draft_with_file_infos(
+        &self,
+        draft: &mut Draft,
+    ) -> Result<(), PrepareError> {
         let ids = draft.file_ids.clone().unwrap_or_default();
         if ids.is_empty() {
             draft.metadata = Some(PostMetadata::default());

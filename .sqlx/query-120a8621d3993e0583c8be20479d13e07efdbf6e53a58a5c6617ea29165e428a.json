@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT COALESCE(character_maximum_length, 0)::integer AS \"length!\"\n                      FROM information_schema.columns\n                     WHERE lower(table_name) = lower($1)\n                       AND lower(column_name) = lower($2)\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "120a8621d3993e0583c8be20479d13e07efdbf6e53a58a5c6617ea29165e428a"
+}

@@ -2649,7 +2649,7 @@ static LICENSED_MFA: tokio::sync::OnceCell<(SecondServer, String, String)> =
 
 /// The signed licence and the key file `scripts/go-licensed.sh` left, or a panic naming the
 /// script — a suite whose oracle is absent must not pass quietly.
-fn stack_license_files() -> (String, String) {
+pub fn stack_license_files() -> (String, String) {
     let dir = stack_license_dir();
     let signed = std::fs::read_to_string(dir.join("license.signed")).unwrap_or_else(|e| {
         panic!(
