@@ -546,7 +546,7 @@ findings, each in the code where it applies:
 - **`TeamMemberWillBeAdded` is a plain `RunMultiHook`**, not the guarded two-phase dispatcher —
   guards guard channels — and it runs on the **revival** path as well as the insert, because both
   go through `applyPreSaveHooks`.
-- **Go's system posts fire the message hooks and this server's do not** ([D-950]). Found here: Go
+- **Go's system posts fire the message hooks and this server's did not** ([D-950], closed 2026-09-22). Found here: Go
   writes every "added to the channel" message with the whole of `CreatePost`, and
   `create_system_post` is a narrow slice of it. Invisible without a plugin host.
 

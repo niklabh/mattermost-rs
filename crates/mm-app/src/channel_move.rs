@@ -282,7 +282,7 @@ impl App {
 
         // `if user != nil`: the local-mode move posts no notice at all.
         if let Some(user) = user {
-            self.post_channel_move_message(user, channel, &previous_team)
+            self.post_channel_move_message(hook_ctx, user, channel, &previous_team)
                 .await;
         }
         Ok(MemberWrite::Done(()))
@@ -295,6 +295,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
     async fn post_channel_move_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user: &User,
         channel: &Channel,
         previous_team: &Team,
@@ -310,6 +311,6 @@ impl App {
             ..Post::default()
         };
         post.add_prop("username", serde_json::Value::String(user.username.clone()));
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 }

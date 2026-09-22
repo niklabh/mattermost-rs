@@ -217,7 +217,12 @@ impl App {
     /// after the write, so they carry `system_user`. Publishing the caller's stale struct would
     /// broadcast `system_guest` to every client that just watched the promotion succeed.
     #[tracing::instrument(skip_all, fields(user_id = %user.id, requestor_id = %requestor_id, teams))]
-    pub async fn promote_guest_to_user(&self, user: &User, requestor_id: &str) -> AppResult<()> {
+    pub async fn promote_guest_to_user(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        user: &User,
+        requestor_id: &str,
+    ) -> AppResult<()> {
         self.store()
             .user()
             .promote_guest_to_user(&user.id)
@@ -253,7 +258,7 @@ impl App {
         for team in &teams {
             // "Soft error if there is an issue joining the default channels" — Go's own comment.
             if let Err(err) = self
-                .join_default_channels(&team.id, user, false, requestor_id)
+                .join_default_channels(ctx, &team.id, user, false, requestor_id)
                 .await
             {
                 tracing::warn!(

@@ -13,8 +13,8 @@
 //! - **A group-constrained team is forwarded to Go.** `FilterNonGroupTeamMembers` needs the group
 //!   store's syncable-membership query, and Go's refusal names every denied user id in the error
 //!   params — not a thing to guess at.
-//! - **No join system post, and no `Users.UpdateAt` bump.** See
-//!   [`mm_app::App::join_user_to_team`]; recorded as **D-242** and **D-243**.
+//! - **No `Users.UpdateAt` bump.** See [`mm_app::App::join_user_to_team`]; recorded as
+//!   **D-242**.
 //!
 //! # The two role routes answer `{"status":"OK"}`, not the member
 //!

@@ -1167,11 +1167,8 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
             if let Some(object) = value.as_object_mut() {
                 object.insert("channel_id".to_owned(), serde_json::json!("<channel>"));
                 // `LastUpdateAt` is `GetMillis()` at save time and the two saves are seconds
-                // apart; `MsgCount` follows the channel's own post count, which Go's join system
-                // post moves and this port's does not (D-243).
-                for key in ["last_update_at", "msg_count", "msg_count_root"] {
-                    object.insert(key.to_owned(), serde_json::json!("<moves>"));
-                }
+                // apart. `MsgCount` is compared: both servers' join system posts move it.
+                object.insert("last_update_at".to_owned(), serde_json::json!("<moves>"));
             }
             let _ = channel;
             value

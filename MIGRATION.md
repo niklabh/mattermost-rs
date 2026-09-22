@@ -14400,6 +14400,22 @@ Mutation tally (`scheduled-posts.plan`): 33 run, 31 caught, 2 controls survived,
 faults. A first run was void: a key-order assertion in the direct-channels test assumed
 `directChannels` sorts first, and a team id starting `a`–`c` sorts ahead of it.
 
+## Plugin hook call sites: the system posts, and the two notices never written (2026-09-22)
+
+No hook is added to the 35; [D-950] and [D-243] close, and D-235's creation paragraph with them.
+Every system post now goes through the hooks `CreatePost` runs, and the two system posts this
+server had never written are written.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `CreatePost`'s hooks on a system post: `runGuardedMessageWillBePosted`, `MessageHasBeenPosted`, `applyPostWillBeConsumedHook` (post.go:368-474) | `App::create_system_post`, `App::post_system_message` and their sixteen callers now take the request's `HookContext` | DONE | `parity::plugin_hooks` — every tour now compares the system posts' hooks, and the consumed tour adds a header notice | A plugin may refuse a notice; ten callers only log that, and a self-join or self-leave fails with it, as in Go. The `posted` event carries what the consumed hooks answered. |
+| `CreateChannelWithUser`'s creator join post (channel.go:193-201) | `App::create_channel_with_user` | DONE | the channel tour | A second `GetUser`, then the post; either failure fails the route with the channel written. |
+| `postJoinMessageForDefaultChannel`, `postJoinTeamMessage`, `postAddToTeamMessage` (channel.go:132, :2802, :2932) | `App::post_join_message_for_default_channel`, `App::join_default_channels` | DONE | the team-join tour; `parity::team_member_writes` now compares `msg_count` unmasked | Behind `ExperimentalEnableDefaultChannelLeaveJoinMessages`, **on by default**. The requestor decides joined-versus-added in both `town-square` and the other default channels. |
+
+Mutation tally (`plugin-hooks-system-posts.plan`): 10 run, 8 caught, 2 controls survived, 0 harness
+faults. `requestor-ignored` survived the first run — no tour added anyone with a requestor —
+and is caught since the membership tour gained a batch add.
+
 ## Plugin hook call sites: `OnInstall` (2026-09-22)
 
 Plugin plan **Phase 5, 28 of 35**; the other 7 hooks are [D-932]. `POST /system/onboarding/complete`
@@ -14420,7 +14436,7 @@ Plugin plan **Phase 5, 27 of 35**; the other 8 hooks are [D-932].
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `applyPostsWillBeConsumedHook`, `applyPostWillBeConsumedHook` (post.go:2999, :3057) | `mm_app::plugin_hooks::{apply_posts_will_be_consumed_hook, apply_post_will_be_consumed_hook, post_from_wire_whole, user_from_wire}` | DONE | `parity::plugin_hooks::the_consumed_hooks_fire_as_go_fires_them` + 7 unit | A replacement is taken **whole** — the comment above the `WithContext` client in client_rpc.go promises a decode-into-original that the code beneath it does not do — and only `Metadata` is carried across. |
-| The fourteen sites: `GetSinglePost`, the eleven list readers, and the post `CreatePost` and `UpdatePost` answer with (post.go:474, :1056, :1360–1828) | `App::get_single_post` and every list reader take a `HookContext`; `create_post_claimed`, `update_post` | DONE (`GetPermalinkPost`, `GetPostAfterTime` and `GetPosts` have no Rust caller yet) | same | Go fires the hook from **inside** `GetSinglePost`, so the context had to reach its thirty callers — the metadata pipeline's permalink read included. A system post's `posted` event gets the empty context ([D-950] owes the real one), which nothing can observe. |
+| The fourteen sites: `GetSinglePost`, the eleven list readers, and the post `CreatePost` and `UpdatePost` answer with (post.go:474, :1056, :1360–1828) | `App::get_single_post` and every list reader take a `HookContext`; `create_post_claimed`, `update_post` | DONE (`GetPermalinkPost`, `GetPostAfterTime` and `GetPosts` have no Rust caller yet) | same | Go fires the hook from **inside** `GetSinglePost`, so the context had to reach its thirty callers — the metadata pipeline's permalink read included. A system post's `posted` event now gets the request's context too ([D-950], closed). |
 | `GetFileInfosForPostWithMigration`'s post read (post.go:2374) | `App::get_file_infos_for_post_with_migration` | FIXED | the download tour, unchanged | It reads the **store**, not `GetSinglePost`; this port had gone through the app function and would have told the plugins about a read Go never mentions. |
 
 Mutation tally (`plugin-hooks-consumed.plan`): 14 run, 12 caught, 2 controls survived, 0 harness

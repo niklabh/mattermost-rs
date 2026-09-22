@@ -22,17 +22,13 @@
 //! two message routes are, so the same `ChannelSave::Existing` from the store becomes a 400 on
 //! one path and a success on the other two.
 //!
-//! # The join system post is not written here
+//! # The creator's join post
 //!
-//! `CreateChannelWithUser` ends in `postJoinChannelMessage` (app/channel.go:2776) — the same
-//! function the six membership writes owe, recorded as [D-231]. Post writes are not ported, so
-//! the post is missing on this path too. Nothing in the response body depends on it: Go marshals
-//! the channel the store returned, which was read before the post existed.
-//!
-//! Go loads the acting user a second time solely to build that post
-//! (`a.GetUser(userID)` at app/channel.go:193). It is not reproduced: `CreateChannel` loaded the
-//! very same user one call earlier to build the membership row and already answered 404 if it
-//! was missing, so the second lookup's only remaining effect is a query.
+//! `CreateChannelWithUser` ends in `postJoinChannelMessage` (app/channel.go:2776), after a second
+//! `GetUser` of the creator, and a failure of either fails the route with the channel already
+//! written. Nothing in the 201 depends on the post — Go marshals the channel the store returned,
+//! read before the post existed — but the next read of the channel sees its `last_post_at` and
+//! `total_msg_count`, and a plugin sees both message hooks.
 //!
 //! # What is deliberately absent
 //!
@@ -265,7 +261,10 @@ impl App {
 
         self.add_channel_to_default_category(user_id, channel).await;
 
-        // The join system post would be written here; see the module docs and [D-231].
+        // `GetUser`, then the creator's join notice. Both fail the route — after the channel,
+        // its membership and its sidebar entry are written, which Go leaves standing.
+        let user = self.get_user(user_id).await?;
+        self.post_join_channel_message(ctx, &user, channel).await?;
 
         // `NewWebSocketEvent(channel_created, "", "", userID, nil, "")` — addressed to the
         // **user**, not to the channel or the team. A client learns about its own new channel and

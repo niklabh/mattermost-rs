@@ -1,0 +1,19 @@
+# Mutation plan for [D-950]: the system posts fire the message and consumed hooks, and the two
+# system posts this server had never written (the creator's join post, the default-channel join
+# posts) are written.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-hooks-system-posts.plan
+#
+# The oracle is the `parity::plugin_hooks` module. The last two lines are the no-op controls and
+# must SURVIVE.
+
+system-post-skips-will-be-posted	crates/mm-app/src/post_write.rs	        post = self.run_guarded_message_will_be_posted(ctx, post).await?;	        let _ = ctx;	api	plugin_hooks
+system-post-skips-has-been-posted	crates/mm-app/src/post_write.rs	        self.message_has_been_posted(ctx, &saved);	        let _ = &saved;	api	plugin_hooks
+system-post-skips-consumed	crates/mm-app/src/post_write.rs	        self.apply_post_will_be_consumed_hook(ctx, &mut saved).await;	        let _ = &mut saved;	api	plugin_hooks
+system-post-loses-the-request	crates/mm-app/src/post_write.rs	        post = self.run_guarded_message_will_be_posted(ctx, post).await?;	        post = self\n            .run_guarded_message_will_be_posted(&crate::plugin_hooks::HookContext::default(), post)\n            .await?;	api	plugin_hooks
+creator-join-post-dropped	crates/mm-app/src/channel_create.rs	        self.post_join_channel_message(ctx, &user, channel).await?;	        let _ = &user;	api	plugin_hooks
+default-channel-posts-inverted	crates/mm-app/src/team_member.rs	            if self\n                .config()\n                .experimental_enable_default_channel_leave_join_messages\n            {\n                self.post_join_message_for_default_channel	            if !self\n                .config()\n                .experimental_enable_default_channel_leave_join_messages\n            {\n                self.post_join_message_for_default_channel	api	plugin_hooks
+requestor-ignored	crates/mm-app/src/team_member.rs	        match (channel.name == DEFAULT_CHANNEL_NAME, requestor) {	        match (channel.name == DEFAULT_CHANNEL_NAME, requestor.filter(|_| false)) {	api	plugin_hooks
+town-square-is-any-channel	crates/mm-app/src/team_member.rs	        match (channel.name == DEFAULT_CHANNEL_NAME, requestor) {	        match (channel.name != DEFAULT_CHANNEL_NAME, requestor) {	api	plugin_hooks
+control-rename-saved	crates/mm-app/src/post_write.rs	        let mut saved = saved;\n        self.apply_post_will_be_consumed_hook(ctx, &mut saved).await;	        let mut rpost = saved;\n        self.apply_post_will_be_consumed_hook(ctx, &mut rpost).await;\n        let saved = rpost;	api	plugin_hooks
+control-reorder-post-fields	crates/mm-app/src/team_member.rs	                    message: format!("{} joined the team.", user.username),\n                    post_type: mm_model::post::POST_TYPE_JOIN_TEAM.to_owned(),	                    post_type: mm_model::post::POST_TYPE_JOIN_TEAM.to_owned(),\n                    message: format!("{} joined the team.", user.username),	api	plugin_hooks

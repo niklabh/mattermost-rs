@@ -545,9 +545,9 @@ impl App {
     ///
     /// # What this port does not do
     ///
-    /// - **The join system post.** `ExperimentalEnableDefaultChannelLeaveJoinMessages` defaults
-    ///   to **`true`** (config.go:874), so a stock Go server *does* post "user joined the team"
-    ///   in `town-square`. This port writes no `Posts` rows — **D-243**.
+    /// - Nothing about the join system posts: they are written by [`App::join_default_channels`]
+    ///   when `ExperimentalEnableDefaultChannelLeaveJoinMessages` is on — which it is by default
+    ///   (config.go:874), so a stock server posts "joined the team" into `town-square`.
     /// - **The plugin hooks are here now**: `TeamMemberWillBeAdded` inside both store branches,
     ///   as `applyPreSaveHooks` runs on the insert *and* the revival, and `UserHasJoinedTeam`
     ///   before the `added_to_team` event. Both are no-ops unless this process hosts plugins.
@@ -692,7 +692,7 @@ impl App {
 
         if !is_guest
             && let Err(err) = self
-                .join_default_channels(&team.id, user, should_be_admin, user_requestor_id)
+                .join_default_channels(hook_ctx, &team.id, user, should_be_admin, user_requestor_id)
                 .await
         {
             tracing::warn!(
@@ -738,9 +738,9 @@ impl App {
     /// # The requestor lookup is the one hard failure before the loop
     ///
     /// And it runs only when `userRequestorId != ""` — which is the single-add route's `""`
-    /// versus the batch route's session id. Its only *use* in Go is the join system post, which
-    /// this port does not write (D-243), but the lookup and its error branch are on the path
-    /// regardless and are kept.
+    /// versus the batch route's session id. Its only *use* is the join system post: a requestor
+    /// turns "joined the team" into "added to the team by", and each channel join into an add
+    /// ([`App::post_join_message_for_default_channel`]).
     ///
     /// # The `user_added` event here is not `AddChannelMember`'s
     ///
@@ -750,36 +750,41 @@ impl App {
     #[tracing::instrument(skip(self, user), fields(team_id = %team_id, user_id = %user.id, should_be_admin))]
     pub async fn join_default_channels(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         team_id: &str,
         user: &User,
         should_be_admin: bool,
         user_requestor_id: &str,
     ) -> AppResult<()> {
-        if !user_requestor_id.is_empty() {
-            self.store()
-                .user()
-                .get(user_requestor_id)
-                .await
-                .map_err(|err| match err.is_not_found() {
-                    true => AppError::boxed(
-                        "JoinDefaultChannels",
-                        MISSING_ACCOUNT_ERROR,
-                        None,
-                        String::new(),
-                        404,
-                    ),
-                    false => {
-                        tracing::error!(error = %err, "requestor lookup failed");
-                        AppError::boxed(
+        let requestor = if user_requestor_id.is_empty() {
+            None
+        } else {
+            Some(
+                self.store()
+                    .user()
+                    .get(user_requestor_id)
+                    .await
+                    .map_err(|err| match err.is_not_found() {
+                        true => AppError::boxed(
                             "JoinDefaultChannels",
-                            "app.user.get.app_error",
+                            MISSING_ACCOUNT_ERROR,
                             None,
                             String::new(),
-                            500,
-                        )
-                    }
-                })?;
-        }
+                            404,
+                        ),
+                        false => {
+                            tracing::error!(error = %err, "requestor lookup failed");
+                            AppError::boxed(
+                                "JoinDefaultChannels",
+                                "app.user.get.app_error",
+                                None,
+                                String::new(),
+                                500,
+                            )
+                        }
+                    })?,
+            )
+        };
 
         let is_guest = user.is_guest();
         let mut last_save_error: Option<mm_store::StoreError> = None;
@@ -836,7 +841,13 @@ impl App {
                     )
                 })?;
 
-            // The join system post would go here — D-243.
+            if self
+                .config()
+                .experimental_enable_default_channel_leave_join_messages
+            {
+                self.post_join_message_for_default_channel(ctx, user, requestor.as_ref(), &channel)
+                    .await;
+            }
 
             let mut event =
                 WebSocketEvent::new(WEBSOCKET_EVENT_USER_ADDED, "", &channel.id, "", None, "");
@@ -1228,7 +1239,7 @@ impl App {
                     }
                 })?;
 
-            self.post_team_leave_message(user, &channel, requestor_id == user.id)
+            self.post_team_leave_message(hook_ctx, user, &channel, requestor_id == user.id)
                 .await;
         }
 
@@ -1239,6 +1250,64 @@ impl App {
         self.remove_team_member(&mut member).await?;
         self.post_process_team_member_leave(&member, requestor_id, hook_ctx)
             .await
+    }
+
+    /// Port of `App.postJoinMessageForDefaultChannel` (app/channel.go:132): in `town-square` a
+    /// team notice — "joined the team" for a self-join, "added to the team by" when someone else
+    /// asked — and in every other default channel the channel notice, likewise. Go only logs a
+    /// failure (`Failed to post join/leave message`), and the join stands.
+    async fn post_join_message_for_default_channel(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        user: &User,
+        requestor: Option<&User>,
+        channel: &mm_model::channel::Channel,
+    ) {
+        use mm_model::channel::DEFAULT_CHANNEL_NAME;
+
+        match (channel.name == DEFAULT_CHANNEL_NAME, requestor) {
+            (true, None) => {
+                let mut post = mm_model::post::Post {
+                    channel_id: channel.id.clone(),
+                    message: format!("{} joined the team.", user.username),
+                    post_type: mm_model::post::POST_TYPE_JOIN_TEAM.to_owned(),
+                    user_id: user.id.clone(),
+                    ..Default::default()
+                };
+                post.add_prop("username", serde_json::Value::String(user.username.clone()));
+                self.post_system_message(ctx, post, channel).await;
+            }
+            (true, Some(requestor)) => {
+                let mut post = mm_model::post::Post {
+                    channel_id: channel.id.clone(),
+                    message: format!(
+                        "{} added to the team by {}.",
+                        user.username, requestor.username
+                    ),
+                    post_type: mm_model::post::POST_TYPE_ADD_TO_TEAM.to_owned(),
+                    user_id: requestor.id.clone(),
+                    ..Default::default()
+                };
+                for (key, value) in [
+                    ("userId", &requestor.id),
+                    ("username", &requestor.username),
+                    (mm_model::post::POST_PROPS_ADDED_USER_ID, &user.id),
+                    ("addedUsername", &user.username),
+                ] {
+                    post.add_prop(key, serde_json::Value::String(value.clone()));
+                }
+                self.post_system_message(ctx, post, channel).await;
+            }
+            (false, None) => {
+                if let Err(err) = self.post_join_channel_message(ctx, user, channel).await {
+                    tracing::warn!(error = %err, "Failed to post join/leave message");
+                }
+            }
+            (false, Some(requestor)) => {
+                self.post_add_to_channel_message(ctx, requestor, user, channel)
+                    .await;
+            }
+        }
     }
 
     /// The two system posts of `LeaveTeam` — `postLeaveTeamMessage` (team.go:1440) and
@@ -1256,6 +1325,7 @@ impl App {
     /// right wrapper: a post that cannot be written does not fail the removal.
     async fn post_team_leave_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user: &User,
         channel: &mm_model::channel::Channel,
         self_leave: bool,
@@ -1281,7 +1351,7 @@ impl App {
         };
         post.add_prop("username", serde_json::Value::String(user.username.clone()));
 
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 
     /// Port of `TeamService.RemoveTeamMember` (app/teams/teams.go).
