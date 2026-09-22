@@ -52,6 +52,8 @@ pub mod session_store;
 /// The read side of `SidebarCategories` — Go hangs these off `ChannelStore`.
 pub mod sidebar_category_store;
 pub mod status_store;
+/// `GetDBSchemaVersion`, `GetSchemaDefinition` and `GetDiagnostics`, for the Support Packet.
+pub mod support_packet_store;
 pub mod system_store;
 pub mod team_store;
 pub mod temporary_post_store;

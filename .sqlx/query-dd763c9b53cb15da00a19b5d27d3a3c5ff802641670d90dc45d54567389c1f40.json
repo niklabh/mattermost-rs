@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT\n    COALESCE(blks_hit::double precision / NULLIF(blks_hit + blks_read, 0), 0) AS \"cache_hit_ratio!\",\n    deadlocks AS \"deadlocks!\",\n    temp_files AS \"temp_files!\",\n    temp_bytes AS \"temp_bytes!\",\n    xact_rollback AS \"xact_rollback!\"\nFROM pg_stat_database\nWHERE datname = current_database()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cache_hit_ratio!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 1,
+        "name": "deadlocks!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "temp_files!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "temp_bytes!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "xact_rollback!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "dd763c9b53cb15da00a19b5d27d3a3c5ff802641670d90dc45d54567389c1f40"
+}

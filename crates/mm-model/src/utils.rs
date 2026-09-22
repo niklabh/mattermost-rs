@@ -1339,6 +1339,17 @@ pub fn go_json_marshal<T: Serialize>(value: &T) -> Result<String, serde_json::Er
     Ok(go_json_escape(&serde_json::to_string(value)?))
 }
 
+/// `json.MarshalIndent(value, "", "    ")` — [`go_json_marshal`] with Go's four-space indent.
+/// The same caveat about maps applies: structs and ordered maps only.
+pub fn go_json_marshal_indent<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
+    let mut out = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+    let mut serializer = serde_json::Serializer::with_formatter(&mut out, formatter);
+    value.serialize(&mut serializer)?;
+    let text = String::from_utf8(out).map_err(serde::ser::Error::custom)?;
+    Ok(go_json_escape(&text))
+}
+
 /// Port of Go's `strings.ToLower`.
 ///
 /// **Not the same function as `str::to_lowercase`**, which is why this exists. Go applies
@@ -1361,6 +1372,46 @@ pub fn go_to_lower(s: &str) -> String {
     s.chars()
         .map(|c| c.to_lowercase().next().unwrap_or(c))
         .collect()
+}
+
+/// Port of Go's `strings.EqualFold` for the inputs it meets here: rune by rune, equal when the
+/// runes are, or when their simple lower- or upper-case mappings are.
+pub fn go_equal_fold(a: &str, b: &str) -> bool {
+    let mut left = a.chars();
+    let mut right = b.chars();
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) => {
+                let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+                let upper = |c: char| c.to_uppercase().next().unwrap_or(c);
+                if x != y && lower(x) != lower(y) && upper(x) != upper(y) {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Port of `utils.SanitizeFileName` (public/utils/fileutils.go:121): trim `.` and space from
+/// both ends, drop every other `.`, replace each rune outside `[A-Za-z0-9_-]` with `_`, and cut
+/// to 100 bytes. Go's `\w` is ASCII-only, so every non-ASCII rune is one underscore.
+pub fn sanitize_file_name(input: &str) -> String {
+    let trimmed = input.trim_matches(|c| c == '.' || c == ' ');
+    let mut out: String = trimmed
+        .chars()
+        .filter(|&c| c != '.')
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    out.truncate(100);
+    out
 }
 
 /// Port of Go's `strings.ToUpper`.

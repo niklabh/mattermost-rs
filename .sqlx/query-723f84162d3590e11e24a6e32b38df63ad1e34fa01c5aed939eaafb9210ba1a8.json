@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT\n    n_dead_tup AS \"n_dead_tup!\",\n    last_autovacuum\nFROM pg_stat_user_tables\nWHERE lower(relname) = 'posts'\n  AND schemaname = current_schema()\nLIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n_dead_tup!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_autovacuum",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "723f84162d3590e11e24a6e32b38df63ad1e34fa01c5aed939eaafb9210ba1a8"
+}

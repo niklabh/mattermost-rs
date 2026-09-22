@@ -65,6 +65,13 @@ pub trait UserStore {
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.AnalyticsGetGuestCount` (user_store.go:1847): live accounts whose
+    /// roles contain `system_guest` — a case-sensitive `LIKE`, where the single-channel count
+    /// beside it uses `ILIKE`.
+    fn analytics_get_guest_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlUserStore.AnalyticsGetInactiveUsersCount` (user_store.go:1500): deactivated
     /// accounts (`DeleteAt > 0`) that are **not bots** — the `LEFT JOIN Bots … IS NULL` half is
     /// what keeps a deactivated bot out of the "inactive users" figure.
@@ -1148,6 +1155,22 @@ impl UserStore for SqlUserStore {
     }
 
     #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_get_guest_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT count(*) AS "count!" FROM users WHERE roles LIKE $1 AND deleteat = 0"#,
+            "%system_guest%",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count guest Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
     async fn analytics_get_inactive_users_count(&self) -> Result<i64, StoreError> {
         let count = sqlx::query_scalar!(
             r#"
@@ -1173,6 +1196,14 @@ impl UserStore for SqlUserStore {
         &self,
         options: &mm_model::user_count::UserCountOptions,
     ) -> Result<i64, StoreError> {
+        // `ExcludeRegularUsers` without the bots is Go's error, not a zero (user_store.go:1489).
+        if options.exclude_regular_users && !options.include_bot_accounts {
+            return Err(StoreError::Argument {
+                entity: "Count",
+                detail: "query with IncludeBotAccounts=false and excludeRegularUsers=true always return 0",
+            });
+        }
+        // `$6`, `ExcludeRegularUsers` with the bots, is Go's inner `JOIN Bots`: bots only.
         let count = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*) AS "count!"
@@ -1184,6 +1215,7 @@ impl UserStore for SqlUserStore {
              WHERE ($1 OR u.deleteat = 0)
                AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)
                AND ($3 OR b.userid IS NULL)
+               AND (NOT $6 OR b.userid IS NOT NULL)
                AND ($4 = '' OR tm.userid IS NOT NULL)
                AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)
             "#,
@@ -1192,6 +1224,7 @@ impl UserStore for SqlUserStore {
             options.include_bot_accounts,
             options.team_id,
             options.channel_id,
+            options.exclude_regular_users,
         )
         .fetch_one(&self.pool)
         .await

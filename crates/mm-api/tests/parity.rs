@@ -286,10 +286,12 @@ mod parity {
     pub mod marketplace_visit;
     pub mod plugin_hooks;
     pub mod plugin_startup;
+    // Appended 2026-09-23: the support packet past its licence gate.
     pub mod plugin_statuses;
     pub mod plugin_toggle;
     pub mod plugin_upload;
     pub mod remote_cluster;
+    pub mod support_packet;
     // Appended 2026-09-15: the system-operations family.
     pub mod sysops;
     // Appended 2026-09-16: PostEditTimeLimit against its own Go oracle (D-222).

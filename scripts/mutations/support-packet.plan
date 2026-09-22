@@ -1,0 +1,32 @@
+# Mutation plan for GET /api/v4/system/support_packet past its licence gate, the goccy YAML
+# emitter it writes with, and `GenerateSupportData` (docs/PLUGIN_PLAN.md, Phase 5).
+#
+#   scripts/mutate-batch.sh scripts/mutations/support-packet.plan
+#
+# The oracles: `mm_model::goyaml`'s and `support_packet`'s go_parity corpora (unit), the
+# `parity::support_packet` suite against the licensed Go oracle, and the support-packet tranche of
+# `parity::plugin_hooks`. The last two lines are the no-op controls and must SURVIVE.
+
+yaml-trailing-space-not-quoted	crates/mm-model/src/goyaml.rs	    if matches!(bytes[bytes.len() - 1], b':' | b' ') {	    if matches!(bytes[bytes.len() - 1], b':') {	unit	goyaml
+yaml-keep-header-never	crates/mm-model/src/goyaml.rs	    } else if s.ends_with(&format!("{lbc}{lbc}")) {	    } else if false {	unit	goyaml
+yaml-float-exponent-threshold	crates/mm-model/src/goyaml.rs	    if !(-4..6).contains(&exp) {	    if !(-5..6).contains(&exp) {	unit	goyaml
+yaml-seq-blank-lines-kept	crates/mm-model/src/goyaml.rs	            if line.len() > diff {	            if line.len() >= diff {	unit	goyaml
+schema-max-length-always	crates/mm-model/src/support_packet.rs	                                            c.max_length == 0,	                                            c.max_length < 0,	unit	support_packet
+role-scheme-id-never-null	crates/mm-model/src/support_packet.rs	            role.scheme_id.as_deref().map_or(Node::Null, Node::str),	            Node::str(role.scheme_id.as_deref().unwrap_or_default()),	unit	support_packet
+diagnostics-empty-structs-kept	crates/mm-model/src/support_packet.rs	    if child.is_empty() {	    if false {	unit	support_packet
+plugins-json-empty-list-not-null	crates/mm-app/src/support_packet.rs	            (!manifests.is_empty()).then_some(manifests)	            Some(manifests)	api	support_packet::the_licensed
+bot-count-counts-everyone	crates/mm-app/src/support_packet.rs	                        include_bot_accounts: true,\n                        exclude_regular_users: true,	                        include_bot_accounts: true,\n                        exclude_regular_users: false,	api	support_packet::the_licensed
+email-probe-skipped	crates/mm-app/src/support_packet.rs	        if email.send_email_notifications.unwrap_or(false) {\n            let site_url	        if false && email.send_email_notifications.unwrap_or(false) {\n            let site_url	api	support_packet::the_licensed
+store-type-prefers-database-url	crates/mm-app/src/support_packet.rs	    let dsn = std::env::var("MM_CONFIG")	    let dsn = std::env::var("MM_CONFIG_UNSET")	api	support_packet::the_licensed
+config-data-source-fully-masked	crates/mm-app/src/config.rs	        if partially_redact_data_sources && !driver_name.is_empty() {	        if false && partially_redact_data_sources && !driver_name.is_empty() {	api	support_packet::the_licensed
+count-ignores-exclude-regular	crates/mm-store/src/user_store.rs	               AND (NOT $6 OR b.userid IS NOT NULL)	               AND ($6 OR NOT $6 OR b.userid IS NOT NULL)	api	support_packet::the_licensed
+schema-nullable-inverted	crates/mm-store/src/support_packet_store.rs	                            is_nullable: is_nullable == "YES",	                            is_nullable: is_nullable == "NO",	api	support_packet::the_licensed
+schema-indexes-dropped	crates/mm-store/src/support_packet_store.rs	                table.indexes = indexes;	                let _ = indexes;	api	support_packet::the_licensed
+logs-off-on-any-value	crates/mm-api/src/gated_reads.rs	    let include_logs = form.get("basic_server_logs") != Some(b"false".as_slice());	    let include_logs = form.get("basic_server_logs").is_none();	api	support_packet::basic_server_logs
+no-cache-header-dropped	crates/mm-api/src/gated_reads.rs	        axum::http::header::CACHE_CONTROL,\n        axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),	        "x-mmrs-mutation",\n        axum::http::HeaderValue::from_static("no-cache, no-store, must-revalidate"),	api	support_packet::the_licensed
+go-plugins-never-forward	crates/mm-api/src/gated_reads.rs	    } else if crate::commands::go_may_have_plugins() {	    } else if false {	api	support_packet::the_shared
+hosted-ignored-for-plugins	crates/mm-api/src/gated_reads.rs	        if state.app.plugin_host().hosted() || !config.plugin_settings.enable.unwrap_or(false) {	        if !config.plugin_settings.enable.unwrap_or(false) {	api	plugin_hooks::the_support
+support-hook-ignores-the-checkbox	crates/mm-app/src/plugin_hooks.rs	    !declared || plugin_packets.contains(&manifest.id)	    true || !declared || plugin_packets.contains(&manifest.id)	api	plugin_hooks::the_support
+support-hook-error-keeps-files	crates/mm-app/src/plugin_hooks.rs	                warnings.push(text);\n                continue;	                warnings.push(text);	api	plugin_hooks::the_support
+control-unit-reordered-sum	crates/mm-model/src/goyaml.rs	    let prefix = spaces(indent + 2);	    let prefix = spaces(2 + indent);	unit	goyaml
+control-api-select-columns-swapped	crates/mm-store/src/support_packet_store.rs	r#"SELECT tablename::text AS "tablename!", indexname::text AS "indexname!", indexdef AS "indexdef!"	r#"SELECT indexname::text AS "indexname!", tablename::text AS "tablename!", indexdef AS "indexdef!"	api	support_packet::the_licensed

@@ -1,0 +1,466 @@
+{
+    "diagnostics": [
+        {
+            "input": {
+                "Version": 2,
+                "License": {
+                    "Company": "Acme: Inc",
+                    "Users": 1000,
+                    "SkuShortName": "enterprise",
+                    "IsTrial": true,
+                    "IsGovSKU": true,
+                    "IsNonProduction": true
+                },
+                "Server": {
+                    "OS": "linux",
+                    "Architecture": "amd64",
+                    "Hostname": "host-1",
+                    "InstallationType": "unknown",
+                    "CPUCores": 16,
+                    "TotalMemoryMB": 64000,
+                    "ContainerCPULimit": 1.5,
+                    "ContainerMemoryLimitMB": 2048,
+                    "ProcessID": 4242,
+                    "StartedAt": "2025-01-02T03:04:05.123456789Z",
+                    "HostStartedAt": "2025-01-01T00:00:00Z",
+                    "OpenFileDescriptors": 77,
+                    "MaxFileDescriptors": 1048576,
+                    "Version": "11.1.0",
+                    "BuildHash": "abc123",
+                    "GoVersion": "go1.26.4"
+                },
+                "Config": {
+                    "Source": "postgres://****:****@localhost/mattermost_test?sslmode=disable"
+                },
+                "Database": {
+                    "Type": "postgres",
+                    "Version": "16.4 (Debian 16.4-1.pgdg120+1)",
+                    "SchemaVersion": "150",
+                    "MasterConnections": 11,
+                    "ReplicaConnections": 12,
+                    "SearchConnections": 13,
+                    "MasterConnectionsInUse": 14,
+                    "MasterConnectionsIdle": 15,
+                    "MasterPoolWaitCount": 16,
+                    "MasterPoolWaitDurationMs": 17,
+                    "MasterConnectionsClosedMaxIdle": 18,
+                    "MasterConnectionsClosedMaxLifetime": 19,
+                    "ReplicaConnectionsInUse": 20,
+                    "ReplicaConnectionsIdle": 21,
+                    "ReplicaPoolWaitCount": 22,
+                    "ReplicaPoolWaitDurationMs": 23,
+                    "ReplicaConnectionsClosedMaxIdle": 24,
+                    "ReplicaConnectionsClosedMaxLifetime": 25,
+                    "CacheHitRatio": 0.9876,
+                    "Deadlocks": 26,
+                    "TempFiles": 27,
+                    "TempBytesMB": 1.25,
+                    "Rollbacks": 28,
+                    "IdleInTransactionCount": 29,
+                    "LongestQueryDurationSeconds": 0.004211,
+                    "WaitingForLockCount": 30,
+                    "PostsDeadTuples": 31,
+                    "PostsLastAutovacuum": "2025-03-04T05:06:07.89Z"
+                },
+                "FileStore": {
+                    "Status": "FAIL",
+                    "Error": "open /nope: no such file",
+                    "Driver": "local",
+                    "FilesystemType": "ext4",
+                    "TotalMB": 100000,
+                    "AvailableMB": 50000
+                },
+                "Websocket": {
+                    "Connections": 3
+                },
+                "Cluster": {
+                    "ID": "clusterid",
+                    "NumberOfNodes": 2
+                },
+                "Notifications": {
+                    "Email": {
+                        "Status": "FAIL",
+                        "Error": "dial tcp: connection refused"
+                    },
+                    "Push": {
+                        "Status": "OK",
+                        "Error": ""
+                    }
+                },
+                "LDAP": {
+                    "Status": "OK",
+                    "Error": "",
+                    "ServerName": "OpenLDAP",
+                    "ServerVersion": "2.6"
+                },
+                "SAML": {
+                    "ProviderType": "Okta",
+                    "Status": "FAIL",
+                    "Error": "bad cert"
+                },
+                "ElasticSearch": {
+                    "Status": "OK",
+                    "Backend": "elasticsearch",
+                    "ServerVersion": "8.9.0",
+                    "ServerPlugins": [
+                        "analysis-icu",
+                        "ingest"
+                    ],
+                    "Error": "e"
+                },
+                "OAuthProviders": {
+                    "GitLab": {
+                        "Status": "disabled",
+                        "Error": ""
+                    },
+                    "Google": {
+                        "Status": "FAIL",
+                        "Error": "no discovery or token endpoint configured"
+                    },
+                    "Office365": {
+                        "Status": "OK",
+                        "Error": ""
+                    },
+                    "OpenID": {
+                        "Status": "FAIL",
+                        "Error": "multi\nline"
+                    }
+                }
+            },
+            "name": "full",
+            "yaml": "version: 2\nlicense:\n  company: \"Acme: Inc\"\n  users: 1000\n  sku_short_name: enterprise\n  is_trial: true\n  is_gov_sku: true\n  is_non_production: true\nserver:\n  # Machine\n  os: linux\n  architecture: amd64\n  hostname: host-1\n  installation_type: unknown\n  # Capacity (hardware → effective quota)\n  cpu_cores: 16 # logical CPUs visible to the OS\n  total_memory_mb: 64000 # host/VM total RAM; may exceed container limit\n  container_cpu_limit: 1.5 # cgroup v2 CPU quota in CPUs; Linux only, omitted if no limit set\n  container_memory_limit_mb: 2048 # cgroup v2 memory quota in MB; Linux only, omitted if no limit set\n  # Process lifecycle\n  process_id: 4242\n  started_at: 2025-01-02T03:04:05.123456789Z # when Mattermost process started\n  host_started_at: 2025-01-01T00:00:00Z # when the host OS booted; omitted if unavailable\n  open_file_descriptors: 77 # current open FDs for this process\n  max_file_descriptors: 1048576 # system limit (ulimit -n)\n  # Software\n  version: 11.1.0\n  build_hash: abc123\n  go_version: go1.26.4\nconfig:\n  store_type: postgres://****:****@localhost/mattermost_test?sslmode=disable\ndatabase:\n  type: postgres\n  version: 16.4 (Debian 16.4-1.pgdg120+1)\n  schema_version: \"150\"\n  master_connections: 11\n  replica_connections: 12\n  search_connections: 13\n  master_connections_in_use: 14\n  master_connections_idle: 15\n  master_pool_wait_count: 16 # cumulative; total times a goroutine waited for a connection since process start\n  master_pool_wait_duration_ms: 17 # cumulative wait time across all goroutines since process start\n  master_connections_closed_max_idle: 18 # cumulative; connections closed because the idle pool was full\n  master_connections_closed_max_lifetime: 19 # cumulative; connections closed for exceeding ConnMaxLifetime\n  replica_connections_in_use: 20\n  replica_connections_idle: 21\n  replica_pool_wait_count: 22 # cumulative across all replicas; see master_pool_wait_count\n  replica_pool_wait_duration_ms: 23 # cumulative across all replicas\n  replica_connections_closed_max_idle: 24 # cumulative across all replicas\n  replica_connections_closed_max_lifetime: 25 # cumulative across all replicas\n  # PostgreSQL-only (these fields are omitted on MySQL)\n  cache_hit_ratio: 0.9876 # blks_hit / (blks_hit + blks_read) from pg_stat_database; cumulative since stats reset\n  deadlocks: 26 # cumulative since pg_stat_database reset\n  temp_files: 27 # cumulative count of temp files created since stats reset\n  temp_bytes_mb: 1.25 # cumulative bytes written to temp files, in MB\n  rollbacks: 28 # cumulative transaction rollbacks since stats reset\n  idle_in_transaction_count: 29 # point-in-time count from pg_stat_activity\n  longest_query_duration_seconds: 0.004211 # point-in-time; max age of any active query right now\n  waiting_for_lock_count: 30 # point-in-time count of backends waiting on a Lock wait_event_type\n  posts_dead_tuples: 31 # n_dead_tup for the posts table from pg_stat_user_tables\n  posts_last_autovacuum: 2025-03-04T05:06:07.89Z # last autovacuum on posts; null if never autovacuumed (then omitted)\nfile_store:\n  file_status: FAIL\n  error: \"open /nope: no such file\"\n  file_driver: local\n  filesystem_type: ext4 # local driver only (e.g. ext4, xfs); omitted for s3 and other remote drivers\n  total_mb: 100000 # local driver only; capacity of the volume hosting FileSettings.Directory\n  available_mb: 50000 # local driver only; free space remaining on that volume\nwebsocket:\n  connections: 3\ncluster:\n  id: clusterid\n  number_of_nodes: 2\nnotifications:\n  email:\n    status: FAIL\n    error: \"dial tcp: connection refused\"\n  push:\n    status: OK\nldap:\n  status: OK\n  server_name: OpenLDAP\n  server_version: \"2.6\"\nsaml:\n  provider_type: Okta\n  status: FAIL\n  error: bad cert\nelastic:\n  status: OK\n  backend: elasticsearch\n  server_version: 8.9.0\n  server_plugins:\n  - analysis-icu\n  - ingest\n  error: e\noauth_providers:\n  gitlab:\n    status: disabled\n  google:\n    status: FAIL\n    error: no discovery or token endpoint configured\n  office365:\n    status: OK\n  openid:\n    status: FAIL\n    error: |-\n      multi\n      line\n"
+        },
+        {
+            "input": {
+                "Version": 2,
+                "License": {
+                    "Company": "",
+                    "Users": 0,
+                    "SkuShortName": "",
+                    "IsTrial": false,
+                    "IsGovSKU": false,
+                    "IsNonProduction": false
+                },
+                "Server": {
+                    "OS": "linux",
+                    "Architecture": "",
+                    "Hostname": "",
+                    "InstallationType": "",
+                    "CPUCores": 0,
+                    "TotalMemoryMB": 0,
+                    "ContainerCPULimit": 0,
+                    "ContainerMemoryLimitMB": 0,
+                    "ProcessID": 0,
+                    "StartedAt": "2025-01-02T03:04:05Z",
+                    "HostStartedAt": "0001-01-01T00:00:00Z",
+                    "OpenFileDescriptors": 0,
+                    "MaxFileDescriptors": 0,
+                    "Version": "",
+                    "BuildHash": "",
+                    "GoVersion": ""
+                },
+                "Config": {
+                    "Source": ""
+                },
+                "Database": {
+                    "Type": "",
+                    "Version": "",
+                    "SchemaVersion": "",
+                    "MasterConnections": 0,
+                    "ReplicaConnections": 0,
+                    "SearchConnections": 0,
+                    "MasterConnectionsInUse": 0,
+                    "MasterConnectionsIdle": 0,
+                    "MasterPoolWaitCount": 0,
+                    "MasterPoolWaitDurationMs": 0,
+                    "MasterConnectionsClosedMaxIdle": 0,
+                    "MasterConnectionsClosedMaxLifetime": 0,
+                    "ReplicaConnectionsInUse": 0,
+                    "ReplicaConnectionsIdle": 0,
+                    "ReplicaPoolWaitCount": 0,
+                    "ReplicaPoolWaitDurationMs": 0,
+                    "ReplicaConnectionsClosedMaxIdle": 0,
+                    "ReplicaConnectionsClosedMaxLifetime": 0,
+                    "CacheHitRatio": 0,
+                    "Deadlocks": 0,
+                    "TempFiles": null,
+                    "TempBytesMB": null,
+                    "Rollbacks": null,
+                    "IdleInTransactionCount": null,
+                    "LongestQueryDurationSeconds": null,
+                    "WaitingForLockCount": null,
+                    "PostsDeadTuples": null,
+                    "PostsLastAutovacuum": null
+                },
+                "FileStore": {
+                    "Status": "OK",
+                    "Error": "",
+                    "Driver": "local",
+                    "FilesystemType": "",
+                    "TotalMB": 0,
+                    "AvailableMB": 0
+                },
+                "Websocket": {
+                    "Connections": 0
+                },
+                "Cluster": {
+                    "ID": "",
+                    "NumberOfNodes": 0
+                },
+                "Notifications": {
+                    "Email": {
+                        "Status": "disabled",
+                        "Error": ""
+                    },
+                    "Push": {
+                        "Status": "disabled",
+                        "Error": ""
+                    }
+                },
+                "LDAP": {
+                    "Status": "disabled",
+                    "Error": "",
+                    "ServerName": "",
+                    "ServerVersion": ""
+                },
+                "SAML": {
+                    "ProviderType": "",
+                    "Status": "disabled",
+                    "Error": ""
+                },
+                "ElasticSearch": {
+                    "Status": "disabled",
+                    "Backend": "",
+                    "ServerVersion": "",
+                    "ServerPlugins": null,
+                    "Error": ""
+                },
+                "OAuthProviders": {
+                    "GitLab": {
+                        "Status": "disabled",
+                        "Error": ""
+                    },
+                    "Google": {
+                        "Status": "disabled",
+                        "Error": ""
+                    },
+                    "Office365": {
+                        "Status": "disabled",
+                        "Error": ""
+                    },
+                    "OpenID": {
+                        "Status": "disabled",
+                        "Error": ""
+                    }
+                }
+            },
+            "name": "stack",
+            "yaml": "version: 2\nlicense:\n  company: \"\"\n  users: 0\n  sku_short_name: \"\"\nserver:\n  # Machine\n  os: linux\n  architecture: \"\"\n  hostname: \"\"\n  installation_type: \"\"\n  # Capacity (hardware → effective quota)\n  cpu_cores: 0 # logical CPUs visible to the OS\n  total_memory_mb: 0 # host/VM total RAM; may exceed container limit\n  # Process lifecycle\n  process_id: 0\n  started_at: 2025-01-02T03:04:05Z # when Mattermost process started\n  open_file_descriptors: 0 # current open FDs for this process\n  max_file_descriptors: 0 # system limit (ulimit -n)\n  # Software\n  version: \"\"\n  build_hash: \"\"\n  go_version: \"\"\nconfig:\n  store_type: \"\"\ndatabase:\n  type: \"\"\n  version: \"\"\n  schema_version: \"\"\n  master_connections: 0\n  replica_connections: 0\n  search_connections: 0\n  master_connections_in_use: 0\n  master_connections_idle: 0\n  master_pool_wait_count: 0 # cumulative; total times a goroutine waited for a connection since process start\n  master_pool_wait_duration_ms: 0 # cumulative wait time across all goroutines since process start\n  master_connections_closed_max_idle: 0 # cumulative; connections closed because the idle pool was full\n  master_connections_closed_max_lifetime: 0 # cumulative; connections closed for exceeding ConnMaxLifetime\n  replica_connections_in_use: 0\n  replica_connections_idle: 0\n  replica_pool_wait_count: 0 # cumulative across all replicas; see master_pool_wait_count\n  replica_pool_wait_duration_ms: 0 # cumulative across all replicas\n  replica_connections_closed_max_idle: 0 # cumulative across all replicas\n  replica_connections_closed_max_lifetime: 0 # cumulative across all replicas\n  # PostgreSQL-only (these fields are omitted on MySQL)\n  cache_hit_ratio: 0.0 # blks_hit / (blks_hit + blks_read) from pg_stat_database; cumulative since stats reset\n  deadlocks: 0 # cumulative since pg_stat_database reset\nfile_store:\n  file_status: OK\n  file_driver: local\nwebsocket:\n  connections: 0\ncluster:\n  id: \"\"\n  number_of_nodes: 0\nnotifications:\n  email:\n    status: disabled\n  push:\n    status: disabled\nldap:\n  status: disabled\nsaml:\n  status: disabled\nelastic:\n  status: disabled\noauth_providers:\n  gitlab:\n    status: disabled\n  google:\n    status: disabled\n  office365:\n    status: disabled\n  openid:\n    status: disabled\n"
+        },
+        {
+            "input": {
+                "Version": 0,
+                "License": {
+                    "Company": "",
+                    "Users": 0,
+                    "SkuShortName": "",
+                    "IsTrial": false,
+                    "IsGovSKU": false,
+                    "IsNonProduction": false
+                },
+                "Server": {
+                    "OS": "",
+                    "Architecture": "",
+                    "Hostname": "",
+                    "InstallationType": "",
+                    "CPUCores": 0,
+                    "TotalMemoryMB": 0,
+                    "ContainerCPULimit": 0,
+                    "ContainerMemoryLimitMB": 0,
+                    "ProcessID": 0,
+                    "StartedAt": "0001-01-01T00:00:00Z",
+                    "HostStartedAt": "0001-01-01T00:00:00Z",
+                    "OpenFileDescriptors": 0,
+                    "MaxFileDescriptors": 0,
+                    "Version": "",
+                    "BuildHash": "",
+                    "GoVersion": ""
+                },
+                "Config": {
+                    "Source": ""
+                },
+                "Database": {
+                    "Type": "",
+                    "Version": "",
+                    "SchemaVersion": "",
+                    "MasterConnections": 0,
+                    "ReplicaConnections": 0,
+                    "SearchConnections": 0,
+                    "MasterConnectionsInUse": 0,
+                    "MasterConnectionsIdle": 0,
+                    "MasterPoolWaitCount": 0,
+                    "MasterPoolWaitDurationMs": 0,
+                    "MasterConnectionsClosedMaxIdle": 0,
+                    "MasterConnectionsClosedMaxLifetime": 0,
+                    "ReplicaConnectionsInUse": 0,
+                    "ReplicaConnectionsIdle": 0,
+                    "ReplicaPoolWaitCount": 0,
+                    "ReplicaPoolWaitDurationMs": 0,
+                    "ReplicaConnectionsClosedMaxIdle": 0,
+                    "ReplicaConnectionsClosedMaxLifetime": 0,
+                    "CacheHitRatio": null,
+                    "Deadlocks": null,
+                    "TempFiles": null,
+                    "TempBytesMB": null,
+                    "Rollbacks": null,
+                    "IdleInTransactionCount": null,
+                    "LongestQueryDurationSeconds": null,
+                    "WaitingForLockCount": null,
+                    "PostsDeadTuples": null,
+                    "PostsLastAutovacuum": null
+                },
+                "FileStore": {
+                    "Status": "",
+                    "Error": "",
+                    "Driver": "",
+                    "FilesystemType": "",
+                    "TotalMB": 0,
+                    "AvailableMB": 0
+                },
+                "Websocket": {
+                    "Connections": 0
+                },
+                "Cluster": {
+                    "ID": "",
+                    "NumberOfNodes": 0
+                },
+                "Notifications": {
+                    "Email": {
+                        "Status": "",
+                        "Error": ""
+                    },
+                    "Push": {
+                        "Status": "",
+                        "Error": ""
+                    }
+                },
+                "LDAP": {
+                    "Status": "",
+                    "Error": "",
+                    "ServerName": "",
+                    "ServerVersion": ""
+                },
+                "SAML": {
+                    "ProviderType": "",
+                    "Status": "",
+                    "Error": ""
+                },
+                "ElasticSearch": {
+                    "Status": "",
+                    "Backend": "",
+                    "ServerVersion": "",
+                    "ServerPlugins": null,
+                    "Error": ""
+                },
+                "OAuthProviders": {
+                    "GitLab": {
+                        "Status": "",
+                        "Error": ""
+                    },
+                    "Google": {
+                        "Status": "",
+                        "Error": ""
+                    },
+                    "Office365": {
+                        "Status": "",
+                        "Error": ""
+                    },
+                    "OpenID": {
+                        "Status": "",
+                        "Error": ""
+                    }
+                }
+            },
+            "name": "zero",
+            "yaml": "version: 0\nlicense:\n  company: \"\"\n  users: 0\n  sku_short_name: \"\"\nserver:\n  # Machine\n  os: \"\"\n  architecture: \"\"\n  hostname: \"\"\n  installation_type: \"\"\n  # Capacity (hardware → effective quota)\n  cpu_cores: 0 # logical CPUs visible to the OS\n  total_memory_mb: 0 # host/VM total RAM; may exceed container limit\n  # Process lifecycle\n  process_id: 0\n  started_at: 0001-01-01T00:00:00Z # when Mattermost process started\n  open_file_descriptors: 0 # current open FDs for this process\n  max_file_descriptors: 0 # system limit (ulimit -n)\n  # Software\n  version: \"\"\n  build_hash: \"\"\n  go_version: \"\"\nconfig:\n  store_type: \"\"\ndatabase:\n  type: \"\"\n  version: \"\"\n  schema_version: \"\"\n  master_connections: 0\n  replica_connections: 0\n  search_connections: 0\n  master_connections_in_use: 0\n  master_connections_idle: 0\n  master_pool_wait_count: 0 # cumulative; total times a goroutine waited for a connection since process start\n  master_pool_wait_duration_ms: 0 # cumulative wait time across all goroutines since process start\n  master_connections_closed_max_idle: 0 # cumulative; connections closed because the idle pool was full\n  master_connections_closed_max_lifetime: 0 # cumulative; connections closed for exceeding ConnMaxLifetime\n  replica_connections_in_use: 0\n  replica_connections_idle: 0\n  replica_pool_wait_count: 0 # cumulative across all replicas; see master_pool_wait_count\n  replica_pool_wait_duration_ms: 0 # cumulative across all replicas\n  replica_connections_closed_max_idle: 0 # cumulative across all replicas\n  replica_connections_closed_max_lifetime: 0 # cumulative across all replicas\nfile_store:\n  file_status: \"\"\n  file_driver: \"\"\nwebsocket:\n  connections: 0\ncluster:\n  id: \"\"\n  number_of_nodes: 0\nldap: {}\nsaml: {}\nelastic: {}\n"
+        }
+    ],
+    "saml_provider_type": [
+        {
+            "input": "",
+            "output": "unknown"
+        },
+        {
+            "input": "https://login.microsoftonline.com/x/federationmetadata/2007-06/federationmetadata.xml",
+            "output": "Azure AD"
+        },
+        {
+            "input": "https://STS.WINDOWS.NET/tenant/",
+            "output": "Azure AD"
+        },
+        {
+            "input": "https://dev-1.okta.com/app/x/sso/saml/metadata",
+            "output": "Okta"
+        },
+        {
+            "input": "https://x.oktapreview.com",
+            "output": "Okta"
+        },
+        {
+            "input": "https://tenant.auth0.com/samlp/metadata",
+            "output": "Auth0"
+        },
+        {
+            "input": "https://x.onelogin.com/saml",
+            "output": "OneLogin"
+        },
+        {
+            "input": "https://accounts.google.com/o/saml2?idpid=1",
+            "output": "Google Workspace"
+        },
+        {
+            "input": "https://sso.jumpcloud.com/saml2/x",
+            "output": "JumpCloud"
+        },
+        {
+            "input": "https://api.duo.com/saml2/sp",
+            "output": "Duo"
+        },
+        {
+            "input": "https://x.centrify.com/",
+            "output": "Centrify"
+        },
+        {
+            "input": "https://kc.example.com/realms/master/protocol/saml/descriptor",
+            "output": "Keycloak"
+        },
+        {
+            "input": "https://fs.example.com/adfs/ls",
+            "output": "ADFS"
+        },
+        {
+            "input": "https://x.example.com/FederationMetadata/2007-06/FederationMetadata.xml",
+            "output": "ADFS"
+        },
+        {
+            "input": "https://idp.shibboleth.net/",
+            "output": "Shibboleth"
+        },
+        {
+            "input": "https://example.edu/idp/shibboleth",
+            "output": "Shibboleth"
+        },
+        {
+            "input": "https://example.com/saml",
+            "output": "unknown"
+        },
+        {
+            "input": "https://login.microsoftonline.com.okta.com/",
+            "output": "Azure AD"
+        },
+        {
+            "input": "https://x.okta.com/realms/y",
+            "output": "Okta"
+        }
+    ]
+}

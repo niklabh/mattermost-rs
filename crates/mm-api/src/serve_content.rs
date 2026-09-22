@@ -124,6 +124,16 @@ pub async fn write_file_response(
     .await
 }
 
+/// Port of `web.setHeaders` (platform/shared/web/files.go:69) for `WriteStreamResponse`'s
+/// callers — the same headers as the file routes', which is what the shared package writes.
+pub(crate) fn stream_headers(
+    content_type: &str,
+    force_download: bool,
+    filename: &str,
+) -> HeaderMap {
+    set_headers(content_type, force_download, filename)
+}
+
 /// Port of `web.setHeaders` (web/files.go:127).
 ///
 /// Returns the headers rather than mutating a writer, because the outcome has to survive being

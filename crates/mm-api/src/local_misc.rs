@@ -610,16 +610,19 @@ async fn local_upload_data(
     upload_write::upload_data(state, path, local_session(), request).await
 }
 
-/// `generateSupportPacket` through `APILocal` (system_local.go:20), up to the licence gate as on
-/// the HTTP router; a licensed server's packet is Go's, over the socket.
+/// `generateSupportPacket` through `APILocal` (system_local.go:20), exactly as on the HTTP
+/// router — the packet built here, and the three forwards over the socket.
 async fn local_generate_support_packet(
     State(state): State<AppState>,
     Extension(go): Extension<GoLocalSocket>,
     request: Request,
 ) -> Response {
-    match gated_reads::support_packet_answer(&state, &local_session()).await {
-        Ok(Some(response)) => response,
-        Ok(None) => forward_over_unix(&go.0, request).await,
+    let session = local_session();
+    let query = request.uri().query().map(str::to_owned);
+    let ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    match gated_reads::support_packet_answer(&state, &session, query.as_deref(), ctx).await {
+        Ok(gated_reads::PacketAnswer::Served(response)) => response,
+        Ok(gated_reads::PacketAnswer::Forward) => forward_over_unix(&go.0, request).await,
         Err(err) => err.into_response(),
     }
 }

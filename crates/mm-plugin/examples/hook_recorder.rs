@@ -94,6 +94,14 @@
 //! post with the message replaced by [`REWRITTEN_HEADER`], and `!partial-scheduled` answers a
 //! post carrying **only** a message — no id, no user, no channel — which Go takes whole.
 //!
+//! # `GenerateSupportData` is driven by the request's `User-Agent`
+//!
+//! The hook is handed nothing but the `plugin.Context`, so the one input a client controls is a
+//! header the host copies into it. A `User-Agent` containing `hookfail` is answered with
+//! [`SUPPORT_REJECTION`] **and** a file, which the host must drop along with the error's warning;
+//! any other is answered with [`SUPPORT_FILES`], so the packet's merge of plugin files is what a
+//! parity run sees.
+//!
 //! # The two consumed hooks are opt-in, and driven by each post's message
 //!
 //! `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext` are implemented only when
@@ -135,6 +143,7 @@ use mm_plugin::wire::plugin::{
     Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use mm_plugin::wire::plugin::{Z_DraftWillBeUpsertedArgs, Z_DraftWillBeUpsertedReturns};
+use mm_plugin::wire::plugin::{Z_GenerateSupportDataArgs, Z_GenerateSupportDataReturns};
 use mm_plugin::wire::plugin::{
     Z_MessagesWillBeConsumedArgs, Z_MessagesWillBeConsumedReturns,
     Z_MessagesWillBeConsumedWithContextArgs, Z_MessagesWillBeConsumedWithContextReturns,
@@ -182,6 +191,19 @@ const REWRITTEN_HEADER: &str = "rewritten by the hook recorder";
 /// The reason the archive and restore hooks refuse with.
 const CHANNEL_REJECTION: &str = "the hook recorder keeps this channel as it is";
 
+/// The error `GenerateSupportData` answers a `hookfail` request with.
+const SUPPORT_REJECTION: &str = "the hook recorder has nothing to report";
+
+/// The files `GenerateSupportData` answers every other request with: a text file in the plugin's
+/// own directory, and one whose bytes are not text.
+const SUPPORT_FILES: [(&str, &[u8]); 2] = [
+    (
+        "mmrs.hookrecorder/recorded.txt",
+        b"recorded by the hook recorder\n",
+    ),
+    ("mmrs.hookrecorder/raw.bin", &[0, 1, 2, 0xfe, 0xff]),
+];
+
 /// What `MessagesWillBeConsumed` puts in front of a `!consume ` message.
 const CONSUMED_PREFIX: &str = "consumed: ";
 
@@ -199,7 +221,7 @@ const CONSUMED: [&str; 2] = [
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
-const IMPLEMENTED: [&str; 27] = [
+const IMPLEMENTED: [&str; 28] = [
     "MessageWillBePosted",
     "MessageHasBeenPosted",
     "MessageWillBeUpdated",
@@ -227,6 +249,7 @@ const IMPLEMENTED: [&str; 27] = [
     "DraftWillBeUpserted",
     "OnInstall",
     "ScheduledPostWillBeCreated",
+    "GenerateSupportData",
 ];
 
 /// The id in `name`, or the empty string when the host set no such variable. An unset variable
@@ -687,6 +710,30 @@ impl Hooks for Recorder {
     ) -> Result<Z_OnInstallReturns, NotImplemented> {
         self.saw("OnInstall", &args);
         Ok(Z_OnInstallReturns::default())
+    }
+
+    async fn generate_support_data(
+        &self,
+        args: Z_GenerateSupportDataArgs,
+    ) -> Result<Z_GenerateSupportDataReturns, NotImplemented> {
+        self.saw("GenerateSupportData", &args);
+        let files = SUPPORT_FILES
+            .iter()
+            .map(|(name, body)| mm_plugin::wire::model::FileData {
+                filename: (*name).to_owned(),
+                body: body.to_vec(),
+            })
+            .collect();
+        let fail = args
+            .a
+            .as_deref()
+            .is_some_and(|ctx| ctx.user_agent.contains("hookfail"));
+        let error =
+            fail.then(|| mm_plugin::error::PluginError::Message(SUPPORT_REJECTION.to_owned()));
+        Ok(Z_GenerateSupportDataReturns {
+            a: files,
+            b: mm_plugin::error::encodable_error(error.as_ref()),
+        })
     }
 
     async fn preferences_have_changed(

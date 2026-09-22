@@ -1,0 +1,3590 @@
+{
+    "floats": [
+        {
+            "input": 0,
+            "yaml": "k: 0.0\n"
+        },
+        {
+            "input": 1,
+            "yaml": "k: 1.0\n"
+        },
+        {
+            "input": -1,
+            "yaml": "k: -1.0\n"
+        },
+        {
+            "input": 0.5,
+            "yaml": "k: 0.5\n"
+        },
+        {
+            "input": 0.3,
+            "yaml": "k: 0.3\n"
+        },
+        {
+            "input": 0.3333333333333333,
+            "yaml": "k: 0.3333333333333333\n"
+        },
+        {
+            "input": 100,
+            "yaml": "k: 100.0\n"
+        },
+        {
+            "input": 100000000000000000000,
+            "yaml": "k: 1e+20\n"
+        },
+        {
+            "input": 1e+21,
+            "yaml": "k: 1e+21\n"
+        },
+        {
+            "input": 0.0001,
+            "yaml": "k: 0.0001\n"
+        },
+        {
+            "input": 0.00001,
+            "yaml": "k: 1e-05\n"
+        },
+        {
+            "input": 1e-7,
+            "yaml": "k: 1e-07\n"
+        },
+        {
+            "input": 123456789,
+            "yaml": "k: 1.23456789e+08\n"
+        },
+        {
+            "input": 1234567890123,
+            "yaml": "k: 1.234567890123e+12\n"
+        },
+        {
+            "input": 0.000123,
+            "yaml": "k: 0.000123\n"
+        },
+        {
+            "input": 2.5e-10,
+            "yaml": "k: 2.5e-10\n"
+        },
+        {
+            "input": 9.999999e+22,
+            "yaml": "k: 9.999999e+22\n"
+        },
+        {
+            "input": 5e-324,
+            "yaml": "k: 5e-324\n"
+        },
+        {
+            "input": 1.7976931348623157e+308,
+            "yaml": "k: 1.7976931348623157e+308\n"
+        }
+    ],
+    "jobs": {
+        "empty": "ldap_sync_jobs: []\ndata_retention_jobs: []\nmessage_export_jobs: []\nelastic_post_indexing_jobs: []\nelastic_post_aggregation_jobs: []\nmigration_jobs: []\n",
+        "input_jobs": [
+            {
+                "id": "jobid1111111111111111111a",
+                "type": "ldap_sync",
+                "priority": 3,
+                "create_at": 1700000000123,
+                "start_at": 1700000001000,
+                "last_activity_at": 0,
+                "status": "success",
+                "progress": 100,
+                "data": {
+                    "a_key": "plain",
+                    "b_key": "value: with colon",
+                    "empty": "",
+                    "multi": "line one\nline two",
+                    "num": "42"
+                }
+            },
+            {
+                "id": "jobid2222222222222222222b",
+                "type": "migrations",
+                "priority": 0,
+                "create_at": 1,
+                "start_at": -1,
+                "last_activity_at": 1699999999999,
+                "status": "error",
+                "progress": -1,
+                "data": {}
+            },
+            {
+                "id": "jobid3333333333333333333c",
+                "type": "message_export",
+                "priority": 0,
+                "create_at": 0,
+                "start_at": 0,
+                "last_activity_at": 0,
+                "status": "",
+                "progress": 0,
+                "data": null
+            }
+        ],
+        "yaml": "ldap_sync_jobs:\n- id: jobid1111111111111111111a\n  type: ldap_sync\n  priority: 3\n  create_at: \"2023-11-15T03:43:20.123+05:30\"\n  start_at: \"2023-11-15T03:43:21+05:30\"\n  last_activity_at: \"1970-01-01T05:30:00+05:30\"\n  status: success\n  progress: 100\n  data:\n    a_key: plain\n    b_key: \"value: with colon\"\n    empty: \"\"\n    multi: |-\n      line one\n      line two\n    num: \"42\"\ndata_retention_jobs: []\nmessage_export_jobs:\n- id: jobid3333333333333333333c\n  type: message_export\n  priority: 0\n  create_at: \"1970-01-01T05:30:00+05:30\"\n  start_at: \"1970-01-01T05:30:00+05:30\"\n  last_activity_at: \"1970-01-01T05:30:00+05:30\"\n  status: \"\"\n  progress: 0\n  data: {}\nelastic_post_indexing_jobs: []\nelastic_post_aggregation_jobs:\n- id: jobid1111111111111111111a\n  type: ldap_sync\n  priority: 3\n  create_at: \"2023-11-15T03:43:20.123+05:30\"\n  start_at: \"2023-11-15T03:43:21+05:30\"\n  last_activity_at: \"1970-01-01T05:30:00+05:30\"\n  status: success\n  progress: 100\n  data:\n    a_key: plain\n    b_key: \"value: with colon\"\n    empty: \"\"\n    multi: |-\n      line one\n      line two\n    num: \"42\"\n- id: jobid2222222222222222222b\n  type: migrations\n  priority: 0\n  create_at: \"1970-01-01T05:30:00.001+05:30\"\n  start_at: \"1970-01-01T05:29:59.999+05:30\"\n  last_activity_at: \"2023-11-15T03:43:19.999+05:30\"\n  status: error\n  progress: -1\n  data: {}\n- id: jobid3333333333333333333c\n  type: message_export\n  priority: 0\n  create_at: \"1970-01-01T05:30:00+05:30\"\n  start_at: \"1970-01-01T05:30:00+05:30\"\n  last_activity_at: \"1970-01-01T05:30:00+05:30\"\n  status: \"\"\n  progress: 0\n  data: {}\nmigration_jobs:\n- id: jobid2222222222222222222b\n  type: migrations\n  priority: 0\n  create_at: \"1970-01-01T05:30:00.001+05:30\"\n  start_at: \"1970-01-01T05:29:59.999+05:30\"\n  last_activity_at: \"2023-11-15T03:43:19.999+05:30\"\n  status: error\n  progress: -1\n  data: {}\n"
+    },
+    "metadata": {
+        "licensed": "version: 1\ntype: support-packet\ngenerated_at: 1700000000123\nserver_version: 11.1.0\nserver_id: serverid111111111111111111\nlicense_id: licenseid11111111111111111\ncustomer_id: customerid1111111111111111\n",
+        "unlicensed": "version: 1\ntype: support-packet\ngenerated_at: 1700000000123\nserver_version: 11.1.0\nserver_id: serverid111111111111111111\nlicense_id: \"\"\ncustomer_id: \"\"\n"
+    },
+    "multierror": {
+        "nested": "3 errors occurred:\n\t* third\nwith newline\n\t* first\n\t* second\n\n",
+        "one": "1 error occurred:\n\t* first\n\n",
+        "restart": "1 error occurred:\n\t* second\n\n",
+        "two": "2 errors occurred:\n\t* first\n\t* second\n\n"
+    },
+    "permissions": {
+        "input_roles": [
+            {
+                "id": "roleid111111111111111111aa",
+                "name": "system_admin",
+                "display_name": "authentication.roles.global_admin.name",
+                "description": "desc: with colon",
+                "create_at": 1700000000000,
+                "update_at": 1700000000500,
+                "delete_at": 0,
+                "permissions": [
+                    "manage_system",
+                    "create_team"
+                ],
+                "scheme_managed": true,
+                "built_in": true,
+                "scheme_id": null
+            },
+            {
+                "id": "roleid222222222222222222bb",
+                "name": "team_user",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": "schemeid11111111111111111a"
+            },
+            {
+                "id": "roleid333333333333333333cc",
+                "name": "x",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": null,
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": ""
+            }
+        ],
+        "input_schemes": [
+            {
+                "id": "schemeid11111111111111111a",
+                "name": "sch",
+                "display_name": "Scheme",
+                "description": "multi\nline",
+                "create_at": 1700000000000,
+                "update_at": 1700000000001,
+                "delete_at": 1700000000002,
+                "scope": "team",
+                "default_team_admin_role": "ta",
+                "default_team_user_role": "tu",
+                "default_channel_admin_role": "ca",
+                "default_channel_user_role": "cu",
+                "default_team_guest_role": "tg",
+                "default_channel_guest_role": "cg",
+                "default_playbook_admin_role": "pa",
+                "default_playbook_member_role": "pm",
+                "default_run_admin_role": "ra",
+                "default_run_member_role": "rm"
+            }
+        ],
+        "no_schemes": "roles:\n- id: roleid111111111111111111aa\n  name: system_admin\n  display_name: \"********************************\"\n  description: \"********************************\"\n  create_at: \"2023-11-15T03:43:20+05:30\"\n  update_at: \"2023-11-15T03:43:20.5+05:30\"\n  delete_at: \"1970-01-01T05:30:00+05:30\"\n  permissions:\n  - manage_system\n  - create_team\n  scheme_managed: true\n  built_in: true\n  scheme_id: null\nschemes: []\n",
+        "yaml": "roles:\n- id: roleid111111111111111111aa\n  name: system_admin\n  display_name: \"********************************\"\n  description: \"********************************\"\n  create_at: \"2023-11-15T03:43:20+05:30\"\n  update_at: \"2023-11-15T03:43:20.5+05:30\"\n  delete_at: \"1970-01-01T05:30:00+05:30\"\n  permissions:\n  - manage_system\n  - create_team\n  scheme_managed: true\n  built_in: true\n  scheme_id: null\n- id: roleid222222222222222222bb\n  name: team_user\n  display_name: \"********************************\"\n  description: \"********************************\"\n  create_at: \"1970-01-01T05:30:00+05:30\"\n  update_at: \"1970-01-01T05:30:00+05:30\"\n  delete_at: \"1970-01-01T05:30:00+05:30\"\n  permissions: []\n  scheme_managed: false\n  built_in: false\n  scheme_id: schemeid11111111111111111a\n- id: roleid333333333333333333cc\n  name: x\n  display_name: \"********************************\"\n  description: \"********************************\"\n  create_at: \"1970-01-01T05:30:00+05:30\"\n  update_at: \"1970-01-01T05:30:00+05:30\"\n  delete_at: \"1970-01-01T05:30:00+05:30\"\n  permissions: []\n  scheme_managed: false\n  built_in: false\n  scheme_id: \"\"\nschemes:\n- id: schemeid11111111111111111a\n  name: \"********************************\"\n  display_name: \"********************************\"\n  description: \"********************************\"\n  create_at: \"2023-11-15T03:43:20+05:30\"\n  update_at: \"2023-11-15T03:43:20.001+05:30\"\n  delete_at: \"2023-11-15T03:43:20.002+05:30\"\n  scope: team\n  default_team_admin_role: ta\n  default_team_user_role: tu\n  default_channel_admin_role: ca\n  default_channel_user_role: cu\n  default_team_guest_role: tg\n  default_channel_guest_role: cg\n  default_playbook_admin_role: pa\n  default_playbook_member_role: pm\n  default_run_admin_role: ra\n  default_run_member_role: rm\n"
+    },
+    "plugin_list": {
+        "empty": "{\n    \"enabled\": null,\n    \"disabled\": null\n}",
+        "one": "{\n    \"enabled\": [\n        {\n            \"id\": \"a\\u003cb\\u003e\\u0026c\",\n            \"name\": \"N\",\n            \"version\": \"1.0.0\"\n        }\n    ],\n    \"disabled\": null\n}"
+    },
+    "plugin_settings_sanitize": {
+        "input": {
+            "emptysettings": {},
+            "noschema": {
+                "secret": "x"
+            },
+            "notinstalled": {
+                "a": "b"
+            },
+            "withschema": {
+                "other": 1,
+                "plain": "y",
+                "secret": "x",
+                "sectionsecret": "z"
+            }
+        },
+        "manifests": [
+            {
+                "id": "withschema",
+                "name": "",
+                "version": "",
+                "settings_schema": {
+                    "header": "",
+                    "footer": "",
+                    "settings": [
+                        {
+                            "key": "Secret",
+                            "display_name": "",
+                            "type": "",
+                            "help_text": "",
+                            "placeholder": "",
+                            "default": null,
+                            "hosting": "",
+                            "secret": true
+                        },
+                        {
+                            "key": "Plain",
+                            "display_name": "",
+                            "type": "",
+                            "help_text": "",
+                            "placeholder": "",
+                            "default": null,
+                            "hosting": "",
+                            "secret": false
+                        }
+                    ],
+                    "sections": [
+                        {
+                            "key": "s",
+                            "title": "",
+                            "subtitle": "",
+                            "settings": [
+                                {
+                                    "key": "SectionSecret",
+                                    "display_name": "",
+                                    "type": "",
+                                    "help_text": "",
+                                    "placeholder": "",
+                                    "default": null,
+                                    "hosting": "",
+                                    "secret": true
+                                }
+                            ],
+                            "header": "",
+                            "footer": "",
+                            "custom": false,
+                            "fallback": false
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "noschema",
+                "name": "",
+                "version": ""
+            }
+        ],
+        "with_manifests": {
+            "emptysettings": {},
+            "noschema": {
+                "secret": "x"
+            },
+            "withschema": {
+                "other": 1,
+                "plain": "y",
+                "secret": "********************************",
+                "sectionsecret": "********************************"
+            }
+        },
+        "with_nil": {
+            "emptysettings": {}
+        }
+    },
+    "sanitize_data_source": [
+        {
+            "driver": "postgres",
+            "input": "",
+            "output": ""
+        },
+        {
+            "driver": "mysql",
+            "input": "",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://mmuser:mostest@localhost/mattermost_test?sslmode=disable\u0026connect_timeout=10",
+            "output": "postgres://****:****@localhost/mattermost_test?connect_timeout=10\u0026sslmode=disable"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://mmuser:mostest@localhost/mattermost_test?sslmode=disable\u0026connect_timeout=10",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://mmuser:mostest@localhost:5432/mattermost_test",
+            "output": "postgres://****:****@localhost:5432/mattermost_test"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://mmuser:mostest@localhost:5432/mattermost_test",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://localhost/db?user=u\u0026password=p\u0026sslmode=require",
+            "output": "postgres://****:****@localhost/db?sslmode=require"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://localhost/db?user=u\u0026password=p\u0026sslmode=require",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://u@host/db",
+            "output": "postgres://****:****@host/db"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://u@host/db",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://u:p%40ss@host/db?application_name=a%20b",
+            "output": "postgres://****:****@host/db?application_name=a b"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://u:p%40ss@host/db?application_name=a%20b",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://host/db?b=2\u0026a=1\u0026a=0",
+            "output": "postgres://****:****@host/db?a=1\u0026a=0\u0026b=2"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://host/db?b=2\u0026a=1\u0026a=0",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "host=localhost user=mmuser password=secret dbname=mattermost",
+            "output": "//****:****@host=localhost user=mmuser password=secret dbname=mattermost"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "host=localhost user=mmuser password=secret dbname=mattermost",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "error": "parse \"::not a url\": missing protocol scheme",
+            "input": "::not a url",
+            "output": ""
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "::not a url",
+            "output": ""
+        },
+        {
+            "driver": "postgres",
+            "input": "postgres://u:p@[::1]:5432/db?search_path=x,y",
+            "output": "postgres://****:****@[::1]:5432/db?search_path=x,y"
+        },
+        {
+            "driver": "mysql",
+            "error": "invalid drivername: only postgres is supported",
+            "input": "postgres://u:p@[::1]:5432/db?search_path=x,y",
+            "output": ""
+        }
+    ],
+    "sanitize_file_name": [
+        {
+            "input": "",
+            "output": ""
+        },
+        {
+            "input": "Acme Corp.",
+            "output": "Acme_Corp"
+        },
+        {
+            "input": "  .Acme. ",
+            "output": "Acme"
+        },
+        {
+            "input": "a.b.c",
+            "output": "abc"
+        },
+        {
+            "input": "Ünïcødé Co",
+            "output": "_n_c_d__Co"
+        },
+        {
+            "input": "x/y\\z",
+            "output": "x_y_z"
+        },
+        {
+            "input": "tab\tco",
+            "output": "tab_co"
+        },
+        {
+            "input": "dash-and_underscore",
+            "output": "dash-and_underscore"
+        },
+        {
+            "input": "日本",
+            "output": "__"
+        },
+        {
+            "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "output": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "input": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "output": "____________________________________________________________"
+        },
+        {
+            "input": "..",
+            "output": ""
+        },
+        {
+            "input": ". .",
+            "output": ""
+        },
+        {
+            "input": "Mattermost Inc.",
+            "output": "Mattermost_Inc"
+        }
+    ],
+    "schema": {
+        "empty": "tables: []\n",
+        "yaml": "database_collation: en_US.utf8\ndatabase_encoding: UTF8\ntables:\n- name: posts\n  collation: default\n  options:\n    autovacuum_enabled: \"true\"\n    fillfactor: \"90\"\n  columns:\n  - name: id\n    data_type: character varying\n    max_length: 26\n    is_nullable: false\n  - name: props\n    data_type: jsonb\n    is_nullable: true\n  indexes:\n  - name: posts_pkey\n    definition: CREATE UNIQUE INDEX posts_pkey ON public.posts USING btree (id)\n- name: empty\n  columns: []\n"
+    },
+    "shapes": {
+        "bools": "t: true\nf: false\n",
+        "empty_map": "m: {}\n",
+        "empty_slice": "l: []\n",
+        "ints": "a: -1\nb: 0\nc: 9223372036854775807\n",
+        "map_of_maps": "x:\n  a: \"2\"\n  b: \"1\"\n\"y\": {}\nz: {}\n",
+        "multiline_deep": "a:\n  b:\n    c:\n    - a: |-\n        x\n        y\n      b:\n      - |-\n        p\n        q\n",
+        "multiline_in_seq": "s:\n- |-\n  a\n  b\n- |\n  c\n  d\n",
+        "nested_empty": "o:\n  i: {}\n",
+        "nil_map": "m: {}\n",
+        "nil_ptr": "p: null\n",
+        "nil_slice": "l: []\n",
+        "omitempty_empties": "keep: \"\"\n",
+        "omitempty_set": "s: s\ni: 1\nl:\n- a\nm:\n  k: v\np: 0\nt: 2024-01-02T03:04:05.6Z\nkeep: k\n",
+        "omitempty_zero": "keep: \"\"\n",
+        "ptr": "p: s\n",
+        "seq_of_maps": "s:\n- a: \"1\"\n  b:\n  - x\n  - \"y\"\n- a: \"2\"\n  b: []\n- a: \"3\"\n  b: []\n",
+        "seq_of_seqs": "s:\n- - a\n  - b\n- []\n- []\n- - c\n",
+        "sorted_map": "m:\n  \"10\": x\n  \"9\": \"y\"\n  B: \"3\"\n  _: \"4\"\n  a: \"1\"\n  b: \"2\"\n",
+        "string_map_any": "{}\n",
+        "time_nanos": "t: 2024-01-02T03:04:05.12Z\n",
+        "time_ptr_nil": "t: null\n",
+        "time_utc": "t: 2024-01-02T03:04:05Z\n",
+        "time_zero": "t: 0001-01-01T00:00:00Z\n",
+        "top_empty_struct": "{}\n",
+        "uints": "u: 18446744073709551615\n",
+        "zero_ptr": "p: 0\n"
+    },
+    "stats": {
+        "populated": "registered_users: 101\nactive_users: 102\ndaily_active_users: 103\nmonthly_active_users: 104\ndeactivated_users: 105\nguests: 106\nsingle_channel_guests: 107\nbot_accounts: 108\nposts: 109\nchannels: 110\nteams: 111\nslash_commands: 112\nincoming_webhooks: 113\noutgoing_webhooks: 114\n",
+        "zero": "registered_users: 0\nactive_users: 0\ndaily_active_users: 0\nmonthly_active_users: 0\ndeactivated_users: 0\nguests: 0\nsingle_channel_guests: 0\nbot_accounts: 0\nposts: 0\nchannels: 0\nteams: 0\nslash_commands: 0\nincoming_webhooks: 0\noutgoing_webhooks: 0\n"
+    },
+    "strings": [
+        {
+            "input": "",
+            "key": "\"\": 1\n",
+            "nested": "outer:\n  inner: \"\"\n  list:\n  - \"\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\"\n",
+            "top": "k: \"\"\n"
+        },
+        {
+            "input": "abc",
+            "key": "abc: 1\n",
+            "nested": "outer:\n  inner: abc\n  list:\n  - abc\n  - x\nseq:\n- name: \"n\"\n  value: abc\n",
+            "top": "k: abc\n"
+        },
+        {
+            "input": "a b",
+            "key": "a b: 1\n",
+            "nested": "outer:\n  inner: a b\n  list:\n  - a b\n  - x\nseq:\n- name: \"n\"\n  value: a b\n",
+            "top": "k: a b\n"
+        },
+        {
+            "input": " a",
+            "key": "\" a\": 1\n",
+            "nested": "outer:\n  inner: \" a\"\n  list:\n  - \" a\"\n  - x\nseq:\n- name: \"n\"\n  value: \" a\"\n",
+            "top": "k: \" a\"\n"
+        },
+        {
+            "input": "a ",
+            "key": "\"a \": 1\n",
+            "nested": "outer:\n  inner: \"a \"\n  list:\n  - \"a \"\n  - x\nseq:\n- name: \"n\"\n  value: \"a \"\n",
+            "top": "k: \"a \"\n"
+        },
+        {
+            "input": "true",
+            "key": "\"true\": 1\n",
+            "nested": "outer:\n  inner: \"true\"\n  list:\n  - \"true\"\n  - x\nseq:\n- name: \"n\"\n  value: \"true\"\n",
+            "top": "k: \"true\"\n"
+        },
+        {
+            "input": "True",
+            "key": "\"True\": 1\n",
+            "nested": "outer:\n  inner: \"True\"\n  list:\n  - \"True\"\n  - x\nseq:\n- name: \"n\"\n  value: \"True\"\n",
+            "top": "k: \"True\"\n"
+        },
+        {
+            "input": "TRUE",
+            "key": "\"TRUE\": 1\n",
+            "nested": "outer:\n  inner: \"TRUE\"\n  list:\n  - \"TRUE\"\n  - x\nseq:\n- name: \"n\"\n  value: \"TRUE\"\n",
+            "top": "k: \"TRUE\"\n"
+        },
+        {
+            "input": "false",
+            "key": "\"false\": 1\n",
+            "nested": "outer:\n  inner: \"false\"\n  list:\n  - \"false\"\n  - x\nseq:\n- name: \"n\"\n  value: \"false\"\n",
+            "top": "k: \"false\"\n"
+        },
+        {
+            "input": "yes",
+            "key": "\"yes\": 1\n",
+            "nested": "outer:\n  inner: \"yes\"\n  list:\n  - \"yes\"\n  - x\nseq:\n- name: \"n\"\n  value: \"yes\"\n",
+            "top": "k: \"yes\"\n"
+        },
+        {
+            "input": "Yes",
+            "key": "\"Yes\": 1\n",
+            "nested": "outer:\n  inner: \"Yes\"\n  list:\n  - \"Yes\"\n  - x\nseq:\n- name: \"n\"\n  value: \"Yes\"\n",
+            "top": "k: \"Yes\"\n"
+        },
+        {
+            "input": "no",
+            "key": "\"no\": 1\n",
+            "nested": "outer:\n  inner: \"no\"\n  list:\n  - \"no\"\n  - x\nseq:\n- name: \"n\"\n  value: \"no\"\n",
+            "top": "k: \"no\"\n"
+        },
+        {
+            "input": "NO",
+            "key": "\"NO\": 1\n",
+            "nested": "outer:\n  inner: \"NO\"\n  list:\n  - \"NO\"\n  - x\nseq:\n- name: \"n\"\n  value: \"NO\"\n",
+            "top": "k: \"NO\"\n"
+        },
+        {
+            "input": "on",
+            "key": "\"on\": 1\n",
+            "nested": "outer:\n  inner: \"on\"\n  list:\n  - \"on\"\n  - x\nseq:\n- name: \"n\"\n  value: \"on\"\n",
+            "top": "k: \"on\"\n"
+        },
+        {
+            "input": "Off",
+            "key": "\"Off\": 1\n",
+            "nested": "outer:\n  inner: \"Off\"\n  list:\n  - \"Off\"\n  - x\nseq:\n- name: \"n\"\n  value: \"Off\"\n",
+            "top": "k: \"Off\"\n"
+        },
+        {
+            "input": "y",
+            "key": "\"y\": 1\n",
+            "nested": "outer:\n  inner: \"y\"\n  list:\n  - \"y\"\n  - x\nseq:\n- name: \"n\"\n  value: \"y\"\n",
+            "top": "k: \"y\"\n"
+        },
+        {
+            "input": "Y",
+            "key": "\"Y\": 1\n",
+            "nested": "outer:\n  inner: \"Y\"\n  list:\n  - \"Y\"\n  - x\nseq:\n- name: \"n\"\n  value: \"Y\"\n",
+            "top": "k: \"Y\"\n"
+        },
+        {
+            "input": "n",
+            "key": "\"n\": 1\n",
+            "nested": "outer:\n  inner: \"n\"\n  list:\n  - \"n\"\n  - x\nseq:\n- name: \"n\"\n  value: \"n\"\n",
+            "top": "k: \"n\"\n"
+        },
+        {
+            "input": "N",
+            "key": "\"N\": 1\n",
+            "nested": "outer:\n  inner: \"N\"\n  list:\n  - \"N\"\n  - x\nseq:\n- name: \"n\"\n  value: \"N\"\n",
+            "top": "k: \"N\"\n"
+        },
+        {
+            "input": "null",
+            "key": "\"null\": 1\n",
+            "nested": "outer:\n  inner: \"null\"\n  list:\n  - \"null\"\n  - x\nseq:\n- name: \"n\"\n  value: \"null\"\n",
+            "top": "k: \"null\"\n"
+        },
+        {
+            "input": "Null",
+            "key": "\"Null\": 1\n",
+            "nested": "outer:\n  inner: \"Null\"\n  list:\n  - \"Null\"\n  - x\nseq:\n- name: \"n\"\n  value: \"Null\"\n",
+            "top": "k: \"Null\"\n"
+        },
+        {
+            "input": "NULL",
+            "key": "\"NULL\": 1\n",
+            "nested": "outer:\n  inner: \"NULL\"\n  list:\n  - \"NULL\"\n  - x\nseq:\n- name: \"n\"\n  value: \"NULL\"\n",
+            "top": "k: \"NULL\"\n"
+        },
+        {
+            "input": "~",
+            "key": "\"~\": 1\n",
+            "nested": "outer:\n  inner: \"~\"\n  list:\n  - \"~\"\n  - x\nseq:\n- name: \"n\"\n  value: \"~\"\n",
+            "top": "k: \"~\"\n"
+        },
+        {
+            "input": ".inf",
+            "key": ".inf: 1\n",
+            "nested": "outer:\n  inner: .inf\n  list:\n  - .inf\n  - x\nseq:\n- name: \"n\"\n  value: .inf\n",
+            "top": "k: .inf\n"
+        },
+        {
+            "input": "-.inf",
+            "key": "-.inf: 1\n",
+            "nested": "outer:\n  inner: -.inf\n  list:\n  - -.inf\n  - x\nseq:\n- name: \"n\"\n  value: -.inf\n",
+            "top": "k: -.inf\n"
+        },
+        {
+            "input": ".nan",
+            "key": ".nan: 1\n",
+            "nested": "outer:\n  inner: .nan\n  list:\n  - .nan\n  - x\nseq:\n- name: \"n\"\n  value: .nan\n",
+            "top": "k: .nan\n"
+        },
+        {
+            "input": ".NaN",
+            "key": ".NaN: 1\n",
+            "nested": "outer:\n  inner: .NaN\n  list:\n  - .NaN\n  - x\nseq:\n- name: \"n\"\n  value: .NaN\n",
+            "top": "k: .NaN\n"
+        },
+        {
+            "input": "NaN",
+            "key": "NaN: 1\n",
+            "nested": "outer:\n  inner: NaN\n  list:\n  - NaN\n  - x\nseq:\n- name: \"n\"\n  value: NaN\n",
+            "top": "k: NaN\n"
+        },
+        {
+            "input": "inf",
+            "key": "inf: 1\n",
+            "nested": "outer:\n  inner: inf\n  list:\n  - inf\n  - x\nseq:\n- name: \"n\"\n  value: inf\n",
+            "top": "k: inf\n"
+        },
+        {
+            "input": "0",
+            "key": "\"0\": 1\n",
+            "nested": "outer:\n  inner: \"0\"\n  list:\n  - \"0\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0\"\n",
+            "top": "k: \"0\"\n"
+        },
+        {
+            "input": "123",
+            "key": "\"123\": 1\n",
+            "nested": "outer:\n  inner: \"123\"\n  list:\n  - \"123\"\n  - x\nseq:\n- name: \"n\"\n  value: \"123\"\n",
+            "top": "k: \"123\"\n"
+        },
+        {
+            "input": "-123",
+            "key": "\"-123\": 1\n",
+            "nested": "outer:\n  inner: \"-123\"\n  list:\n  - \"-123\"\n  - x\nseq:\n- name: \"n\"\n  value: \"-123\"\n",
+            "top": "k: \"-123\"\n"
+        },
+        {
+            "input": "+123",
+            "key": "\"+123\": 1\n",
+            "nested": "outer:\n  inner: \"+123\"\n  list:\n  - \"+123\"\n  - x\nseq:\n- name: \"n\"\n  value: \"+123\"\n",
+            "top": "k: \"+123\"\n"
+        },
+        {
+            "input": "0123",
+            "key": "\"0123\": 1\n",
+            "nested": "outer:\n  inner: \"0123\"\n  list:\n  - \"0123\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0123\"\n",
+            "top": "k: \"0123\"\n"
+        },
+        {
+            "input": "0x1F",
+            "key": "\"0x1F\": 1\n",
+            "nested": "outer:\n  inner: \"0x1F\"\n  list:\n  - \"0x1F\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0x1F\"\n",
+            "top": "k: \"0x1F\"\n"
+        },
+        {
+            "input": "0o17",
+            "key": "\"0o17\": 1\n",
+            "nested": "outer:\n  inner: \"0o17\"\n  list:\n  - \"0o17\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0o17\"\n",
+            "top": "k: \"0o17\"\n"
+        },
+        {
+            "input": "0b101",
+            "key": "\"0b101\": 1\n",
+            "nested": "outer:\n  inner: \"0b101\"\n  list:\n  - \"0b101\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0b101\"\n",
+            "top": "k: \"0b101\"\n"
+        },
+        {
+            "input": "1_000",
+            "key": "\"1_000\": 1\n",
+            "nested": "outer:\n  inner: \"1_000\"\n  list:\n  - \"1_000\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1_000\"\n",
+            "top": "k: \"1_000\"\n"
+        },
+        {
+            "input": "_1",
+            "key": "_1: 1\n",
+            "nested": "outer:\n  inner: _1\n  list:\n  - _1\n  - x\nseq:\n- name: \"n\"\n  value: _1\n",
+            "top": "k: _1\n"
+        },
+        {
+            "input": "1.5",
+            "key": "\"1.5\": 1\n",
+            "nested": "outer:\n  inner: \"1.5\"\n  list:\n  - \"1.5\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1.5\"\n",
+            "top": "k: \"1.5\"\n"
+        },
+        {
+            "input": ".5",
+            "key": "\".5\": 1\n",
+            "nested": "outer:\n  inner: \".5\"\n  list:\n  - \".5\"\n  - x\nseq:\n- name: \"n\"\n  value: \".5\"\n",
+            "top": "k: \".5\"\n"
+        },
+        {
+            "input": "1.",
+            "key": "\"1.\": 1\n",
+            "nested": "outer:\n  inner: \"1.\"\n  list:\n  - \"1.\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1.\"\n",
+            "top": "k: \"1.\"\n"
+        },
+        {
+            "input": "1e5",
+            "key": "1e5: 1\n",
+            "nested": "outer:\n  inner: 1e5\n  list:\n  - 1e5\n  - x\nseq:\n- name: \"n\"\n  value: 1e5\n",
+            "top": "k: 1e5\n"
+        },
+        {
+            "input": "1E5",
+            "key": "1E5: 1\n",
+            "nested": "outer:\n  inner: 1E5\n  list:\n  - 1E5\n  - x\nseq:\n- name: \"n\"\n  value: 1E5\n",
+            "top": "k: 1E5\n"
+        },
+        {
+            "input": "1.5e3",
+            "key": "\"1.5e3\": 1\n",
+            "nested": "outer:\n  inner: \"1.5e3\"\n  list:\n  - \"1.5e3\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1.5e3\"\n",
+            "top": "k: \"1.5e3\"\n"
+        },
+        {
+            "input": "1e",
+            "key": "1e: 1\n",
+            "nested": "outer:\n  inner: 1e\n  list:\n  - 1e\n  - x\nseq:\n- name: \"n\"\n  value: 1e\n",
+            "top": "k: 1e\n"
+        },
+        {
+            "input": "12e3x",
+            "key": "12e3x: 1\n",
+            "nested": "outer:\n  inner: 12e3x\n  list:\n  - 12e3x\n  - x\nseq:\n- name: \"n\"\n  value: 12e3x\n",
+            "top": "k: 12e3x\n"
+        },
+        {
+            "input": "1.2.3",
+            "key": "1.2.3: 1\n",
+            "nested": "outer:\n  inner: 1.2.3\n  list:\n  - 1.2.3\n  - x\nseq:\n- name: \"n\"\n  value: 1.2.3\n",
+            "top": "k: 1.2.3\n"
+        },
+        {
+            "input": "9223372036854775808",
+            "key": "\"9223372036854775808\": 1\n",
+            "nested": "outer:\n  inner: \"9223372036854775808\"\n  list:\n  - \"9223372036854775808\"\n  - x\nseq:\n- name: \"n\"\n  value: \"9223372036854775808\"\n",
+            "top": "k: \"9223372036854775808\"\n"
+        },
+        {
+            "input": "18446744073709551616",
+            "key": "\"18446744073709551616\": 1\n",
+            "nested": "outer:\n  inner: \"18446744073709551616\"\n  list:\n  - \"18446744073709551616\"\n  - x\nseq:\n- name: \"n\"\n  value: \"18446744073709551616\"\n",
+            "top": "k: \"18446744073709551616\"\n"
+        },
+        {
+            "input": "-9223372036854775809",
+            "key": "\"-9223372036854775809\": 1\n",
+            "nested": "outer:\n  inner: \"-9223372036854775809\"\n  list:\n  - \"-9223372036854775809\"\n  - x\nseq:\n- name: \"n\"\n  value: \"-9223372036854775809\"\n",
+            "top": "k: \"-9223372036854775809\"\n"
+        },
+        {
+            "input": "99999999999999999999999",
+            "key": "\"99999999999999999999999\": 1\n",
+            "nested": "outer:\n  inner: \"99999999999999999999999\"\n  list:\n  - \"99999999999999999999999\"\n  - x\nseq:\n- name: \"n\"\n  value: \"99999999999999999999999\"\n",
+            "top": "k: \"99999999999999999999999\"\n"
+        },
+        {
+            "input": "1e999",
+            "key": "1e999: 1\n",
+            "nested": "outer:\n  inner: 1e999\n  list:\n  - 1e999\n  - x\nseq:\n- name: \"n\"\n  value: 1e999\n",
+            "top": "k: 1e999\n"
+        },
+        {
+            "input": "0x",
+            "key": "0x: 1\n",
+            "nested": "outer:\n  inner: 0x\n  list:\n  - 0x\n  - x\nseq:\n- name: \"n\"\n  value: 0x\n",
+            "top": "k: 0x\n"
+        },
+        {
+            "input": "0b",
+            "key": "0b: 1\n",
+            "nested": "outer:\n  inner: 0b\n  list:\n  - 0b\n  - x\nseq:\n- name: \"n\"\n  value: 0b\n",
+            "top": "k: 0b\n"
+        },
+        {
+            "input": "0o",
+            "key": "0o: 1\n",
+            "nested": "outer:\n  inner: 0o\n  list:\n  - 0o\n  - x\nseq:\n- name: \"n\"\n  value: 0o\n",
+            "top": "k: 0o\n"
+        },
+        {
+            "input": "-",
+            "key": "\"-\": 1\n",
+            "nested": "outer:\n  inner: \"-\"\n  list:\n  - \"-\"\n  - x\nseq:\n- name: \"n\"\n  value: \"-\"\n",
+            "top": "k: \"-\"\n"
+        },
+        {
+            "input": "--",
+            "key": "--: 1\n",
+            "nested": "outer:\n  inner: --\n  list:\n  - --\n  - x\nseq:\n- name: \"n\"\n  value: --\n",
+            "top": "k: --\n"
+        },
+        {
+            "input": "- a",
+            "key": "\"- a\": 1\n",
+            "nested": "outer:\n  inner: \"- a\"\n  list:\n  - \"- a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"- a\"\n",
+            "top": "k: \"- a\"\n"
+        },
+        {
+            "input": "-a",
+            "key": "-a: 1\n",
+            "nested": "outer:\n  inner: -a\n  list:\n  - -a\n  - x\nseq:\n- name: \"n\"\n  value: -a\n",
+            "top": "k: -a\n"
+        },
+        {
+            "input": "a-",
+            "key": "a-: 1\n",
+            "nested": "outer:\n  inner: a-\n  list:\n  - a-\n  - x\nseq:\n- name: \"n\"\n  value: a-\n",
+            "top": "k: a-\n"
+        },
+        {
+            "input": "a - b",
+            "key": "\"a - b\": 1\n",
+            "nested": "outer:\n  inner: \"a - b\"\n  list:\n  - \"a - b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a - b\"\n",
+            "top": "k: \"a - b\"\n"
+        },
+        {
+            "input": "a- b",
+            "key": "\"a- b\": 1\n",
+            "nested": "outer:\n  inner: \"a- b\"\n  list:\n  - \"a- b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a- b\"\n",
+            "top": "k: \"a- b\"\n"
+        },
+        {
+            "input": "a -b",
+            "key": "a -b: 1\n",
+            "nested": "outer:\n  inner: a -b\n  list:\n  - a -b\n  - x\nseq:\n- name: \"n\"\n  value: a -b\n",
+            "top": "k: a -b\n"
+        },
+        {
+            "input": ":",
+            "key": "\":\": 1\n",
+            "nested": "outer:\n  inner: \":\"\n  list:\n  - \":\"\n  - x\nseq:\n- name: \"n\"\n  value: \":\"\n",
+            "top": "k: \":\"\n"
+        },
+        {
+            "input": "a:",
+            "key": "\"a:\": 1\n",
+            "nested": "outer:\n  inner: \"a:\"\n  list:\n  - \"a:\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a:\"\n",
+            "top": "k: \"a:\"\n"
+        },
+        {
+            "input": "a: b",
+            "key": "\"a: b\": 1\n",
+            "nested": "outer:\n  inner: \"a: b\"\n  list:\n  - \"a: b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a: b\"\n",
+            "top": "k: \"a: b\"\n"
+        },
+        {
+            "input": "a:b",
+            "key": "a:b: 1\n",
+            "nested": "outer:\n  inner: a:b\n  list:\n  - a:b\n  - x\nseq:\n- name: \"n\"\n  value: a:b\n",
+            "top": "k: a:b\n"
+        },
+        {
+            "input": "a :b",
+            "key": "a :b: 1\n",
+            "nested": "outer:\n  inner: a :b\n  list:\n  - a :b\n  - x\nseq:\n- name: \"n\"\n  value: a :b\n",
+            "top": "k: a :b\n"
+        },
+        {
+            "input": "http://x.y/z",
+            "key": "http://x.y/z: 1\n",
+            "nested": "outer:\n  inner: http://x.y/z\n  list:\n  - http://x.y/z\n  - x\nseq:\n- name: \"n\"\n  value: http://x.y/z\n",
+            "top": "k: http://x.y/z\n"
+        },
+        {
+            "input": "#",
+            "key": "\"#\": 1\n",
+            "nested": "outer:\n  inner: \"#\"\n  list:\n  - \"#\"\n  - x\nseq:\n- name: \"n\"\n  value: \"#\"\n",
+            "top": "k: \"#\"\n"
+        },
+        {
+            "input": "a#b",
+            "key": "\"a#b\": 1\n",
+            "nested": "outer:\n  inner: \"a#b\"\n  list:\n  - \"a#b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a#b\"\n",
+            "top": "k: \"a#b\"\n"
+        },
+        {
+            "input": "a #b",
+            "key": "\"a #b\": 1\n",
+            "nested": "outer:\n  inner: \"a #b\"\n  list:\n  - \"a #b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a #b\"\n",
+            "top": "k: \"a #b\"\n"
+        },
+        {
+            "input": "a\\b",
+            "key": "\"a\\\\b\": 1\n",
+            "nested": "outer:\n  inner: \"a\\\\b\"\n  list:\n  - \"a\\\\b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a\\\\b\"\n",
+            "top": "k: \"a\\\\b\"\n"
+        },
+        {
+            "input": "*x",
+            "key": "\"*x\": 1\n",
+            "nested": "outer:\n  inner: \"*x\"\n  list:\n  - \"*x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"*x\"\n",
+            "top": "k: \"*x\"\n"
+        },
+        {
+            "input": "\u0026x",
+            "key": "\"\u0026x\": 1\n",
+            "nested": "outer:\n  inner: \"\u0026x\"\n  list:\n  - \"\u0026x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u0026x\"\n",
+            "top": "k: \"\u0026x\"\n"
+        },
+        {
+            "input": "!x",
+            "key": "\"!x\": 1\n",
+            "nested": "outer:\n  inner: \"!x\"\n  list:\n  - \"!x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"!x\"\n",
+            "top": "k: \"!x\"\n"
+        },
+        {
+            "input": "|x",
+            "key": "\"|x\": 1\n",
+            "nested": "outer:\n  inner: \"|x\"\n  list:\n  - \"|x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"|x\"\n",
+            "top": "k: \"|x\"\n"
+        },
+        {
+            "input": "\u003ex",
+            "key": "\"\u003ex\": 1\n",
+            "nested": "outer:\n  inner: \"\u003ex\"\n  list:\n  - \"\u003ex\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u003ex\"\n",
+            "top": "k: \"\u003ex\"\n"
+        },
+        {
+            "input": "%x",
+            "key": "\"%x\": 1\n",
+            "nested": "outer:\n  inner: \"%x\"\n  list:\n  - \"%x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"%x\"\n",
+            "top": "k: \"%x\"\n"
+        },
+        {
+            "input": "'x",
+            "key": "\"'x\": 1\n",
+            "nested": "outer:\n  inner: \"'x\"\n  list:\n  - \"'x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"'x\"\n",
+            "top": "k: \"'x\"\n"
+        },
+        {
+            "input": "\"x",
+            "key": "\"\\\"x\": 1\n",
+            "nested": "outer:\n  inner: \"\\\"x\"\n  list:\n  - \"\\\"x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\\\"x\"\n",
+            "top": "k: \"\\\"x\"\n"
+        },
+        {
+            "input": "@x",
+            "key": "\"@x\": 1\n",
+            "nested": "outer:\n  inner: \"@x\"\n  list:\n  - \"@x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"@x\"\n",
+            "top": "k: \"@x\"\n"
+        },
+        {
+            "input": "`x",
+            "key": "\"`x\": 1\n",
+            "nested": "outer:\n  inner: \"`x\"\n  list:\n  - \"`x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"`x\"\n",
+            "top": "k: \"`x\"\n"
+        },
+        {
+            "input": "[x]",
+            "key": "\"[x]\": 1\n",
+            "nested": "outer:\n  inner: \"[x]\"\n  list:\n  - \"[x]\"\n  - x\nseq:\n- name: \"n\"\n  value: \"[x]\"\n",
+            "top": "k: \"[x]\"\n"
+        },
+        {
+            "input": "{x}",
+            "key": "\"{x}\": 1\n",
+            "nested": "outer:\n  inner: \"{x}\"\n  list:\n  - \"{x}\"\n  - x\nseq:\n- name: \"n\"\n  value: \"{x}\"\n",
+            "top": "k: \"{x}\"\n"
+        },
+        {
+            "input": "]x",
+            "key": "\"]x\": 1\n",
+            "nested": "outer:\n  inner: \"]x\"\n  list:\n  - \"]x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"]x\"\n",
+            "top": "k: \"]x\"\n"
+        },
+        {
+            "input": "}x",
+            "key": "\"}x\": 1\n",
+            "nested": "outer:\n  inner: \"}x\"\n  list:\n  - \"}x\"\n  - x\nseq:\n- name: \"n\"\n  value: \"}x\"\n",
+            "top": "k: \"}x\"\n"
+        },
+        {
+            "input": ",x",
+            "key": "\",x\": 1\n",
+            "nested": "outer:\n  inner: \",x\"\n  list:\n  - \",x\"\n  - x\nseq:\n- name: \"n\"\n  value: \",x\"\n",
+            "top": "k: \",x\"\n"
+        },
+        {
+            "input": "x,",
+            "key": "x,: 1\n",
+            "nested": "outer:\n  inner: x,\n  list:\n  - x,\n  - x\nseq:\n- name: \"n\"\n  value: x,\n",
+            "top": "k: x,\n"
+        },
+        {
+            "input": "x]",
+            "key": "x]: 1\n",
+            "nested": "outer:\n  inner: x]\n  list:\n  - x]\n  - x\nseq:\n- name: \"n\"\n  value: x]\n",
+            "top": "k: x]\n"
+        },
+        {
+            "input": "x}",
+            "key": "x}: 1\n",
+            "nested": "outer:\n  inner: x}\n  list:\n  - x}\n  - x\nseq:\n- name: \"n\"\n  value: x}\n",
+            "top": "k: x}\n"
+        },
+        {
+            "input": "?x",
+            "key": "?x: 1\n",
+            "nested": "outer:\n  inner: ?x\n  list:\n  - ?x\n  - x\nseq:\n- name: \"n\"\n  value: ?x\n",
+            "top": "k: ?x\n"
+        },
+        {
+            "input": "=",
+            "key": "=: 1\n",
+            "nested": "outer:\n  inner: =\n  list:\n  - =\n  - x\nseq:\n- name: \"n\"\n  value: =\n",
+            "top": "k: =\n"
+        },
+        {
+            "input": "a=b",
+            "key": "a=b: 1\n",
+            "nested": "outer:\n  inner: a=b\n  list:\n  - a=b\n  - x\nseq:\n- name: \"n\"\n  value: a=b\n",
+            "top": "k: a=b\n"
+        },
+        {
+            "input": "2006-01-02",
+            "key": "\"2006-01-02\": 1\n",
+            "nested": "outer:\n  inner: \"2006-01-02\"\n  list:\n  - \"2006-01-02\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2006-01-02\"\n",
+            "top": "k: \"2006-01-02\"\n"
+        },
+        {
+            "input": "2006-01-02T15:04:05Z",
+            "key": "\"2006-01-02T15:04:05Z\": 1\n",
+            "nested": "outer:\n  inner: \"2006-01-02T15:04:05Z\"\n  list:\n  - \"2006-01-02T15:04:05Z\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2006-01-02T15:04:05Z\"\n",
+            "top": "k: \"2006-01-02T15:04:05Z\"\n"
+        },
+        {
+            "input": "2006-01-02t15:04:05Z",
+            "key": "\"2006-01-02t15:04:05Z\": 1\n",
+            "nested": "outer:\n  inner: \"2006-01-02t15:04:05Z\"\n  list:\n  - \"2006-01-02t15:04:05Z\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2006-01-02t15:04:05Z\"\n",
+            "top": "k: \"2006-01-02t15:04:05Z\"\n"
+        },
+        {
+            "input": "2006-01-02T15:04:05.999999999+05:30",
+            "key": "\"2006-01-02T15:04:05.999999999+05:30\": 1\n",
+            "nested": "outer:\n  inner: \"2006-01-02T15:04:05.999999999+05:30\"\n  list:\n  - \"2006-01-02T15:04:05.999999999+05:30\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2006-01-02T15:04:05.999999999+05:30\"\n",
+            "top": "k: \"2006-01-02T15:04:05.999999999+05:30\"\n"
+        },
+        {
+            "input": "2006-01-02 15:04:05",
+            "key": "\"2006-01-02 15:04:05\": 1\n",
+            "nested": "outer:\n  inner: \"2006-01-02 15:04:05\"\n  list:\n  - \"2006-01-02 15:04:05\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2006-01-02 15:04:05\"\n",
+            "top": "k: \"2006-01-02 15:04:05\"\n"
+        },
+        {
+            "input": "15:4",
+            "key": "\"15:4\": 1\n",
+            "nested": "outer:\n  inner: \"15:4\"\n  list:\n  - \"15:4\"\n  - x\nseq:\n- name: \"n\"\n  value: \"15:4\"\n",
+            "top": "k: \"15:4\"\n"
+        },
+        {
+            "input": "12:30",
+            "key": "\"12:30\": 1\n",
+            "nested": "outer:\n  inner: \"12:30\"\n  list:\n  - \"12:30\"\n  - x\nseq:\n- name: \"n\"\n  value: \"12:30\"\n",
+            "top": "k: \"12:30\"\n"
+        },
+        {
+            "input": "1:2",
+            "key": "\"1:2\": 1\n",
+            "nested": "outer:\n  inner: \"1:2\"\n  list:\n  - \"1:2\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1:2\"\n",
+            "top": "k: \"1:2\"\n"
+        },
+        {
+            "input": "25:61",
+            "key": "25:61: 1\n",
+            "nested": "outer:\n  inner: 25:61\n  list:\n  - 25:61\n  - x\nseq:\n- name: \"n\"\n  value: 25:61\n",
+            "top": "k: 25:61\n"
+        },
+        {
+            "input": "2006-13-45",
+            "key": "2006-13-45: 1\n",
+            "nested": "outer:\n  inner: 2006-13-45\n  list:\n  - 2006-13-45\n  - x\nseq:\n- name: \"n\"\n  value: 2006-13-45\n",
+            "top": "k: 2006-13-45\n"
+        },
+        {
+            "input": "multi\nline",
+            "key": "|-\n  multi\n  line: 1\n",
+            "nested": "outer:\n  inner: |-\n    multi\n    line\n  list:\n  - |-\n    multi\n    line\n  - x\nseq:\n- name: \"n\"\n  value: |-\n    multi\n    line\n",
+            "top": "k: |-\n  multi\n  line\n"
+        },
+        {
+            "input": "multi\nline\n",
+            "key": "|\n  multi\n  line: 1\n",
+            "nested": "outer:\n  inner: |\n    multi\n    line\n  list:\n  - |\n    multi\n    line\n  - x\nseq:\n- name: \"n\"\n  value: |\n    multi\n    line\n",
+            "top": "k: |\n  multi\n  line\n"
+        },
+        {
+            "input": "multi\n\n",
+            "key": "|+\n  multi\n: 1\n",
+            "nested": "outer:\n  inner: |+\n    multi\n\n  list:\n  - |+\n    multi\n\n  - x\nseq:\n- name: \"n\"\n  value: |+\n    multi\n\n",
+            "top": "k: |+\n  multi\n\n"
+        },
+        {
+            "input": "\nlead",
+            "key": "|-\n  \n  lead: 1\n",
+            "nested": "outer:\n  inner: |-\n    \n    lead\n  list:\n  - |-\n\n    lead\n  - x\nseq:\n- name: \"n\"\n  value: |-\n    \n    lead\n",
+            "top": "k: |-\n  \n  lead\n"
+        },
+        {
+            "input": "a\n b",
+            "key": "|-\n  a\n   b: 1\n",
+            "nested": "outer:\n  inner: |-\n    a\n     b\n  list:\n  - |-\n    a\n     b\n  - x\nseq:\n- name: \"n\"\n  value: |-\n    a\n     b\n",
+            "top": "k: |-\n  a\n   b\n"
+        },
+        {
+            "input": "x\r\ny",
+            "key": "|-\r\n  x\r\n  y: 1\n",
+            "nested": "outer:\n  inner: |-\r\n    x\r\n    y\n  list:\n  - |-\r\n    x\r\n    y\n  - x\nseq:\n- name: \"n\"\n  value: |-\r\n    x\r\n    y\n",
+            "top": "k: |-\r\n  x\r\n  y\n"
+        },
+        {
+            "input": "x\ry",
+            "key": "|-\r  x\r  y: 1\n",
+            "nested": "outer:\n  inner: |-\r    x\r    y\n  list:\n  - |-\r    x\r    y\n  - x\nseq:\n- name: \"n\"\n  value: |-\r  x\r  y\n",
+            "top": "k: |-\r  x\r  y\n"
+        },
+        {
+            "input": "tab\there",
+            "key": "tab\there: 1\n",
+            "nested": "outer:\n  inner: tab\there\n  list:\n  - tab\there\n  - x\nseq:\n- name: \"n\"\n  value: tab\there\n",
+            "top": "k: tab\there\n"
+        },
+        {
+            "input": "\u0001",
+            "key": "\u0001: 1\n",
+            "nested": "outer:\n  inner: \u0001\n  list:\n  - \u0001\n  - x\nseq:\n- name: \"n\"\n  value: \u0001\n",
+            "top": "k: \u0001\n"
+        },
+        {
+            "input": "",
+            "key": ": 1\n",
+            "nested": "outer:\n  inner: \n  list:\n  - \n  - x\nseq:\n- name: \"n\"\n  value: \n",
+            "top": "k: \n"
+        },
+        {
+            "input": "héllo",
+            "key": "héllo: 1\n",
+            "nested": "outer:\n  inner: héllo\n  list:\n  - héllo\n  - x\nseq:\n- name: \"n\"\n  value: héllo\n",
+            "top": "k: héllo\n"
+        },
+        {
+            "input": "日本",
+            "key": "日本: 1\n",
+            "nested": "outer:\n  inner: 日本\n  list:\n  - 日本\n  - x\nseq:\n- name: \"n\"\n  value: 日本\n",
+            "top": "k: 日本\n"
+        },
+        {
+            "input": "\u2028",
+            "key": "\u2028: 1\n",
+            "nested": "outer:\n  inner: \u2028\n  list:\n  - \u2028\n  - x\nseq:\n- name: \"n\"\n  value: \u2028\n",
+            "top": "k: \u2028\n"
+        },
+        {
+            "input": "a'b",
+            "key": "a'b: 1\n",
+            "nested": "outer:\n  inner: a'b\n  list:\n  - a'b\n  - x\nseq:\n- name: \"n\"\n  value: a'b\n",
+            "top": "k: a'b\n"
+        },
+        {
+            "input": "a\"b",
+            "key": "a\"b: 1\n",
+            "nested": "outer:\n  inner: a\"b\n  list:\n  - a\"b\n  - x\nseq:\n- name: \"n\"\n  value: a\"b\n",
+            "top": "k: a\"b\n"
+        },
+        {
+            "input": "CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat)",
+            "key": "CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat): 1\n",
+            "nested": "outer:\n  inner: CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat)\n  list:\n  - CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat)\n  - x\nseq:\n- name: \"n\"\n  value: CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat)\n",
+            "top": "k: CREATE UNIQUE INDEX idx_posts ON public.posts USING btree (id, createat)\n"
+        },
+        {
+            "input": "character varying",
+            "key": "character varying: 1\n",
+            "nested": "outer:\n  inner: character varying\n  list:\n  - character varying\n  - x\nseq:\n- name: \"n\"\n  value: character varying\n",
+            "top": "k: character varying\n"
+        },
+        {
+            "input": "en_US.utf8",
+            "key": "en_US.utf8: 1\n",
+            "nested": "outer:\n  inner: en_US.utf8\n  list:\n  - en_US.utf8\n  - x\nseq:\n- name: \"n\"\n  value: en_US.utf8\n",
+            "top": "k: en_US.utf8\n"
+        },
+        {
+            "input": "UTF8",
+            "key": "UTF8: 1\n",
+            "nested": "outer:\n  inner: UTF8\n  list:\n  - UTF8\n  - x\nseq:\n- name: \"n\"\n  value: UTF8\n",
+            "top": "k: UTF8\n"
+        },
+        {
+            "input": "C",
+            "key": "C: 1\n",
+            "nested": "outer:\n  inner: C\n  list:\n  - C\n  - x\nseq:\n- name: \"n\"\n  value: C\n",
+            "top": "k: C\n"
+        },
+        {
+            "input": "json",
+            "key": "json: 1\n",
+            "nested": "outer:\n  inner: json\n  list:\n  - json\n  - x\nseq:\n- name: \"n\"\n  value: json\n",
+            "top": "k: json\n"
+        },
+        {
+            "input": "jsonb",
+            "key": "jsonb: 1\n",
+            "nested": "outer:\n  inner: jsonb\n  list:\n  - jsonb\n  - x\nseq:\n- name: \"n\"\n  value: jsonb\n",
+            "top": "k: jsonb\n"
+        },
+        {
+            "input": "timestamp",
+            "key": "timestamp: 1\n",
+            "nested": "outer:\n  inner: timestamp\n  list:\n  - timestamp\n  - x\nseq:\n- name: \"n\"\n  value: timestamp\n",
+            "top": "k: timestamp\n"
+        },
+        {
+            "input": "sanitized",
+            "key": "sanitized: 1\n",
+            "nested": "outer:\n  inner: sanitized\n  list:\n  - sanitized\n  - x\nseq:\n- name: \"n\"\n  value: sanitized\n",
+            "top": "k: sanitized\n"
+        },
+        {
+            "input": "********************************",
+            "key": "\"********************************\": 1\n",
+            "nested": "outer:\n  inner: \"********************************\"\n  list:\n  - \"********************************\"\n  - x\nseq:\n- name: \"n\"\n  value: \"********************************\"\n",
+            "top": "k: \"********************************\"\n"
+        },
+        {
+            "input": "system_admin",
+            "key": "system_admin: 1\n",
+            "nested": "outer:\n  inner: system_admin\n  list:\n  - system_admin\n  - x\nseq:\n- name: \"n\"\n  value: system_admin\n",
+            "top": "k: system_admin\n"
+        },
+        {
+            "input": "mm_support_packet",
+            "key": "mm_support_packet: 1\n",
+            "nested": "outer:\n  inner: mm_support_packet\n  list:\n  - mm_support_packet\n  - x\nseq:\n- name: \"n\"\n  value: mm_support_packet\n",
+            "top": "k: mm_support_packet\n"
+        },
+        {
+            "input": "a\u0000b",
+            "key": "a\u0000b: 1\n",
+            "nested": "outer:\n  inner: a\u0000b\n  list:\n  - a\u0000b\n  - x\nseq:\n- name: \"n\"\n  value: a\u0000b\n",
+            "top": "k: a\u0000b\n"
+        },
+        {
+            "input": " ",
+            "key": "\" \": 1\n",
+            "nested": "outer:\n  inner: \" \"\n  list:\n  - \" \"\n  - x\nseq:\n- name: \"n\"\n  value: \" \"\n",
+            "top": "k: \" \"\n"
+        },
+        {
+            "input": " a",
+            "key": "\" a\": 1\n",
+            "nested": "outer:\n  inner: \" a\"\n  list:\n  - \" a\"\n  - x\nseq:\n- name: \"n\"\n  value: \" a\"\n",
+            "top": "k: \" a\"\n"
+        },
+        {
+            "input": "a b",
+            "key": "a b: 1\n",
+            "nested": "outer:\n  inner: a b\n  list:\n  - a b\n  - x\nseq:\n- name: \"n\"\n  value: a b\n",
+            "top": "k: a b\n"
+        },
+        {
+            "input": "a ",
+            "key": "\"a \": 1\n",
+            "nested": "outer:\n  inner: \"a \"\n  list:\n  - \"a \"\n  - x\nseq:\n- name: \"n\"\n  value: \"a \"\n",
+            "top": "k: \"a \"\n"
+        },
+        {
+            "input": "!",
+            "key": "\"!\": 1\n",
+            "nested": "outer:\n  inner: \"!\"\n  list:\n  - \"!\"\n  - x\nseq:\n- name: \"n\"\n  value: \"!\"\n",
+            "top": "k: \"!\"\n"
+        },
+        {
+            "input": "!a",
+            "key": "\"!a\": 1\n",
+            "nested": "outer:\n  inner: \"!a\"\n  list:\n  - \"!a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"!a\"\n",
+            "top": "k: \"!a\"\n"
+        },
+        {
+            "input": "a!b",
+            "key": "a!b: 1\n",
+            "nested": "outer:\n  inner: a!b\n  list:\n  - a!b\n  - x\nseq:\n- name: \"n\"\n  value: a!b\n",
+            "top": "k: a!b\n"
+        },
+        {
+            "input": "a!",
+            "key": "a!: 1\n",
+            "nested": "outer:\n  inner: a!\n  list:\n  - a!\n  - x\nseq:\n- name: \"n\"\n  value: a!\n",
+            "top": "k: a!\n"
+        },
+        {
+            "input": "\"",
+            "key": "\"\\\"\": 1\n",
+            "nested": "outer:\n  inner: \"\\\"\"\n  list:\n  - \"\\\"\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\\\"\"\n",
+            "top": "k: \"\\\"\"\n"
+        },
+        {
+            "input": "\"a",
+            "key": "\"\\\"a\": 1\n",
+            "nested": "outer:\n  inner: \"\\\"a\"\n  list:\n  - \"\\\"a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\\\"a\"\n",
+            "top": "k: \"\\\"a\"\n"
+        },
+        {
+            "input": "a\"b",
+            "key": "a\"b: 1\n",
+            "nested": "outer:\n  inner: a\"b\n  list:\n  - a\"b\n  - x\nseq:\n- name: \"n\"\n  value: a\"b\n",
+            "top": "k: a\"b\n"
+        },
+        {
+            "input": "a\"",
+            "key": "a\": 1\n",
+            "nested": "outer:\n  inner: a\"\n  list:\n  - a\"\n  - x\nseq:\n- name: \"n\"\n  value: a\"\n",
+            "top": "k: a\"\n"
+        },
+        {
+            "input": "#",
+            "key": "\"#\": 1\n",
+            "nested": "outer:\n  inner: \"#\"\n  list:\n  - \"#\"\n  - x\nseq:\n- name: \"n\"\n  value: \"#\"\n",
+            "top": "k: \"#\"\n"
+        },
+        {
+            "input": "#a",
+            "key": "\"#a\": 1\n",
+            "nested": "outer:\n  inner: \"#a\"\n  list:\n  - \"#a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"#a\"\n",
+            "top": "k: \"#a\"\n"
+        },
+        {
+            "input": "a#b",
+            "key": "\"a#b\": 1\n",
+            "nested": "outer:\n  inner: \"a#b\"\n  list:\n  - \"a#b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a#b\"\n",
+            "top": "k: \"a#b\"\n"
+        },
+        {
+            "input": "a#",
+            "key": "\"a#\": 1\n",
+            "nested": "outer:\n  inner: \"a#\"\n  list:\n  - \"a#\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a#\"\n",
+            "top": "k: \"a#\"\n"
+        },
+        {
+            "input": "$",
+            "key": "$: 1\n",
+            "nested": "outer:\n  inner: $\n  list:\n  - $\n  - x\nseq:\n- name: \"n\"\n  value: $\n",
+            "top": "k: $\n"
+        },
+        {
+            "input": "$a",
+            "key": "$a: 1\n",
+            "nested": "outer:\n  inner: $a\n  list:\n  - $a\n  - x\nseq:\n- name: \"n\"\n  value: $a\n",
+            "top": "k: $a\n"
+        },
+        {
+            "input": "a$b",
+            "key": "a$b: 1\n",
+            "nested": "outer:\n  inner: a$b\n  list:\n  - a$b\n  - x\nseq:\n- name: \"n\"\n  value: a$b\n",
+            "top": "k: a$b\n"
+        },
+        {
+            "input": "a$",
+            "key": "a$: 1\n",
+            "nested": "outer:\n  inner: a$\n  list:\n  - a$\n  - x\nseq:\n- name: \"n\"\n  value: a$\n",
+            "top": "k: a$\n"
+        },
+        {
+            "input": "%",
+            "key": "\"%\": 1\n",
+            "nested": "outer:\n  inner: \"%\"\n  list:\n  - \"%\"\n  - x\nseq:\n- name: \"n\"\n  value: \"%\"\n",
+            "top": "k: \"%\"\n"
+        },
+        {
+            "input": "%a",
+            "key": "\"%a\": 1\n",
+            "nested": "outer:\n  inner: \"%a\"\n  list:\n  - \"%a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"%a\"\n",
+            "top": "k: \"%a\"\n"
+        },
+        {
+            "input": "a%b",
+            "key": "a%b: 1\n",
+            "nested": "outer:\n  inner: a%b\n  list:\n  - a%b\n  - x\nseq:\n- name: \"n\"\n  value: a%b\n",
+            "top": "k: a%b\n"
+        },
+        {
+            "input": "a%",
+            "key": "a%: 1\n",
+            "nested": "outer:\n  inner: a%\n  list:\n  - a%\n  - x\nseq:\n- name: \"n\"\n  value: a%\n",
+            "top": "k: a%\n"
+        },
+        {
+            "input": "\u0026",
+            "key": "\"\u0026\": 1\n",
+            "nested": "outer:\n  inner: \"\u0026\"\n  list:\n  - \"\u0026\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u0026\"\n",
+            "top": "k: \"\u0026\"\n"
+        },
+        {
+            "input": "\u0026a",
+            "key": "\"\u0026a\": 1\n",
+            "nested": "outer:\n  inner: \"\u0026a\"\n  list:\n  - \"\u0026a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u0026a\"\n",
+            "top": "k: \"\u0026a\"\n"
+        },
+        {
+            "input": "a\u0026b",
+            "key": "a\u0026b: 1\n",
+            "nested": "outer:\n  inner: a\u0026b\n  list:\n  - a\u0026b\n  - x\nseq:\n- name: \"n\"\n  value: a\u0026b\n",
+            "top": "k: a\u0026b\n"
+        },
+        {
+            "input": "a\u0026",
+            "key": "a\u0026: 1\n",
+            "nested": "outer:\n  inner: a\u0026\n  list:\n  - a\u0026\n  - x\nseq:\n- name: \"n\"\n  value: a\u0026\n",
+            "top": "k: a\u0026\n"
+        },
+        {
+            "input": "'",
+            "key": "\"'\": 1\n",
+            "nested": "outer:\n  inner: \"'\"\n  list:\n  - \"'\"\n  - x\nseq:\n- name: \"n\"\n  value: \"'\"\n",
+            "top": "k: \"'\"\n"
+        },
+        {
+            "input": "'a",
+            "key": "\"'a\": 1\n",
+            "nested": "outer:\n  inner: \"'a\"\n  list:\n  - \"'a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"'a\"\n",
+            "top": "k: \"'a\"\n"
+        },
+        {
+            "input": "a'b",
+            "key": "a'b: 1\n",
+            "nested": "outer:\n  inner: a'b\n  list:\n  - a'b\n  - x\nseq:\n- name: \"n\"\n  value: a'b\n",
+            "top": "k: a'b\n"
+        },
+        {
+            "input": "a'",
+            "key": "a': 1\n",
+            "nested": "outer:\n  inner: a'\n  list:\n  - a'\n  - x\nseq:\n- name: \"n\"\n  value: a'\n",
+            "top": "k: a'\n"
+        },
+        {
+            "input": "(",
+            "key": "(: 1\n",
+            "nested": "outer:\n  inner: (\n  list:\n  - (\n  - x\nseq:\n- name: \"n\"\n  value: (\n",
+            "top": "k: (\n"
+        },
+        {
+            "input": "(a",
+            "key": "(a: 1\n",
+            "nested": "outer:\n  inner: (a\n  list:\n  - (a\n  - x\nseq:\n- name: \"n\"\n  value: (a\n",
+            "top": "k: (a\n"
+        },
+        {
+            "input": "a(b",
+            "key": "a(b: 1\n",
+            "nested": "outer:\n  inner: a(b\n  list:\n  - a(b\n  - x\nseq:\n- name: \"n\"\n  value: a(b\n",
+            "top": "k: a(b\n"
+        },
+        {
+            "input": "a(",
+            "key": "a(: 1\n",
+            "nested": "outer:\n  inner: a(\n  list:\n  - a(\n  - x\nseq:\n- name: \"n\"\n  value: a(\n",
+            "top": "k: a(\n"
+        },
+        {
+            "input": ")",
+            "key": "): 1\n",
+            "nested": "outer:\n  inner: )\n  list:\n  - )\n  - x\nseq:\n- name: \"n\"\n  value: )\n",
+            "top": "k: )\n"
+        },
+        {
+            "input": ")a",
+            "key": ")a: 1\n",
+            "nested": "outer:\n  inner: )a\n  list:\n  - )a\n  - x\nseq:\n- name: \"n\"\n  value: )a\n",
+            "top": "k: )a\n"
+        },
+        {
+            "input": "a)b",
+            "key": "a)b: 1\n",
+            "nested": "outer:\n  inner: a)b\n  list:\n  - a)b\n  - x\nseq:\n- name: \"n\"\n  value: a)b\n",
+            "top": "k: a)b\n"
+        },
+        {
+            "input": "a)",
+            "key": "a): 1\n",
+            "nested": "outer:\n  inner: a)\n  list:\n  - a)\n  - x\nseq:\n- name: \"n\"\n  value: a)\n",
+            "top": "k: a)\n"
+        },
+        {
+            "input": "*",
+            "key": "\"*\": 1\n",
+            "nested": "outer:\n  inner: \"*\"\n  list:\n  - \"*\"\n  - x\nseq:\n- name: \"n\"\n  value: \"*\"\n",
+            "top": "k: \"*\"\n"
+        },
+        {
+            "input": "*a",
+            "key": "\"*a\": 1\n",
+            "nested": "outer:\n  inner: \"*a\"\n  list:\n  - \"*a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"*a\"\n",
+            "top": "k: \"*a\"\n"
+        },
+        {
+            "input": "a*b",
+            "key": "a*b: 1\n",
+            "nested": "outer:\n  inner: a*b\n  list:\n  - a*b\n  - x\nseq:\n- name: \"n\"\n  value: a*b\n",
+            "top": "k: a*b\n"
+        },
+        {
+            "input": "a*",
+            "key": "a*: 1\n",
+            "nested": "outer:\n  inner: a*\n  list:\n  - a*\n  - x\nseq:\n- name: \"n\"\n  value: a*\n",
+            "top": "k: a*\n"
+        },
+        {
+            "input": "+",
+            "key": "+: 1\n",
+            "nested": "outer:\n  inner: +\n  list:\n  - +\n  - x\nseq:\n- name: \"n\"\n  value: +\n",
+            "top": "k: +\n"
+        },
+        {
+            "input": "+a",
+            "key": "+a: 1\n",
+            "nested": "outer:\n  inner: +a\n  list:\n  - +a\n  - x\nseq:\n- name: \"n\"\n  value: +a\n",
+            "top": "k: +a\n"
+        },
+        {
+            "input": "a+b",
+            "key": "a+b: 1\n",
+            "nested": "outer:\n  inner: a+b\n  list:\n  - a+b\n  - x\nseq:\n- name: \"n\"\n  value: a+b\n",
+            "top": "k: a+b\n"
+        },
+        {
+            "input": "a+",
+            "key": "a+: 1\n",
+            "nested": "outer:\n  inner: a+\n  list:\n  - a+\n  - x\nseq:\n- name: \"n\"\n  value: a+\n",
+            "top": "k: a+\n"
+        },
+        {
+            "input": ",",
+            "key": "\",\": 1\n",
+            "nested": "outer:\n  inner: \",\"\n  list:\n  - \",\"\n  - x\nseq:\n- name: \"n\"\n  value: \",\"\n",
+            "top": "k: \",\"\n"
+        },
+        {
+            "input": ",a",
+            "key": "\",a\": 1\n",
+            "nested": "outer:\n  inner: \",a\"\n  list:\n  - \",a\"\n  - x\nseq:\n- name: \"n\"\n  value: \",a\"\n",
+            "top": "k: \",a\"\n"
+        },
+        {
+            "input": "a,b",
+            "key": "a,b: 1\n",
+            "nested": "outer:\n  inner: a,b\n  list:\n  - a,b\n  - x\nseq:\n- name: \"n\"\n  value: a,b\n",
+            "top": "k: a,b\n"
+        },
+        {
+            "input": "a,",
+            "key": "a,: 1\n",
+            "nested": "outer:\n  inner: a,\n  list:\n  - a,\n  - x\nseq:\n- name: \"n\"\n  value: a,\n",
+            "top": "k: a,\n"
+        },
+        {
+            "input": "-",
+            "key": "\"-\": 1\n",
+            "nested": "outer:\n  inner: \"-\"\n  list:\n  - \"-\"\n  - x\nseq:\n- name: \"n\"\n  value: \"-\"\n",
+            "top": "k: \"-\"\n"
+        },
+        {
+            "input": "-a",
+            "key": "-a: 1\n",
+            "nested": "outer:\n  inner: -a\n  list:\n  - -a\n  - x\nseq:\n- name: \"n\"\n  value: -a\n",
+            "top": "k: -a\n"
+        },
+        {
+            "input": "a-b",
+            "key": "a-b: 1\n",
+            "nested": "outer:\n  inner: a-b\n  list:\n  - a-b\n  - x\nseq:\n- name: \"n\"\n  value: a-b\n",
+            "top": "k: a-b\n"
+        },
+        {
+            "input": "a-",
+            "key": "a-: 1\n",
+            "nested": "outer:\n  inner: a-\n  list:\n  - a-\n  - x\nseq:\n- name: \"n\"\n  value: a-\n",
+            "top": "k: a-\n"
+        },
+        {
+            "input": ".",
+            "key": ".: 1\n",
+            "nested": "outer:\n  inner: .\n  list:\n  - .\n  - x\nseq:\n- name: \"n\"\n  value: .\n",
+            "top": "k: .\n"
+        },
+        {
+            "input": ".a",
+            "key": ".a: 1\n",
+            "nested": "outer:\n  inner: .a\n  list:\n  - .a\n  - x\nseq:\n- name: \"n\"\n  value: .a\n",
+            "top": "k: .a\n"
+        },
+        {
+            "input": "a.b",
+            "key": "a.b: 1\n",
+            "nested": "outer:\n  inner: a.b\n  list:\n  - a.b\n  - x\nseq:\n- name: \"n\"\n  value: a.b\n",
+            "top": "k: a.b\n"
+        },
+        {
+            "input": "a.",
+            "key": "a.: 1\n",
+            "nested": "outer:\n  inner: a.\n  list:\n  - a.\n  - x\nseq:\n- name: \"n\"\n  value: a.\n",
+            "top": "k: a.\n"
+        },
+        {
+            "input": "/",
+            "key": "/: 1\n",
+            "nested": "outer:\n  inner: /\n  list:\n  - /\n  - x\nseq:\n- name: \"n\"\n  value: /\n",
+            "top": "k: /\n"
+        },
+        {
+            "input": "/a",
+            "key": "/a: 1\n",
+            "nested": "outer:\n  inner: /a\n  list:\n  - /a\n  - x\nseq:\n- name: \"n\"\n  value: /a\n",
+            "top": "k: /a\n"
+        },
+        {
+            "input": "a/b",
+            "key": "a/b: 1\n",
+            "nested": "outer:\n  inner: a/b\n  list:\n  - a/b\n  - x\nseq:\n- name: \"n\"\n  value: a/b\n",
+            "top": "k: a/b\n"
+        },
+        {
+            "input": "a/",
+            "key": "a/: 1\n",
+            "nested": "outer:\n  inner: a/\n  list:\n  - a/\n  - x\nseq:\n- name: \"n\"\n  value: a/\n",
+            "top": "k: a/\n"
+        },
+        {
+            "input": "0",
+            "key": "\"0\": 1\n",
+            "nested": "outer:\n  inner: \"0\"\n  list:\n  - \"0\"\n  - x\nseq:\n- name: \"n\"\n  value: \"0\"\n",
+            "top": "k: \"0\"\n"
+        },
+        {
+            "input": "0a",
+            "key": "0a: 1\n",
+            "nested": "outer:\n  inner: 0a\n  list:\n  - 0a\n  - x\nseq:\n- name: \"n\"\n  value: 0a\n",
+            "top": "k: 0a\n"
+        },
+        {
+            "input": "a0b",
+            "key": "a0b: 1\n",
+            "nested": "outer:\n  inner: a0b\n  list:\n  - a0b\n  - x\nseq:\n- name: \"n\"\n  value: a0b\n",
+            "top": "k: a0b\n"
+        },
+        {
+            "input": "a0",
+            "key": "a0: 1\n",
+            "nested": "outer:\n  inner: a0\n  list:\n  - a0\n  - x\nseq:\n- name: \"n\"\n  value: a0\n",
+            "top": "k: a0\n"
+        },
+        {
+            "input": "1",
+            "key": "\"1\": 1\n",
+            "nested": "outer:\n  inner: \"1\"\n  list:\n  - \"1\"\n  - x\nseq:\n- name: \"n\"\n  value: \"1\"\n",
+            "top": "k: \"1\"\n"
+        },
+        {
+            "input": "1a",
+            "key": "1a: 1\n",
+            "nested": "outer:\n  inner: 1a\n  list:\n  - 1a\n  - x\nseq:\n- name: \"n\"\n  value: 1a\n",
+            "top": "k: 1a\n"
+        },
+        {
+            "input": "a1b",
+            "key": "a1b: 1\n",
+            "nested": "outer:\n  inner: a1b\n  list:\n  - a1b\n  - x\nseq:\n- name: \"n\"\n  value: a1b\n",
+            "top": "k: a1b\n"
+        },
+        {
+            "input": "a1",
+            "key": "a1: 1\n",
+            "nested": "outer:\n  inner: a1\n  list:\n  - a1\n  - x\nseq:\n- name: \"n\"\n  value: a1\n",
+            "top": "k: a1\n"
+        },
+        {
+            "input": "2",
+            "key": "\"2\": 1\n",
+            "nested": "outer:\n  inner: \"2\"\n  list:\n  - \"2\"\n  - x\nseq:\n- name: \"n\"\n  value: \"2\"\n",
+            "top": "k: \"2\"\n"
+        },
+        {
+            "input": "2a",
+            "key": "2a: 1\n",
+            "nested": "outer:\n  inner: 2a\n  list:\n  - 2a\n  - x\nseq:\n- name: \"n\"\n  value: 2a\n",
+            "top": "k: 2a\n"
+        },
+        {
+            "input": "a2b",
+            "key": "a2b: 1\n",
+            "nested": "outer:\n  inner: a2b\n  list:\n  - a2b\n  - x\nseq:\n- name: \"n\"\n  value: a2b\n",
+            "top": "k: a2b\n"
+        },
+        {
+            "input": "a2",
+            "key": "a2: 1\n",
+            "nested": "outer:\n  inner: a2\n  list:\n  - a2\n  - x\nseq:\n- name: \"n\"\n  value: a2\n",
+            "top": "k: a2\n"
+        },
+        {
+            "input": "3",
+            "key": "\"3\": 1\n",
+            "nested": "outer:\n  inner: \"3\"\n  list:\n  - \"3\"\n  - x\nseq:\n- name: \"n\"\n  value: \"3\"\n",
+            "top": "k: \"3\"\n"
+        },
+        {
+            "input": "3a",
+            "key": "3a: 1\n",
+            "nested": "outer:\n  inner: 3a\n  list:\n  - 3a\n  - x\nseq:\n- name: \"n\"\n  value: 3a\n",
+            "top": "k: 3a\n"
+        },
+        {
+            "input": "a3b",
+            "key": "a3b: 1\n",
+            "nested": "outer:\n  inner: a3b\n  list:\n  - a3b\n  - x\nseq:\n- name: \"n\"\n  value: a3b\n",
+            "top": "k: a3b\n"
+        },
+        {
+            "input": "a3",
+            "key": "a3: 1\n",
+            "nested": "outer:\n  inner: a3\n  list:\n  - a3\n  - x\nseq:\n- name: \"n\"\n  value: a3\n",
+            "top": "k: a3\n"
+        },
+        {
+            "input": "4",
+            "key": "\"4\": 1\n",
+            "nested": "outer:\n  inner: \"4\"\n  list:\n  - \"4\"\n  - x\nseq:\n- name: \"n\"\n  value: \"4\"\n",
+            "top": "k: \"4\"\n"
+        },
+        {
+            "input": "4a",
+            "key": "4a: 1\n",
+            "nested": "outer:\n  inner: 4a\n  list:\n  - 4a\n  - x\nseq:\n- name: \"n\"\n  value: 4a\n",
+            "top": "k: 4a\n"
+        },
+        {
+            "input": "a4b",
+            "key": "a4b: 1\n",
+            "nested": "outer:\n  inner: a4b\n  list:\n  - a4b\n  - x\nseq:\n- name: \"n\"\n  value: a4b\n",
+            "top": "k: a4b\n"
+        },
+        {
+            "input": "a4",
+            "key": "a4: 1\n",
+            "nested": "outer:\n  inner: a4\n  list:\n  - a4\n  - x\nseq:\n- name: \"n\"\n  value: a4\n",
+            "top": "k: a4\n"
+        },
+        {
+            "input": "5",
+            "key": "\"5\": 1\n",
+            "nested": "outer:\n  inner: \"5\"\n  list:\n  - \"5\"\n  - x\nseq:\n- name: \"n\"\n  value: \"5\"\n",
+            "top": "k: \"5\"\n"
+        },
+        {
+            "input": "5a",
+            "key": "5a: 1\n",
+            "nested": "outer:\n  inner: 5a\n  list:\n  - 5a\n  - x\nseq:\n- name: \"n\"\n  value: 5a\n",
+            "top": "k: 5a\n"
+        },
+        {
+            "input": "a5b",
+            "key": "a5b: 1\n",
+            "nested": "outer:\n  inner: a5b\n  list:\n  - a5b\n  - x\nseq:\n- name: \"n\"\n  value: a5b\n",
+            "top": "k: a5b\n"
+        },
+        {
+            "input": "a5",
+            "key": "a5: 1\n",
+            "nested": "outer:\n  inner: a5\n  list:\n  - a5\n  - x\nseq:\n- name: \"n\"\n  value: a5\n",
+            "top": "k: a5\n"
+        },
+        {
+            "input": "6",
+            "key": "\"6\": 1\n",
+            "nested": "outer:\n  inner: \"6\"\n  list:\n  - \"6\"\n  - x\nseq:\n- name: \"n\"\n  value: \"6\"\n",
+            "top": "k: \"6\"\n"
+        },
+        {
+            "input": "6a",
+            "key": "6a: 1\n",
+            "nested": "outer:\n  inner: 6a\n  list:\n  - 6a\n  - x\nseq:\n- name: \"n\"\n  value: 6a\n",
+            "top": "k: 6a\n"
+        },
+        {
+            "input": "a6b",
+            "key": "a6b: 1\n",
+            "nested": "outer:\n  inner: a6b\n  list:\n  - a6b\n  - x\nseq:\n- name: \"n\"\n  value: a6b\n",
+            "top": "k: a6b\n"
+        },
+        {
+            "input": "a6",
+            "key": "a6: 1\n",
+            "nested": "outer:\n  inner: a6\n  list:\n  - a6\n  - x\nseq:\n- name: \"n\"\n  value: a6\n",
+            "top": "k: a6\n"
+        },
+        {
+            "input": "7",
+            "key": "\"7\": 1\n",
+            "nested": "outer:\n  inner: \"7\"\n  list:\n  - \"7\"\n  - x\nseq:\n- name: \"n\"\n  value: \"7\"\n",
+            "top": "k: \"7\"\n"
+        },
+        {
+            "input": "7a",
+            "key": "7a: 1\n",
+            "nested": "outer:\n  inner: 7a\n  list:\n  - 7a\n  - x\nseq:\n- name: \"n\"\n  value: 7a\n",
+            "top": "k: 7a\n"
+        },
+        {
+            "input": "a7b",
+            "key": "a7b: 1\n",
+            "nested": "outer:\n  inner: a7b\n  list:\n  - a7b\n  - x\nseq:\n- name: \"n\"\n  value: a7b\n",
+            "top": "k: a7b\n"
+        },
+        {
+            "input": "a7",
+            "key": "a7: 1\n",
+            "nested": "outer:\n  inner: a7\n  list:\n  - a7\n  - x\nseq:\n- name: \"n\"\n  value: a7\n",
+            "top": "k: a7\n"
+        },
+        {
+            "input": "8",
+            "key": "\"8\": 1\n",
+            "nested": "outer:\n  inner: \"8\"\n  list:\n  - \"8\"\n  - x\nseq:\n- name: \"n\"\n  value: \"8\"\n",
+            "top": "k: \"8\"\n"
+        },
+        {
+            "input": "8a",
+            "key": "8a: 1\n",
+            "nested": "outer:\n  inner: 8a\n  list:\n  - 8a\n  - x\nseq:\n- name: \"n\"\n  value: 8a\n",
+            "top": "k: 8a\n"
+        },
+        {
+            "input": "a8b",
+            "key": "a8b: 1\n",
+            "nested": "outer:\n  inner: a8b\n  list:\n  - a8b\n  - x\nseq:\n- name: \"n\"\n  value: a8b\n",
+            "top": "k: a8b\n"
+        },
+        {
+            "input": "a8",
+            "key": "a8: 1\n",
+            "nested": "outer:\n  inner: a8\n  list:\n  - a8\n  - x\nseq:\n- name: \"n\"\n  value: a8\n",
+            "top": "k: a8\n"
+        },
+        {
+            "input": "9",
+            "key": "\"9\": 1\n",
+            "nested": "outer:\n  inner: \"9\"\n  list:\n  - \"9\"\n  - x\nseq:\n- name: \"n\"\n  value: \"9\"\n",
+            "top": "k: \"9\"\n"
+        },
+        {
+            "input": "9a",
+            "key": "9a: 1\n",
+            "nested": "outer:\n  inner: 9a\n  list:\n  - 9a\n  - x\nseq:\n- name: \"n\"\n  value: 9a\n",
+            "top": "k: 9a\n"
+        },
+        {
+            "input": "a9b",
+            "key": "a9b: 1\n",
+            "nested": "outer:\n  inner: a9b\n  list:\n  - a9b\n  - x\nseq:\n- name: \"n\"\n  value: a9b\n",
+            "top": "k: a9b\n"
+        },
+        {
+            "input": "a9",
+            "key": "a9: 1\n",
+            "nested": "outer:\n  inner: a9\n  list:\n  - a9\n  - x\nseq:\n- name: \"n\"\n  value: a9\n",
+            "top": "k: a9\n"
+        },
+        {
+            "input": ":",
+            "key": "\":\": 1\n",
+            "nested": "outer:\n  inner: \":\"\n  list:\n  - \":\"\n  - x\nseq:\n- name: \"n\"\n  value: \":\"\n",
+            "top": "k: \":\"\n"
+        },
+        {
+            "input": ":a",
+            "key": ":a: 1\n",
+            "nested": "outer:\n  inner: :a\n  list:\n  - :a\n  - x\nseq:\n- name: \"n\"\n  value: :a\n",
+            "top": "k: :a\n"
+        },
+        {
+            "input": "a:b",
+            "key": "a:b: 1\n",
+            "nested": "outer:\n  inner: a:b\n  list:\n  - a:b\n  - x\nseq:\n- name: \"n\"\n  value: a:b\n",
+            "top": "k: a:b\n"
+        },
+        {
+            "input": "a:",
+            "key": "\"a:\": 1\n",
+            "nested": "outer:\n  inner: \"a:\"\n  list:\n  - \"a:\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a:\"\n",
+            "top": "k: \"a:\"\n"
+        },
+        {
+            "input": ";",
+            "key": ";: 1\n",
+            "nested": "outer:\n  inner: ;\n  list:\n  - ;\n  - x\nseq:\n- name: \"n\"\n  value: ;\n",
+            "top": "k: ;\n"
+        },
+        {
+            "input": ";a",
+            "key": ";a: 1\n",
+            "nested": "outer:\n  inner: ;a\n  list:\n  - ;a\n  - x\nseq:\n- name: \"n\"\n  value: ;a\n",
+            "top": "k: ;a\n"
+        },
+        {
+            "input": "a;b",
+            "key": "a;b: 1\n",
+            "nested": "outer:\n  inner: a;b\n  list:\n  - a;b\n  - x\nseq:\n- name: \"n\"\n  value: a;b\n",
+            "top": "k: a;b\n"
+        },
+        {
+            "input": "a;",
+            "key": "a;: 1\n",
+            "nested": "outer:\n  inner: a;\n  list:\n  - a;\n  - x\nseq:\n- name: \"n\"\n  value: a;\n",
+            "top": "k: a;\n"
+        },
+        {
+            "input": "\u003c",
+            "key": "\u003c: 1\n",
+            "nested": "outer:\n  inner: \u003c\n  list:\n  - \u003c\n  - x\nseq:\n- name: \"n\"\n  value: \u003c\n",
+            "top": "k: \u003c\n"
+        },
+        {
+            "input": "\u003ca",
+            "key": "\u003ca: 1\n",
+            "nested": "outer:\n  inner: \u003ca\n  list:\n  - \u003ca\n  - x\nseq:\n- name: \"n\"\n  value: \u003ca\n",
+            "top": "k: \u003ca\n"
+        },
+        {
+            "input": "a\u003cb",
+            "key": "a\u003cb: 1\n",
+            "nested": "outer:\n  inner: a\u003cb\n  list:\n  - a\u003cb\n  - x\nseq:\n- name: \"n\"\n  value: a\u003cb\n",
+            "top": "k: a\u003cb\n"
+        },
+        {
+            "input": "a\u003c",
+            "key": "a\u003c: 1\n",
+            "nested": "outer:\n  inner: a\u003c\n  list:\n  - a\u003c\n  - x\nseq:\n- name: \"n\"\n  value: a\u003c\n",
+            "top": "k: a\u003c\n"
+        },
+        {
+            "input": "=",
+            "key": "=: 1\n",
+            "nested": "outer:\n  inner: =\n  list:\n  - =\n  - x\nseq:\n- name: \"n\"\n  value: =\n",
+            "top": "k: =\n"
+        },
+        {
+            "input": "=a",
+            "key": "=a: 1\n",
+            "nested": "outer:\n  inner: =a\n  list:\n  - =a\n  - x\nseq:\n- name: \"n\"\n  value: =a\n",
+            "top": "k: =a\n"
+        },
+        {
+            "input": "a=b",
+            "key": "a=b: 1\n",
+            "nested": "outer:\n  inner: a=b\n  list:\n  - a=b\n  - x\nseq:\n- name: \"n\"\n  value: a=b\n",
+            "top": "k: a=b\n"
+        },
+        {
+            "input": "a=",
+            "key": "a=: 1\n",
+            "nested": "outer:\n  inner: a=\n  list:\n  - a=\n  - x\nseq:\n- name: \"n\"\n  value: a=\n",
+            "top": "k: a=\n"
+        },
+        {
+            "input": "\u003e",
+            "key": "\"\u003e\": 1\n",
+            "nested": "outer:\n  inner: \"\u003e\"\n  list:\n  - \"\u003e\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u003e\"\n",
+            "top": "k: \"\u003e\"\n"
+        },
+        {
+            "input": "\u003ea",
+            "key": "\"\u003ea\": 1\n",
+            "nested": "outer:\n  inner: \"\u003ea\"\n  list:\n  - \"\u003ea\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\u003ea\"\n",
+            "top": "k: \"\u003ea\"\n"
+        },
+        {
+            "input": "a\u003eb",
+            "key": "a\u003eb: 1\n",
+            "nested": "outer:\n  inner: a\u003eb\n  list:\n  - a\u003eb\n  - x\nseq:\n- name: \"n\"\n  value: a\u003eb\n",
+            "top": "k: a\u003eb\n"
+        },
+        {
+            "input": "a\u003e",
+            "key": "a\u003e: 1\n",
+            "nested": "outer:\n  inner: a\u003e\n  list:\n  - a\u003e\n  - x\nseq:\n- name: \"n\"\n  value: a\u003e\n",
+            "top": "k: a\u003e\n"
+        },
+        {
+            "input": "?",
+            "key": "?: 1\n",
+            "nested": "outer:\n  inner: ?\n  list:\n  - ?\n  - x\nseq:\n- name: \"n\"\n  value: ?\n",
+            "top": "k: ?\n"
+        },
+        {
+            "input": "?a",
+            "key": "?a: 1\n",
+            "nested": "outer:\n  inner: ?a\n  list:\n  - ?a\n  - x\nseq:\n- name: \"n\"\n  value: ?a\n",
+            "top": "k: ?a\n"
+        },
+        {
+            "input": "a?b",
+            "key": "a?b: 1\n",
+            "nested": "outer:\n  inner: a?b\n  list:\n  - a?b\n  - x\nseq:\n- name: \"n\"\n  value: a?b\n",
+            "top": "k: a?b\n"
+        },
+        {
+            "input": "a?",
+            "key": "a?: 1\n",
+            "nested": "outer:\n  inner: a?\n  list:\n  - a?\n  - x\nseq:\n- name: \"n\"\n  value: a?\n",
+            "top": "k: a?\n"
+        },
+        {
+            "input": "@",
+            "key": "\"@\": 1\n",
+            "nested": "outer:\n  inner: \"@\"\n  list:\n  - \"@\"\n  - x\nseq:\n- name: \"n\"\n  value: \"@\"\n",
+            "top": "k: \"@\"\n"
+        },
+        {
+            "input": "@a",
+            "key": "\"@a\": 1\n",
+            "nested": "outer:\n  inner: \"@a\"\n  list:\n  - \"@a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"@a\"\n",
+            "top": "k: \"@a\"\n"
+        },
+        {
+            "input": "a@b",
+            "key": "a@b: 1\n",
+            "nested": "outer:\n  inner: a@b\n  list:\n  - a@b\n  - x\nseq:\n- name: \"n\"\n  value: a@b\n",
+            "top": "k: a@b\n"
+        },
+        {
+            "input": "a@",
+            "key": "a@: 1\n",
+            "nested": "outer:\n  inner: a@\n  list:\n  - a@\n  - x\nseq:\n- name: \"n\"\n  value: a@\n",
+            "top": "k: a@\n"
+        },
+        {
+            "input": "A",
+            "key": "A: 1\n",
+            "nested": "outer:\n  inner: A\n  list:\n  - A\n  - x\nseq:\n- name: \"n\"\n  value: A\n",
+            "top": "k: A\n"
+        },
+        {
+            "input": "Aa",
+            "key": "Aa: 1\n",
+            "nested": "outer:\n  inner: Aa\n  list:\n  - Aa\n  - x\nseq:\n- name: \"n\"\n  value: Aa\n",
+            "top": "k: Aa\n"
+        },
+        {
+            "input": "aAb",
+            "key": "aAb: 1\n",
+            "nested": "outer:\n  inner: aAb\n  list:\n  - aAb\n  - x\nseq:\n- name: \"n\"\n  value: aAb\n",
+            "top": "k: aAb\n"
+        },
+        {
+            "input": "aA",
+            "key": "aA: 1\n",
+            "nested": "outer:\n  inner: aA\n  list:\n  - aA\n  - x\nseq:\n- name: \"n\"\n  value: aA\n",
+            "top": "k: aA\n"
+        },
+        {
+            "input": "B",
+            "key": "B: 1\n",
+            "nested": "outer:\n  inner: B\n  list:\n  - B\n  - x\nseq:\n- name: \"n\"\n  value: B\n",
+            "top": "k: B\n"
+        },
+        {
+            "input": "Ba",
+            "key": "Ba: 1\n",
+            "nested": "outer:\n  inner: Ba\n  list:\n  - Ba\n  - x\nseq:\n- name: \"n\"\n  value: Ba\n",
+            "top": "k: Ba\n"
+        },
+        {
+            "input": "aBb",
+            "key": "aBb: 1\n",
+            "nested": "outer:\n  inner: aBb\n  list:\n  - aBb\n  - x\nseq:\n- name: \"n\"\n  value: aBb\n",
+            "top": "k: aBb\n"
+        },
+        {
+            "input": "aB",
+            "key": "aB: 1\n",
+            "nested": "outer:\n  inner: aB\n  list:\n  - aB\n  - x\nseq:\n- name: \"n\"\n  value: aB\n",
+            "top": "k: aB\n"
+        },
+        {
+            "input": "C",
+            "key": "C: 1\n",
+            "nested": "outer:\n  inner: C\n  list:\n  - C\n  - x\nseq:\n- name: \"n\"\n  value: C\n",
+            "top": "k: C\n"
+        },
+        {
+            "input": "Ca",
+            "key": "Ca: 1\n",
+            "nested": "outer:\n  inner: Ca\n  list:\n  - Ca\n  - x\nseq:\n- name: \"n\"\n  value: Ca\n",
+            "top": "k: Ca\n"
+        },
+        {
+            "input": "aCb",
+            "key": "aCb: 1\n",
+            "nested": "outer:\n  inner: aCb\n  list:\n  - aCb\n  - x\nseq:\n- name: \"n\"\n  value: aCb\n",
+            "top": "k: aCb\n"
+        },
+        {
+            "input": "aC",
+            "key": "aC: 1\n",
+            "nested": "outer:\n  inner: aC\n  list:\n  - aC\n  - x\nseq:\n- name: \"n\"\n  value: aC\n",
+            "top": "k: aC\n"
+        },
+        {
+            "input": "D",
+            "key": "D: 1\n",
+            "nested": "outer:\n  inner: D\n  list:\n  - D\n  - x\nseq:\n- name: \"n\"\n  value: D\n",
+            "top": "k: D\n"
+        },
+        {
+            "input": "Da",
+            "key": "Da: 1\n",
+            "nested": "outer:\n  inner: Da\n  list:\n  - Da\n  - x\nseq:\n- name: \"n\"\n  value: Da\n",
+            "top": "k: Da\n"
+        },
+        {
+            "input": "aDb",
+            "key": "aDb: 1\n",
+            "nested": "outer:\n  inner: aDb\n  list:\n  - aDb\n  - x\nseq:\n- name: \"n\"\n  value: aDb\n",
+            "top": "k: aDb\n"
+        },
+        {
+            "input": "aD",
+            "key": "aD: 1\n",
+            "nested": "outer:\n  inner: aD\n  list:\n  - aD\n  - x\nseq:\n- name: \"n\"\n  value: aD\n",
+            "top": "k: aD\n"
+        },
+        {
+            "input": "E",
+            "key": "E: 1\n",
+            "nested": "outer:\n  inner: E\n  list:\n  - E\n  - x\nseq:\n- name: \"n\"\n  value: E\n",
+            "top": "k: E\n"
+        },
+        {
+            "input": "Ea",
+            "key": "Ea: 1\n",
+            "nested": "outer:\n  inner: Ea\n  list:\n  - Ea\n  - x\nseq:\n- name: \"n\"\n  value: Ea\n",
+            "top": "k: Ea\n"
+        },
+        {
+            "input": "aEb",
+            "key": "aEb: 1\n",
+            "nested": "outer:\n  inner: aEb\n  list:\n  - aEb\n  - x\nseq:\n- name: \"n\"\n  value: aEb\n",
+            "top": "k: aEb\n"
+        },
+        {
+            "input": "aE",
+            "key": "aE: 1\n",
+            "nested": "outer:\n  inner: aE\n  list:\n  - aE\n  - x\nseq:\n- name: \"n\"\n  value: aE\n",
+            "top": "k: aE\n"
+        },
+        {
+            "input": "F",
+            "key": "F: 1\n",
+            "nested": "outer:\n  inner: F\n  list:\n  - F\n  - x\nseq:\n- name: \"n\"\n  value: F\n",
+            "top": "k: F\n"
+        },
+        {
+            "input": "Fa",
+            "key": "Fa: 1\n",
+            "nested": "outer:\n  inner: Fa\n  list:\n  - Fa\n  - x\nseq:\n- name: \"n\"\n  value: Fa\n",
+            "top": "k: Fa\n"
+        },
+        {
+            "input": "aFb",
+            "key": "aFb: 1\n",
+            "nested": "outer:\n  inner: aFb\n  list:\n  - aFb\n  - x\nseq:\n- name: \"n\"\n  value: aFb\n",
+            "top": "k: aFb\n"
+        },
+        {
+            "input": "aF",
+            "key": "aF: 1\n",
+            "nested": "outer:\n  inner: aF\n  list:\n  - aF\n  - x\nseq:\n- name: \"n\"\n  value: aF\n",
+            "top": "k: aF\n"
+        },
+        {
+            "input": "G",
+            "key": "G: 1\n",
+            "nested": "outer:\n  inner: G\n  list:\n  - G\n  - x\nseq:\n- name: \"n\"\n  value: G\n",
+            "top": "k: G\n"
+        },
+        {
+            "input": "Ga",
+            "key": "Ga: 1\n",
+            "nested": "outer:\n  inner: Ga\n  list:\n  - Ga\n  - x\nseq:\n- name: \"n\"\n  value: Ga\n",
+            "top": "k: Ga\n"
+        },
+        {
+            "input": "aGb",
+            "key": "aGb: 1\n",
+            "nested": "outer:\n  inner: aGb\n  list:\n  - aGb\n  - x\nseq:\n- name: \"n\"\n  value: aGb\n",
+            "top": "k: aGb\n"
+        },
+        {
+            "input": "aG",
+            "key": "aG: 1\n",
+            "nested": "outer:\n  inner: aG\n  list:\n  - aG\n  - x\nseq:\n- name: \"n\"\n  value: aG\n",
+            "top": "k: aG\n"
+        },
+        {
+            "input": "H",
+            "key": "H: 1\n",
+            "nested": "outer:\n  inner: H\n  list:\n  - H\n  - x\nseq:\n- name: \"n\"\n  value: H\n",
+            "top": "k: H\n"
+        },
+        {
+            "input": "Ha",
+            "key": "Ha: 1\n",
+            "nested": "outer:\n  inner: Ha\n  list:\n  - Ha\n  - x\nseq:\n- name: \"n\"\n  value: Ha\n",
+            "top": "k: Ha\n"
+        },
+        {
+            "input": "aHb",
+            "key": "aHb: 1\n",
+            "nested": "outer:\n  inner: aHb\n  list:\n  - aHb\n  - x\nseq:\n- name: \"n\"\n  value: aHb\n",
+            "top": "k: aHb\n"
+        },
+        {
+            "input": "aH",
+            "key": "aH: 1\n",
+            "nested": "outer:\n  inner: aH\n  list:\n  - aH\n  - x\nseq:\n- name: \"n\"\n  value: aH\n",
+            "top": "k: aH\n"
+        },
+        {
+            "input": "I",
+            "key": "I: 1\n",
+            "nested": "outer:\n  inner: I\n  list:\n  - I\n  - x\nseq:\n- name: \"n\"\n  value: I\n",
+            "top": "k: I\n"
+        },
+        {
+            "input": "Ia",
+            "key": "Ia: 1\n",
+            "nested": "outer:\n  inner: Ia\n  list:\n  - Ia\n  - x\nseq:\n- name: \"n\"\n  value: Ia\n",
+            "top": "k: Ia\n"
+        },
+        {
+            "input": "aIb",
+            "key": "aIb: 1\n",
+            "nested": "outer:\n  inner: aIb\n  list:\n  - aIb\n  - x\nseq:\n- name: \"n\"\n  value: aIb\n",
+            "top": "k: aIb\n"
+        },
+        {
+            "input": "aI",
+            "key": "aI: 1\n",
+            "nested": "outer:\n  inner: aI\n  list:\n  - aI\n  - x\nseq:\n- name: \"n\"\n  value: aI\n",
+            "top": "k: aI\n"
+        },
+        {
+            "input": "J",
+            "key": "J: 1\n",
+            "nested": "outer:\n  inner: J\n  list:\n  - J\n  - x\nseq:\n- name: \"n\"\n  value: J\n",
+            "top": "k: J\n"
+        },
+        {
+            "input": "Ja",
+            "key": "Ja: 1\n",
+            "nested": "outer:\n  inner: Ja\n  list:\n  - Ja\n  - x\nseq:\n- name: \"n\"\n  value: Ja\n",
+            "top": "k: Ja\n"
+        },
+        {
+            "input": "aJb",
+            "key": "aJb: 1\n",
+            "nested": "outer:\n  inner: aJb\n  list:\n  - aJb\n  - x\nseq:\n- name: \"n\"\n  value: aJb\n",
+            "top": "k: aJb\n"
+        },
+        {
+            "input": "aJ",
+            "key": "aJ: 1\n",
+            "nested": "outer:\n  inner: aJ\n  list:\n  - aJ\n  - x\nseq:\n- name: \"n\"\n  value: aJ\n",
+            "top": "k: aJ\n"
+        },
+        {
+            "input": "K",
+            "key": "K: 1\n",
+            "nested": "outer:\n  inner: K\n  list:\n  - K\n  - x\nseq:\n- name: \"n\"\n  value: K\n",
+            "top": "k: K\n"
+        },
+        {
+            "input": "Ka",
+            "key": "Ka: 1\n",
+            "nested": "outer:\n  inner: Ka\n  list:\n  - Ka\n  - x\nseq:\n- name: \"n\"\n  value: Ka\n",
+            "top": "k: Ka\n"
+        },
+        {
+            "input": "aKb",
+            "key": "aKb: 1\n",
+            "nested": "outer:\n  inner: aKb\n  list:\n  - aKb\n  - x\nseq:\n- name: \"n\"\n  value: aKb\n",
+            "top": "k: aKb\n"
+        },
+        {
+            "input": "aK",
+            "key": "aK: 1\n",
+            "nested": "outer:\n  inner: aK\n  list:\n  - aK\n  - x\nseq:\n- name: \"n\"\n  value: aK\n",
+            "top": "k: aK\n"
+        },
+        {
+            "input": "L",
+            "key": "L: 1\n",
+            "nested": "outer:\n  inner: L\n  list:\n  - L\n  - x\nseq:\n- name: \"n\"\n  value: L\n",
+            "top": "k: L\n"
+        },
+        {
+            "input": "La",
+            "key": "La: 1\n",
+            "nested": "outer:\n  inner: La\n  list:\n  - La\n  - x\nseq:\n- name: \"n\"\n  value: La\n",
+            "top": "k: La\n"
+        },
+        {
+            "input": "aLb",
+            "key": "aLb: 1\n",
+            "nested": "outer:\n  inner: aLb\n  list:\n  - aLb\n  - x\nseq:\n- name: \"n\"\n  value: aLb\n",
+            "top": "k: aLb\n"
+        },
+        {
+            "input": "aL",
+            "key": "aL: 1\n",
+            "nested": "outer:\n  inner: aL\n  list:\n  - aL\n  - x\nseq:\n- name: \"n\"\n  value: aL\n",
+            "top": "k: aL\n"
+        },
+        {
+            "input": "M",
+            "key": "M: 1\n",
+            "nested": "outer:\n  inner: M\n  list:\n  - M\n  - x\nseq:\n- name: \"n\"\n  value: M\n",
+            "top": "k: M\n"
+        },
+        {
+            "input": "Ma",
+            "key": "Ma: 1\n",
+            "nested": "outer:\n  inner: Ma\n  list:\n  - Ma\n  - x\nseq:\n- name: \"n\"\n  value: Ma\n",
+            "top": "k: Ma\n"
+        },
+        {
+            "input": "aMb",
+            "key": "aMb: 1\n",
+            "nested": "outer:\n  inner: aMb\n  list:\n  - aMb\n  - x\nseq:\n- name: \"n\"\n  value: aMb\n",
+            "top": "k: aMb\n"
+        },
+        {
+            "input": "aM",
+            "key": "aM: 1\n",
+            "nested": "outer:\n  inner: aM\n  list:\n  - aM\n  - x\nseq:\n- name: \"n\"\n  value: aM\n",
+            "top": "k: aM\n"
+        },
+        {
+            "input": "N",
+            "key": "\"N\": 1\n",
+            "nested": "outer:\n  inner: \"N\"\n  list:\n  - \"N\"\n  - x\nseq:\n- name: \"n\"\n  value: \"N\"\n",
+            "top": "k: \"N\"\n"
+        },
+        {
+            "input": "Na",
+            "key": "Na: 1\n",
+            "nested": "outer:\n  inner: Na\n  list:\n  - Na\n  - x\nseq:\n- name: \"n\"\n  value: Na\n",
+            "top": "k: Na\n"
+        },
+        {
+            "input": "aNb",
+            "key": "aNb: 1\n",
+            "nested": "outer:\n  inner: aNb\n  list:\n  - aNb\n  - x\nseq:\n- name: \"n\"\n  value: aNb\n",
+            "top": "k: aNb\n"
+        },
+        {
+            "input": "aN",
+            "key": "aN: 1\n",
+            "nested": "outer:\n  inner: aN\n  list:\n  - aN\n  - x\nseq:\n- name: \"n\"\n  value: aN\n",
+            "top": "k: aN\n"
+        },
+        {
+            "input": "O",
+            "key": "O: 1\n",
+            "nested": "outer:\n  inner: O\n  list:\n  - O\n  - x\nseq:\n- name: \"n\"\n  value: O\n",
+            "top": "k: O\n"
+        },
+        {
+            "input": "Oa",
+            "key": "Oa: 1\n",
+            "nested": "outer:\n  inner: Oa\n  list:\n  - Oa\n  - x\nseq:\n- name: \"n\"\n  value: Oa\n",
+            "top": "k: Oa\n"
+        },
+        {
+            "input": "aOb",
+            "key": "aOb: 1\n",
+            "nested": "outer:\n  inner: aOb\n  list:\n  - aOb\n  - x\nseq:\n- name: \"n\"\n  value: aOb\n",
+            "top": "k: aOb\n"
+        },
+        {
+            "input": "aO",
+            "key": "aO: 1\n",
+            "nested": "outer:\n  inner: aO\n  list:\n  - aO\n  - x\nseq:\n- name: \"n\"\n  value: aO\n",
+            "top": "k: aO\n"
+        },
+        {
+            "input": "P",
+            "key": "P: 1\n",
+            "nested": "outer:\n  inner: P\n  list:\n  - P\n  - x\nseq:\n- name: \"n\"\n  value: P\n",
+            "top": "k: P\n"
+        },
+        {
+            "input": "Pa",
+            "key": "Pa: 1\n",
+            "nested": "outer:\n  inner: Pa\n  list:\n  - Pa\n  - x\nseq:\n- name: \"n\"\n  value: Pa\n",
+            "top": "k: Pa\n"
+        },
+        {
+            "input": "aPb",
+            "key": "aPb: 1\n",
+            "nested": "outer:\n  inner: aPb\n  list:\n  - aPb\n  - x\nseq:\n- name: \"n\"\n  value: aPb\n",
+            "top": "k: aPb\n"
+        },
+        {
+            "input": "aP",
+            "key": "aP: 1\n",
+            "nested": "outer:\n  inner: aP\n  list:\n  - aP\n  - x\nseq:\n- name: \"n\"\n  value: aP\n",
+            "top": "k: aP\n"
+        },
+        {
+            "input": "Q",
+            "key": "Q: 1\n",
+            "nested": "outer:\n  inner: Q\n  list:\n  - Q\n  - x\nseq:\n- name: \"n\"\n  value: Q\n",
+            "top": "k: Q\n"
+        },
+        {
+            "input": "Qa",
+            "key": "Qa: 1\n",
+            "nested": "outer:\n  inner: Qa\n  list:\n  - Qa\n  - x\nseq:\n- name: \"n\"\n  value: Qa\n",
+            "top": "k: Qa\n"
+        },
+        {
+            "input": "aQb",
+            "key": "aQb: 1\n",
+            "nested": "outer:\n  inner: aQb\n  list:\n  - aQb\n  - x\nseq:\n- name: \"n\"\n  value: aQb\n",
+            "top": "k: aQb\n"
+        },
+        {
+            "input": "aQ",
+            "key": "aQ: 1\n",
+            "nested": "outer:\n  inner: aQ\n  list:\n  - aQ\n  - x\nseq:\n- name: \"n\"\n  value: aQ\n",
+            "top": "k: aQ\n"
+        },
+        {
+            "input": "R",
+            "key": "R: 1\n",
+            "nested": "outer:\n  inner: R\n  list:\n  - R\n  - x\nseq:\n- name: \"n\"\n  value: R\n",
+            "top": "k: R\n"
+        },
+        {
+            "input": "Ra",
+            "key": "Ra: 1\n",
+            "nested": "outer:\n  inner: Ra\n  list:\n  - Ra\n  - x\nseq:\n- name: \"n\"\n  value: Ra\n",
+            "top": "k: Ra\n"
+        },
+        {
+            "input": "aRb",
+            "key": "aRb: 1\n",
+            "nested": "outer:\n  inner: aRb\n  list:\n  - aRb\n  - x\nseq:\n- name: \"n\"\n  value: aRb\n",
+            "top": "k: aRb\n"
+        },
+        {
+            "input": "aR",
+            "key": "aR: 1\n",
+            "nested": "outer:\n  inner: aR\n  list:\n  - aR\n  - x\nseq:\n- name: \"n\"\n  value: aR\n",
+            "top": "k: aR\n"
+        },
+        {
+            "input": "S",
+            "key": "S: 1\n",
+            "nested": "outer:\n  inner: S\n  list:\n  - S\n  - x\nseq:\n- name: \"n\"\n  value: S\n",
+            "top": "k: S\n"
+        },
+        {
+            "input": "Sa",
+            "key": "Sa: 1\n",
+            "nested": "outer:\n  inner: Sa\n  list:\n  - Sa\n  - x\nseq:\n- name: \"n\"\n  value: Sa\n",
+            "top": "k: Sa\n"
+        },
+        {
+            "input": "aSb",
+            "key": "aSb: 1\n",
+            "nested": "outer:\n  inner: aSb\n  list:\n  - aSb\n  - x\nseq:\n- name: \"n\"\n  value: aSb\n",
+            "top": "k: aSb\n"
+        },
+        {
+            "input": "aS",
+            "key": "aS: 1\n",
+            "nested": "outer:\n  inner: aS\n  list:\n  - aS\n  - x\nseq:\n- name: \"n\"\n  value: aS\n",
+            "top": "k: aS\n"
+        },
+        {
+            "input": "T",
+            "key": "T: 1\n",
+            "nested": "outer:\n  inner: T\n  list:\n  - T\n  - x\nseq:\n- name: \"n\"\n  value: T\n",
+            "top": "k: T\n"
+        },
+        {
+            "input": "Ta",
+            "key": "Ta: 1\n",
+            "nested": "outer:\n  inner: Ta\n  list:\n  - Ta\n  - x\nseq:\n- name: \"n\"\n  value: Ta\n",
+            "top": "k: Ta\n"
+        },
+        {
+            "input": "aTb",
+            "key": "aTb: 1\n",
+            "nested": "outer:\n  inner: aTb\n  list:\n  - aTb\n  - x\nseq:\n- name: \"n\"\n  value: aTb\n",
+            "top": "k: aTb\n"
+        },
+        {
+            "input": "aT",
+            "key": "aT: 1\n",
+            "nested": "outer:\n  inner: aT\n  list:\n  - aT\n  - x\nseq:\n- name: \"n\"\n  value: aT\n",
+            "top": "k: aT\n"
+        },
+        {
+            "input": "U",
+            "key": "U: 1\n",
+            "nested": "outer:\n  inner: U\n  list:\n  - U\n  - x\nseq:\n- name: \"n\"\n  value: U\n",
+            "top": "k: U\n"
+        },
+        {
+            "input": "Ua",
+            "key": "Ua: 1\n",
+            "nested": "outer:\n  inner: Ua\n  list:\n  - Ua\n  - x\nseq:\n- name: \"n\"\n  value: Ua\n",
+            "top": "k: Ua\n"
+        },
+        {
+            "input": "aUb",
+            "key": "aUb: 1\n",
+            "nested": "outer:\n  inner: aUb\n  list:\n  - aUb\n  - x\nseq:\n- name: \"n\"\n  value: aUb\n",
+            "top": "k: aUb\n"
+        },
+        {
+            "input": "aU",
+            "key": "aU: 1\n",
+            "nested": "outer:\n  inner: aU\n  list:\n  - aU\n  - x\nseq:\n- name: \"n\"\n  value: aU\n",
+            "top": "k: aU\n"
+        },
+        {
+            "input": "V",
+            "key": "V: 1\n",
+            "nested": "outer:\n  inner: V\n  list:\n  - V\n  - x\nseq:\n- name: \"n\"\n  value: V\n",
+            "top": "k: V\n"
+        },
+        {
+            "input": "Va",
+            "key": "Va: 1\n",
+            "nested": "outer:\n  inner: Va\n  list:\n  - Va\n  - x\nseq:\n- name: \"n\"\n  value: Va\n",
+            "top": "k: Va\n"
+        },
+        {
+            "input": "aVb",
+            "key": "aVb: 1\n",
+            "nested": "outer:\n  inner: aVb\n  list:\n  - aVb\n  - x\nseq:\n- name: \"n\"\n  value: aVb\n",
+            "top": "k: aVb\n"
+        },
+        {
+            "input": "aV",
+            "key": "aV: 1\n",
+            "nested": "outer:\n  inner: aV\n  list:\n  - aV\n  - x\nseq:\n- name: \"n\"\n  value: aV\n",
+            "top": "k: aV\n"
+        },
+        {
+            "input": "W",
+            "key": "W: 1\n",
+            "nested": "outer:\n  inner: W\n  list:\n  - W\n  - x\nseq:\n- name: \"n\"\n  value: W\n",
+            "top": "k: W\n"
+        },
+        {
+            "input": "Wa",
+            "key": "Wa: 1\n",
+            "nested": "outer:\n  inner: Wa\n  list:\n  - Wa\n  - x\nseq:\n- name: \"n\"\n  value: Wa\n",
+            "top": "k: Wa\n"
+        },
+        {
+            "input": "aWb",
+            "key": "aWb: 1\n",
+            "nested": "outer:\n  inner: aWb\n  list:\n  - aWb\n  - x\nseq:\n- name: \"n\"\n  value: aWb\n",
+            "top": "k: aWb\n"
+        },
+        {
+            "input": "aW",
+            "key": "aW: 1\n",
+            "nested": "outer:\n  inner: aW\n  list:\n  - aW\n  - x\nseq:\n- name: \"n\"\n  value: aW\n",
+            "top": "k: aW\n"
+        },
+        {
+            "input": "X",
+            "key": "X: 1\n",
+            "nested": "outer:\n  inner: X\n  list:\n  - X\n  - x\nseq:\n- name: \"n\"\n  value: X\n",
+            "top": "k: X\n"
+        },
+        {
+            "input": "Xa",
+            "key": "Xa: 1\n",
+            "nested": "outer:\n  inner: Xa\n  list:\n  - Xa\n  - x\nseq:\n- name: \"n\"\n  value: Xa\n",
+            "top": "k: Xa\n"
+        },
+        {
+            "input": "aXb",
+            "key": "aXb: 1\n",
+            "nested": "outer:\n  inner: aXb\n  list:\n  - aXb\n  - x\nseq:\n- name: \"n\"\n  value: aXb\n",
+            "top": "k: aXb\n"
+        },
+        {
+            "input": "aX",
+            "key": "aX: 1\n",
+            "nested": "outer:\n  inner: aX\n  list:\n  - aX\n  - x\nseq:\n- name: \"n\"\n  value: aX\n",
+            "top": "k: aX\n"
+        },
+        {
+            "input": "Y",
+            "key": "\"Y\": 1\n",
+            "nested": "outer:\n  inner: \"Y\"\n  list:\n  - \"Y\"\n  - x\nseq:\n- name: \"n\"\n  value: \"Y\"\n",
+            "top": "k: \"Y\"\n"
+        },
+        {
+            "input": "Ya",
+            "key": "Ya: 1\n",
+            "nested": "outer:\n  inner: Ya\n  list:\n  - Ya\n  - x\nseq:\n- name: \"n\"\n  value: Ya\n",
+            "top": "k: Ya\n"
+        },
+        {
+            "input": "aYb",
+            "key": "aYb: 1\n",
+            "nested": "outer:\n  inner: aYb\n  list:\n  - aYb\n  - x\nseq:\n- name: \"n\"\n  value: aYb\n",
+            "top": "k: aYb\n"
+        },
+        {
+            "input": "aY",
+            "key": "aY: 1\n",
+            "nested": "outer:\n  inner: aY\n  list:\n  - aY\n  - x\nseq:\n- name: \"n\"\n  value: aY\n",
+            "top": "k: aY\n"
+        },
+        {
+            "input": "Z",
+            "key": "Z: 1\n",
+            "nested": "outer:\n  inner: Z\n  list:\n  - Z\n  - x\nseq:\n- name: \"n\"\n  value: Z\n",
+            "top": "k: Z\n"
+        },
+        {
+            "input": "Za",
+            "key": "Za: 1\n",
+            "nested": "outer:\n  inner: Za\n  list:\n  - Za\n  - x\nseq:\n- name: \"n\"\n  value: Za\n",
+            "top": "k: Za\n"
+        },
+        {
+            "input": "aZb",
+            "key": "aZb: 1\n",
+            "nested": "outer:\n  inner: aZb\n  list:\n  - aZb\n  - x\nseq:\n- name: \"n\"\n  value: aZb\n",
+            "top": "k: aZb\n"
+        },
+        {
+            "input": "aZ",
+            "key": "aZ: 1\n",
+            "nested": "outer:\n  inner: aZ\n  list:\n  - aZ\n  - x\nseq:\n- name: \"n\"\n  value: aZ\n",
+            "top": "k: aZ\n"
+        },
+        {
+            "input": "[",
+            "key": "\"[\": 1\n",
+            "nested": "outer:\n  inner: \"[\"\n  list:\n  - \"[\"\n  - x\nseq:\n- name: \"n\"\n  value: \"[\"\n",
+            "top": "k: \"[\"\n"
+        },
+        {
+            "input": "[a",
+            "key": "\"[a\": 1\n",
+            "nested": "outer:\n  inner: \"[a\"\n  list:\n  - \"[a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"[a\"\n",
+            "top": "k: \"[a\"\n"
+        },
+        {
+            "input": "a[b",
+            "key": "a[b: 1\n",
+            "nested": "outer:\n  inner: a[b\n  list:\n  - a[b\n  - x\nseq:\n- name: \"n\"\n  value: a[b\n",
+            "top": "k: a[b\n"
+        },
+        {
+            "input": "a[",
+            "key": "a[: 1\n",
+            "nested": "outer:\n  inner: a[\n  list:\n  - a[\n  - x\nseq:\n- name: \"n\"\n  value: a[\n",
+            "top": "k: a[\n"
+        },
+        {
+            "input": "\\",
+            "key": "\"\\\\\": 1\n",
+            "nested": "outer:\n  inner: \"\\\\\"\n  list:\n  - \"\\\\\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\\\\\"\n",
+            "top": "k: \"\\\\\"\n"
+        },
+        {
+            "input": "\\a",
+            "key": "\"\\\\a\": 1\n",
+            "nested": "outer:\n  inner: \"\\\\a\"\n  list:\n  - \"\\\\a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"\\\\a\"\n",
+            "top": "k: \"\\\\a\"\n"
+        },
+        {
+            "input": "a\\b",
+            "key": "\"a\\\\b\": 1\n",
+            "nested": "outer:\n  inner: \"a\\\\b\"\n  list:\n  - \"a\\\\b\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a\\\\b\"\n",
+            "top": "k: \"a\\\\b\"\n"
+        },
+        {
+            "input": "a\\",
+            "key": "\"a\\\\\": 1\n",
+            "nested": "outer:\n  inner: \"a\\\\\"\n  list:\n  - \"a\\\\\"\n  - x\nseq:\n- name: \"n\"\n  value: \"a\\\\\"\n",
+            "top": "k: \"a\\\\\"\n"
+        },
+        {
+            "input": "]",
+            "key": "\"]\": 1\n",
+            "nested": "outer:\n  inner: \"]\"\n  list:\n  - \"]\"\n  - x\nseq:\n- name: \"n\"\n  value: \"]\"\n",
+            "top": "k: \"]\"\n"
+        },
+        {
+            "input": "]a",
+            "key": "\"]a\": 1\n",
+            "nested": "outer:\n  inner: \"]a\"\n  list:\n  - \"]a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"]a\"\n",
+            "top": "k: \"]a\"\n"
+        },
+        {
+            "input": "a]b",
+            "key": "a]b: 1\n",
+            "nested": "outer:\n  inner: a]b\n  list:\n  - a]b\n  - x\nseq:\n- name: \"n\"\n  value: a]b\n",
+            "top": "k: a]b\n"
+        },
+        {
+            "input": "a]",
+            "key": "a]: 1\n",
+            "nested": "outer:\n  inner: a]\n  list:\n  - a]\n  - x\nseq:\n- name: \"n\"\n  value: a]\n",
+            "top": "k: a]\n"
+        },
+        {
+            "input": "^",
+            "key": "^: 1\n",
+            "nested": "outer:\n  inner: ^\n  list:\n  - ^\n  - x\nseq:\n- name: \"n\"\n  value: ^\n",
+            "top": "k: ^\n"
+        },
+        {
+            "input": "^a",
+            "key": "^a: 1\n",
+            "nested": "outer:\n  inner: ^a\n  list:\n  - ^a\n  - x\nseq:\n- name: \"n\"\n  value: ^a\n",
+            "top": "k: ^a\n"
+        },
+        {
+            "input": "a^b",
+            "key": "a^b: 1\n",
+            "nested": "outer:\n  inner: a^b\n  list:\n  - a^b\n  - x\nseq:\n- name: \"n\"\n  value: a^b\n",
+            "top": "k: a^b\n"
+        },
+        {
+            "input": "a^",
+            "key": "a^: 1\n",
+            "nested": "outer:\n  inner: a^\n  list:\n  - a^\n  - x\nseq:\n- name: \"n\"\n  value: a^\n",
+            "top": "k: a^\n"
+        },
+        {
+            "input": "_",
+            "key": "_: 1\n",
+            "nested": "outer:\n  inner: _\n  list:\n  - _\n  - x\nseq:\n- name: \"n\"\n  value: _\n",
+            "top": "k: _\n"
+        },
+        {
+            "input": "_a",
+            "key": "_a: 1\n",
+            "nested": "outer:\n  inner: _a\n  list:\n  - _a\n  - x\nseq:\n- name: \"n\"\n  value: _a\n",
+            "top": "k: _a\n"
+        },
+        {
+            "input": "a_b",
+            "key": "a_b: 1\n",
+            "nested": "outer:\n  inner: a_b\n  list:\n  - a_b\n  - x\nseq:\n- name: \"n\"\n  value: a_b\n",
+            "top": "k: a_b\n"
+        },
+        {
+            "input": "a_",
+            "key": "a_: 1\n",
+            "nested": "outer:\n  inner: a_\n  list:\n  - a_\n  - x\nseq:\n- name: \"n\"\n  value: a_\n",
+            "top": "k: a_\n"
+        },
+        {
+            "input": "`",
+            "key": "\"`\": 1\n",
+            "nested": "outer:\n  inner: \"`\"\n  list:\n  - \"`\"\n  - x\nseq:\n- name: \"n\"\n  value: \"`\"\n",
+            "top": "k: \"`\"\n"
+        },
+        {
+            "input": "`a",
+            "key": "\"`a\": 1\n",
+            "nested": "outer:\n  inner: \"`a\"\n  list:\n  - \"`a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"`a\"\n",
+            "top": "k: \"`a\"\n"
+        },
+        {
+            "input": "a`b",
+            "key": "a`b: 1\n",
+            "nested": "outer:\n  inner: a`b\n  list:\n  - a`b\n  - x\nseq:\n- name: \"n\"\n  value: a`b\n",
+            "top": "k: a`b\n"
+        },
+        {
+            "input": "a`",
+            "key": "a`: 1\n",
+            "nested": "outer:\n  inner: a`\n  list:\n  - a`\n  - x\nseq:\n- name: \"n\"\n  value: a`\n",
+            "top": "k: a`\n"
+        },
+        {
+            "input": "a",
+            "key": "a: 1\n",
+            "nested": "outer:\n  inner: a\n  list:\n  - a\n  - x\nseq:\n- name: \"n\"\n  value: a\n",
+            "top": "k: a\n"
+        },
+        {
+            "input": "aa",
+            "key": "aa: 1\n",
+            "nested": "outer:\n  inner: aa\n  list:\n  - aa\n  - x\nseq:\n- name: \"n\"\n  value: aa\n",
+            "top": "k: aa\n"
+        },
+        {
+            "input": "aab",
+            "key": "aab: 1\n",
+            "nested": "outer:\n  inner: aab\n  list:\n  - aab\n  - x\nseq:\n- name: \"n\"\n  value: aab\n",
+            "top": "k: aab\n"
+        },
+        {
+            "input": "aa",
+            "key": "aa: 1\n",
+            "nested": "outer:\n  inner: aa\n  list:\n  - aa\n  - x\nseq:\n- name: \"n\"\n  value: aa\n",
+            "top": "k: aa\n"
+        },
+        {
+            "input": "b",
+            "key": "b: 1\n",
+            "nested": "outer:\n  inner: b\n  list:\n  - b\n  - x\nseq:\n- name: \"n\"\n  value: b\n",
+            "top": "k: b\n"
+        },
+        {
+            "input": "ba",
+            "key": "ba: 1\n",
+            "nested": "outer:\n  inner: ba\n  list:\n  - ba\n  - x\nseq:\n- name: \"n\"\n  value: ba\n",
+            "top": "k: ba\n"
+        },
+        {
+            "input": "abb",
+            "key": "abb: 1\n",
+            "nested": "outer:\n  inner: abb\n  list:\n  - abb\n  - x\nseq:\n- name: \"n\"\n  value: abb\n",
+            "top": "k: abb\n"
+        },
+        {
+            "input": "ab",
+            "key": "ab: 1\n",
+            "nested": "outer:\n  inner: ab\n  list:\n  - ab\n  - x\nseq:\n- name: \"n\"\n  value: ab\n",
+            "top": "k: ab\n"
+        },
+        {
+            "input": "c",
+            "key": "c: 1\n",
+            "nested": "outer:\n  inner: c\n  list:\n  - c\n  - x\nseq:\n- name: \"n\"\n  value: c\n",
+            "top": "k: c\n"
+        },
+        {
+            "input": "ca",
+            "key": "ca: 1\n",
+            "nested": "outer:\n  inner: ca\n  list:\n  - ca\n  - x\nseq:\n- name: \"n\"\n  value: ca\n",
+            "top": "k: ca\n"
+        },
+        {
+            "input": "acb",
+            "key": "acb: 1\n",
+            "nested": "outer:\n  inner: acb\n  list:\n  - acb\n  - x\nseq:\n- name: \"n\"\n  value: acb\n",
+            "top": "k: acb\n"
+        },
+        {
+            "input": "ac",
+            "key": "ac: 1\n",
+            "nested": "outer:\n  inner: ac\n  list:\n  - ac\n  - x\nseq:\n- name: \"n\"\n  value: ac\n",
+            "top": "k: ac\n"
+        },
+        {
+            "input": "d",
+            "key": "d: 1\n",
+            "nested": "outer:\n  inner: d\n  list:\n  - d\n  - x\nseq:\n- name: \"n\"\n  value: d\n",
+            "top": "k: d\n"
+        },
+        {
+            "input": "da",
+            "key": "da: 1\n",
+            "nested": "outer:\n  inner: da\n  list:\n  - da\n  - x\nseq:\n- name: \"n\"\n  value: da\n",
+            "top": "k: da\n"
+        },
+        {
+            "input": "adb",
+            "key": "adb: 1\n",
+            "nested": "outer:\n  inner: adb\n  list:\n  - adb\n  - x\nseq:\n- name: \"n\"\n  value: adb\n",
+            "top": "k: adb\n"
+        },
+        {
+            "input": "ad",
+            "key": "ad: 1\n",
+            "nested": "outer:\n  inner: ad\n  list:\n  - ad\n  - x\nseq:\n- name: \"n\"\n  value: ad\n",
+            "top": "k: ad\n"
+        },
+        {
+            "input": "e",
+            "key": "e: 1\n",
+            "nested": "outer:\n  inner: e\n  list:\n  - e\n  - x\nseq:\n- name: \"n\"\n  value: e\n",
+            "top": "k: e\n"
+        },
+        {
+            "input": "ea",
+            "key": "ea: 1\n",
+            "nested": "outer:\n  inner: ea\n  list:\n  - ea\n  - x\nseq:\n- name: \"n\"\n  value: ea\n",
+            "top": "k: ea\n"
+        },
+        {
+            "input": "aeb",
+            "key": "aeb: 1\n",
+            "nested": "outer:\n  inner: aeb\n  list:\n  - aeb\n  - x\nseq:\n- name: \"n\"\n  value: aeb\n",
+            "top": "k: aeb\n"
+        },
+        {
+            "input": "ae",
+            "key": "ae: 1\n",
+            "nested": "outer:\n  inner: ae\n  list:\n  - ae\n  - x\nseq:\n- name: \"n\"\n  value: ae\n",
+            "top": "k: ae\n"
+        },
+        {
+            "input": "f",
+            "key": "f: 1\n",
+            "nested": "outer:\n  inner: f\n  list:\n  - f\n  - x\nseq:\n- name: \"n\"\n  value: f\n",
+            "top": "k: f\n"
+        },
+        {
+            "input": "fa",
+            "key": "fa: 1\n",
+            "nested": "outer:\n  inner: fa\n  list:\n  - fa\n  - x\nseq:\n- name: \"n\"\n  value: fa\n",
+            "top": "k: fa\n"
+        },
+        {
+            "input": "afb",
+            "key": "afb: 1\n",
+            "nested": "outer:\n  inner: afb\n  list:\n  - afb\n  - x\nseq:\n- name: \"n\"\n  value: afb\n",
+            "top": "k: afb\n"
+        },
+        {
+            "input": "af",
+            "key": "af: 1\n",
+            "nested": "outer:\n  inner: af\n  list:\n  - af\n  - x\nseq:\n- name: \"n\"\n  value: af\n",
+            "top": "k: af\n"
+        },
+        {
+            "input": "g",
+            "key": "g: 1\n",
+            "nested": "outer:\n  inner: g\n  list:\n  - g\n  - x\nseq:\n- name: \"n\"\n  value: g\n",
+            "top": "k: g\n"
+        },
+        {
+            "input": "ga",
+            "key": "ga: 1\n",
+            "nested": "outer:\n  inner: ga\n  list:\n  - ga\n  - x\nseq:\n- name: \"n\"\n  value: ga\n",
+            "top": "k: ga\n"
+        },
+        {
+            "input": "agb",
+            "key": "agb: 1\n",
+            "nested": "outer:\n  inner: agb\n  list:\n  - agb\n  - x\nseq:\n- name: \"n\"\n  value: agb\n",
+            "top": "k: agb\n"
+        },
+        {
+            "input": "ag",
+            "key": "ag: 1\n",
+            "nested": "outer:\n  inner: ag\n  list:\n  - ag\n  - x\nseq:\n- name: \"n\"\n  value: ag\n",
+            "top": "k: ag\n"
+        },
+        {
+            "input": "h",
+            "key": "h: 1\n",
+            "nested": "outer:\n  inner: h\n  list:\n  - h\n  - x\nseq:\n- name: \"n\"\n  value: h\n",
+            "top": "k: h\n"
+        },
+        {
+            "input": "ha",
+            "key": "ha: 1\n",
+            "nested": "outer:\n  inner: ha\n  list:\n  - ha\n  - x\nseq:\n- name: \"n\"\n  value: ha\n",
+            "top": "k: ha\n"
+        },
+        {
+            "input": "ahb",
+            "key": "ahb: 1\n",
+            "nested": "outer:\n  inner: ahb\n  list:\n  - ahb\n  - x\nseq:\n- name: \"n\"\n  value: ahb\n",
+            "top": "k: ahb\n"
+        },
+        {
+            "input": "ah",
+            "key": "ah: 1\n",
+            "nested": "outer:\n  inner: ah\n  list:\n  - ah\n  - x\nseq:\n- name: \"n\"\n  value: ah\n",
+            "top": "k: ah\n"
+        },
+        {
+            "input": "i",
+            "key": "i: 1\n",
+            "nested": "outer:\n  inner: i\n  list:\n  - i\n  - x\nseq:\n- name: \"n\"\n  value: i\n",
+            "top": "k: i\n"
+        },
+        {
+            "input": "ia",
+            "key": "ia: 1\n",
+            "nested": "outer:\n  inner: ia\n  list:\n  - ia\n  - x\nseq:\n- name: \"n\"\n  value: ia\n",
+            "top": "k: ia\n"
+        },
+        {
+            "input": "aib",
+            "key": "aib: 1\n",
+            "nested": "outer:\n  inner: aib\n  list:\n  - aib\n  - x\nseq:\n- name: \"n\"\n  value: aib\n",
+            "top": "k: aib\n"
+        },
+        {
+            "input": "ai",
+            "key": "ai: 1\n",
+            "nested": "outer:\n  inner: ai\n  list:\n  - ai\n  - x\nseq:\n- name: \"n\"\n  value: ai\n",
+            "top": "k: ai\n"
+        },
+        {
+            "input": "j",
+            "key": "j: 1\n",
+            "nested": "outer:\n  inner: j\n  list:\n  - j\n  - x\nseq:\n- name: \"n\"\n  value: j\n",
+            "top": "k: j\n"
+        },
+        {
+            "input": "ja",
+            "key": "ja: 1\n",
+            "nested": "outer:\n  inner: ja\n  list:\n  - ja\n  - x\nseq:\n- name: \"n\"\n  value: ja\n",
+            "top": "k: ja\n"
+        },
+        {
+            "input": "ajb",
+            "key": "ajb: 1\n",
+            "nested": "outer:\n  inner: ajb\n  list:\n  - ajb\n  - x\nseq:\n- name: \"n\"\n  value: ajb\n",
+            "top": "k: ajb\n"
+        },
+        {
+            "input": "aj",
+            "key": "aj: 1\n",
+            "nested": "outer:\n  inner: aj\n  list:\n  - aj\n  - x\nseq:\n- name: \"n\"\n  value: aj\n",
+            "top": "k: aj\n"
+        },
+        {
+            "input": "k",
+            "key": "k: 1\n",
+            "nested": "outer:\n  inner: k\n  list:\n  - k\n  - x\nseq:\n- name: \"n\"\n  value: k\n",
+            "top": "k: k\n"
+        },
+        {
+            "input": "ka",
+            "key": "ka: 1\n",
+            "nested": "outer:\n  inner: ka\n  list:\n  - ka\n  - x\nseq:\n- name: \"n\"\n  value: ka\n",
+            "top": "k: ka\n"
+        },
+        {
+            "input": "akb",
+            "key": "akb: 1\n",
+            "nested": "outer:\n  inner: akb\n  list:\n  - akb\n  - x\nseq:\n- name: \"n\"\n  value: akb\n",
+            "top": "k: akb\n"
+        },
+        {
+            "input": "ak",
+            "key": "ak: 1\n",
+            "nested": "outer:\n  inner: ak\n  list:\n  - ak\n  - x\nseq:\n- name: \"n\"\n  value: ak\n",
+            "top": "k: ak\n"
+        },
+        {
+            "input": "l",
+            "key": "l: 1\n",
+            "nested": "outer:\n  inner: l\n  list:\n  - l\n  - x\nseq:\n- name: \"n\"\n  value: l\n",
+            "top": "k: l\n"
+        },
+        {
+            "input": "la",
+            "key": "la: 1\n",
+            "nested": "outer:\n  inner: la\n  list:\n  - la\n  - x\nseq:\n- name: \"n\"\n  value: la\n",
+            "top": "k: la\n"
+        },
+        {
+            "input": "alb",
+            "key": "alb: 1\n",
+            "nested": "outer:\n  inner: alb\n  list:\n  - alb\n  - x\nseq:\n- name: \"n\"\n  value: alb\n",
+            "top": "k: alb\n"
+        },
+        {
+            "input": "al",
+            "key": "al: 1\n",
+            "nested": "outer:\n  inner: al\n  list:\n  - al\n  - x\nseq:\n- name: \"n\"\n  value: al\n",
+            "top": "k: al\n"
+        },
+        {
+            "input": "m",
+            "key": "m: 1\n",
+            "nested": "outer:\n  inner: m\n  list:\n  - m\n  - x\nseq:\n- name: \"n\"\n  value: m\n",
+            "top": "k: m\n"
+        },
+        {
+            "input": "ma",
+            "key": "ma: 1\n",
+            "nested": "outer:\n  inner: ma\n  list:\n  - ma\n  - x\nseq:\n- name: \"n\"\n  value: ma\n",
+            "top": "k: ma\n"
+        },
+        {
+            "input": "amb",
+            "key": "amb: 1\n",
+            "nested": "outer:\n  inner: amb\n  list:\n  - amb\n  - x\nseq:\n- name: \"n\"\n  value: amb\n",
+            "top": "k: amb\n"
+        },
+        {
+            "input": "am",
+            "key": "am: 1\n",
+            "nested": "outer:\n  inner: am\n  list:\n  - am\n  - x\nseq:\n- name: \"n\"\n  value: am\n",
+            "top": "k: am\n"
+        },
+        {
+            "input": "n",
+            "key": "\"n\": 1\n",
+            "nested": "outer:\n  inner: \"n\"\n  list:\n  - \"n\"\n  - x\nseq:\n- name: \"n\"\n  value: \"n\"\n",
+            "top": "k: \"n\"\n"
+        },
+        {
+            "input": "na",
+            "key": "na: 1\n",
+            "nested": "outer:\n  inner: na\n  list:\n  - na\n  - x\nseq:\n- name: \"n\"\n  value: na\n",
+            "top": "k: na\n"
+        },
+        {
+            "input": "anb",
+            "key": "anb: 1\n",
+            "nested": "outer:\n  inner: anb\n  list:\n  - anb\n  - x\nseq:\n- name: \"n\"\n  value: anb\n",
+            "top": "k: anb\n"
+        },
+        {
+            "input": "an",
+            "key": "an: 1\n",
+            "nested": "outer:\n  inner: an\n  list:\n  - an\n  - x\nseq:\n- name: \"n\"\n  value: an\n",
+            "top": "k: an\n"
+        },
+        {
+            "input": "o",
+            "key": "o: 1\n",
+            "nested": "outer:\n  inner: o\n  list:\n  - o\n  - x\nseq:\n- name: \"n\"\n  value: o\n",
+            "top": "k: o\n"
+        },
+        {
+            "input": "oa",
+            "key": "oa: 1\n",
+            "nested": "outer:\n  inner: oa\n  list:\n  - oa\n  - x\nseq:\n- name: \"n\"\n  value: oa\n",
+            "top": "k: oa\n"
+        },
+        {
+            "input": "aob",
+            "key": "aob: 1\n",
+            "nested": "outer:\n  inner: aob\n  list:\n  - aob\n  - x\nseq:\n- name: \"n\"\n  value: aob\n",
+            "top": "k: aob\n"
+        },
+        {
+            "input": "ao",
+            "key": "ao: 1\n",
+            "nested": "outer:\n  inner: ao\n  list:\n  - ao\n  - x\nseq:\n- name: \"n\"\n  value: ao\n",
+            "top": "k: ao\n"
+        },
+        {
+            "input": "p",
+            "key": "p: 1\n",
+            "nested": "outer:\n  inner: p\n  list:\n  - p\n  - x\nseq:\n- name: \"n\"\n  value: p\n",
+            "top": "k: p\n"
+        },
+        {
+            "input": "pa",
+            "key": "pa: 1\n",
+            "nested": "outer:\n  inner: pa\n  list:\n  - pa\n  - x\nseq:\n- name: \"n\"\n  value: pa\n",
+            "top": "k: pa\n"
+        },
+        {
+            "input": "apb",
+            "key": "apb: 1\n",
+            "nested": "outer:\n  inner: apb\n  list:\n  - apb\n  - x\nseq:\n- name: \"n\"\n  value: apb\n",
+            "top": "k: apb\n"
+        },
+        {
+            "input": "ap",
+            "key": "ap: 1\n",
+            "nested": "outer:\n  inner: ap\n  list:\n  - ap\n  - x\nseq:\n- name: \"n\"\n  value: ap\n",
+            "top": "k: ap\n"
+        },
+        {
+            "input": "q",
+            "key": "q: 1\n",
+            "nested": "outer:\n  inner: q\n  list:\n  - q\n  - x\nseq:\n- name: \"n\"\n  value: q\n",
+            "top": "k: q\n"
+        },
+        {
+            "input": "qa",
+            "key": "qa: 1\n",
+            "nested": "outer:\n  inner: qa\n  list:\n  - qa\n  - x\nseq:\n- name: \"n\"\n  value: qa\n",
+            "top": "k: qa\n"
+        },
+        {
+            "input": "aqb",
+            "key": "aqb: 1\n",
+            "nested": "outer:\n  inner: aqb\n  list:\n  - aqb\n  - x\nseq:\n- name: \"n\"\n  value: aqb\n",
+            "top": "k: aqb\n"
+        },
+        {
+            "input": "aq",
+            "key": "aq: 1\n",
+            "nested": "outer:\n  inner: aq\n  list:\n  - aq\n  - x\nseq:\n- name: \"n\"\n  value: aq\n",
+            "top": "k: aq\n"
+        },
+        {
+            "input": "r",
+            "key": "r: 1\n",
+            "nested": "outer:\n  inner: r\n  list:\n  - r\n  - x\nseq:\n- name: \"n\"\n  value: r\n",
+            "top": "k: r\n"
+        },
+        {
+            "input": "ra",
+            "key": "ra: 1\n",
+            "nested": "outer:\n  inner: ra\n  list:\n  - ra\n  - x\nseq:\n- name: \"n\"\n  value: ra\n",
+            "top": "k: ra\n"
+        },
+        {
+            "input": "arb",
+            "key": "arb: 1\n",
+            "nested": "outer:\n  inner: arb\n  list:\n  - arb\n  - x\nseq:\n- name: \"n\"\n  value: arb\n",
+            "top": "k: arb\n"
+        },
+        {
+            "input": "ar",
+            "key": "ar: 1\n",
+            "nested": "outer:\n  inner: ar\n  list:\n  - ar\n  - x\nseq:\n- name: \"n\"\n  value: ar\n",
+            "top": "k: ar\n"
+        },
+        {
+            "input": "s",
+            "key": "s: 1\n",
+            "nested": "outer:\n  inner: s\n  list:\n  - s\n  - x\nseq:\n- name: \"n\"\n  value: s\n",
+            "top": "k: s\n"
+        },
+        {
+            "input": "sa",
+            "key": "sa: 1\n",
+            "nested": "outer:\n  inner: sa\n  list:\n  - sa\n  - x\nseq:\n- name: \"n\"\n  value: sa\n",
+            "top": "k: sa\n"
+        },
+        {
+            "input": "asb",
+            "key": "asb: 1\n",
+            "nested": "outer:\n  inner: asb\n  list:\n  - asb\n  - x\nseq:\n- name: \"n\"\n  value: asb\n",
+            "top": "k: asb\n"
+        },
+        {
+            "input": "as",
+            "key": "as: 1\n",
+            "nested": "outer:\n  inner: as\n  list:\n  - as\n  - x\nseq:\n- name: \"n\"\n  value: as\n",
+            "top": "k: as\n"
+        },
+        {
+            "input": "t",
+            "key": "t: 1\n",
+            "nested": "outer:\n  inner: t\n  list:\n  - t\n  - x\nseq:\n- name: \"n\"\n  value: t\n",
+            "top": "k: t\n"
+        },
+        {
+            "input": "ta",
+            "key": "ta: 1\n",
+            "nested": "outer:\n  inner: ta\n  list:\n  - ta\n  - x\nseq:\n- name: \"n\"\n  value: ta\n",
+            "top": "k: ta\n"
+        },
+        {
+            "input": "atb",
+            "key": "atb: 1\n",
+            "nested": "outer:\n  inner: atb\n  list:\n  - atb\n  - x\nseq:\n- name: \"n\"\n  value: atb\n",
+            "top": "k: atb\n"
+        },
+        {
+            "input": "at",
+            "key": "at: 1\n",
+            "nested": "outer:\n  inner: at\n  list:\n  - at\n  - x\nseq:\n- name: \"n\"\n  value: at\n",
+            "top": "k: at\n"
+        },
+        {
+            "input": "u",
+            "key": "u: 1\n",
+            "nested": "outer:\n  inner: u\n  list:\n  - u\n  - x\nseq:\n- name: \"n\"\n  value: u\n",
+            "top": "k: u\n"
+        },
+        {
+            "input": "ua",
+            "key": "ua: 1\n",
+            "nested": "outer:\n  inner: ua\n  list:\n  - ua\n  - x\nseq:\n- name: \"n\"\n  value: ua\n",
+            "top": "k: ua\n"
+        },
+        {
+            "input": "aub",
+            "key": "aub: 1\n",
+            "nested": "outer:\n  inner: aub\n  list:\n  - aub\n  - x\nseq:\n- name: \"n\"\n  value: aub\n",
+            "top": "k: aub\n"
+        },
+        {
+            "input": "au",
+            "key": "au: 1\n",
+            "nested": "outer:\n  inner: au\n  list:\n  - au\n  - x\nseq:\n- name: \"n\"\n  value: au\n",
+            "top": "k: au\n"
+        },
+        {
+            "input": "v",
+            "key": "v: 1\n",
+            "nested": "outer:\n  inner: v\n  list:\n  - v\n  - x\nseq:\n- name: \"n\"\n  value: v\n",
+            "top": "k: v\n"
+        },
+        {
+            "input": "va",
+            "key": "va: 1\n",
+            "nested": "outer:\n  inner: va\n  list:\n  - va\n  - x\nseq:\n- name: \"n\"\n  value: va\n",
+            "top": "k: va\n"
+        },
+        {
+            "input": "avb",
+            "key": "avb: 1\n",
+            "nested": "outer:\n  inner: avb\n  list:\n  - avb\n  - x\nseq:\n- name: \"n\"\n  value: avb\n",
+            "top": "k: avb\n"
+        },
+        {
+            "input": "av",
+            "key": "av: 1\n",
+            "nested": "outer:\n  inner: av\n  list:\n  - av\n  - x\nseq:\n- name: \"n\"\n  value: av\n",
+            "top": "k: av\n"
+        },
+        {
+            "input": "w",
+            "key": "w: 1\n",
+            "nested": "outer:\n  inner: w\n  list:\n  - w\n  - x\nseq:\n- name: \"n\"\n  value: w\n",
+            "top": "k: w\n"
+        },
+        {
+            "input": "wa",
+            "key": "wa: 1\n",
+            "nested": "outer:\n  inner: wa\n  list:\n  - wa\n  - x\nseq:\n- name: \"n\"\n  value: wa\n",
+            "top": "k: wa\n"
+        },
+        {
+            "input": "awb",
+            "key": "awb: 1\n",
+            "nested": "outer:\n  inner: awb\n  list:\n  - awb\n  - x\nseq:\n- name: \"n\"\n  value: awb\n",
+            "top": "k: awb\n"
+        },
+        {
+            "input": "aw",
+            "key": "aw: 1\n",
+            "nested": "outer:\n  inner: aw\n  list:\n  - aw\n  - x\nseq:\n- name: \"n\"\n  value: aw\n",
+            "top": "k: aw\n"
+        },
+        {
+            "input": "x",
+            "key": "x: 1\n",
+            "nested": "outer:\n  inner: x\n  list:\n  - x\n  - x\nseq:\n- name: \"n\"\n  value: x\n",
+            "top": "k: x\n"
+        },
+        {
+            "input": "xa",
+            "key": "xa: 1\n",
+            "nested": "outer:\n  inner: xa\n  list:\n  - xa\n  - x\nseq:\n- name: \"n\"\n  value: xa\n",
+            "top": "k: xa\n"
+        },
+        {
+            "input": "axb",
+            "key": "axb: 1\n",
+            "nested": "outer:\n  inner: axb\n  list:\n  - axb\n  - x\nseq:\n- name: \"n\"\n  value: axb\n",
+            "top": "k: axb\n"
+        },
+        {
+            "input": "ax",
+            "key": "ax: 1\n",
+            "nested": "outer:\n  inner: ax\n  list:\n  - ax\n  - x\nseq:\n- name: \"n\"\n  value: ax\n",
+            "top": "k: ax\n"
+        },
+        {
+            "input": "y",
+            "key": "\"y\": 1\n",
+            "nested": "outer:\n  inner: \"y\"\n  list:\n  - \"y\"\n  - x\nseq:\n- name: \"n\"\n  value: \"y\"\n",
+            "top": "k: \"y\"\n"
+        },
+        {
+            "input": "ya",
+            "key": "ya: 1\n",
+            "nested": "outer:\n  inner: ya\n  list:\n  - ya\n  - x\nseq:\n- name: \"n\"\n  value: ya\n",
+            "top": "k: ya\n"
+        },
+        {
+            "input": "ayb",
+            "key": "ayb: 1\n",
+            "nested": "outer:\n  inner: ayb\n  list:\n  - ayb\n  - x\nseq:\n- name: \"n\"\n  value: ayb\n",
+            "top": "k: ayb\n"
+        },
+        {
+            "input": "ay",
+            "key": "ay: 1\n",
+            "nested": "outer:\n  inner: ay\n  list:\n  - ay\n  - x\nseq:\n- name: \"n\"\n  value: ay\n",
+            "top": "k: ay\n"
+        },
+        {
+            "input": "z",
+            "key": "z: 1\n",
+            "nested": "outer:\n  inner: z\n  list:\n  - z\n  - x\nseq:\n- name: \"n\"\n  value: z\n",
+            "top": "k: z\n"
+        },
+        {
+            "input": "za",
+            "key": "za: 1\n",
+            "nested": "outer:\n  inner: za\n  list:\n  - za\n  - x\nseq:\n- name: \"n\"\n  value: za\n",
+            "top": "k: za\n"
+        },
+        {
+            "input": "azb",
+            "key": "azb: 1\n",
+            "nested": "outer:\n  inner: azb\n  list:\n  - azb\n  - x\nseq:\n- name: \"n\"\n  value: azb\n",
+            "top": "k: azb\n"
+        },
+        {
+            "input": "az",
+            "key": "az: 1\n",
+            "nested": "outer:\n  inner: az\n  list:\n  - az\n  - x\nseq:\n- name: \"n\"\n  value: az\n",
+            "top": "k: az\n"
+        },
+        {
+            "input": "{",
+            "key": "\"{\": 1\n",
+            "nested": "outer:\n  inner: \"{\"\n  list:\n  - \"{\"\n  - x\nseq:\n- name: \"n\"\n  value: \"{\"\n",
+            "top": "k: \"{\"\n"
+        },
+        {
+            "input": "{a",
+            "key": "\"{a\": 1\n",
+            "nested": "outer:\n  inner: \"{a\"\n  list:\n  - \"{a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"{a\"\n",
+            "top": "k: \"{a\"\n"
+        },
+        {
+            "input": "a{b",
+            "key": "a{b: 1\n",
+            "nested": "outer:\n  inner: a{b\n  list:\n  - a{b\n  - x\nseq:\n- name: \"n\"\n  value: a{b\n",
+            "top": "k: a{b\n"
+        },
+        {
+            "input": "a{",
+            "key": "a{: 1\n",
+            "nested": "outer:\n  inner: a{\n  list:\n  - a{\n  - x\nseq:\n- name: \"n\"\n  value: a{\n",
+            "top": "k: a{\n"
+        },
+        {
+            "input": "|",
+            "key": "\"|\": 1\n",
+            "nested": "outer:\n  inner: \"|\"\n  list:\n  - \"|\"\n  - x\nseq:\n- name: \"n\"\n  value: \"|\"\n",
+            "top": "k: \"|\"\n"
+        },
+        {
+            "input": "|a",
+            "key": "\"|a\": 1\n",
+            "nested": "outer:\n  inner: \"|a\"\n  list:\n  - \"|a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"|a\"\n",
+            "top": "k: \"|a\"\n"
+        },
+        {
+            "input": "a|b",
+            "key": "a|b: 1\n",
+            "nested": "outer:\n  inner: a|b\n  list:\n  - a|b\n  - x\nseq:\n- name: \"n\"\n  value: a|b\n",
+            "top": "k: a|b\n"
+        },
+        {
+            "input": "a|",
+            "key": "a|: 1\n",
+            "nested": "outer:\n  inner: a|\n  list:\n  - a|\n  - x\nseq:\n- name: \"n\"\n  value: a|\n",
+            "top": "k: a|\n"
+        },
+        {
+            "input": "}",
+            "key": "\"}\": 1\n",
+            "nested": "outer:\n  inner: \"}\"\n  list:\n  - \"}\"\n  - x\nseq:\n- name: \"n\"\n  value: \"}\"\n",
+            "top": "k: \"}\"\n"
+        },
+        {
+            "input": "}a",
+            "key": "\"}a\": 1\n",
+            "nested": "outer:\n  inner: \"}a\"\n  list:\n  - \"}a\"\n  - x\nseq:\n- name: \"n\"\n  value: \"}a\"\n",
+            "top": "k: \"}a\"\n"
+        },
+        {
+            "input": "a}b",
+            "key": "a}b: 1\n",
+            "nested": "outer:\n  inner: a}b\n  list:\n  - a}b\n  - x\nseq:\n- name: \"n\"\n  value: a}b\n",
+            "top": "k: a}b\n"
+        },
+        {
+            "input": "a}",
+            "key": "a}: 1\n",
+            "nested": "outer:\n  inner: a}\n  list:\n  - a}\n  - x\nseq:\n- name: \"n\"\n  value: a}\n",
+            "top": "k: a}\n"
+        },
+        {
+            "input": "~",
+            "key": "\"~\": 1\n",
+            "nested": "outer:\n  inner: \"~\"\n  list:\n  - \"~\"\n  - x\nseq:\n- name: \"n\"\n  value: \"~\"\n",
+            "top": "k: \"~\"\n"
+        },
+        {
+            "input": "~a",
+            "key": "~a: 1\n",
+            "nested": "outer:\n  inner: ~a\n  list:\n  - ~a\n  - x\nseq:\n- name: \"n\"\n  value: ~a\n",
+            "top": "k: ~a\n"
+        },
+        {
+            "input": "a~b",
+            "key": "a~b: 1\n",
+            "nested": "outer:\n  inner: a~b\n  list:\n  - a~b\n  - x\nseq:\n- name: \"n\"\n  value: a~b\n",
+            "top": "k: a~b\n"
+        },
+        {
+            "input": "a~",
+            "key": "a~: 1\n",
+            "nested": "outer:\n  inner: a~\n  list:\n  - a~\n  - x\nseq:\n- name: \"n\"\n  value: a~\n",
+            "top": "k: a~\n"
+        }
+    ],
+    "zone": "IST",
+    "zone_offset_secs": 19800
+}

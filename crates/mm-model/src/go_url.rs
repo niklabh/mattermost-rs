@@ -979,6 +979,11 @@ impl Values {
             .insert(key.as_bytes().to_vec(), vec![value.as_bytes().to_vec()]);
     }
 
+    /// Port of `Values.Del` — removes every value for the key.
+    pub fn del(&mut self, key: &str) {
+        self.0.remove(key.as_bytes());
+    }
+
     /// Port of `Values.Add` — appends.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         self.0.entry(key.to_vec()).or_default().push(value.to_vec());
@@ -1004,6 +1009,14 @@ impl Values {
         }
         buf
     }
+}
+
+/// Port of `QueryUnescape` (net/url/url.go:190) — `+` is a space, `%XX` a byte. The result is
+/// Go's byte string read as UTF-8, lossily: the one caller (`SanitizeDataSource`) unescapes a URL
+/// this crate has just escaped.
+pub fn query_unescape(s: &str) -> Result<String, UrlParseError> {
+    let bytes = unescape(s.as_bytes(), Encoding::QueryComponent)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Port of `ParseQuery` (net/url/url.go:931) and `parseQuery` (:957).

@@ -882,6 +882,19 @@ where
     });
 }
 
+/// The gate in front of `GenerateSupportData` (app/support_packet.go:107): a plugin that
+/// declared the `support_packet` prop is called only when the admin ticked it.
+pub(crate) fn support_data_requested(
+    manifest: &mm_model::manifest::Manifest,
+    plugin_packets: &[String],
+) -> bool {
+    let declared = manifest
+        .props
+        .as_ref()
+        .is_some_and(|props| props.contains_key("support_packet"));
+    !declared || plugin_packets.contains(&manifest.id)
+}
+
 /// `model.NewAppError(caller, "app.plugin.inactive_guard.app_error", nil, "", 503)` —
 /// `logAndErrPluginsDisabled` and `logAndErrPluginInactive` answer the same error
 /// (guarded_hooks.go:78, :63).
@@ -2034,6 +2047,58 @@ impl App {
         if let Some(err) = mm_plugin::error::decodable_error(returns.a.as_ref()) {
             tracing::error!(plugin_id = id, error = %err.go_error(), "Plugin OnInstall hook failed");
         }
+    }
+
+    /// `GenerateSupportData` — the plugin loop at the end of `GenerateSupportPacket`
+    /// (app/support_packet.go:103-126), through `RunMultiHook`: every running plugin that
+    /// implements it, in the environment's order, and **none short-circuits** — the closure
+    /// always answers `true`.
+    ///
+    /// A plugin whose manifest carries a `support_packet` prop (any value, `null` included: Go
+    /// tests the key) has a checkbox in the System Console and is asked only when its id is in
+    /// `plugin_packets`; a plugin without one is always asked. An error the plugin answers is a
+    /// warning, and that plugin's files are dropped even when it sent some; a transport failure
+    /// is Go's logged zero value — no files, no warning. Files are appended in the order the
+    /// plugin sent them.
+    pub(crate) async fn run_generate_support_data(
+        &self,
+        ctx: &HookContext,
+        plugin_packets: &[String],
+    ) -> (Vec<mm_model::support_packet::FileData>, Vec<String>) {
+        let (mut files, mut warnings) = (Vec::new(), Vec::new());
+        let Some(environment) = self.hook_environment() else {
+            return (files, warnings);
+        };
+        for (hooks, manifest) in environment.hooks_implementing(hook_id::GENERATE_SUPPORT_DATA) {
+            if !support_data_requested(&manifest, plugin_packets) {
+                continue;
+            }
+            let returns = hooks
+                .generate_support_data(wire_plugin::Z_GenerateSupportDataArgs {
+                    a: ctx.boxed_wire(),
+                })
+                .await;
+            if let Some(err) = mm_plugin::error::decodable_error(returns.b.as_ref()) {
+                let text = err.go_error();
+                tracing::warn!(
+                    plugin = %manifest.id,
+                    error = %text,
+                    "Failed to generate plugin file for Support Packet"
+                );
+                warnings.push(text);
+                continue;
+            }
+            files.extend(
+                returns
+                    .a
+                    .into_iter()
+                    .map(|data| mm_model::support_packet::FileData {
+                        filename: data.filename,
+                        body: data.body,
+                    }),
+            );
+        }
+        (files, warnings)
     }
 
     /// `ChannelHasBeenCreated` (hook 13) — the three creation sites: the end of `CreateChannel`

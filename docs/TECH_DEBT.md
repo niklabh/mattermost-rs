@@ -9498,7 +9498,7 @@ gob's merge keeps the caller's `nil`.
 **What is owed:** the wire→model `PostMetadata` conversion, or a forward at that branch, before a
 plugin that sets `Metadata.Priority` from `MessageWillBePosted` is supported.
 
-## D-932 · 6 of the 35 plugin hooks do not fire from the Rust host
+## D-932 · 5 of the 35 plugin hooks do not fire from the Rust host
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-20 (plugin hook call sites) · **Owner** the plugin host
 **Narrowed** 2026-09-20 — the channel and team membership family, six more hooks.
@@ -9510,9 +9510,11 @@ both served upload paths. Then `PreferencesHaveChanged`, the channel lifecycle f
 every served post read and on the post a create or an edit answers with. Then `OnInstall`, on
 onboarding's plugin installs. Then `ScheduledPostWillBeCreated`, on the scheduled-post create
 and update, which are served on a licensed server since the same day.
+**Narrowed** 2026-09-23 — `GenerateSupportData`, with the support packet it ends, served past its
+licence gate.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
-**29** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
+**30** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
 (`MessageWillBePosted`, `MessageHasBeenPosted`, `MessageWillBeUpdated`,
 `MessageHasBeenUpdated`, `MessageHasBeenDeleted`), the two reaction hooks, and the membership
 family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`,
@@ -9520,15 +9522,14 @@ family (`ChannelMemberWillBeAdded`, `UserHasJoinedChannel`, `UserHasLeftChannel`
 (`UserHasBeenCreated`, `UserWillLogIn`, `UserHasLoggedIn`, `UserHasBeenDeactivated`) and
 both file hooks, `PreferencesHaveChanged`, and `ChannelHasBeenCreated`, `ChannelWillBeUpdated`,
 `ChannelWillBeArchived`, `ChannelWillBeRestored`, `DraftWillBeUpserted`, and the two consumed
-hooks `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, `OnInstall`, and
-`ScheduledPostWillBeCreated`. That is 34 of the 46 invocations. The remaining 6 hooks do not fire
-at all, and the paths that would fire them behave
+hooks `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, `OnInstall`,
+`ScheduledPostWillBeCreated` and `GenerateSupportData`. That is 35 of the 46 invocations. The
+remaining 5 hooks do not fire at all, and the paths that would fire them behave
 exactly as they did before:
 
 ```text
 notification EmailNotificationWillBeSent, NotificationWillBePushed
 plugin.go    OnPluginClusterEvent
-support      GenerateSupportData
 properties   the `checkFieldDeleteAccess` plugin check ([D-542])
 ```
 
@@ -9700,3 +9701,39 @@ can produce, and is forwarded anyway.
 `color.NYCbCrA` conversions — after which the gate can narrow to the lossy case, or disappear.
 Nothing needs it until a client uploads one; `parity::image_uploads::the_undecoded_formats_still_
 forward` sends exactly this file and checks Go answers it completely.
+
+---
+
+## D-980 · The support packet has no `heap.prof`, `goroutines` or `cpu.prof`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (the support packet)
+
+Go's packet carries three `runtime/pprof` files: the heap, every goroutine's stack, and a CPU
+profile sampled for five seconds (which is why every Go packet takes five seconds). This process
+has no Go runtime, and a file of those names holding anything else would break the `go tool
+pprof` a support engineer opens it with, so `mm_app::support_packet` writes none of them and does
+not wait. The zip is otherwise Go's file for file; `parity::support_packet` names the three as
+the only difference.
+
+**What is owed:** the Rust process's own profiles under names of their own — a pprof-format CPU
+profile is what `pprof-rs` writes, and a heap profile needs an instrumented allocator — once a
+support workflow wants them. `go_version` in `diagnostics.yaml` is written empty for the same
+reason and closes with it.
+
+---
+
+## D-981 · A support packet whose SMTP probe needs TLS or auth goes to Go
+
+**Status** OPEN · **Severity** forward · **Raised** 2026-09-23 (the support packet)
+
+`diagnostics.yaml` reports `mail.TestConnection` when `SendEmailNotifications` is on. The
+plain-TCP half is ported (`SmtpProbe`: dial, the `220` greeting, `EHLO`/`HELO`, Go's error text),
+but `ConnectionSecurity` `TLS` or `STARTTLS` needs a TLS client with Go's
+`InsecureSkipVerify`/`ServerName` semantics, and `EnableSMTPAuth` needs `smtp.Client.Auth` with
+Mattermost's `authChooser` (PLAIN when offered, else LOGIN, both refusing an unencrypted
+non-localhost server). None of it is private; the whole packet forwards
+(`SupportPacketForward::SmtpProbe`) rather than write a status it did not measure.
+
+**What is owed:** the TLS dial and `STARTTLS` (tokio-rustls is in the registry), and the two auth
+mechanisms, pinned against a local SMTP test server under both hosts. It is also most of
+[D-238]'s transport, so it likely lands with that.
