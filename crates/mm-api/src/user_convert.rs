@@ -271,6 +271,7 @@ pub async fn promote_guest_to_user(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Response {
     let user_id = resolve_me(&user_id, &session).to_owned();
     if !is_valid_id(&user_id) {
@@ -316,7 +317,11 @@ pub async fn promote_guest_to_user(
     // against every default channel the promoted account is added to.
     match state
         .app
-        .promote_guest_to_user(&user, &session.0.user_id)
+        .promote_guest_to_user(
+            &crate::plugin_context::hook_context(&parts, Some(&session.0)),
+            &user,
+            &session.0.user_id,
+        )
         .await
     {
         Ok(()) => status_ok(),

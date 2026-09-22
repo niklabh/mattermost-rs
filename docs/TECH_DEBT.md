@@ -6576,7 +6576,8 @@ user's** locale, where the other ten use the server's. Ours are English througho
 ---
 
 
-**`POST /api/v4/channels` posts no join message.** Found by the agent that ported channel
+~~**`POST /api/v4/channels` posts no join message.**~~ Paid off 2026-09-22: `create_channel_with_user`
+writes it.  Found by the agent that ported channel
 creation, in the same session that paid off D-231's membership posts — the create path is a
 route that did not exist when those were written, so it was never in their scope. Go's
 `CreateChannelWithUser` calls `postJoinChannelMessage` for the creator. It is invisible in the
@@ -6782,7 +6783,10 @@ not atomic with the membership insert, in Go or here.
 
 ## D-243 · The team join and leave system posts are missing
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+**Closed** 2026-09-22 — the leave and removal notices were already written (`post_team_leave_message`);
+the join notices now are too, by `App::post_join_message_for_default_channel` behind the setting,
+and `parity::team_member_writes` compares `msg_count` unmasked.
 
 The channel-membership twin of this is [D-231]; this is the team half, and it is **larger**
 because the setting that gates it defaults to `true`.
@@ -9536,8 +9540,7 @@ this server does not port — its only callers are `GetPermalinkPost` and the `/
 command, neither of them served. It lands with whichever of those is ported first.
 
 `ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
-are served already. Nor is [D-950], the message hooks that Go's *system* posts fire and this
-server's do not.
+are served already.
 
 **A branch this server forwards fires nothing under the Rust host**, because the Go process it
 forwards to hosts no plugins then (docs/PLUGIN_PLAN.md, D6). For the hooks that do fire, that is:
@@ -9556,7 +9559,10 @@ a `parity::plugin_hooks`-shaped diff of what `examples/hook_recorder` saw under 
 
 ## D-950 · Go's system posts fire the message hooks and this server's do not
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (the membership hook sites)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-20 (the membership hook sites)
+**Closed** 2026-09-22 — `create_system_post` runs `MessageWillBePosted` (guarded), `MessageHasBeenPosted`
+and the consumed hooks, under the request's `HookContext` from all sixteen callers; every
+`parity::plugin_hooks` tour now compares the system posts' hooks instead of dropping them.
 
 Every membership and channel-property system message in Go is written with the whole of
 `a.CreatePost` — nineteen call sites in `channel.go` and `team.go` — so each one dispatches

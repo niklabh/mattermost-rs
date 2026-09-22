@@ -1188,14 +1188,34 @@ impl Subject {
     }
 }
 
-/// The post-family hooks the system messages a membership change writes fire **on the Go host
-/// only**. Go's `postAddToChannelMessage` and its eighteen siblings go through the whole of
-/// `a.CreatePost`, which dispatches `MessageWillBePosted` and `MessageHasBeenPosted`; this
-/// server's `create_system_post` is a narrow slice of `CreatePost` that does not — [D-950].
+/// The post-family hooks the system message a membership change writes fires — Go's
+/// `postAddToChannelMessage` and its eighteen siblings go through the whole of `a.CreatePost`.
 ///
-/// Dropped from both sides so that this suite is about the membership hooks and fails for their
-/// reasons. The gap is the debt entry's, and it was found here: it is invisible without a plugin.
+/// Compared like every other hook, but left out of what [`MemberPair::hooks`] hands back, so each
+/// step's own assertions stay about the hook the step is for.
 const SYSTEM_POST_HOOKS: [&str; 2] = ["MessageWillBePosted", "MessageHasBeenPosted"];
+
+fn is_system_post_hook(entry: &Json) -> bool {
+    entry["hook"]
+        .as_str()
+        .is_some_and(|h| SYSTEM_POST_HOOKS.contains(&h))
+        && entry["args"]["B"]["Type"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("system_"))
+}
+
+/// A step's entries sorted by hook name and then by rendering, so two hosts that interleave detached hooks
+/// differently still compare equal when they fired the same hooks with the same arguments.
+fn in_canonical_order(entries: &[Json]) -> Vec<Json> {
+    let mut sorted = entries.to_vec();
+    sorted.sort_by_cached_key(|e| {
+        (
+            e["hook"].as_str().unwrap_or_default().to_owned(),
+            e.to_string(),
+        )
+    });
+    sorted
+}
 
 /// How long both transcripts must stay unchanged before they are judged complete.
 ///
@@ -1274,20 +1294,10 @@ impl MemberPair {
     /// Wait until both transcripts have stopped growing, then assert they agree entry for entry
     /// and return what this step added.
     async fn hooks(&mut self, what: &str) -> Vec<Json> {
-        let without_system_posts = |entries: Vec<Json>| -> Vec<Json> {
-            entries
-                .into_iter()
-                .filter(|e| {
-                    !e["hook"]
-                        .as_str()
-                        .is_some_and(|h| SYSTEM_POST_HOOKS.contains(&h))
-                })
-                .collect()
-        };
         let read = || {
             (
-                without_system_posts(transcript_of(&self.go_log, &self.go_scrub)),
-                without_system_posts(transcript_of(&self.rust_log, &self.rust_scrub)),
+                transcript_of(&self.go_log, &self.go_scrub),
+                transcript_of(&self.rust_log, &self.rust_scrub),
             )
         };
         let (mut go, mut rust) = read();
@@ -1305,17 +1315,28 @@ impl MemberPair {
             go = g;
             rust = r;
         }
+        // A step's hooks are compared as a set: the notification hooks run on detached tasks on
+        // both hosts, and a system post's two run on yet another, so their interleaving is not
+        // a promise either server makes.
+        let (go_step, rust_step) = (
+            in_canonical_order(&go[self.seen.min(go.len())..]),
+            in_canonical_order(&rust[self.seen.min(rust.len())..]),
+        );
         assert_eq!(
-            names(&go),
-            names(&rust),
+            names(&go_step),
+            names(&rust_step),
             "{what}: the hooks that fired\n  go:   {:?}\n  rust: {:?}",
             names(&go),
             names(&rust)
         );
-        for (index, (g, r)) in go.iter().zip(rust.iter()).enumerate() {
+        for (index, (g, r)) in go_step.iter().zip(rust_step.iter()).enumerate() {
             assert_eq!(g, r, "{what}: hook {index} differs");
         }
-        let fresh = go[self.seen..].to_vec();
+        let fresh = go[self.seen..]
+            .iter()
+            .filter(|e| !is_system_post_hook(e))
+            .cloned()
+            .collect();
         self.seen = go.len();
         fresh
     }
@@ -1324,18 +1345,8 @@ impl MemberPair {
     /// is called and the request then dies before any notification hook.
     async fn no_more_hooks(&mut self, what: &str) {
         tokio::time::sleep(QUIET).await;
-        let keep = |entries: Vec<Json>| -> Vec<Json> {
-            entries
-                .into_iter()
-                .filter(|e| {
-                    !e["hook"]
-                        .as_str()
-                        .is_some_and(|h| SYSTEM_POST_HOOKS.contains(&h))
-                })
-                .collect()
-        };
-        let go = keep(transcript_of(&self.go_log, &self.go_scrub));
-        let rust = keep(transcript_of(&self.rust_log, &self.rust_scrub));
+        let go = transcript_of(&self.go_log, &self.go_scrub);
+        let rust = transcript_of(&self.rust_log, &self.rust_scrub);
         assert_eq!(go.len(), self.seen, "{what}: Go fired {:?}", names(&go));
         assert_eq!(
             rust.len(),
@@ -1412,6 +1423,7 @@ async fn run_the_membership_tour(client: &reqwest::Client, admin: &str) {
     let join_team = common::create_team(&client, &admin, "hookjn").await;
     let reject_team = common::create_team(&client, &admin, "hookrt").await;
     let admin_team = common::create_team(&client, &admin, "hookat").await;
+    let batch_team = common::create_team(&client, &admin, "hookbt").await;
 
     let actor = common::create_plain_user(&client, &admin, &home, "hookact").await;
     let go_user = common::create_plain_user(&client, &admin, &home, "hookgo").await;
@@ -1439,8 +1451,8 @@ async fn run_the_membership_tour(client: &reqwest::Client, admin: &str) {
             assert!(joined.status().is_success(), "{user} joins {id}");
         }
     }
-    // It needs `team_admin` on the three teams to add and remove members there.
-    for team in [&join_team, &reject_team, &admin_team] {
+    // It needs `team_admin` on the four teams to add and remove members there.
+    for team in [&join_team, &reject_team, &admin_team, &batch_team] {
         let joined = client
             .post(format!("{GO}/api/v4/teams/{team}/members"))
             .bearer_auth(&admin)
@@ -1680,6 +1692,46 @@ async fn run_the_membership_tour(client: &reqwest::Client, admin: &str) {
         fired[1]["args"]["C"],
         Json::Null,
         "AddTeamMember's requestor is empty, so the actor is nil and gob omits it"
+    );
+
+    // 5b. A batch add. `AddTeamMembers` passes the session as the requestor, so the default
+    //     channels get "added to the team by" and "added to the channel by" notices rather than
+    //     the "joined" ones step 5 writes — the only step where the requestor reaches them.
+    let batch = |user: &str| {
+        (
+            format!("/api/v4/teams/{batch_team}/members/batch"),
+            Some(
+                serde_json::to_vec(
+                    &serde_json::json!([{ "team_id": batch_team, "user_id": user }]),
+                )
+                .expect("a body"),
+            ),
+        )
+    };
+    let ((gs, gb), (rs, rb)) = pair
+        .each(
+            reqwest::Method::POST,
+            &actor_token,
+            batch(&go_user.id),
+            batch(&rs_user.id),
+        )
+        .await;
+    assert_eq!((gs, rs), (201, 201), "Go {gb} / Rust {rb}");
+    let fired = pair.hooks("a batch team add").await;
+    assert_eq!(
+        &names(&fired)[..2],
+        ["TeamMemberWillBeAdded", "UserHasJoinedTeam"],
+        "the whole sequence was {:?}",
+        names(&fired)
+    );
+    let notice_types: Vec<String> = transcript_of(&pair.go_log, &pair.go_scrub)
+        .iter()
+        .filter(|e| e["hook"] == "MessageWillBePosted")
+        .filter_map(|e| e["args"]["B"]["Type"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        notice_types.iter().any(|t| t == "system_add_to_team"),
+        "Go wrote an added-to-the-team notice: {notice_types:?}"
     );
 
     // 6. A refused join.
@@ -2767,8 +2819,8 @@ async fn the_channel_hooks_fire_as_go_fires_them() {
 ///
 /// With `through_main_go` both are created by the stack's Go server, which hosts no plugins, so
 /// nothing is recorded and both rows carry Go's join post. Otherwise each is created by its own
-/// side's server — the path `ChannelHasBeenCreated` is about, and one where this server writes
-/// no join post ([D-231]), which every later payload would carry as a different `LastPostAt`.
+/// side's server — the path `ChannelHasBeenCreated` is about, and the creator's join post, whose
+/// two message hooks fire on both.
 async fn create_open_channel(
     pair: &mut MemberPair,
     admin: &str,
@@ -4196,6 +4248,71 @@ async fn run_the_consumed_tour(client: &reqwest::Client, admin: &str) {
         ],
         "sorted by name: one read, then the deletion"
     );
+
+    // 18. A system post: a header patch writes the "updated the channel header" notice through
+    //     `CreatePost`, so it is offered to the plugins on its way to the `posted` event like any
+    //     other post ([D-950]). Each host patches a fresh channel of its own, made by the stack's
+    //     Go server, so the two channel rows and the two notices differ only in id and name.
+    let mut notices = Vec::new();
+    for (base, log, tag) in [
+        (&go.base, &pair.go_log, "hookcsgo"),
+        (&rust.base, &pair.rust_log, "hookcsrs"),
+    ] {
+        let id = common::create_channel(&client, &admin, &team, tag).await;
+        let (status, body, _) = request_raw(
+            &client,
+            base,
+            reqwest::Method::PUT,
+            Some(&admin),
+            &format!("/api/v4/channels/{id}/patch"),
+            Some(br#"{"header": "a consumed header"}"#),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&body));
+        notices.push((
+            log.clone(),
+            vec![
+                (id, "<ch>".to_owned()),
+                (tag.to_owned(), "<tag>".to_owned()),
+            ],
+        ));
+    }
+    tokio::time::sleep(QUIET * 2).await;
+    let fresh: Vec<Vec<Json>> = notices
+        .iter()
+        .map(|(log, scrub)| in_canonical_order(&transcript_of(log, scrub)[pair.seen..]))
+        .collect();
+    assert_eq!(
+        names(&fresh[0]),
+        names(&fresh[1]),
+        "a system post: the hooks that fired"
+    );
+    for (index, (g, r)) in fresh[0].iter().zip(fresh[1].iter()).enumerate() {
+        assert_eq!(g, r, "a system post: hook {index} differs");
+    }
+    assert_eq!(
+        names(&fresh[0]),
+        [
+            "ChannelWillBeUpdated",
+            "MessageHasBeenPosted",
+            "MessageWillBePosted",
+            "MessagesWillBeConsumed",
+            "MessagesWillBeConsumedWithContext",
+        ],
+        "sorted by name: the update, then the notice's four"
+    );
+    let consumed = fresh[0]
+        .iter()
+        .find(|e| e["hook"] == "MessagesWillBeConsumed")
+        .expect("the consumed hook");
+    assert_eq!(
+        consumed["args"]["A"][0]["Type"], "system_header_change",
+        "the notice is what the plugins are offered: {consumed}"
+    );
+    pair.seen = transcript(&pair.go_log).len();
+    for (_, scrub) in &notices {
+        common::delete_channel(&client, &admin, &scrub[0].0).await;
+    }
 
     drop(rust);
     drop(go);

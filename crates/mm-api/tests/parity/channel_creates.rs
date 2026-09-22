@@ -19,13 +19,11 @@
 //! the identical stored row, so that one is compared with nothing masked at all. It is the
 //! strongest assertion in the file for exactly that reason.
 //!
-//! # The system post is missing here too
+//! # The creator's join post
 //!
-//! `POST /channels` ends in `postJoinChannelMessage` on Go's side and does not here ([D-231]),
-//! so Go's channel gets a post and ours does not. It is invisible in the **response**, which is
-//! marshalled before the post exists — and very visible in a later `GET /channels/{id}`, whose
-//! `total_msg_count` and `last_post_at` move on Go's row only. Nothing here re-reads a created
-//! channel's row for that reason.
+//! `POST /channels` ends in `postJoinChannelMessage` on both servers. It is invisible in the
+//! **response**, which is marshalled before the post exists; `parity::plugin_hooks`' channel
+//! tour sees it through the two message hooks it fires.
 
 use std::time::Duration;
 

@@ -258,6 +258,7 @@ impl App {
 
         if old_display_name != channel.display_name {
             self.post_update_channel_display_name_message(
+                ctx,
                 user_id,
                 channel,
                 &old_display_name,
@@ -267,6 +268,7 @@ impl App {
         }
         if channel.header != old_header {
             self.post_update_channel_header_message(
+                ctx,
                 user_id,
                 channel,
                 &old_header,
@@ -276,6 +278,7 @@ impl App {
         }
         if channel.purpose != old_purpose {
             self.post_update_channel_purpose_message(
+                ctx,
                 user_id,
                 channel,
                 &old_purpose,
@@ -348,6 +351,7 @@ impl App {
         let posted = match self.privacy_message_author(user).await {
             Ok((author_id, author_username)) => self
                 .create_system_post(
+                    ctx,
                     channel_privacy_post(&author_id, &author_username, channel),
                     channel,
                 )
@@ -525,6 +529,7 @@ impl App {
             match &user {
                 Some(user) => {
                     self.post_system_message(
+                        ctx,
                         channel_deleted_post(&user.id, &user.username, &channel.id),
                         channel,
                     )
@@ -536,6 +541,7 @@ impl App {
                 None => match self.get_system_bot().await {
                     Ok(bot) => {
                         self.post_system_message(
+                            ctx,
                             channel_deleted_post(&bot.user_id, &bot.username, &channel.id),
                             channel,
                         )
@@ -728,6 +734,7 @@ impl App {
             })?;
 
             self.post_system_message(
+                ctx,
                 channel_restored_post(&user.id, &user.username, &channel.id),
                 channel,
             )
@@ -739,6 +746,7 @@ impl App {
             match self.get_system_bot().await {
                 Ok(bot) => {
                     self.post_system_message(
+                        ctx,
                         channel_restored_post(&bot.user_id, &bot.username, &channel.id),
                         channel,
                     )
@@ -796,6 +804,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
     pub async fn post_update_channel_display_name_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         channel: &Channel,
         old_display_name: &str,
@@ -824,7 +833,7 @@ impl App {
             ..Post::default()
         };
 
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 
     /// Port of `app.App.PostUpdateChannelHeaderMessage` (app/channel.go:2100).
@@ -836,6 +845,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
     pub async fn post_update_channel_header_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         channel: &Channel,
         old_header: &str,
@@ -875,7 +885,7 @@ impl App {
             ..Post::default()
         };
 
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 
     /// Port of `app.App.PostUpdateChannelPurposeMessage` (app/channel.go:2134).
@@ -887,6 +897,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
     pub async fn post_update_channel_purpose_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         channel: &Channel,
         old_purpose: &str,
@@ -926,7 +937,7 @@ impl App {
             ..Post::default()
         };
 
-        self.post_system_message(post, channel).await;
+        self.post_system_message(ctx, post, channel).await;
     }
 
     /// The `Store().User().Get(userID)` the three "the channel changed" notices each open with.

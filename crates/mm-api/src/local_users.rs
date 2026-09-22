@@ -674,8 +674,12 @@ async fn local_verify_user_email_without_token(
 
 /// `promoteGuestToUser` through `APILocal` (user_local.go:35). The requestor recorded against
 /// the default channels is `Session().UserId` — the empty string, on this transport.
-async fn local_promote_guest_to_user(state: State<AppState>, path: UrlPath<String>) -> Response {
-    user_convert::promote_guest_to_user(state, path, local_session()).await
+async fn local_promote_guest_to_user(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    parts: axum::http::request::Parts,
+) -> Response {
+    user_convert::promote_guest_to_user(state, path, local_session(), parts).await
 }
 
 /// `demoteUserToGuest` through `APILocal` (user_local.go:36).

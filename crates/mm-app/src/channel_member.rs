@@ -557,10 +557,13 @@ impl App {
             // `opts.UserRequestorID == "" || userID == opts.UserRequestorID` — a self-add, and
             // **its post failure is the route's failure**.
             Some(requestor) if requestor.id != user.id => {
-                self.post_add_to_channel_message(&requestor, &user, channel)
+                self.post_add_to_channel_message(hook_ctx, &requestor, &user, channel)
                     .await;
             }
-            _ => self.post_join_channel_message(&user, channel).await?,
+            _ => {
+                self.post_join_channel_message(hook_ctx, &user, channel)
+                    .await?
+            }
         }
 
         Ok(MemberWrite::Done(member))
@@ -1002,9 +1005,10 @@ impl App {
 
         if user_id_to_remove == remover_user_id {
             // A self-removal. Inline in Go, so its failure is the `DELETE`'s failure.
-            self.post_leave_channel_message(&user, channel).await?;
+            self.post_leave_channel_message(hook_ctx, &user, channel)
+                .await?;
         } else {
-            self.post_remove_from_channel_message(remover_user_id, &user, channel)
+            self.post_remove_from_channel_message(hook_ctx, remover_user_id, &user, channel)
                 .await;
         }
 
@@ -1463,10 +1467,11 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user.id))]
     pub async fn post_join_channel_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user: &User,
         channel: &Channel,
     ) -> Result<(), Box<AppError>> {
-        self.create_system_post(join_channel_post(user, &channel.id), channel)
+        self.create_system_post(ctx, join_channel_post(user, &channel.id), channel)
             .await
             .map(|_| ())
             .map_err(|err| add_remove_message_error("postJoinChannelMessage", &err))
@@ -1488,12 +1493,17 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %added_user.id))]
     pub async fn post_add_to_channel_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user: &User,
         added_user: &User,
         channel: &Channel,
     ) {
-        self.post_system_message(add_to_channel_post(user, added_user, &channel.id), channel)
-            .await;
+        self.post_system_message(
+            ctx,
+            add_to_channel_post(user, added_user, &channel.id),
+            channel,
+        )
+        .await;
     }
 
     /// Port of `app.App.postLeaveChannelMessage` (app/channel.go:2882).
@@ -1509,10 +1519,11 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user.id))]
     pub async fn post_leave_channel_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user: &User,
         channel: &Channel,
     ) -> Result<(), Box<AppError>> {
-        self.create_system_post(leave_channel_post(user, &channel.id), channel)
+        self.create_system_post(ctx, leave_channel_post(user, &channel.id), channel)
             .await
             .map(|_| ())
             .map_err(|err| add_remove_message_error("postLeaveChannelMessage", &err))
@@ -1532,6 +1543,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %removed_user.id))]
     pub async fn post_remove_from_channel_message(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         remover_user_id: &str,
         removed_user: &User,
         channel: &Channel,
@@ -1556,6 +1568,7 @@ impl App {
         };
 
         self.post_system_message(
+            ctx,
             remove_from_channel_post(&message_user_id, removed_user, &channel.id),
             channel,
         )
