@@ -146,9 +146,10 @@ pub async fn acknowledge_post(
         Err(err) => return err.into_response(),
     };
 
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     match state
         .app
-        .save_acknowledgement_for_post(&post_id, &user_id)
+        .save_acknowledgement_for_post(&hook_ctx, &post_id, &user_id)
         .await
     {
         Ok(AcknowledgementWrite::Done(acknowledgement)) => {
@@ -207,14 +208,15 @@ pub async fn unacknowledge_post(
         Err(err) => return err.into_response(),
     };
 
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     // `c.App.GetSinglePost(c.AppContext, c.Params.PostId, false)` — its error propagated as is.
-    if let Err(err) = state.app.get_single_post(&post_id, false).await {
+    if let Err(err) = state.app.get_single_post(&hook_ctx, &post_id, false).await {
         return ApiError::from(*err).into_response();
     }
 
     match state
         .app
-        .delete_acknowledgement_for_post(&post_id, &user_id)
+        .delete_acknowledgement_for_post(&hook_ctx, &post_id, &user_id)
         .await
     {
         Ok(AcknowledgementWrite::Done(())) => (

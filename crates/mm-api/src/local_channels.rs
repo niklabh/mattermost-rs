@@ -289,12 +289,16 @@ async fn local_get_post(
     UrlPath(post_id): UrlPath<String>,
     request: Request,
 ) -> Response {
+    // The socket carries no session and no peer address: every context field but the request
+    // id is empty, as Go's `pluginContext` reads off a local-mode request.
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     match posts::get_post_outcome(
         &state,
         &post_id,
         &local_session(),
         request.uri().query(),
         request.headers(),
+        &hook_ctx,
     )
     .await
     {
@@ -311,12 +315,14 @@ async fn local_get_posts_for_channel(
     UrlPath(channel_id): UrlPath<String>,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
     match posts::get_posts_for_channel_outcome(
         &state,
         &channel_id,
         &local_session(),
         request.uri().query(),
         request.headers(),
+        &hook_ctx,
     )
     .await
     {
@@ -859,7 +865,11 @@ async fn local_add_channel_member(
         return ApiError::invalid_param("post_root_id").into_response();
     }
     if post_root_id.len() == 26 {
-        let root = match state.app.get_single_post(post_root_id, false).await {
+        let root = match state
+            .app
+            .get_single_post(&hook_ctx, post_root_id, false)
+            .await
+        {
             Ok(root) => root,
             Err(err) => return ApiError::from(err).into_response(),
         };
@@ -954,13 +964,16 @@ async fn local_delete_post(
     }
     let permanent = channels::query_flag_is_true(request.uri().query(), "permanent");
 
-    if let Err(err) = state.app.get_single_post(&post_id, permanent).await {
-        return ApiError::from(err).into_response();
-    }
-
     // A local-socket request has no session and no peer address, which is what Go's
     // `pluginContext` reads off one: every field but `RequestId` is empty there too.
     let hook_ctx = crate::plugin_context::hook_context_of(&request, None);
+    if let Err(err) = state
+        .app
+        .get_single_post(&hook_ctx, &post_id, permanent)
+        .await
+    {
+        return ApiError::from(err).into_response();
+    }
     let outcome = if permanent {
         state
             .app

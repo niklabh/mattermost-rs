@@ -70,6 +70,7 @@ use crate::broadcast_hooks::{
     BROADCAST_POSTED_ACK,
 };
 use crate::mention::{MentionKeywords, MentionResults, MentionType, get_explicit_mentions};
+use crate::plugin_hooks::HookContext;
 use crate::thread_read::MM_BLOCKS_ENABLED;
 
 /// Port of `app.CRTNotifiers` (notification.go): the followers of a thread who should be told
@@ -310,6 +311,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(post_id = %post.id, channel_id = %channel.id))]
     pub(crate) async fn handle_post_events(
         &self,
+        ctx: &HookContext,
         post: &Post,
         user: &User,
         channel: &Channel,
@@ -321,8 +323,16 @@ impl App {
         } else {
             self.get_team(&channel.team_id).await?
         };
-        self.send_notifications(post, &team, channel, user, parent_post_list, set_online)
-            .await
+        self.send_notifications(
+            ctx,
+            post,
+            &team,
+            channel,
+            user,
+            parent_post_list,
+            set_online,
+        )
+        .await
     }
 
     /// The arms of `SendNotifications` this server hands to Go, decided **before** the row is
@@ -410,9 +420,11 @@ impl App {
     /// failed membership write or mention increment is **logged and skipped** — Go warns and
     /// carries on, and the post is already committed. A failed `thread_updated` read aborts the
     /// remaining events, as Go's `return nil, err` does.
+    #[allow(clippy::too_many_arguments)] // Go's signature plus the request context.
     #[tracing::instrument(skip_all, fields(post_id = %post.id, mentioned, followers))]
     pub(crate) async fn send_notifications(
         &self,
+        ctx: &HookContext,
         post: &Post,
         team: &Team,
         channel: &Channel,
@@ -755,7 +767,7 @@ impl App {
         }
 
         let permalink = self
-            .publish_websocket_event_for_post_with_hooks(post, message)
+            .publish_websocket_event_for_post_with_hooks(ctx, post, message)
             .await?;
 
         // If this is a reply in a thread, notify participants.
@@ -1063,6 +1075,7 @@ impl App {
     /// need a refused type and an enterprise setting respectively.
     pub(crate) async fn publish_websocket_event_for_post_with_hooks(
         &self,
+        ctx: &HookContext,
         post: &Post,
         mut message: WebSocketEvent,
     ) -> AppResult<PermalinkFate> {
@@ -1106,6 +1119,7 @@ impl App {
 
         let fate = self
             .setup_broadcast_hook_for_permalink(
+                ctx,
                 post,
                 &mut message,
                 permalink_previewed_post,
@@ -1139,6 +1153,7 @@ impl App {
     /// which serves only to find the channel.
     async fn setup_broadcast_hook_for_permalink(
         &self,
+        ctx: &HookContext,
         post: &Post,
         message: &mut WebSocketEvent,
         permalink_previewed_post: Option<mm_model::permalink::PreviewPost>,
@@ -1159,7 +1174,7 @@ impl App {
             );
             return Ok(PermalinkFate::Removed);
         }
-        let previewed_post = match self.get_single_post(preview_prop, false).await {
+        let previewed_post = match self.get_single_post(ctx, preview_prop, false).await {
             Ok(previewed_post) => previewed_post,
             Err(err) if err.status_code == 404 => {
                 tracing::warn!(

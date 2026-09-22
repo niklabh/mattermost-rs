@@ -11,6 +11,7 @@ use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::response::{IntoResponse, Response};
+use mm_app::plugin_hooks::HookContext;
 use mm_app::post::{PrepareError, PreparePostForClientOpts};
 use mm_model::channel::CHANNEL_TYPE_OPEN;
 use mm_model::file_info::get_etag_for_file_infos;
@@ -77,12 +78,14 @@ pub async fn get_post(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     match get_post_outcome(
         &state,
         &post_id,
         &session,
         request.uri().query(),
         request.headers(),
+        &hook_ctx,
     )
     .await
     {
@@ -103,12 +106,13 @@ pub(crate) async fn get_post_outcome(
     session: &AuthenticatedSession,
     query: Option<&str>,
     headers: &axum::http::HeaderMap,
+    ctx: &HookContext,
 ) -> Outcome {
     let if_none_match = headers
         .get(IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    serve(state, post_id, session, query, if_none_match).await
+    serve(state, post_id, session, query, if_none_match, ctx).await
 }
 
 async fn serve(
@@ -117,6 +121,7 @@ async fn serve(
     session: &AuthenticatedSession,
     query: Option<&str>,
     if_none_match: Option<String>,
+    ctx: &HookContext,
 ) -> Outcome {
     // `c.RequirePostId()` (web/context.go:411). The router's `[A-Za-z0-9]+` charset has already
     // rejected the shapes gorilla would 404, so what is left for this to catch is a segment of
@@ -144,7 +149,7 @@ async fn serve(
 
     let (post, _is_member) = match state
         .app
-        .get_post_if_authorized(post_id, &session.0, include_deleted)
+        .get_post_if_authorized(ctx, post_id, &session.0, include_deleted)
         .await
     {
         Ok(found) => found,
@@ -161,7 +166,7 @@ async fn serve(
 
     let prepared = match state
         .app
-        .prepare_post_for_client_with_embeds_and_images(&post, opts)
+        .prepare_post_for_client_with_embeds_and_images(ctx, &post, opts)
         .await
     {
         Ok(prepared) => prepared,
@@ -253,8 +258,10 @@ pub async fn get_post_info(
     State(state): State<AppState>,
     Path(post_id): Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Response {
-    match serve_post_info(&state, &post_id, &session).await {
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    match serve_post_info(&state, &post_id, &session, &hook_ctx).await {
         Ok(info) => match serde_json::to_vec(&info) {
             Ok(body) => (
                 StatusCode::OK,
@@ -285,6 +292,7 @@ async fn serve_post_info(
     state: &AppState,
     post_id: &str,
     session: &AuthenticatedSession,
+    ctx: &HookContext,
 ) -> Result<mm_model::post_info::PostInfo, ApiError> {
     // `c.RequirePostId()`.
     if !is_valid_id(post_id) {
@@ -292,7 +300,7 @@ async fn serve_post_info(
     }
     let user_id = session.0.user_id.as_str();
 
-    let post = state.app.get_single_post(post_id, false).await?;
+    let post = state.app.get_single_post(ctx, post_id, false).await?;
     let channel = state.app.get_channel(&post.channel_id).await?;
 
     let not_found = || {
@@ -430,12 +438,14 @@ pub async fn get_posts_for_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     match get_posts_for_channel_outcome(
         &state,
         &channel_id,
         &session,
         request.uri().query(),
         request.headers(),
+        &hook_ctx,
     )
     .await
     {
@@ -452,12 +462,13 @@ pub(crate) async fn get_posts_for_channel_outcome(
     session: &AuthenticatedSession,
     query: Option<&str>,
     headers: &axum::http::HeaderMap,
+    ctx: &HookContext,
 ) -> Outcome {
     let if_none_match = headers
         .get(IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    serve_channel_posts(state, channel_id, session, query, if_none_match).await
+    serve_channel_posts(state, channel_id, session, query, if_none_match, ctx).await
 }
 
 async fn serve_channel_posts(
@@ -466,6 +477,7 @@ async fn serve_channel_posts(
     session: &AuthenticatedSession,
     query: Option<&str>,
     if_none_match: Option<String>,
+    ctx: &HookContext,
 ) -> Outcome {
     // `c.RequireChannelId()` (web/context.go:377).
     if !is_valid_id(channel_id) {
@@ -560,6 +572,7 @@ async fn serve_channel_posts(
         state
             .app
             .get_posts_since(
+                ctx,
                 channel_id,
                 since,
                 &session.0.user_id,
@@ -568,14 +581,14 @@ async fn serve_channel_posts(
             )
             .await
     } else {
-        state.app.get_posts_page(opts).await
+        state.app.get_posts_page(ctx, opts).await
     };
     let list = match list {
         Ok(list) => list,
         Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
-    let mut prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let mut prepared = match state.app.prepare_post_list_for_client(ctx, &list).await {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, channel_id, "forwarding to Go");
@@ -757,8 +770,18 @@ pub async fn get_post_thread(
         .get(IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
-    match serve_post_thread(&state, &post_id, &session, query.as_deref(), if_none_match).await {
+    match serve_post_thread(
+        &state,
+        &post_id,
+        &session,
+        query.as_deref(),
+        if_none_match,
+        &hook_ctx,
+    )
+    .await
+    {
         Outcome::Served(response) => response,
         Outcome::Failed(err) => err.into_response(),
         Outcome::Forward => proxy::forward_to_go(State(state), request).await,
@@ -771,6 +794,7 @@ async fn serve_post_thread(
     session: &AuthenticatedSession,
     query: Option<&str>,
     if_none_match: Option<String>,
+    ctx: &HookContext,
 ) -> Outcome {
     // `c.RequirePostId()` (web/context.go:411).
     if !is_valid_id(post_id) {
@@ -860,7 +884,7 @@ async fn serve_post_thread(
         from_update_at,
     };
 
-    let list = match state.app.get_post_thread(post_id, opts).await {
+    let list = match state.app.get_post_thread(ctx, post_id, opts).await {
         Ok(list) => list,
         Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
@@ -879,7 +903,7 @@ async fn serve_post_thread(
     // see a row the thread query did not.
     let (_post, _is_member) = match state
         .app
-        .get_post_if_authorized(post_id, &session.0, false)
+        .get_post_if_authorized(ctx, post_id, &session.0, false)
         .await
     {
         Ok(found) => found,
@@ -897,7 +921,7 @@ async fn serve_post_thread(
         );
     }
 
-    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let prepared = match state.app.prepare_post_list_for_client(ctx, &list).await {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, post_id, "forwarding to Go");
@@ -1204,6 +1228,7 @@ pub async fn get_posts_for_channel_around_last_unread(
         .get(IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
     match serve_posts_around_last_unread(
         &state,
@@ -1212,6 +1237,7 @@ pub async fn get_posts_for_channel_around_last_unread(
         &session,
         query.as_deref(),
         if_none_match,
+        &hook_ctx,
     )
     .await
     {
@@ -1228,6 +1254,7 @@ async fn serve_posts_around_last_unread(
     session: &AuthenticatedSession,
     query: Option<&str>,
     if_none_match: Option<String>,
+    ctx: &HookContext,
 ) -> Outcome {
     // `me`, resolved before the validity check (web/context.go:301).
     let user_id = resolve_me(user_id, session);
@@ -1284,6 +1311,7 @@ async fn serve_posts_around_last_unread(
     let list = match state
         .app
         .get_posts_for_channel_around_last_unread(
+            ctx,
             channel_id,
             user_id,
             limit_before,
@@ -1322,7 +1350,7 @@ async fn serve_posts_around_last_unread(
             collapsed_threads,
             include_deleted: false,
         };
-        match state.app.get_posts_page(opts).await {
+        match state.app.get_posts_page(ctx, opts).await {
             Ok(list) => list,
             Err(err) => return Outcome::Failed(ApiError::from(err)),
         }
@@ -1330,7 +1358,7 @@ async fn serve_posts_around_last_unread(
         list
     };
 
-    let mut prepared = match state.app.prepare_post_list_for_client(&list).await {
+    let mut prepared = match state.app.prepare_post_list_for_client(ctx, &list).await {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, channel_id, "forwarding to Go");
@@ -1433,11 +1461,13 @@ pub async fn get_edit_history_for_post(
     State(state): State<AppState>,
     Path(post_id): Path<String>,
     session: AuthenticatedSession,
+    parts: axum::http::request::Parts,
 ) -> Result<Response, ApiError> {
     // `c.RequirePostId()` (web/context.go:411).
     if !is_valid_id(&post_id) {
         return Err(ApiError::invalid_url_param("post_id"));
     }
+    let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
 
     let permission_error =
         || ApiError::from(make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]));
@@ -1445,7 +1475,7 @@ pub async fn get_edit_history_for_post(
     // `includeDeleted` is hard-coded false, and the error is **thrown away** — see the doc
     // comment. This is the one place in the port where an app-layer 404 is deliberately
     // swallowed.
-    let Ok(original) = state.app.get_single_post(&post_id, false).await else {
+    let Ok(original) = state.app.get_single_post(&hook_ctx, &post_id, false).await else {
         return Err(permission_error());
     };
 
@@ -1767,8 +1797,9 @@ pub async fn get_flagged_posts_for_user(
     request: Request,
 ) -> Response {
     let query = request.uri().query().map(str::to_owned);
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
 
-    match serve_flagged_posts(&state, &user_id, &session, query.as_deref()).await {
+    match serve_flagged_posts(&state, &user_id, &session, query.as_deref(), &hook_ctx).await {
         Outcome::Served(response) => response,
         Outcome::Failed(err) => err.into_response(),
         Outcome::Forward => proxy::forward_to_go(State(state), request).await,
@@ -1780,6 +1811,7 @@ async fn serve_flagged_posts(
     user_id: &str,
     session: &AuthenticatedSession,
     query: Option<&str>,
+    ctx: &HookContext,
 ) -> Outcome {
     // `c.RequireUserId()` (web/context.go:296), `me` resolved first.
     let user_id = resolve_me(user_id, session);
@@ -1812,6 +1844,7 @@ async fn serve_flagged_posts(
     let list = match state
         .app
         .get_flagged_posts(
+            ctx,
             user_id,
             channel_filter,
             team_filter,
@@ -1893,7 +1926,7 @@ async fn serve_flagged_posts(
     kept.sort_by_create_at();
     tracing::Span::current().record("kept", kept.order.as_ref().map_or(0, Vec::len));
 
-    let prepared = match state.app.prepare_post_list_for_client(&kept).await {
+    let prepared = match state.app.prepare_post_list_for_client(ctx, &kept).await {
         Ok(prepared) => prepared,
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, user_id, "forwarding to Go");

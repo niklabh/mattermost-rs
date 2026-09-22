@@ -499,11 +499,12 @@ pub async fn patch_cpa_values(
     request: Request,
 ) -> Response {
     let connection_id = connection_id(&request);
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let Some(body) = read_body(request).await else {
         return body_unreadable();
     };
     let user_id = session.0.user_id.clone();
-    cpa_patch_values(&state, &session, &user_id, &body, &connection_id).await
+    cpa_patch_values(&state, &session, &user_id, &body, &connection_id, &hook_ctx).await
 }
 
 /// Port of `listCPAValues` (:371) —
@@ -568,10 +569,11 @@ pub async fn patch_cpa_values_for_user(
     }
 
     let connection_id = connection_id(&request);
+    let hook_ctx = crate::plugin_context::hook_context_of(&request, Some(&session.0));
     let Some(body) = read_body(request).await else {
         return body_unreadable();
     };
-    cpa_patch_values(&state, &session, &user_id, &body, &connection_id).await
+    cpa_patch_values(&state, &session, &user_id, &body, &connection_id, &hook_ctx).await
 }
 
 /// Port of `cpaPatchValues` (:302), shared by both PATCH-values routes.
@@ -607,6 +609,7 @@ async fn cpa_patch_values(
     user_id: &str,
     body: &[u8],
     connection_id: &str,
+    hook_ctx: &mm_app::plugin_hooks::HookContext,
 ) -> Response {
     let Some(updates) = decode_map(body) else {
         return ApiError::invalid_param("value").into_response();
@@ -691,7 +694,9 @@ async fn cpa_patch_values(
         }
         if !state
             .app
-            .session_has_permission_to_set_property_field_values(&session.0, field, user_id)
+            .session_has_permission_to_set_property_field_values(
+                hook_ctx, &session.0, field, user_id,
+            )
             .await
         {
             return refusal(
@@ -723,7 +728,7 @@ async fn cpa_patch_values(
 
     let upserted = match state
         .app
-        .cpa_upsert_values(&group, &caller, values, user_id, connection_id)
+        .cpa_upsert_values(hook_ctx, &group, &caller, values, user_id, connection_id)
         .await
     {
         Ok(upserted) => upserted,

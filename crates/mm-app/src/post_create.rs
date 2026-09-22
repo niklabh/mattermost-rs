@@ -217,6 +217,7 @@ impl App {
     /// leaking the first.
     async fn deduplicate_create_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         post: &Post,
         session: &Session,
     ) -> Result<Option<Post>, PrepareError> {
@@ -241,7 +242,7 @@ impl App {
         }
 
         match self
-            .get_post_if_authorized(&entry.post_id, session, false)
+            .get_post_if_authorized(ctx, &entry.post_id, session, false)
             .await
         {
             Ok((found, _is_member)) => {
@@ -569,7 +570,10 @@ impl App {
         flags: CreatePostFlags,
         hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
-        if let Some(found) = self.deduplicate_create_post(&post, session).await? {
+        if let Some(found) = self
+            .deduplicate_create_post(hook_ctx, &post, session)
+            .await?
+        {
             return Ok((found, false));
         }
 
@@ -745,7 +749,7 @@ impl App {
         // measured or previewed, with a `LinkMetadata` row written for a fetch — and the
         // dimensions of every image. What it cannot reproduce is forwarded from here, still before
         // the save; the only thing left behind is the `LinkMetadata` upsert Go repeats.
-        self.get_embeds_and_images(post, true).await?;
+        self.get_embeds_and_images(hook_ctx, post, true).await?;
         // The permalink preview's id goes into the saved row.
         if let Some(preview) = post.get_preview_post() {
             post.add_prop(
@@ -816,7 +820,10 @@ impl App {
             )
             .await?;
 
-        // `applyPostWillBeConsumedHook` — no plugin environment, [D-183].
+        // `applyPostWillBeConsumedHook(rctx, &rpost)`: after the prepare, so the plugins see the
+        // post as the client will, and before the events, which carry what they answered.
+        self.apply_post_will_be_consumed_hook(hook_ctx, &mut prepared)
+            .await;
         // `ResolvePersistentNotification` — a reply to a live persistent-notification root is
         // forwarded by `resolve_root_post`; every other root returns on its first lines.
         // Make sure the poster is following the thread.
@@ -842,6 +849,7 @@ impl App {
         }
         match self
             .handle_post_events(
+                hook_ctx,
                 &prepared,
                 &user,
                 channel,
@@ -1023,6 +1031,7 @@ impl App {
     #[tracing::instrument(skip_all, fields(channel_id = %post.channel_id))]
     pub async fn send_ephemeral_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         user_id: &str,
         mut post: Post,
     ) -> Result<Post, PrepareError> {
@@ -1042,6 +1051,7 @@ impl App {
         // `props.attachments`, which `prepare_post_for_client` refuses.
         let post = self
             .prepare_post_for_client_with_embeds_and_images(
+                ctx,
                 &post,
                 PreparePostForClientOpts {
                     is_new_post: true,

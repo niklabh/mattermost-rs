@@ -58,13 +58,14 @@ impl App {
     )]
     pub async fn update_thread_read_for_user_by_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         current_session_id: &str,
         user_id: &str,
         team_id: &str,
         thread_id: &str,
         post_id: &str,
     ) -> AppResult<ThreadResponse> {
-        let post = self.get_single_post(post_id, false).await?;
+        let post = self.get_single_post(ctx, post_id, false).await?;
 
         if post.root_id != thread_id && post_id != thread_id {
             return Err(AppError::boxed(
@@ -77,6 +78,7 @@ impl App {
         }
 
         self.update_thread_read_for_user(
+            ctx,
             current_session_id,
             user_id,
             team_id,
@@ -107,6 +109,7 @@ impl App {
     )]
     pub async fn update_thread_read_for_user(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         current_session_id: &str,
         user_id: &str,
         team_id: &str,
@@ -139,7 +142,7 @@ impl App {
             .await
             .map_err(wrap)?;
 
-        let post = self.get_single_post(thread_id, false).await?;
+        let post = self.get_single_post(ctx, thread_id, false).await?;
         membership.unread_mentions = self
             .count_thread_mentions(&user, &post, team_id, timestamp)
             .await?;

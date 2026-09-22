@@ -88,6 +88,23 @@
 //! `DraftWillBeUpserted` reads the draft's message: `!reject-draft <reason>` refuses,
 //! `!rewrite-draft` answers the whole draft with the message replaced by [`REWRITTEN_HEADER`],
 //! and `!partial-draft` answers a draft carrying **only** a message, which Go takes whole.
+//!
+//! # The two consumed hooks are opt-in, and driven by each post's message
+//!
+//! `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext` are implemented only when
+//! `HOOK_RECORDER_CONSUME` is set, because Go fires them from inside **every** post read —
+//! `GetSinglePost` included — and the older tours assert their transcripts entry for entry.
+//! Each is handed a slice and answers one replacement per post that asks for one:
+//!
+//! | message starts with | hook | answer |
+//! |---|---|---|
+//! | `!consume ` | `MessagesWillBeConsumed` | a post carrying **only** `Id` and `Message` (the rest, with [`CONSUMED_PREFIX`] in front) — Go takes it whole |
+//! | `!consume-ctx ` | `MessagesWillBeConsumedWithContext` | the same, with [`CONSUMED_CTX_PREFIX`] |
+//! | `!consume-stranger` | `MessagesWillBeConsumed` | a post under an id the host never asked about, which it must ignore |
+//! | anything else | both | nothing for that post |
+//!
+//! The context-aware hook is asked **after** the plain one, over the map as the plain one's
+//! answers left it, so a `!consume ` post reaches it already rewritten.
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -113,6 +130,10 @@ use mm_plugin::wire::plugin::{
     Z_UserHasLoggedInArgs, Z_UserHasLoggedInReturns, Z_UserWillLogInArgs, Z_UserWillLogInReturns,
 };
 use mm_plugin::wire::plugin::{Z_DraftWillBeUpsertedArgs, Z_DraftWillBeUpsertedReturns};
+use mm_plugin::wire::plugin::{
+    Z_MessagesWillBeConsumedArgs, Z_MessagesWillBeConsumedReturns,
+    Z_MessagesWillBeConsumedWithContextArgs, Z_MessagesWillBeConsumedWithContextReturns,
+};
 use serde_json::{Value as Json, json};
 
 /// `render.rs` reads a gob oracle for its fixture helpers; this plugin loads no fixture, so the
@@ -151,6 +172,21 @@ const REWRITTEN_HEADER: &str = "rewritten by the hook recorder";
 
 /// The reason the archive and restore hooks refuse with.
 const CHANNEL_REJECTION: &str = "the hook recorder keeps this channel as it is";
+
+/// What `MessagesWillBeConsumed` puts in front of a `!consume ` message.
+const CONSUMED_PREFIX: &str = "consumed: ";
+
+/// What `MessagesWillBeConsumedWithContext` puts in front of a `!consume-ctx ` message.
+const CONSUMED_CTX_PREFIX: &str = "consumed with context: ";
+
+/// The id the stranger replacement is answered under: well-formed, and nobody's.
+const STRANGER_ID: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+/// The two consumed hooks, added to [`IMPLEMENTED`] when `HOOK_RECORDER_CONSUME` is set.
+const CONSUMED: [&str; 2] = [
+    "MessagesWillBeConsumed",
+    "MessagesWillBeConsumedWithContext",
+];
 
 /// The hooks this plugin implements, which is what `Plugin.Implemented` answers and therefore
 /// what each host's `Implements` gate lets through.
@@ -213,9 +249,59 @@ fn after<'a>(message: &'a str, prefix: &str) -> Option<&'a str> {
     message.strip_prefix(prefix)
 }
 
+/// The replacements a slice of posts asks for: `!<prefix> <rest>` becomes a post carrying only the
+/// id and `<label><rest>`; a `!consume-stranger` message becomes a post under [`STRANGER_ID`].
+fn consumed_replacements(posts: &[Post], prefix: &str, label: &str) -> Vec<Post> {
+    posts
+        .iter()
+        .filter_map(|post| {
+            if let Some(rest) = after(&post.message, prefix) {
+                Some(Post {
+                    id: post.id.clone(),
+                    message: format!("{label}{rest}"),
+                    ..Post::default()
+                })
+            } else if prefix == "!consume " && post.message == "!consume-stranger" {
+                Some(Post {
+                    id: STRANGER_ID.to_owned(),
+                    message: "a stranger".to_owned(),
+                    ..Post::default()
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 impl Hooks for Recorder {
     fn implemented(&self) -> Vec<String> {
-        IMPLEMENTED.iter().map(|s| (*s).to_owned()).collect()
+        let consume = std::env::var_os("HOOK_RECORDER_CONSUME").is_some();
+        IMPLEMENTED
+            .iter()
+            .chain(CONSUMED.iter().filter(|_| consume))
+            .map(|s| (*s).to_owned())
+            .collect()
+    }
+
+    async fn messages_will_be_consumed(
+        &self,
+        args: Z_MessagesWillBeConsumedArgs,
+    ) -> Result<Z_MessagesWillBeConsumedReturns, NotImplemented> {
+        self.saw("MessagesWillBeConsumed", &args);
+        Ok(Z_MessagesWillBeConsumedReturns {
+            a: consumed_replacements(&args.a, "!consume ", CONSUMED_PREFIX),
+        })
+    }
+
+    async fn messages_will_be_consumed_with_context(
+        &self,
+        args: Z_MessagesWillBeConsumedWithContextArgs,
+    ) -> Result<Z_MessagesWillBeConsumedWithContextReturns, NotImplemented> {
+        self.saw("MessagesWillBeConsumedWithContext", &args);
+        Ok(Z_MessagesWillBeConsumedWithContextReturns {
+            a: consumed_replacements(&args.b, "!consume-ctx ", CONSUMED_CTX_PREFIX),
+        })
     }
 
     async fn message_will_be_posted(

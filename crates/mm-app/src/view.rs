@@ -404,8 +404,8 @@ impl App {
     /// # It is `GetPostsPage` with two ids changed
     ///
     /// The store call is identical — `Post().GetPosts(options, false, sanitizeOptions)` — and so
-    /// are the four stages after it, every one of which [`App::get_posts_page`] documents as inert
-    /// or unreachable here. What differs is the error vocabulary: `ErrInvalidInput` is
+    /// are the four stages after it, which [`App::get_posts_page`] documents: three inert or
+    /// unreachable here, and the plugin hook last. What differs is the error vocabulary: `ErrInvalidInput` is
     /// `app.post.get_posts.app_error` at **400** and everything else
     /// `app.post.get_posts_for_view.app_error` at 500, where `GetPostsPage` says
     /// `app.post.get_root_posts.app_error`. A client branching on `id` can tell the two routes
@@ -414,13 +414,14 @@ impl App {
     /// Go's own comment says the view's configuration is not consulted yet: "For now, it returns
     /// all posts in the channel." So `view_id` reaches this route, is validated, and then changes
     /// nothing about the answer — a `TODO` that is part of the wire contract until it is not.
-    #[tracing::instrument(skip(self, opts), fields(channel_id = %opts.channel_id))]
+    #[tracing::instrument(skip(self, ctx, opts), fields(channel_id = %opts.channel_id))]
     pub async fn get_posts_for_view(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         opts: mm_store::post_store::GetPostsOptions<'_>,
     ) -> AppResult<mm_model::post_list::PostList> {
         use mm_store::post_store::PostStore;
-        self.store().post().get_posts(opts).await.map_err(|err| {
+        let mut list = self.store().post().get_posts(opts).await.map_err(|err| {
             if err.is_invalid_input() {
                 return AppError::boxed(
                     "GetPostsForView",
@@ -438,7 +439,10 @@ impl App {
                 String::new(),
                 500,
             )
-        })
+        })?;
+        self.apply_post_list_will_be_consumed_hook(ctx, &mut list)
+            .await;
+        Ok(list)
     }
 
     /// Port of `app.App.publishViewEvent` (app/view.go:161) — unexported in Go.

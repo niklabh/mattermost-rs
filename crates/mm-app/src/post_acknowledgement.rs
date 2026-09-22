@@ -57,10 +57,11 @@ impl App {
     #[tracing::instrument(skip(self), fields(post_id = post_id, user_id = user_id))]
     pub async fn save_acknowledgement_for_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         post_id: &str,
         user_id: &str,
     ) -> Result<AcknowledgementWrite<PostAcknowledgement>, Box<AppError>> {
-        let post = self.get_single_post(post_id, false).await?;
+        let post = self.get_single_post(ctx, post_id, false).await?;
         let channel = self.get_channel(&post.channel_id).await?;
 
         if channel.delete_at > 0 {
@@ -108,7 +109,7 @@ impl App {
         // `InvalidateLastPostTimeCache`: nothing here caches the last post time.
         self.send_acknowledgement_event(WEBSOCKET_EVENT_ACKNOWLEDGEMENT_ADDED, &saved, &post)
             .await;
-        self.send_post_update_event(&post).await;
+        self.send_post_update_event(ctx, &post).await;
 
         Ok(AcknowledgementWrite::Done(saved))
     }
@@ -123,10 +124,11 @@ impl App {
     #[tracing::instrument(skip(self), fields(post_id = post_id, user_id = user_id))]
     pub async fn delete_acknowledgement_for_post(
         &self,
+        ctx: &crate::plugin_hooks::HookContext,
         post_id: &str,
         user_id: &str,
     ) -> Result<AcknowledgementWrite<()>, Box<AppError>> {
-        let post = self.get_single_post(post_id, false).await?;
+        let post = self.get_single_post(ctx, post_id, false).await?;
         let channel = self.get_channel(&post.channel_id).await?;
 
         if channel.delete_at > 0 {
@@ -191,7 +193,7 @@ impl App {
 
         self.send_acknowledgement_event(WEBSOCKET_EVENT_ACKNOWLEDGEMENT_REMOVED, &old, &post)
             .await;
-        self.send_post_update_event(&post).await;
+        self.send_post_update_event(ctx, &post).await;
 
         Ok(AcknowledgementWrite::Done(()))
     }
@@ -274,10 +276,10 @@ impl App {
     ///
     /// The prepare was already proven possible before the write; a failure here is a store
     /// fault between the two, logged the way Go logs its own failure to publish.
-    async fn send_post_update_event(&self, post: &Post) {
+    async fn send_post_update_event(&self, ctx: &crate::plugin_hooks::HookContext, post: &Post) {
         match self.prepared_for_update_event(post).await {
             Ok(prepared) => {
-                self.publish_websocket_event_for_post(WEBSOCKET_EVENT_POST_EDITED, &prepared)
+                self.publish_websocket_event_for_post(ctx, WEBSOCKET_EVENT_POST_EDITED, &prepared)
                     .await;
             }
             Err(err) => {

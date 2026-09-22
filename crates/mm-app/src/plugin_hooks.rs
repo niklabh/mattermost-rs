@@ -43,6 +43,8 @@ use mm_model::channel_member::ChannelMember;
 use mm_model::draft::Draft;
 use mm_model::file_info::FileInfo;
 use mm_model::post::{POST_TYPE_BURN_ON_READ, Post};
+use mm_model::post_list::PostMap;
+use mm_model::post_metadata::PostMetadata;
 use mm_model::preference::Preferences;
 use mm_model::reaction::Reaction;
 use mm_model::team_member::TeamMember;
@@ -201,6 +203,52 @@ pub fn user_to_wire(user: &User) -> wire_model::User {
         disable_welcome_email: user.disable_welcome_email,
         last_login: user.last_login,
         mfa_used_timestamps: user.mfa_used_timestamps.clone().unwrap_or_default(),
+    }
+}
+
+/// The reverse of [`user_to_wire`], for the one place a user comes **back** from a plugin: a
+/// post's `Participants`, when a `MessagesWillBeConsumed` answer carries the whole post
+/// ([`post_from_wire_whole`]). A nil and an empty map are one thing to gob, so the three maps
+/// and the timestamp list are `None` when what came back is empty.
+pub fn user_from_wire(wire: &wire_model::User) -> User {
+    let map = |m: &wire_model::StringMap| (!m.is_empty()).then(|| string_map_from_wire(m));
+    User {
+        id: wire.id.clone(),
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        delete_at: wire.delete_at,
+        username: wire.username.clone(),
+        password: wire.password.clone(),
+        auth_data: wire.auth_data.clone(),
+        auth_service: wire.auth_service.clone(),
+        email: wire.email.clone(),
+        email_verified: wire.email_verified,
+        nickname: wire.nickname.clone(),
+        first_name: wire.first_name.clone(),
+        last_name: wire.last_name.clone(),
+        position: wire.position.clone(),
+        roles: wire.roles.clone(),
+        allow_marketing: wire.allow_marketing,
+        props: map(&wire.props),
+        notify_props: map(&wire.notify_props),
+        last_password_update: wire.last_password_update,
+        last_picture_update: wire.last_picture_update,
+        failed_attempts: wire.failed_attempts,
+        locale: wire.locale.clone(),
+        timezone: map(&wire.timezone),
+        mfa_active: wire.mfa_active,
+        mfa_secret: wire.mfa_secret.clone(),
+        remote_id: wire.remote_id.clone(),
+        last_activity_at: wire.last_activity_at,
+        is_bot: wire.is_bot,
+        bot_description: wire.bot_description.clone(),
+        bot_last_icon_update: wire.bot_last_icon_update,
+        terms_of_service_id: wire.terms_of_service_id.clone(),
+        terms_of_service_create_at: wire.terms_of_service_create_at,
+        disable_welcome_email: wire.disable_welcome_email,
+        last_login: wire.last_login,
+        mfa_used_timestamps: (!wire.mfa_used_timestamps.is_empty())
+            .then(|| wire.mfa_used_timestamps.clone()),
     }
 }
 
@@ -667,6 +715,93 @@ pub fn post_from_wire(wire: &wire_model::Post, source: &Post) -> Post {
         is_following: wire.is_following,
         // `ForPlugin` nils it on the way out and every call site restores it on the way back.
         metadata: None,
+    }
+}
+
+/// A post a plugin answered `MessagesWillBeConsumed` with, taken **whole**.
+///
+/// Unlike [`post_from_wire`], nothing comes from the post the call was made with. Go decodes the
+/// reply into a fresh `Z_MessagesWillBeConsumedReturns` (client_rpc.go:977, :1015) and assigns
+/// each element straight into the map — `posts[postReplacement.Id] = postReplacement`
+/// (post.go:3037). The comment above the `WithContext` variant promises "decoding the returned
+/// post into the original one to avoid the unintentional removal of fields by older plugins";
+/// the code beneath it does no such thing, and the wire is what the code does. So a field the
+/// plugin left out is its zero value: `Props`, `FileIds` and `Participants` come back nil, which
+/// is `None` here and an absent key to the client. Only `Metadata` is put back, by the caller,
+/// from the value it held before the hook.
+pub fn post_from_wire_whole(wire: &wire_model::Post) -> Post {
+    Post {
+        id: wire.id.clone(),
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        edit_at: wire.edit_at,
+        delete_at: wire.delete_at,
+        is_pinned: wire.is_pinned,
+        user_id: wire.user_id.clone(),
+        channel_id: wire.channel_id.clone(),
+        root_id: wire.root_id.clone(),
+        original_id: wire.original_id.clone(),
+        message: wire.message.clone(),
+        message_source: wire.message_source.clone(),
+        post_type: wire.r#type.clone(),
+        props: (!wire.props.is_empty()).then(|| props_from_wire(&wire.props)),
+        hashtags: wire.hashtags.clone(),
+        filenames: wire.filenames.clone(),
+        file_ids: (!wire.file_ids.is_empty()).then(|| wire.file_ids.clone()),
+        pending_post_id: wire.pending_post_id.clone(),
+        has_reactions: wire.has_reactions,
+        remote_id: wire.remote_id.clone(),
+        reply_count: wire.reply_count,
+        last_reply_at: wire.last_reply_at,
+        participants: (!wire.participants.is_empty())
+            .then(|| wire.participants.iter().map(user_from_wire).collect()),
+        is_following: wire.is_following,
+        metadata: None,
+    }
+}
+
+/// `metadataByPostID` (post.go:3005): the posts the hook is about — every one that is not
+/// burn-on-read — keyed by id, each with the metadata that is put back on its replacement.
+fn consumable_metadata(
+    posts: &PostMap,
+) -> std::collections::BTreeMap<String, Option<PostMetadata>> {
+    posts
+        .iter()
+        .filter(|(_, post)| post.post_type != POST_TYPE_BURN_ON_READ)
+        .map(|(id, post)| (id.clone(), post.metadata.clone()))
+        .collect()
+}
+
+/// `rebuildPostsSlice` (post.go:3007): the consumable posts, each `ForPlugin`-ed afresh, as the
+/// next plugin is handed them. Go walks a map, so its order is whatever the runtime gives; this
+/// walks the `BTreeMap`, so it is by id. Neither is a promise to the plugin.
+fn consumed_slice(
+    posts: &PostMap,
+    metadata_by_id: &std::collections::BTreeMap<String, Option<PostMetadata>>,
+) -> Vec<wire_model::Post> {
+    posts
+        .iter()
+        .filter(|(id, _)| metadata_by_id.contains_key(*id))
+        .map(|(_, post)| post_to_wire(&post.for_plugin()))
+        .collect()
+}
+
+/// `applyReplacements` (post.go:3027): each answer lands on the map under its **own** id, whole,
+/// with the pre-hook metadata put back; an id the hook was not asked about is ignored ("if the
+/// plugin returned a post with a new id, ignore it"). Go also skips a nil element, which gob
+/// refuses to encode in the first place, so none reaches here.
+fn apply_consumed_replacements(
+    posts: &mut PostMap,
+    metadata_by_id: &std::collections::BTreeMap<String, Option<PostMetadata>>,
+    replacements: Vec<wire_model::Post>,
+) {
+    for replacement in replacements {
+        let Some(metadata) = metadata_by_id.get(&replacement.id) else {
+            continue;
+        };
+        let mut post = post_from_wire_whole(&replacement);
+        post.metadata = metadata.clone();
+        posts.insert(replacement.id.clone(), post);
     }
 }
 
@@ -2142,5 +2277,243 @@ impl App {
             }
         }
         Ok(draft)
+    }
+
+    /// Port of `applyPostsWillBeConsumedHook` (post.go:2999) — hooks 38 and 56,
+    /// `MessagesWillBeConsumed` and `MessagesWillBeConsumedWithContext`, which Go runs on the
+    /// way **out** of every post read: the eleven list readers, `GetSinglePost`, and the
+    /// `rpost` that `CreatePost` and `UpdatePost` answer with.
+    ///
+    /// Nothing runs unless some plugin implements one of the two, and nothing runs for a map
+    /// with no consumable post — a burn-on-read post is left out of the slice and left alone in
+    /// the map. Every plugin implementing the plain hook is asked first, then every one
+    /// implementing the context-aware one; each is handed the map **as the previous answers
+    /// left it**, so the second hook sees the first hook's rewrites. A replacement is taken
+    /// whole ([`post_from_wire_whole`]) and only `Metadata` is carried across. Plain
+    /// `RunMultiHook`s both: a plugin that fails in transport answers no posts and is skipped.
+    pub(crate) async fn apply_posts_will_be_consumed_hook(
+        &self,
+        ctx: &HookContext,
+        posts: &mut PostMap,
+    ) {
+        let Some(environment) = self.hook_environment() else {
+            return;
+        };
+        let plain = environment.hooks_implementing(hook_id::MESSAGES_WILL_BE_CONSUMED);
+        let with_context =
+            environment.hooks_implementing(hook_id::MESSAGES_WILL_BE_CONSUMED_WITH_CONTEXT);
+        if plain.is_empty() && with_context.is_empty() {
+            return;
+        }
+
+        let metadata_by_id = consumable_metadata(posts);
+        if metadata_by_id.is_empty() {
+            return;
+        }
+        let mut slice = consumed_slice(posts, &metadata_by_id);
+
+        for (hooks, _manifest) in plain {
+            let returns = hooks
+                .messages_will_be_consumed(wire_plugin::Z_MessagesWillBeConsumedArgs {
+                    a: slice.clone(),
+                })
+                .await;
+            apply_consumed_replacements(posts, &metadata_by_id, returns.a);
+            slice = consumed_slice(posts, &metadata_by_id);
+        }
+
+        let context = ctx.boxed_wire();
+        for (hooks, _manifest) in with_context {
+            let returns = hooks
+                .messages_will_be_consumed_with_context(
+                    wire_plugin::Z_MessagesWillBeConsumedWithContextArgs {
+                        a: context.clone(),
+                        b: slice.clone(),
+                    },
+                )
+                .await;
+            apply_consumed_replacements(posts, &metadata_by_id, returns.a);
+            slice = consumed_slice(posts, &metadata_by_id);
+        }
+    }
+
+    /// [`App::apply_posts_will_be_consumed_hook`] over a list's map. A list with no map is Go's
+    /// nil map: nothing to walk, nothing fired.
+    pub(crate) async fn apply_post_list_will_be_consumed_hook(
+        &self,
+        ctx: &HookContext,
+        list: &mut mm_model::post_list::PostList,
+    ) {
+        if let Some(posts) = list.posts.as_mut() {
+            self.apply_posts_will_be_consumed_hook(ctx, posts).await;
+        }
+    }
+
+    /// Port of `applyPostWillBeConsumedHook` (post.go:3057): the one-post map, and whatever the
+    /// map holds under the post's id afterwards — which is always something, because a
+    /// replacement lands under the id it was asked about.
+    pub(crate) async fn apply_post_will_be_consumed_hook(
+        &self,
+        ctx: &HookContext,
+        post: &mut Post,
+    ) {
+        let id = post.id.clone();
+        let mut posts = PostMap::new();
+        posts.insert(id.clone(), std::mem::take(post));
+        self.apply_posts_will_be_consumed_hook(ctx, &mut posts)
+            .await;
+        if let Some(consumed) = posts.remove(&id) {
+            *post = consumed;
+        }
+    }
+}
+
+#[cfg(test)]
+mod consumed_tests {
+    use super::*;
+
+    fn post(id: &str, message: &str) -> Post {
+        Post {
+            id: id.to_owned(),
+            channel_id: "channel00000000000000000000".to_owned(),
+            user_id: "user000000000000000000000000".to_owned(),
+            message: message.to_owned(),
+            props: Some(
+                [("k".to_owned(), serde_json::Value::from(1))]
+                    .into_iter()
+                    .collect(),
+            ),
+            file_ids: Some(vec!["file00000000000000000000000".to_owned()]),
+            metadata: Some(PostMetadata {
+                expire_at: 7,
+                ..PostMetadata::default()
+            }),
+            ..Post::default()
+        }
+    }
+
+    fn map(posts: Vec<Post>) -> PostMap {
+        posts.into_iter().map(|p| (p.id.clone(), p)).collect()
+    }
+
+    #[test]
+    fn a_burn_on_read_post_is_neither_sent_nor_touched() {
+        let mut burning = post("b", "burning");
+        burning.post_type = POST_TYPE_BURN_ON_READ.to_owned();
+        let posts = map(vec![post("a", "plain"), burning]);
+        let metadata = consumable_metadata(&posts);
+        assert_eq!(metadata.keys().collect::<Vec<_>>(), ["a"]);
+        let slice = consumed_slice(&posts, &metadata);
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].id, "a");
+        assert!(slice[0].metadata.is_none(), "ForPlugin nils the metadata");
+    }
+
+    #[test]
+    fn an_empty_map_has_nothing_to_consume() {
+        let posts = PostMap::new();
+        assert!(consumable_metadata(&posts).is_empty());
+    }
+
+    #[test]
+    fn a_replacement_is_taken_whole_with_the_metadata_put_back() {
+        let mut posts = map(vec![post("a", "before")]);
+        let metadata = consumable_metadata(&posts);
+        let replacement = wire_model::Post {
+            id: "a".to_owned(),
+            message: "after".to_owned(),
+            ..wire_model::Post::default()
+        };
+        apply_consumed_replacements(&mut posts, &metadata, vec![replacement]);
+        let consumed = &posts["a"];
+        assert_eq!(consumed.message, "after");
+        assert_eq!(
+            consumed.channel_id, "",
+            "taken whole: the channel was not carried"
+        );
+        assert_eq!(consumed.props, None, "an empty map came back nil");
+        assert_eq!(consumed.file_ids, None);
+        assert_eq!(
+            consumed.metadata.as_ref().map(|m| m.expire_at),
+            Some(7),
+            "the pre-hook metadata is put back"
+        );
+    }
+
+    #[test]
+    fn a_replacement_under_an_unknown_id_is_ignored() {
+        let mut posts = map(vec![post("a", "before")]);
+        let metadata = consumable_metadata(&posts);
+        let stranger = wire_model::Post {
+            id: "stranger".to_owned(),
+            message: "after".to_owned(),
+            ..wire_model::Post::default()
+        };
+        apply_consumed_replacements(&mut posts, &metadata, vec![stranger]);
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts["a"].message, "before");
+    }
+
+    #[test]
+    fn a_burn_on_read_replacement_is_ignored_too() {
+        let mut burning = post("b", "burning");
+        burning.post_type = POST_TYPE_BURN_ON_READ.to_owned();
+        let mut posts = map(vec![burning]);
+        let metadata = consumable_metadata(&posts);
+        let replacement = wire_model::Post {
+            id: "b".to_owned(),
+            message: "rewritten".to_owned(),
+            ..wire_model::Post::default()
+        };
+        apply_consumed_replacements(&mut posts, &metadata, vec![replacement]);
+        assert_eq!(posts["b"].message, "burning");
+    }
+
+    #[test]
+    fn the_slice_is_rebuilt_from_the_replacements() {
+        let mut posts = map(vec![post("a", "before"), post("b", "other")]);
+        let metadata = consumable_metadata(&posts);
+        apply_consumed_replacements(
+            &mut posts,
+            &metadata,
+            vec![wire_model::Post {
+                id: "a".to_owned(),
+                message: "after".to_owned(),
+                ..wire_model::Post::default()
+            }],
+        );
+        let slice = consumed_slice(&posts, &metadata);
+        assert_eq!(
+            slice.iter().map(|p| p.message.as_str()).collect::<Vec<_>>(),
+            ["after", "other"]
+        );
+    }
+
+    #[test]
+    fn a_whole_post_keeps_what_it_carries() {
+        let wire = wire_model::Post {
+            id: "a".to_owned(),
+            props: wire_model::StringInterface::from([(
+                "k".to_owned(),
+                json_to_interface(&serde_json::Value::from(2)),
+            )]),
+            file_ids: vec!["f".to_owned()],
+            participants: vec![wire_model::User {
+                id: "u".to_owned(),
+                username: "who".to_owned(),
+                ..wire_model::User::default()
+            }],
+            ..wire_model::Post::default()
+        };
+        let post = post_from_wire_whole(&wire);
+        assert_eq!(
+            post.props.as_ref().and_then(|p| p.get("k")).cloned(),
+            Some(serde_json::Value::from(2))
+        );
+        assert_eq!(post.file_ids.as_deref(), Some(&["f".to_owned()][..]));
+        let participants = post.participants.expect("the participants came back");
+        assert_eq!(participants.len(), 1);
+        assert_eq!(participants[0].username, "who");
+        assert_eq!(participants[0].props, None, "an empty map is nil");
     }
 }

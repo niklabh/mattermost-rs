@@ -84,7 +84,7 @@ impl App {
         session: &Session,
         hook_ctx: &crate::plugin_hooks::HookContext,
     ) -> Result<(Post, bool), PrepareError> {
-        let mut post = self.get_single_post(post_id, false).await?;
+        let mut post = self.get_single_post(hook_ctx, post_id, false).await?;
 
         // Note the id: `patch_post`, not `update_post`. The comment above it in Go
         // ("only allow to update the pinned status…") describes an intention the code does not
@@ -405,6 +405,7 @@ impl App {
 
         let mut prepared = self
             .prepare_post_for_client_with_embeds_and_images(
+                hook_ctx,
                 &saved,
                 PreparePostForClientOpts {
                     is_edit_post: true,
@@ -426,7 +427,12 @@ impl App {
         // `AutoTranslation().Translate` would run here on a licensed installation with the
         // feature enabled for the channel. See the module docs.
 
-        self.publish_websocket_event_for_post(WEBSOCKET_EVENT_POST_EDITED, &prepared)
+        // `applyPostWillBeConsumedHook(rctx, &rpost)`: the plugins see the prepared post, and
+        // what they answer is what the event carries and the caller gets back.
+        self.apply_post_will_be_consumed_hook(hook_ctx, &mut prepared)
+            .await;
+
+        self.publish_websocket_event_for_post(hook_ctx, WEBSOCKET_EVENT_POST_EDITED, &prepared)
             .await;
 
         // **After the publish**, so the event carries the unsanitised post and the HTTP response
@@ -974,10 +980,15 @@ impl App {
     /// `omit_connection_id`. So the client that made the edit **is** told about it, unlike a draft
     /// save; a port that helpfully threaded the `Connection-Id` header through here would silently
     /// stop the editing tab from seeing its own edit.
-    pub(crate) async fn publish_websocket_event_for_post(&self, event: &str, post: &Post) {
+    pub(crate) async fn publish_websocket_event_for_post(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        event: &str,
+        post: &Post,
+    ) {
         let message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");
         if let Err(err) = self
-            .publish_websocket_event_for_post_with_hooks(post, message)
+            .publish_websocket_event_for_post_with_hooks(ctx, post, message)
             .await
         {
             // Go answers 500 `app.post.marshal.app_error` here. A `Post` cannot fail to
@@ -1160,8 +1171,16 @@ impl App {
 
         // `publishWebsocketEventForPost`: the serialisation, the `channel_mentions` hook for a
         // notice that quotes a `~name`, and the publish.
+        //
+        // The context is the empty one because nothing here can observe it: the only read it
+        // reaches is the permalink hook's, and a system post carries no permalink preview. The
+        // request's own context at `create_system_post`'s sixteen callers is [D-950]'s.
         if let Err(err) = self
-            .publish_websocket_event_for_post_with_hooks(post, message)
+            .publish_websocket_event_for_post_with_hooks(
+                &crate::plugin_hooks::HookContext::default(),
+                post,
+                message,
+            )
             .await
         {
             tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
