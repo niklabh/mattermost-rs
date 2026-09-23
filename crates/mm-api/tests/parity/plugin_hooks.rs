@@ -243,12 +243,26 @@ fn lay_out(run: &Path) -> PathBuf {
 struct GoServer {
     child: std::process::Child,
     base: String,
+    /// The tour's scratch directory: the parent of both hosts' run directories.
+    scratch: PathBuf,
 }
 
+/// Killed on drop, and so is every plugin process either host started under this tour.
+///
+/// A SIGKILLed server never shuts its plugins down, so each tour used to leave its recorder
+/// processes behind, reparented to init — 1,050 of them across four worktrees, measured
+/// 2026-09-23. The Rust host is always dropped first (it is declared after this server, and every
+/// tour drops it first by hand), so by the time this runs both hosts are gone and whatever still
+/// executes from under the scratch directory is an orphan. `pkill` is run directly, not through
+/// a shell, so its pattern cannot match the process doing the killing.
 impl Drop for GoServer {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        let _ = Command::new("pkill")
+            .arg("-f")
+            .arg(format!("{}/", self.scratch.display()))
+            .status();
     }
 }
 
@@ -325,6 +339,9 @@ async fn start_go_binary(name: &str, run: &Path, env: &[(&str, &str)], offset: u
     let mut server = GoServer {
         child,
         base: format!("http://127.0.0.1:{port}"),
+        scratch: run
+            .parent()
+            .map_or_else(|| run.to_path_buf(), Path::to_path_buf),
     };
     let client = client();
     for _ in 0..450 {
