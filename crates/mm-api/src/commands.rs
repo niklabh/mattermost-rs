@@ -849,7 +849,23 @@ pub async fn list_command_autocomplete_suggestions(
         Err(err) => return ApiError::from(err).into_response(),
     };
 
-    match mm_app::command_suggestions::get_suggestions(&mut commands, &user_input, role_id) {
+    // `pluginContext(rctx)` and the `CommandArgs`, for a dynamic list a plugin here serves (only
+    // this host's plugins can be in the list: under the Go host the request was forwarded above).
+    let context = crate::plugin_context::hook_context_of(&request, Some(&session.0));
+    let channel_id = query_first(request.uri().query(), "channel_id").unwrap_or_default();
+    let root_id = query_first(request.uri().query(), "root_id").unwrap_or_default();
+    let suggestion_request = mm_app::command_suggestions::SuggestionRequest {
+        session: &session.0,
+        context: &context,
+        channel_id: &channel_id,
+        team_id: &team_id,
+        root_id: &root_id,
+    };
+    let suggestions = state
+        .app
+        .autocomplete_suggestions(&mut commands, &user_input, role_id, &suggestion_request)
+        .await;
+    match suggestions {
         Ok(suggestions) => match mm_model::utils::go_json_marshal(&suggestions) {
             Ok(body) => (
                 StatusCode::OK,

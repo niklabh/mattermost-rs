@@ -362,7 +362,7 @@ impl Hooks for Recorder {
             .iter()
             .chain(CONSUMED.iter().filter(|_| consume))
             .chain(["ExecuteCommand"].iter().filter(|_| commands::enabled()))
-            .chain(["ServeHTTP"].iter().filter(|_| files::enabled()))
+            .chain(["ServeHTTP"].iter().filter(|_| files::serves_http()))
             .map(|s| (*s).to_owned())
             .collect()
     }
@@ -866,8 +866,9 @@ impl Hooks for Recorder {
 }
 
 impl mm_plugin::rpc::HooksHttp for Recorder {
-    /// Implemented only with `HOOK_RECORDER_FILES` set (`recorder/files.rs`), for the files
-    /// script's inter-plugin requests; the host never calls it otherwise.
+    /// Implemented only with `HOOK_RECORDER_FILES` or `HOOK_RECORDER_HTTP` set
+    /// (`recorder/files.rs`), for the files script's inter-plugin requests and the client HTTP
+    /// tranche; the host never calls it otherwise.
     async fn serve_http(
         &self,
         context: Option<Box<mm_plugin::wire::plugin::Context>>,

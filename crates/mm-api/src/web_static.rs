@@ -111,6 +111,9 @@ pub struct StaticSetup {
     /// `ServiceSettings.EnableTesting` — registers `GET /manualtest` ahead of the catch-all
     /// (api4/api.go:414).
     enable_testing: bool,
+    /// This process hosts the plugins (`MMRS_PLUGIN_HOST=rust`), so the plugin HTTP subrouter is
+    /// served here ([`crate::plugin_requests`]) rather than forwarded.
+    host_plugins: bool,
 }
 
 impl StaticSetup {
@@ -139,6 +142,7 @@ impl StaticSetup {
                     .unwrap_or("./client/plugins"),
             ),
             enable_testing: service.enable_testing.unwrap_or(false),
+            host_plugins: false,
         }
     }
 }
@@ -203,7 +207,9 @@ async fn setup(state: &AppState) -> Option<&StaticSetup> {
         .get_or_try_init(|| async {
             let config = mm_app::config::load_model_config(state.app.store().config()).await?;
             let subpath = state.app.config().subpath();
-            Ok::<_, mm_app::config::ConfigError>(StaticSetup::from_config(&config, subpath))
+            let mut setup = StaticSetup::from_config(&config, subpath);
+            setup.host_plugins = state.app.plugin_host().hosted();
+            Ok::<_, mm_app::config::ConfigError>(setup)
         })
         .await
         .map_err(|err| tracing::warn!(error = %err, "could not read the static setup"))
@@ -228,6 +234,9 @@ enum Route {
     /// `GET /manualtest` under `EnableTesting` — `crate::manualtest`. A `HEAD` is `Root`'s:
     /// gorilla's route is `Methods(GET)`.
     ManualTest,
+    /// The plugin HTTP subrouter (app/channels.go:239), any method — only under the Rust plugin
+    /// host; see [`crate::plugin_requests`].
+    Plugin(crate::plugin_requests::PluginRoute),
     Root,
 }
 
@@ -236,7 +245,8 @@ enum Route {
 /// the redirects.
 ///
 /// Forwarded prefixes are the routes Go registers ahead of the catch-all: the plugin HTTP
-/// subrouter (`/plugins/{plugin_id}`, any method — app/channels.go:239), `getPublicFile`'s
+/// subrouter (`/plugins/{plugin_id}`, any method — app/channels.go:239; served here instead,
+/// as [`Route::Plugin`], when this process hosts the plugins), `getPublicFile`'s
 /// `/files/` subrouter, the api4 tree (`/api/v4` and `/api/v5`, which gorilla's `PathPrefix`
 /// matches without a trailing slash), `web.InitOAuth` (`/oauth/…`, `/.well-known/…`,
 /// `/api/v3/oauth/…`, `/signup/…/complete`, `/login/…/complete`), `InitSaml` and
@@ -265,6 +275,13 @@ fn classify(setup: &StaticSetup, method: &Method, path: &str, raw_query: &str) -
             raw_query,
         ));
     };
+
+    // Registered for every method, and ahead of the web client's routes.
+    if setup.host_plugins
+        && let Some(route) = crate::plugin_requests::plugin_route(rel)
+    {
+        return Route::Plugin(route);
+    }
 
     if *method != Method::GET && *method != Method::HEAD {
         return Route::Forward;
@@ -372,13 +389,27 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
     let Some(setup) = setup(&state).await else {
         return proxy::forward_to_go(State(state), request).await;
     };
-    if setup.webserver_mode == "disabled" {
+    let route = classify(setup, request.method(), &path, &url.raw_query);
+    // `InitStatic` is skipped when the web server is disabled; the plugin routes are not
+    // (they are registered by `NewChannels`).
+    if setup.webserver_mode == "disabled" && !matches!(route, Route::Plugin(_)) {
         return proxy::forward_to_go(State(state), request).await;
     }
-
-    let route = classify(setup, request.method(), &path, &url.raw_query);
     tracing::Span::current().record("route", tracing::field::debug(&route));
     let (parts, body) = request.into_parts();
+    if let Route::Plugin(route) = route {
+        return crate::plugin_requests::serve(
+            &state,
+            &setup.subpath,
+            route,
+            parts,
+            body,
+            url,
+            &raw_target,
+            &path,
+        )
+        .await;
+    }
     let answer = match route {
         Route::Forward => None,
         Route::Redirect(location) => Some(http_redirect(&parts.method, &location)),
@@ -389,6 +420,7 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
             crate::manualtest::manual_test(&state, setup, &raw_target, &url.raw_query, &parts).await
         }
         Route::Root => root(&state, setup, &raw_target, &path, &parts).await,
+        Route::Plugin(_) => None,
     };
     match answer {
         Some(response) => {
@@ -428,7 +460,7 @@ fn empty_body(method: &Method) -> Body {
 /// A `HEAD` answer whose handler wrote nothing gets **no** `Content-Length` from `net/http`
 /// (a `304`, a `412`, a redirect), where hyper would write `0` for an empty body of known size.
 /// One whose handler set the header, or wrote a body, keeps it.
-fn head_framing(method: &Method, response: Response) -> Response {
+pub(crate) fn head_framing(method: &Method, response: Response) -> Response {
     use axum::body::HttpBody as _;
     if *method != Method::HEAD
         || response.headers().contains_key(header::CONTENT_LENGTH)
@@ -618,7 +650,7 @@ fn not_found_no_cache(mut response: Response) -> Response {
 ///
 /// `name` is the cleaned file name, `url_path` the request's (stripped) path, which is what the
 /// redirects look at. `None` forwards: a directory listing, a multi-range request.
-async fn serve_file(
+pub(crate) async fn serve_file(
     dir: &Path,
     name: &str,
     url_path: &str,
@@ -676,6 +708,12 @@ async fn serve_file(
         }
     }
     if metadata.is_dir() {
+        // A directory named without its slash — reachable only when `redirect` is off, through
+        // `http.ServeFile` (a plugin's public file), since the block above takes it otherwise.
+        if !url_path.ends_with('/') {
+            let target = format!("{}/", go_path::base(url_path));
+            return Some(local_redirect(headers, &target, raw_query, &parts.method));
+        }
         // `index.html` or `dirList`. Unreachable through the static handlers, which 404 a
         // trailing slash before the file server sees it, and redirect one that is missing.
         return None;
@@ -1162,6 +1200,7 @@ mod tests {
             plugin_client_dir: PathBuf::from("./client/plugins"),
             csp_sha_directive: String::new(),
             enable_testing: false,
+            host_plugins: false,
         }
     }
 
@@ -1173,6 +1212,43 @@ mod tests {
         assert_eq!(mux_clean_path("/a//b/./c/"), "/a/b/c/");
         assert_eq!(mux_clean_path("/"), "/");
         assert_eq!(mux_clean_path("/.."), "/");
+    }
+
+    /// The plugin subrouter is served only when this process hosts the plugins, for every
+    /// method and under the subpath; a path gorilla would not match is forwarded as before.
+    #[test]
+    fn the_plugin_routes_are_served_only_under_the_rust_host() {
+        use crate::plugin_requests::PluginRoute;
+        let go_host = setup("/");
+        assert_eq!(
+            classify(&go_host, &Method::GET, "/plugins/p/x", ""),
+            Route::Forward
+        );
+        let mut rust_host = setup("/");
+        rust_host.host_plugins = true;
+        assert_eq!(
+            classify(&rust_host, &Method::POST, "/plugins/p/x", ""),
+            Route::Plugin(PluginRoute::Request("p".to_owned()))
+        );
+        assert_eq!(
+            classify(&rust_host, &Method::GET, "/plugins/p/public/a.png", ""),
+            Route::Plugin(PluginRoute::Public("p".to_owned()))
+        );
+        assert_eq!(
+            classify(&rust_host, &Method::GET, "/plugins/a~b/x", ""),
+            Route::Forward
+        );
+        let mut sub = setup("/chat");
+        sub.host_plugins = true;
+        assert_eq!(
+            classify(&sub, &Method::DELETE, "/chat/plugins/p", ""),
+            Route::Plugin(PluginRoute::Request("p".to_owned()))
+        );
+        assert_eq!(
+            classify(&sub, &Method::GET, "/plugins/p", ""),
+            Route::Redirect("/chat/plugins/p".to_owned()),
+            "outside the subpath is still the redirect into it"
+        );
     }
 
     #[test]

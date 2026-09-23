@@ -679,7 +679,7 @@ a command a plugin here registered, and the autocomplete list's plugin half. The
 with its quirks (a second plugin's registration is appended, not refused; `UnregisterCommand`
 removes every plugin's entry; only disable and remove drop a plugin's commands). A response post
 the port cannot write is answered as a failed post ([D-1020]); a plugin's dynamic-list suggestion
-still forwards ([D-1021]).
+is fetched from the plugin since 2026-09-23 (closing [D-1021]).
 
 **Then 106 of 258:** the user, status, preference and team thirty-five (`plugin_api/users.rs`):
 `GetUsers`, `GetUsersByIds`, `GetUsersInChannel`, `GetUsersInTeam`, `SearchUsers`,
@@ -697,8 +697,14 @@ and one plugin's HTTP request to another's `ServeHTTP`. `UploadFile` is
 `DoUploadFileExpectModification`, whose `FileWillBeUploaded` has its own rules and whose row has no
 channel and no mini preview; reading such an image back is [D-891]'s repair, not-implemented. A
 `PluginHTTP` whose request carries no header reaches no plugin and answers 200 with nothing, as
-Go's nil-map panic makes it. `SendMail` sends nothing ([D-238]). The client-facing
-`/plugins/{id}/*` is still Go's ([D-1040]).
+Go's nil-map panic makes it. `SendMail` sends nothing ([D-238]).
+
+**Then the client's side of `ServeHTTP` (2026-09-23):** `/plugins/{id}/*` under the Rust host
+(`mm_app::plugin_requests`, `mm_api::plugin_requests`) — the token in Go's order, the scrub, the
+session, `MFARequired`, the CSRF check, `Mattermost-User-Id`, and `net/http`'s framing of what the
+plugin wrote — plus the public files and the server's own `doPluginRequest` for a dynamic list.
+Closes [D-1040] and [D-1021]. A plugin cannot hijack the connection yet ([D-1060]); a personal
+access token Go has never seen is no session here ([D-1061]).
 
 ### Phase 7 · Publish
 

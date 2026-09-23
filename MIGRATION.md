@@ -14659,3 +14659,20 @@ handed over once, so no later status is observable; noted on `PluginResponseWrit
 | `WebConn.ShouldSendEvent`'s membership cache and `Hub.InvalidateUser` (platform/web_conn.go:980, web_hub.go:663) | `App::should_send_event`, `MemberCache` (mm-app `hub`) | DONE | 2 unit, `db_hub_join_order`, `parity::plugin_hooks::the_plugin_api_user_methods_answer_as_go_answers` (own user joins; 10 of 10 green) | Go's answer for a joiner's last default channel is a hub race (13 of 26 via the plugin API, 0 of 30 via REST); this hub gives the REST answer, and a load can no longer outlive an invalidation. |
 
 Mutation tally (`hub-join-order.plan`): 11 run, 9 caught, 2 controls survived, 0 harness faults.
+
+## Plugin HTTP: a client's request to a plugin's `ServeHTTP`, and the dynamic list (2026-09-23)
+
+`/plugins/{plugin_id}` and `/{anything}` (any method) and `/plugins/{plugin_id}/public/*` are
+served under `MMRS_PLUGIN_HOST=rust` and forwarded under the Go host, as before. They are web
+routes, not api4 pairs, so the api4 count is unchanged. Closes [D-1040] and [D-1021]; opens
+[D-1060]–[D-1062].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `ServePluginRequest`, `servePluginRequest`, `validateCSRFForPluginRequest` (app/plugin_requests.go:23-313) | `App::serve_plugin_request`, `plugin_request_token`, `scrub_plugin_request`, `validate_csrf` (`mm_app::plugin_requests`) | DONE | `parity::plugin_hooks::a_clients_plugin_request_is_served_as_go_serves_it` (27 requests) + `go_parity` (23 request, 30 CSRF cases) + 9 unit | The header beats the cookie here, the reverse of REST; `RequestURI` keeps `access_token`. |
+| `net/http`'s response framing (server.go `chunkWriter.writeHeader`) | `GoResponseWriter` | DONE | `go_parity` (25 framing cases from a real `httptest` server) | The head waits for 2 KiB, then a length or chunking; a missing type is sniffed. |
+| `ServePluginPublicRequest` (plugin_requests.go:116) | `mm_api::plugin_requests::serve_public` over `web_static::serve_file` | DONE, 404s only checked | the tranche | [D-1062]. |
+| `doPluginRequest`, `LocalResponseWriter` (integration_action.go:197-290), `getDynamicListArgument` (command_autocomplete.go:242) | `App::do_plugin_request`, `LocalResponseWriter`, `App::autocomplete_suggestions`, `decode_list_items` | DONE | the tranche (`/hookrec fetch` ×3) + 4 unit | Only the plugin's last write is read; the parser halts at each list and re-runs with the answers. |
+
+Mutation tally (`plugin-servehttp.plan`): 34 run, 32 caught, 2 controls survived, 0 harness faults.
+

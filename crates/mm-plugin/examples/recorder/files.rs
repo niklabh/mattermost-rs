@@ -36,6 +36,28 @@ pub const SWITCH: &str = "HOOK_RECORDER_FILES";
 /// runaway must not take the machine with it.
 const BODY_CAP: u64 = 64 * 1024;
 
+/// The most of a served request's body the recorder reads.
+const SERVED_BODY_CAP: u64 = 16 * 1024 * 1024;
+/// `/big`'s answer: this many writes of [`BIG_CHUNK`] bytes.
+const BIG_CHUNKS: usize = 3;
+const BIG_CHUNK: usize = 100_000;
+
+/// FNV-1a, 64 bits, as hex: enough to tell two large bodies apart in a transcript.
+fn fnv1a(bytes: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// `ServeHTTP` is implemented under the files script's switch, or under
+/// `HOOK_RECORDER_HTTP` alone (the client HTTP tranche).
+pub fn serves_http() -> bool {
+    enabled() || std::env::var_os("HOOK_RECORDER_HTTP").is_some()
+}
+
 pub fn enabled() -> bool {
     std::env::var_os(SWITCH).is_some()
 }
@@ -627,17 +649,25 @@ async fn plugin_http(
 /// | `/status` | 418 and no body |
 /// | `/late` | a body, **then** a 500 status, which is too late to count |
 /// | `/silent` | a header set, and nothing written |
+/// | `/html` | a page with no `Content-Type`, which the host sniffs |
+/// | `/flushed` | a byte, a flush, a byte: the head goes out at the flush |
+/// | `/big` | [`BIG_CHUNKS`] writes of [`BIG_CHUNK`] bytes each, streamed |
+/// | `/suggest/fetch` | `/hookrec fetch`'s dynamic list, after a first write that is not JSON |
 /// | anything else | Go's 404 |
+///
+/// The whole body is read (up to [`SERVED_BODY_CAP`]), so neither host is left holding an
+/// unread one; the transcript keeps its first [`BODY_CAP`] bytes, its length and a hash.
 pub async fn serve(
     context: Option<Box<Context>>,
     request: Option<Box<HTTPRequestSubset>>,
     body: Option<RemoteReader>,
     mut writer: mm_plugin::http::RemoteResponseWriter,
 ) -> Json {
-    let mut received = Vec::new();
+    let mut whole = Vec::new();
     if let Some(body) = body {
-        let _ = body.take(BODY_CAP).read_to_end(&mut received).await;
+        let _ = body.take(SERVED_BODY_CAP).read_to_end(&mut whole).await;
     }
+    let received = &whole[..whole.len().min(BODY_CAP as usize)];
     let request = request.map(|r| *r).unwrap_or_default();
     let url = request
         .url
@@ -656,7 +686,9 @@ pub async fn serve(
             "Host": request.host,
             "RemoteAddr": request.remote_addr,
             "RequestURI": request.request_uri,
-            "Body": String::from_utf8_lossy(&received),
+            "Body": String::from_utf8_lossy(received),
+            "BodyLen": whole.len(),
+            "BodyHash": fnv1a(&whole),
         },
     });
 
@@ -675,13 +707,40 @@ pub async fn serve(
                 .insert("X-Echo".to_owned(), vec![echoed]);
             writer.write_header(202).await;
             let _ = writer
-                .write(format!("echo: {} {query}", String::from_utf8_lossy(&received)).as_bytes())
+                .write(format!("echo: {} {query}", String::from_utf8_lossy(received)).as_bytes())
                 .await;
         }
         "/status" => writer.write_header(418).await,
         "/late" => {
             let _ = writer.write(b"early body").await;
             writer.write_header(500).await;
+        }
+        "/suggest/fetch" => {
+            // Two writes: the server's own writer keeps only the last. Go decodes the first JSON
+            // value — keys case-insensitively, a non-string field left empty, a non-object element
+            // a zero item — and never reads what follows it.
+            let _ = writer.write(b"[not json").await;
+            let _ = writer
+                .write(
+                    br#"[{"item":"one","hint":"h1","helptext":"first"},{"Item":"two","HINT":"h2","HelpText":5},null,"x",{"ITEM":"three words"}] trailing"#,
+                )
+                .await;
+        }
+        "/html" => {
+            let _ = writer.write(b"<html><body>hookrec</body></html>").await;
+        }
+        "/flushed" => {
+            let _ = writer.write(b"a").await;
+            writer.flush().await;
+            let _ = writer.write(b"b").await;
+        }
+        "/big" => {
+            for n in 0..BIG_CHUNKS {
+                let chunk: Vec<u8> = (0..BIG_CHUNK)
+                    .map(|i| b'a' + ((i + n) % 26) as u8)
+                    .collect();
+                let _ = writer.write(&chunk).await;
+            }
         }
         "/silent" => {
             writer
