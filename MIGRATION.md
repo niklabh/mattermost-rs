@@ -14634,6 +14634,23 @@ controls survived, 1 harness fault; the survivor (status order read as username 
 invisible because `usroth` sorts before `usrown`, so the fixture now ranks them the other way;
 the rerun: 4 run, 2 caught, 2 controls survived, 0 harness faults.
 
+## Plugin API: files, dialogs, mail and inter-plugin HTTP (2026-09-23)
+
+Eleven more methods, **117 of 258** (relative to `main` at fd23a265): `UploadFile`, `GetFileInfo`,
+`GetFileInfos`, `GetFile`, `ReadFile`, `GetFileLink`, `CopyFileInfos`, `SetFileSearchableContent`,
+`OpenInteractiveDialog`, `SendMail` and `PluginHTTP` (`mm_app::plugin_api::{files,http}`, which
+say what answers not-implemented). Narrows [D-932]; opens [D-1040].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `UploadFile` → `UploadFileForUserAndTeam`, `DoUploadFileExpectModification`, `getInfoForBytes` (app/file.go:615-1160, file_info.go:18) | `App::upload_file`, `App::do_upload_file_expect_modification`, `get_info_for_bytes`, `App::run_upload_file_hooks` | DONE | `parity::plugin_hooks::the_plugin_api_file_methods_answer_as_go_answers` + 3 unit | The row has no `ChannelId` and no mini preview; the images are made from the caller's bytes, not a plugin's replacement. |
+| `GetFileInfos`, `GetFile`, `SetFileSearchableContent`, `CopyFileInfos`, `GeneratePublicLink` (app/file.go:1328-1430), `SqlFileInfoStore.GetWithOptions`/`SetContent` | `mm_app::file`, `FileInfoStore::{get_with_options, set_content}` | DONE | the tranche | A zero page size is an empty answer; a copy made before a failing id stays. |
+| `PluginAPI` file, dialog and mail methods (app/plugin_api.go:1046-1152) | `mm_app::plugin_api::files` | DONE | the tranche + 5 unit | `GetFileLink` is a 501 while public links are off. |
+| `PluginHTTP`, `ServeInterPluginRequest`, `PluginResponseWriter` (plugin_api.go:1336, plugin_requests.go:59, response_transfer.go) | `mm_app::plugin_api::http` | DONE | the tranche + 4 unit | The head is taken at the first write; a request with no header reaches no plugin. |
+
+Mutation tally (`plugin-api-files.plan`): 38 run, 35 caught, 1 survivor, 2 controls survived,
+0 harness faults. The survivor (`write_header` taking every status) is equivalent: the head is
+handed over once, so no later status is observable; noted on `PluginResponseWriter::write_header`.
 
 ## Websocket hub: when a joiner's memberships are read — D-1032 (2026-09-23)
 
@@ -14645,8 +14662,8 @@ Mutation tally (`hub-join-order.plan`): 11 run, 9 caught, 2 controls survived, 0
 
 ## Plugin API: channels, members, sidebar, post lists, reactions and emoji (2026-09-23)
 
-Twenty-seven more methods, **133 of 258** (relative to `main` at 6e7ac701; a parallel branch adds
-the file, dialog and plugin-HTTP ones), in `mm_app::plugin_api::channels`, which says what each
+Twenty-seven more methods, **144 of 258** with the file, dialog and plugin-HTTP ones merged
+beside them, in `mm_app::plugin_api::channels`, which says what each
 answers and what is not implemented. Opens [D-1050].
 
 | Go | Rust | Status | Tests | Note |

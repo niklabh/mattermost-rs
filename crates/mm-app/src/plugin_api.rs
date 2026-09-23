@@ -45,6 +45,10 @@
 //! `GetPostsSince`, `GetPostsAfter`, `GetPostsBefore`, `SearchPostsInTeam` (a `*` search only),
 //! `SearchPostsInTeamForUser` and `GetReactions`; and `GetEmoji`, `GetEmojiByName`,
 //! `GetEmojiList` and `GetEmojiImage`.
+//! And the file, dialog and mail methods (`plugin_api/files.rs`): `UploadFile`, `GetFileInfo`,
+//! `GetFileInfos`, `GetFile`, `ReadFile`, `GetFileLink`, `CopyFileInfos`,
+//! `SetFileSearchableContent`, `OpenInteractiveDialog` and `SendMail`; and `PluginHTTP`, one
+//! plugin's request to another's `ServeHTTP` (`plugin_api/http.rs`).
 //!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
@@ -144,7 +148,12 @@ use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
 
 mod channels;
+mod files;
+mod http;
 mod users;
+
+pub use files::{file_infos_options_from_wire, open_dialog_request_from_wire, send_mail_refusal};
+pub use http::{InterPluginTarget, inter_plugin_target};
 
 /// Port of `PluginAPI` (app/plugin_api.go:24): the app, and the plugin it serves.
 ///
@@ -1387,6 +1396,89 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         self.channels_get_emoji_image(args).await
     }
 
+    // -- files, dialogs and mail (`plugin_api/files.rs`) ------------------------------------
+
+    /// `PluginAPI.UploadFile`; see [`AppPluginApi::files_upload_file`].
+    async fn upload_file(
+        &self,
+        args: api::Z_UploadFileArgs,
+    ) -> Result<api::Z_UploadFileReturns, NotImplemented> {
+        self.files_upload_file(args).await
+    }
+
+    /// `PluginAPI.GetFileInfo`; see [`AppPluginApi::files_get_file_info`].
+    async fn get_file_info(
+        &self,
+        args: api::Z_GetFileInfoArgs,
+    ) -> Result<api::Z_GetFileInfoReturns, NotImplemented> {
+        self.files_get_file_info(args).await
+    }
+
+    /// `PluginAPI.GetFileInfos`; see [`AppPluginApi::files_get_file_infos`].
+    async fn get_file_infos(
+        &self,
+        args: api::Z_GetFileInfosArgs,
+    ) -> Result<api::Z_GetFileInfosReturns, NotImplemented> {
+        self.files_get_file_infos(args).await
+    }
+
+    /// `PluginAPI.GetFile`; see [`AppPluginApi::files_get_file`].
+    async fn get_file(
+        &self,
+        args: api::Z_GetFileArgs,
+    ) -> Result<api::Z_GetFileReturns, NotImplemented> {
+        self.files_get_file(args).await
+    }
+
+    /// `PluginAPI.ReadFile`; see [`AppPluginApi::files_read_file`].
+    async fn read_file(
+        &self,
+        args: api::Z_ReadFileArgs,
+    ) -> Result<api::Z_ReadFileReturns, NotImplemented> {
+        self.files_read_file(args).await
+    }
+
+    /// `PluginAPI.GetFileLink`; see [`AppPluginApi::files_get_file_link`].
+    async fn get_file_link(
+        &self,
+        args: api::Z_GetFileLinkArgs,
+    ) -> Result<api::Z_GetFileLinkReturns, NotImplemented> {
+        self.files_get_file_link(args).await
+    }
+
+    /// `PluginAPI.CopyFileInfos`; see [`AppPluginApi::files_copy_file_infos`].
+    async fn copy_file_infos(
+        &self,
+        args: api::Z_CopyFileInfosArgs,
+    ) -> Result<api::Z_CopyFileInfosReturns, NotImplemented> {
+        self.files_copy_file_infos(args).await
+    }
+
+    /// `PluginAPI.SetFileSearchableContent`; see
+    /// [`AppPluginApi::files_set_file_searchable_content`].
+    async fn set_file_searchable_content(
+        &self,
+        args: api::Z_SetFileSearchableContentArgs,
+    ) -> Result<api::Z_SetFileSearchableContentReturns, NotImplemented> {
+        self.files_set_file_searchable_content(args).await
+    }
+
+    /// `PluginAPI.OpenInteractiveDialog`; see [`AppPluginApi::files_open_interactive_dialog`].
+    async fn open_interactive_dialog(
+        &self,
+        args: api::Z_OpenInteractiveDialogArgs,
+    ) -> Result<api::Z_OpenInteractiveDialogReturns, NotImplemented> {
+        self.files_open_interactive_dialog(args).await
+    }
+
+    /// `PluginAPI.SendMail`; see [`AppPluginApi::files_send_mail`].
+    async fn send_mail(
+        &self,
+        args: api::Z_SendMailArgs,
+    ) -> Result<api::Z_SendMailReturns, NotImplemented> {
+        self.files_send_mail(args).await
+    }
+
     // -- slash commands ---------------------------------------------------------------------
 
     /// Port of `PluginAPI.RegisterCommand` (app/plugin_api.go:82); see
@@ -2275,7 +2367,16 @@ impl PluginApiDynamic for AppPluginApi {
 }
 
 impl mm_plugin::rpc::PluginApiStreams for AppPluginApi {}
-impl mm_plugin::rpc::PluginApiHttp for AppPluginApi {}
+impl mm_plugin::rpc::PluginApiHttp for AppPluginApi {
+    /// `PluginAPI.PluginHTTP`; see [`AppPluginApi::http_plugin_http`].
+    async fn plugin_http(
+        &self,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Box<dyn tokio::io::AsyncRead + Send + Unpin>,
+    ) -> Result<mm_plugin::rpc::HttpResponse, NotImplemented> {
+        self.http_plugin_http(request, body).await
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -2419,6 +2520,58 @@ mod tests {
             .await
             .expect("served");
         assert!(!channel.a);
+    }
+
+    /// `GetFileLink` refuses with Go's 501 while public links are off — the default — before
+    /// any row is read, so no store is asked.
+    #[tokio::test]
+    async fn a_file_link_is_refused_while_public_links_are_off() {
+        use mm_plugin::rpc::PluginApi as _;
+        let api = unreachable_api();
+        assert!(!api.app.config().enable_public_link);
+        let answer = api
+            .get_file_link(api::Z_GetFileLinkArgs { a: "f".into() })
+            .await
+            .expect("served");
+        let err = answer.b.expect("refused");
+        assert_eq!(
+            (err.id.as_str(), err.status_code, err.r#where.as_str()),
+            (
+                "plugin_api.get_file_link.disabled.app_error",
+                501,
+                "GetFileLink"
+            )
+        );
+        assert!(answer.a.is_empty());
+    }
+
+    /// `SendMail` refuses a missing field before it looks at the setting; past the refusals, with
+    /// notifications on — the default — the mail would go out, which is not implemented here.
+    #[tokio::test]
+    async fn send_mail_is_not_implemented_only_once_it_would_send() {
+        use mm_plugin::rpc::PluginApi as _;
+        let api = unreachable_api();
+        assert!(api.app.config().send_email_notifications);
+        let refused = api
+            .send_mail(api::Z_SendMailArgs {
+                a: String::new(),
+                b: "s".into(),
+                c: "b".into(),
+            })
+            .await
+            .expect("served");
+        assert_eq!(
+            refused.a.map(|e| e.id),
+            Some("plugin_api.send_mail.missing_to".to_owned())
+        );
+        let sent = api
+            .send_mail(api::Z_SendMailArgs {
+                a: "a@b".into(),
+                b: "s".into(),
+                c: "b".into(),
+            })
+            .await;
+        assert!(sent.is_err(), "no sender here");
     }
 
     /// An `EnsureBot` failure crosses as `encodableError` makes it: a message as an

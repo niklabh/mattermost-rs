@@ -134,6 +134,10 @@
 //! `{"hook": "OnActivate", "calls": [...]}` and each `ExecuteCommand`; `/hookrec script` also
 //! runs the command half of the plugin API and records `{"hook": "CommandScript", ...}`.
 //!
+//! `/hookrec files` (with `HOOK_RECORDER_COMMANDS` set) runs `recorder/files.rs` — the file,
+//! dialog, mail and inter-plugin HTTP methods — and records `{"hook": "FilesScript", ...}`; with
+//! `HOOK_RECORDER_FILES` set the recorder also implements `ServeHTTP` for those requests.
+//!
 //! `!users-script` runs `recorder/users.rs` — the user, status, preference and team methods —
 //! and records `{"hook": "UsersScript", ...}` the same way.
 //!
@@ -208,6 +212,8 @@ mod users;
 
 #[path = "recorder/channels.rs"]
 mod channels;
+#[path = "recorder/files.rs"]
+mod files;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -361,6 +367,7 @@ impl Hooks for Recorder {
             .iter()
             .chain(CONSUMED.iter().filter(|_| consume))
             .chain(["ExecuteCommand"].iter().filter(|_| commands::enabled()))
+            .chain(["ServeHTTP"].iter().filter(|_| files::enabled()))
             .map(|s| (*s).to_owned())
             .collect()
     }
@@ -378,6 +385,13 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "CommandScript", "calls": calls }));
+        }
+        if command_args.command.split(' ').nth(1) == Some("files") {
+            let calls = match self.api.get() {
+                Some(api) => files::run(api, &command_args).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "FilesScript", "calls": calls }));
         }
         Ok(answer)
     }
@@ -866,7 +880,21 @@ impl Hooks for Recorder {
     }
 }
 
-impl mm_plugin::rpc::HooksHttp for Recorder {}
+impl mm_plugin::rpc::HooksHttp for Recorder {
+    /// Implemented only with `HOOK_RECORDER_FILES` set (`recorder/files.rs`), for the files
+    /// script's inter-plugin requests; the host never calls it otherwise.
+    async fn serve_http(
+        &self,
+        context: Option<Box<mm_plugin::wire::plugin::Context>>,
+        request: Option<Box<mm_plugin::wire::plugin::HTTPRequestSubset>>,
+        body: Option<mm_plugin::io_rpc::RemoteReader>,
+        writer: mm_plugin::http::RemoteResponseWriter,
+    ) -> Result<(), NotImplemented> {
+        let entry = files::serve(context, request, body, writer).await;
+        self.record(&entry);
+        Ok(())
+    }
+}
 impl mm_plugin::rpc::HooksFileUpload for Recorder {
     async fn file_will_be_uploaded(
         &self,

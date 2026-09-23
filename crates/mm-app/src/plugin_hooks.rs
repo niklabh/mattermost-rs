@@ -1952,6 +1952,79 @@ impl App {
         Ok(true)
     }
 
+    /// Port of the `RunMultiHook` over `FileWillBeUploaded` in `DoUploadFileExpectModification`
+    /// (app/file.go:1110) — the plugin API's `UploadFile` — **before** anything is written. Its
+    /// rules are not [`App::run_plugins_hook`]'s:
+    ///
+    /// - each plugin is lent a **fresh** reader over the bytes as they stand, so the second plugin
+    ///   reads the first one's replacement, and a fresh writer, so a replacement is one plugin's
+    ///   output rather than everyone's concatenated;
+    /// - a replacement becomes the bytes and their length the size **at once**, before the next
+    ///   plugin is asked;
+    /// - a refusal stops the iteration and is the 400 whose **id** is
+    ///   `"File rejected by plugin. " + reason` under `DoUploadFile` — no event, and nothing to
+    ///   remove, because nothing is on disk yet.
+    ///
+    /// `info` is merged in place as the host client decodes each answer into it. Answers the
+    /// replacement bytes, when any plugin wrote some.
+    pub(crate) async fn run_upload_file_hooks(
+        &self,
+        ctx: &HookContext,
+        info: &mut FileInfo,
+        data: &[u8],
+    ) -> Result<Option<Vec<u8>>, Box<AppError>> {
+        let Some(environment) = self.hook_environment() else {
+            return Ok(None);
+        };
+        let plugins = environment.hooks_implementing(hook_id::FILE_WILL_BE_UPLOADED);
+        if plugins.is_empty() {
+            return Ok(None);
+        }
+
+        // One owned copy, shared by every reader: each is lent to a task of its own.
+        let mut current = Arc::new(data.to_vec());
+        let mut replaced = false;
+        for (hooks, _manifest) in plugins {
+            let reader = SharedReader {
+                data: Arc::clone(&current),
+                at: Arc::default(),
+            };
+            let output = SharedBuffer::default();
+            let returns = hooks
+                .file_will_be_uploaded(
+                    ctx.boxed_wire(),
+                    Some(Box::new(file_info_to_wire(info))),
+                    reader,
+                    output.clone(),
+                )
+                .await;
+            if !returns.b.is_empty() {
+                return Err(AppError::boxed(
+                    "DoUploadFile",
+                    format!("File rejected by plugin. {}", returns.b),
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+            if let Some(merged) = returns.a.as_deref() {
+                *info = file_info_from_wire(merged);
+            }
+            let written = std::mem::take(
+                &mut *output
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
+            if !written.is_empty() {
+                info.size = i64::try_from(written.len()).unwrap_or(i64::MAX);
+                current = Arc::new(written);
+                replaced = true;
+            }
+        }
+        Ok(replaced.then(|| Arc::unwrap_or_clone(current)))
+    }
+
     /// Port of `sendFileUploadRejectedEvent` (app/file.go:1996): `file_upload_rejected` to the
     /// uploader, to one connection of theirs when the request named it.
     async fn send_file_upload_rejected_event(
