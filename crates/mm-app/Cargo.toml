@@ -10,6 +10,8 @@ repository.workspace = true
 mm-store.workspace = true
 mm-model.workspace = true
 mm-plugin.workspace = true
+# `gobwire::Interface`: the plugin API's log methods read the `[]any` pairs a plugin sends.
+gobwire = { path = "../gobwire" }
 tar.workspace = true
 flate2.workspace = true
 mm-markdown.workspace = true

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE PluginKeyValueStore SET PValue = $1, ExpireAt = $2\n             WHERE PluginId = $3 AND PKey = $4 AND PValue = $5 AND (ExpireAt = 0 OR ExpireAt > $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Int8",
+        "Text",
+        "Text",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "df3a487395e05f67ca83de8ba59572db50093f2c7b0d3082d96817cdd737a5f4"
+}

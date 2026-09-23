@@ -640,6 +640,20 @@ Zoom, AI, Boards). Most methods are thin wrappers over app functions that routes
 Unported ones return the typed not-implemented `AppError` and are counted, never silently
 succeeding. **Exit:** those plugins' own e2e flows pass under the Rust host.
 
+The total is 258, measured from `crates/mm-plugin/src/rpc/api.rs`: 254 methods on `PluginApi`
+(`LoadPluginConfiguration` among them), 3 on `PluginApiStreams` and 1 on `PluginApiHttp`.
+
+**Done first, 16 of 258:** the nine `KV*` methods, the four `Log*`, `GetServerVersion`,
+`GetDiagnosticId` and `GetSystemInstallDate`, over a new `mm_store::plugin_store`. The
+environment's API factory now builds each plugin's `AppPluginApi` from the `App` and the
+manifest; the Go-host path is untouched, since that environment is never started. Two findings:
+gob cannot tell a nil `[]byte` from an empty one, so `KVSet(key, []byte{})` **deletes** the key
+and a compare against an empty old value is the insert-if-absent path; and a row with a NULL
+`ExpireAt` — migration 45's default — can be neither read nor replaced through the API. The
+tranche runs a 66-call script from inside `MessageWillBePosted` under both hosts, one after the
+other from the same planted rows. `GetConfig`, `GetUnsanitizedConfig` and `GetLicense` need a
+gob `Config` and `License` built from JSON, and are [D-990].
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

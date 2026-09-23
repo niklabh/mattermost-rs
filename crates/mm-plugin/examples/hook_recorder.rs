@@ -118,11 +118,18 @@
 //!
 //! The context-aware hook is asked **after** the plain one, over the map as the plain one's
 //! answers left it, so a `!consume ` post reaches it already rewritten.
+//!
+//! # A `!kv-script` post runs the plugin API script
+//!
+//! `MessageWillBePosted` on a post whose message is exactly `!kv-script` first runs
+//! `recorder/kv.rs` — a fixed sequence of `KV*`, `Log*` and server-information calls — and records
+//! `{"hook": "KVScript", "calls": [...]}` with every answer, before answering "no opinion". That
+//! entry lands **between** the hook's own entry and `MessageHasBeenPosted`.
 
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-use mm_plugin::rpc::{Hooks, NotImplemented, Plugin, client_main};
+use mm_plugin::rpc::{ApiClient, Hooks, NotImplemented, Plugin, client_main};
 use mm_plugin::wire::model::{Channel, Draft, ScheduledPost};
 use mm_plugin::wire::model::{ChannelMember, Post, TeamMember};
 use mm_plugin::wire::plugin::{
@@ -164,6 +171,9 @@ fn oracle_dir() -> std::path::PathBuf {
 mod render;
 
 use render::render_typed;
+
+#[path = "recorder/kv.rs"]
+mod kv;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -261,6 +271,8 @@ fn configured_id(name: &str) -> String {
 
 struct Recorder {
     transcript: Mutex<std::fs::File>,
+    /// The API client the host handed over on activation, for the `!kv-script` post.
+    api: OnceLock<ApiClient>,
 }
 
 impl Recorder {
@@ -344,6 +356,13 @@ impl Hooks for Recorder {
     ) -> Result<Z_MessageWillBePostedReturns, NotImplemented> {
         self.saw("MessageWillBePosted", &args);
         let message = args.b.as_deref().map_or("", |p| p.message.as_str());
+        if message == kv::KV_SCRIPT {
+            let calls = match self.api.get() {
+                Some(api) => kv::run(api.client()).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "KVScript", "calls": calls }));
+        }
         let answer = if let Some(reason) = after(message, "!reject ") {
             Z_MessageWillBePostedReturns {
                 a: None,
@@ -809,7 +828,11 @@ impl mm_plugin::rpc::HooksFileUpload for Recorder {
         Ok(answer)
     }
 }
-impl Plugin for Recorder {}
+impl Plugin for Recorder {
+    fn set_api(&self, api: ApiClient, _: mm_plugin::rpc::DriverClient) {
+        let _ = self.api.set(api);
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -822,6 +845,7 @@ async fn main() {
         .expect("open the transcript");
     let plugin = Recorder {
         transcript: Mutex::new(transcript),
+        api: OnceLock::new(),
     };
     if let Err(e) = client_main(plugin).await {
         eprintln!("hook recorder: {e}");

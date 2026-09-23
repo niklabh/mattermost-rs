@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM PluginKeyValueStore WHERE PluginId = $1 AND PKey = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e8d2f3fee9bb80d49b35fe8b4904366e05132fd8da92aaef488f5a964dd17544"
+}

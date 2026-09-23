@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 0/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 16/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14528,3 +14528,17 @@ VP8 lossy path — the in-loop filter's level arithmetic, the VP8L Huffman group
 cross-colour transform's mode mask, the chroma pack shift and the partition-header length. The
 decoder matches Go on every one of the corpus's real streams; what is unproven is that the corpus
 would *notice* those seven lines being wrong.
+
+## Plugin API, Phase 6 begins: the KV store, logging and server information (2026-09-23)
+
+`AppPluginApi` (`mm_app::plugin_api`) now holds the app and the plugin's manifest, as Go's
+`NewPluginAPI` does, and answers **16 of the 258** API methods; the rest still answer Go's
+not-implemented error. `GetConfig`, `GetUnsanitizedConfig` and `GetLicense` are [D-990].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `SqlPluginStore` less `DeleteAllExpired` (store/sqlstore/plugin_store.go) | `mm_store::plugin_store` | DONE | 9 store (`db_plugin_store`) + 2 unit | A NULL `ExpireAt` (migration 45's default) is invisible to every read and blocks insert-if-absent, which then answers `false`. |
+| app/plugin_key_value_store.go, the KV half of platform/cluster.go, `GetSystemInstallDate`, `ServerId` | `mm_app::plugin_key_value_store` | DONE | 2 unit + the parity tranche | Every write removes the key's pre-5.6 hashed spelling; `KVList` still lists a hashed row under its hash. |
+| `PluginAPI` KV, `Log*`, `GetServerVersion`, `GetDiagnosticId`, `GetSystemInstallDate` (app/plugin_api.go) | `mm_app::plugin_api` | DONE | `parity::plugin_hooks::the_plugin_api_kv_methods_answer_as_go_answers` (66 calls, both hosts, plus the rows each left) + 5 unit | An `AppError` crosses translated in the server locale, without its wrapped cause. The log line is a `tracing` event, not an `mlog` one; Go's log is the oracle for the pairing. |
+
+Mutation tally (`plugin-api-kv.plan`): 22 run, 20 caught, 2 controls survived, 0 harness faults.

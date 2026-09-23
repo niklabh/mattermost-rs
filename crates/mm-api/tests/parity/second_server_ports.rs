@@ -97,8 +97,9 @@ fn no_two_second_servers_share_a_port() {
     // boards oracle down, and twenty tests in six other suites failed for it.
     // `parity::plugin_startup` starts its own Go server at + 73, and `parity::plugin_hooks` at
     // + 74.
-    // `parity::plugin_hooks`' support-packet tranche starts its Go server at + 87.
-    let reserved: Vec<u16> = [8065, 8066, 8115, 8138, 8139, 8152]
+    // `parity::plugin_hooks`' support-packet tranche starts its Go server at + 87, and its
+    // plugin API tranche at + 88.
+    let reserved: Vec<u16> = [8065, 8066, 8115, 8138, 8139, 8152, 8153]
         .into_iter()
         .chain(8095..=8104)
         .collect();

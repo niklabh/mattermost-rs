@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT PluginId AS \"plugin_id!\", PKey AS \"key!\", PValue AS value, ExpireAt AS \"expire_at!\"\n               FROM PluginKeyValueStore\n               WHERE PluginId = $1 AND PKey = $2 AND (ExpireAt = 0 OR ExpireAt > $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "plugin_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "key!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "value",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "expire_at!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "19d22b704d8e7e7db33f857c5e966af80cc182cfe29c460fb152cb15e93fd09b"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM PluginKeyValueStore\n             WHERE PluginId = $1 AND PKey = $2 AND PValue = $3 AND (ExpireAt = 0 OR ExpireAt > $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b8e6d09bc16cd662a35b2d85be61b517dda9a953657dc32f6b7af99d8208c72d"
+}

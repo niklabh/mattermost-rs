@@ -36,6 +36,7 @@ pub mod license_store;
 pub mod link_metadata_store;
 pub mod notify_admin_store;
 pub mod oauth_store;
+pub mod plugin_store;
 pub mod post_acknowledgement_store;
 pub mod post_store;
 pub mod preference_store;
@@ -90,6 +91,7 @@ pub use license_store::{LicenseStore, SqlLicenseStore};
 pub use link_metadata_store::{LinkMetadataStore, SqlLinkMetadataStore};
 pub use notify_admin_store::{NotifyAdminStore, SqlNotifyAdminStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
+pub use plugin_store::{PluginStore, SqlPluginStore};
 pub use post_acknowledgement_store::{PostAcknowledgementStore, SqlPostAcknowledgementStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
@@ -137,6 +139,7 @@ pub struct SqlStore {
     command: SqlCommandStore,
     channel: SqlChannelStore,
     channel_guard: SqlChannelGuardStore,
+    plugin: SqlPluginStore,
     channel_join_request: SqlChannelJoinRequestStore,
     config: SqlConfigStore,
     emoji: SqlEmojiStore,
@@ -211,6 +214,7 @@ impl SqlStore {
             command: SqlCommandStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
             channel_guard: SqlChannelGuardStore::new(pool.clone()),
+            plugin: SqlPluginStore::new(pool.clone()),
             channel_join_request: SqlChannelJoinRequestStore::new(pool.clone()),
             config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
@@ -672,6 +676,11 @@ impl SqlStore {
     /// Port of `store.Store.ChannelJoinRequest()`.
     pub fn channel_guard(&self) -> &SqlChannelGuardStore {
         &self.channel_guard
+    }
+
+    /// Port of `store.Store.Plugin()`.
+    pub fn plugin(&self) -> &SqlPluginStore {
+        &self.plugin
     }
 
     pub fn channel_join_request(&self) -> &SqlChannelJoinRequestStore {
