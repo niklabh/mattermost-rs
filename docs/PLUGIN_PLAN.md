@@ -663,6 +663,15 @@ configuration environment for both hosts, so the two configurations are compared
 `SavePluginConfig` saves through the Go server, whose plugins' `ConfigurationWillBeSaved` run
 instead of the Rust host's ([D-1000]).
 
+**Then 64 of 258:** what a plugin calls after activation — the user, team, channel, member,
+post, thread and session reads, `HasPermissionTo{,Team,Channel}`, `CreatePost`, `UpdatePost`,
+`DeletePost`, the three ephemeral methods, the two reaction methods, `AddChannelMember`,
+`CreateChannel`, `GetDirectChannel`, `GetGroupChannel`, the bot methods with `EnsureBotUser`
+(everything the SDK's `EnsureBot` calls but `SetProfileImage`, [D-1010]) and
+`PublishWebSocketEvent`. A plugin's `CreatePost` from inside a hook fires that plugin's own
+message hooks re-entrantly on both hosts; the tranche compares those hooks and every websocket
+frame too. A shape the REST route forwards answers not-implemented for that call.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

@@ -128,6 +128,11 @@
 //!
 //! `!config-script` does the same with `recorder/config.rs` — the configuration and licence
 //! methods, and three `SavePluginConfig`s — and records `{"hook": "ConfigScript", ...}`.
+//!
+//! `!core-script` runs `recorder/core.rs` — the user, team, channel, post, permission, bot and
+//! websocket methods, reading ids from `HOOK_RECORDER_CORE_*` — and records
+//! `{"hook": "CoreScript", ...}`. Its posts fire this plugin's own message hooks while the outer
+//! hook is still waiting, so those entries land **before** the script's.
 
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
@@ -180,6 +185,9 @@ mod kv;
 
 #[path = "recorder/config.rs"]
 mod config;
+
+#[path = "recorder/core.rs"]
+mod core;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -368,6 +376,17 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "KVScript", "calls": calls }));
+        }
+        if message == core::CORE_SCRIPT {
+            let channel = args.b.as_deref().map_or("", |p| p.channel_id.as_str());
+            let session = args.a.as_deref().map_or("", |c| c.session_id.as_str());
+            let calls = match self.api.get() {
+                Some(api) => {
+                    core::run(api.client(), &core::Inputs::from_env(channel, session)).await
+                }
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "CoreScript", "calls": calls }));
         }
         if message == config::CONFIG_SCRIPT {
             let calls = match self.api.get() {

@@ -13,12 +13,12 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 27/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 64/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
 Blended, the migration is **roughly 60–65% by route traffic** and **about 40% with equal weight
-on routes, websocket, plugins and jobs**. The backlog is 159 OPEN entries in
+on routes, websocket, plugins and jobs**. The backlog is 161 OPEN entries in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
 methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
 missing e-mail ([D-238]) and push-notification ([D-215]) services.
@@ -14570,3 +14570,29 @@ the whole document unreadable here; `mm_model` now reads it.
 Mutation tally (`plugin-api-config.plan`, then `-rerun.plan`): 21 run, 18 caught, 1 survivor and
 2 controls survived; the survivor (Go's float formatting in `LoadPluginConfiguration`) was
 invisible because `1e21` prints alike in both — `1e20` does not, and the rerun caught it.
+
+## Plugin API: users, teams, channels, posts, permissions, bots and websocket events (2026-09-23)
+
+Thirty-seven more methods, **64 of 258** (relative to `main` at b8be58c7): the sixteen reads,
+the three permission checks, ten post and channel writes, the seven bot methods including
+`EnsureBotUser`, and `PublishWebSocketEvent` (`mm_app::plugin_api`, `mm_app::plugin_api_wire`).
+A shape the REST route would forward answers `API <Name> called but not implemented.` for that
+call. Opens [D-1010] (`SetProfileImage`) and [D-1011] (`UpdatePost` with `mm_blocks_actions`).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` reads, permissions, post/channel/bot writes, `PublishWebSocketEvent` (app/plugin_api.go) | `mm_app::plugin_api`, `mm_app::plugin_api_wire` | DONE | `parity::plugin_hooks::the_plugin_api_core_methods_answer_as_go_answers` (89 calls; every answer, every hook the plugin's own writes fire, every websocket frame, the bot rows and `deleteBy`) + 9 unit (and 2 for the harness) | The API's context is `request.EmptyContext`: hooks get six empty strings, the session is zero. `Where` crosses gob, so a delegated `Where` is now visible. |
+| `PluginAPI.CreatePost`, `UpdateEphemeralPost`, `DeleteEphemeralPost` (app/post.go:759-849) | `App::create_post_from_plugin`, `update_ephemeral_post`, `delete_ephemeral_post` | DONE | the tranche | `CreatePostFlags.from_plugin` adds `from_plugin` and makes the author an integration for a silent post. |
+| `App.EnsureBot`, `App.PermanentDeleteBot` (app/bot.go:26, 452) | `App::ensure_bot`, `App::permanent_delete_bot` | DONE | 3 unit + the tranche | Go's user cache keeps a deleted bot readable through `GetUser`; not reproduced (no cache here). |
+
+Three fixes found on the way: a system post (`create_system_post`, every membership notice) now
+goes through `PreparePostForClient`, so its `posted` event carries `metadata: {}` as Go's does;
+`GetChannelByNameForTeamName` reports Go's `Where`; and `parity::plugin_hooks`' `normalise` had
+been masking every app error's `Id` as `<id>`, so no hook tranche compared error ids until now.
+
+Mutation tally (`plugin-api-core.plan`): 30 run, 28 caught, 2 controls survived, 0 harness faults.
+A first batch was void — both controls caught — because a mutation that kept a bot's `Users` row
+left its username taken for every later line; the purge now removes the script's bot users by
+username, and the two real survivors of that batch (`DeletePost`'s deleter, `CreateChannel`
+adding no member) got a row check and a `GetChannelMember` before the rerun.
+

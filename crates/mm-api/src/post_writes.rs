@@ -954,6 +954,7 @@ async fn serve_create(
                 silent_notification: silent,
                 // Server-set only; `SanitizeProps` strips a client's prop.
                 force_notification: false,
+                from_plugin: false,
             },
             hook_ctx,
         )

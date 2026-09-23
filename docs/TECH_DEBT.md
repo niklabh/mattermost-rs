@@ -6945,6 +6945,9 @@ are written (the DM or the post can error and Go returns that error) where ours 
 
 Blocked behind `CreatePostAsUser`. Unreachable today in any case — see [D-280].
 
+Since 2026-09-23 it is reachable through the plugin API: a plugin's `CreateBot` with a human
+owner answers not implemented (decided before any write), which this entry closing would lift.
+
 ---
 
 ## D-282 · Disabling a bot does not run `userDeactivated`
@@ -9774,3 +9777,28 @@ enable and disable. Nothing is private.
 patch rebuilt from whatever configuration a hook returns (a whole `model.Config` crossing gob, so
 `mm_app::plugin_api_config`'s conversion is half of it; the other half is gob → JSON), and a
 `parity::plugin_hooks` tranche with a recorder that rewrites and refuses.
+
+---
+
+## D-1010 · The plugin API has no `SetProfileImage`
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:1026) · **Owner** the plugin host
+
+The SDK's `EnsureBot` calls it when given a profile image option. Go's path is
+`SetProfileImageFromFile` — **without** `checkImageLimits`, which `App::set_profile_image` runs
+first for the REST route. **What is owed:** split `set_profile_image` at that check (the
+resolution guard inside `image_pipeline::decode` has to be checked against Go's decoder first),
+wrap it after a `GetUser`, and a script call in the core tranche with a small PNG and a non-image.
+
+---
+
+## D-1011 · A plugin's `UpdatePost` carrying `mm_blocks_actions` answers not implemented
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:996) · **Owner** the plugin host
+
+Go validates the prop with `ValidateMmBlocksActions` (400
+`plugin.api.update_post.mm_blocks_actions.app_error`) and then lets the plugin replace the
+registry (`AllowMmBlocksActionsUpdate`); neither is ported, and `App::update_post` would keep the
+old registry. **What is owed:** the validator, the option on `update_post`, and a script call with
+a valid and an invalid registry.
+

@@ -727,6 +727,163 @@ impl App {
     }
 }
 
+/// `botUserKey` (app/bot.go:21): `internalKeyPrefix + "botid"`, the plugin KV key under which
+/// [`App::ensure_bot`] remembers the bot it made.
+pub const BOT_USER_KEY: &str = "mmi_botid";
+
+/// What `App.EnsureBot` fails with. It returns an `error`, not an `*AppError`, and three shapes
+/// reach the plugin differently: `encodableError` sends an `*AppError` whole and anything else as
+/// its `Error()` text.
+#[derive(Debug, thiserror::Error)]
+pub enum EnsureBotError {
+    /// `errors.New` or `fmt.Errorf` with no app error inside: the text is the whole error.
+    #[error("{0}")]
+    Message(String),
+    /// An `*AppError` returned as it is — the KV read's.
+    #[error(transparent)]
+    App(Box<AppError>),
+    /// `fmt.Errorf("<prefix>: %w", appErr)`. The text is the prefix and the app error's
+    /// `Error()`, which carries its **translated** message, so the caller renders it once it has
+    /// translated the error.
+    #[error("{0}: {1}")]
+    Wrapped(&'static str, Box<AppError>),
+}
+
+impl App {
+    /// Port of `App.EnsureBot` (app/bot.go:26), behind the plugin API's `EnsureBotUser` — what the
+    /// SDK's `BotService.EnsureBot` calls under its cluster mutex.
+    ///
+    /// # Three ways to an id, in Go's order
+    ///
+    /// 1. The id stored under [`BOT_USER_KEY`], if that bot still exists (deleted or not —
+    ///    `GetBot(..., true)`): it is **patched** to the requested username, display name and
+    ///    description, and its id is the answer. A stored id whose bot is gone is only logged.
+    /// 2. An existing user with the requested username: a bot is adopted (its id stored); a
+    ///    human is refused, because converting one is an administrator's decision.
+    /// 3. A new bot, whose id is then stored.
+    ///
+    /// The owner is whatever the caller set — the plugin API sets the plugin's id first.
+    #[tracing::instrument(skip(self, bot), fields(username = bot.map(|b| b.username.as_str())))]
+    pub async fn ensure_bot(
+        &self,
+        plugin_id: &str,
+        bot: Option<&Bot>,
+    ) -> Result<String, EnsureBotError> {
+        let Some(bot) = bot else {
+            return Err(EnsureBotError::Message("passed a nil bot".to_owned()));
+        };
+        if bot.username.is_empty() {
+            return Err(EnsureBotError::Message(
+                "passed a bot with no username".to_owned(),
+            ));
+        }
+
+        let stored = self
+            .get_plugin_key(plugin_id, BOT_USER_KEY)
+            .await
+            .map_err(EnsureBotError::App)?;
+
+        // "If the bot has already been created, check whether it still exists and use it."
+        if let Some(bytes) = stored {
+            let bot_id = String::from_utf8_lossy(&bytes).into_owned();
+            match self.get_bot(&bot_id, true).await {
+                Err(err) => {
+                    tracing::debug!(bot_id, error = %err, "Unable to get bot.");
+                }
+                Ok(_) => {
+                    // "ensure existing bot is synced with what is being created"
+                    let patch = BotPatch {
+                        username: Some(bot.username.clone()),
+                        display_name: Some(bot.display_name.clone()),
+                        description: Some(bot.description.clone()),
+                    };
+                    self.patch_bot(&bot_id, &patch)
+                        .await
+                        .map_err(|err| EnsureBotError::Wrapped("failed to patch bot", err))?;
+                    return Ok(bot_id);
+                }
+            }
+        }
+
+        // "Check for an existing bot user with that username. If one exists, then use that."
+        if let Ok(user) = self.get_user_by_username(&bot.username).await {
+            if user.is_bot {
+                self.set_plugin_key(plugin_id, BOT_USER_KEY, Some(user.id.as_bytes()))
+                    .await
+                    .map_err(|err| EnsureBotError::Wrapped("failed to set plugin key", err))?;
+                return Ok(user.id);
+            }
+            tracing::error!(
+                username = %bot.username,
+                user_id = %user.id,
+                "Plugin attempted to use an account that already exists. Convert user to a bot \
+                 account in the CLI by running 'mattermost user convert <username> --bot'. If the \
+                 user is an existing user account you want to preserve, change its username and \
+                 restart the Mattermost server, after which the plugin will create a bot account \
+                 with that name. For more information about bot accounts, see \
+                 https://mattermost.com/pl/default-bot-accounts",
+            );
+            // `%q` of a username: a valid username is lowercase ASCII letters, digits and `.-_`,
+            // none of which Go's quoting escapes — and only a stored, valid one reaches here.
+            return Err(EnsureBotError::Message(format!(
+                "username \"{}\" is already taken by a non-bot user",
+                bot.username
+            )));
+        }
+
+        let created = self
+            .create_bot(bot)
+            .await
+            .map_err(|err| EnsureBotError::Wrapped("failed to create bot", err))?;
+
+        self.set_plugin_key(plugin_id, BOT_USER_KEY, Some(created.user_id.as_bytes()))
+            .await
+            .map_err(|err| EnsureBotError::Wrapped("failed to set plugin key", err))?;
+
+        Ok(created.user_id)
+    }
+
+    /// Port of `App.PermanentDeleteBot` (app/bot.go:452): the `Bots` row, then the `Users` row,
+    /// and nothing else — no cache purge, no event, no posts touched.
+    ///
+    /// A bot that does not exist is not an error: both deletes match nothing. The bot half's
+    /// failure is 400 `app.bot.permenent_delete.bad_id` (Go's spelling) naming the id, because the
+    /// store reports every failure as invalid input; the user half's is a 500.
+    ///
+    /// **Go's user cache is not invalidated**, so on Go a `GetUser` of the deleted bot keeps
+    /// answering the old row until the cache entry expires (measured through the plugin API).
+    /// This server has no user cache, so the same read is the 404 the database gives: a stale
+    /// read is not reproduced.
+    #[tracing::instrument(skip(self))]
+    pub async fn permanent_delete_bot(&self, bot_user_id: &str) -> AppResult {
+        if let Err(err) = self.store().bot().permanent_delete(bot_user_id).await {
+            tracing::warn!(error = %err, "the Bots row could not be deleted");
+            let params = std::collections::HashMap::from([(
+                "user_id".to_owned(),
+                serde_json::Value::String(bot_user_id.to_owned()),
+            )]);
+            return Err(AppError::boxed(
+                "PermanentDeleteBot",
+                "app.bot.permenent_delete.bad_id",
+                Some(params),
+                String::new(),
+                400,
+            ));
+        }
+        if let Err(err) = self.store().user().permanent_delete(bot_user_id).await {
+            tracing::error!(error = %err, "the bot's Users row could not be deleted");
+            return Err(AppError::boxed(
+                "PermanentDeleteBot",
+                "app.user.permanent_delete.app_error",
+                None,
+                String::new(),
+                500,
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -912,5 +1069,74 @@ mod tests {
         });
         assert_eq!(err.id, "app.bot.getbots.internal_error");
         assert_eq!(err.status_code, 500);
+    }
+
+    fn unreachable_app() -> crate::App {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        crate::App::new(mm_store::SqlStore::from_pool(pool))
+    }
+
+    /// `EnsureBot`'s two refusals come before the KV read, so neither touches the store; the KV
+    /// read's own failure is returned as the app error it is, not wrapped.
+    #[tokio::test]
+    async fn ensure_bot_refuses_before_it_reads() {
+        let app = unreachable_app();
+        let nil = app.ensure_bot("p", None).await.expect_err("nil");
+        assert_eq!(nil.to_string(), "passed a nil bot");
+        assert!(matches!(nil, EnsureBotError::Message(_)));
+
+        let nameless = Bot {
+            username: String::new(),
+            ..Bot::default()
+        };
+        let err = app
+            .ensure_bot("p", Some(&nameless))
+            .await
+            .expect_err("no name");
+        assert_eq!(err.to_string(), "passed a bot with no username");
+
+        let named = Bot {
+            username: "named".into(),
+            ..Bot::default()
+        };
+        match app.ensure_bot("p", Some(&named)).await {
+            Err(EnsureBotError::App(err)) => {
+                assert_eq!(err.id, "app.plugin_store.get.app_error");
+            }
+            other => panic!("the KV read's failure, unwrapped: {other:?}"),
+        }
+    }
+
+    /// `fmt.Errorf("%s: %w")` over an app error renders the app error's `Error()`.
+    #[test]
+    fn a_wrapped_ensure_bot_error_renders_as_go_formats_it() {
+        let err = EnsureBotError::Wrapped(
+            "failed to create bot",
+            AppError::boxed("CreateBot", "some.id", None, "detail".to_owned(), 400),
+        );
+        assert_eq!(
+            err.to_string(),
+            "failed to create bot: CreateBot: some.id, detail"
+        );
+        assert_eq!(BOT_USER_KEY, "mmi_botid");
+    }
+
+    /// The bot half's failure is the 400 with Go's misspelt id, naming the bot.
+    #[tokio::test]
+    async fn a_failed_bot_delete_is_the_bad_id_400() {
+        let err = unreachable_app()
+            .permanent_delete_bot("abcdefghijklmnopqrstuvwxyz")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.id, "app.bot.permenent_delete.bad_id");
+        assert_eq!(err.status_code, 400);
+        assert_eq!(err.where_, "PermanentDeleteBot");
+        assert_eq!(
+            err.params.as_ref().and_then(|p| p.get("user_id")),
+            Some(&serde_json::json!("abcdefghijklmnopqrstuvwxyz"))
+        );
     }
 }

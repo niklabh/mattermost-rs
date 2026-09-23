@@ -504,11 +504,20 @@ fn path_without_ids(path: &str) -> String {
 /// Replace what cannot be compared with a token that keeps the only thing worth asserting about
 /// it: an id is `""` or `"<id>"`, a timestamp is `0` or `"<set>"`. A mutation that stopped
 /// setting one, or set one it should not, still shows.
+///
+/// **Except an `*AppError`'s `Id`**, which is the error's translation key, not a minted id — the
+/// one thing about an error most worth comparing. An object carrying `StatusCode` is an app error
+/// (gob omits a zero field, and no app error has status 0). Until 2026-09-23 this masked it, so
+/// every tranche compared error messages but not error ids.
 fn normalise(value: &mut Json) {
     match value {
         Json::Array(items) => items.iter_mut().for_each(normalise),
         Json::Object(map) => {
+            let is_app_error = map.contains_key("StatusCode");
             for (key, entry) in map.iter_mut() {
+                if is_app_error && key == "Id" {
+                    continue;
+                }
                 if ID_KEYS.contains(&key.as_str()) {
                     if let Some(text) = entry.as_str() {
                         *entry = Json::String(if text.is_empty() { "" } else { "<id>" }.to_owned());
@@ -5583,6 +5592,705 @@ async fn run_the_config_tour(client: &reqwest::Client, admin: &str) {
     common::delete_channel(client, admin, &channel).await;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: users, teams, channels, posts, permissions, bots and websocket events
+// (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the core tranche; see `second_server_ports`.
+const CORE_HOST_PORT: u16 = 8144;
+/// Its Go server.
+const CORE_GO_OFFSET: u16 = 90;
+/// The recorder's well-formed id that names nothing (`examples/recorder/core.rs`).
+const CORE_MISSING: &str = "coremissingcoremissingcore";
+/// Each side's tag: in its users' names, its bots' names and the channel it creates.
+const CORE_SIDES: [&str; 2] = ["sidego", "siders"];
+
+/// The plain users and the channels the core tour makes, for the cleanup.
+static CORE_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API methods a plugin calls after activation
+/// (`mm_app::plugin_api`, `mm_app::plugin_api_wire`): the user, team, channel, member, post,
+/// thread and session reads; the three permission checks; `CreatePost`, `UpdatePost`,
+/// `DeletePost`, the three ephemeral methods, the two reaction methods, `AddChannelMember`,
+/// `CreateChannel`, `GetDirectChannel` and `GetGroupChannel`; the bot methods and
+/// `EnsureBotUser`; and `PublishWebSocketEvent`.
+///
+/// A `!core-script` post, made by each side's **own** user in its **own** channel, makes the
+/// recorder run `examples/recorder/core.rs` inside `MessageWillBePosted`. Three things are
+/// compared: every answer, in order; every hook the script's writes fired on the recorder itself
+/// (a `CreatePost` from inside a hook fires `MessageWillBePosted` again, on the same plugin); and
+/// every websocket frame the own user's socket on that host received.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Reads go to a reader and a channel both sides share and nobody writes. Writes go to what each
+/// side owns — its own two users, its own channel, bots and a channel named with its tag — so the
+/// ids and names differ, and they are **scrubbed**: the side's users, channel, token and session,
+/// then every id the script learned from an answer (its bots, posts, ephemeral post, channel, DM,
+/// GM and their names), each to one token. What is left is masked, and each mask is named:
+/// [`normalise`]'s id and time keys, any other 26-character id outside the shared set as
+/// `<minted>` (system posts, history rows, CSRF tokens), and a session's `ExpiresAt` and
+/// `LastActivityAt`, which follow each side's own login.
+#[tokio::test]
+async fn the_plugin_api_core_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    purge_core_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_core_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    purge_core_rows().await;
+    let users = std::mem::take(
+        &mut *CORE_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// The recorder's bots (and their users), its KV rows, and the channels the script created —
+/// none of which carries the suite's name prefix, so the fixture purge never reaches them.
+async fn purge_core_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    for statement in [
+        "DELETE FROM users WHERE id IN (SELECT userid FROM bots WHERE ownerid = $1)",
+        "DELETE FROM bots WHERE ownerid = $1",
+        "DELETE FROM pluginkeyvaluestore WHERE pluginid = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(PLUGIN_ID)
+            .execute(&pool)
+            .await
+            .expect("the recorder's rows go");
+    }
+    // By username too: a bot whose `Bots` row went without its `Users` row (a mutation did
+    // exactly that) is invisible to the owner filter above and keeps its username taken.
+    let usernames: Vec<String> = CORE_SIDES
+        .iter()
+        .flat_map(|side| {
+            ["corebot", "corebotb", "ensured"]
+                .into_iter()
+                .map(move |prefix| format!("{prefix}{side}"))
+        })
+        .collect();
+    for statement in [
+        "DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM users WHERE username = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&usernames)
+            .execute(&pool)
+            .await
+            .expect("the script's bot users go");
+    }
+    for side in CORE_SIDES {
+        let name = format!("core{side}");
+        for statement in [
+            "DELETE FROM publicchannels WHERE name = $1",
+            "DELETE FROM channelmembers WHERE channelid IN (SELECT id FROM channels WHERE name = $1)",
+            "DELETE FROM channels WHERE name = $1",
+        ] {
+            sqlx::query(statement)
+                .bind(&name)
+                .execute(&pool)
+                .await
+                .expect("the script's channel goes");
+        }
+    }
+}
+
+/// One side of the core tour: its users, its channel, and what it recorded.
+struct CoreSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    other: common::PlainUser,
+    channel: String,
+}
+
+impl CoreSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self, shared: &CoreShared) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_CORE_READER", shared.reader.id.clone()),
+            (
+                "HOOK_RECORDER_CORE_READ_CHANNEL",
+                shared.read_channel.clone(),
+            ),
+            ("HOOK_RECORDER_CORE_ADMIN", shared.admin_id.clone()),
+            ("HOOK_RECORDER_CORE_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_CORE_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_CORE_SIDE", self.tag.to_owned()),
+        ]
+    }
+}
+
+/// What both sides read and never write.
+struct CoreShared {
+    reader: common::PlainUser,
+    read_channel: String,
+    admin_id: String,
+    team: String,
+}
+
+impl CoreShared {
+    /// The ids both sides may legitimately carry, which the `<minted>` mask leaves alone.
+    fn ids(&self) -> Vec<String> {
+        vec![
+            self.reader.id.clone(),
+            self.read_channel.clone(),
+            self.admin_id.clone(),
+            self.team.clone(),
+            CORE_MISSING.to_owned(),
+        ]
+    }
+}
+
+/// The value at `pointer` in the `n`th answer (0-based) of the call named `name`.
+fn learned(calls: &[Json], name: &str, n: usize, pointer: &str) -> Option<String> {
+    calls
+        .iter()
+        .filter(|c| c["call"] == name)
+        .nth(n)
+        .and_then(|c| c.pointer(pointer))
+        .and_then(Json::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
+/// This side's scrub pairs, the ones the script's answers taught it first — a DM's name holds
+/// both users' ids, so it has to go before they do.
+fn core_pairs(side: &CoreSide, calls: &[Json]) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for (name, n, pointer, token) in [
+        ("GetDirectChannel", 0, "/returns/A/Name", "<dm-name>"),
+        ("GetGroupChannel", 0, "/returns/A/Name", "<gm-name>"),
+        ("GetDirectChannel", 0, "/returns/A/Id", "<dm>"),
+        ("GetGroupChannel", 0, "/returns/A/Id", "<gm>"),
+        ("CreateChannel", 0, "/returns/A/Id", "<created-channel>"),
+        ("CreateBot", 0, "/returns/A/UserId", "<bot>"),
+        ("EnsureBotUser", 2, "/returns/A", "<ensured>"),
+        ("CreatePost", 0, "/returns/A/Id", "<root>"),
+        ("CreatePost", 1, "/returns/A/Id", "<reply>"),
+        ("SendEphemeralPost", 0, "/returns/A/Id", "<ephemeral>"),
+        ("GetSession", 0, "/args/A", "<session>"),
+    ] {
+        if let Some(value) = learned(calls, name, n, pointer) {
+            pairs.push((value, token.to_owned()));
+        }
+    }
+    pairs.extend([
+        (side.own.id.clone(), "<own>".to_owned()),
+        (side.other.id.clone(), "<other>".to_owned()),
+        (side.channel.clone(), "<own-channel>".to_owned()),
+        (side.own.token.clone(), "<token>".to_owned()),
+        (side.tag.to_owned(), "<side>".to_owned()),
+    ]);
+    pairs
+}
+
+fn is_minted_id(text: &str) -> bool {
+    text.len() == 26
+        && text
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+}
+
+/// The masks left after the scrub: any 26-character id outside `shared` is `<minted>`, and a
+/// session's two clocks, which follow each side's own login, are `<time>` when set.
+fn mask_core(value: &mut Json, shared: &[String]) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(|v| mask_core(v, shared)),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "ExpiresAt" | "LastActivityAt" | "expires_at" | "last_activity_at"
+                ) && entry.as_i64().is_some_and(|n| n != 0)
+                {
+                    *entry = Json::String("<time>".to_owned());
+                    continue;
+                }
+                // `multiple_channels_viewed`: each channel's view time, stamped by each side's own
+                // trigger post.
+                if key == "channel_times" {
+                    if let Some(times) = entry.as_object_mut() {
+                        times
+                            .values_mut()
+                            .for_each(|t| *t = Json::String("<time>".to_owned()));
+                    }
+                }
+                mask_core(entry, shared);
+            }
+        }
+        Json::String(text) => *text = mask_minted_in(text, shared),
+        _ => {}
+    }
+}
+
+/// Every 26-character id in `text` — the whole string, or a word of it such as the `id=…` a
+/// validation error's `DetailedError` carries — that is not in `shared`, as `<minted>`.
+fn mask_minted_in(text: &str, shared: &[String]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        if is_minted_id(word) && !shared.contains(word) {
+            out.push_str("<minted>");
+        } else {
+            out.push_str(word);
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
+/// A websocket frame as it is compared: scrubbed, `seq` dropped, each JSON document carried as a
+/// string (a post) parsed so its ids and times can be masked, then masked like a body.
+fn core_frame(raw: &str, pairs: &[(String, String)], shared: &[String]) -> Option<Json> {
+    let mut frame: Json = serde_json::from_str(&scrub(raw, pairs)).ok()?;
+    if frame["event"] == "hello" || frame.get("event").is_none() {
+        return None;
+    }
+    if let Some(map) = frame.as_object_mut() {
+        map.remove("seq");
+    }
+    if let Some(data) = frame.get_mut("data").and_then(Json::as_object_mut) {
+        for value in data.values_mut() {
+            if let Some(text) = value.as_str() {
+                if text.starts_with('{') || text.starts_with('[') {
+                    if let Ok(parsed) = serde_json::from_str::<Json>(text) {
+                        *value = parsed;
+                    }
+                }
+            }
+        }
+    }
+    // `group_added`'s ids are in **id** order (`GetGroupNameFromUserIds` sorts the slice in place),
+    // which each side's own ids decide differently; the suite asserts the raw order is sorted and
+    // compares the scrubbed ones as a set.
+    if let Some(ids) = frame
+        .pointer_mut("/data/teammate_ids")
+        .and_then(Json::as_array_mut)
+    {
+        ids.sort_by_key(Json::to_string);
+    }
+    normalise_body(&mut frame);
+    mask_core(&mut frame, shared);
+    Some(frame)
+}
+
+/// Whether every `group_added` frame's `teammate_ids` is in ascending id order, as Go sends it.
+fn group_added_ids_are_sorted(raw: &[String]) -> bool {
+    raw.iter()
+        .filter_map(|r| serde_json::from_str::<Json>(r).ok())
+        .filter(|f| f["event"] == "group_added")
+        .all(|f| {
+            let ids: Vec<String> = f["data"]["teammate_ids"]
+                .as_str()
+                .and_then(|t| serde_json::from_str(t).ok())
+                .unwrap_or_default();
+            !ids.is_empty() && ids.windows(2).all(|w| w[0] <= w[1])
+        })
+}
+
+/// Wait until the transcript holds the script's entry and then stops growing: the script's
+/// writes fire detached hooks, which land on their own schedule on both hosts.
+async fn core_transcript_settles(path: &Path, side: &str) {
+    let mut last = usize::MAX;
+    let mut quiet_since = None;
+    for _ in 0..400 {
+        let entries = transcript(path);
+        let done = entries.iter().any(|e| e["hook"] == "CoreScript");
+        if done && entries.len() == last {
+            let since = *quiet_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= QUIET * 2 {
+                return;
+            }
+        } else {
+            quiet_since = None;
+        }
+        last = entries.len();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "{side}: the core script never settled: {:?}",
+        names(&transcript(path))
+    );
+}
+
+/// Who the reply's row says deleted it: `DeletePost` passes the plugin's id, which the store
+/// writes into the props as `deleteBy` and no answer or hook carries.
+async fn core_deleted_by(calls: &[Json]) -> Option<String> {
+    let id = learned(calls, "CreatePost", 1, "/returns/A/Id")?;
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (by,): (Option<String>,) =
+        sqlx::query_as("SELECT props->>'deleteBy' FROM posts WHERE id = $1")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .expect("the deleted reply");
+    by
+}
+
+/// How many bots the script made, and how many of their `Users` rows are left. Read from the
+/// database, because Go's `GetUser` answers a permanently deleted bot from its user cache.
+async fn core_bot_user_rows(calls: &[Json]) -> (usize, i64) {
+    let ids: Vec<String> = [
+        learned(calls, "CreateBot", 0, "/returns/A/UserId"),
+        learned(calls, "EnsureBotUser", 2, "/returns/A"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM users WHERE id = ANY($1)")
+        .bind(&ids)
+        .fetch_one(&pool)
+        .await
+        .expect("the bot users");
+    (ids.len(), left)
+}
+
+/// Read the socket until a whole window passes with nothing new.
+async fn core_frames_settle(probe: &mut common::SocketProbe) {
+    for _ in 0..20 {
+        let before = probe.raw.len();
+        probe.collect_for(Duration::from_millis(900)).await;
+        if probe.raw.len() == before {
+            return;
+        }
+    }
+}
+
+async fn run_the_core_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-core");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let team = common::create_team(client, admin, "hookcore").await;
+    let read_channel = common::create_channel(client, admin, &team, "hookcoreread").await;
+    let reader = common::create_plain_user(client, admin, &team, "corerd").await;
+    common::add_user_to_channel(client, admin, &read_channel, &reader.id).await;
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let shared = CoreShared {
+        reader,
+        read_channel,
+        admin_id: me["id"].as_str().expect("an id").to_owned(),
+        team: team.clone(),
+    };
+    CORE_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(shared.reader.id.clone());
+
+    let mut sides = Vec::new();
+    for tag in CORE_SIDES {
+        let own = common::create_plain_user(client, admin, &team, &format!("coreown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("coreoth{tag}")).await;
+        CORE_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("core{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        sides.push(CoreSide {
+            tag,
+            own,
+            other,
+            channel,
+        });
+    }
+
+    let go_env = sides[0].env(&shared);
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", "")];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    env[0].1 = &go_transcript;
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, CORE_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env(&shared);
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(CORE_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    // Each side in turn: its socket open, its trigger, its transcript and frames settled.
+    let shared_ids = shared.ids();
+    let mut recorded = Vec::new();
+    let mut bot_rows = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!core-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        core_transcript_settles(log, host).await;
+        core_frames_settle(&mut probe).await;
+
+        // The ids are learned from the lines as written, before anything is normalised.
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "CoreScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = core_pairs(side, &calls);
+        let mut entries = transcript_of(log, &pairs);
+        entries.iter_mut().for_each(|e| mask_core(e, &shared_ids));
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .collect();
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames, probe.raw.clone()));
+        bot_rows.push(core_bot_user_rows(&calls).await);
+        assert_eq!(
+            core_deleted_by(&calls).await.as_deref(),
+            Some(PLUGIN_ID),
+            "{host}: the plugin is recorded as the reply's deleter"
+        );
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "CoreScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    for (index, (g, r)) in go_calls.iter().zip(&rust_calls).enumerate() {
+        assert_eq!(g, r, "call {index} ({})", g["call"]);
+    }
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order: the detached ones land when they
+    // land on both hosts.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "CoreScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    for (index, (g, r)) in go_hooks.iter().zip(&rust_hooks).enumerate() {
+        assert_eq!(g, r, "hook {index} ({})", g["hook"]);
+    }
+
+    // Every frame the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the own user received"
+    );
+    for (index, (g, r)) in go_side.1.iter().zip(&rust_side.1).enumerate() {
+        assert_eq!(g, r, "frame {index} ({})", g["event"]);
+    }
+
+    for (side, host) in [(go_side, "Go"), (rust_side, "Rust")] {
+        assert!(
+            group_added_ids_are_sorted(&side.2),
+            "{host}: group_added's teammate ids are in id order"
+        );
+    }
+
+    // What parity alone would not pin, because both hosts could agree on a wrong answer.
+    let answer = |name: &str, n: usize| -> Json {
+        go_calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let permissions: Vec<Json> = (0..3)
+        .map(|n| answer("HasPermissionTo", n)["A"].clone())
+        .chain((0..4).map(|n| answer("HasPermissionToTeam", n)["A"].clone()))
+        .chain((0..4).map(|n| answer("HasPermissionToChannel", n)["A"].clone()))
+        .collect();
+    let (t, f) = (Json::Bool(true), Json::Null);
+    assert_eq!(
+        permissions,
+        [
+            t.clone(),
+            f.clone(),
+            t.clone(),
+            t.clone(),
+            f.clone(),
+            f.clone(),
+            t.clone(),
+            t.clone(),
+            f.clone(),
+            f.clone(),
+            f,
+        ],
+        "the permission answers (false is gob's omitted zero)"
+    );
+    assert_eq!(
+        answer("GetUser", 1)["B"]["StatusCode"],
+        404,
+        "a missing user is Go's 404"
+    );
+    assert_eq!(
+        answer("CreateBot", 1)["B"]["Id"],
+        "plugin_api.bot_cant_create_bot",
+        "a bot cannot own a bot"
+    );
+    assert_eq!(
+        answer("GetBot", 0)["A"]["OwnerId"],
+        PLUGIN_ID,
+        "a bot with no owner is the plugin's"
+    );
+    assert_eq!(
+        answer("EnsureBotUser", 2)["A"],
+        answer("EnsureBotUser", 3)["A"],
+        "the second EnsureBot finds the first bot"
+    );
+    assert_eq!(
+        answer("CreatePost", 0)["A"]["Props"]["$map"]["from_plugin"]["value"],
+        "true",
+        "a plugin's post says so"
+    );
+    assert_eq!(
+        answer("CreatePost", 2)["A"]["Props"]["$map"]["silent_notification"]["value"],
+        true,
+        "a plugin may post silently as a human"
+    );
+    assert_eq!(
+        answer("GetChannelMember", 2)["B"]["StatusCode"],
+        404,
+        "a channel a plugin creates has no members"
+    );
+    for (host, bots) in [("Go", &bot_rows[0]), ("Rust", &bot_rows[1])] {
+        assert_eq!(
+            bots,
+            &(2, 0),
+            "{host}: both bots were made, and PermanentDeleteBot left no Users row behind"
+        );
+    }
+    let custom = |name: &str| -> usize {
+        go_side
+            .1
+            .iter()
+            .filter(|f| f["event"] == format!("custom_{PLUGIN_ID}_{name}"))
+            .count()
+    };
+    assert_eq!(
+        (
+            custom("to_user"),
+            custom("to_channel"),
+            custom("omitted"),
+            custom("empty")
+        ),
+        (1, 1, 0, 1),
+        "who received the plugin's events: {:?}",
+        event_names(&go_side.1)
+    );
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+    common::delete_channel(client, admin, &shared.read_channel).await;
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]
@@ -5609,6 +6317,45 @@ fn normalise_keeps_empty_apart_from_set() {
                     "Message": "hello", "RootId": "<id>",
                 },
             },
+        })
+    );
+}
+
+/// An app error's `Id` is its translation key and survives; a post's beside it does not.
+#[test]
+fn normalise_keeps_an_app_error_id() {
+    let mut value: Json = serde_json::json!({
+        "A": { "Id": "abcdefghijklmnopqrstuvwxyz" },
+        "B": { "Id": "app.user.missing_account.const", "StatusCode": 404, "Where": "GetUser" },
+    });
+    normalise(&mut value);
+    assert_eq!(value["A"]["Id"], "<id>");
+    assert_eq!(value["B"]["Id"], "app.user.missing_account.const");
+}
+
+/// The core tranche's last mask: a 26-character id outside the shared set, and a session's two
+/// clocks; everything else as it was.
+#[test]
+fn mask_core_names_what_it_masks() {
+    let shared = vec!["sharedsharedsharedshared00".to_owned()];
+    let mut value: Json = serde_json::json!({
+        "a": "abcdefghijklmnopqrstuvwxyz",
+        "b": "sharedsharedsharedshared00",
+        "c": "short",
+        "d": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "e": "id=abcdefghijklmnopqrstuvwxyz, sharedsharedsharedshared00",
+        "f": "abcdefghijklmnopqrstuvwxyz0",
+        "ExpiresAt": 5, "LastActivityAt": 0,
+    });
+    mask_core(&mut value, &shared);
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "a": "<minted>", "b": "sharedsharedsharedshared00", "c": "short",
+            "d": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            "e": "id=<minted>, sharedsharedsharedshared00",
+            "f": "abcdefghijklmnopqrstuvwxyz0",
+            "ExpiresAt": "<time>", "LastActivityAt": 0,
         })
     );
 }
