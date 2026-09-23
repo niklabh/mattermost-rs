@@ -107,10 +107,20 @@ NOT_RAW = {"self", "Self", "super", "crate"}
 
 
 # Methods whose RPC server is hand-written in crates/mm-plugin/src/rpc/: `OnActivate` dials the
-# brokered connections, `Implemented` has no wire structs, and `LoadPluginConfiguration` answers
-# `null` rather than a not-implemented error. Their trait methods are still generated, except for
-# the two that have no plain wire structs.
-REGISTER_BY_HAND = {"OnActivate", "Implemented", "LoadPluginConfiguration"}
+# brokered connections, `Implemented` has no wire structs, `LoadPluginConfiguration` answers
+# `null` rather than a not-implemented error, and the four whose Go map may be empty and non-nil
+# (`GetConfig`, `GetUnsanitizedConfig` and `GetPluginConfig` answer one, `SavePluginConfig` is
+# sent one) are served through `PluginApiDynamic`, because a Rust map cannot tell gob that.
+# Their trait methods are still generated, except for the two that have no plain wire structs.
+REGISTER_BY_HAND = {
+    "OnActivate",
+    "Implemented",
+    "LoadPluginConfiguration",
+    "GetConfig",
+    "GetUnsanitizedConfig",
+    "GetPluginConfig",
+    "SavePluginConfig",
+}
 
 
 class GenError(Exception):
@@ -493,6 +503,19 @@ class Generator:
                 out.append(
                     f"        {const} => {self.json_fn(tid)}(&i.downcast::<{self.rust_type(tid, '')}>().ok()?)?,"
                 )
+            elif t["kind"] == "map":
+                # A map an interface holds is never nil once gob has decoded it (`decodeMap`
+                # makes one), so an empty one marshals as `{}` — unlike a struct's map field,
+                # which gob omits when empty and Go then holds as nil. (A slice stays nil when
+                # empty, so `null` is right for the slice types above.)
+                ty = self.rust_type(tid, "")
+                elem = self.json_expr(self.flattened(t["elem"]), "v")
+                expr = (
+                    "Json::Object(value.iter()"
+                    f".map(|(k, v)| -> Option<(String, Json)> {{ Some((k.clone(), {elem})) }})"
+                    ".collect::<Option<Map<String, Json>>>()?)"
+                )
+                out.append(f"        {const} => {{ let value = i.downcast::<{ty}>().ok()?; {expr} }}")
             else:
                 ty = self.rust_type(tid, "")
                 expr = self.json_expr(tid, "&value")
@@ -630,7 +653,11 @@ class Generator:
     def rpc_register(self, out, fn, trait, methods):
         out.append(f"/// Register every generated method of `{trait}` on `server` as `Plugin.<Method>`.")
         out.append("///")
-        out.append(f"/// Not registered here: {', '.join(sorted(REGISTER_BY_HAND))}, whose servers are hand-written.")
+        # The hand-written ones among these methods, plus the two with no plain wire structs,
+        # which never reach this list.
+        names = {m["name"] for m in methods} | {"OnActivate", "Implemented"}
+        by_hand = sorted(n for n in REGISTER_BY_HAND if n in names)
+        out.append(f"/// Not registered here: {', '.join(by_hand)}, whose servers are hand-written.")
         out.append(f"pub fn {fn}<T: {trait}>(server: &mut Server, implementation: &Arc<T>) {{")
         for m in methods:
             if m["name"] in REGISTER_BY_HAND:

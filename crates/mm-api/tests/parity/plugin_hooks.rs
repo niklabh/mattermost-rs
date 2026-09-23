@@ -126,67 +126,82 @@ fn bundle() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
-            let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-bundle");
-            let stage = scratch.join(PLUGIN_ID);
-            let _ = std::fs::remove_dir_all(&scratch);
-            std::fs::create_dir_all(&stage).expect("the staging directory");
-            std::fs::write(
-                stage.join("plugin.json"),
-                format!(
+            pack_bundle(
+                "plugin-hooks-bundle",
+                &format!(
                     r#"{{"id": "{PLUGIN_ID}", "name": "Hook Recorder", "version": "0.1.0", "server": {{"executable": "plugin"}}}}"#
                 ),
             )
-            .expect("the manifest");
-            // Copied, not linked: a bundle carrying a symlink is what `extractTarGz` refuses.
-            std::fs::copy(hook_recorder(), stage.join("plugin")).expect("the executable");
-            let tarball = scratch.join(format!("{PLUGIN_ID}.tar.gz"));
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "tar -c -C {stage} {PLUGIN_ID} | gzip -1 > {out}",
-                    stage = scratch.display(),
-                    out = tarball.display()
-                ))
-                .status()
-                .expect("tar runs");
-            assert!(status.success(), "packing the bundle failed");
-            tarball
         })
         .clone()
 }
 
+/// The recorder with `manifest` as its `plugin.json`, packed under `scratch` in the test's
+/// temporary directory. Each variant has its own staging directory, so no variant touches the
+/// plain bundle the older tours install.
+fn pack_bundle(scratch: &str, manifest: &str) -> PathBuf {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(scratch);
+    let stage = scratch.join(PLUGIN_ID);
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&stage).expect("the staging directory");
+    std::fs::write(stage.join("plugin.json"), manifest).expect("the manifest");
+    // Copied, not linked: a bundle carrying a symlink is what `extractTarGz` refuses.
+    std::fs::copy(hook_recorder(), stage.join("plugin")).expect("the executable");
+    let tarball = scratch.join(format!("{PLUGIN_ID}.tar.gz"));
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "tar -c -C {stage} {PLUGIN_ID} | gzip -1 > {out}",
+            stage = scratch.display(),
+            out = tarball.display()
+        ))
+        .status()
+        .expect("tar runs");
+    assert!(status.success(), "packing the bundle failed");
+    tarball
+}
+
 /// [`bundle`] with the manifest carrying a `support_packet` prop — the System Console's
-/// checkbox, which makes `GenerateSupportData` ask for the plugin to be ticked. Its own staging
-/// directory, so the plain bundle the older tours install is untouched.
+/// checkbox, which makes `GenerateSupportData` ask for the plugin to be ticked.
 fn bundle_with_support_prop() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
-            let scratch =
-                PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-bundle-support");
-            let stage = scratch.join(PLUGIN_ID);
-            let _ = std::fs::remove_dir_all(&scratch);
-            std::fs::create_dir_all(&stage).expect("the staging directory");
-            std::fs::write(
-                stage.join("plugin.json"),
-                format!(
+            pack_bundle(
+                "plugin-hooks-bundle-support",
+                &format!(
                     r#"{{"id": "{PLUGIN_ID}", "name": "Hook Recorder", "version": "0.1.0", "server": {{"executable": "plugin"}}, "props": {{"support_packet": "The hook recorder's transcript"}}}}"#
                 ),
             )
-            .expect("the manifest");
-            std::fs::copy(hook_recorder(), stage.join("plugin")).expect("the executable");
-            let tarball = scratch.join(format!("{PLUGIN_ID}.tar.gz"));
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "tar -c -C {stage} {PLUGIN_ID} | gzip -1 > {out}",
-                    stage = scratch.display(),
-                    out = tarball.display()
-                ))
-                .status()
-                .expect("tar runs");
-            assert!(status.success(), "packing the bundle failed");
-            tarball
+        })
+        .clone()
+}
+
+/// [`bundle`] with a settings schema: defaults at the top level and in a section, and a secret
+/// in each, for the configuration tranche.
+fn bundle_with_settings_schema() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let manifest = serde_json::json!({
+                "id": PLUGIN_ID,
+                "name": "Hook Recorder",
+                "version": "0.1.0",
+                "server": { "executable": "plugin" },
+                "settings_schema": {
+                    "settings": [
+                        { "key": "Plain", "type": "text", "default": "plain-default" },
+                        { "key": "SecretKey", "type": "text", "secret": true, "default": "secret-default" },
+                        { "key": "OnlyDefault", "type": "number", "default": 7 },
+                        { "key": "NoDefault", "type": "text" }
+                    ],
+                    "sections": [{ "key": "Advanced", "settings": [
+                        { "key": "SectionSecret", "type": "text", "secret": true },
+                        { "key": "SectionDefault", "type": "bool", "default": true }
+                    ]}]
+                }
+            });
+            pack_bundle("plugin-hooks-bundle-settings", &manifest.to_string())
         })
         .clone()
 }
@@ -5152,6 +5167,416 @@ async fn run_the_kv_tour(client: &reqwest::Client, admin: &str) {
             .any(|l| l.contains("invalid key/value pair") && l.contains(r#""arg":"dangling""#)),
         "Go complains about the dangling argument"
     );
+
+    drop(rust);
+    drop(go);
+    common::delete_channel(client, admin, &channel).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: the plugin's configuration and the licence (Phase 6, D-990)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the configuration tranche; see `second_server_ports`.
+const CONFIG_HOST_PORT: u16 = 8143;
+/// Its Go server — the licensed build, so `GetLicense` has a licence to answer with.
+const CONFIG_GO_OFFSET: u16 = 89;
+/// A plugin no bundle installs, whose stored settings `GetConfig` must drop and
+/// `GetUnsanitizedConfig` must keep.
+const CONFIG_ABSENT: &str = "mmrs.configabsent";
+/// A plugin no bundle installs either, with an **empty** entry, which sanitising keeps.
+const CONFIG_EMPTY: &str = "mmrs.configempty";
+
+/// Cross-server parity for the plugin API's configuration and licence methods
+/// (`mm_app::plugin_api_config`): `GetConfig`, `GetUnsanitizedConfig`, `GetPluginConfig`,
+/// `LoadPluginConfiguration`, `SavePluginConfig` three ways, `GetLicense`, `GetPluginID`,
+/// `GetTelemetryId`, `GetCloudLimits`, `GetBundlePath` and `IsEnterpriseReady`.
+///
+/// A `!config-script` post makes the recorder run `examples/recorder/config.rs` inside
+/// `MessageWillBePosted`; the answers that carry a map are decoded dynamically there, so an empty
+/// map that was sent and a nil one that was not render differently. Both hosts are licensed with
+/// the stack's signed licence and given the **same** configuration environment — relative
+/// directories, one site URL, one data source — so the two configurations they answer with are
+/// the one document, and every answer is compared whole.
+///
+/// The recorder starts with **no** entry in `PluginSettings.Plugins` (the one state a patch
+/// cannot produce, so it is made in the row), and its own saves then give it a map, another map,
+/// an empty map and a nil one. Two other entries are planted: settings for a plugin no bundle
+/// installs, and an empty entry.
+///
+/// # Which server saves
+///
+/// `SavePluginConfig` saves the whole configuration. Under the Go host that is the Go host's
+/// own copy, as old as its start; under this server it is a patch through the **main** Go server
+/// (`mm_app::peer_config`). So the two sides run in sequence, and between them main Go saves its
+/// own current copy — undoing anything the Go host's stale copy reverted — before the recorder's
+/// entry is taken out of the row again. The `Plugins` map each side left is compared too.
+#[tokio::test]
+async fn the_plugin_api_config_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_config_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    remove_planted_plugin_settings(&client, &admin).await;
+    plant_state(&client, &admin, None).await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Put entries into `PluginSettings.Plugins` through main Go, which keeps every entry the patch
+/// does not name.
+async fn patch_plugin_settings(client: &reqwest::Client, admin: &str, plugins: Json) {
+    let status = client
+        .put(format!("{GO}/api/v4/config/patch"))
+        .bearer_auth(admin)
+        .json(&serde_json::json!({ "PluginSettings": { "Plugins": plugins } }))
+        .send()
+        .await
+        .expect("Go answers")
+        .status();
+    assert!(status.is_success(), "patching Plugins: {status}");
+}
+
+/// The active document's `PluginSettings.Plugins`.
+async fn stored_plugin_settings() -> Json {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (value,): (String,) =
+        sqlx::query_as("SELECT Value FROM Configurations WHERE Active LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("the active configuration");
+    let document: Json = serde_json::from_str(&value).expect("JSON");
+    document["PluginSettings"]["Plugins"].clone()
+}
+
+/// A patch cannot delete an entry, so the three planted ones are taken out of the active row
+/// directly, and main Go is told to reload it.
+async fn remove_planted_plugin_settings(client: &reqwest::Client, admin: &str) {
+    remove_plugin_settings(client, admin, &[PLUGIN_ID, CONFIG_ABSENT, CONFIG_EMPTY]).await;
+}
+
+/// Take `ids` out of the active row's `PluginSettings.Plugins`, first having main Go save its
+/// own copy (so a secondary Go server's stale save is undone), then reload main Go from the row.
+async fn remove_plugin_settings(client: &reqwest::Client, admin: &str, ids: &[&str]) {
+    patch_plugin_settings(client, admin, serde_json::json!({})).await;
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (id, value): (String, String) =
+        sqlx::query_as("SELECT Id, Value FROM Configurations WHERE Active LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("the active configuration");
+    let mut document: Json = serde_json::from_str(&value).expect("JSON");
+    if let Some(plugins) = document["PluginSettings"]["Plugins"].as_object_mut() {
+        for id in ids {
+            plugins.remove(*id);
+        }
+    }
+    sqlx::query("UPDATE Configurations SET Value = $1 WHERE Id = $2")
+        .bind(document.to_string())
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .expect("the planted settings go");
+    let status = client
+        .post(format!("{GO}/api/v4/config/reload"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .status();
+    assert!(
+        status.is_success(),
+        "reloading Go's configuration: {status}"
+    );
+}
+
+async fn run_the_config_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-config");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let tarball = bundle_with_settings_schema();
+    let go_log = lay_out_bundle(&go_run, &tarball);
+    let rust_log = lay_out_bundle(&rs_run, &tarball);
+
+    plant_state(client, admin, Some(true)).await;
+    patch_plugin_settings(
+        client,
+        admin,
+        serde_json::json!({
+            CONFIG_ABSENT: { "Kept": "only unsanitised" },
+            CONFIG_EMPTY: {},
+        }),
+    )
+    .await;
+    remove_plugin_settings(client, admin, &[PLUGIN_ID]).await;
+    let team = common::create_team(client, admin, "hookcfg").await;
+    let channel = common::create_channel(client, admin, &team, "hookcfg").await;
+
+    // One configuration environment for both hosts, so both answer with one document: the Go
+    // host's port in the site URL and listen address, the directories relative to each run
+    // directory, and Go's data source.
+    let go_port = go_port() + CONFIG_GO_OFFSET;
+    let site_url = format!("http://localhost:{go_port}");
+    let listen = format!(":{go_port}");
+    let dsn = format!(
+        "{}?sslmode=disable&connect_timeout=10",
+        std::env::var("DATABASE_URL").expect("parity.sh sets DATABASE_URL")
+    );
+    let (signed, key_file) = common::stack_license_files();
+    let shared: Vec<(&str, &str)> = vec![
+        ("MM_SERVICESETTINGS_SITEURL", site_url.as_str()),
+        ("MM_SERVICESETTINGS_LISTENADDRESS", listen.as_str()),
+        ("MM_SERVICESETTINGS_ENABLELOCALMODE", "false"),
+        ("MM_SQLSETTINGS_DRIVERNAME", "postgres"),
+        ("MM_SQLSETTINGS_DATASOURCE", dsn.as_str()),
+        ("MM_SQLSETTINGS_MAXIDLECONNS", "2"),
+        ("MM_SQLSETTINGS_MAXOPENCONNS", "5"),
+        ("MM_JOBSETTINGS_RUNJOBS", "false"),
+        ("MM_JOBSETTINGS_RUNSCHEDULER", "false"),
+        ("MM_FILESETTINGS_DIRECTORY", "./data/"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", "./plugins"),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", "./client"),
+        ("MM_LICENSE", signed.as_str()),
+        ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
+    ];
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut go_env = shared.clone();
+    go_env.push(("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str()));
+    let go = start_go_binary("mattermost-licensed", &go_run, &go_env, CONFIG_GO_OFFSET).await;
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let mut rust_env = shared.clone();
+    rust_env.push(("MMRS_PLUGIN_HOST", "rust"));
+    rust_env.push(("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()));
+    let rust = SecondServer::start_in(CONFIG_HOST_PORT, &rs_run, &rust_env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "channel_id": channel,
+        "message": "!config-script",
+    }))
+    .expect("the post");
+
+    let mut sides = Vec::new();
+    for (base, log, side) in [
+        (go.base.as_str(), go_log.as_path(), "Go"),
+        (rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        // No entry for the recorder before each side, and main Go's own copy in the row.
+        remove_plugin_settings(client, admin, &[PLUGIN_ID]).await;
+        let (status, _, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(admin),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(status, 201, "{side}: the post");
+        if side == "Rust" {
+            assert_eq!(served_by.as_deref(), Some("rust"), "the post was forwarded");
+        }
+        let entries = transcript_reaches(log, 3, side).await;
+        sides.push((entries, stored_plugin_settings().await));
+    }
+    let (go_side, rust_side) = (&sides[0], &sides[1]);
+
+    assert_eq!(
+        names(&go_side.0),
+        [
+            "MessageWillBePosted",
+            "ConfigScript",
+            "MessageHasBeenPosted"
+        ],
+        "the script runs inside the hook"
+    );
+    let go_calls = go_side.0[1]["calls"].as_array().expect("the calls");
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {go_calls:?}"
+    );
+    let rust_calls = rust_side.0[1]["calls"].as_array().expect("the calls");
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // Two answers are facts about the process, not the port: the bundle path is under each
+    // host's own run directory, and `IsEnterpriseReady` is the build's flag — the licensed Go
+    // build says true, this binary says what `MM_BUILD_ENTERPRISE_READY` was at compile time.
+    let bundle_path = |calls: &[Json], run: &Path| -> String {
+        let call = calls
+            .iter()
+            .find(|c| c["call"] == "GetBundlePath")
+            .expect("GetBundlePath");
+        call["returns"]["A"]
+            .as_str()
+            .expect("a path")
+            .replace(&run.to_string_lossy().into_owned(), "<run>")
+    };
+    assert_eq!(
+        bundle_path(go_calls, &go_run),
+        format!("<run>/plugins/{PLUGIN_ID}"),
+        "Go's bundle path"
+    );
+    assert_eq!(
+        bundle_path(go_calls, &go_run),
+        bundle_path(rust_calls, &rs_run),
+        "the bundle path"
+    );
+    let enterprise_ready = |calls: &[Json]| -> Json {
+        calls
+            .iter()
+            .find(|c| c["call"] == "IsEnterpriseReady")
+            .expect("IsEnterpriseReady")["returns"]
+            .clone()
+    };
+    assert_eq!(
+        enterprise_ready(go_calls),
+        serde_json::json!({ "A": true }),
+        "the licensed Go build"
+    );
+    let built_ready = matches!(
+        mm_model::version::BUILD_ENTERPRISE_READY,
+        "1" | "t" | "T" | "TRUE" | "true" | "True"
+    );
+    let expected: Json = if built_ready {
+        serde_json::json!({ "A": true })
+    } else {
+        serde_json::json!({})
+    };
+    assert_eq!(enterprise_ready(rust_calls), expected, "this build");
+
+    for (index, (g, r)) in go_calls.iter().zip(rust_calls).enumerate() {
+        if matches!(
+            g["call"].as_str(),
+            Some("GetBundlePath" | "IsEnterpriseReady")
+        ) {
+            continue;
+        }
+        assert_eq!(g, r, "call {index} ({})", g["call"]);
+    }
+    assert_eq!(go_side.0[0], rust_side.0[0], "MessageWillBePosted");
+
+    // What parity alone would not pin, because both sides could agree on a wrong answer.
+    let returned = |name: &str, nth: usize| -> Json {
+        go_calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("{name} #{nth}"))["returns"]
+            .clone()
+    };
+    let plugins_of = |config: &Json| config["A"]["PluginSettings"]["Plugins"]["$map"].clone();
+    let sanitized = plugins_of(&returned("GetConfig", 0));
+    let unsanitized = plugins_of(&returned("GetUnsanitizedConfig", 0));
+    assert!(
+        sanitized.get(CONFIG_ABSENT).is_none(),
+        "GetConfig drops an uninstalled plugin's settings"
+    );
+    assert!(
+        unsanitized.get(CONFIG_ABSENT).is_some(),
+        "GetUnsanitizedConfig keeps them"
+    );
+    assert_eq!(
+        sanitized[CONFIG_EMPTY],
+        serde_json::json!({ "$map": {} }),
+        "an empty entry is kept, and sent"
+    );
+    let fake = serde_json::json!({ "$iface": "string", "value": mm_model::utils::FAKE_SETTING });
+    assert_eq!(
+        sanitized[PLUGIN_ID]["$map"]["secretkey"], fake,
+        "a secret, matched without case"
+    );
+    assert_eq!(
+        sanitized[PLUGIN_ID]["$map"]["SectionSecret"], fake,
+        "a section's secret"
+    );
+    assert_eq!(
+        unsanitized[PLUGIN_ID]["$map"]["secretkey"],
+        serde_json::json!({ "$iface": "string", "value": "hunter2" }),
+        "the unsanitised secret"
+    );
+    let empty_map = serde_json::json!({ "A": { "$map": {} } });
+    assert_eq!(
+        returned("GetPluginConfig", 0),
+        empty_map,
+        "no entry: an empty map, sent"
+    );
+    assert_eq!(
+        returned("GetPluginConfig", 1)["A"]["$map"]["secretkey"],
+        fake,
+        "GetPluginConfig is sanitised"
+    );
+    assert!(
+        returned("GetPluginConfig", 2)["A"]["$map"]
+            .get("Plain")
+            .is_none(),
+        "a save replaces the entry whole"
+    );
+    assert_eq!(
+        returned("GetPluginConfig", 3),
+        empty_map,
+        "an empty map is sent"
+    );
+    assert_eq!(
+        returned("GetPluginConfig", 4),
+        serde_json::json!({}),
+        "a nil one is not"
+    );
+    assert_eq!(
+        plugins_of(&returned("GetConfig", 1))[PLUGIN_ID],
+        serde_json::json!({ "$map": {} }),
+        "a nil entry crosses as an empty map, being a map's element"
+    );
+    assert!(
+        returned("GetLicense", 0)["A"]["Features"].is_object(),
+        "the licensed host has a licence"
+    );
+    let loaded = |nth: usize| -> String {
+        go_calls
+            .iter()
+            .filter(|c| c["call"] == "LoadPluginConfiguration")
+            .nth(nth)
+            .expect("LoadPluginConfiguration")["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert!(
+        loaded(0).contains(r#""secretkey":"secret-default""#),
+        "{}",
+        loaded(0)
+    );
+    assert!(
+        loaded(1).contains(r#""secretkey":"hunter2""#),
+        "{}",
+        loaded(1)
+    );
+    assert!(loaded(1).contains(r#""onlydefault":7"#), "{}", loaded(1));
+    assert!(
+        loaded(1).contains(r#""large":100000000000000000000"#),
+        "Go writes 1e20 in full: {}",
+        loaded(1)
+    );
+
+    assert_eq!(
+        go_side.1[PLUGIN_ID],
+        Json::Null,
+        "the last save, of a nil map, left null"
+    );
+    assert_eq!(go_side.1, rust_side.1, "the Plugins each host left");
 
     drop(rust);
     drop(go);

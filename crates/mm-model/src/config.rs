@@ -1960,8 +1960,11 @@ pub struct PluginSettings {
     #[serde(rename = "ClientDirectory")]
     pub client_directory: Option<String>,
 
+    /// `map[string]map[string]any`: an entry may be JSON `null` (a nil inner map), which is what
+    /// the plugin API's `SavePluginConfig(nil)` leaves in Go's document — so the inner map is an
+    /// `Option`, or one such entry would make the whole document unreadable here.
     #[serde(rename = "Plugins")]
-    pub plugins: Option<std::collections::BTreeMap<String, StringInterface>>,
+    pub plugins: Option<std::collections::BTreeMap<String, Option<StringInterface>>>,
 
     #[serde(rename = "PluginStates")]
     pub plugin_states: Option<std::collections::BTreeMap<String, PluginState>>,
@@ -2440,7 +2443,8 @@ pub const DATABASE_DRIVER_POSTGRES: &str = "postgres";
 impl PluginSettings {
     /// Port of `(*PluginSettings).Sanitize` (config.go:3707): a secret setting of an installed
     /// plugin becomes `FakeSetting`, and the stored settings of a plugin with no manifest are
-    /// dropped — **except** an empty settings map, which Go never iterates and so never deletes.
+    /// dropped — **except** an empty or nil settings map, which Go never iterates and so never
+    /// deletes.
     /// `None` (plugins off) has no manifests, so every non-empty entry goes.
     ///
     /// Keys match a schema key case-insensitively (`strings.EqualFold`), and a plugin whose
@@ -2454,8 +2458,14 @@ impl PluginSettings {
             .iter()
             .map(|m| (m.id.as_str(), m))
             .collect();
-        plugins.retain(|id, settings| settings.is_empty() || by_id.contains_key(id.as_str()));
+        plugins.retain(|id, settings| {
+            settings.as_ref().is_none_or(StringInterface::is_empty)
+                || by_id.contains_key(id.as_str())
+        });
         for (id, settings) in plugins.iter_mut() {
+            let Some(settings) = settings.as_mut() else {
+                continue;
+            };
             let Some(schema) = by_id
                 .get(id.as_str())
                 .and_then(|m| m.settings_schema.as_ref())

@@ -51,7 +51,9 @@ use mm_model::plugin_status::{
 };
 
 use crate::error::decodable_error;
-use crate::rpc::{Driver, HooksClient, PluginApi, PluginApiHttp, PluginApiStreams, handshake};
+use crate::rpc::{
+    Driver, HooksClient, PluginApiDynamic, PluginApiHttp, PluginApiStreams, handshake,
+};
 use crate::wire::plugin::Z_OnDeactivateArgs;
 
 /// Go's `model.CurrentVersion`, which `min_server_version` is checked against.
@@ -550,7 +552,7 @@ pub struct PrepackagedPlugin {
 
 impl<A, D> Environment<A, D>
 where
-    A: PluginApi + PluginApiStreams + PluginApiHttp,
+    A: PluginApiDynamic + PluginApiStreams + PluginApiHttp,
     D: Driver,
 {
     pub fn new(
@@ -1139,7 +1141,7 @@ pub struct HealthCheckJob<A, D> {
 
 impl<A, D> HealthCheckJob<A, D>
 where
-    A: PluginApi + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
+    A: PluginApiDynamic + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
     D: Driver + Send + Sync + 'static,
 {
     fn timestamps(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<Instant>>> {
@@ -1219,7 +1221,7 @@ impl<A, D> HealthCheckJob<A, D> {
 
 impl<A, D> Environment<A, D>
 where
-    A: PluginApi + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
+    A: PluginApiDynamic + PluginApiStreams + PluginApiHttp + Send + Sync + 'static,
     D: Driver + Send + Sync + 'static,
 {
     /// environment.go, `TogglePluginHealthCheckJob`: start a job when enabling and none runs;
@@ -1271,7 +1273,7 @@ impl<A, D> Environment<A, D> {
 
 impl<A, D> Environment<A, D>
 where
-    A: PluginApi + PluginApiStreams + PluginApiHttp,
+    A: PluginApiDynamic + PluginApiStreams + PluginApiHttp,
     D: Driver,
 {
     /// The disabling half of `TogglePluginHealthCheckJob`.

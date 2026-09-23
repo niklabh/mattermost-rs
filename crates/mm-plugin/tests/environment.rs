@@ -22,6 +22,7 @@ struct NoApi;
 impl PluginApi for NoApi {}
 impl PluginApiStreams for NoApi {}
 impl PluginApiHttp for NoApi {}
+impl mm_plugin::rpc::PluginApiDynamic for NoApi {}
 
 struct NoDriver;
 impl mm_plugin::rpc::Driver for NoDriver {}

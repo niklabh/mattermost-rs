@@ -125,6 +125,9 @@
 //! `recorder/kv.rs` — a fixed sequence of `KV*`, `Log*` and server-information calls — and records
 //! `{"hook": "KVScript", "calls": [...]}` with every answer, before answering "no opinion". That
 //! entry lands **between** the hook's own entry and `MessageHasBeenPosted`.
+//!
+//! `!config-script` does the same with `recorder/config.rs` — the configuration and licence
+//! methods, and three `SavePluginConfig`s — and records `{"hook": "ConfigScript", ...}`.
 
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
@@ -174,6 +177,9 @@ use render::render_typed;
 
 #[path = "recorder/kv.rs"]
 mod kv;
+
+#[path = "recorder/config.rs"]
+mod config;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -362,6 +368,13 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "KVScript", "calls": calls }));
+        }
+        if message == config::CONFIG_SCRIPT {
+            let calls = match self.api.get() {
+                Some(api) => config::run(api.client()).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "ConfigScript", "calls": calls }));
         }
         let answer = if let Some(reason) = after(message, "!reject ") {
             Z_MessageWillBePostedReturns {

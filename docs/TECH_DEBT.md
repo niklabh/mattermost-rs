@@ -9280,8 +9280,8 @@ active state (closed 2026-09-20: `mm_app::plugin_prepackaged`, `mm_plugin::envir
 measured by `parity::plugin_startup` and `environment::health_check_matches_go_step_for_step`).
 What still keeps it from being a drop-in:
 
-- The plugin API and driver: `AppPluginApi` answers 16 of the 258 API methods (the `KV*` nine,
-  the `Log*` four, `GetServerVersion`, `GetDiagnosticId`, `GetSystemInstallDate`) and the
+- The plugin API and driver: `AppPluginApi` answers 27 of the 258 API methods (the `KV*` nine,
+  the `Log*` four, server information, and the configuration and licence eleven) and the
   not-implemented error for the rest; `AppPluginDriver` answers not-implemented throughout. That
   is plugin plan Phase 6, ordered by what real plugins call.
 - The hook call sites: 25 of the 35 are wired (the post family and reactions, which closed
@@ -9749,18 +9749,28 @@ mechanisms, pinned against a local SMTP test server under both hosts. It is also
 
 ## D-990 · The plugin API has no `GetConfig`, `GetUnsanitizedConfig` or `GetLicense`
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:105-145) · **Owner** the plugin host
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:105-145) · **Owner** the plugin host
+**Closed** 2026-09-23 — `mm_app::plugin_api_config` builds the gob `model.Config` from its JSON,
+generically over the generated wire type, and maps the licence by hand; the three, with
+`GetPluginConfig`, `SavePluginConfig` and `LoadPluginConfiguration`, are served through
+`mm_plugin::rpc::PluginApiDynamic` so an empty map crosses as Go sends it;
+`parity::plugin_hooks::the_plugin_api_config_methods_answer_as_go_answers`.
 
-Three of the methods every plugin calls first answer `API <Name> called but not implemented.`
-under the Rust host. Each returns a gob `*model.Config` or `*model.License`: hundreds of pointer
-fields, keyed by Go field name, which this server holds only as the JSON document (the config) or
-as `mm_model::license::License` (the licence). Nothing is private; the work is a conversion from
-that JSON into `mm_plugin::wire::model::Config` — `model.Config`'s only three `json:` tags are
-`,omitempty` without a rename, so its JSON keys *are* the gob field names and the conversion can
-be generic over the generated IDL rather than hand-written per field (`model.License` has 74 tags
-and needs the IDL's JSON names) — plus `GetSanitizedConfig`'s sanitisation, which the support packet
-already ported (`mm_app::config::sanitize_with`).
+---
 
-**What is owed:** the three methods, with a tranche in `parity::plugin_hooks` that renders both
-hosts' answers. `GetPluginConfig` and `LoadPluginConfiguration` read the same document and are
-the natural next two.
+## D-1000 · A configuration save made through the Rust plugin host skips its plugins' `ConfigurationWillBeSaved`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (platform/config.go:91) · **Owner** the plugin host
+
+Go's `PlatformService.SaveConfig` runs every active plugin's `ConfigurationWillBeSaved` hook
+first, and takes the configuration a hook hands back, or refuses the save with the hook's error
+(`app.save_config.plugin_hook_error`). This server saves through the Go server
+(`mm_app::peer_config`), so the hooks that run are the **Go** process's plugins' — none, when
+`MMRS_PLUGIN_HOST=rust` — and the Rust host's plugins are never asked. It affects every save the
+Rust host makes: `SavePluginConfig` (`App::save_plugin_config`) and the `PluginStates` writes of
+enable and disable. Nothing is private.
+
+**What is owed:** the hook run over the Rust host's plugins before the patch is sent, with the
+patch rebuilt from whatever configuration a hook returns (a whole `model.Config` crossing gob, so
+`mm_app::plugin_api_config`'s conversion is half of it; the other half is gob → JSON), and a
+`parity::plugin_hooks` tranche with a recorder that rewrites and refuses.

@@ -1105,7 +1105,7 @@ mod go_parity {
         let case = &corpus["plugin_settings_sanitize"];
         let manifests: Vec<Manifest> =
             serde_json::from_value(case["manifests"].clone()).expect("manifests");
-        let input: std::collections::BTreeMap<String, crate::utils::StringInterface> =
+        let input: std::collections::BTreeMap<String, Option<crate::utils::StringInterface>> =
             serde_json::from_value(case["input"].clone()).expect("input");
         let mut with = crate::config::PluginSettings {
             plugins: Some(input.clone()),
