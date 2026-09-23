@@ -233,6 +233,22 @@ pub trait UserStore {
         deleted: Option<bool>,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.GetProfilesInChannelByStatus` (user_store.go:896): the channel's
+    /// members ordered online, away, dnd, then everyone else — a user with **no** `Status` row
+    /// sorts with `offline` — and by username within each.
+    ///
+    /// `deleted` is the caller's reading of Go's `Inactive && !Active` / `Active && !Inactive`,
+    /// which unlike [`UserStore::get_profiles_in_channel`]'s `if/else if` means both flags
+    /// together filter nothing. Its caller today is the plugin API's `GetUsersInChannel`, which
+    /// sets neither.
+    fn get_profiles_in_channel_by_status(
+        &self,
+        channel_id: &str,
+        page: i64,
+        per_page: i64,
+        deleted: Option<bool>,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetAllProfilesInChannel` (user_store.go:961): every **live** user
     /// with a `ChannelMembers` row on the channel, keyed by user id, sanitized with the empty
     /// options map.
@@ -2027,6 +2043,84 @@ impl UserStore for SqlUserStore {
                     OR ($4 AND u.deleteat != 0)
                     OR (NOT $4 AND u.deleteat = 0))
              ORDER BY u.username ASC
+             OFFSET $2 LIMIT $3
+            "#,
+            channel_id,
+            offset_of(page, per_page),
+            per_page,
+            deleted,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    async fn get_profiles_in_channel_by_status(
+        &self,
+        channel_id: &str,
+        page: i64,
+        per_page: i64,
+        deleted: Option<bool>,
+    ) -> Result<Vec<User>, StoreError> {
+        // `LeftJoin("Status s ON ( s.UserId = Users.Id )")` and two `OrderBy`s: the status rank,
+        // then the username. The join is LEFT, so a member who has never connected ranks 4 with
+        // the offline ones rather than dropping out.
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              JOIN channelmembers cm ON (cm.userid = u.id)
+              LEFT JOIN status s ON (s.userid = u.id)
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE cm.channelid = $1
+               AND ($4::bool IS NULL
+                    OR ($4 AND u.deleteat != 0)
+                    OR (NOT $4 AND u.deleteat = 0))
+             ORDER BY CASE s.status
+                          WHEN 'online' THEN 1
+                          WHEN 'away' THEN 2
+                          WHEN 'dnd' THEN 3
+                          ELSE 4
+                      END,
+                      u.username ASC
              OFFSET $2 LIMIT $3
             "#,
             channel_id,

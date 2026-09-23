@@ -1,0 +1,38 @@
+# Mutation plan for the plugin API's user, status, preference and team methods
+# (docs/PLUGIN_PLAN.md, Phase 6).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-users.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_user_methods_answer_as_go_answers`: 97 API
+# calls from inside MessageWillBePosted on a Go host and a Rust host, every answer, every hook the
+# writes fire, and every frame the own user's socket receives. One line is a unit mutation
+# (`plugin_api::users`), because no script call can reach a refused option shape. The last two
+# lines are the no-op controls and must SURVIVE.
+
+by-ids-sanitised	crates/mm-app/src/plugin_api/users.rs	self.app.get_users(&args.a).await	self.app.get_users(&args.a).await.map(|mut users| { users.iter_mut().for_each(|u| u.sanitize(&std::collections::HashMap::new())); users })	api	plugin_hooks::the_plugin_api_user_methods
+listings-unsanitised	crates/mm-app/src/user.rs	user.sanitize(&none);	let _ = (&none, user);	api	plugin_hooks::the_plugin_api_user_methods
+search-unsanitised	crates/mm-app/src/plugin_api/users.rs	self.app.sanitize_profile(&mut user, true);	let _ = &mut user;	api	plugin_hooks::the_plugin_api_user_methods
+search-matches-emails	crates/mm-app/src/plugin_api/users.rs	allow_emails: false,	allow_emails: true,	api	plugin_hooks::the_plugin_api_user_methods
+search-matches-full-names	crates/mm-app/src/plugin_api/users.rs	allow_full_names: false,	allow_full_names: true,	api	plugin_hooks::the_plugin_api_user_methods
+search-limit-defaulted	crates/mm-app/src/plugin_api/users.rs	limit: search.limit,	limit: if search.limit == 0 { 100 } else { search.limit },	api	plugin_hooks::the_plugin_api_user_methods
+search-channel-as-team	crates/mm-app/src/plugin_api/users.rs	SearchArm::InChannel(&search.in_channel_id)	SearchArm::InTeam(&search.in_channel_id)	api	plugin_hooks::the_plugin_api_user_methods
+status-sort-as-username	crates/mm-app/src/plugin_api/users.rs	self.app.get_users_in_channel_by_status(&args.a, page).await	self.app.get_users_in_channel(&args.a, page).await	api	plugin_hooks::the_plugin_api_user_methods
+status-rank-online-last	crates/mm-store/src/user_store.rs	WHEN 'online' THEN 1	WHEN 'online' THEN 5	api	plugin_hooks::the_plugin_api_user_methods
+get-users-activity-ignored	crates/mm-app/src/plugin_api/users.rs	inactive: options.inactive,\n            active: options.active,	inactive: false,\n            active: false,	api	plugin_hooks::the_plugin_api_user_methods
+team-members-page-not-offset	crates/mm-app/src/plugin_api/users.rs	args.b.saturating_mul(args.c),	args.b,	api	plugin_hooks::the_plugin_api_user_methods
+paged-memberships-live-only	crates/mm-store/src/team_store.rs	WHERE tm.userid = $1\n         LIMIT $2 OFFSET $3	WHERE tm.userid = $1 AND tm.deleteat = 0\n         LIMIT $2 OFFSET $3	api	plugin_hooks::the_plugin_api_user_methods
+status-online-not-manual	crates/mm-app/src/plugin_api/users.rs	self.app.set_status_online(user_id, true)	self.app.set_status_online(user_id, false)	api	plugin_hooks::the_plugin_api_user_methods
+dnd-untimed-as-timed	crates/mm-app/src/plugin_api/users.rs	STATUS_DND => self.app.set_status_do_not_disturb(user_id).await,	STATUS_DND => self.app.set_status_do_not_disturb_timed(user_id, 0).await,	api	plugin_hooks::the_plugin_api_user_methods
+dnd-untimed-records-prev	crates/mm-app/src/status.rs	status.manual = true;\n\n        self.save_and_broadcast_status(&status).await;	status.manual = true;\n        status.prev_status = status.status.clone();\n\n        self.save_and_broadcast_status(&status).await;	api	plugin_hooks::the_plugin_api_user_methods
+timed-dnd-end-shifted	crates/mm-app/src/plugin_api/users.rs	.set_status_do_not_disturb_timed(&args.a, args.b)	.set_status_do_not_disturb_timed(&args.a, args.b + 60)	api	plugin_hooks::the_plugin_api_user_methods
+preference-ownership-dropped	crates/mm-app/src/preference.rs	if preference.user_id != user_id {	if false && preference.user_id != user_id {	api	plugin_hooks::the_plugin_api_user_methods
+preference-hook-dropped	crates/mm-app/src/preference.rs	self.preferences_have_changed(ctx, preferences);	let _ = (ctx, preferences);	api	plugin_hooks::the_plugin_api_user_methods
+team-roles-where-delegated	crates/mm-app/src/team_member.rs	err.where_ = "UpdateTeamMemberRoles".to_owned();	err.where_ = "GetTeamMember".to_owned();	api	plugin_hooks::the_plugin_api_user_methods
+update-user-where-delegated	crates/mm-app/src/user.rs	err.where_ = "UpdateUser".to_owned();\n            err\n        })?;\n\n        if prev.create_at	err.where_ = "GetUser".to_owned();\n            err\n        })?;\n\n        if prev.create_at	api	plugin_hooks::the_plugin_api_user_methods
+add-members-graceful	crates/mm-app/src/plugin_api/users.rs	.add_team_members(&args.a, &args.b, &args.c, false, &HookContext::default())	.add_team_members(&args.a, &args.b, &args.c, true, &HookContext::default())	api	plugin_hooks::the_plugin_api_user_methods
+delete-user-activates	crates/mm-app/src/plugin_api/users.rs	a: self.set_active("DeleteUser", &args.a, false).await?,	a: self.set_active("DeleteUser", &args.a, true).await?,	api	plugin_hooks::the_plugin_api_user_methods
+roles-event-dropped	crates/mm-app/src/plugin_api/users.rs	self.app.update_user_roles(&args.a, &args.b, true)	self.app.update_user_roles(&args.a, &args.b, false)	api	plugin_hooks::the_plugin_api_user_methods
+custom-status-zone-dropped	crates/mm-app/src/plugin_api_wire.rs	gobwire::Zone::Offset(seconds) => seconds,	gobwire::Zone::Offset(_) => 0,	api	plugin_hooks::the_plugin_api_user_methods
+get-users-sort-misread	crates/mm-app/src/plugin_api/users.rs	} else if options.sort == "update_at_asc" {	} else if options.sort == "update_at_desc" {	unit	plugin_api::users
+control-reply-list	crates/mm-app/src/plugin_api/users.rs	Ok(items) => (items.iter().map(convert).collect(), None),	Ok(items) => (items.iter().map(convert).collect(), Option::None),	api	plugin_hooks::the_plugin_api_user_methods
+control-delete-rename	crates/mm-app/src/plugin_api/users.rs	let preferences = preferences_from_wire(&args.b);\n        let result = self.app.delete_preferences(&args.a, &preferences).await;	let prefs = preferences_from_wire(&args.b);\n        let result = self.app.delete_preferences(&args.a, &prefs).await;	api	plugin_hooks::the_plugin_api_user_methods

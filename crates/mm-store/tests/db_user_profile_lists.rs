@@ -62,6 +62,7 @@ async fn pool() -> PgPool {
 
 async fn purge(pool: &PgPool) {
     for statement in [
+        "DELETE FROM status WHERE userid LIKE 'mmrsulist%'",
         "DELETE FROM channelmembers WHERE userid LIKE 'mmrsulist%'",
         "DELETE FROM teammembers WHERE userid LIKE 'mmrsulist%'",
         "DELETE FROM channels WHERE id LIKE 'mmrsulist%'",
@@ -337,6 +338,87 @@ async fn in_channel_has_no_membership_deletion_condition_and_orders_by_username(
         .await
         .expect("query runs");
     assert_eq!(usernames(&gone), vec!["mmrsulist-mid"]);
+
+    purge(&pool).await;
+}
+
+async fn set_status(pool: &PgPool, user: &str, status: &str) {
+    sqlx::query(
+        "INSERT INTO status (userid, status, manual, lastactivityat, dndendtime, prevstatus)
+         VALUES ($1, $2, false, 0, 0, '')",
+    )
+    .bind(user)
+    .bind(status)
+    .execute(pool)
+    .await
+    .expect("inserts the status");
+}
+
+/// The rank puts online, away and dnd first in that order and everyone else after — `offline`
+/// and **no row at all** tie at 4 and fall back to username — so the expected order below is
+/// neither username order nor id order, and a user with no `Status` row still appears.
+#[tokio::test]
+async fn in_channel_by_status_ranks_online_away_dnd_then_the_rest_by_username() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL to run");
+        return;
+    }
+    let _serialised = FIXTURES.lock().await;
+    let pool = pool().await;
+    seed(&pool).await;
+    for user in [AMY, DAN, EVE] {
+        add_to_channel(&pool, CHANNEL, user).await;
+    }
+    set_status(&pool, AMY, "online").await;
+    set_status(&pool, ZED, "away").await;
+    set_status(&pool, EVE, "dnd").await;
+    set_status(&pool, DAN, "offline").await;
+    let store = SqlUserStore::new(pool.clone());
+
+    let all = store
+        .get_profiles_in_channel_by_status(CHANNEL, 0, 60, None)
+        .await
+        .expect("query runs");
+    assert_eq!(
+        usernames(&all),
+        vec![
+            "mmrsulist-amy",
+            "mmrsulist-zed",
+            "mmrsulist-eve",
+            "mmrsulist-dan",
+            "mmrsulist-mid"
+        ],
+        "online, away, dnd, then offline `dan` and status-less `mid` by username"
+    );
+
+    let live = store
+        .get_profiles_in_channel_by_status(CHANNEL, 0, 60, Some(false))
+        .await
+        .expect("query runs");
+    assert_eq!(
+        usernames(&live),
+        vec!["mmrsulist-amy", "mmrsulist-zed", "mmrsulist-eve"]
+    );
+    let gone = store
+        .get_profiles_in_channel_by_status(CHANNEL, 0, 60, Some(true))
+        .await
+        .expect("query runs");
+    assert_eq!(usernames(&gone), vec!["mmrsulist-dan", "mmrsulist-mid"]);
+
+    let second = store
+        .get_profiles_in_channel_by_status(CHANNEL, 1, 2, None)
+        .await
+        .expect("query runs");
+    assert_eq!(
+        usernames(&second),
+        vec!["mmrsulist-eve", "mmrsulist-dan"],
+        "OFFSET page * per_page over the ranked order"
+    );
+    let none = store
+        .get_profiles_in_channel_by_status(CHANNEL, 0, 0, None)
+        .await
+        .expect("query runs");
+    assert!(none.is_empty(), "per_page=0 is LIMIT 0");
 
     purge(&pool).await;
 }

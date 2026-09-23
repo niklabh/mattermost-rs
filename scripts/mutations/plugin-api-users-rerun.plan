@@ -1,0 +1,11 @@
+# Rerun of plugin-api-users.plan after its first batch (27 run, 23 caught, 1 survivor, 2 controls
+# survived, 1 harness fault):
+# - status-sort-as-username survived: other online and own dnd gave the same order by status as
+#   by username (`usroth` sorts before `usrown`). The script now puts own online and other dnd.
+# - listings-unsanitised did not compile: `let _ = (&none, user)` left the map's type unknown.
+#   Re-expressed so the call stays and never runs.
+
+status-sort-as-username	crates/mm-app/src/plugin_api/users.rs	self.app.get_users_in_channel_by_status(&args.a, page).await	self.app.get_users_in_channel(&args.a, page).await	api	plugin_hooks::the_plugin_api_user_methods
+listings-unsanitised	crates/mm-app/src/user.rs	user.sanitize(&none);	if false {\n            user.sanitize(&none);\n        }	api	plugin_hooks::the_plugin_api_user_methods
+control-reply-list	crates/mm-app/src/plugin_api/users.rs	Ok(items) => (items.iter().map(convert).collect(), None),	Ok(items) => (items.iter().map(convert).collect(), Option::None),	api	plugin_hooks::the_plugin_api_user_methods
+control-delete-rename	crates/mm-app/src/plugin_api/users.rs	let preferences = preferences_from_wire(&args.b);\n        let result = self.app.delete_preferences(&args.a, &preferences).await;	let prefs = preferences_from_wire(&args.b);\n        let result = self.app.delete_preferences(&args.a, &prefs).await;	api	plugin_hooks::the_plugin_api_user_methods

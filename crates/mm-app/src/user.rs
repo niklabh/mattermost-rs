@@ -407,6 +407,94 @@ impl App {
             .map_err(|err| get_profiles_error("GetUsersInChannel", err))
     }
 
+    /// Port of `app.App.GetUsersFromProfiles` (user.go:645) → `store.GetAllProfiles`, for the
+    /// shape [`UserStore::get_all_profiles`](mm_store::UserStore::get_all_profiles) holds: no
+    /// role filter, username order, no `UpdatedAfter`, nil view restrictions. The caller decides
+    /// that the options are that shape. Every user comes back with the store's
+    /// `Sanitize(map[string]bool{})` applied, as Go's store applies it — the credentials go and
+    /// the profile stays.
+    #[tracing::instrument(skip_all, fields(page = page.page, per_page = page.per_page))]
+    pub async fn get_users_from_profiles(&self, page: UserPage) -> AppResult<Vec<User>> {
+        let mut users = self
+            .store()
+            .user()
+            .get_all_profiles(page.page, page.per_page, page.deleted())
+            .await
+            .map_err(|err| get_profiles_error("GetUsers", err))?;
+        store_sanitize(&mut users);
+        Ok(users)
+    }
+
+    /// Port of `app.App.GetUsers` (user.go:558) → `SqlUserStore.GetMany`: the rows for these
+    /// ids, deactivated ones included, **unsanitised** — `GetMany` is the one listing query that
+    /// does not call `Sanitize`. Go's has no `ORDER BY`; the order here is the shared query's,
+    /// which a caller must not rely on any more than on Go's.
+    #[tracing::instrument(skip_all, fields(count = ids.len()))]
+    pub async fn get_users(&self, ids: &[String]) -> AppResult<Vec<User>> {
+        self.store()
+            .user()
+            .get_profile_by_ids(ids, 0)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "users lookup failed");
+                AppError::boxed(
+                    "GetUsers",
+                    "app.user.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetUsersInTeam` (user.go:667) → `store.GetProfiles`, store-sanitised.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, page = page.page))]
+    pub async fn get_users_in_team(&self, team_id: &str, page: UserPage) -> AppResult<Vec<User>> {
+        let mut users = self
+            .store()
+            .user()
+            .get_profiles_in_team(team_id, page.page, page.per_page, page.deleted())
+            .await
+            .map_err(|err| get_profiles_error("GetUsersInTeam", err))?;
+        store_sanitize(&mut users);
+        Ok(users)
+    }
+
+    /// Port of `app.App.GetUsersInChannel` (user.go:711), store-sanitised.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, page = page.page))]
+    pub async fn get_users_in_channel(
+        &self,
+        channel_id: &str,
+        page: UserPage,
+    ) -> AppResult<Vec<User>> {
+        let mut users = self.get_users_in_channel_page(channel_id, page).await?;
+        store_sanitize(&mut users);
+        Ok(users)
+    }
+
+    /// Port of `app.App.GetUsersInChannelByStatus` (user.go:720), store-sanitised. The active
+    /// filter is the by-status query's own `Inactive && !Active` reading.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, page = page.page))]
+    pub async fn get_users_in_channel_by_status(
+        &self,
+        channel_id: &str,
+        page: UserPage,
+    ) -> AppResult<Vec<User>> {
+        let deleted = match (page.inactive, page.active) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        };
+        let mut users = self
+            .store()
+            .user()
+            .get_profiles_in_channel_by_status(channel_id, page.page, page.per_page, deleted)
+            .await
+            .map_err(|err| get_profiles_error("GetUsersInChannelByStatus", err))?;
+        store_sanitize(&mut users);
+        Ok(users)
+    }
+
     /// Port of `app.App.GetUsersNotInChannelPage` (user.go:803) for `groupConstrained = false`.
     ///
     /// **The multiply happens here**, not in the store (`GetUsersNotInChannel(…, page*perPage,
@@ -500,6 +588,16 @@ impl App {
     }
 }
 
+/// `u.Sanitize(map[string]bool{})`, which every listing query in Go's `SqlUserStore` but
+/// `GetMany` runs on its rows: the password, the MFA secret and timestamps and `LastLogin` go;
+/// the email, the names and the auth fields stay.
+fn store_sanitize(users: &mut [User]) {
+    let none = std::collections::HashMap::new();
+    for user in users {
+        user.sanitize(&none);
+    }
+}
+
 /// The one error every user *search* produces: a 500 carrying `app.user.search.app_error`.
 ///
 /// Five app functions mint it and only `where` separates them, which — like
@@ -540,6 +638,25 @@ impl App {
             .search(team_id, term.trim(), options)
             .await
             .map_err(|err| search_error("SearchUsersInTeam", err))?;
+        tracing::Span::current().record("found", users.len());
+        Ok(users)
+    }
+
+    /// Port of `app.App.SearchUsersInChannel` (app/user.go:2434), sanitisation left to the
+    /// caller as in [`App::search_users_in_team`].
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    pub async fn search_users_in_channel(
+        &self,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> AppResult<Vec<User>> {
+        let users = self
+            .store()
+            .user()
+            .search_in_channel(channel_id, term.trim(), options)
+            .await
+            .map_err(|err| search_error("SearchUsersInChannel", err))?;
         tracing::Span::current().record("found", users.len());
         Ok(users)
     }
@@ -789,14 +906,24 @@ impl App {
         send_notifications: bool,
     ) -> AppResult<mm_model::user::User> {
         let mut user = user.clone();
-        let prev = self.get_user(&user.id).await?;
+        // `GetUser`'s two errors, minted here with **this** function's `Where` — invisible on
+        // REST (`json:"-"`), and on the wire of the plugin API's `UpdateUser`.
+        let prev = self.get_user(&user.id).await.map_err(|mut err| {
+            err.where_ = "UpdateUser".to_owned();
+            err
+        })?;
 
         if prev.create_at != user.create_at {
             user.create_at = prev.create_at;
         }
 
         if user.username != prev.username {
-            self.is_unique_to_group_names(&user.username).await?;
+            self.is_unique_to_group_names(&user.username)
+                .await
+                .map_err(|mut err| {
+                    err.where_ = "UpdateUser".to_owned();
+                    err
+                })?;
         }
 
         let mut new_email = String::new();

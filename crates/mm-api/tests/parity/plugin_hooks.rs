@@ -6993,6 +6993,618 @@ async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: users, statuses, preferences and teams (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the users tranche; see `second_server_ports`. Not a Go offset port: + 73,
+/// + 74 and + 80 to + 92 are taken by this file's Go servers.
+const USERS_HOST_PORT: u16 = 8158;
+/// Its Go server.
+const USERS_GO_OFFSET: u16 = 92;
+/// Each side's tag: in its users' names, the user and the team its script makes.
+const USERS_SIDES: [&str; 2] = ["pusidego", "pusiders"];
+/// The picture planted in each host's file store for its own user, so `GetProfileImage` reads a
+/// stored file on both (a missing one is Go's generated avatar, which is not reproduced).
+const USERS_PICTURE: &[u8] = b"not a png: the plugin users tranche";
+
+/// The plain users the users tour makes, for the cleanup.
+static USERS_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's user, status, preference and team methods
+/// (`mm_app::plugin_api::users`).
+///
+/// A `!users-script` post, made by each side's own user in its own channel, runs
+/// `examples/recorder/users.rs` inside `MessageWillBePosted`. As in the core tranche, every
+/// answer is compared in order, every hook the script's writes fired, and every websocket frame
+/// the own user's socket received.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own team, channel and two users, made through main Go before either host
+/// starts, and the admin leaves the side team so that nothing in it is shared-stack state. The
+/// side's ids and its tag are scrubbed, then the ids the script learned — the user and team it
+/// made. What is left is masked, and each mask is named: [`normalise`]'s id and time keys,
+/// [`mask_core`]'s `<minted>` ids (invite ids, the made team's default channels, system posts) and
+/// session clocks, a `Password` hash as `<hash>`, since each side's users were made with their
+/// own salt, and a frame's `last_password_update`, stamped by each side's own user creation.
+///
+/// # Seven answers are compared as sets
+///
+/// `GetUsersByIds` (`GetMany` has no `ORDER BY`), `GetTeamsUnreadForUser` (teams in the order
+/// the unread query's rows first name them, and it has no `ORDER BY`), `GetTeamMembers`
+/// (user-id order, and each side's ids are its own), `GetTeamMembersForUser` and
+/// `GetTeamsForUser` (no `ORDER BY`), `GetUserStatusesByIds` (cache hits first in Go) and
+/// `GetPreferencesForUser` (no `ORDER BY`) have their lists sorted after the scrub. Every other
+/// list keeps its order.
+#[tokio::test]
+async fn the_plugin_api_user_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    purge_users_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_users_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *USERS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    purge_users_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// What the script made that carries no suite prefix the fixture purge reaches mid-run: the user
+/// and the team each side makes, and the team's channels and memberships. Deactivated through Go
+/// first would leave the username taken for the next run, so the rows go.
+async fn purge_users_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let usernames: Vec<String> = USERS_SIDES
+        .iter()
+        .map(|side| format!("mmrsplainusrnew{side}"))
+        .collect();
+    let teams: Vec<String> = USERS_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-plugusers-{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM status WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM users WHERE username = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&usernames)
+            .execute(&pool)
+            .await
+            .expect("the script's user goes");
+    }
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the script's team goes");
+    }
+}
+
+/// One side of the users tour.
+struct UsersSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    other: common::PlainUser,
+    team: String,
+    channel: String,
+}
+
+impl UsersSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self, reader: &str, shared_team: &str) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_USERS_READER", reader.to_owned()),
+            ("HOOK_RECORDER_USERS_SHARED_TEAM", shared_team.to_owned()),
+            ("HOOK_RECORDER_USERS_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_USERS_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_USERS_TEAM", self.team.clone()),
+            ("HOOK_RECORDER_USERS_SIDE", self.tag.to_owned()),
+        ]
+    }
+
+    /// This side's scrub pairs: what the script's answers taught it first, then the fixture.
+    fn pairs(&self, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for (name, pointer, token) in [
+            ("CreateUser", "/returns/A/Id", "<new-user>"),
+            ("CreateTeam", "/returns/A/Id", "<new-team>"),
+        ] {
+            if let Some(value) = learned(calls, name, 0, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.other.id.clone(), "<other>".to_owned()),
+            (self.team.clone(), "<side-team>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// The calls whose answer list has no order either server promises; see the test's doc.
+const USERS_UNORDERED: [&str; 7] = [
+    "GetUsersByIds",
+    "GetTeamsUnreadForUser",
+    "GetTeamMembers",
+    "GetTeamMembersForUser",
+    "GetTeamsForUser",
+    "GetUserStatusesByIds",
+    "GetPreferencesForUser",
+];
+
+/// A bcrypt hash, salted per user: `"<hash>"` when set, so that set-or-not is still compared.
+fn mask_password(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(mask_password),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if key == "Password" && entry.as_str().is_some_and(|p| !p.is_empty()) {
+                    *entry = Json::String("<hash>".to_owned());
+                    continue;
+                }
+                mask_password(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A frame's `last_password_update`, which each side's own user got from its own creation — the
+/// JSON name of the `LastPasswordUpdate` that [`normalise`] already masks in the transcript.
+fn mask_password_update(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(mask_password_update),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if key == "last_password_update" && entry.as_i64().is_some_and(|n| n != 0) {
+                    *entry = Json::String("<set>".to_owned());
+                    continue;
+                }
+                mask_password_update(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sort the answer lists of [`USERS_UNORDERED`] calls, once everything else is a token.
+fn sort_unordered_answers(entries: &mut [Json]) {
+    for entry in entries.iter_mut() {
+        let Some(calls) = entry.get_mut("calls").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for call in calls.iter_mut() {
+            let unordered = call["call"]
+                .as_str()
+                .is_some_and(|name| USERS_UNORDERED.contains(&name));
+            if !unordered {
+                continue;
+            }
+            if let Some(items) = call.pointer_mut("/returns/A").and_then(Json::as_array_mut) {
+                items.sort_by_key(Json::to_string);
+            }
+        }
+    }
+}
+
+/// Wait until the transcript holds the script's entry under `hook` and then stops growing.
+async fn script_transcript_settles(path: &Path, hook: &str, side: &str) {
+    let mut last = usize::MAX;
+    let mut quiet_since = None;
+    for _ in 0..600 {
+        let entries = transcript(path);
+        let done = entries.iter().any(|e| e["hook"] == hook);
+        if done && entries.len() == last {
+            let since = *quiet_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= QUIET * 2 {
+                return;
+            }
+        } else {
+            quiet_since = None;
+        }
+        last = entries.len();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "{side}: the {hook} never settled: {:?}",
+        names(&transcript(path))
+    );
+}
+
+async fn run_the_users_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-users");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let shared_team = common::create_team(client, admin, "hookusers").await;
+    let reader = common::create_plain_user(client, admin, &shared_team, "usrrd").await;
+    USERS_USERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(reader.id.clone());
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in USERS_SIDES {
+        let team = common::create_team(client, admin, &format!("hookusers{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("usrown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("usroth{tag}")).await;
+        USERS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("users{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::add_user_to_channel(client, admin, &channel, &other.id).await;
+        // The admin made the team and the channel, so it is in both; leaving the team takes it
+        // out of the channel too, and nothing the script reads is shared-stack state.
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(UsersSide {
+            tag,
+            own,
+            other,
+            team,
+            channel,
+        });
+    }
+
+    // Each host's own user has a stored picture in that host's file store.
+    for (run, side) in [(&go_run, &sides[0]), (&rs_run, &sides[1])] {
+        let dir = run.join("data/users").join(&side.own.id);
+        std::fs::create_dir_all(&dir).expect("the picture's directory");
+        std::fs::write(dir.join("profile.png"), USERS_PICTURE).expect("the picture");
+    }
+
+    let go_env = sides[0].env(&reader.id, &shared_team);
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, USERS_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env(&reader.id, &shared_team);
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(USERS_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![
+        reader.id.clone(),
+        shared_team.clone(),
+        admin_id.clone(),
+        CORE_MISSING.to_owned(),
+    ];
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!users-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "UsersScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "UsersScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(&calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            mask_core(entry, &shared_ids);
+            mask_password(entry);
+        }
+        sort_unordered_answers(&mut entries);
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .collect();
+        frames.iter_mut().for_each(mask_password_update);
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames, calls));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "UsersScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    // Every differing call at once: a tranche this long is otherwise debugged one run per call.
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "UsersScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    // Every frame the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the own user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    let differing: Vec<String> = go_side
+        .1
+        .iter()
+        .zip(&rust_side.1)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("frame {index} ({}):\n  go:   {g}\n  rust: {r}", g["event"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    assert_users_answers_are_gos(&go_calls, &go_hooks);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_users_answers_are_gos(calls: &[Json], hooks: &[Json]) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let own_in = |list: &Json| -> Json {
+        list["A"]
+            .as_array()
+            .and_then(|users| {
+                users
+                    .iter()
+                    .find(|u| u["Username"] == "mmrsplainusrown<side>")
+            })
+            .cloned()
+            .unwrap_or(Json::Null)
+    };
+
+    // Sanitisation: `GetMany` none, the listing queries the credential scrub, search the admin
+    // profile scrub.
+    let by_ids = own_in(&answer("GetUsersByIds", 0));
+    assert_eq!(by_ids["Password"], "<hash>", "GetUsersByIds is unsanitised");
+    let listed = own_in(&answer("GetUsers", 0));
+    assert!(
+        listed["Password"].is_null() && listed["Email"].is_string(),
+        "GetUsers drops the password and keeps the e-mail: {listed}"
+    );
+    let in_team = own_in(&answer("GetUsersInTeam", 0));
+    assert!(
+        in_team["Password"].is_null() && in_team["Email"].is_string(),
+        "GetUsersInTeam likewise: {in_team}"
+    );
+    let found = own_in(&answer("SearchUsers", 0));
+    assert!(
+        found["Password"].is_null() && found["Email"].is_string(),
+        "a plugin's search is sanitised as an admin: {found}"
+    );
+    assert!(
+        answer("SearchUsers", 1)["A"].is_null(),
+        "the e-mail is not searched"
+    );
+    assert!(
+        answer("SearchUsers", 3)["A"].is_null(),
+        "a zero limit is LIMIT 0"
+    );
+    assert_eq!(
+        answer("GetUsersInChannel", 2)["B"]["Id"],
+        "plugin.api.get_users_in_channel",
+        "an unknown sort is refused"
+    );
+    let names = |list: &Json| -> Vec<String> {
+        list["A"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|u| u["Username"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        names(&answer("GetUsersInChannel", 3)),
+        ["mmrsplainusrown<side>", "mmrsplainusroth<side>"],
+        "status order puts the online user before the dnd one, against username order"
+    );
+
+    // The writes.
+    assert_eq!(
+        answer("CreateUser", 0)["A"]["Roles"],
+        "system_user",
+        "a plugin's user gets system_user whatever it asked for"
+    );
+    assert_eq!(
+        answer("UpdateUserRoles", 2)["B"]["StatusCode"],
+        400,
+        "a missing user is UpdateUserRoles' 400"
+    );
+    assert_eq!(
+        answer("UpdateUserStatus", 4)["B"]["Id"],
+        "plugin.api.update_user_status.bad_status",
+        "ooo is not a status a plugin can set"
+    );
+    let timed = answer("SetUserStatusTimedDND", 0)["A"].clone();
+    assert_eq!(
+        (&timed["Status"], &timed["PrevStatus"], &timed["DNDEndTime"]),
+        (
+            &Json::from("dnd"),
+            &Json::from("online"),
+            &Json::from(4_102_444_800_i64)
+        ),
+        "the timed DND keeps the status to return to and truncates the end to the minute"
+    );
+    assert_eq!(
+        answer("UpdatePreferencesForUser", 1)["A"]["StatusCode"],
+        403,
+        "another user's preference is refused"
+    );
+    let preference_hooks = hooks
+        .iter()
+        .filter(|h| h["hook"] == "PreferencesHaveChanged")
+        .count();
+    assert!(
+        preference_hooks >= 1,
+        "a plugin's own preference write fires PreferencesHaveChanged"
+    );
+    let left: Vec<Json> = answer("GetTeamMembersForUser", 0)["A"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        left.iter()
+            .any(|m| m["TeamId"] == "<new-team>" && m["DeleteAt"] == "<set>"),
+        "the left team's row is still listed: {left:?}"
+    );
+    assert!(
+        answer("GetTeams", 1)["A"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|t| t["Name"] == "mmrs-parity-plugusers-<side>" && t["DeleteAt"] == "<set>"),
+        "DeleteTeam archives the team"
+    );
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]

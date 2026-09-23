@@ -140,6 +140,18 @@ pub trait TeamStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetTeamsForUserWithPagination` (team_store.go:1209): every
+    /// membership row the user has, **left teams included** — there is no `DeleteAt` predicate,
+    /// unlike [`TeamStore::get_teams_for_user`] — and **no `ORDER BY`**, so which rows a page
+    /// holds is the database's heap order. `OFFSET page * per_page LIMIT per_page`, and a
+    /// `per_page` of zero is `LIMIT 0`.
+    fn get_teams_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705) — the **teams**, where
     /// `get_teams_for_user` returns the memberships.
     fn get_teams_by_user_id(
@@ -464,6 +476,16 @@ impl TeamStore for SqlTeamStore {
         include_deleted: bool,
     ) -> Result<Vec<TeamMember>, StoreError> {
         get_teams_for_user(&self.pool, user_id, exclude_team_id, include_deleted).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, page, per_page))]
+    async fn get_teams_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> Result<Vec<TeamMember>, StoreError> {
+        get_teams_for_user_with_pagination(&self.pool, user_id, page, per_page).await
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, found))]
@@ -1581,6 +1603,50 @@ pub async fn get_teams_for_user(
         user_id,
         exclude_team_id,
         include_deleted
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with userId={user_id}"),
+        source,
+    })?;
+
+    Ok(rows.into_iter().map(team_member_from_row).collect())
+}
+
+/// Port of `SqlTeamStore.GetTeamsForUserWithPagination` (team_store.go:1209); see
+/// [`TeamStore::get_teams_for_user_with_pagination`]. The select and the two scheme joins are
+/// [`get_teams_for_user`]'s (`getTeamMembersWithSchemeSelectQuery`); only the predicate and the
+/// paging differ. The offset saturates where Go's `page * perPage` would wrap.
+pub async fn get_teams_for_user_with_pagination(
+    pool: &PgPool,
+    user_id: &str,
+    page: i64,
+    per_page: i64,
+) -> Result<Vec<TeamMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        TeamMemberRow,
+        r#"
+        SELECT tm.teamid,
+               tm.userid,
+               tm.roles,
+               tm.deleteat,
+               tm.schemeuser,
+               tm.schemeadmin,
+               tm.schemeguest,
+               tm.createat,
+               ts.defaultteamguestrole,
+               ts.defaultteamuserrole,
+               ts.defaultteamadminrole
+          FROM teammembers tm
+          LEFT JOIN teams t ON tm.teamid = t.id
+          LEFT JOIN schemes ts ON t.schemeid = ts.id
+         WHERE tm.userid = $1
+         LIMIT $2 OFFSET $3
+        "#,
+        user_id,
+        per_page,
+        page.saturating_mul(per_page),
     )
     .fetch_all(pool)
     .await

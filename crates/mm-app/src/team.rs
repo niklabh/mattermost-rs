@@ -82,6 +82,32 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetTeamMembersForUserWithPagination` (team.go:1117): every membership
+    /// row the user has, left teams included and in no promised order; see
+    /// [`mm_store::TeamStore::get_teams_for_user_with_pagination`].
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, page, per_page))]
+    pub async fn get_team_members_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> AppResult<Vec<TeamMember>> {
+        self.store()
+            .team()
+            .get_teams_for_user_with_pagination(user_id, page, per_page)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "paged team members lookup failed");
+                AppError::boxed(
+                    "GetTeamMembersForUserWithPagination",
+                    "app.team.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetTeam` (team.go:897), through the `TeamService.GetTeam` pass-through
     /// (app/teams/teams.go:30) it delegates to.
     ///

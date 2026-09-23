@@ -9835,3 +9835,43 @@ this process's, so Go answers as if it did not exist. **What is owed:** `getDyna
 for a plugin URL — the request through the plugin's `ServeHTTP` (`/plugins/<id>/...`), which the
 Rust host already serves — and a check in the command tranche with `/hookrec fetch `.
 
+---
+
+## D-1030 · A plugin's `GetUsers` with a role, the `update_at_asc` sort, `UpdatedAfter` or view restrictions answers not implemented
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:277) · **Owner** the plugin host
+
+`UserStore::get_all_profiles` holds only the page and the active filter; Go's `GetAllProfiles`
+also applies `applyRoleFilter`, `applyMultiRoleFilters` (system roles only), `Users.UpdateAt ASC`
+for `update_at_asc`, `UpdateAt > UpdatedAfter` and `applyViewRestrictionsFilter`
+(`mm_app::plugin_api::users::get_users_unanswerable`). **What is owed:** those four in one
+`QueryBuilder` query, a DB test per predicate, and a script call per shape in the users tranche.
+
+---
+
+## D-1031 · A plugin's `SearchUsers` outside a team or a channel answers not implemented
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/user.go:2412) · **Owner** the plugin host
+
+`App.SearchUsers` has six other arms: `WithoutTeam`, `NotInChannelId` (which asks the
+access-control service first), `NotInTeamId`, `InGroupId`, `NotInGroupId`
+(`mm_app::plugin_api::users::search_arm`). The store has `search_not_in_channel` for the plain
+case; the rest have no query here. **What is owed:** the arms that are store calls, the ABAC
+branch of `SearchUsersNotInChannel` behind its nil-service answer, and a script call per arm.
+
+---
+
+## D-1032 · Whether a joining user's own connection hears its default-channel `user_added` depends on hub timing
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/channel.go:75) · **Owner** the websocket hub
+
+`JoinDefaultChannels` saves each default channel's member and publishes `user_added` to the
+channel; a connection hears it only if its cached memberships already hold that channel. Go's hub
+decides on its own goroutine, after the loop has usually saved both channels: measured, Go always
+delivered the joiner's two `user_added` and never its own Off-Topic join post. This hub decides
+as it publishes and dropped one `user_added` one run in three; invalidating the joiner's cache
+per channel then delivered the join post Go does not. The users tranche therefore watches a
+user who never joins. **What is owed:** a delivery rule that reproduces Go's usual order (decide
+after the publishing call returns, or reload once per join), and the tranche's joins made by the
+watched user.
+

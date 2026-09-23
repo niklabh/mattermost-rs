@@ -15,6 +15,7 @@
 use mm_store::StoreError;
 use mm_store::team_store::{
     TeamMembersGetOptions, get_by_name, get_member, get_members, get_members_by_ids,
+    get_teams_for_user_with_pagination,
 };
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -346,6 +347,61 @@ async fn the_member_reads_match_gos_sql() {
             }
         ),
         "{empty:?}"
+    );
+
+    purge(&pool).await;
+}
+
+/// `GetTeamsForUserWithPagination` keeps a **left** team's row — it has no `DeleteAt`
+/// predicate, unlike `GetTeamsForUser` — and pages with `OFFSET page * per_page`. It has no
+/// `ORDER BY` either, so the pages are compared as a set.
+#[tokio::test]
+async fn the_paged_memberships_of_a_user_keep_left_teams() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL to run");
+        return;
+    }
+    let _serialised = FIXTURES.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    seed(&pool).await;
+
+    let departed = get_teams_for_user_with_pagination(&pool, USER_DEPARTED, 0, 10)
+        .await
+        .expect("lists");
+    assert_eq!(departed.len(), 1, "the left team's row is listed");
+    assert_eq!(
+        (departed[0].team_id.as_str(), departed[0].delete_at),
+        (TEAM, 1_700_000_000_000)
+    );
+
+    let mut paged = Vec::new();
+    for page in 0..2 {
+        let rows = get_teams_for_user_with_pagination(&pool, USER_A, page, 1)
+            .await
+            .expect("lists");
+        assert_eq!(rows.len(), 1, "page {page} holds one row");
+        paged.push(rows[0].team_id.clone());
+    }
+    paged.sort();
+    assert_eq!(paged, vec![TEAM.to_owned(), OTHER_TEAM.to_owned()]);
+    let beyond = get_teams_for_user_with_pagination(&pool, USER_A, 2, 1)
+        .await
+        .expect("lists");
+    assert!(beyond.is_empty(), "OFFSET 2 is past both rows");
+    let none = get_teams_for_user_with_pagination(&pool, USER_A, 0, 0)
+        .await
+        .expect("lists");
+    assert!(none.is_empty(), "per_page=0 is LIMIT 0");
+    let admin = get_teams_for_user_with_pagination(&pool, USER_A, 0, 10)
+        .await
+        .expect("lists")
+        .into_iter()
+        .find(|m| m.team_id == TEAM)
+        .expect("the admin row");
+    assert_eq!(
+        admin.roles, "team_user team_admin",
+        "the scheme roles are applied"
     );
 
     purge(&pool).await;

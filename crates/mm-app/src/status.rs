@@ -492,6 +492,39 @@ impl App {
     }
 }
 
+impl App {
+    /// Port of `PlatformService.SetStatusDoNotDisturb` (platform/status.go:548): the untimed DND
+    /// the plugin API's `UpdateUserStatus(…, "dnd")` sets.
+    ///
+    /// Unlike [`App::set_status_do_not_disturb_timed`] it records **no** `PrevStatus` and leaves
+    /// `DNDEndTime` as it was — a user who had a timed DND keeps its end time, and the expiry job
+    /// will still end this one. `Manual` is forced true. With no status to read, the user starts
+    /// from an offline, non-manual one, as Go's does on any read error.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    pub async fn set_status_do_not_disturb(&self, user_id: &str) {
+        if !self.config().enable_user_statuses {
+            return;
+        }
+
+        let mut status = match self.get_status(user_id).await {
+            Ok(status) => status,
+            Err(_) => Status {
+                user_id: user_id.to_owned(),
+                status: STATUS_OFFLINE.to_owned(),
+                manual: false,
+                last_activity_at: 0,
+                active_channel: String::new(),
+                ..Status::default()
+            },
+        };
+
+        status.status = mm_model::status::STATUS_DND.to_owned();
+        status.manual = true;
+
+        self.save_and_broadcast_status(&status).await;
+    }
+}
+
 /// Port of `PlatformService.isUserAway` (platform/status.go).
 ///
 /// `LastActivityAt` is **milliseconds** and `UserStatusAwayTimeout` is **seconds**, hence the
