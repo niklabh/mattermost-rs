@@ -1,0 +1,34 @@
+# Mutation plan for plugin slash commands under the Rust host (docs/PLUGIN_PLAN.md, Phase 6):
+# the registry, execution through POST /api/v4/commands/execute, HandleCommandResponse, the
+# command half of the plugin API and the autocomplete list's plugin half.
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-commands.plan
+#
+# The oracle is `parity::plugin_hooks::plugin_slash_commands_run_as_go_runs_them`: a Go host and a
+# Rust host each run nineteen commands and a command script, and every answer, hook, frame, post
+# and the autocomplete list and suggestions are compared. Two lines are unit mutations of the
+# registry. The last two lines are the no-op controls and must SURVIVE.
+
+plugin-host-inverted	crates/mm-api/src/commands.rs	    if state.app.plugin_host().hosted() {\n        args.user_id	    if !state.app.plugin_host().hosted() {\n        args.user_id	api	plugin_hooks::plugin_slash_commands
+built-in-wins	crates/mm-api/src/commands.rs	    if state.app.plugin_host().hosted() {\n        args.user_id	    if state.app.plugin_host().hosted() && !matches!(mm_app::command_provider::provider_command(&state.app.config(), &trigger), mm_app::command_provider::ProviderCommand::Command(_)) {\n        args.user_id	api	plugin_hooks::plugin_slash_commands
+autocomplete-asks-go	crates/mm-api/src/commands.rs	    !state.app.plugin_host().hosted() && go_may_have_plugins()	    go_may_have_plugins()	api	plugin_hooks::plugin_slash_commands
+autocomplete-no-plugin-half	crates/mm-app/src/command_provider.rs	for command in self.plugin_commands().for_team(team_id) {	for command in self.plugin_commands().for_team(team_id).into_iter().filter(|_| false) {	api	plugin_hooks::plugin_slash_commands
+trigger-not-lowered	crates/mm-app/src/plugin_commands.rs	            trigger: go_to_lower(&command.trigger),	            trigger: command.trigger.clone(),	api	plugin_hooks::plugin_slash_commands
+client-trigger-id-dropped	crates/mm-app/src/plugin_commands.rs	        response.trigger_id = client_trigger_id;	        let _ = client_trigger_id;	api	plugin_hooks::plugin_slash_commands
+plugin-response-is-bot-post	crates/mm-app/src/plugin_commands.rs	.handle_command_response(ctx, session, &command, args, &mut response, true)	.handle_command_response(ctx, session, &command, args, &mut response, false)	api	plugin_hooks::plugin_slash_commands
+extras-not-posted	crates/mm-app/src/plugin_commands.rs	            for resp in extra.iter_mut() {	            for resp in extra.iter_mut().filter(|_| false) {	api	plugin_hooks::plugin_slash_commands
+redirect-unchecked	crates/mm-app/src/plugin_commands.rs	        if !response.channel_id.is_empty() {	        if !response.channel_id.is_empty() && false {	api	plugin_hooks::plugin_slash_commands
+slack-parsing-always	crates/mm-app/src/plugin_commands.rs	        if !response.skip_slack_parsing {	        if true || !response.skip_slack_parsing {	api	plugin_hooks::plugin_slash_commands
+here-not-expanded	crates/mm-app/src/plugin_commands.rs	        .replace("<!here>", "@here")	        .replace("<!here>", "<!here>")	api	plugin_hooks::plugin_slash_commands
+untyped-not-ephemeral	crates/mm-app/src/plugin_commands.rs	        if (response.response_type.is_empty()	        if (false	api	plugin_hooks::plugin_slash_commands
+empty-ephemeral-sent	crates/mm-app/src/plugin_commands.rs	            && (!response.text.is_empty() || response.attachments.is_some())	            && true	api	plugin_hooks::plugin_slash_commands
+status-not-bucketed	crates/mm-app/src/plugin_commands.rs	    let status = if (100..=999).contains(&wire.status_code) {	    let status = if (0..=999).contains(&wire.status_code) {	api	plugin_hooks::plugin_slash_commands
+skip-translation-dropped	crates/mm-app/src/plugin_commands.rs	    err.skip_translation = wire.skip_translation;	    let _ = wire.skip_translation;	api	plugin_hooks::plugin_slash_commands
+plugin-error-translated	crates/mm-app/src/plugin_api.rs	                b: app_error(err.error, !err.from_plugin),	                b: app_error(err.error, true),	api	plugin_hooks::plugin_slash_commands
+slash-site-url-unset	crates/mm-app/src/plugin_api.rs	        command_args.site_url = self.app.config().site_url.clone().unwrap_or_default();	        let _ = self.app.config().site_url.clone();	api	plugin_hooks::plugin_slash_commands
+slash-not-found-unimplemented	crates/mm-app/src/plugin_api.rs	                    Ok(crate::command_provider::CommandDispatch::NotFound(err)) | Err(err) => {	                    Err(err) => {	api	plugin_hooks::plugin_slash_commands
+disable-keeps-commands	crates/mm-app/src/plugins.rs	            self.plugins.commands.unregister_plugin(&id);	            let _ = &self.plugins.commands;	api	plugin_hooks::plugin_slash_commands
+unregister-any-team	crates/mm-app/src/plugin_commands.rs	.retain(|pc| pc.command.team_id != team_id || pc.command.trigger != trigger);	.retain(|pc| pc.command.trigger != trigger);	unit	plugin_commands
+plugin-trigger-any-space	crates/mm-app/src/plugin_commands.rs	    let head = command.split(' ').next().unwrap_or_default();	    let head = command.split(char::is_whitespace).next().unwrap_or_default();	unit	plugin_commands
+control-answered-ok	crates/mm-app/src/plugin_commands.rs	            Ok(()) => ExecuteOutcome::Answered(Ok(Box::new(response))),	            Ok(()) => ExecuteOutcome::Answered(Result::Ok(Box::new(response))),	api	plugin_hooks::plugin_slash_commands
+control-trim-str	crates/mm-api/src/commands.rs	    format!("{base}{subpath}").trim_end_matches('/').to_owned()	    format!("{base}{subpath}").trim_end_matches("/").to_owned()	api	plugin_hooks::plugin_slash_commands

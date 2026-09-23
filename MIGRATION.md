@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 64/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 71/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14595,4 +14595,22 @@ A first batch was void — both controls caught — because a mutation that kept
 left its username taken for every later line; the purge now removes the script's bot users by
 username, and the two real survivors of that batch (`DeletePost`'s deleter, `CreateChannel`
 adding no member) got a row check and a `GetChannelMember` before the rerun.
+
+## Plugin slash commands under the Rust host (2026-09-23)
+
+Seven more API methods, **71 of 258**: `RegisterCommand`, `UnregisterCommand`,
+`ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`, `ListCommands` and
+`ExecuteSlashCommand`; the `ExecuteCommand` hook (one plugin's, through `HooksForPlugin`, so not
+one of Phase 5's 35 sites); `POST /api/v4/commands/execute` served
+under `MMRS_PLUGIN_HOST=rust` for a trigger a plugin here registered (plugins run before built-ins,
+so a plugin's `/shrug` wins); and the plugin half of the autocomplete list. Opens [D-1020] and
+[D-1021]; narrows [D-241] and [D-781].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| app/plugin_commands.go, `ExecuteCommand`'s plugin half, `HandleCommandResponse{,Post}`, `CreateCommandPost`, `Mentions*`, `ProcessSlackText` (app/command.go, app/slack.go) | `mm_app::plugin_commands` | DONE | 14 unit + `parity::plugin_hooks::plugin_slash_commands_run_as_go_runs_them` (19 commands, a 16-call script, hooks, frames, posts, autocomplete) | The registry's quirks and the post that cannot be forwarded are in the module docs. |
+| `PluginAPI` command methods (app/plugin_api.go:82-98, 1400-1459) | `mm_app::plugin_api` | DONE | the tranche | A plugin's own `*AppError` crosses untranslated; `ListBuiltInCommands` is English only. |
+| `executeCommand` (api4/command.go:357) under the Rust host | `mm_api::commands::execute_command` | DONE | the tranche, `command_*` suites | An unknown trigger and a plugin's empty answer still forward. |
+
+Mutation tally (`plugin-commands.plan`): 23 run, 21 caught, 2 controls survived, 0 harness faults.
 

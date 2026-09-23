@@ -25,6 +25,10 @@
 //! `GetGroupChannel`; `CreateBot`, `GetBot`, `GetBots`, `PatchBot`, `UpdateBotActive`,
 //! `PermanentDeleteBot` and `EnsureBotUser`; and `PublishWebSocketEvent`.
 //!
+//! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
+//! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
+//! `ListCommands` and `ExecuteSlashCommand`.
+//!
 //! # A shape the REST route forwards is not implemented here
 //!
 //! The app functions behind these methods refuse, before any write, the shapes this server does
@@ -179,6 +183,19 @@ fn bytes(value: &[u8]) -> Option<&[u8]> {
 /// `Wrap` attached is unexported, so it stays behind and `DetailedError` is what it was.
 pub fn wire_app_error(mut err: Box<AppError>, default_server_locale: &str) -> Box<WireAppError> {
     translate(&mut err, default_server_locale);
+    Box::new(WireAppError {
+        id: err.id,
+        message: err.message,
+        detailed_error: err.detailed_error,
+        request_id: err.request_id,
+        status_code: i64::from(err.status_code),
+        r#where: err.where_,
+        skip_translation: err.skip_translation,
+    })
+}
+
+/// A `*model.AppError` a plugin made, handed on as it arrived: nothing translates it again.
+pub fn wire_app_error_as_is(err: AppError) -> Box<WireAppError> {
     Box::new(WireAppError {
         id: err.id,
         message: err.message,
@@ -844,6 +861,204 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         Ok(api::Z_PublishWebSocketEventReturns {})
     }
 
+    // -- slash commands ---------------------------------------------------------------------
+
+    /// Port of `PluginAPI.RegisterCommand` (app/plugin_api.go:82); see
+    /// [`PluginCommandRegistry::register`](crate::plugin_commands::PluginCommandRegistry::register).
+    /// A refusal crosses as `encodableError` makes it: an `ErrorString`. A nil command, which Go
+    /// dereferences, is the empty one — an invalid command.
+    async fn register_command(
+        &self,
+        args: api::Z_RegisterCommandArgs,
+    ) -> Result<api::Z_RegisterCommandReturns, NotImplemented> {
+        let command = args
+            .a
+            .as_deref()
+            .map(crate::plugin_commands::command_from_wire)
+            .unwrap_or_default();
+        let result = self.app.plugin_commands().register(&self.id, command);
+        Ok(api::Z_RegisterCommandReturns {
+            a: result.err().and_then(|err| {
+                mm_plugin::error::encodable_error(Some(&PluginError::Message(err.to_string())))
+            }),
+        })
+    }
+
+    /// Port of `PluginAPI.UnregisterCommand` (app/plugin_api.go:86): team id, then trigger. It
+    /// removes **every** plugin's registration of the trigger there, and cannot fail.
+    async fn unregister_command(
+        &self,
+        args: api::Z_UnregisterCommandArgs,
+    ) -> Result<api::Z_UnregisterCommandReturns, NotImplemented> {
+        self.app.plugin_commands().unregister(&args.a, &args.b);
+        Ok(api::Z_UnregisterCommandReturns { a: None })
+    }
+
+    /// Port of `PluginAPI.ListPluginCommands` (app/plugin_api.go:1429): every plugin's commands
+    /// for the team, first trigger wins.
+    async fn list_plugin_commands(
+        &self,
+        args: api::Z_ListPluginCommandsArgs,
+    ) -> Result<api::Z_ListPluginCommandsReturns, NotImplemented> {
+        Ok(api::Z_ListPluginCommandsReturns {
+            a: self.plugin_commands_for(&args.a),
+            b: None,
+        })
+    }
+
+    /// Port of `PluginAPI.ListBuiltInCommands` (app/plugin_api.go:1443); see
+    /// [`App::list_built_in_commands`]. Not implemented under a non-English server locale.
+    async fn list_built_in_commands(
+        &self,
+        _: api::Z_ListBuiltInCommandsArgs,
+    ) -> Result<api::Z_ListBuiltInCommandsReturns, NotImplemented> {
+        Ok(api::Z_ListBuiltInCommandsReturns {
+            a: self.built_in_commands()?,
+            b: None,
+        })
+    }
+
+    /// Port of `PluginAPI.ListCustomCommands` (app/plugin_api.go:1424): the team's commands
+    /// straight from the store, `EnableCommands` or not, **unsanitised** — tokens included.
+    async fn list_custom_commands(
+        &self,
+        args: api::Z_ListCustomCommandsArgs,
+    ) -> Result<api::Z_ListCustomCommandsReturns, NotImplemented> {
+        let answer = match self.custom_commands(&args.a).await {
+            Ok(commands) => api::Z_ListCustomCommandsReturns {
+                a: commands,
+                b: None,
+            },
+            Err(b) => api::Z_ListCustomCommandsReturns { a: Vec::new(), b },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.ListCommands` (app/plugin_api.go:1400): the plugins' commands, then the
+    /// built-ins, then the team's — concatenated, so a trigger can appear twice.
+    async fn list_commands(
+        &self,
+        args: api::Z_ListCommandsArgs,
+    ) -> Result<api::Z_ListCommandsReturns, NotImplemented> {
+        let mut all = self.plugin_commands_for(&args.a);
+        all.extend(self.built_in_commands()?);
+        let answer = match self.custom_commands(&args.a).await {
+            Ok(custom) => {
+                all.extend(custom);
+                api::Z_ListCommandsReturns { a: all, b: None }
+            }
+            Err(b) => api::Z_ListCommandsReturns { a: Vec::new(), b },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.ExecuteSlashCommand` (app/plugin_api.go:91): the user must exist, the
+    /// site URL is the configured one, and then `ExecuteCommand` with the API's empty context —
+    /// so a plugin command's response post is made with the zero session.
+    ///
+    /// A trigger that reaches a custom or built-in command is answered as not implemented (no
+    /// `DoCommand` and no outgoing request is ported), decided before that command runs; one that
+    /// matches nothing is Go's 404. When `HandleCommandResponse` fails Go returns the response
+    /// **and** the error, and so does this.
+    async fn execute_slash_command(
+        &self,
+        args: api::Z_ExecuteSlashCommandArgs,
+    ) -> Result<api::Z_ExecuteSlashCommandReturns, NotImplemented> {
+        use crate::plugin_commands::{
+            ExecuteOutcome, command_args_from_wire, command_response_to_wire,
+        };
+
+        let mut command_args = args
+            .a
+            .as_deref()
+            .map(command_args_from_wire)
+            .unwrap_or_default();
+        let app_error = |err: Box<AppError>, translated: bool| {
+            let wire = if translated {
+                self.wire(err)
+            } else {
+                Some(wire_app_error_as_is(*err))
+            };
+            wire.and_then(|w| mm_plugin::error::encodable_error(Some(&PluginError::App(w))))
+        };
+        if let Err(err) = self.app.get_user(&command_args.user_id).await {
+            return Ok(api::Z_ExecuteSlashCommandReturns {
+                a: None,
+                b: app_error(err, true),
+            });
+        }
+        command_args.site_url = self.app.config().site_url.clone().unwrap_or_default();
+
+        // `ExecuteCommand`'s own format check, before anything runs.
+        let Some(trigger) = crate::command_provider::command_trigger(&command_args.command) else {
+            let head = command_args
+                .command
+                .find(char::is_whitespace)
+                .map_or(command_args.command.as_str(), |i| {
+                    &command_args.command[..i]
+                });
+            return Ok(api::Z_ExecuteSlashCommandReturns {
+                a: None,
+                b: app_error(
+                    AppError::boxed(
+                        "command",
+                        "api.command.execute_command.format.app_error",
+                        Some(std::collections::HashMap::from([(
+                            "Trigger".to_owned(),
+                            serde_json::Value::String(mm_model::utils::go_to_lower(head)),
+                        )])),
+                        String::new(),
+                        400,
+                    ),
+                    true,
+                ),
+            });
+        };
+
+        let answer = match self
+            .app
+            .execute_plugin_command(
+                &HookContext::default(),
+                &Session::default(),
+                &mut command_args,
+            )
+            .await
+        {
+            ExecuteOutcome::Answered(Ok(response)) => api::Z_ExecuteSlashCommandReturns {
+                a: Some(Box::new(command_response_to_wire(&response))),
+                b: None,
+            },
+            ExecuteOutcome::Answered(Err(err)) => api::Z_ExecuteSlashCommandReturns {
+                a: err
+                    .response
+                    .as_ref()
+                    .map(|r| Box::new(command_response_to_wire(r))),
+                b: app_error(err.error, !err.from_plugin),
+            },
+            ExecuteOutcome::NotPlugin => {
+                match self
+                    .app
+                    .command_dispatch(&command_args.team_id, &command_args.user_id, &trigger)
+                    .await
+                {
+                    Ok(crate::command_provider::CommandDispatch::NotFound(err)) | Err(err) => {
+                        api::Z_ExecuteSlashCommandReturns {
+                            a: None,
+                            b: app_error(err, true),
+                        }
+                    }
+                    Ok(_) => {
+                        return Err(self.not_implemented(
+                            "ExecuteSlashCommand",
+                            "a custom or built-in command runs only in Go",
+                        ));
+                    }
+                }
+            }
+        };
+        Ok(answer)
+    }
+
     // -- bots -------------------------------------------------------------------------------
 
     /// Port of `PluginAPI.CreateBot` (app/plugin_api.go:1287). An empty owner becomes the
@@ -1302,6 +1517,52 @@ impl AppPluginApi {
         match result {
             Ok(value) => (Some(Box::new(convert(value))), None),
             Err(err) => (None, self.wire(err)),
+        }
+    }
+
+    /// `ListPluginCommands`' answer: the team's plugin commands, first trigger wins.
+    fn plugin_commands_for(&self, team_id: &str) -> Vec<mm_plugin::wire::model::Command> {
+        let mut seen = std::collections::HashSet::new();
+        self.app
+            .plugin_commands()
+            .for_team(team_id)
+            .into_iter()
+            .filter(|c| seen.insert(c.trigger.clone()))
+            .map(|c| crate::plugin_commands::command_to_wire(&c))
+            .collect()
+    }
+
+    /// `ListBuiltInCommands`' answer, or not implemented where the strings are not English.
+    fn built_in_commands(&self) -> Result<Vec<mm_plugin::wire::model::Command>, NotImplemented> {
+        match self.app.list_built_in_commands() {
+            Some(commands) => Ok(commands
+                .iter()
+                .map(crate::plugin_commands::command_to_wire)
+                .collect()),
+            None => Err(self.not_implemented(
+                "ListBuiltInCommands",
+                "the built-in commands are held in English only, or /exportlink is undecidable",
+            )),
+        }
+    }
+
+    /// `ListCustomCommands`' answer: `Command().GetByTeam` whole. Its error is the store's, an
+    /// `error` that crosses as its text; the text is this store's, not Go's `errors.Wrapf`.
+    async fn custom_commands(
+        &self,
+        team_id: &str,
+    ) -> Result<Vec<mm_plugin::wire::model::Command>, Option<Interface>> {
+        use mm_store::CommandStore as _;
+        match self.app.store().command().get_by_team(team_id).await {
+            Ok(commands) => Ok(commands
+                .iter()
+                .map(crate::plugin_commands::command_to_wire)
+                .collect()),
+            Err(err) => Err(mm_plugin::error::encodable_error(Some(
+                &PluginError::Message(format!(
+                    "failed to find Commands with teamId={team_id}: {err}"
+                )),
+            ))),
         }
     }
 

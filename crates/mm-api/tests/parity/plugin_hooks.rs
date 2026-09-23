@@ -6291,6 +6291,691 @@ async fn run_the_core_tour(client: &reqwest::Client, admin: &str) {
     common::delete_channel(client, admin, &shared.read_channel).await;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The slash-command tranche
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the slash-command tranche; see `second_server_ports`.
+const COMMAND_HOST_PORT: u16 = 8145;
+/// Its Go server.
+const COMMAND_GO_OFFSET: u16 = 91;
+/// Each side's tag, in its users' names and its channels'.
+const COMMAND_SIDES: [&str; 2] = ["cmdsidego", "cmdsiders"];
+
+/// The plain users the command tour makes, for the cleanup.
+static COMMAND_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for **plugin slash commands** under each host (`mm_app::plugin_commands`,
+/// the execute handler in `mm_api::commands`): the recorder registers its commands on activation
+/// (`examples/recorder/commands.rs`, switched on by `HOOK_RECORDER_COMMANDS`), and each side's
+/// own user runs the same commands through `POST /api/v4/commands/execute` in its own channel.
+///
+/// Compared: the registrations' answers; every command's status and body; every hook the
+/// recorder saw (the `ExecuteCommand`s, and the message hooks an in-channel response fires); the
+/// command script's plugin API answers; every websocket frame the own user received; the posts
+/// the responses wrote; and the autocomplete list and suggestions. Masked: ids minted per side
+/// (`<minted>`), the trigger id (checked for shape first), the session id, the site URL's host.
+///
+/// Also pinned, because both hosts could agree on a wrong answer: a plugin's `/shrug` answers
+/// instead of the built-in's; an unknown trigger and a plugin's "nothing" are **forwarded** by
+/// the Rust host and 404 on both; and a plugin disabled through the Rust host takes its commands
+/// with it.
+#[tokio::test]
+async fn plugin_slash_commands_run_as_go_runs_them() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_command_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *COMMAND_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// One side of the command tour.
+struct CommandSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    channel: String,
+    /// An open channel the own user is not in, for the forbidden redirect.
+    closed: String,
+}
+
+impl CommandSide {
+    fn pairs(&self, base: &str) -> Vec<(String, String)> {
+        let host = base.trim_start_matches("http://").to_owned();
+        vec![
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.closed.clone(), "<closed-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (host, "<host>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]
+    }
+
+    /// The commands the tour runs, in order.
+    fn commands(&self) -> Vec<String> {
+        vec![
+            format!(
+                "/hookrec ephemeral <!channel> <!here> <@{}> hi @{} ~{}",
+                self.own.id,
+                common::plain_username(&format!("cmdown{}", self.tag)),
+                format!("mmrs-parity-cmd{}", self.tag),
+            ),
+            format!("/hookrec in_channel posted for <@{}>", self.own.id),
+            "/hookrec plain no type".to_owned(),
+            "/hookrec skip <!channel> stays as it is".to_owned(),
+            "/hookrec props".to_owned(),
+            "/hookrec goto".to_owned(),
+            "/hookrec extra".to_owned(),
+            format!("/hookrec forbidden {}", self.closed),
+            "/hookrec system".to_owned(),
+            "/hookrec error".to_owned(),
+            "/hookrec error-skip".to_owned(),
+            "/hookrec error-status".to_owned(),
+            "/HookRec ephemeral upper".to_owned(),
+            "/hookreccase".to_owned(),
+            "/hookrecteam ephemeral team".to_owned(),
+            "/shrug the plugin's".to_owned(),
+            "/hookrec script".to_owned(),
+            "/hookrec nothing".to_owned(),
+            "/nosuchhookrec at all".to_owned(),
+        ]
+    }
+}
+
+/// The commands the Rust host must hand on to Go: no plugin answers them.
+const COMMAND_FORWARDED: [&str; 2] = ["/hookrec nothing", "/nosuchhookrec at all"];
+
+/// Every `TriggerId` in an `ExecuteCommand` entry, decoded: `<client id>:<user id>:<millis>:
+/// <signature>`. Read before anything is masked.
+fn trigger_ids(log: &Path) -> Vec<Vec<String>> {
+    use base64::Engine as _;
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+        .filter(|e| e["hook"] == "ExecuteCommand")
+        .filter_map(|e| e["args"]["B"]["TriggerId"].as_str().map(str::to_owned))
+        .map(|raw| {
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(raw.as_bytes())
+                .unwrap_or_default();
+            String::from_utf8_lossy(&decoded)
+                .split(':')
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect()
+}
+
+/// The masks this tranche adds to [`mask_core`]'s: a trigger id and a session id, which each
+/// side mints; a site URL, whose host is each side's own.
+fn mask_command(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(mask_command),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(key.as_str(), "TriggerId" | "SessionId" | "SiteURL")
+                    && entry.as_str().is_some_and(|s| !s.is_empty())
+                {
+                    *entry = Json::String(format!("<{key}>"));
+                    continue;
+                }
+                mask_command(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Wait until the transcript holds `hook` and then stops growing.
+async fn command_transcript_settles(path: &Path, hook: &str, side: &str) {
+    let mut last = usize::MAX;
+    let mut quiet_since = None;
+    for _ in 0..400 {
+        let entries = transcript(path);
+        let done = entries.iter().any(|e| e["hook"] == hook);
+        if done && entries.len() == last {
+            let since = *quiet_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= QUIET * 2 {
+                return;
+            }
+        } else {
+            quiet_since = None;
+        }
+        last = entries.len();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!(
+        "{side}: the transcript never settled after {hook}: {:?}",
+        names(&transcript(path))
+    );
+}
+
+/// The own user's posts in the own channel, oldest first: type, message and props, which is what
+/// a command response decides.
+async fn command_posts(channel: &str, user: &str) -> Vec<Json> {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let rows: Vec<(String, String, Option<String>, bool)> = sqlx::query_as(
+        "SELECT type, message, props::text, rootid <> '' FROM posts
+         WHERE channelid = $1 AND userid = $2 ORDER BY createat, id",
+    )
+    .bind(channel)
+    .bind(user)
+    .fetch_all(&pool)
+    .await
+    .expect("the posts");
+    rows.into_iter()
+        .map(|(kind, message, props, reply)| {
+            let props: Json = props
+                .and_then(|p| serde_json::from_str(&p).ok())
+                .unwrap_or(Json::Null);
+            serde_json::json!({ "type": kind, "message": message, "props": props, "reply": reply })
+        })
+        .collect()
+}
+
+async fn run_the_command_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-commands");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let team = common::create_team(client, admin, "hookcmd").await;
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let shared: Vec<String> = vec![team.clone(), me["id"].as_str().expect("an id").to_owned()];
+    let mut sides = Vec::new();
+    for tag in COMMAND_SIDES {
+        let own = common::create_plain_user(client, admin, &team, &format!("cmdown{tag}")).await;
+        COMMAND_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(own.id.clone());
+        let channel = common::create_channel(client, admin, &team, &format!("cmd{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        let closed = common::create_channel(client, admin, &team, &format!("cmdx{tag}")).await;
+        sides.push(CommandSide {
+            tag,
+            own,
+            channel,
+            closed,
+        });
+    }
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let go = start_go(
+        &go_run,
+        &[
+            ("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str()),
+            ("HOOK_RECORDER_COMMANDS", "1"),
+            ("HOOK_RECORDER_COMMAND_TEAM", team.as_str()),
+        ],
+        COMMAND_GO_OFFSET,
+    )
+    .await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    // `ExecuteSlashCommand` hands the plugin `GetSiteURL()`, the configured one; the Go host has
+    // it from `start_go`, so the Rust host gets its own too (masked, but set on both).
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let site_url = format!("http://localhost:{}", COMMAND_HOST_PORT + offset);
+    let rust = SecondServer::start_in(
+        COMMAND_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+            ("HOOK_RECORDER_COMMANDS", "1"),
+            ("HOOK_RECORDER_COMMAND_TEAM", team.as_str()),
+            ("MM_SERVICESETTINGS_SITEURL", site_url.as_str()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+    command_transcript_settles(&go_log, "OnActivate", "Go").await;
+    command_transcript_settles(&rust_log, "OnActivate", "Rust").await;
+    let activated = (transcript(&go_log).len(), transcript(&rust_log).len());
+
+    // Each side in turn: its socket open, its commands, its transcript and frames settled.
+    let mut answers = Vec::new();
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let pairs = side.pairs(base);
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let mut side_answers = Vec::new();
+        let mut client_trigger_ids = Vec::new();
+        for command in side.commands() {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "channel_id": side.channel,
+                "team_id": team,
+                "command": command,
+            }))
+            .expect("the body");
+            let (status, answer, served_by) = request_raw(
+                client,
+                base,
+                reqwest::Method::POST,
+                Some(&side.own.token),
+                "/api/v4/commands/execute",
+                Some(&body),
+            )
+            .await;
+            let scrubbed = scrub(&String::from_utf8_lossy(&answer), &pairs);
+            let mut value: Json = serde_json::from_str(&scrubbed)
+                .unwrap_or_else(|_| Json::String(scrubbed.trim_end().to_owned()));
+            if let Some(id) = value["trigger_id"].as_str().filter(|s| !s.is_empty()) {
+                client_trigger_ids.push(id.to_owned());
+            }
+            value.as_object_mut().map(|m| m.remove("request_id"));
+            mask_core(&mut value, &shared);
+            let scrubbed_command = scrub(&command, &pairs);
+            if host == "Rust" {
+                let forwarded = COMMAND_FORWARDED.contains(&command.as_str());
+                assert_eq!(
+                    served_by.as_deref() == Some("rust"),
+                    !forwarded,
+                    "{scrubbed_command}: served by {served_by:?}"
+                );
+            }
+            side_answers.push((scrubbed_command, status, value));
+        }
+        command_transcript_settles(log, "CommandScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        // The trigger ids the plugin was handed: the user's, and each response's client half.
+        let triggers = trigger_ids(log);
+        assert!(
+            triggers
+                .iter()
+                .all(|t| t.len() == 4 && t[0].len() == 26 && t[1] == side.own.id),
+            "{host}: every trigger id is <client>:<user>:<millis>:<signature>: {triggers:?}"
+        );
+        for id in &client_trigger_ids {
+            assert!(
+                triggers.iter().any(|t| &t[0] == id),
+                "{host}: the response's trigger id {id} is the one the plugin was handed"
+            );
+        }
+
+        let mut entries = transcript_of(log, &pairs);
+        entries.iter_mut().for_each(|e| {
+            mask_core(e, &shared);
+            mask_command(e);
+        });
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared))
+            .collect();
+        frames.sort_by_key(Json::to_string);
+        let mut posts = command_posts(&side.channel, &side.own.id).await;
+        for post in &mut posts {
+            *post = serde_json::from_str(&scrub(&post.to_string(), &pairs)).expect("json");
+            mask_core(post, &shared);
+        }
+        answers.push(side_answers);
+        recorded.push((entries, frames, posts));
+    }
+
+    // The registrations on activation.
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+    let activation = |entries: &[Json]| -> Json {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "OnActivate")
+            .cloned()
+            .expect("the recorder activated")
+    };
+    let go_activation = activation(&go_side.0);
+    assert_eq!(go_activation, activation(&rust_side.0), "the registrations");
+    let refusals: Vec<Json> = go_activation["calls"]
+        .as_array()
+        .expect("calls")
+        .iter()
+        .map(|c| c["returns"]["A"].clone())
+        .collect();
+    assert_eq!(
+        refusals.iter().filter(|r| r.is_null()).count(),
+        4,
+        "four registrations are accepted: {refusals:?}"
+    );
+    let refusal_text = serde_json::to_string(&refusals).expect("json");
+    for text in [
+        "invalid command",
+        "invalid autocomplete data in command: Command should be lowercase",
+    ] {
+        assert!(
+            refusal_text.contains(text),
+            "Go refuses with {text:?}: {refusal_text}"
+        );
+    }
+    assert_eq!(
+        activated.0, activated.1,
+        "both hosts wrote the same entries on activation"
+    );
+
+    // Every command's answer.
+    for ((command, gs, gb), (_, rs, rb)) in answers[0].iter().zip(&answers[1]) {
+        assert_eq!((gs, gb), (rs, rb), "{command}");
+    }
+    assert_eq!(answers[0].len(), answers[1].len());
+
+    // The command script's answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "CommandScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {go_calls:?}"
+    );
+    for (index, (g, r)) in go_calls.iter().zip(&rust_calls).enumerate() {
+        assert_eq!(g, r, "script call {index} ({})", g["call"]);
+    }
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // Every other hook, in canonical order: the message hooks are detached on both hosts.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "CommandScript" && e["hook"] != "OnActivate")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    for (index, (g, r)) in go_hooks.iter().zip(&rust_hooks).enumerate() {
+        assert_eq!(g, r, "hook {index} ({})", g["hook"]);
+    }
+
+    // The frames and the posts.
+    let events = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(events(&go_side.1), events(&rust_side.1), "the events");
+    for event in ["ephemeral_message", "posted"] {
+        assert!(
+            events(&go_side.1).iter().any(|e| e == event),
+            "the own user received {event}: {:?}",
+            events(&go_side.1)
+        );
+    }
+    // Eighteen commands reach the plugin through the route (all but the unknown trigger), and
+    // three more through `ExecuteSlashCommand`.
+    assert_eq!(
+        names(&go_hooks)
+            .iter()
+            .filter(|n| *n == "ExecuteCommand")
+            .count(),
+        21,
+        "the ExecuteCommand calls: {:?}",
+        names(&go_hooks)
+    );
+    assert!(
+        names(&go_hooks).iter().any(|n| n == "MessageHasBeenPosted"),
+        "an in-channel response fires the message hooks"
+    );
+    for (index, (g, r)) in go_side.1.iter().zip(&rust_side.1).enumerate() {
+        assert_eq!(g, r, "frame {index} ({})", g["event"]);
+    }
+    assert_eq!(go_side.2, rust_side.2, "the posts the responses wrote");
+
+    // What parity alone would not pin.
+    let answer = |prefix: &str| -> (u16, Json) {
+        answers[0]
+            .iter()
+            .find(|(c, _, _)| c.starts_with(prefix))
+            .map(|(_, s, b)| (*s, b.clone()))
+            .unwrap_or_else(|| panic!("no answer for {prefix}"))
+    };
+    assert_eq!(
+        answer("/shrug").1["text"],
+        "hookrec: /shrug the plugin's",
+        "a plugin's /shrug overrides the built-in"
+    );
+    let first = answer("/hookrec ephemeral <!channel>").1;
+    assert!(
+        first["text"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("@channel @here @mmrsplaincmdown<side> hi")),
+        "the response text is Slack-processed: {first}"
+    );
+    assert_eq!(
+        answer("/hookrec skip").1["text"],
+        "<!channel> stays as it is"
+    );
+    assert_eq!(
+        answer("/hookrec goto").1["goto_location"],
+        "https://example.com/hookrec"
+    );
+    for (prefix, status, id) in [
+        (
+            "/hookrec error-skip",
+            409,
+            "mmrs.hookrecorder.command_error_skip",
+        ),
+        (
+            "/hookrec error-status",
+            500,
+            "mmrs.hookrecorder.command_error_status",
+        ),
+        ("/hookrec error", 418, "mmrs.hookrecorder.command_error"),
+        (
+            "/hookrec forbidden",
+            500,
+            "api.command.execute_command.create_post_failed.app_error",
+        ),
+        (
+            "/hookrec system",
+            500,
+            "api.command.execute_command.create_post_failed.app_error",
+        ),
+        (
+            "/hookrec nothing",
+            404,
+            "api.command.execute_command.not_found.app_error",
+        ),
+        (
+            "/nosuchhookrec",
+            404,
+            "api.command.execute_command.not_found.app_error",
+        ),
+    ] {
+        let (s, body) = answer(prefix);
+        assert_eq!((s, body["id"].as_str()), (status, Some(id)), "{prefix}");
+    }
+    assert_eq!(
+        answer("/hookrec error-skip").1["message"],
+        "the hook recorder refuses this command",
+        "a plugin error that skips translation keeps its message"
+    );
+    let in_channel: Vec<&Json> = go_side
+        .2
+        .iter()
+        .filter(|p| p["message"] == "posted for @mmrsplaincmdown<side>")
+        .collect();
+    assert_eq!(
+        in_channel.len(),
+        1,
+        "the in-channel response is one post: {:?}",
+        go_side.2
+    );
+    assert!(
+        go_side.2.iter().any(|p| p["message"] == "the second"),
+        "an extra in-channel response is posted too"
+    );
+    let script_posts = go_side
+        .2
+        .iter()
+        .filter(|p| p["message"] == "posted by the script")
+        .count();
+    assert_eq!(
+        script_posts, 1,
+        "ExecuteSlashCommand's in-channel response is posted"
+    );
+
+    // The autocomplete list and suggestions, the plugin half included.
+    for path in [
+        format!("/api/v4/teams/{team}/commands/autocomplete"),
+        format!(
+            "/api/v4/teams/{team}/commands/autocomplete_suggestions?user_input=%2Fhookrec%20&channel_id={}",
+            sides[0].channel
+        ),
+        format!(
+            "/api/v4/teams/{team}/commands/autocomplete_suggestions?user_input=%2Fhookrec%20pick%20&channel_id={}",
+            sides[0].channel
+        ),
+    ] {
+        let (gs, gb, _) = request_raw(
+            client,
+            &go.base,
+            reqwest::Method::GET,
+            Some(&sides[0].own.token),
+            &path,
+            None,
+        )
+        .await;
+        let (rs, rb, served_by) = request_raw(
+            client,
+            &rust.base,
+            reqwest::Method::GET,
+            Some(&sides[0].own.token),
+            &path,
+            None,
+        )
+        .await;
+        assert_eq!(served_by.as_deref(), Some("rust"), "{path} was forwarded");
+        let decode = |bytes: &[u8]| -> Json {
+            let mut value: Json = serde_json::from_slice(bytes).unwrap_or(Json::Null);
+            // The built-ins are in Go's map order.
+            if let Some(items) = value.as_array_mut() {
+                items.sort_by_key(Json::to_string);
+            }
+            value
+        };
+        assert_eq!((gs, decode(&gb)), (rs, decode(&rb)), "{path}");
+        assert_eq!(gs, 200, "{path}");
+        if path.ends_with("/autocomplete") {
+            let list = decode(&gb);
+            let hookrec = list
+                .as_array()
+                .and_then(|l| l.iter().find(|c| c["trigger"] == "hookrec"))
+                .expect("the plugin's command is listed");
+            assert_eq!(
+                hookrec["autocomplete_data"]["SubCommands"][2]["Arguments"][0]["Data"]["FetchURL"],
+                "/plugins/mmrs.hookrecorder/suggest/fetch",
+                "a relative fetch URL is rooted at the plugin"
+            );
+            assert!(
+                list.as_array()
+                    .is_some_and(|l| l.iter().any(|c| c["trigger"] == "hookrecteam")),
+                "the team's own plugin command is listed"
+            );
+        }
+    }
+    drop(go);
+
+    // A plugin disabled through the Rust host takes its commands with it: the trigger is then
+    // nobody's, and Go answers it.
+    let (status, body, _) = request_raw(
+        client,
+        &rust.base,
+        reqwest::Method::POST,
+        Some(admin),
+        &format!("/api/v4/plugins/{PLUGIN_ID}/disable"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "disable: {}", String::from_utf8_lossy(&body));
+    let body = serde_json::to_vec(&serde_json::json!({
+        "channel_id": sides[1].channel,
+        "team_id": team,
+        "command": "/hookrec ephemeral after the disable",
+    }))
+    .expect("the body");
+    let (status, answer, served_by) = request_raw(
+        client,
+        &rust.base,
+        reqwest::Method::POST,
+        Some(&sides[1].own.token),
+        "/api/v4/commands/execute",
+        Some(&body),
+    )
+    .await;
+    let answer: Json = serde_json::from_slice(&answer).unwrap_or(Json::Null);
+    assert_eq!(
+        (
+            status,
+            answer["id"].as_str(),
+            served_by.as_deref() == Some("rust")
+        ),
+        (
+            404,
+            Some("api.command.execute_command.not_found.app_error"),
+            false
+        ),
+        "a disabled plugin's command is nobody's: {answer}"
+    );
+
+    drop(rust);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+        common::delete_channel(client, admin, &side.closed).await;
+    }
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]

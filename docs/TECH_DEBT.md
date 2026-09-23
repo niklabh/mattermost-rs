@@ -6141,6 +6141,9 @@ review error in this project, the same way a missing `rename` is.
 ## D-241 · `listCommands`'s built-in half needs the slash-command registry
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, command reads)
+**Narrowed** 2026-09-23 — the two autocomplete routes are served (2026-09-15, [D-781] for what
+they still forward), and under the Rust plugin host their plugin half is this process's registry
+(`mm_app::plugin_commands`). What is left is `listCommands`' non-`custom_only` branch.
 
 `GET /api/v4/commands` is served for `custom_only=true` and **forwarded otherwise**. The other
 branch calls `ListAutocompleteCommands` / `ListAllCommandsByUser`, which merge the ~30 **built-in**
@@ -9079,6 +9082,9 @@ under [D-411], not here.
 ## D-781 · Slash commands that would run, and suggestions that fetch a list, are forwarded
 
 **Status** OPEN · **Severity** coverage · **Raised** 2026-09-15 (command.go)
+**Narrowed** 2026-09-23 — under the Rust plugin host a command a plugin here registered is served
+whole; the plugin API's `ExecuteSlashCommand` answers not implemented for the two "would run"
+cases below, for the same reason.
 
 The three command routes are served (`crates/mm-api/src/commands.rs`), and forward in four cases:
 a command that would **run** — any built-in provider (no `DoCommand` is ported: `/echo`,
@@ -9801,4 +9807,31 @@ Go validates the prop with `ValidateMmBlocksActions` (400
 registry (`AllowMmBlocksActionsUpdate`); neither is ported, and `App::update_post` would keep the
 old registry. **What is owed:** the validator, the option on `update_post`, and a script call with
 a valid and an invalid registry.
+
+---
+
+## D-1020 · A plugin command's response post this server cannot write answers `create_post_failed`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/command.go:55) · **Owner** the plugin host
+
+The response is known only after the plugin's `ExecuteCommand` ran, so a post `CreatePost` or
+`SendEphemeralPost` refuses as unreproducible cannot be forwarded: attachments (`ParseMessageAttachment`
+sets `slack_attachment` and the `attachments` prop), a non-default post type, a username or icon
+override (`EnablePostUsernameOverride`/`EnablePostIconOverride` on), a channel with an outgoing
+webhook, and whatever the notification pass forwards (an out-of-channel mention). Go posts them;
+this server answers 500 `api.command.execute_command.create_post_failed.app_error` and logs at
+error level (`mm_app::plugin_commands`). `ExecuteSlashCommand` also returns a response without its
+attachments. **What is owed:** each refused shape in `CreatePost` in turn — attachments first, the
+common one for bot-style commands — and a `/hookrec` verb per shape in the command tranche.
+
+---
+
+## D-1021 · Under the Rust plugin host, a suggestion that reaches a plugin's dynamic list is forwarded to a Go that lacks the command
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/auto_complete.go) · **Owner** the plugin host
+
+`autocomplete_suggestions` forwards on `NeedsGo` ([D-781]); under the Rust host the command is
+this process's, so Go answers as if it did not exist. **What is owed:** `getDynamicListArgument`
+for a plugin URL — the request through the plugin's `ServeHTTP` (`/plugins/<id>/...`), which the
+Rust host already serves — and a check in the command tranche with `/hookrec fetch `.
 
