@@ -115,7 +115,7 @@ fn go_getwd() -> std::io::Result<PathBuf> {
 
 /// Port of `filepath.Abs`: the working directory ([`go_getwd`]) joined ahead of a relative
 /// path, then [`go_clean`] — lexical only, no symlink is followed.
-fn go_abs(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn go_abs(path: &Path) -> std::io::Result<PathBuf> {
     if path.is_absolute() {
         return Ok(go_clean(path));
     }

@@ -3746,7 +3746,7 @@ fn normalise_webserver_mode(mode: String) -> String {
 /// Go's list is closed and case-sensitive apart from the six forms below: `TRUE`, `True` and
 /// `true` parse, but `tRuE` and `yes` do not. Widening it to `eq_ignore_ascii_case` would accept
 /// values the Go server rejects, which is how the two configurations drift apart.
-fn parse_bool(raw: &str) -> Option<bool> {
+pub(crate) fn parse_bool(raw: &str) -> Option<bool> {
     match raw {
         "1" | "t" | "T" | "TRUE" | "true" | "True" => Some(true),
         "0" | "f" | "F" | "FALSE" | "false" | "False" => Some(false),
@@ -5591,6 +5591,23 @@ pub fn sanitize_with(
 ) {
     sanitize_secrets(config, partially_redact_data_sources);
     config.plugin_settings.sanitize(manifests);
+}
+
+impl crate::App {
+    /// Port of `App.GetSanitizedConfig` (app/config.go:215): the running configuration with every
+    /// secret masked and the plugin settings sanitised against the installed manifests — or, when
+    /// there are none to ask (`getPluginManifests` failing: plugins off), with every plugin's
+    /// stored settings dropped. No partial data-source redaction: `SanitizedConfig` passes nil
+    /// options.
+    ///
+    /// Not what `GET /config` serves, which stops short of the plugin step (see [`sanitize`]);
+    /// the plugin API's `GetConfig`, `GetPluginConfig` and `GetBundlePath` are the callers.
+    pub async fn get_sanitized_config(&self) -> Result<mm_model::config::Config, ConfigError> {
+        let mut config = load_model_config(self.store().config()).await?;
+        let manifests = self.get_plugin_manifests();
+        sanitize_with(&mut config, manifests.as_deref(), false);
+        Ok(config)
+    }
 }
 
 fn sanitize_secrets(config: &mut mm_model::config::Config, partially_redact_data_sources: bool) {

@@ -1,0 +1,32 @@
+# Mutation plan for the plugin API's configuration and licence methods (docs/PLUGIN_PLAN.md,
+# Phase 6; D-990).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-config.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_config_methods_answer_as_go_answers` (23 API
+# calls under a licensed pair, plus the `Plugins` each host left) and, for the licence mapping,
+# `mm_app::plugin_api_config`'s one-hot unit test — the oracle licence and the fixture hold every
+# flag `true`, so a swap between two flags is visible only there. The last two lines are the no-op
+# controls and must SURVIVE.
+
+getconfig-unsanitized	crates/mm-app/src/plugin_api.rs	self.config_answer("Z_GetConfigReturns", true).await,	self.config_answer("Z_GetConfigReturns", false).await,	api	plugin_hooks::the_plugin_api_config
+unsanitized-is-sanitized	crates/mm-app/src/plugin_api.rs	self.config_answer("Z_GetUnsanitizedConfigReturns", false)	self.config_answer("Z_GetUnsanitizedConfigReturns", true)	api	plugin_hooks::the_plugin_api_config
+plugin-config-unsanitized	crates/mm-app/src/plugin_api.rs	let config = match self.app.get_sanitized_config().await {	let config = match crate::config::load_model_config(self.app.store().config()).await {	api	plugin_hooks::the_plugin_api_config
+sanitize-without-manifests	crates/mm-app/src/config.rs	let manifests = self.get_plugin_manifests();	let manifests = self.get_plugin_manifests().filter(|_| false);	api	plugin_hooks::the_plugin_api_config
+sanitize-partially-redacts	crates/mm-app/src/config.rs	sanitize_with(&mut config, manifests.as_deref(), false);	sanitize_with(&mut config, manifests.as_deref(), true);	api	plugin_hooks::the_plugin_api_config
+absent-entry-is-nil	crates/mm-app/src/plugin_api_config.rs	None => Some(Value::Map(Vec::new())),	None => None,	api	plugin_hooks::the_plugin_api_config
+settings-keys-not-lowered	crates/mm-app/src/plugin_api_config.rs	config.insert(go_to_lower(key), value.clone());	config.insert(key.clone(), value.clone());	api	plugin_hooks::the_plugin_api_config
+section-defaults-skipped	crates/mm-app/src/plugin_api_config.rs	for section in schema.sections.iter().flatten() {	for section in schema.sections.iter().flatten().take(0) {	api	plugin_hooks::the_plugin_api_config
+float-formatted-by-serde	crates/mm-app/src/plugin_api_config.rs	out.push_str(&mm_model::utils::go_json_format_float(f).unwrap_or_else(|| "0".into()));	out.push_str(&n.to_string());	api	plugin_hooks::the_plugin_api_config
+load-not-html-escaped	crates/mm-app/src/plugin_api_config.rs	mm_model::utils::go_json_escape(&out).into_bytes()	out.into_bytes()	api	plugin_hooks::the_plugin_api_config
+raw-message-null-omitted	crates/mm-app/src/plugin_api_config.rs	if ty == Type::Bytes {	if ty == Type::Bytes && !json.is_null() {	api	plugin_hooks::the_plugin_api_config
+embedded-not-flattened	crates/mm-app/src/plugin_api_config.rs	[("ContentFlaggingSettings", "ContentFlaggingSettingsBase")];	[("ContentFlaggingSettings", "NotEmbedded")];	api	plugin_hooks::the_plugin_api_config
+null-element-dropped	crates/mm-app/src/plugin_api_config.rs	return Ok(element.then(|| zero(&ty)));	return Ok(None);	api	plugin_hooks::the_plugin_api_config
+licence-flag-swapped	crates/mm-app/src/plugin_api_config.rs	ldap_groups: f.ldap_groups,	ldap_groups: f.ldap,	unit	plugin_api_config
+save-nil-as-empty	crates/mm-app/src/plugin_api_config.rs	None | Some(None) => Ok(Json::Null),	None | Some(None) => Ok(Json::Object(Map::new())),	api	plugin_hooks::the_plugin_api_config
+save-writes-another-entry	crates/mm-app/src/plugin_api_config.rs	plugins.insert(id.to_owned(), settings);	plugins.insert(format!("{id}.saved"), settings);	api	plugin_hooks::the_plugin_api_config
+cloud-limits-nil	crates/mm-app/src/plugin_api.rs	a: Some(Box::default()),	a: None,	api	plugin_hooks::the_plugin_api_config
+bundle-path-without-id	crates/mm-app/src/plugin_api.rs	mm_model::go_path::join(&[&directory, &self.manifest.id])	mm_model::go_path::join(&[&directory])	api	plugin_hooks::the_plugin_api_config
+interface-empty-map-is-null	crates/mm-plugin/src/wire/gob_safe.rs	.ok()?;\n            Json::Object(\n                value	.ok()?;\n            if value.is_empty() {\n                return Some(Json::Null);\n            }\n            Json::Object(\n                value	api	plugin_hooks::the_plugin_api_config
+control-api-typed-pairs	crates/mm-app/src/plugin_api_config.rs	let mut pairs = Vec::with_capacity(object.len());	let mut pairs: Vec<(Value, Value)> = Vec::with_capacity(object.len());	api	plugin_hooks::the_plugin_api_config
+control-unit-typed-config	crates/mm-app/src/plugin_api_config.rs	let mut config = Map::new();	let mut config: Map<String, Json> = Map::new();	unit	plugin_api_config

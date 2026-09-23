@@ -155,6 +155,20 @@ impl App {
         self.plugins.get()
     }
 
+    /// Port of `App.getPluginManifests` (app/plugin.go:375): the manifest of every bundle in the
+    /// plugin directory, running or not. `None` is Go's error — plugins off, or a directory that
+    /// cannot be listed — on which callers sanitise every plugin's settings away.
+    pub fn get_plugin_manifests(&self) -> Option<Vec<mm_model::manifest::Manifest>> {
+        let environment = self.plugins_environment()?;
+        match environment.available() {
+            Ok(bundles) => Some(bundles.into_iter().filter_map(|b| b.manifest).collect()),
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to get list of available plugins");
+                None
+            }
+        }
+    }
+
     /// Port of `Channels.initPlugins` (app/plugin.go:172), in Go's order (see the module docs).
     /// A second call only re-syncs the active state and turns the health-check job on or off.
     #[tracing::instrument(skip(self))]

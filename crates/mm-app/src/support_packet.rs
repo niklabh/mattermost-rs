@@ -621,12 +621,7 @@ impl App {
         let mut sanitized = config.clone();
         let manifests: Option<Vec<mm_model::manifest::Manifest>> = match plugins {
             PacketPlugins::NoneRunning => Some(Vec::new()),
-            PacketPlugins::Environment => self.plugins_environment().and_then(|environment| {
-                environment
-                    .available()
-                    .ok()
-                    .map(|bundles| bundles.into_iter().filter_map(|b| b.manifest).collect())
-            }),
+            PacketPlugins::Environment => self.get_plugin_manifests(),
         };
         if manifests.is_none() {
             tracing::warn!(

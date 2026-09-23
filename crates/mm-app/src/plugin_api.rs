@@ -9,9 +9,19 @@
 //! # What is ported
 //!
 //! The logging four, the nine `KV*` methods (`crate::plugin_key_value_store`), `GetServerVersion`,
-//! `GetDiagnosticId` and `GetSystemInstallDate`. Not yet `GetConfig`, `GetUnsanitizedConfig` or
-//! `GetLicense`: each answers a gob `model.Config` or `model.License`, hundreds of pointer fields
-//! this server holds only as JSON, and the conversion is its own unit ([D-990]).
+//! `GetDiagnosticId` and `GetSystemInstallDate`; and the configuration and licence methods
+//! (`crate::plugin_api_config`): `GetConfig`, `GetUnsanitizedConfig`, `GetPluginConfig`,
+//! `SavePluginConfig`, `LoadPluginConfiguration`, `GetLicense`, `IsEnterpriseReady`,
+//! `GetBundlePath`, `GetPluginID`, `GetTelemetryId` and `GetCloudLimits`.
+//!
+//! The four whose Go map may be empty and non-nil are served through
+//! `mm_plugin::rpc::PluginApiDynamic`, because the generated structs send an empty map as nil.
+//!
+//! # The configuration is read per call
+//!
+//! Go answers from its in-memory copy; this server re-reads the document each call
+//! (`load_model_config`, the document plus this process's environment), as `GET /config` does,
+//! so a save made through the Go server is seen on the next call.
 //!
 //! # An error crosses translated, without its wrapped cause
 //!
@@ -29,11 +39,22 @@
 //! not an `mlog` line: this server's log format is not Go's anywhere, so what is ported is the
 //! level, the message, the plugin id and the fields, in order.
 
+use gobwire::Dynamic;
 use gobwire::Interface;
 use mm_model::manifest::Manifest;
 use mm_model::utils::AppError;
 use mm_plugin::rpc::NotImplemented;
+use mm_plugin::rpc::{Answer, PluginApiDynamic};
 use mm_plugin::wire::model::AppError as WireAppError;
+use mm_plugin::wire::plugin::{
+    Z_GetBundlePathArgs, Z_GetBundlePathReturns, Z_GetCloudLimitsArgs, Z_GetCloudLimitsReturns,
+    Z_GetConfigArgs, Z_GetConfigReturns, Z_GetLicenseArgs, Z_GetLicenseReturns,
+    Z_GetPluginConfigArgs, Z_GetPluginConfigReturns, Z_GetPluginIDArgs, Z_GetPluginIDReturns,
+    Z_GetTelemetryIdArgs, Z_GetTelemetryIdReturns, Z_GetUnsanitizedConfigArgs,
+    Z_GetUnsanitizedConfigReturns, Z_IsEnterpriseReadyArgs, Z_IsEnterpriseReadyReturns,
+    Z_LoadPluginConfigurationArgsArgs, Z_LoadPluginConfigurationArgsReturns,
+    Z_SavePluginConfigReturns,
+};
 use mm_plugin::wire::plugin::{
     Z_GetDiagnosticIdArgs, Z_GetDiagnosticIdReturns, Z_GetServerVersionArgs,
     Z_GetServerVersionReturns, Z_GetSystemInstallDateArgs, Z_GetSystemInstallDateReturns,
@@ -375,6 +396,123 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         })
     }
 
+    /// Port of `PluginAPI.GetLicense` (app/plugin_api.go:143): the licence the server runs on, or
+    /// nil. Go's is in memory and cannot fail to read; a store failure here is logged and nil.
+    async fn get_license(
+        &self,
+        _: Z_GetLicenseArgs,
+    ) -> Result<Z_GetLicenseReturns, NotImplemented> {
+        let license = match self.app.license().await {
+            Ok(license) => license,
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err.id, "the licence could not be read");
+                None
+            }
+        };
+        Ok(Z_GetLicenseReturns {
+            a: license.map(|l| Box::new(crate::plugin_api_config::license_to_wire(&l))),
+        })
+    }
+
+    /// Port of `PluginAPI.IsEnterpriseReady` (app/plugin_api.go:147): `strconv.ParseBool` of the
+    /// build's `BuildEnterpriseReady`, false when it does not parse.
+    async fn is_enterprise_ready(
+        &self,
+        _: Z_IsEnterpriseReadyArgs,
+    ) -> Result<Z_IsEnterpriseReadyReturns, NotImplemented> {
+        Ok(Z_IsEnterpriseReadyReturns {
+            a: crate::config::parse_bool(mm_model::version::BUILD_ENTERPRISE_READY)
+                .unwrap_or(false),
+        })
+    }
+
+    /// Port of `PluginAPI.GetTelemetryId` (app/plugin_api.go:164): the server id, as
+    /// `GetDiagnosticId` answers.
+    async fn get_telemetry_id(
+        &self,
+        _: Z_GetTelemetryIdArgs,
+    ) -> Result<Z_GetTelemetryIdReturns, NotImplemented> {
+        Ok(Z_GetTelemetryIdReturns {
+            a: self.app.server_id().await,
+        })
+    }
+
+    /// Port of `PluginAPI.GetPluginID` (app/plugin_api.go:1665).
+    async fn get_plugin_id(
+        &self,
+        _: Z_GetPluginIDArgs,
+    ) -> Result<Z_GetPluginIDReturns, NotImplemented> {
+        Ok(Z_GetPluginIDReturns { a: self.id.clone() })
+    }
+
+    /// Port of `PluginAPI.GetCloudLimits` (app/plugin_api.go:1564) with Go's nil cloud interface,
+    /// the only one the public tree has: an empty `ProductLimits`, non-nil, so it crosses as an
+    /// empty struct rather than a nil pointer.
+    async fn get_cloud_limits(
+        &self,
+        _: Z_GetCloudLimitsArgs,
+    ) -> Result<Z_GetCloudLimitsReturns, NotImplemented> {
+        Ok(Z_GetCloudLimitsReturns {
+            a: Some(Box::default()),
+            b: None,
+        })
+    }
+
+    /// Port of `PluginAPI.GetBundlePath` (app/plugin_api.go:134): `filepath.Abs` of the
+    /// configured plugin directory joined with the plugin's id — relative to this process's
+    /// working directory, as Go's is to its own. The one failure, an unreadable working
+    /// directory, crosses as Go's `encodableError` does.
+    async fn get_bundle_path(
+        &self,
+        _: Z_GetBundlePathArgs,
+    ) -> Result<Z_GetBundlePathReturns, NotImplemented> {
+        let directory = match self.app.get_sanitized_config().await {
+            Ok(config) => config.plugin_settings.directory.unwrap_or_default(),
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration could not be read");
+                String::new()
+            }
+        };
+        let joined = mm_model::go_path::join(&[&directory, &self.manifest.id]);
+        let answer = match crate::logs::go_abs(std::path::Path::new(&joined)) {
+            Ok(path) => Z_GetBundlePathReturns {
+                a: path.to_string_lossy().into_owned(),
+                b: None,
+            },
+            Err(err) => Z_GetBundlePathReturns {
+                a: String::new(),
+                b: mm_plugin::error::encodable_error(Some(
+                    &mm_plugin::error::PluginError::Message(err.to_string()),
+                )),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.LoadPluginConfiguration` (app/plugin_api.go:50), with the host half of
+    /// the RPC: the JSON of the manifest's defaults under this plugin's **unsanitised** settings
+    /// (`crate::plugin_api_config::plugin_configuration`).
+    async fn load_plugin_configuration(
+        &self,
+        _: Z_LoadPluginConfigurationArgsArgs,
+    ) -> Result<Z_LoadPluginConfigurationArgsReturns, NotImplemented> {
+        let config = match crate::config::load_model_config(self.app.store().config()).await {
+            Ok(config) => Some(config),
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration could not be read");
+                None
+            }
+        };
+        let settings = config
+            .as_ref()
+            .and_then(|c| c.plugin_settings.plugins.as_ref())
+            .and_then(|p| p.get(&self.id))
+            .and_then(Option::as_ref);
+        Ok(Z_LoadPluginConfigurationArgsReturns {
+            a: crate::plugin_api_config::plugin_configuration(&self.manifest, settings),
+        })
+    }
+
     /// Port of `PluginAPI.GetSystemInstallDate` (app/plugin_api.go:156).
     async fn get_system_install_date(
         &self,
@@ -388,6 +526,113 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
             },
         };
         Ok(answer)
+    }
+}
+
+impl AppPluginApi {
+    /// `GetConfig` or `GetUnsanitizedConfig` as the dynamic `Z_<Method>Returns` named `name`.
+    /// Go's answer cannot fail; a document this server cannot read, or cannot put into gob's
+    /// shape, is logged and answered with a nil config.
+    async fn config_answer(&self, name: &str, sanitized: bool) -> Dynamic {
+        let config = if sanitized {
+            self.app.get_sanitized_config().await
+        } else {
+            crate::config::load_model_config(self.app.store().config()).await
+        };
+        let json = match config.map(|c| serde_json::to_value(&c)) {
+            Ok(Ok(json)) => Some(json),
+            Ok(Err(err)) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration did not serialise");
+                None
+            }
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration could not be read");
+                None
+            }
+        };
+        let fallback = || crate::plugin_api_config::config_returns(name, None);
+        match crate::plugin_api_config::config_returns(name, json.as_ref()) {
+            Ok(answer) => answer,
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration has no gob form");
+                fallback().unwrap_or_default()
+            }
+        }
+    }
+}
+
+impl PluginApiDynamic for AppPluginApi {
+    /// Port of `PluginAPI.GetConfig` (app/plugin_api.go:105): `App.GetSanitizedConfig`.
+    async fn get_config_dynamic(
+        &self,
+        _: Z_GetConfigArgs,
+    ) -> Result<Answer<Z_GetConfigReturns>, NotImplemented> {
+        Ok(Answer::Dynamic(
+            self.config_answer("Z_GetConfigReturns", true).await,
+        ))
+    }
+
+    /// Port of `PluginAPI.GetUnsanitizedConfig` (app/plugin_api.go:110): the configuration with
+    /// its secrets.
+    async fn get_unsanitized_config_dynamic(
+        &self,
+        _: Z_GetUnsanitizedConfigArgs,
+    ) -> Result<Answer<Z_GetUnsanitizedConfigReturns>, NotImplemented> {
+        Ok(Answer::Dynamic(
+            self.config_answer("Z_GetUnsanitizedConfigReturns", false)
+                .await,
+        ))
+    }
+
+    /// Port of `PluginAPI.GetPluginConfig` (app/plugin_api.go:119): this plugin's entry in the
+    /// **sanitised** configuration, keyed by the manifest's id — so a secret setting reads
+    /// `FakeSetting` — or an empty map when it has none.
+    async fn get_plugin_config_dynamic(
+        &self,
+        _: Z_GetPluginConfigArgs,
+    ) -> Result<Answer<Z_GetPluginConfigReturns>, NotImplemented> {
+        let config = match self.app.get_sanitized_config().await {
+            Ok(config) => Some(config),
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err, "the configuration could not be read");
+                None
+            }
+        };
+        let plugins = config
+            .as_ref()
+            .and_then(|c| c.plugin_settings.plugins.as_ref());
+        Ok(Answer::Dynamic(
+            crate::plugin_api_config::plugin_config_returns(plugins, &self.manifest.id),
+        ))
+    }
+
+    /// Port of `PluginAPI.SavePluginConfig` (app/plugin_api.go:127), keyed by the manifest's id;
+    /// see [`App::save_plugin_config`](crate::App::save_plugin_config).
+    async fn save_plugin_config_dynamic(
+        &self,
+        args: &Dynamic,
+    ) -> Result<Z_SavePluginConfigReturns, NotImplemented> {
+        let result = match crate::plugin_api_config::plugin_config_from_args(args) {
+            Ok(settings) => {
+                self.app
+                    .save_plugin_config(&self.manifest.id, settings)
+                    .await
+            }
+            // Go's `SaveConfig` fails to persist a value `json.Marshal` refuses.
+            Err(err) => Err(AppError::boxed(
+                "saveConfig",
+                "app.save_config.app_error",
+                None,
+                "",
+                500,
+            ))
+            .inspect_err(
+                |_| tracing::warn!(plugin_id = %self.id, error = %err, "SavePluginConfig failed"),
+            ),
+        };
+        Ok(Z_SavePluginConfigReturns {
+            a: result.err().and_then(|e| self.wire(e)),
+        })
     }
 }
 

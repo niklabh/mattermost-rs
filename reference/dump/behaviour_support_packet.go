@@ -414,6 +414,8 @@ func pluginSettingsSanitizeCases() map[string]any {
 			"noschema":    {"secret": "x"},
 			"notinstalled": {"a": "b"},
 			"emptysettings": {},
+			// What `SavePluginConfig(nil)` leaves behind: kept, as the empty map is.
+			"nilsettings": nil,
 		}
 	}
 	withManifests := model.PluginSettings{Plugins: plugins()}

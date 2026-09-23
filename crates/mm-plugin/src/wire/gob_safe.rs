@@ -116,24 +116,20 @@ pub fn interface_to_json(i: &Interface) -> Option<Json> {
                     ::std::option::Option<::gobwire::Interface>,
                 >>()
                 .ok()?;
-            if (&value).is_empty() {
-                Json::Null
-            } else {
-                Json::Object(
-                    (&value)
-                        .iter()
-                        .map(|(k, v)| -> Option<(String, Json)> {
-                            Some((
-                                k.clone(),
-                                match v {
-                                    Some(i) => interface_to_json(i)?,
-                                    None => Json::Null,
-                                },
-                            ))
-                        })
-                        .collect::<Option<Map<String, Json>>>()?,
-                )
-            }
+            Json::Object(
+                value
+                    .iter()
+                    .map(|(k, v)| -> Option<(String, Json)> {
+                        Some((
+                            k.clone(),
+                            match v {
+                                Some(i) => interface_to_json(i)?,
+                                None => Json::Null,
+                            },
+                        ))
+                    })
+                    .collect::<Option<Map<String, Json>>>()?,
+            )
         }
         // Everything else is one of gob's basic types, which carry no names.
         _ => value_to_json(&i.value)?,

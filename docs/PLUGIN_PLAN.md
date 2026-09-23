@@ -651,8 +651,17 @@ gob cannot tell a nil `[]byte` from an empty one, so `KVSet(key, []byte{})` **de
 and a compare against an empty old value is the insert-if-absent path; and a row with a NULL
 `ExpireAt` — migration 45's default — can be neither read nor replaced through the API. The
 tranche runs a 66-call script from inside `MessageWillBePosted` under both hosts, one after the
-other from the same planted rows. `GetConfig`, `GetUnsanitizedConfig` and `GetLicense` need a
-gob `Config` and `License` built from JSON, and are [D-990].
+other from the same planted rows.
+
+**Then 27 of 258:** the configuration and licence eleven — `GetConfig`, `GetUnsanitizedConfig`,
+`GetPluginConfig`, `SavePluginConfig`, `LoadPluginConfiguration`, `GetLicense`,
+`IsEnterpriseReady`, `GetBundlePath`, `GetPluginID`, `GetTelemetryId`, `GetCloudLimits`
+(`mm_app::plugin_api_config`). The four whose Go map may be empty and non-nil are served by hand
+through `PluginApiDynamic` (`plugingen.py`'s `REGISTER_BY_HAND`), because gob tells an empty map
+from a nil one and the generated structs cannot. The tranche runs on a licensed pair with one
+configuration environment for both hosts, so the two configurations are compared whole.
+`SavePluginConfig` saves through the Go server, whose plugins' `ConfigurationWillBeSaved` run
+instead of the Rust host's ([D-1000]).
 
 ### Phase 7 · Publish
 

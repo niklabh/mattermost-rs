@@ -221,6 +221,9 @@ impl PluginApiStreams for Fake {
 }
 
 /// Answers the plugin's outward HTTP call with what both suites expect, and records the request.
+/// The typed answers, as every other method gives them.
+impl mm_plugin::rpc::PluginApiDynamic for Fake {}
+
 impl mm_plugin::rpc::PluginApiHttp for Fake {
     async fn plugin_http(
         &self,
@@ -791,7 +794,9 @@ fn merged_post(message: &str) -> Json {
 
 /// A connected host and plugin over an in-memory yamux session, with the host serving the API.
 /// Both sides get a broker, because the streaming methods lend a reader over one.
-async fn rust_api_pair<A: PluginApi + PluginApiStreams + mm_plugin::rpc::PluginApiHttp>(
+async fn rust_api_pair<
+    A: mm_plugin::rpc::PluginApiDynamic + PluginApiStreams + mm_plugin::rpc::PluginApiHttp,
+>(
     api: Arc<A>,
 ) -> ApiClient {
     let (a, b) = tokio::io::duplex(1 << 20);
@@ -1285,6 +1290,7 @@ struct Nothing;
 impl PluginApi for Nothing {}
 impl PluginApiStreams for Nothing {}
 impl mm_plugin::rpc::PluginApiHttp for Nothing {}
+impl mm_plugin::rpc::PluginApiDynamic for Nothing {}
 
 #[tokio::test]
 async fn rpc_rust_hooks_round_trip_every_hook() {

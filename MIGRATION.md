@@ -13,7 +13,7 @@ backlog, `docs/PLUGIN_PLAN.md` §6 for the plugin surface.
 | api4 route+method pairs (593 HTTP, 171 local-mode) | All registered and answered here first | 764 / 764 |
 | …answered with no branch forwarded to Go | 258 handler functions in `mm-api` still forward at least one branch (302 call sites, 75 files) | ~65%, estimated |
 | Websocket hub | Events, broadcast hooks, reconnect replay, MFA, guest visibility; binary frames refused ([D-187]) | most of it |
-| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 16/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
+| Plugin host ([`docs/PLUGIN_PLAN.md`](docs/PLUGIN_PLAN.md)) | Routes 22/22, hooks 30/35, API methods 27/258, Driver 0/20; `MMRS_PLUGIN_HOST` defaults to `go` ([D-811]) | ~8% of the surface |
 | Jobs | Watcher and transitions ported; schedulers never started ([D-802]); 1 of 29 job types has a worker ([D-804]) | ~3% of the workers |
 | Cluster interfaces | Private Enterprise code, nil on every build we run — forwarded by design | not owed |
 
@@ -14550,3 +14550,23 @@ not-implemented error. `GetConfig`, `GetUnsanitizedConfig` and `GetLicense` are 
 | `PluginAPI` KV, `Log*`, `GetServerVersion`, `GetDiagnosticId`, `GetSystemInstallDate` (app/plugin_api.go) | `mm_app::plugin_api` | DONE | `parity::plugin_hooks::the_plugin_api_kv_methods_answer_as_go_answers` (66 calls, both hosts, plus the rows each left) + 5 unit | An `AppError` crosses translated in the server locale, without its wrapped cause. The log line is a `tracing` event, not an `mlog` one; Go's log is the oracle for the pairing. |
 
 Mutation tally (`plugin-api-kv.plan`): 22 run, 20 caught, 2 controls survived, 0 harness faults.
+
+## Plugin API: the plugin's configuration and the licence (2026-09-23)
+
+Eleven more methods, **27 of 258**: `GetConfig`, `GetUnsanitizedConfig`, `GetPluginConfig`,
+`SavePluginConfig`, `LoadPluginConfiguration`, `GetLicense`, `IsEnterpriseReady`,
+`GetBundlePath`, `GetPluginID`, `GetTelemetryId` and `GetCloudLimits`. Closes [D-990]; opens
+[D-1000] (`ConfigurationWillBeSaved` is not run for a save the Rust host makes).
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` config and licence methods (app/plugin_api.go:50-166, 1564, 1665), `App.GetSanitizedConfig`, `getPluginManifests` | `mm_app::plugin_api_config`, `mm_app::plugin_api` | DONE | `parity::plugin_hooks::the_plugin_api_config_methods_answer_as_go_answers` (23 calls, licensed pair, plus the `Plugins` each host left) + 13 unit | `Config.Clone` is a JSON round trip, so the gob `Config` is built from the JSON; a `json.RawMessage` comes back as its text and never nil. |
+| The four map-carrying methods' servers | `mm_plugin::rpc::PluginApiDynamic` | DONE | 1 unit + the tranche | Go sends an empty non-nil map and a Rust `HashMap` cannot say so; `GetPluginConfig` with no entry is `map[string]any{}`, sent. |
+
+An interface-held empty `map[string]any` now marshals as `{}` (gob always decodes it non-nil); it
+was `null`. A `null` entry in `PluginSettings.Plugins`, which `SavePluginConfig(nil)` writes, made
+the whole document unreadable here; `mm_model` now reads it.
+
+Mutation tally (`plugin-api-config.plan`, then `-rerun.plan`): 21 run, 18 caught, 1 survivor and
+2 controls survived; the survivor (Go's float formatting in `LoadPluginConfiguration`) was
+invisible because `1e21` prints alike in both — `1e20` does not, and the rerun caught it.

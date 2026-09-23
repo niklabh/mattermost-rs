@@ -5424,7 +5424,7 @@ pub trait PluginApi: Send + Sync + 'static {
 
 /// Register every generated method of `PluginApi` on `server` as `Plugin.<Method>`.
 ///
-/// Not registered here: Implemented, LoadPluginConfiguration, OnActivate, whose servers are hand-written.
+/// Not registered here: GetConfig, GetPluginConfig, GetUnsanitizedConfig, Implemented, LoadPluginConfiguration, OnActivate, SavePluginConfig, whose servers are hand-written.
 pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) {
     let this = Arc::clone(implementation);
     server.register(
@@ -6336,15 +6336,6 @@ pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) 
         }
     });
     let this = Arc::clone(implementation);
-    server.register("Plugin.GetConfig", move |args: Z_GetConfigArgs| {
-        let this = Arc::clone(&this);
-        async move {
-            this.get_config(args).await.map_err(|NotImplemented| {
-                ServiceError("API GetConfig called but not implemented.".into())
-            })
-        }
-    });
-    let this = Arc::clone(implementation);
     server.register(
         "Plugin.GetDiagnosticId",
         move |args: Z_GetDiagnosticIdArgs| {
@@ -6611,20 +6602,6 @@ pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) 
             })
         }
     });
-    let this = Arc::clone(implementation);
-    server.register(
-        "Plugin.GetPluginConfig",
-        move |args: Z_GetPluginConfigArgs| {
-            let this = Arc::clone(&this);
-            async move {
-                this.get_plugin_config(args)
-                    .await
-                    .map_err(|NotImplemented| {
-                        ServiceError("API GetPluginConfig called but not implemented.".into())
-                    })
-            }
-        },
-    );
     let this = Arc::clone(implementation);
     server.register("Plugin.GetPluginID", move |args: Z_GetPluginIDArgs| {
         let this = Arc::clone(&this);
@@ -7026,20 +7003,6 @@ pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) 
                 this.get_telemetry_id(args).await.map_err(|NotImplemented| {
                     ServiceError("API GetTelemetryId called but not implemented.".into())
                 })
-            }
-        },
-    );
-    let this = Arc::clone(implementation);
-    server.register(
-        "Plugin.GetUnsanitizedConfig",
-        move |args: Z_GetUnsanitizedConfigArgs| {
-            let this = Arc::clone(&this);
-            async move {
-                this.get_unsanitized_config(args)
-                    .await
-                    .map_err(|NotImplemented| {
-                        ServiceError("API GetUnsanitizedConfig called but not implemented.".into())
-                    })
             }
         },
     );
@@ -7824,20 +7787,6 @@ pub fn register_api<T: PluginApi>(server: &mut Server, implementation: &Arc<T>) 
             })
         }
     });
-    let this = Arc::clone(implementation);
-    server.register(
-        "Plugin.SavePluginConfig",
-        move |args: Z_SavePluginConfigArgs| {
-            let this = Arc::clone(&this);
-            async move {
-                this.save_plugin_config(args)
-                    .await
-                    .map_err(|NotImplemented| {
-                        ServiceError("API SavePluginConfig called but not implemented.".into())
-                    })
-            }
-        },
-    );
     let this = Arc::clone(implementation);
     server.register(
         "Plugin.SearchChannels",

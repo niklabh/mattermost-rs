@@ -27,7 +27,9 @@ use crate::render::render_typed;
 /// The message that runs the script.
 pub const KV_SCRIPT: &str = "!kv-script";
 
-async fn call<A, R>(api: &Client, name: &str, args: A) -> Json
+/// One call through the raw client, written down with its arguments and what came back — or the
+/// transport error, such as a method the host lacks.
+pub async fn call<A, R>(api: &Client, name: &str, args: A) -> Json
 where
     A: Encode,
     R: Decode + Default + Encode + Send + 'static,

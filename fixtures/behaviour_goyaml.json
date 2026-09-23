@@ -209,6 +209,7 @@
     "plugin_settings_sanitize": {
         "input": {
             "emptysettings": {},
+            "nilsettings": null,
             "noschema": {
                 "secret": "x"
             },
@@ -285,6 +286,7 @@
         ],
         "with_manifests": {
             "emptysettings": {},
+            "nilsettings": null,
             "noschema": {
                 "secret": "x"
             },
@@ -296,7 +298,8 @@
             }
         },
         "with_nil": {
-            "emptysettings": {}
+            "emptysettings": {},
+            "nilsettings": null
         }
     },
     "sanitize_data_source": [

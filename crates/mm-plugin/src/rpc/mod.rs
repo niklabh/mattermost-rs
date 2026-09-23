@@ -22,6 +22,7 @@ use crate::wire::plugin::{Z_OnActivateArgs, Z_OnActivateReturns};
 
 mod api;
 mod driver;
+mod dynamic;
 mod file_upload;
 mod handwritten;
 mod hooks;
@@ -31,6 +32,7 @@ mod streams;
 
 pub use api::{PluginApi, register_api as register_generated_api};
 pub use driver::{Driver, register_driver};
+pub use dynamic::{Answer, PluginApiDynamic};
 pub use file_upload::HooksFileUpload;
 pub use handwritten::json_to_interface;
 pub use hooks::{HOOK_NAMES, Hooks, hook_id, register_hooks};
@@ -46,16 +48,17 @@ pub use streams::{HttpResponse, PluginApiHttp, PluginApiStreams, RemoteHttpRespo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NotImplemented;
 
-/// Every method of [`PluginApi`] a plugin can call: the generated ones, `LoadPluginConfiguration`
-/// and the methods that carry a reader, whose servers are hand-written. The broker is how those
-/// readers reach the plugin.
-pub fn register_api<T: PluginApi + PluginApiStreams + PluginApiHttp>(
+/// Every method of [`PluginApi`] a plugin can call: the generated ones, `LoadPluginConfiguration`,
+/// the three that answer a map through [`PluginApiDynamic`], and the methods that carry a reader,
+/// whose servers are hand-written. The broker is how those readers reach the plugin.
+pub fn register_api<T: PluginApiDynamic + PluginApiStreams + PluginApiHttp>(
     server: &mut Server,
     implementation: &Arc<T>,
     broker: &MuxBroker,
 ) {
     register_generated_api(server, implementation);
     handwritten::register_load_plugin_configuration(server, implementation);
+    dynamic::register_api_dynamic(server, implementation);
     streams::register_api_streams(server, implementation, broker);
     streams::register_api_http(server, implementation, broker);
 }
@@ -119,7 +122,7 @@ impl HooksClient {
     /// `driver` answers the plugin's database calls on the second connection (db_rpc.go).
     pub async fn on_activate<A, D>(&self, api: &Arc<A>, driver: &Arc<D>) -> Z_OnActivateReturns
     where
-        A: PluginApi + PluginApiStreams + PluginApiHttp,
+        A: PluginApiDynamic + PluginApiStreams + PluginApiHttp,
         D: Driver,
     {
         let mut api_server = Server::new();

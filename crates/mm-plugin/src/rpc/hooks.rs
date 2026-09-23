@@ -1308,7 +1308,7 @@ pub trait Hooks: Send + Sync + 'static {
 
 /// Register every generated method of `Hooks` on `server` as `Plugin.<Method>`.
 ///
-/// Not registered here: Implemented, LoadPluginConfiguration, OnActivate, whose servers are hand-written.
+/// Not registered here: Implemented, OnActivate, whose servers are hand-written.
 pub fn register_hooks<T: Hooks>(server: &mut Server, implementation: &Arc<T>) {
     let this = Arc::clone(implementation);
     server.register(
