@@ -4881,6 +4881,283 @@ async fn run_the_consumed_tour(client: &reqwest::Client, admin: &str) {
     common::delete_channel(&client, &admin, &channel).await;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: the KV store, logging and server information (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the plugin API tranche; see `second_server_ports`.
+const KV_HOST_PORT: u16 = 8142;
+/// Its Go server.
+const KV_GO_OFFSET: u16 = 88;
+/// Another plugin's id, whose planted row the script must neither see nor delete.
+const KV_NEIGHBOUR: &str = "mmrs.kvneighbour";
+
+/// Cross-server parity for the first plugin API methods (docs/PLUGIN_PLAN.md, Phase 6;
+/// `mm_app::plugin_api`): the nine `KV*` methods, the four `Log*`, and `GetServerVersion`,
+/// `GetDiagnosticId` and `GetSystemInstallDate`.
+///
+/// A post whose message is `!kv-script` makes the recorder run a fixed script of API calls from
+/// inside `MessageWillBePosted` and write down every answer (`examples/recorder/kv.rs`). The
+/// transcripts are compared entry for entry, and so are the `PluginKeyValueStore` rows each host
+/// left behind.
+///
+/// # The two sides run in sequence, not side by side
+///
+/// Both hosts serve the one plugin id, so they share its rows. So each side starts from the same
+/// planted fixture — purged and replanted between them — and its rows are read before the other
+/// side runs. The fixture holds what the API cannot write: the pre-5.6 hashed spellings of two
+/// keys, two expired values, a NULL `ExpireAt`, a value that expires far in the future, and a row
+/// of **another** plugin's that delete-all must spare.
+#[tokio::test]
+async fn the_plugin_api_kv_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_kv_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    purge_kv_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+async fn purge_kv_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    sqlx::query("DELETE FROM PluginKeyValueStore WHERE PluginId = $1 OR PluginId = $2")
+        .bind(PLUGIN_ID)
+        .bind(KV_NEIGHBOUR)
+        .execute(&pool)
+        .await
+        .expect("the KV rows go");
+}
+
+/// The fixture both sides start from, written around both servers.
+async fn plant_kv_rows() {
+    purge_kv_rows().await;
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let far_future = 4_102_444_800_000_i64; // 2100-01-01
+    let hash = mm_app::plugin_key_value_store::key_hash;
+    let rows: [(&str, String, &[u8], Option<i64>); 8] = [
+        (PLUGIN_ID, hash("legacy"), b"from before 5.6", Some(0)),
+        (PLUGIN_ID, hash("hashed-only"), b"hashed", Some(0)),
+        (PLUGIN_ID, "expired".into(), b"stale", Some(1)),
+        (PLUGIN_ID, "expired-old".into(), b"stale", Some(1)),
+        (PLUGIN_ID, "null-expiry".into(), b"null", None),
+        (PLUGIN_ID, "future-old".into(), b"stale", Some(far_future)),
+        (PLUGIN_ID, "zz-kept".into(), b"kept", Some(0)),
+        (KV_NEIGHBOUR, "shared-key".into(), b"neighbour", Some(0)),
+    ];
+    for (plugin, key, value, expire_at) in rows {
+        sqlx::query(
+            "INSERT INTO PluginKeyValueStore (PluginId, PKey, PValue, ExpireAt) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(plugin)
+        .bind(key)
+        .bind(value)
+        .bind(expire_at)
+        .execute(&pool)
+        .await
+        .expect("a KV row is planted");
+    }
+}
+
+/// Both plugins' rows, by plugin and key, with `ExpireAt` as what can be compared across two runs
+/// a few seconds apart: never, NULL, past, or the whole minutes left.
+async fn kv_rows() -> Vec<(String, String, String, String)> {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    type Row = (String, String, Option<Vec<u8>>, Option<i64>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT PluginId, PKey, PValue, ExpireAt FROM PluginKeyValueStore
+         WHERE PluginId = $1 OR PluginId = $2 ORDER BY PluginId, PKey",
+    )
+    .bind(PLUGIN_ID)
+    .bind(KV_NEIGHBOUR)
+    .fetch_all(&pool)
+    .await
+    .expect("the KV rows");
+    let now = mm_model::utils::get_millis();
+    rows.into_iter()
+        .map(|(plugin, key, value, expire_at)| {
+            let expiry = match expire_at {
+                None => "null".to_owned(),
+                Some(0) => "never".to_owned(),
+                Some(at) if at < now => "past".to_owned(),
+                Some(at) => format!("in {} min", (at - now + 30_000) / 60_000),
+            };
+            let value = value.map_or_else(
+                || "<nil>".to_owned(),
+                |v| String::from_utf8_lossy(&v).into_owned(),
+            );
+            (plugin, key, value, expiry)
+        })
+        .collect()
+}
+
+async fn run_the_kv_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-kv");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+    let team = common::create_team(client, admin, "hookkv").await;
+    let channel = common::create_channel(client, admin, &team, "hookkv").await;
+
+    let go = start_go(
+        &go_run,
+        &[("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy())],
+        KV_GO_OFFSET,
+    )
+    .await;
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust = SecondServer::start_in(
+        KV_HOST_PORT,
+        &rs_run,
+        &[
+            ("MMRS_PLUGIN_HOST", "rust"),
+            ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+            ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+            ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+            ("HOOK_RECORDER_TRANSCRIPT", &rust_log.to_string_lossy()),
+        ],
+    )
+    .await
+    .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "channel_id": channel,
+        "message": "!kv-script",
+    }))
+    .expect("the post");
+
+    // Each side from the same fixture, its rows read before the other side runs.
+    let mut sides = Vec::new();
+    for (base, log, side) in [
+        (go.base.as_str(), go_log.as_path(), "Go"),
+        (rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        plant_kv_rows().await;
+        let (status, _, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(admin),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(status, 201, "{side}: the post");
+        if side == "Rust" {
+            assert_eq!(served_by.as_deref(), Some("rust"), "the post was forwarded");
+        }
+        let entries = transcript_reaches(log, 3, side).await;
+        sides.push((entries, kv_rows().await));
+    }
+    let (go_side, rust_side) = (&sides[0], &sides[1]);
+
+    assert_eq!(
+        names(&go_side.0),
+        ["MessageWillBePosted", "KVScript", "MessageHasBeenPosted"],
+        "the script runs inside the hook"
+    );
+    let go_calls = go_side.0[1]["calls"].as_array().expect("the calls");
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {go_calls:?}"
+    );
+    let rust_calls = rust_side.0[1]["calls"].as_array().expect("the calls");
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+    for (index, (g, r)) in go_calls.iter().zip(rust_calls).enumerate() {
+        assert_eq!(g, r, "call {index} ({})", g["call"]);
+    }
+    for (index, (g, r)) in go_side.0.iter().zip(&rust_side.0).enumerate() {
+        assert_eq!(g, r, "transcript entry {index}");
+    }
+
+    // A few answers the parity alone would not pin, because both sides could agree on a wrong one:
+    // the hashed spelling is found, an expired or NULL-expiry value is not, and the rows prove
+    // delete-all spared the neighbour.
+    let returned = |index: usize| go_calls[index]["returns"].clone();
+    assert_ne!(
+        returned(0),
+        returned(1),
+        "the hashed `legacy` is found, `missing` is not"
+    );
+    assert_eq!(
+        returned(1),
+        returned(2),
+        "an expired value reads as nothing"
+    );
+    assert_eq!(returned(1), returned(3), "so does a NULL expiry");
+    assert_eq!(
+        go_side.1,
+        vec![
+            (
+                PLUGIN_ID.into(),
+                "final-a".into(),
+                "A".into(),
+                "never".into()
+            ),
+            (
+                PLUGIN_ID.into(),
+                "final-b".into(),
+                "B".into(),
+                "in 60 min".into()
+            ),
+            (
+                PLUGIN_ID.into(),
+                "final-c".into(),
+                "C".into(),
+                "past".into()
+            ),
+            (
+                KV_NEIGHBOUR.into(),
+                "shared-key".into(),
+                "neighbour".into(),
+                "never".into()
+            ),
+        ],
+        "Go's rows"
+    );
+    assert_eq!(go_side.1, rust_side.1, "the rows each host left");
+
+    // Go's log is the oracle for how a pair and a dangling argument are logged
+    // (`mm_app::plugin_api::log_fields`); this server's log format is its own.
+    let go_text = std::fs::read_to_string(go_run.join("go.log")).unwrap_or_default();
+    let info = go_text
+        .lines()
+        .find(|l| l.contains("hook recorder info"))
+        .expect("Go logged the plugin's info line");
+    assert!(
+        info.contains(r#""plugin_id":"mmrs.hookrecorder""#) && info.contains(r#""script":"kv""#),
+        "{info}"
+    );
+    assert!(
+        go_text
+            .lines()
+            .any(|l| l.contains("invalid key/value pair") && l.contains(r#""arg":"dangling""#)),
+        "Go complains about the dangling argument"
+    );
+
+    drop(rust);
+    drop(go);
+    common::delete_channel(client, admin, &channel).await;
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]

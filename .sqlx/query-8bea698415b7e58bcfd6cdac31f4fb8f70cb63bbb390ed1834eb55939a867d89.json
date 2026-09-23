@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO PluginKeyValueStore (PluginId, PKey, PValue, ExpireAt) VALUES ($1, $2, $3, $4)\n             ON CONFLICT (pluginid, pkey) DO UPDATE SET PValue = $5, ExpireAt = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Bytea",
+        "Int8",
+        "Bytea",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8bea698415b7e58bcfd6cdac31f4fb8f70cb63bbb390ed1834eb55939a867d89"
+}

@@ -1755,6 +1755,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "flate2",
+ "gobwire",
  "goimage",
  "hmac",
  "if-addrs",

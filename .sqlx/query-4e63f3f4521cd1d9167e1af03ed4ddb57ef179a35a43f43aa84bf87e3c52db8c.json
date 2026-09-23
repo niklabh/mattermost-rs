@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT PKey AS \"key!\" FROM PluginKeyValueStore\n               WHERE PluginId = $1 AND (ExpireAt = 0 OR ExpireAt > $2)\n               ORDER BY PKey LIMIT $3 OFFSET $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4e63f3f4521cd1d9167e1af03ed4ddb57ef179a35a43f43aa84bf87e3c52db8c"
+}

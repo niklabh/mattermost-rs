@@ -20,8 +20,9 @@
 //!
 //! # What is not ported yet
 //!
-//! - The plugin API itself: [`AppPluginApi`] answers every method with the typed
-//!   not-implemented error (plugin plan Phase 6), and [`AppPluginDriver`] likewise.
+//! - Most of the plugin API: [`AppPluginApi`] (`crate::plugin_api`) answers the methods Phase 6
+//!   has ported and the typed not-implemented error for the rest, and [`AppPluginDriver`]
+//!   answers not-implemented throughout.
 //!
 //! Each is a `docs/TECH_DEBT.md` entry. The cluster branches are Go's nil cluster: there is no
 //! cluster here, so a status carries `cluster_id: ""` and no peer statuses are merged.
@@ -45,14 +46,9 @@ use crate::config::Config;
 /// Go's `model.PluginIdApps`, whose state follows `FeatureFlags.AppsEnabled`.
 pub(crate) const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
 
-/// The server API a plugin is served. Every method answers Go's not-implemented error until the
-/// plugin plan's Phase 6 ports them.
-pub struct AppPluginApi;
-impl mm_plugin::rpc::PluginApi for AppPluginApi {}
-impl mm_plugin::rpc::PluginApiStreams for AppPluginApi {}
-impl mm_plugin::rpc::PluginApiHttp for AppPluginApi {}
+pub use crate::plugin_api::AppPluginApi;
 
-/// The database a plugin queries through. Not ported yet; see [`AppPluginApi`].
+/// The database a plugin queries through. Not ported yet (plugin plan Phase 6).
 pub struct AppPluginDriver;
 impl mm_plugin::rpc::Driver for AppPluginDriver {}
 
@@ -185,8 +181,13 @@ impl App {
                 return;
             }
         }
+        // Go's `newAPIImpl`: one `PluginAPI` per plugin, over the app. The factory is called once
+        // per activation, so each call needs an `App` of its own; `App` is a set of shared
+        // handles, and the clone is how Go's `*App` pointer is shared. It is a cycle through
+        // `self.plugins`, broken when `shut_down_plugins` drops the environment.
+        let app = self.clone();
         let environment = Environment::new(
-            Box::new(|_: &Manifest| Arc::new(AppPluginApi)),
+            Box::new(move |manifest: &Manifest| Arc::new(AppPluginApi::new(app.clone(), manifest))),
             Arc::new(AppPluginDriver),
             PathBuf::from(plugin_dir),
             PathBuf::from(webapp_plugin_dir),

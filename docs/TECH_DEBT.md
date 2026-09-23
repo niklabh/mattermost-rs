@@ -9280,8 +9280,10 @@ active state (closed 2026-09-20: `mm_app::plugin_prepackaged`, `mm_plugin::envir
 measured by `parity::plugin_startup` and `environment::health_check_matches_go_step_for_step`).
 What still keeps it from being a drop-in:
 
-- The plugin API and driver: `AppPluginApi` and `AppPluginDriver` answer every call with the
-  not-implemented error. That is plugin plan Phase 6, ordered by what real plugins call.
+- The plugin API and driver: `AppPluginApi` answers 16 of the 258 API methods (the `KV*` nine,
+  the `Log*` four, `GetServerVersion`, `GetDiagnosticId`, `GetSystemInstallDate`) and the
+  not-implemented error for the rest; `AppPluginDriver` answers not-implemented throughout. That
+  is plugin plan Phase 6, ordered by what real plugins call.
 - The hook call sites: 25 of the 35 are wired (the post family and reactions, which closed
   D-402's plugin half; the membership family; the user lifecycle family, which closed D-453
   and D-471; both file hooks; `PreferencesHaveChanged`; the channel lifecycle; `DraftWillBeUpserted`). The
@@ -9742,3 +9744,23 @@ non-localhost server). None of it is private; the whole packet forwards
 **What is owed:** the TLS dial and `STARTTLS` (tokio-rustls is in the registry), and the two auth
 mechanisms, pinned against a local SMTP test server under both hosts. It is also most of
 [D-238]'s transport, so it likely lands with that.
+
+---
+
+## D-990 · The plugin API has no `GetConfig`, `GetUnsanitizedConfig` or `GetLicense`
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/plugin_api.go:105-145) · **Owner** the plugin host
+
+Three of the methods every plugin calls first answer `API <Name> called but not implemented.`
+under the Rust host. Each returns a gob `*model.Config` or `*model.License`: hundreds of pointer
+fields, keyed by Go field name, which this server holds only as the JSON document (the config) or
+as `mm_model::license::License` (the licence). Nothing is private; the work is a conversion from
+that JSON into `mm_plugin::wire::model::Config` — `model.Config`'s only three `json:` tags are
+`,omitempty` without a rename, so its JSON keys *are* the gob field names and the conversion can
+be generic over the generated IDL rather than hand-written per field (`model.License` has 74 tags
+and needs the IDL's JSON names) — plus `GetSanitizedConfig`'s sanitisation, which the support packet
+already ported (`mm_app::config::sanitize_with`).
+
+**What is owed:** the three methods, with a tranche in `parity::plugin_hooks` that renders both
+hosts' answers. `GetPluginConfig` and `LoadPluginConfiguration` read the same document and are
+the natural next two.

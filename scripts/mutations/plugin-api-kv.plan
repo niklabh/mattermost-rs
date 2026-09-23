@@ -1,0 +1,32 @@
+# Mutation plan for the plugin API's first methods: the KV store, logging and server information
+# (docs/PLUGIN_PLAN.md, Phase 6).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-kv.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_kv_methods_answer_as_go_answers` (66 API
+# calls under both hosts, plus the rows each left) and, for the log pairing, `mm_app::plugin_api`'s
+# unit tests. Every SQL mutation keeps its bind parameter typed (`$n = $n`), or `query!` cannot
+# compile it. The last two lines are the no-op controls and must SURVIVE.
+
+get-expiry-reversed	crates/mm-store/src/plugin_store.rs	WHERE PluginId = $1 AND PKey = $2 AND (ExpireAt = 0 OR ExpireAt > $3)"#	WHERE PluginId = $1 AND PKey = $2 AND (ExpireAt = 0 OR ExpireAt < $3)"#	api	plugin_hooks::the_plugin_api_kv
+cas-update-ignores-expiry	crates/mm-store/src/plugin_store.rs	AND PValue = $5 AND (ExpireAt = 0 OR ExpireAt > $6)	AND PValue = $5 AND (ExpireAt = 0 OR ExpireAt > $6 OR $6 = $6)	api	plugin_hooks::the_plugin_api_kv
+cas-insert-clears-live-not-expired	crates/mm-store/src/plugin_store.rs	AND ExpireAt <> 0 AND ExpireAt < $3",	AND ExpireAt <> 0 AND ExpireAt > $3",	api	plugin_hooks::the_plugin_api_kv
+cas-conflict-is-an-error	crates/mm-store/src/plugin_store.rs	Err(err) if is_key_conflict(&err) => Ok(false),	Err(err) if false && is_key_conflict(&err) => Ok(false),	api	plugin_hooks::the_plugin_api_kv
+cad-ignores-expiry	crates/mm-store/src/plugin_store.rs	AND PValue = $3 AND (ExpireAt = 0 OR ExpireAt > $4)	AND PValue = $3 AND (ExpireAt = 0 OR ExpireAt > $4 OR $4 = $4)	api	plugin_hooks::the_plugin_api_kv
+cad-nil-old-deletes	crates/mm-store/src/plugin_store.rs	            // nil can't be stored, so nothing can match it.\n            return Ok(false);	            // nil can't be stored, so nothing can match it.\n            return Ok(true);	api	plugin_hooks::the_plugin_api_kv
+list-default-limit-100	crates/mm-store/src/plugin_store.rs	pub const DEFAULT_PLUGIN_KEY_FETCH_LIMIT: i64 = 10;	pub const DEFAULT_PLUGIN_KEY_FETCH_LIMIT: i64 = 100;	api	plugin_hooks::the_plugin_api_kv
+list-negative-offset-mirrored	crates/mm-store/src/plugin_store.rs	let offset = offset.max(0);	let offset = offset.abs();	api	plugin_hooks::the_plugin_api_kv
+delete-all-takes-the-neighbour	crates/mm-store/src/plugin_store.rs	"DELETE FROM PluginKeyValueStore WHERE PluginId = $1",	"DELETE FROM PluginKeyValueStore WHERE PluginId = $1 OR PluginId = 'mmrs.kvneighbour'",	api	plugin_hooks::the_plugin_api_kv
+list-offset-is-the-page	crates/mm-app/src/plugin_key_value_store.rs	.list(plugin_id, page.wrapping_mul(per_page), per_page)	.list(plugin_id, page, per_page)	api	plugin_hooks::the_plugin_api_kv
+set-skips-hashed-cleanup	crates/mm-app/src/plugin_key_value_store.rs	        if let Err(err) = store.delete(plugin_id, &key_hash(key)).await {\n            tracing::warn!(plugin_id, key,	        if let Err(err) = store.delete(plugin_id, "").await {\n            tracing::warn!(plugin_id, key,	api	plugin_hooks::the_plugin_api_kv
+get-no-hashed-fallback	crates/mm-app/src/plugin_key_value_store.rs	                key_hash(key),\n                "Failed to query plugin key value using hashed key",	                key.to_owned(),\n                "Failed to query plugin key value using hashed key",	api	plugin_hooks::the_plugin_api_kv
+delete-skips-hashed-spelling	crates/mm-app/src/plugin_key_value_store.rs	(key_hash(key), "Failed to delete plugin key value"),	(key.to_owned(), "Failed to delete plugin key value"),	api	plugin_hooks::the_plugin_api_kv
+invalid-becomes-500	crates/mm-app/src/plugin_key_value_store.rs	StoreError::Invalid { app_error, .. } => app_error,	StoreError::Invalid { .. } => Box::new(AppError::new(r#where, id, None, "", 500)),	api	plugin_hooks::the_plugin_api_kv
+install-date-wrong-row	crates/mm-app/src/plugin_key_value_store.rs	.get_by_name(mm_model::system::SYSTEM_INSTALLATION_DATE_KEY)	.get_by_name(mm_model::system::SYSTEM_SERVER_ID)	api	plugin_hooks::the_plugin_api_kv
+error-untranslated	crates/mm-app/src/plugin_api.rs	if let Some(bundle) = crate::i18n::loaded() {	if let Some(bundle) = crate::i18n::loaded().filter(|_| false) {	api	plugin_hooks::the_plugin_api_kv
+cas-empty-old-is-not-nil	crates/mm-app/src/plugin_api.rs	.compare_and_set_plugin_key(&self.id, &args.a, bytes(&args.b), bytes(&args.c))	.compare_and_set_plugin_key(&self.id, &args.a, Some(&args.b[..]), bytes(&args.c))	api	plugin_hooks::the_plugin_api_kv
+set-empty-value-is-stored	crates/mm-app/src/plugin_api.rs	.set_plugin_key(&self.id, &args.a, bytes(&args.b))	.set_plugin_key(&self.id, &args.a, Some(&args.b[..]))	api	plugin_hooks::the_plugin_api_kv
+expiry-in-deciseconds	crates/mm-model/src/plugin_kvset_options.rs	get_millis() + (opt.expire_in_seconds * 1000)	get_millis() + (opt.expire_in_seconds * 100)	api	plugin_hooks::the_plugin_api_kv
+log-dangling-read-as-pair	crates/mm-app/src/plugin_api.rs	        if i == pairs.len() - 1 {	        if false && i == pairs.len() - 1 {	unit	plugin_api
+control-unit-typed-counter	crates/mm-app/src/plugin_api.rs	    let mut i = 0;	    let mut i = 0usize;	unit	plugin_api
+control-api-select-columns-swapped	crates/mm-store/src/plugin_store.rs	r#"SELECT PluginId AS "plugin_id!", PKey AS "key!", PValue AS value, ExpireAt AS "expire_at!"	r#"SELECT PKey AS "key!", PluginId AS "plugin_id!", PValue AS value, ExpireAt AS "expire_at!"	api	plugin_hooks::the_plugin_api_kv
