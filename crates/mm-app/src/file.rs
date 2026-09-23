@@ -43,30 +43,8 @@ impl App {
     #[tracing::instrument(skip(self), fields(file_id = %file_id))]
     pub async fn get_file_info(&self, file_id: &str) -> Result<FileInfo, PrepareError> {
         let info = self
-            .store()
-            .file_info()
-            .get(file_id)
+            .server_get_file_info(file_id)
             .await
-            .map_err(|err| {
-                if err.is_not_found() {
-                    AppError::boxed(
-                        "GetFileInfo",
-                        "app.file_info.get.app_error",
-                        None,
-                        String::new(),
-                        404,
-                    )
-                } else {
-                    tracing::error!(error = %err, "file info lookup failed");
-                    AppError::boxed(
-                        "GetFileInfo",
-                        "app.file_info.get.app_error",
-                        None,
-                        String::new(),
-                        500,
-                    )
-                }
-            })
             .map_err(PrepareError::App)?;
 
         if Self::mini_preview_would_be_generated(&info) {
@@ -76,6 +54,158 @@ impl App {
         }
 
         Ok(info)
+    }
+
+    /// Port of `Server.getFileInfo` (app/file.go:1295): the store read alone, whose two failures
+    /// carry the **same** id, `app.file_info.get.app_error`, and differ only in status — 404 for
+    /// a miss, 500 for a query failure. `SetFileSearchableContent` reads through this and not
+    /// through [`App::get_file_info`], so it never repairs a mini preview.
+    pub(crate) async fn server_get_file_info(&self, file_id: &str) -> AppResult<FileInfo> {
+        self.store().file_info().get(file_id).await.map_err(|err| {
+            let status = if err.is_not_found() {
+                404
+            } else {
+                tracing::error!(error = %err, "file info lookup failed");
+                500
+            };
+            AppError::boxed(
+                "GetFileInfo",
+                "app.file_info.get.app_error",
+                None,
+                String::new(),
+                status,
+            )
+        })
+    }
+
+    /// Port of `app.App.GetFileInfos` (app/file.go:1350), the plugin API's `GetFileInfos`.
+    ///
+    /// A store refusal — a negative page or page size, or a sort other than `CreateAt`/`Size` —
+    /// is the 400 `app.file_info.get_with_options.app_error`; anything else the same id at 500.
+    /// `getFilteredAccessibleFiles` keeps every row off a cloud licence (see
+    /// [`App::get_file_info`]). Then `generateMiniPreviewForInfos`: one image in the page that
+    /// would be repaired makes the whole answer [`PrepareError::Unreproducible`] ([D-891]).
+    #[tracing::instrument(skip(self, options), fields(page, per_page))]
+    pub async fn get_file_infos(
+        &self,
+        page: i64,
+        per_page: i64,
+        options: &mm_model::file_info::GetFileInfosOptions,
+    ) -> Result<Vec<FileInfo>, PrepareError> {
+        let infos = self
+            .store()
+            .file_info()
+            .get_with_options(page, per_page, options)
+            .await
+            .map_err(|err| {
+                let status = if err.is_invalid_input() || err.is_limit_exceeded() {
+                    400
+                } else {
+                    tracing::error!(error = %err, "file info listing failed");
+                    500
+                };
+                PrepareError::App(AppError::boxed(
+                    "GetFileInfos",
+                    "app.file_info.get_with_options.app_error",
+                    None,
+                    String::new(),
+                    status,
+                ))
+            })?;
+        if infos.iter().any(Self::mini_preview_would_be_generated) {
+            return Err(PrepareError::Unreproducible(
+                "generateMiniPreview reads the file backend and writes the row back",
+            ));
+        }
+        Ok(infos)
+    }
+
+    /// Port of `app.App.GetFile` (app/file.go:1379): [`App::get_file_info`] — its mini-preview
+    /// repair included — then the bytes at the row's path.
+    pub async fn get_file(&self, file_id: &str) -> Result<Vec<u8>, PrepareError> {
+        let info = self.get_file_info(file_id).await?;
+        self.read_file(&info.path).await
+    }
+
+    /// Port of `app.App.SetFileSearchableContent` (app/file.go:1328): the row must exist and be
+    /// live ([`App::server_get_file_info`]), then `SetContent`, whose own not-found branch Go
+    /// writes and never reaches — the `UPDATE` does not count rows — so its only failure is the
+    /// 500.
+    pub async fn set_file_searchable_content(&self, file_id: &str, content: &str) -> AppResult<()> {
+        let info = self.server_get_file_info(file_id).await?;
+        self.store()
+            .file_info()
+            .set_content(&info.id, content)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "setting the searchable content failed");
+                AppError::boxed(
+                    "SetFileSearchableContent",
+                    "app.file_info.set_searchable_content.app_error",
+                    None,
+                    String::new(),
+                    if err.is_not_found() { 404 } else { 500 },
+                )
+            })
+    }
+
+    /// Port of `app.App.CopyFileInfos` (app/file.go:1393): a new row per id, pointing at the
+    /// **same** stored file, owned by `user_id`, detached from any post and channel, and every one
+    /// stamped with one `now` taken before the loop.
+    ///
+    /// No transaction, as in Go: the copies made before a failing id stay. A missing or deleted
+    /// id is the 404 `app.file_info.get.app_error` under this function's own `where`; an owner
+    /// `IsValid` refuses is the model's 400, returned as it is. An empty list is nil.
+    pub async fn copy_file_infos(
+        &self,
+        user_id: &str,
+        file_ids: &[String],
+    ) -> AppResult<Vec<String>> {
+        let now = mm_model::utils::get_millis();
+        let mut copied = Vec::new();
+        for file_id in file_ids {
+            let mut info = self.store().file_info().get(file_id).await.map_err(|err| {
+                let status = if err.is_not_found() { 404 } else { 500 };
+                AppError::boxed(
+                    "CopyFileInfos",
+                    "app.file_info.get.app_error",
+                    None,
+                    String::new(),
+                    status,
+                )
+            })?;
+            info.id = mm_model::utils::new_id();
+            info.creator_id = user_id.to_owned();
+            info.create_at = now;
+            info.update_at = now;
+            info.post_id = String::new();
+            info.channel_id = String::new();
+            let saved = match self.store().file_info().save(info).await {
+                Ok(saved) => saved,
+                Err(mm_store::error::StoreError::Invalid { app_error, .. }) => {
+                    return Err(app_error);
+                }
+                Err(err) => {
+                    tracing::error!(error = %err, "FileInfo save failed");
+                    return Err(AppError::boxed(
+                        "CopyFileInfos",
+                        "app.file_info.save.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    ));
+                }
+            };
+            copied.push(saved.id);
+        }
+        Ok(copied)
+    }
+
+    /// Port of `app.App.GeneratePublicLink` (app/file.go:601): `<site>/files/<id>/public?h=<hash>`
+    /// under the configured salt.
+    pub fn generate_public_link(&self, site_url: &str, info: &FileInfo) -> String {
+        let hash = generate_public_link_hash(&info.id, &self.config().public_link_salt);
+        format!("{site_url}/files/{}/public?h={hash}", info.id)
     }
 
     /// The row read `getFile` makes, which is **not** [`App::get_file_info`].

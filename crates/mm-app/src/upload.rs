@@ -487,7 +487,11 @@ impl App {
     /// Port of `App.HandleImages` (app/file.go:1161) for the one file `UploadData` passes:
     /// decode (a failure is a debug log and nothing written), orientation through a seekable
     /// reader, and the `_thumb` and `_preview` writes — each failure logged and skipped.
-    async fn handle_images(&self, info: &FileInfo, data: Vec<u8>) -> Result<(), PrepareError> {
+    pub(crate) async fn handle_images(
+        &self,
+        info: &FileInfo,
+        data: Vec<u8>,
+    ) -> Result<(), PrepareError> {
         let max_res = self.config().file_max_image_resolution;
         let derived =
             tokio::task::spawn_blocking(move || image_pipeline::handle_image(&data, max_res))

@@ -690,6 +690,16 @@ query does, not what REST does — `GetUsersByIds` hands the plugin the password
 an admin's. `GetUsers` with a role, the `update_at_asc` sort, `UpdatedAfter` or view restrictions
 ([D-1030]) and a search outside a team or channel ([D-1031]) answer not-implemented.
 
+**Then 117 of 258:** the file, dialog and mail ten and `PluginHTTP` (`plugin_api/files.rs`,
+`plugin_api/http.rs`): `UploadFile`, `GetFileInfo`, `GetFileInfos`, `GetFile`, `ReadFile`,
+`GetFileLink`, `CopyFileInfos`, `SetFileSearchableContent`, `OpenInteractiveDialog`, `SendMail`,
+and one plugin's HTTP request to another's `ServeHTTP`. `UploadFile` is
+`DoUploadFileExpectModification`, whose `FileWillBeUploaded` has its own rules and whose row has no
+channel and no mini preview; reading such an image back is [D-891]'s repair, not-implemented. A
+`PluginHTTP` whose request carries no header reaches no plugin and answers 200 with nothing, as
+Go's nil-map panic makes it. `SendMail` sends nothing ([D-238]). The client-facing
+`/plugins/{id}/*` is still Go's ([D-1040]).
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

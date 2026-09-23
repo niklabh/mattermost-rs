@@ -7730,6 +7730,903 @@ fn assert_users_answers_are_gos(calls: &[Json], hooks: &[Json]) {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: files, dialogs, mail and inter-plugin HTTP (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the files tranche; see `second_server_ports`. Go's port + 93 is the users
+/// tranche's Rust host, so this tranche's Go server is at + 94 and its Rust host just above it.
+const FILES_HOST_PORT: u16 = 8160;
+/// Its Go server.
+const FILES_GO_OFFSET: u16 = 94;
+/// Each side's tag: in its user's name, its channel's and every file name the script makes.
+const FILES_SIDES: [&str; 2] = ["pfsidego", "pfsiders"];
+/// The most of one stored file the suite reads back.
+const FILES_READ_CAP: u64 = 1024 * 1024;
+
+/// The users the files tour makes, for the cleanup.
+static FILES_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's file, dialog, mail and inter-plugin HTTP methods
+/// (`mm_app::plugin_api::files`, `mm_app::plugin_api::http`).
+///
+/// `/hookrec files`, run by each side's own user in its own channel, runs
+/// `examples/recorder/files.rs` inside `ExecuteCommand` — so `OpenInteractiveDialog` has the
+/// trigger id the host minted. Compared: every answer in order, every hook the script fired
+/// (`FileWillBeUploaded` for each upload, `ServeHTTP` for each inter-plugin request that reached
+/// the recorder), every websocket frame the user's socket received (the dialogs), the `FileInfo`
+/// rows this side's user and uploads left, and every file each host wrote into its own store.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own user and channel and five planted files, uploaded through main Go by
+/// that user before either host starts; the bytes the script reads back are copied into each
+/// host's own file store. The side's ids, token, tag and site URL are scrubbed, then the ids the
+/// script learned (its uploads and copies). Masks: [`normalise`]'s id, time and path keys,
+/// [`mask_core`]'s `<minted>` ids, [`mask_command`]'s trigger ids, and a public link's hash,
+/// which is of each side's own file id — checked against the salt before it is masked.
+#[tokio::test]
+async fn the_plugin_api_file_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    purge_files_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_files_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *FILES_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in users {
+        common::delete_plain_user(&client, &admin, &id).await;
+    }
+    purge_files_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Every row the tour made: the planted files, the script's uploads (all named `mmrsfiles`) and
+/// the copies, which keep the planted files' names.
+async fn purge_files_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    sqlx::query("DELETE FROM fileinfo WHERE name LIKE '%mmrsfiles%' OR path LIKE '%mmrsfiles%'")
+        .execute(&pool)
+        .await
+        .expect("the tour's files go");
+}
+
+/// One side of the files tour.
+struct FilesSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    channel: String,
+    /// The planted files, in the order `examples/recorder/files.rs` names them.
+    planted: [(&'static str, String); 5],
+    since: i64,
+}
+
+impl FilesSide {
+    fn env(&self) -> Vec<(&'static str, String)> {
+        let mut env = vec![
+            ("HOOK_RECORDER_FILES_SIDE", self.tag.to_owned()),
+            ("HOOK_RECORDER_FILES_SINCE", self.since.to_string()),
+        ];
+        for (var, (_, id)) in [
+            "HOOK_RECORDER_FILES_A",
+            "HOOK_RECORDER_FILES_B",
+            "HOOK_RECORDER_FILES_C",
+            "HOOK_RECORDER_FILES_IMAGE",
+            "HOOK_RECORDER_FILES_DELETED",
+        ]
+        .into_iter()
+        .zip(&self.planted)
+        {
+            env.push((var, id.clone()));
+        }
+        env
+    }
+
+    /// This side's scrub pairs: the ids the script's answers taught it first, then the fixture.
+    fn pairs(&self, calls: &[Json], site: &str) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for n in 0..16 {
+            if let Some(id) = learned(calls, "UploadFile", n, "/returns/A/Id") {
+                pairs.push((id, format!("<upload-{n}>")));
+            }
+        }
+        for n in 0..2 {
+            if let Some(id) = learned(calls, "CopyFileInfos", 0, &format!("/returns/A/{n}")) {
+                pairs.push((id, format!("<copy-{n}>")));
+            }
+        }
+        for (token, id) in &self.planted {
+            pairs.push((id.clone(), format!("<planted-{token}>")));
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (site.to_owned(), "<site>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// A `GetFileInfos` filter's `Since`, which is each side's own planted file's `CreateAt`.
+fn mask_since(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(mask_since),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if key == "Since" && entry.as_i64().is_some_and(|n| n != 0) {
+                    *entry = Json::String("<since>".to_owned());
+                    continue;
+                }
+                mask_since(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A public link's hash — of each side's own file id — as `<hash>`.
+fn mask_link_hash(text: &str) -> String {
+    const MARK: &str = "/public?h=";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(MARK) {
+        out.push_str(&rest[..at + MARK.len()]);
+        out.push_str("<hash>");
+        rest = rest[at + MARK.len()..]
+            .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The configured `PublicLinkSalt`, from the active configuration document.
+async fn public_link_salt() -> String {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (value,): (String,) =
+        sqlx::query_as("SELECT value FROM configurations WHERE active LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .expect("the configuration");
+    let config: Json = serde_json::from_str(&value).expect("the configuration is JSON");
+    config["FileSettings"]["PublicLinkSalt"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The `FileInfo` rows this side left: its planted files and their copies (its user's), and the
+/// script's uploads (named for its tag) — every column, the minted ones as tokens.
+async fn files_rows(side: &FilesSide, pairs: &[(String, String)], shared: &[String]) -> Vec<Json> {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT jsonb_build_object(
+                    'Id', id, 'CreatorId', creatorid, 'PostId', postid, 'ChannelId', channelid,
+                    'CreateAt', createat, 'UpdateAt', updateat, 'DeleteAt', deleteat,
+                    'Path', path, 'ThumbnailPath', thumbnailpath, 'PreviewPath', previewpath,
+                    'Name', name, 'Extension', extension, 'Size', size, 'MimeType', mimetype,
+                    'Width', width, 'Height', height, 'HasPreviewImage', haspreviewimage,
+                    'MiniPreview', encode(minipreview, 'base64'), 'Content', content,
+                    'RemoteId', remoteid, 'Archived', archived)::text
+           FROM fileinfo
+          WHERE creatorid = $1 OR name LIKE '%' || $2 || '%' OR path LIKE '%' || $2 || '%'",
+    )
+    .bind(&side.own.id)
+    .bind(side.tag)
+    .fetch_all(&pool)
+    .await
+    .expect("the rows");
+    let mut out: Vec<Json> = rows
+        .into_iter()
+        .map(|(row,)| {
+            let mut row: Json = serde_json::from_str(&scrub(&row, pairs)).expect("json");
+            normalise(&mut row);
+            mask_core(&mut row, shared);
+            row
+        })
+        .collect();
+    out.sort_by_key(Json::to_string);
+    out
+}
+
+/// Every file a host wrote under its own store, but the plugin bundles: the path scrubbed and its
+/// ids tokens, and the bytes, capped.
+fn stored_files(data: &Path, pairs: &[(String, String)]) -> Vec<(String, String)> {
+    use base64::Engine as _;
+    use std::io::Read as _;
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(data, &mut files);
+    let mut out: Vec<(String, String)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let relative = path.strip_prefix(data).ok()?.to_string_lossy().into_owned();
+            if relative.starts_with("plugins/") {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)
+                .ok()?
+                .take(FILES_READ_CAP)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            Some((
+                path_without_ids(&scrub(&relative, pairs)),
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+            ))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Copy a planted file's bytes, and its derived images, from main Go's store into a host's.
+async fn copy_planted(id: &str, into: &Path) {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let (path, thumbnail, preview): (String, String, String) =
+        sqlx::query_as("SELECT path, thumbnailpath, previewpath FROM fileinfo WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the planted row");
+    let from = PathBuf::from(common::stack_data_dir());
+    for relative in [path, thumbnail, preview] {
+        if relative.is_empty() {
+            continue;
+        }
+        let target = into.join(&relative);
+        std::fs::create_dir_all(target.parent().expect("a parent")).expect("the directory");
+        std::fs::copy(from.join(&relative), &target).expect("the planted bytes");
+    }
+}
+
+/// Wait until a planted file's post deletion has reached its row: Go deletes a post's files on a
+/// goroutine after answering.
+async fn wait_until_deleted(id: &str) {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    for _ in 0..100 {
+        let (deleted,): (i64,) = sqlx::query_as("SELECT deleteat FROM fileinfo WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("the planted row");
+        if deleted != 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the planted file {id} was never deleted with its post");
+}
+
+async fn run_the_files_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-files");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let team = common::create_team(client, admin, "hookfiles").await;
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let shared: Vec<String> = vec![team.clone(), me["id"].as_str().expect("an id").to_owned()];
+    let mut sides = Vec::new();
+    for tag in FILES_SIDES {
+        let own = common::create_plain_user(client, admin, &team, &format!("pfown{tag}")).await;
+        FILES_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(own.id.clone());
+        let channel = common::create_channel(client, admin, &team, &format!("files{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        let upload = |name: String, kind: &'static str, bytes: Vec<u8>| {
+            let (client, token, channel) = (client.clone(), own.token.clone(), channel.clone());
+            async move {
+                // Distinct `CreateAt`s, so that no sort falls back on the ids.
+                tokio::time::sleep(Duration::from_millis(15)).await;
+                common::upload_file(&client, &token, &channel, &name, kind, &bytes).await
+            }
+        };
+        let a = upload(
+            format!("mmrsfiles-planted-a-{tag}.txt"),
+            "text/plain",
+            vec![b'a'; 10],
+        )
+        .await;
+        let b = upload(
+            format!("mmrsfiles-planted-b-{tag}.txt"),
+            "text/plain",
+            vec![b'b'; 30],
+        )
+        .await;
+        let c = upload(
+            format!("mmrsfiles-planted-c-{tag}.txt"),
+            "text/plain",
+            vec![b'c'; 20],
+        )
+        .await;
+        let image = upload(
+            format!("mmrsfiles-planted-img-{tag}.png"),
+            "image/png",
+            common::TINY_PNG.to_vec(),
+        )
+        .await;
+        let deleted = upload(
+            format!("mmrsfiles-planted-deleted-{tag}.txt"),
+            "text/plain",
+            b"withdrawn with its post".to_vec(),
+        )
+        .await;
+        common::post_message_with_files(
+            client,
+            &own.token,
+            &channel,
+            "the planted image",
+            std::slice::from_ref(&image),
+        )
+        .await;
+        let withdrawn = common::post_message_with_files(
+            client,
+            &own.token,
+            &channel,
+            "a post whose file goes with it",
+            std::slice::from_ref(&deleted),
+        )
+        .await;
+        common::delete_post(client, &own.token, &withdrawn).await;
+        wait_until_deleted(&deleted).await;
+        let pool = common::fixture_pool().await.expect("the stack database");
+        let (since,): (i64,) = sqlx::query_as("SELECT createat FROM fileinfo WHERE id = $1")
+            .bind(&b)
+            .fetch_one(&pool)
+            .await
+            .expect("b's row");
+        sides.push(FilesSide {
+            tag,
+            own,
+            channel,
+            planted: [
+                ("a", a),
+                ("b", b),
+                ("c", c),
+                ("img", image),
+                ("deleted", deleted),
+            ],
+            since,
+        });
+    }
+    // The bytes the script reads back, in each host's own store.
+    for (run, side) in [(&go_run, &sides[0]), (&rs_run, &sides[1])] {
+        for (_, id) in &side.planted[..4] {
+            copy_planted(id, &run.join("data")).await;
+        }
+    }
+
+    let offset: u16 = std::env::var("MMRS_PORT_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let go_site = format!("http://localhost:{}", go_port() + FILES_GO_OFFSET);
+    let rust_site = format!("http://localhost:{}", FILES_HOST_PORT + offset);
+    let common_env = [
+        ("HOOK_RECORDER_COMMANDS", "1"),
+        ("HOOK_RECORDER_COMMAND_TEAM", team.as_str()),
+        ("HOOK_RECORDER_FILES", "1"),
+        ("MM_FILESETTINGS_ENABLEPUBLICLINK", "true"),
+        ("MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS", "false"),
+        // Go extracts an upload's text on a goroutine, and this server does not ([D-651]).
+        ("MM_FILESETTINGS_EXTRACTCONTENT", "false"),
+    ];
+
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let go_side_env = sides[0].env();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(common_env);
+    env.extend(go_side_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, FILES_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_side_env = sides[1].env();
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+        ("MM_SERVICESETTINGS_SITEURL", rust_site.as_str()),
+    ];
+    env.extend(common_env);
+    env.extend(rust_side_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(FILES_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+    command_transcript_settles(&go_log, "OnActivate", "Go").await;
+    command_transcript_settles(&rust_log, "OnActivate", "Rust").await;
+
+    let salt = public_link_salt().await;
+    let mut recorded = Vec::new();
+    for (side, base, site, log, run, host) in [
+        (
+            &sides[0],
+            go.base.as_str(),
+            go_site.as_str(),
+            go_log.as_path(),
+            &go_run,
+            "Go",
+        ),
+        (
+            &sides[1],
+            rust.base.as_str(),
+            rust_site.as_str(),
+            rust_log.as_path(),
+            &rs_run,
+            "Rust",
+        ),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "team_id": team,
+            "command": "/hookrec files",
+        }))
+        .expect("the body");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/commands/execute",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            200,
+            "{host}: the command: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the command was forwarded"
+            );
+        }
+        command_transcript_settles(log, "FilesScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "FilesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+
+        // The link's hash is of this side's own image, under the configured salt.
+        let link = calls
+            .iter()
+            .find(|c| c["call"] == "GetFileLink")
+            .and_then(|c| c["returns"]["A"].as_str())
+            .unwrap_or_default()
+            .to_owned();
+        let image = &side.planted[3].1;
+        assert_eq!(
+            link,
+            format!(
+                "{site}/files/{image}/public?h={}",
+                mm_app::file::generate_public_link_hash(image, &salt)
+            ),
+            "{host}: the public link"
+        );
+
+        let pairs = side.pairs(&calls, site);
+        let mut entries: Vec<Json> = transcript_of(log, &pairs)
+            .into_iter()
+            .map(|entry| serde_json::from_str(&mask_link_hash(&entry.to_string())).expect("json"))
+            .collect();
+        for entry in entries.iter_mut() {
+            mask_core(entry, &shared);
+            mask_command(entry);
+            mask_since(entry);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared))
+            .collect();
+        frames.iter_mut().for_each(mask_command);
+        frames.sort_by_key(Json::to_string);
+        let rows = files_rows(side, &pairs, &shared).await;
+        let stored = stored_files(&run.join("data"), &pairs);
+        recorded.push((entries, frames, rows, stored));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "FilesScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // Every hook, in the order the plugin saw them: the uploads and the inter-plugin requests
+    // are synchronous calls inside the script, so the order is the script's.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .filter(|e| e["hook"] != "FilesScript")
+            .cloned()
+            .collect()
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    // Every frame the user's socket received.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    assert_eq!(go_side.1, rust_side.1, "the frames");
+
+    // The rows, and the bytes each host wrote.
+    assert_eq!(go_side.2, rust_side.2, "the FileInfo rows");
+    assert_eq!(
+        go_side.3.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        rust_side.3.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        "the files each host stored"
+    );
+    assert_eq!(go_side.3, rust_side.3, "the stored bytes");
+
+    assert_files_answers_are_gos(&go_calls, &go_hooks, &go_side.1, &go_side.2, &go_side.3);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_files_answers_are_gos(
+    calls: &[Json],
+    hooks: &[Json],
+    frames: &[Json],
+    rows: &[Json],
+    stored: &[(String, String)],
+) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let upload = |n: usize| answer("UploadFile", n);
+    let error_id = |value: &Json| value["B"]["Id"].as_str().map(str::to_owned);
+
+    // UploadFile, in the script's order.
+    let text = upload(0)["A"].clone();
+    assert_eq!(
+        (&text["CreatorId"], text.get("ChannelId"), &text["Size"]),
+        (&Json::from("nouser"), None, &Json::from(27)),
+        "a plugin's upload has no user and no channel: {text}"
+    );
+    assert!(
+        text["Path"].as_str().is_some_and(|p| p.ends_with(
+            "/teams/noteam/channels/<own-channel>/users/nouser/<upload-0>/notes-mmrsfiles-<side>.txt"
+        )),
+        "the channel is in the path: {text}"
+    );
+    assert_eq!(
+        upload(1)["A"]["Size"],
+        29,
+        "a replacement is the size: {}",
+        upload(1)
+    );
+    assert_eq!(
+        upload(2)["A"]["Name"],
+        "renamed.txt",
+        "the plugin's name is taken"
+    );
+    assert_eq!(
+        error_id(&upload(3)).as_deref(),
+        Some("File rejected by plugin. the hook recorder turns this upload away"),
+        "the reason is in the id"
+    );
+    let png = upload(4)["A"].clone();
+    assert_eq!(
+        (&png["Width"], &png["Height"]),
+        (&Json::from(3), &Json::from(2))
+    );
+    assert!(
+        png.get("MiniPreview").is_none(),
+        "no mini preview on this path: {png}"
+    );
+    let rotated = upload(5)["A"].clone();
+    assert_eq!(
+        (&rotated["Width"], &rotated["Height"]),
+        (&Json::from(2), &Json::from(4)),
+        "orientation 6 swaps the dimensions"
+    );
+    assert_eq!(
+        upload(7)["A"].get("HasPreviewImage"),
+        None,
+        "an animated GIF has no preview"
+    );
+    assert_eq!(
+        upload(8)["A"]["HasPreviewImage"],
+        true,
+        "a one-frame GIF has one"
+    );
+    assert_eq!(
+        error_id(&upload(9)).as_deref(),
+        Some("app.file_info.get.gif.app_error"),
+        "a GIF whose frames do not count"
+    );
+    assert_eq!(
+        error_id(&upload(10)).as_deref(),
+        Some("api.file.upload_file.large_image.app_error")
+    );
+    let garbage = upload(11)["A"].clone();
+    assert!(
+        garbage.get("Width").is_none() && garbage["PreviewPath"].is_string(),
+        "an image that does not decode keeps its derived paths: {garbage}"
+    );
+    assert!(
+        upload(12)["A"].get("PreviewPath").is_none(),
+        "an SVG has none"
+    );
+    assert!(
+        upload(13)["A"]["Path"]
+            .as_str()
+            .is_some_and(|p| p.contains("/channels/./users/nouser/")),
+        "no channel is `.` in the path: {}",
+        upload(13)
+    );
+    assert_eq!(
+        error_id(&upload(14)).as_deref(),
+        Some("api.file.upload_file.incorrect_channelId.app_error")
+    );
+
+    // The reads.
+    assert_eq!(
+        answer("GetFileInfo", 2)["B"]["StatusCode"],
+        404,
+        "a deleted row is not read"
+    );
+    assert_eq!(
+        answer("SetFileSearchableContent", 3)["A"]["StatusCode"],
+        404,
+        "nor written"
+    );
+    assert_eq!(
+        answer("GetFileInfo", 4)["A"]["Content"],
+        "words a search could find",
+        "the content is set"
+    );
+    let names = |list: &Json| -> Vec<String> {
+        list["A"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f["Name"].as_str().map(str::to_owned))
+            .collect()
+    };
+    let planted = |x: &str| {
+        format!(
+            "mmrsfiles-planted-{x}-<side>.{}",
+            if x == "img" { "png" } else { "txt" }
+        )
+    };
+    assert_eq!(
+        names(&answer("GetFileInfos", 0)),
+        [planted("a"), planted("b"), planted("c"), planted("img")],
+        "oldest first"
+    );
+    assert_eq!(
+        names(&answer("GetFileInfos", 1)),
+        [planted("img"), planted("b"), planted("c"), planted("a")],
+        "largest first"
+    );
+    assert_eq!(
+        names(&answer("GetFileInfos", 2)),
+        [planted("a"), planted("c"), planted("b"), planted("img")],
+        "smallest first"
+    );
+    assert_eq!(
+        names(&answer("GetFileInfos", 3))[0],
+        planted("deleted"),
+        "the deleted row, newest"
+    );
+    assert_eq!(
+        names(&answer("GetFileInfos", 4)),
+        [planted("b"), planted("c"), planted("img")],
+        "since b"
+    );
+    assert!(
+        !names(&answer("GetFileInfos", 5)).contains(&planted("c")),
+        "c has content now"
+    );
+    assert_eq!(
+        names(&answer("GetFileInfos", 7)),
+        [planted("c"), planted("img")],
+        "the second page of two"
+    );
+    for n in [8, 9, 10] {
+        assert_eq!(
+            answer("GetFileInfos", n)["B"]["StatusCode"],
+            400,
+            "GetFileInfos {n}: {}",
+            answer("GetFileInfos", n)
+        );
+    }
+    assert!(answer("GetFileInfos", 11)["A"].is_null(), "a page of none");
+    assert_eq!(
+        error_id(&answer("GetFileLink", 1)).as_deref(),
+        Some("plugin_api.get_file_link.no_post.app_error")
+    );
+    assert_eq!(
+        error_id(&answer("CopyFileInfos", 2)).as_deref(),
+        Some("model.file_info.is_valid.user_id.app_error")
+    );
+
+    // The dialog, the mail and the inter-plugin requests.
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|f| f["event"] == "open_dialog")
+            .count(),
+        2,
+        "the two dialogs with a real trigger reach the user: {frames:?}"
+    );
+    assert!(answer("OpenInteractiveDialog", 2)["A"]["StatusCode"].is_i64());
+    assert!(
+        answer("SendMail", 4).get("A").is_none(),
+        "no mail is sent, and none refused"
+    );
+    let http = |n: usize| {
+        calls
+            .iter()
+            .filter(|c| c["call"] == "PluginHTTP")
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    assert_eq!(
+        (&http(0)["StatusCode"], &http(0)["Body"]),
+        (&Json::from(202), &Json::from("echo: ping a=1&a=0&b=2")),
+        "the query is re-encoded, sorted by key and not by value"
+    );
+    assert_eq!(
+        http(2)["StatusCode"],
+        200,
+        "a status after the body is too late"
+    );
+    assert_eq!(
+        (&http(4)["StatusCode"], &http(4)["Body"]),
+        (&Json::from(200), &Json::from("")),
+        "a request with no header reaches no plugin"
+    );
+    assert_eq!(http(5)["StatusCode"], 404);
+    assert_eq!(http(6)["StatusCode"], 400);
+    let served: Vec<&Json> = hooks.iter().filter(|h| h["hook"] == "ServeHTTP").collect();
+    assert_eq!(
+        served.len(),
+        4,
+        "echo, status, late and silent reach the recorder"
+    );
+    assert_eq!(
+        served[0]["args"]["Header"]["Mattermost-Plugin-Id"],
+        serde_json::json!(["mmrs.hookrecorder"])
+    );
+
+    // The rows and the bytes.
+    assert!(
+        rows.iter()
+            .all(|r| r["Name"] != "hookrefuse-mmrsfiles-<side>.txt"),
+        "a refused upload leaves no row"
+    );
+    let bytes = |suffix: &str| {
+        stored
+            .iter()
+            .find(|(p, _)| p.ends_with(suffix))
+            .map(|(_, b)| b.clone())
+    };
+    use base64::Engine as _;
+    assert_eq!(
+        bytes("hookreplace-mmrsfiles-<side>.txt"),
+        Some(base64::engine::general_purpose::STANDARD.encode("replaced by the hook recorder")),
+        "the replacement is what is stored"
+    );
+    assert!(
+        bytes("hookunimage-mmrsfiles-<side>_thumb.png").is_some(),
+        "the thumbnail is made from the bytes the plugin was given: {stored:?}"
+    );
+    assert!(
+        bytes("hookrefuse-mmrsfiles-<side>.txt").is_none(),
+        "nothing refused is stored"
+    );
+}
+
 /// The rendering the transcript is written in is a pure function of the value, so the
 /// normalisation this suite compares through can be checked without a stack.
 #[test]
@@ -7796,6 +8693,22 @@ fn mask_core_names_what_it_masks() {
             "f": "abcdefghijklmnopqrstuvwxyz0",
             "ExpiresAt": "<time>", "LastActivityAt": 0,
         })
+    );
+}
+
+/// The files tranche's masks: every link hash and nothing after it; a set `Since` and not a zero.
+#[test]
+fn the_files_masks_take_only_what_they_name() {
+    assert_eq!(
+        mask_link_hash(r#"{"A":"http://x/files/f/public?h=Ab-_9","B":"k","C":"y/public?h=Q"}"#),
+        r#"{"A":"http://x/files/f/public?h=<hash>","B":"k","C":"y/public?h=<hash>"}"#
+    );
+    assert_eq!(mask_link_hash("no link"), "no link");
+    let mut value = serde_json::json!({ "C": { "Since": 1790167257679_i64 }, "D": { "Since": 0 } });
+    mask_since(&mut value);
+    assert_eq!(
+        value,
+        serde_json::json!({ "C": { "Since": "<since>" }, "D": { "Since": 0 } })
     );
 }
 

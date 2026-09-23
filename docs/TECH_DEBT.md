@@ -6693,6 +6693,10 @@ than a courtesy.
 The dependency is measurable only by reimplementing it (SMTP, templates, i18n), which the standing
 decision at the head of this file says to forward rather than port.
 
+Since 2026-09-23 the plugin API's `SendMail` also waits on it: its three refusals and the
+`SendEmailNotifications`-off success are served, and a mail that would go out answers
+not-implemented.
+
 ---
 
 ## D-236 · CSRF is not checked on any migrated route — CLOSED 2026-09-16
@@ -8786,7 +8790,9 @@ still forwards is [D-961], and the seven unproven VP8 decisions are [D-960].
 `FileSettings.ExtractContent` (default on): a background goroutine that runs `docextractor` over a
 non-image file and writes the text into `FileInfo.Content`, making the file body searchable. Both
 ported paths skip it — `mm_app::App::upload_file_x` and `App::upload_data` note the omission where
-Go schedules it.
+Go schedules it — and so does the plugin API's `UploadFile`
+(`App::do_upload_file_expect_modification`, since 2026-09-23), whose parity tranche turns
+extraction off on both hosts for that reason.
 
 The result is invisible on the upload response (extraction is asynchronous and never touches the
 returned `FileInfo`) and reachable only through `POST /files/search`, which is itself unported. So
@@ -9375,7 +9381,10 @@ now produces from Rust, as it did from Go. The pixels are ported
 `FileInfo().Upsert`: `InvalidateFileInfosForPostCache` in the **Go** process, whose
 `localcachelayer` serves `GetForPost`/`GetByIds` from memory, and no REST call purges it
 (`crate::peer_cache` has no file-info method). **What is owed:** a purge path Go honours, then the
-repair.
+repair. Since 2026-09-23 it also decides the plugin API: `GetFileInfo`, `GetFile`, `GetFileLink`
+and `GetFileInfos` answer not-implemented for such a row — and the plugin API's own `UploadFile`
+makes one for every raster image, since that path generates no mini preview. Such a row has no
+`PostId`, so Go's post-keyed cache is not in its way; only the repair itself is owed there.
 
 ---
 
@@ -9525,7 +9534,8 @@ every served post read and on the post a create or an edit answers with. Then `O
 onboarding's plugin installs. Then `ScheduledPostWillBeCreated`, on the scheduled-post create
 and update, which are served on a licensed server since the same day.
 **Narrowed** 2026-09-23 — `GenerateSupportData`, with the support packet it ends, served past its
-licence gate.
+licence gate. Then `FileWillBeUploaded` at `DoUploadFileExpectModification`, for the plugin API's
+`UploadFile`.
 
 `channels/app` invokes 35 distinct hooks across 46 call sites. Under `MMRS_PLUGIN_HOST=rust`,
 **30** fire from `mm_app::plugin_hooks` exactly where Go fires them: the post family
@@ -9549,13 +9559,14 @@ plugin.go    OnPluginClusterEvent
 The `checkFieldDeleteAccess` plugin check, listed here until 2026-09-23, is not a hook: it asks
 `GetPluginStatus`, which the Rust host now answers from its own environment ([D-542]).
 
-**Two call sites of hooks that do fire are still missing.** `FileWillBeUploaded` is also invoked
-by `DoUploadFileExpectModification` (file.go:1110), with its own rules — a buffered replacement,
-the reason concatenated into the id — but only the plugin API's `UploadFile` and the Slack import
-reach it, and neither is served. `UserHasJoinedChannel` has two
+**One call site of a hook that does fire is still missing.** `UserHasJoinedChannel` has two
 (channel.go:2044 and :2764); the first fires, and the second is inside `App.JoinChannel`, which
 this server does not port — its only callers are `GetPermalinkPost` and the `/join` slash
 command, neither of them served. It lands with whichever of those is ported first.
+`FileWillBeUploaded`'s third site, `DoUploadFileExpectModification` (file.go:1110), fires since
+2026-09-23 from the plugin API's `UploadFile` (`App::run_upload_file_hooks`, with its own rules: a
+fresh reader and writer per plugin, the reason in the id, nothing to remove); its other caller,
+the Slack import, is not served.
 
 `ServeHTTP`, `OnActivate`, `OnDeactivate` and `OnConfigurationChange` are not on this list: they
 are served already.
@@ -9832,8 +9843,9 @@ common one for bot-style commands — and a `/hookrec` verb per shape in the com
 
 `autocomplete_suggestions` forwards on `NeedsGo` ([D-781]); under the Rust host the command is
 this process's, so Go answers as if it did not exist. **What is owed:** `getDynamicListArgument`
-for a plugin URL — the request through the plugin's `ServeHTTP` (`/plugins/<id>/...`), which the
-Rust host already serves — and a check in the command tranche with `/hookrec fetch `.
+for a plugin URL — the request through the plugin's `ServeHTTP` (`/plugins/<id>/...`), which is
+not served either ([D-1040]; this entry said otherwise until 2026-09-23) — and a check in the
+command tranche with `/hookrec fetch `.
 
 ---
 
@@ -9880,3 +9892,19 @@ user who never joins. **What is owed:** a delivery rule that reproduces Go's usu
 after the publishing call returns, or reload once per join), and the tranche's joins made by the
 watched user.
 
+---
+
+## D-1040 · Under the Rust plugin host, `/plugins/{plugin_id}/*` still goes to Go, which hosts no plugins
+
+**Status** OPEN · **Severity** gap · **Raised** 2026-09-23 (the plugin API's `PluginHTTP`) · **Owner** the plugin host
+
+`Channels.ServePluginRequest` and `servePluginRequest` (app/plugin_requests.go:23, :156) — a
+client's HTTP request to a plugin's `ServeHTTP` — are not ported: `mm_api::web_static` classifies
+`/plugins/…` as a forward. Under `MMRS_PLUGIN_HOST=rust` the Go process has no plugins, so every
+such request is Go's 404 however the Rust host's plugin would answer. The inter-plugin half,
+`PluginHTTP`, is served (`mm_app::plugin_api::http`) and is the host-side machinery this needs
+beside the session handling: the token from the header, cookie or `access_token` query, the
+header and cookie scrubbing, the subpath trim, `GetSession`'s redacted error, `MFARequired`, the
+CSRF check with its `XMLHttpRequest` leniency, and `Mattermost-User-Id` for a session that passes.
+**What is owed:** that route, with a `plugin_hooks` tranche that drives the recorder's `ServeHTTP`
+from a client on each host; then [D-1021]'s dynamic list.
