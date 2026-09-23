@@ -14651,3 +14651,11 @@ say what answers not-implemented). Narrows [D-932]; opens [D-1040].
 Mutation tally (`plugin-api-files.plan`): 38 run, 35 caught, 1 survivor, 2 controls survived,
 0 harness faults. The survivor (`write_header` taking every status) is equivalent: the head is
 handed over once, so no later status is observable; noted on `PluginResponseWriter::write_header`.
+
+## Websocket hub: when a joiner's memberships are read — D-1032 (2026-09-23)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `WebConn.ShouldSendEvent`'s membership cache and `Hub.InvalidateUser` (platform/web_conn.go:980, web_hub.go:663) | `App::should_send_event`, `MemberCache` (mm-app `hub`) | DONE | 2 unit, `db_hub_join_order`, `parity::plugin_hooks::the_plugin_api_user_methods_answer_as_go_answers` (own user joins; 10 of 10 green) | Go's answer for a joiner's last default channel is a hub race (13 of 26 via the plugin API, 0 of 30 via REST); this hub gives the REST answer, and a load can no longer outlive an invalidation. |
+
+Mutation tally (`hub-join-order.plan`): 11 run, 9 caught, 2 controls survived, 0 harness faults.

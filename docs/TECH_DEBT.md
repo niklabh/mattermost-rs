@@ -9875,7 +9875,12 @@ branch of `SearchUsersNotInChannel` behind its nil-service answer, and a script 
 
 ## D-1032 · Whether a joining user's own connection hears its default-channel `user_added` depends on hub timing
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-23 (app/channel.go:75) · **Owner** the websocket hub
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-23 (app/channel.go:75) · **Owner** the websocket hub
+**Closed** 2026-09-23 — measured, the race is Go's: through the plugin API Go heard off-topic's
+`user_added` in 13 runs of 26 (a random `select` between its queued broadcast and the post-join
+`InvalidateUser`), over REST in 0 of 30, and this hub gives the REST answer every time. The rule
+is on `App::should_send_event`; a membership load can no longer outlive an invalidation; the
+users tranche's own user joins, and only Go's coin-toss frame is tolerated.
 
 `JoinDefaultChannels` saves each default channel's member and publishes `user_added` to the
 channel; a connection hears it only if its cached memberships already hold that channel. Go's hub
