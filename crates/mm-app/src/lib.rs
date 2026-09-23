@@ -90,6 +90,7 @@ pub mod peer_config;
 pub mod plugin_api;
 pub mod plugin_api_config;
 pub mod plugin_api_wire;
+pub mod plugin_commands;
 pub mod plugin_hooks;
 pub mod plugin_install;
 pub mod plugin_key_value_store;

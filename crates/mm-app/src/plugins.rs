@@ -64,6 +64,8 @@ pub struct PluginHost {
     /// Serialises `initPlugins`, `syncPluginsActiveState` and `ShutDownPlugins`: Go runs each
     /// under its config listener, one change at a time.
     lifecycle: tokio::sync::Mutex<()>,
+    /// Go's `Channels.pluginCommands`: the slash commands the plugins here registered.
+    commands: crate::plugin_commands::PluginCommandRegistry,
 }
 
 impl std::fmt::Debug for PluginHost {
@@ -87,6 +89,12 @@ impl PluginHost {
     /// Whether this process hosts plugins.
     pub fn hosted(&self) -> bool {
         self.hosted
+    }
+
+    /// The slash commands the plugins here registered ([`crate::plugin_commands`]). Always
+    /// empty when this process does not host plugins.
+    pub fn commands(&self) -> &crate::plugin_commands::PluginCommandRegistry {
+        &self.commands
     }
 
     fn get(&self) -> Option<Arc<PluginsEnvironment>> {
@@ -524,6 +532,13 @@ impl App {
                 "",
                 404,
             ));
+        }
+
+        // `DisablePlugin` drops the plugin's slash commands here, after the in-memory config
+        // update and before the save — so a save that fails leaves them dropped, as Go does.
+        // Enabling registers nothing: the plugin does that itself when it activates.
+        if !enable {
+            self.plugins.commands.unregister_plugin(&id);
         }
 
         let live = crate::config::load_model_config(self.store().config())

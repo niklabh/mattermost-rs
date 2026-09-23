@@ -129,6 +129,11 @@
 //! `!config-script` does the same with `recorder/config.rs` — the configuration and licence
 //! methods, and three `SavePluginConfig`s — and records `{"hook": "ConfigScript", ...}`.
 //!
+//! With `HOOK_RECORDER_COMMANDS` set, the recorder registers slash commands on activation and
+//! answers `ExecuteCommand` by the command's first word (`recorder/commands.rs`), writing down
+//! `{"hook": "OnActivate", "calls": [...]}` and each `ExecuteCommand`; `/hookrec script` also
+//! runs the command half of the plugin API and records `{"hook": "CommandScript", ...}`.
+//!
 //! `!core-script` runs `recorder/core.rs` — the user, team, channel, post, permission, bot and
 //! websocket methods, reading ids from `HOOK_RECORDER_CORE_*` — and records
 //! `{"hook": "CoreScript", ...}`. Its posts fire this plugin's own message hooks while the outer
@@ -188,6 +193,9 @@ mod config;
 
 #[path = "recorder/core.rs"]
 mod core;
+
+#[path = "recorder/commands.rs"]
+mod commands;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -340,8 +348,26 @@ impl Hooks for Recorder {
         IMPLEMENTED
             .iter()
             .chain(CONSUMED.iter().filter(|_| consume))
+            .chain(["ExecuteCommand"].iter().filter(|_| commands::enabled()))
             .map(|s| (*s).to_owned())
             .collect()
+    }
+
+    async fn execute_command(
+        &self,
+        args: mm_plugin::wire::plugin::Z_ExecuteCommandArgs,
+    ) -> Result<mm_plugin::wire::plugin::Z_ExecuteCommandReturns, NotImplemented> {
+        self.saw("ExecuteCommand", &args);
+        let command_args = args.b.as_deref().cloned().unwrap_or_default();
+        let answer = commands::answer(&command_args);
+        if command_args.command.split(' ').nth(1) == Some("script") {
+            let calls = match self.api.get() {
+                Some(api) => commands::run(api.client(), &command_args).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "CommandScript", "calls": calls }));
+        }
+        Ok(answer)
     }
 
     async fn messages_will_be_consumed(
@@ -863,6 +889,22 @@ impl mm_plugin::rpc::HooksFileUpload for Recorder {
 impl Plugin for Recorder {
     fn set_api(&self, api: ApiClient, _: mm_plugin::rpc::DriverClient) {
         let _ = self.api.set(api);
+    }
+
+    /// With `HOOK_RECORDER_COMMANDS` set, register the slash commands (`recorder/commands.rs`)
+    /// and write down what the host answered; otherwise the SDK's default, as before.
+    async fn on_activate(
+        &self,
+    ) -> Result<mm_plugin::wire::plugin::Z_OnActivateReturns, NotImplemented> {
+        if !commands::enabled() {
+            return Err(NotImplemented);
+        }
+        let calls = match self.api.get() {
+            Some(api) => commands::on_activate(api.client()).await,
+            None => vec![json!({ "error": "no API client" })],
+        };
+        self.record(&json!({ "hook": "OnActivate", "calls": calls }));
+        Ok(mm_plugin::wire::plugin::Z_OnActivateReturns::default())
     }
 }
 

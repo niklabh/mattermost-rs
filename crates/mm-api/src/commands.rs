@@ -677,9 +677,11 @@ pub async fn regen_command_token(
 //   lookups `tryExecuteCustomCommand` makes before it matches, and the 404 for a trigger nothing
 //   matches. It **forwards** the moment something would *run*: a custom command (an outgoing
 //   webhook, then a post), any built-in provider (no `DoCommand` is ported), or any command at all
-//   while Go may have plugin commands. See [`mm_app::command_provider`] and [D-781].
+//   while Go may have plugin commands. See [`mm_app::command_provider`] and [D-781]. Under the
+//   Rust plugin host, a command a plugin here registered is served whole (see [`execute_command`]).
 // - **`GET /teams/{team_id}/commands/autocomplete`** serves the list, built-ins included, for an
-//   English request while Go can have no plugin commands; otherwise it forwards.
+//   English request while Go can have no plugin commands — always so under the Rust plugin host,
+//   whose own plugins' commands are the list's plugin half; otherwise it forwards.
 // - **`GET /teams/{team_id}/commands/autocomplete_suggestions`** serves the suggestions under the
 //   same two conditions, and forwards when the parser reaches a dynamic list argument.
 
@@ -724,6 +726,14 @@ pub(crate) fn go_may_have_plugins() -> bool {
         }
     }
     false
+}
+
+/// Whether the autocomplete list's plugin half may be Go's. Under the Rust plugin host it is
+/// this process's registry — Go runs no plugins then (docs/PLUGIN_PLAN.md, D6) — so only the Go
+/// host consults [`go_may_have_plugins`]. Forwarding there would answer without the plugins'
+/// commands.
+fn go_plugin_commands_possible(state: &AppState) -> bool {
+    !state.app.plugin_host().hosted() && go_may_have_plugins()
 }
 
 /// Whether the request's translate function is English — see
@@ -776,7 +786,7 @@ pub async fn list_autocomplete_commands(
     if let Err(err) = require_team_view(&state, &team_id, &session).await {
         return err.into_response();
     }
-    if go_may_have_plugins() || !request_is_english(&state, request.headers()) {
+    if go_plugin_commands_possible(&state) || !request_is_english(&state, request.headers()) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
@@ -826,7 +836,7 @@ pub async fn list_command_autocomplete_suggestions(
         .unwrap_or(&user_input)
         .to_owned();
 
-    if go_may_have_plugins() || !request_is_english(&state, request.headers()) {
+    if go_plugin_commands_possible(&state) || !request_is_english(&state, request.headers()) {
         tracing::Span::current().record("forwarded", true);
         return crate::proxy::forward_to_go(State(state), request).await;
     }
@@ -869,6 +879,40 @@ pub async fn list_command_autocomplete_suggestions(
     }
 }
 
+/// `c.GetSiteURLHeader()` (web/handlers.go:227): the request's protocol and `Host`, then the
+/// configured subpath, trailing slashes trimmed — or, under a cloud licence, the configured site
+/// URL instead of the request's. `GetProtocol` is `X-Forwarded-Proto: https` or TLS, and this
+/// server terminates no TLS.
+async fn site_url_header(state: &AppState, headers: &axum::http::HeaderMap) -> String {
+    let config = state.app.config();
+    let subpath = config.subpath();
+    let cloud = state
+        .app
+        .license()
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|license| license.is_cloud());
+    let base = if cloud {
+        config.site_url.clone().unwrap_or_default()
+    } else {
+        let protocol = if headers
+            .get("X-Forwarded-Proto")
+            .is_some_and(|v| v.as_bytes() == b"https")
+        {
+            "https"
+        } else {
+            "http"
+        };
+        let host = headers
+            .get(axum::http::header::HOST)
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .unwrap_or_default();
+        format!("{protocol}://{host}")
+    };
+    format!("{base}{subpath}").trim_end_matches('/').to_owned()
+}
+
 /// What `serve_execute` decided.
 enum Execute {
     Answer(Response),
@@ -893,6 +937,19 @@ enum Execute {
 /// Then [`mm_app::App::command_dispatch`]. For a non-DM channel the body's `team_id` is replaced
 /// by the channel's, so a command cannot be run against another team.
 ///
+/// # Under the Rust plugin host
+///
+/// With `MMRS_PLUGIN_HOST=rust` the plugins' slash commands are registered here
+/// (`mm_app::plugin_commands`), and Go runs none (docs/PLUGIN_PLAN.md, D6). A trigger a plugin
+/// here registered is **served**: the trigger id, the mentions, the plugin's `ExecuteCommand`
+/// hook, and `HandleCommandResponse` — the ephemeral or in-channel post of the response and of
+/// each extra response — then the response as JSON, `trigger_id` the client half. That holds for
+/// a trigger a built-in or custom command also uses, because Go tries plugins first. Everything
+/// else keeps the rule below: a trigger no plugin here registered, and one whose plugin answered
+/// neither a response nor an error, go on exactly as they do under the Go host. The decision is
+/// made from the registry before the plugin runs; the one shape it cannot make in advance, a
+/// response post this server cannot write, is answered as Go answers a failed post ([D-1020]).
+///
 /// # A Go bug reproduced
 ///
 /// When `CheckIfChannelIsRestrictedDM` fails, the handler assigns the *channel* lookup's error —
@@ -912,7 +969,7 @@ pub async fn execute_command(
             return ApiError::invalid_param("command_args").into_response();
         }
     };
-    match serve_execute(&state, &session, &bytes).await {
+    match serve_execute(&state, &session, &parts, &bytes).await {
         Ok(Execute::Answer(response)) => response,
         Ok(Execute::Forward) => {
             tracing::Span::current().record("forwarded", true);
@@ -927,6 +984,7 @@ pub async fn execute_command(
 async fn serve_execute(
     state: &AppState,
     session: &AuthenticatedSession,
+    parts: &axum::http::request::Parts,
     bytes: &[u8],
 ) -> Result<Execute, ApiError> {
     const WHERE: &str = "executeCommand";
@@ -1027,7 +1085,36 @@ async fn serve_execute(
         )));
     };
 
-    // `tryExecutePluginCommand` runs first, and a plugin command overrides everything.
+    // `tryExecutePluginCommand` runs first, and a plugin command overrides everything. When this
+    // process hosts the plugins, their commands are here and are run here; see
+    // [`execute_command`]'s "Under the Rust plugin host".
+    if state.app.plugin_host().hosted() {
+        args.user_id.clone_from(&session.0.user_id);
+        args.site_url = site_url_header(state, &parts.headers).await;
+        args.connection_id = parts
+            .headers
+            .get("Connection-Id")
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .unwrap_or_default();
+        let ctx = crate::plugin_context::hook_context(parts, Some(&session.0));
+        match state
+            .app
+            .execute_plugin_command(&ctx, &session.0, &mut args)
+            .await
+        {
+            mm_app::plugin_commands::ExecuteOutcome::Answered(Ok(response)) => {
+                return Ok(Execute::Answer(encoded(
+                    StatusCode::OK,
+                    &response,
+                    "executeCommand",
+                )?));
+            }
+            mm_app::plugin_commands::ExecuteOutcome::Answered(Err(err)) => {
+                return Err(ApiError::from(err.error));
+            }
+            mm_app::plugin_commands::ExecuteOutcome::NotPlugin => {}
+        }
+    }
     if go_may_have_plugins() {
         return Ok(Execute::Forward);
     }

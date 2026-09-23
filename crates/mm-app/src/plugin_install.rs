@@ -495,8 +495,8 @@ impl App {
         Ok(manifest)
     }
 
-    /// Port of `removePluginLocally` (plugin_install.go:558): deactivate, forget, and delete the
-    /// unpacked bundle.
+    /// Port of `removePluginLocally` (plugin_install.go:558): deactivate, forget, drop its slash
+    /// commands, and delete the unpacked bundle.
     pub async fn remove_plugin_locally(&self, id: &str) -> Result<(), Box<AppError>> {
         const WHERE: &str = "removePlugin";
         let Some(environment) = self.plugins_environment() else {
@@ -526,6 +526,7 @@ impl App {
         };
         environment.deactivate(id).await;
         environment.remove_plugin(id);
+        self.plugin_commands().unregister_plugin(id);
         if let Err(e) = std::fs::remove_dir_all(&unpacked)
             && e.kind() != std::io::ErrorKind::NotFound
         {

@@ -93,7 +93,7 @@ pub struct HookContext {
 }
 
 impl HookContext {
-    fn to_wire(&self) -> wire_plugin::Context {
+    pub(crate) fn to_wire(&self) -> wire_plugin::Context {
         wire_plugin::Context {
             session_id: self.session_id.clone(),
             request_id: self.request_id.clone(),
@@ -116,7 +116,9 @@ impl HookContext {
 /// `map[string]any` as gob sends it: `client_rpc.go`'s `init()` registers `[]any` and
 /// `map[string]any`, so a nested document encodes; every number is a `float64`, because that is
 /// what Go's own `json.Unmarshal` of the request body left in the map.
-fn props_to_wire(props: Option<&mm_model::utils::StringInterface>) -> wire_model::StringInterface {
+pub(crate) fn props_to_wire(
+    props: Option<&mm_model::utils::StringInterface>,
+) -> wire_model::StringInterface {
     props
         .into_iter()
         .flatten()

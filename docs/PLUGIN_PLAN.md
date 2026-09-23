@@ -672,6 +672,15 @@ post, thread and session reads, `HasPermissionTo{,Team,Channel}`, `CreatePost`, 
 message hooks re-entrantly on both hosts; the tranche compares those hooks and every websocket
 frame too. A shape the REST route forwards answers not-implemented for that call.
 
+**Then 71 of 258:** the slash-command seven — `RegisterCommand`, `UnregisterCommand`,
+`ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`, `ListCommands`,
+`ExecuteSlashCommand` (`mm_app::plugin_commands`) — with `POST /api/v4/commands/execute` serving
+a command a plugin here registered, and the autocomplete list's plugin half. The registry is Go's
+with its quirks (a second plugin's registration is appended, not refused; `UnregisterCommand`
+removes every plugin's entry; only disable and remove drop a plugin's commands). A response post
+the port cannot write is answered as a failed post ([D-1020]); a plugin's dynamic-list suggestion
+still forwards ([D-1021]).
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

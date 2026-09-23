@@ -784,12 +784,14 @@ pub fn command_trigger(command: &str) -> Option<String> {
 }
 
 impl App {
-    /// Port of `App.ListAutocompleteCommands` (app/command.go:100) without its plugin half,
-    /// which the handler has already established is empty.
+    /// Port of `App.ListAutocompleteCommands` (app/command.go:100). The plugin half is this
+    /// process's registry ([`crate::plugin_commands`]), which is empty unless it hosts plugins;
+    /// the handler has established that Go holds none.
     ///
     /// Precedence is by trigger, first come: `EnableCustomUserStatuses` off reserves `status`
-    /// before anything is listed, then the team's custom commands — sanitised — then the
-    /// built-ins. So a custom `/shrug` hides the built-in one. `Ok(None)` is
+    /// before anything is listed, then the plugins' commands — **not** sanitised, and listed
+    /// whatever `EnableCommands` says — then the team's custom commands, sanitised, then the
+    /// built-ins. So a plugin's or a custom `/shrug` hides the built-in one. `Ok(None)` is
     /// [`ProviderCommand::Undecidable`], for the handler to forward.
     #[tracing::instrument(skip(self), fields(count))]
     pub async fn list_autocomplete_commands(
@@ -802,6 +804,12 @@ impl App {
 
         if !config.enable_custom_user_statuses {
             seen.insert(CMD_CUSTOM_STATUS_TRIGGER.to_owned());
+        }
+
+        for command in self.plugin_commands().for_team(team_id) {
+            if command.auto_complete && seen.insert(command.trigger.clone()) {
+                commands.push(command);
+            }
         }
 
         if config.enable_commands {
