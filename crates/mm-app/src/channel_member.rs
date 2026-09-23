@@ -63,6 +63,7 @@ use mm_store::channel_member_history_store::ChannelMemberHistoryStore;
 use mm_store::channel_store::ChannelStore;
 use mm_store::group_store::GroupStore;
 use mm_store::thread_store::ThreadStore;
+use mm_store::user_store::UserStore;
 
 use crate::App;
 
@@ -104,6 +105,41 @@ const DEFAULT_CHANNEL_NAME: &str = "town-square";
 pub enum MemberWrite<T> {
     Done(T),
     Forward(&'static str),
+}
+
+/// `app.UpdateMultipleMaximum` (app/channel.go:28): the most members one
+/// `PatchChannelMembersNotifyProps` may name.
+pub const UPDATE_MULTIPLE_MAXIMUM: usize = 200;
+
+/// `PatchChannelMembersNotifyProps`' refusal of more than [`UPDATE_MULTIPLE_MAXIMUM`] members.
+fn too_many_members_error() -> Box<AppError> {
+    let params = std::collections::HashMap::from([(
+        "Max".to_owned(),
+        serde_json::Value::from(UPDATE_MULTIPLE_MAXIMUM),
+    )]);
+    AppError::boxed(
+        "PatchChannelMembersNotifyProps",
+        "app.channel.patch_channel_members_notify_props.too_many",
+        Some(params),
+        "",
+        400,
+    )
+}
+
+/// What the store's `PatchMultipleMembersNotifyProps` refuses before it writes, in its order:
+/// no props at all (a bare `errors.New`, so the app's **500** under the store's name), then
+/// `IsChannelMemberNotifyPropsValid` with missing fields allowed (its own 400, as is).
+pub fn patch_notify_props_refusal(props: &StringMap) -> Option<Box<AppError>> {
+    if props.is_empty() {
+        return Some(AppError::boxed(
+            "UpdateMultipleMembersNotifyProps",
+            "app.channel.patch_channel_members_notify_props.app_error",
+            None,
+            "",
+            500,
+        ));
+    }
+    mm_model::channel_member::is_channel_member_notify_props_valid(Some(props), true).err()
 }
 
 /// Port of `app.ChannelMemberOpts` (app/channel.go:1996).
@@ -394,11 +430,67 @@ impl App {
                 }
             })?;
 
+        // `InvalidateChannelCacheForUser` (channel.go:1580): the member's connections re-read
+        // their memberships and session on their next channel event.
+        self.hub()
+            .invalidate_channel_members_for_user(&member.user_id);
+
         // Go's error id for a marshal failure here is `api.marshal_error` at 500; ours cannot
         // fail, because `send_update_channel_member_event` logs rather than returns.
         self.send_update_channel_member_event(&member).await;
 
         Ok(member)
+    }
+
+    /// Port of `app.App.PatchChannelMembersNotifyProps` (app/channel.go:1609): the same props
+    /// merged into many members at once — reached only by the plugin API here.
+    ///
+    /// In Go's order: more than [`UPDATE_MULTIPLE_MAXIMUM`] members is a 400; then the store's
+    /// refusals ([`patch_notify_props_refusal`]); then the write. When a named pair is not a
+    /// member the store answers Go's `(nil, nil)` — nothing written, **success**, no event (see
+    /// `mm_store::channel_store::patch_multiple_members_notify_props`). Otherwise one
+    /// `channel_member_updated` per member, addressed to that member's user.
+    #[tracing::instrument(skip(self, members, props), fields(members = members.len()))]
+    pub async fn patch_channel_members_notify_props(
+        &self,
+        members: &[(String, String)],
+        props: &StringMap,
+    ) -> AppResult<Vec<ChannelMember>> {
+        if members.len() > UPDATE_MULTIPLE_MAXIMUM {
+            return Err(too_many_members_error());
+        }
+        if let Some(err) = patch_notify_props_refusal(props) {
+            return Err(err);
+        }
+        let updated = self
+            .store()
+            .channel()
+            .patch_multiple_members_notify_props(members, props)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "patching members' notify props failed");
+                AppError::boxed(
+                    "UpdateMultipleMembersNotifyProps",
+                    "app.channel.patch_channel_members_notify_props.app_error",
+                    None,
+                    "",
+                    500,
+                )
+            })?
+            .unwrap_or_default();
+        // `InvalidateChannelCacheForUser` once per distinct user (channel.go:1634), before any
+        // event.
+        let mut invalidated = std::collections::BTreeSet::new();
+        for member in &updated {
+            if invalidated.insert(member.user_id.as_str()) {
+                self.hub()
+                    .invalidate_channel_members_for_user(&member.user_id);
+            }
+        }
+        for member in &updated {
+            self.send_update_channel_member_event(member).await;
+        }
+        Ok(updated)
     }
 
     /// Port of `app.App.updateChannelMember` (app/channel.go:1663) — the store write plus the
@@ -440,6 +532,9 @@ impl App {
                     }
                 })?;
 
+        // `InvalidateChannelCacheForUser` (channel.go:1678).
+        self.hub()
+            .invalidate_channel_members_for_user(&updated.user_id);
         self.send_update_channel_member_event(&updated).await;
 
         Ok(updated)
@@ -836,6 +931,11 @@ impl App {
                 )
             })?;
 
+        // `InvalidateChannelCacheForUser` (channel.go:1935). Without it the joiner's open
+        // connections keep the memberships they loaded before the join and miss every event in
+        // the channel — its own join post first — until something else invalidates them.
+        self.hub().invalidate_channel_members_for_user(&user.id);
+
         Ok(MemberWrite::Done(saved))
     }
 
@@ -941,6 +1041,11 @@ impl App {
                 )
             })?;
 
+        // `InvalidateChannelCacheForUser` (channel.go:3069): the leaver's connections stop
+        // hearing the channel, its own leave post included.
+        self.hub()
+            .invalidate_channel_members_for_user(user_id_to_remove);
+
         // `UserHasLeftChannel` (channel.go:3087), after `channel.IsSpace()` and **before** the
         // two `user_removed` events. Go loads the actor with `a.GetUser(removerUserId)` and
         // **discards its error**, so an unresolvable remover is a nil actor, not a failure.
@@ -1012,6 +1117,117 @@ impl App {
                 .await;
         }
 
+        Ok(MemberWrite::Done(()))
+    }
+
+    /// Port of `app.App.LeaveChannel` (app/channel.go:2820) — a user taking themself out of a
+    /// channel, which only the plugin API's `DeleteChannelMember` reaches on this server (REST's
+    /// member delete is `RemoveUserFromChannel`).
+    ///
+    /// # In Go's order
+    ///
+    /// The channel, then the user (Go reads them concurrently and checks the channel's error
+    /// first), each with its own 404 and 500 under this function's `Where`; a DM or group
+    /// message is a **400** `api.channel.leave.direct.app_error`; then the inner
+    /// `removeUserFromChannel` with the user as their own remover — so town-square is its 400,
+    /// and a non-member its 404.
+    ///
+    /// # The leave post is detached and cannot fail the call
+    ///
+    /// Go posts it on `a.Srv().Go`, after answering, and only logs its failure. It is posted
+    /// here before answering and its failure is likewise only logged; the hooks and the
+    /// `posted` event are the same, and neither server promises their timing against the
+    /// answer. The post is skipped for town-square with
+    /// `ExperimentalEnableDefaultChannelLeaveJoinMessages` off — reachable only by a guest, whose
+    /// removal is forwarded before this point.
+    #[tracing::instrument(skip(self, hook_ctx), fields(channel_id = %channel_id, user_id = %user_id))]
+    pub async fn leave_channel(
+        &self,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+        channel_id: &str,
+        user_id: &str,
+    ) -> Result<MemberWrite<()>, Box<AppError>> {
+        let params = std::collections::HashMap::from([(
+            "channel_id".to_owned(),
+            serde_json::Value::String(channel_id.to_owned()),
+        )]);
+        let channel = self
+            .store()
+            .channel()
+            .get(channel_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "LeaveChannel",
+                        "app.channel.get.existing.app_error",
+                        Some(params),
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "the channel to leave could not be read");
+                    AppError::boxed(
+                        "LeaveChannel",
+                        "app.channel.get.find.app_error",
+                        Some(params),
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        let user = self.store().user().get(user_id).await.map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    "LeaveChannel",
+                    "app.user.missing_account.const",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "the leaving user could not be read");
+                AppError::boxed(
+                    "LeaveChannel",
+                    "app.user.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            }
+        })?;
+
+        if channel.is_group_or_direct() {
+            return Err(AppError::boxed(
+                "LeaveChannel",
+                "api.channel.leave.direct.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        if let MemberWrite::Forward(why) = self
+            .remove_user_from_channel_inner(user_id, user_id, &channel, hook_ctx)
+            .await?
+        {
+            return Ok(MemberWrite::Forward(why));
+        }
+
+        if channel.name == DEFAULT_CHANNEL_NAME
+            && !self
+                .config()
+                .experimental_enable_default_channel_leave_join_messages
+        {
+            return Ok(MemberWrite::Done(()));
+        }
+
+        if let Err(err) = self
+            .post_leave_channel_message(hook_ctx, &user, &channel)
+            .await
+        {
+            tracing::error!(error = %err, "Failed to post LeaveChannel message");
+        }
         Ok(MemberWrite::Done(()))
     }
 
@@ -1692,6 +1908,38 @@ fn add_remove_message_error(where_: &'static str, cause: &AppError) -> Box<AppEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_patch_refusals_are_the_stores_in_its_order() {
+        let empty = patch_notify_props_refusal(&StringMap::new()).expect("refused");
+        assert_eq!(
+            (empty.where_.as_str(), empty.id.as_str(), empty.status_code),
+            (
+                "UpdateMultipleMembersNotifyProps",
+                "app.channel.patch_channel_members_notify_props.app_error",
+                500
+            )
+        );
+        let bad = StringMap::from([("desktop".to_owned(), "banana".to_owned())]);
+        let invalid = patch_notify_props_refusal(&bad).expect("refused");
+        assert_eq!(
+            (invalid.id.as_str(), invalid.status_code),
+            ("model.channel_member.is_valid.notify_level.app_error", 400)
+        );
+        let partial = StringMap::from([("push".to_owned(), "all".to_owned())]);
+        assert!(
+            patch_notify_props_refusal(&partial).is_none(),
+            "missing fields are allowed"
+        );
+        let too_many = too_many_members_error();
+        assert_eq!(
+            (too_many.id.as_str(), too_many.status_code),
+            (
+                "app.channel.patch_channel_members_notify_props.too_many",
+                400
+            )
+        );
+    }
 
     fn named(id: &str, username: &str, roles: &str) -> User {
         User {

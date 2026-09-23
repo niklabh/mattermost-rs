@@ -40,7 +40,9 @@
 //! - `cleanupChannelAccessControlPolicy` and `CancelPendingChannelJoinRequestsOnConvert` —
 //!   enterprise, and Go logs rather than returns their failures.
 
-use mm_model::channel::{CHANNEL_TYPE_OPEN, Channel, ChannelPatch, DEFAULT_CHANNEL_NAME};
+use mm_model::channel::{
+    CHANNEL_TYPE_OPEN, CHANNEL_TYPE_SPACE, Channel, ChannelPatch, DEFAULT_CHANNEL_NAME,
+};
 use mm_model::post::{
     POST_TYPE_CHANGE_CHANNEL_PRIVACY, POST_TYPE_CHANNEL_DELETED, POST_TYPE_CHANNEL_RESTORED,
     POST_TYPE_DISPLAYNAME_CHANGE, POST_TYPE_HEADER_CHANGE, POST_TYPE_PURPOSE_CHANGE, Post,
@@ -105,8 +107,10 @@ impl App {
     /// handler's read and this one answers **404 `app.channel.get.existing.app_error`**, and any
     /// other store failure answers 500 `app.channel.get.find.app_error`. (Its other two uses —
     /// the ABAC type-conversion block and the plugin hook — are both absent, see the module
-    /// docs.) `Channel().Get` filters to message channel types, so a board or space id is a 404
-    /// here as well.
+    /// docs.) `Channel().Get` filters to message channel types, so a board id is a 404 here as
+    /// well. A **space** channel is read with `GetChannelOfType` instead, skips the
+    /// `ChannelWillBeUpdated` hook and publishes no `channel_updated` — Go's space branch, which
+    /// only the plugin API's `UpdateChannel` can reach (no REST route takes a space).
     ///
     /// # Four store errors, four different answers
     ///
@@ -130,31 +134,35 @@ impl App {
             "channel_id".to_owned(),
             serde_json::Value::String(channel.id.clone()),
         )]);
-        let old_channel = self
-            .store()
-            .channel()
-            .get(&channel.id)
-            .await
-            .map_err(|err| {
-                if err.is_not_found() {
-                    AppError::boxed(
-                        "UpdateChannel",
-                        "app.channel.get.existing.app_error",
-                        Some(params),
-                        String::new(),
-                        404,
-                    )
-                } else {
-                    tracing::error!(error = %err, "channel re-read failed");
-                    AppError::boxed(
-                        "UpdateChannel",
-                        "app.channel.get.find.app_error",
-                        Some(params),
-                        String::new(),
-                        500,
-                    )
-                }
-            })?;
+        // A space backing channel is read by its exact type: the generic `Get` excludes it.
+        let old_channel = if channel.is_space() {
+            self.store()
+                .channel()
+                .get_channel_of_type(&channel.id, CHANNEL_TYPE_SPACE)
+                .await
+        } else {
+            self.store().channel().get(&channel.id).await
+        }
+        .map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    "UpdateChannel",
+                    "app.channel.get.existing.app_error",
+                    Some(params),
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "channel re-read failed");
+                AppError::boxed(
+                    "UpdateChannel",
+                    "app.channel.get.find.app_error",
+                    Some(params),
+                    String::new(),
+                    500,
+                )
+            }
+        })?;
 
         // `runGuardedChannelWillBeUpdated`, not for a space. The dispatcher takes the channel by
         // value because a plugin's answer replaces it whole; the clone is the value it replaces.
@@ -169,6 +177,11 @@ impl App {
             .update(channel)
             .await
             .map_err(update_channel_error)?;
+
+        // "Space backing channels are internal: skip the channel_updated broadcast."
+        if channel.is_space() {
+            return Ok(());
+        }
 
         // `channel_updated` carries the whole channel as a **JSON string** under `channel`, not
         // as a nested object — the hub precomputes the frame and Go's `Add` takes an `any` that

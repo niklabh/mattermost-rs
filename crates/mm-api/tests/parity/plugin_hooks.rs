@@ -7877,3 +7877,715 @@ fn a_torn_last_line_waits_for_its_newline() {
 fn a_missing_transcript_is_empty() {
     assert!(transcript(Path::new("/nonexistent/hooks.jsonl")).is_empty());
 }
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: channels, members, sidebar, post lists, reactions and emoji (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the channels tranche; see `second_server_ports`. Chosen clear of the ports
+/// the users tranche and its siblings take, since a parallel branch appends tranches too.
+const CHANNELS_HOST_PORT: u16 = 8164;
+/// Its Go server.
+const CHANNELS_GO_OFFSET: u16 = 97;
+/// Each side's tag: in its users' names, its team, and the channel and posts its script makes.
+const CHANNELS_SIDES: [&str; 2] = ["pchsidego", "pchsiders"];
+
+/// The plain users the channels tour makes, for the cleanup.
+static CHANNELS_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's channel, member, sidebar, post-list, reaction and
+/// emoji methods (`mm_app::plugin_api::channels`).
+///
+/// A `!channels-script` post, made by each side's own user in its own channel, runs
+/// `examples/recorder/channels.rs` inside `MessageWillBePosted`. As in the users tranche, every
+/// answer is compared in order, every hook the script's writes fired, and every websocket frame
+/// the own user's socket received.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own team, channel and two users, made through main Go before either host
+/// starts, and the admin leaves the side team. Two custom emoji are shared, read by both sides
+/// and written by neither. The side's ids and tag are scrubbed, and the ids the script learned
+/// first (the DM's name before its users' ids, the made channel, the category, the five posts).
+/// What is left is masked, and each mask is named: [`normalise`]'s id and time keys,
+/// [`mask_core`]'s `<minted>` ids and session clocks, a `Password` hash as `<hash>` (the leave
+/// hook carries the user, salted per side), a frame's member clocks, and `GetPostsSince`'s own
+/// time argument, read off each side's post as `<since>`.
+///
+/// # Four answers are compared as sets
+///
+/// `GetChannelMembers` (`GetMembers` has no `ORDER BY` without `UpdatedAfter`),
+/// `GetChannelMembersByIds` (none), `GetChannelMembersForUser` (channel-id order, and each side's
+/// ids are its own) and the `A` of `UpdateChannelSidebarCategories` (the request's order) are
+/// sorted after the scrub. Every other list keeps its order.
+#[tokio::test]
+async fn the_plugin_api_channel_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    purge_channels_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_channels_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *CHANNELS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    purge_channels_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// What the tour leaves that the fixture purge does not reach: each side team's channels (the
+/// made one is archived, not removed), their members, posts and sidebar rows; the DMs between
+/// the side users; and the two emoji.
+async fn purge_channels_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let teams: Vec<String> = CHANNELS_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookchans{side}"))
+        .collect();
+    let usernames: Vec<String> = CHANNELS_SIDES
+        .iter()
+        .flat_map(|side| {
+            [
+                common::plain_username(&format!("chown{side}")),
+                common::plain_username(&format!("choth{side}")),
+            ]
+        })
+        .collect();
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM reactions WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+    // A DM's name is its two users' ids, `__`-joined.
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN users u ON c.type = 'D' AND c.name LIKE '%' || u.id || '%' WHERE u.username = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN users u ON c.type = 'D' AND c.name LIKE '%' || u.id || '%' WHERE u.username = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM channels WHERE id IN (SELECT c.id FROM channels c JOIN users u ON c.type = 'D' AND c.name LIKE '%' || u.id || '%' WHERE u.username = ANY($1))",
+    ] {
+        sqlx::query(statement)
+            .bind(&usernames)
+            .execute(&pool)
+            .await
+            .expect("the side users' DMs go");
+    }
+    sqlx::query("DELETE FROM emoji WHERE name LIKE 'mmrsparitychems%'")
+        .execute(&pool)
+        .await
+        .expect("the tour's emoji go");
+}
+
+/// One side of the channels tour.
+struct ChannelsSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    other: common::PlainUser,
+    team: String,
+    channel: String,
+    town: String,
+    off: String,
+}
+
+impl ChannelsSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self, emoji: &ChannelsEmoji) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_CHANNELS_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_CHANNELS_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_CHANNELS_TEAM", self.team.clone()),
+            ("HOOK_RECORDER_CHANNELS_TOWN", self.town.clone()),
+            ("HOOK_RECORDER_CHANNELS_OFF", self.off.clone()),
+            ("HOOK_RECORDER_CHANNELS_SIDE", self.tag.to_owned()),
+            ("HOOK_RECORDER_CHANNELS_EMOJI_A", emoji.a.clone()),
+            ("HOOK_RECORDER_CHANNELS_EMOJI_B", emoji.b.clone()),
+            ("HOOK_RECORDER_CHANNELS_EMOJI_NAME", emoji.a_name.clone()),
+        ]
+    }
+
+    /// This side's scrub pairs: what the script's answers taught it first — the DM's name holds
+    /// both users' ids, so it goes before they do — then the fixture.
+    fn pairs(&self, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for (name, n, pointer, token) in [
+            ("GetDirectChannel", 0, "/returns/A/Name", "<dm-name>"),
+            ("GetDirectChannel", 0, "/returns/A/Id", "<dm>"),
+            ("CreateChannel", 0, "/returns/A/Id", "<made>"),
+            (
+                "CreateChannelSidebarCategory",
+                0,
+                "/returns/A/SidebarCategory/Id",
+                "<category>",
+            ),
+            ("CreatePost", 0, "/returns/A/Id", "<p1>"),
+            ("CreatePost", 1, "/returns/A/Id", "<p2>"),
+            ("CreatePost", 2, "/returns/A/Id", "<p3>"),
+            ("CreatePost", 3, "/returns/A/Id", "<p4>"),
+            ("CreatePost", 4, "/returns/A/Id", "<reply>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.other.id.clone(), "<other>".to_owned()),
+            (self.team.clone(), "<side-team>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.town.clone(), "<town>".to_owned()),
+            (self.off.clone(), "<off>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// The two shared emoji: `a` is made second and named first, so name order and insertion order
+/// disagree.
+struct ChannelsEmoji {
+    a: String,
+    a_name: String,
+    b: String,
+}
+
+/// The calls whose answer list has no order either server promises; see the test's doc.
+const CHANNELS_UNORDERED: [&str; 4] = [
+    "GetChannelMembers",
+    "GetChannelMembersByIds",
+    "GetChannelMembersForUser",
+    "UpdateChannelSidebarCategories",
+];
+
+/// `GetPostsSince`'s time, read off each side's own post: `<since>` unless it is the fixed
+/// future time the script also asks for.
+fn mask_since(entries: &mut [Json]) {
+    for entry in entries.iter_mut() {
+        let Some(calls) = entry.get_mut("calls").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for call in calls.iter_mut() {
+            if call["call"] != "GetPostsSince" {
+                continue;
+            }
+            if let Some(since) = call.pointer_mut("/args/B") {
+                if since.as_i64().is_some_and(|t| t != 4_102_444_800_000) {
+                    *since = Json::String("<since>".to_owned());
+                }
+            }
+        }
+    }
+}
+
+/// A frame's `channelMember` clocks, stamped by each side's own write: the JSON names of the
+/// `LastUpdateAt`/`LastViewedAt` that [`normalise`] already masks in the transcript.
+fn mask_member_clocks(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(mask_member_clocks),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(key.as_str(), "last_update_at" | "last_viewed_at")
+                    && entry.as_i64().is_some_and(|n| n != 0)
+                {
+                    *entry = Json::String("<set>".to_owned());
+                    continue;
+                }
+                mask_member_clocks(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Sort the answer lists of [`CHANNELS_UNORDERED`] calls, once everything else is a token.
+fn sort_channels_unordered(entries: &mut [Json]) {
+    for entry in entries.iter_mut() {
+        let Some(calls) = entry.get_mut("calls").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for call in calls.iter_mut() {
+            let unordered = call["call"]
+                .as_str()
+                .is_some_and(|name| CHANNELS_UNORDERED.contains(&name));
+            if !unordered {
+                continue;
+            }
+            if let Some(items) = call.pointer_mut("/returns/A").and_then(Json::as_array_mut) {
+                items.sort_by_key(Json::to_string);
+            }
+        }
+    }
+}
+
+/// A default channel's id on `team`, through main Go.
+async fn channel_by_name(client: &reqwest::Client, admin: &str, team: &str, name: &str) -> String {
+    let found: Json = client
+        .get(format!("{GO}/api/v4/teams/{team}/channels/name/{name}"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the channel");
+    found["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the side team has a {name}: {found}"))
+        .to_owned()
+}
+
+async fn run_the_channels_tour(client: &reqwest::Client, admin: &str) {
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("plugin-hooks-channels");
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    plant_state(client, admin, Some(true)).await;
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    let mut sides = Vec::new();
+    for tag in CHANNELS_SIDES {
+        let team = common::create_team(client, admin, &format!("hookchans{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("chown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("choth{tag}")).await;
+        CHANNELS_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("chans{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::add_user_to_channel(client, admin, &channel, &other.id).await;
+        let town = channel_by_name(client, admin, &team, "town-square").await;
+        let off = channel_by_name(client, admin, &team, "off-topic").await;
+        // The admin made the team and the channel; leaving the team takes it out of both.
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(ChannelsSide {
+            tag,
+            own,
+            other,
+            team,
+            channel,
+            town,
+            off,
+        });
+    }
+
+    // Two emoji, the second-made named first; their image planted in each host's file store.
+    let stamp = common::unique_emoji_name("");
+    let b_name = stamp.replace("mmrsparity", "mmrsparitychemsb");
+    let a_name = stamp.replace("mmrsparity", "mmrsparitychemsa");
+    let b = common::create_custom_emoji(client, admin, &admin_id, &b_name).await;
+    let a = common::create_custom_emoji(client, admin, &admin_id, &a_name).await;
+    let emoji = ChannelsEmoji { a, a_name, b };
+    for run in [&go_run, &rs_run] {
+        for id in [&emoji.a, &emoji.b] {
+            let dir = run.join("data/emoji").join(id);
+            std::fs::create_dir_all(&dir).expect("the emoji's directory");
+            std::fs::write(dir.join("image"), common::TINY_PNG).expect("the emoji's image");
+        }
+    }
+
+    let go_env = sides[0].env(&emoji);
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(go_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let go = start_go(&go_run, &env, CHANNELS_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_env = sides[1].env(&emoji);
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(rust_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(CHANNELS_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let shared_ids = vec![
+        emoji.a.clone(),
+        emoji.b.clone(),
+        admin_id.clone(),
+        CORE_MISSING.to_owned(),
+    ];
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!channels-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "ChannelsScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "ChannelsScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(&calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            mask_core(entry, &shared_ids);
+            mask_password(entry);
+        }
+        mask_since(&mut entries);
+        sort_channels_unordered(&mut entries);
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .collect();
+        frames.iter_mut().for_each(mask_member_clocks);
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "ChannelsScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "ChannelsScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(names(&go_hooks), names(&rust_hooks), "the hooks that fired");
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    // Every frame the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "the events the own user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    let differing: Vec<String> = go_side
+        .1
+        .iter()
+        .zip(&rust_side.1)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("frame {index} ({}):\n  go:   {g}\n  rust: {r}", g["event"]))
+        .collect();
+    assert!(differing.is_empty(), "{}", differing.join("\n"));
+
+    assert_channels_answers_are_gos(&go_calls, &go_hooks, &emoji);
+
+    drop(rust);
+    drop(go);
+    for side in &sides {
+        common::delete_channel(client, admin, &side.channel).await;
+    }
+    for id in [&emoji.a, &emoji.b] {
+        common::delete_custom_emoji(client, admin, id).await;
+    }
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_channels_answers_are_gos(calls: &[Json], hooks: &[Json], emoji: &ChannelsEmoji) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error_id = |name: &str, n: usize, key: &str| -> (Json, Json) {
+        let returns = answer(name, n);
+        (
+            returns[key]["Id"].clone(),
+            returns[key]["StatusCode"].clone(),
+        )
+    };
+
+    // Go's bugs, kept.
+    let stats = answer("GetChannelStats", 2)["A"].clone();
+    assert_eq!(
+        (&stats["MemberCount"], &stats["GuestCount"]),
+        (&Json::from(2), &Json::from(2)),
+        "GuestCount is a second member count: {stats}"
+    );
+    assert_eq!(
+        answer("GetChannelMembersForUser", 0)["A"],
+        answer("GetChannelMembersForUser", 1)["A"],
+        "the team id is ignored"
+    );
+    assert!(
+        answer("GetChannelMembersForUser", 0)["A"]
+            .as_array()
+            .is_some_and(|m| m.len() == 3),
+        "the own user's three channels"
+    );
+
+    // The refusals the plugin path reaches and REST does not.
+    assert_eq!(
+        error_id("GetPostsForChannel", 2, "B"),
+        (Json::from("app.post.get_posts.app_error"), Json::from(400)),
+        "more than 1000 per page"
+    );
+    for n in [2, 3] {
+        assert_eq!(
+            error_id("GetPostsAfter", n, "B"),
+            (
+                Json::from("app.post.get_posts_around.get.app_error"),
+                Json::from(400)
+            ),
+            "a negative page or size after"
+        );
+        assert_eq!(
+            error_id("GetPostsBefore", n, "B"),
+            (
+                Json::from("app.post.get_posts_around.get.app_error"),
+                Json::from(400)
+            ),
+            "a negative page or size before"
+        );
+    }
+    let patch =
+        |n: usize| -> Json { answer("PatchChannelMembersNotifications", n)["A"]["Id"].clone() };
+    assert_eq!(
+        [patch(0), patch(1), patch(2), patch(3)],
+        [
+            Json::from("app.channel.patch_channel_members_notify_props.too_many"),
+            Json::from("app.channel.patch_channel_members_notify_props.app_error"),
+            Json::from("model.channel_member.is_valid.notify_level.app_error"),
+            Json::from("model.channel_member.is_valid.unread_level.app_error"),
+        ],
+        "every refusal before the patch's write"
+    );
+    assert_eq!(
+        [patch(4), patch(5)],
+        [Json::Null, Json::Null],
+        "a patch, and one naming a non-member, both succeed"
+    );
+    let notify = answer("GetChannelMember", 0)["A"]["NotifyProps"]["$map"].clone();
+    assert_eq!(
+        (&notify["desktop"], &notify["push"]),
+        (&Json::from("none"), &Json::from("mention")),
+        "the second patch named a non-member and was rolled back: {notify}"
+    );
+
+    // The leaves.
+    let leave = |n: usize| -> Json { answer("DeleteChannelMember", n)["A"]["Id"].clone() };
+    assert_eq!(
+        leave(0),
+        Json::Null,
+        "the other user leaves the made channel"
+    );
+    assert_eq!(
+        leave(4),
+        Json::from("api.channel.remove.default.app_error"),
+        "town-square cannot be left"
+    );
+    assert_eq!(leave(5), Json::Null, "off-topic can");
+    assert_eq!(
+        leave(6),
+        Json::from("api.channel.leave.direct.app_error"),
+        "a DM cannot be left"
+    );
+    let left = hooks
+        .iter()
+        .filter(|h| h["hook"] == "UserHasLeftChannel")
+        .count();
+    assert_eq!(left, 2, "two leaves fire UserHasLeftChannel");
+    let leave_posts = hooks
+        .iter()
+        .filter(|h| {
+            h["hook"] == "MessageHasBeenPosted" && h.to_string().contains("system_leave_channel")
+        })
+        .count();
+    assert_eq!(leave_posts, 2, "each leave posts its message");
+
+    // Archiving.
+    assert_eq!(
+        answer("DeleteChannel", 1)["A"]["Id"],
+        "api.channel.delete_channel.deleted.app_error"
+    );
+    assert_eq!(
+        answer("DeleteChannel", 3)["A"]["Id"],
+        "api.channel.delete_channel.cannot.app_error"
+    );
+    let listed = |n: usize| -> bool {
+        answer("GetChannelsForTeamForUser", n)["A"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| c["Name"] == "plugchan-<side>")
+    };
+    assert!(
+        listed(2) && !listed(3),
+        "the archived channel is listed only when asked"
+    );
+
+    // Posts and search.
+    let order = |name: &str, n: usize| -> Json { answer(name, n)["A"]["Order"].clone() };
+    assert_eq!(
+        order("GetPostsForChannel", 0),
+        serde_json::json!(["<reply>", "<p4>", "<p3>"])
+    );
+    assert_eq!(
+        order("GetPostsAfter", 0),
+        serde_json::json!(["<p3>", "<p2>"])
+    );
+    assert_eq!(
+        order("GetPostsBefore", 0),
+        serde_json::json!(["<p3>", "<p2>"])
+    );
+    assert_eq!(order("GetPostsBefore", 1), serde_json::json!(["<p3>"]));
+    assert_eq!(
+        answer("SearchPostsInTeamForUser", 0)["A"]["PostList"]["Order"],
+        serde_json::json!(["<p4>"]),
+        "the search finds the one post with its word"
+    );
+    let reactions = answer("GetReactions", 0)["A"].clone();
+    assert_eq!(
+        reactions
+            .as_array()
+            .map(|r| r.iter().map(|x| x["EmojiName"].clone()).collect::<Vec<_>>()),
+        Some(vec![Json::from("smile"), Json::from("thumbsup")]),
+        "reactions in the order they were made"
+    );
+
+    // Emoji.
+    let names_listed: Vec<Json> = answer("GetEmojiList", 0)["A"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| e["Name"].clone())
+        .collect();
+    assert_eq!(
+        names_listed.first(),
+        Some(&Json::from(emoji.a_name.as_str())),
+        "name order puts the second-made emoji first: {names_listed:?}"
+    );
+    assert_eq!(names_listed.len(), 2, "both emoji listed");
+    assert_eq!(answer("GetEmojiImage", 0)["B"], "png");
+    assert_eq!(
+        answer("GetEmojiByName", 2)["B"]["StatusCode"],
+        404,
+        "a system emoji is not a custom one"
+    );
+}

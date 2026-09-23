@@ -690,6 +690,17 @@ query does, not what REST does — `GetUsersByIds` hands the plugin the password
 an admin's. `GetUsers` with a role, the `update_at_asc` sort, `UpdatedAfter` or view restrictions
 ([D-1030]) and a search outside a team or channel ([D-1031]) answer not-implemented.
 
+**Then 133 of 258** (relative to `main` at 6e7ac701): the channel, member, sidebar, post-list,
+reaction and emoji twenty-seven (`plugin_api/channels.rs`): `GetChannelsForTeamForUser`,
+`GetPublicChannelsForTeam`, `SearchChannels`, `UpdateChannel`, `DeleteChannel`,
+`GetChannelStats`, the three member reads, `UpdateChannelMemberRoles`,
+`UpdateChannelMemberNotifications`, `PatchChannelMembersNotifications`, `DeleteChannelMember`
+(Go's `LeaveChannel`, new here); the three sidebar-category methods; `GetPostsForChannel`,
+`GetPostsSince`, `GetPostsAfter`, `GetPostsBefore`, `SearchPostsInTeam`,
+`SearchPostsInTeamForUser` and `GetReactions`; and the four emoji reads. A plugin passes page
+sizes REST clamps, so Go's store refusals of them are ported. `SearchPostsInTeam` with a real
+term answers not-implemented ([D-1050]).
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

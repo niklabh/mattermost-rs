@@ -35,6 +35,17 @@
 //! `CreateTeamMembers`, `DeleteTeamMember`, `UpdateTeamMemberRoles`, `GetTeamStats`,
 //! `SearchTeams`, `CreateTeam`, `UpdateTeam` and `DeleteTeam`.
 //!
+//! And the channel, member, sidebar, post-list, reaction and emoji methods
+//! (`plugin_api/channels.rs`, which says what each answers and which shapes are not
+//! implemented): `GetChannelsForTeamForUser`, `GetPublicChannelsForTeam`, `SearchChannels`,
+//! `UpdateChannel`, `DeleteChannel`, `GetChannelStats`, `GetChannelMembers`,
+//! `GetChannelMembersByIds`, `GetChannelMembersForUser`, `UpdateChannelMemberRoles`,
+//! `UpdateChannelMemberNotifications`, `PatchChannelMembersNotifications` (its refusals only),
+//! `DeleteChannelMember`; the three sidebar-category methods; `GetPostsForChannel`,
+//! `GetPostsSince`, `GetPostsAfter`, `GetPostsBefore`, `SearchPostsInTeam` (a `*` search only),
+//! `SearchPostsInTeamForUser` and `GetReactions`; and `GetEmoji`, `GetEmojiByName`,
+//! `GetEmojiList` and `GetEmojiImage`.
+//!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
 //! `ListCommands` and `ExecuteSlashCommand`.
@@ -132,6 +143,7 @@ use crate::plugin_hooks::{
 use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
 
+mod channels;
 mod users;
 
 /// Port of `PluginAPI` (app/plugin_api.go:24): the app, and the plugin it serves.
@@ -1153,6 +1165,226 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         _: api::Z_GetTeamsArgs,
     ) -> Result<api::Z_GetTeamsReturns, NotImplemented> {
         self.users_get_teams().await
+    }
+
+    // -- channels, members, sidebar, post lists, reactions and emoji (`plugin_api/channels.rs`)
+
+    /// `PluginAPI.GetChannelsForTeamForUser`; see [`AppPluginApi::channels_get_channels_for_team_for_user`].
+    async fn get_channels_for_team_for_user(
+        &self,
+        args: api::Z_GetChannelsForTeamForUserArgs,
+    ) -> Result<api::Z_GetChannelsForTeamForUserReturns, NotImplemented> {
+        self.channels_get_channels_for_team_for_user(args).await
+    }
+
+    /// `PluginAPI.GetPublicChannelsForTeam`; see [`AppPluginApi::channels_get_public_channels_for_team`].
+    async fn get_public_channels_for_team(
+        &self,
+        args: api::Z_GetPublicChannelsForTeamArgs,
+    ) -> Result<api::Z_GetPublicChannelsForTeamReturns, NotImplemented> {
+        self.channels_get_public_channels_for_team(args).await
+    }
+
+    /// `PluginAPI.SearchChannels`; see [`AppPluginApi::channels_search_channels`].
+    async fn search_channels(
+        &self,
+        args: api::Z_SearchChannelsArgs,
+    ) -> Result<api::Z_SearchChannelsReturns, NotImplemented> {
+        self.channels_search_channels(args).await
+    }
+
+    /// `PluginAPI.UpdateChannel`; see [`AppPluginApi::channels_update_channel`].
+    async fn update_channel(
+        &self,
+        args: api::Z_UpdateChannelArgs,
+    ) -> Result<api::Z_UpdateChannelReturns, NotImplemented> {
+        self.channels_update_channel(args).await
+    }
+
+    /// `PluginAPI.DeleteChannel`; see [`AppPluginApi::channels_delete_channel`].
+    async fn delete_channel(
+        &self,
+        args: api::Z_DeleteChannelArgs,
+    ) -> Result<api::Z_DeleteChannelReturns, NotImplemented> {
+        self.channels_delete_channel(args).await
+    }
+
+    /// `PluginAPI.GetChannelStats`; see [`AppPluginApi::channels_get_channel_stats`].
+    async fn get_channel_stats(
+        &self,
+        args: api::Z_GetChannelStatsArgs,
+    ) -> Result<api::Z_GetChannelStatsReturns, NotImplemented> {
+        self.channels_get_channel_stats(args).await
+    }
+
+    /// `PluginAPI.GetChannelMembers`; see [`AppPluginApi::channels_get_channel_members`].
+    async fn get_channel_members(
+        &self,
+        args: api::Z_GetChannelMembersArgs,
+    ) -> Result<api::Z_GetChannelMembersReturns, NotImplemented> {
+        self.channels_get_channel_members(args).await
+    }
+
+    /// `PluginAPI.GetChannelMembersByIds`; see [`AppPluginApi::channels_get_channel_members_by_ids`].
+    async fn get_channel_members_by_ids(
+        &self,
+        args: api::Z_GetChannelMembersByIdsArgs,
+    ) -> Result<api::Z_GetChannelMembersByIdsReturns, NotImplemented> {
+        self.channels_get_channel_members_by_ids(args).await
+    }
+
+    /// `PluginAPI.GetChannelMembersForUser`; see [`AppPluginApi::channels_get_channel_members_for_user`].
+    async fn get_channel_members_for_user(
+        &self,
+        args: api::Z_GetChannelMembersForUserArgs,
+    ) -> Result<api::Z_GetChannelMembersForUserReturns, NotImplemented> {
+        self.channels_get_channel_members_for_user(args).await
+    }
+
+    /// `PluginAPI.UpdateChannelMemberRoles`; see [`AppPluginApi::channels_update_channel_member_roles`].
+    async fn update_channel_member_roles(
+        &self,
+        args: api::Z_UpdateChannelMemberRolesArgs,
+    ) -> Result<api::Z_UpdateChannelMemberRolesReturns, NotImplemented> {
+        self.channels_update_channel_member_roles(args).await
+    }
+
+    /// `PluginAPI.UpdateChannelMemberNotifications`; see [`AppPluginApi::channels_update_channel_member_notifications`].
+    async fn update_channel_member_notifications(
+        &self,
+        args: api::Z_UpdateChannelMemberNotificationsArgs,
+    ) -> Result<api::Z_UpdateChannelMemberNotificationsReturns, NotImplemented> {
+        self.channels_update_channel_member_notifications(args)
+            .await
+    }
+
+    /// `PluginAPI.PatchChannelMembersNotifications`; see [`AppPluginApi::channels_patch_channel_members_notifications`].
+    async fn patch_channel_members_notifications(
+        &self,
+        args: api::Z_PatchChannelMembersNotificationsArgs,
+    ) -> Result<api::Z_PatchChannelMembersNotificationsReturns, NotImplemented> {
+        self.channels_patch_channel_members_notifications(args)
+            .await
+    }
+
+    /// `PluginAPI.DeleteChannelMember`; see [`AppPluginApi::channels_delete_channel_member`].
+    async fn delete_channel_member(
+        &self,
+        args: api::Z_DeleteChannelMemberArgs,
+    ) -> Result<api::Z_DeleteChannelMemberReturns, NotImplemented> {
+        self.channels_delete_channel_member(args).await
+    }
+
+    /// `PluginAPI.GetChannelSidebarCategories`; see [`AppPluginApi::channels_get_channel_sidebar_categories`].
+    async fn get_channel_sidebar_categories(
+        &self,
+        args: api::Z_GetChannelSidebarCategoriesArgs,
+    ) -> Result<api::Z_GetChannelSidebarCategoriesReturns, NotImplemented> {
+        self.channels_get_channel_sidebar_categories(args).await
+    }
+
+    /// `PluginAPI.CreateChannelSidebarCategory`; see [`AppPluginApi::channels_create_channel_sidebar_category`].
+    async fn create_channel_sidebar_category(
+        &self,
+        args: api::Z_CreateChannelSidebarCategoryArgs,
+    ) -> Result<api::Z_CreateChannelSidebarCategoryReturns, NotImplemented> {
+        self.channels_create_channel_sidebar_category(args).await
+    }
+
+    /// `PluginAPI.UpdateChannelSidebarCategories`; see [`AppPluginApi::channels_update_channel_sidebar_categories`].
+    async fn update_channel_sidebar_categories(
+        &self,
+        args: api::Z_UpdateChannelSidebarCategoriesArgs,
+    ) -> Result<api::Z_UpdateChannelSidebarCategoriesReturns, NotImplemented> {
+        self.channels_update_channel_sidebar_categories(args).await
+    }
+
+    /// `PluginAPI.GetPostsForChannel`; see [`AppPluginApi::channels_get_posts_for_channel`].
+    async fn get_posts_for_channel(
+        &self,
+        args: api::Z_GetPostsForChannelArgs,
+    ) -> Result<api::Z_GetPostsForChannelReturns, NotImplemented> {
+        self.channels_get_posts_for_channel(args).await
+    }
+
+    /// `PluginAPI.GetPostsSince`; see [`AppPluginApi::channels_get_posts_since`].
+    async fn get_posts_since(
+        &self,
+        args: api::Z_GetPostsSinceArgs,
+    ) -> Result<api::Z_GetPostsSinceReturns, NotImplemented> {
+        self.channels_get_posts_since(args).await
+    }
+
+    /// `PluginAPI.GetPostsAfter`; see [`AppPluginApi::channels_get_posts_after`].
+    async fn get_posts_after(
+        &self,
+        args: api::Z_GetPostsAfterArgs,
+    ) -> Result<api::Z_GetPostsAfterReturns, NotImplemented> {
+        self.channels_get_posts_after(args).await
+    }
+
+    /// `PluginAPI.GetPostsBefore`; see [`AppPluginApi::channels_get_posts_before`].
+    async fn get_posts_before(
+        &self,
+        args: api::Z_GetPostsBeforeArgs,
+    ) -> Result<api::Z_GetPostsBeforeReturns, NotImplemented> {
+        self.channels_get_posts_before(args).await
+    }
+
+    /// `PluginAPI.SearchPostsInTeam`; see [`AppPluginApi::channels_search_posts_in_team`].
+    async fn search_posts_in_team(
+        &self,
+        args: api::Z_SearchPostsInTeamArgs,
+    ) -> Result<api::Z_SearchPostsInTeamReturns, NotImplemented> {
+        self.channels_search_posts_in_team(args).await
+    }
+
+    /// `PluginAPI.SearchPostsInTeamForUser`; see [`AppPluginApi::channels_search_posts_in_team_for_user`].
+    async fn search_posts_in_team_for_user(
+        &self,
+        args: api::Z_SearchPostsInTeamForUserArgs,
+    ) -> Result<api::Z_SearchPostsInTeamForUserReturns, NotImplemented> {
+        self.channels_search_posts_in_team_for_user(args).await
+    }
+
+    /// `PluginAPI.GetReactions`; see [`AppPluginApi::channels_get_reactions`].
+    async fn get_reactions(
+        &self,
+        args: api::Z_GetReactionsArgs,
+    ) -> Result<api::Z_GetReactionsReturns, NotImplemented> {
+        self.channels_get_reactions(args).await
+    }
+
+    /// `PluginAPI.GetEmoji`; see [`AppPluginApi::channels_get_emoji`].
+    async fn get_emoji(
+        &self,
+        args: api::Z_GetEmojiArgs,
+    ) -> Result<api::Z_GetEmojiReturns, NotImplemented> {
+        self.channels_get_emoji(args).await
+    }
+
+    /// `PluginAPI.GetEmojiByName`; see [`AppPluginApi::channels_get_emoji_by_name`].
+    async fn get_emoji_by_name(
+        &self,
+        args: api::Z_GetEmojiByNameArgs,
+    ) -> Result<api::Z_GetEmojiByNameReturns, NotImplemented> {
+        self.channels_get_emoji_by_name(args).await
+    }
+
+    /// `PluginAPI.GetEmojiList`; see [`AppPluginApi::channels_get_emoji_list`].
+    async fn get_emoji_list(
+        &self,
+        args: api::Z_GetEmojiListArgs,
+    ) -> Result<api::Z_GetEmojiListReturns, NotImplemented> {
+        self.channels_get_emoji_list(args).await
+    }
+
+    /// `PluginAPI.GetEmojiImage`; see [`AppPluginApi::channels_get_emoji_image`].
+    async fn get_emoji_image(
+        &self,
+        args: api::Z_GetEmojiImageArgs,
+    ) -> Result<api::Z_GetEmojiImageReturns, NotImplemented> {
+        self.channels_get_emoji_image(args).await
     }
 
     // -- slash commands ---------------------------------------------------------------------

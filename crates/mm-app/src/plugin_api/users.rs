@@ -138,7 +138,7 @@ fn bad_channel_sort() -> Box<AppError> {
 
 impl AppPluginApi {
     /// A list read's two returns, each element converted.
-    fn reply_list<T, W>(
+    pub(super) fn reply_list<T, W>(
         &self,
         result: Result<Vec<T>, Box<AppError>>,
         convert: impl Fn(&T) -> W,
