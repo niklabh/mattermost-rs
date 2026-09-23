@@ -14614,3 +14614,23 @@ so a plugin's `/shrug` wins); and the plugin half of the autocomplete list. Open
 
 Mutation tally (`plugin-commands.plan`): 23 run, 21 caught, 2 controls survived, 0 harness faults.
 
+## Plugin API: users, statuses, preferences and teams (2026-09-23)
+
+Thirty-five more methods, **106 of 258** (relative to `main` at c5599c86): the user reads and
+writes, the four status and four preference methods, and fourteen team methods
+(`mm_app::plugin_api::users`, which says what each sanitises and what answers not-implemented).
+Opens [D-1030], [D-1031] and [D-1032].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` user, status, preference and team methods (app/plugin_api.go:168-430, 630, 1016, 1267) | `mm_app::plugin_api::users`, `mm_app::plugin_api_wire` | DONE | `parity::plugin_hooks::the_plugin_api_user_methods_answer_as_go_answers` (97 calls, hooks, frames) + 7 unit | Sanitisation is the store query's: `GetUsersByIds` is unsanitised, the listings credential-scrubbed, a search an admin's. |
+| `GetProfilesInChannelByStatus`, `GetTeamsForUserWithPagination`, `SetStatusDoNotDisturb` | `UserStore::get_profiles_in_channel_by_status`, `TeamStore::get_teams_for_user_with_pagination`, `App::set_status_do_not_disturb` | DONE | 2 DB tests + the tranche | The paged memberships keep left teams and have no `ORDER BY`. |
+
+Two `Where`s found on the way, invisible on REST and on the plugin wire: `UpdateUser`'s user
+lookup and `UpdateTeamMemberRoles`' member lookup now report their own function, as Go's do.
+
+Mutation tally (`plugin-api-users.plan`, then `-rerun.plan`): 27 run, 23 caught, 1 survivor, 2
+controls survived, 1 harness fault; the survivor (status order read as username order) was
+invisible because `usroth` sorts before `usrown`, so the fixture now ranks them the other way;
+the rerun: 4 run, 2 caught, 2 controls survived, 0 harness faults.
+

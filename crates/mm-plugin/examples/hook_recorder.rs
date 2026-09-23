@@ -134,6 +134,9 @@
 //! `{"hook": "OnActivate", "calls": [...]}` and each `ExecuteCommand`; `/hookrec script` also
 //! runs the command half of the plugin API and records `{"hook": "CommandScript", ...}`.
 //!
+//! `!users-script` runs `recorder/users.rs` — the user, status, preference and team methods —
+//! and records `{"hook": "UsersScript", ...}` the same way.
+//!
 //! `!core-script` runs `recorder/core.rs` — the user, team, channel, post, permission, bot and
 //! websocket methods, reading ids from `HOOK_RECORDER_CORE_*` — and records
 //! `{"hook": "CoreScript", ...}`. Its posts fire this plugin's own message hooks while the outer
@@ -196,6 +199,9 @@ mod core;
 
 #[path = "recorder/commands.rs"]
 mod commands;
+
+#[path = "recorder/users.rs"]
+mod users;
 
 /// `plugin.DismissPostError` (public/plugin/hooks.go:82).
 const DISMISS: &str = "plugin.message_will_be_posted.dismiss_post";
@@ -413,6 +419,14 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "CoreScript", "calls": calls }));
+        }
+        if message == users::USERS_SCRIPT {
+            let channel = args.b.as_deref().map_or("", |p| p.channel_id.as_str());
+            let calls = match self.api.get() {
+                Some(api) => users::run(api.client(), &users::Inputs::from_env(channel)).await,
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "UsersScript", "calls": calls }));
         }
         if message == config::CONFIG_SCRIPT {
             let calls = match self.api.get() {

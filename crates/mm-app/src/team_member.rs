@@ -116,9 +116,16 @@ impl App {
         user_id: &str,
         new_roles: &str,
     ) -> AppResult<TeamMember> {
-        // Go reads the store directly here rather than going through `GetTeamMember`, but the
-        // two error ids are the same pair, so `get_team_member` is the same answer.
-        let mut member = self.get_team_member(team_id, user_id).await?;
+        // Go reads the store directly here rather than going through `GetTeamMember`: the two
+        // error ids are the same pair, but `Where` is this function's — invisible on REST
+        // (`json:"-"`) and on the wire of the plugin API's `UpdateTeamMemberRoles`.
+        let mut member = self
+            .get_team_member(team_id, user_id)
+            .await
+            .map_err(|mut err| {
+                err.where_ = "UpdateTeamMemberRoles".to_owned();
+                err
+            })?;
 
         let (scheme_guest_role, scheme_user_role, scheme_admin_role) =
             self.get_scheme_roles_for_team(team_id).await?;

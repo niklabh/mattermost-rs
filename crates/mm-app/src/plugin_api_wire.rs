@@ -16,14 +16,21 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use chrono::{DateTime, FixedOffset};
 use gobwire::Interface;
 use mm_model::bot::{Bot, BotGetOptions, BotPatch};
+use mm_model::custom_status::CustomStatus;
 use mm_model::permission::Permission;
 use mm_model::post_list::PostList;
+use mm_model::preference::{Preference, Preferences};
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
+use mm_model::stats::TeamStats;
+use mm_model::status::Status;
 use mm_model::team::Team;
+use mm_model::team_member::TeamUnread;
 use mm_model::utils::StringInterface;
+use mm_model::utils::go_time;
 use mm_model::websocket_message::WebsocketBroadcast;
 use mm_plugin::wire::model as wire_model;
 
@@ -245,6 +252,135 @@ pub fn custom_event_name(plugin_id: &str, event: &str) -> String {
     format!("custom_{plugin_id}_{event}")
 }
 
+/// A team a plugin passed to `CreateTeam` or `UpdateTeam`, taken whole: gob's omitted empty map
+/// is Go's nil `PolicyActions`, and the three pointers are carried as they came.
+pub fn team_from_wire(wire: &wire_model::Team) -> Team {
+    Team {
+        id: wire.id.clone(),
+        create_at: wire.create_at,
+        update_at: wire.update_at,
+        delete_at: wire.delete_at,
+        display_name: wire.display_name.clone(),
+        name: wire.name.clone(),
+        description: wire.description.clone(),
+        email: wire.email.clone(),
+        team_type: wire.r#type.clone(),
+        company_name: wire.company_name.clone(),
+        allowed_domains: wire.allowed_domains.clone(),
+        invite_id: wire.invite_id.clone(),
+        allow_open_invite: wire.allow_open_invite,
+        last_team_icon_update: wire.last_team_icon_update,
+        scheme_id: wire.scheme_id.clone(),
+        group_constrained: wire.group_constrained,
+        policy_id: wire.policy_id.clone(),
+        cloud_limits_archived: wire.cloud_limits_archived,
+        policy_enforced: wire.policy_enforced,
+        policy_actions: (!wire.policy_actions.is_empty()).then(|| {
+            wire.policy_actions
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect()
+        }),
+        policy_is_active: wire.policy_is_active,
+        recommended: wire.recommended,
+    }
+}
+
+/// A status as gob sends it (`model.Status`, status.go:24): **with** `PrevStatus` and
+/// `ActiveChannel`, which JSON hides (`json:"-"`, `omitempty`) and gob carries like any other
+/// exported field.
+pub fn status_to_wire(status: &Status) -> wire_model::Status {
+    wire_model::Status {
+        user_id: status.user_id.clone(),
+        status: status.status.clone(),
+        manual: status.manual,
+        last_activity_at: status.last_activity_at,
+        active_channel: status.active_channel.clone(),
+        dnd_end_time: status.dnd_end_time,
+        prev_status: status.prev_status.clone(),
+    }
+}
+
+/// A preference as gob sends it (`model.Preference`, preference.go:69).
+pub fn preference_to_wire(preference: &Preference) -> wire_model::Preference {
+    wire_model::Preference {
+        user_id: preference.user_id.clone(),
+        category: preference.category.clone(),
+        name: preference.name.clone(),
+        value: preference.value.clone(),
+    }
+}
+
+/// The preferences a plugin passed to `UpdatePreferencesForUser` or `DeletePreferencesForUser`.
+pub fn preferences_from_wire(wire: &[wire_model::Preference]) -> Preferences {
+    Preferences(
+        wire.iter()
+            .map(|p| Preference {
+                user_id: p.user_id.clone(),
+                category: p.category.clone(),
+                name: p.name.clone(),
+                value: p.value.clone(),
+            })
+            .collect(),
+    )
+}
+
+/// A team's unread counts as gob sends them (`model.TeamUnread`, team.go:70).
+pub fn team_unread_to_wire(unread: &TeamUnread) -> wire_model::TeamUnread {
+    wire_model::TeamUnread {
+        team_id: unread.team_id.clone(),
+        msg_count: unread.msg_count,
+        mention_count: unread.mention_count,
+        mention_count_root: unread.mention_count_root,
+        msg_count_root: unread.msg_count_root,
+        thread_count: unread.thread_count,
+        thread_mention_count: unread.thread_mention_count,
+        thread_urgent_mention_count: unread.thread_urgent_mention_count,
+    }
+}
+
+/// A team's member counts as gob sends them (`model.TeamStats`, team_stats.go:6).
+pub fn team_stats_to_wire(stats: &TeamStats) -> wire_model::TeamStats {
+    wire_model::TeamStats {
+        team_id: stats.team_id.clone(),
+        total_member_count: stats.total_member_count,
+        active_member_count: stats.active_member_count,
+    }
+}
+
+/// The `*model.CustomStatus` a plugin passed to `UpdateUserCustomStatus`. `ExpiresAt` is a
+/// `time.Time`, which crosses gob as its binary form: seconds, nanoseconds and an offset. The
+/// offset survives, so the stored JSON prints the instant in the zone the plugin wrote it in,
+/// as Go's does; the zero time (omitted by gob) is Go's zero time.
+pub fn custom_status_from_wire(wire: &wire_model::CustomStatus) -> CustomStatus {
+    CustomStatus {
+        emoji: wire.emoji.clone(),
+        text: wire.text.clone(),
+        duration: wire.duration.clone(),
+        expires_at: go_time_to_chrono(&wire.expires_at),
+    }
+}
+
+/// A gob `time.Time` as the model's `DateTime<FixedOffset>`: the zero time is Go's, and an
+/// instant chrono cannot hold (beyond ±262,000 years) is taken as the zero time too.
+pub fn go_time_to_chrono(time: &gobwire::GoTime) -> DateTime<FixedOffset> {
+    if *time == gobwire::GoTime::default() {
+        return *go_time::ZERO;
+    }
+    let offset = match time.zone {
+        gobwire::Zone::Utc => 0,
+        gobwire::Zone::Offset(seconds) => seconds,
+    };
+    let nanos = u32::try_from(time.nsec).unwrap_or(0);
+    match (
+        FixedOffset::east_opt(offset),
+        DateTime::from_timestamp(time.unix(), nanos),
+    ) {
+        (Some(zone), Some(utc)) => utc.with_timezone(&zone),
+        _ => *go_time::ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +545,148 @@ mod tests {
             delete_at: 4,
         };
         assert_eq!(bot_from_wire(&bot_to_wire(&bot)), bot);
+    }
+
+    /// Every field distinct and non-zero, so a swapped pair or a dropped field shows.
+    #[test]
+    fn a_team_round_trips_and_an_empty_policy_map_is_nil() {
+        let team = Team {
+            id: "i".into(),
+            create_at: 1,
+            update_at: 2,
+            delete_at: 3,
+            display_name: "dn".into(),
+            name: "n".into(),
+            description: "de".into(),
+            email: "e@x.invalid".into(),
+            team_type: "I".into(),
+            company_name: "c".into(),
+            allowed_domains: "a.invalid".into(),
+            invite_id: "inv".into(),
+            allow_open_invite: true,
+            last_team_icon_update: 4,
+            scheme_id: Some("s".into()),
+            group_constrained: Some(false),
+            policy_id: Some("p".into()),
+            cloud_limits_archived: true,
+            policy_enforced: true,
+            policy_actions: Some(HashMap::from([("membership".to_owned(), true)])),
+            policy_is_active: true,
+            recommended: true,
+        };
+        assert_eq!(team_from_wire(&team_to_wire(&team)), team);
+        let bare = Team {
+            policy_actions: Some(HashMap::new()),
+            ..team
+        };
+        assert_eq!(team_from_wire(&team_to_wire(&bare)).policy_actions, None);
+    }
+
+    /// `PrevStatus` and `ActiveChannel` are hidden from JSON and carried by gob.
+    #[test]
+    fn a_status_crosses_with_the_fields_json_hides() {
+        let status = Status {
+            user_id: "u".into(),
+            status: "dnd".into(),
+            manual: true,
+            last_activity_at: 5,
+            active_channel: "c".into(),
+            dnd_end_time: 6,
+            prev_status: "away".into(),
+        };
+        let wire = status_to_wire(&status);
+        assert_eq!(
+            (
+                wire.user_id.as_str(),
+                wire.status.as_str(),
+                wire.manual,
+                wire.last_activity_at,
+                wire.active_channel.as_str(),
+                wire.dnd_end_time,
+                wire.prev_status.as_str()
+            ),
+            ("u", "dnd", true, 5, "c", 6, "away")
+        );
+    }
+
+    #[test]
+    fn preferences_and_counts_cross_field_for_field() {
+        let preference = Preference {
+            user_id: "u".into(),
+            category: "c".into(),
+            name: "n".into(),
+            value: "v".into(),
+        };
+        let wire = preference_to_wire(&preference);
+        assert_eq!(preferences_from_wire(&[wire]).0, vec![preference]);
+
+        let unread = TeamUnread {
+            team_id: "t".into(),
+            msg_count: 1,
+            mention_count: 2,
+            mention_count_root: 3,
+            msg_count_root: 4,
+            thread_count: 5,
+            thread_mention_count: 6,
+            thread_urgent_mention_count: 7,
+        };
+        let wire = team_unread_to_wire(&unread);
+        assert_eq!(
+            [
+                wire.msg_count,
+                wire.mention_count,
+                wire.mention_count_root,
+                wire.msg_count_root,
+                wire.thread_count,
+                wire.thread_mention_count,
+                wire.thread_urgent_mention_count
+            ],
+            [1, 2, 3, 4, 5, 6, 7]
+        );
+        let stats = team_stats_to_wire(&TeamStats {
+            team_id: "t".into(),
+            total_member_count: 8,
+            active_member_count: 9,
+        });
+        assert_eq!(
+            (
+                stats.team_id.as_str(),
+                stats.total_member_count,
+                stats.active_member_count
+            ),
+            ("t", 8, 9)
+        );
+    }
+
+    /// The zero `time.Time` is Go's zero; any other keeps its instant, nanoseconds and offset.
+    #[test]
+    fn a_gob_time_keeps_its_instant_and_its_offset() {
+        assert!(go_time::is_zero(&go_time_to_chrono(
+            &gobwire::GoTime::default()
+        )));
+        let ist =
+            gobwire::GoTime::from_unix(1_900_000_000, 250_000_000, gobwire::Zone::Offset(19_800));
+        let time = go_time_to_chrono(&ist);
+        assert_eq!(time.timestamp(), 1_900_000_000);
+        assert_eq!(time.timestamp_subsec_nanos(), 250_000_000);
+        assert_eq!(time.offset().local_minus_utc(), 19_800);
+        let utc = go_time_to_chrono(&gobwire::GoTime::from_unix(60, 0, gobwire::Zone::Utc));
+        assert_eq!((utc.timestamp(), utc.offset().local_minus_utc()), (60, 0));
+
+        let status = custom_status_from_wire(&wire_model::CustomStatus {
+            emoji: "e".into(),
+            text: "t".into(),
+            duration: "d".into(),
+            expires_at: ist,
+        });
+        assert_eq!(
+            (
+                status.emoji.as_str(),
+                status.text.as_str(),
+                status.duration.as_str()
+            ),
+            ("e", "t", "d")
+        );
+        assert_eq!(status.expires_at, time);
     }
 }

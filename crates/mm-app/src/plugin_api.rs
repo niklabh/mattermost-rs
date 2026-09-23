@@ -25,6 +25,16 @@
 //! `GetGroupChannel`; `CreateBot`, `GetBot`, `GetBots`, `PatchBot`, `UpdateBotActive`,
 //! `PermanentDeleteBot` and `EnsureBotUser`; and `PublishWebSocketEvent`.
 //!
+//! And the user, status, preference and team methods (`plugin_api/users.rs`, which says what
+//! each sanitises and which shapes are not implemented): `GetUsers`, `GetUsersByIds`,
+//! `GetUsersInChannel`, `GetUsersInTeam`, `SearchUsers`, `GetProfileImage`, `CreateUser`,
+//! `UpdateUser`, `UpdateUserActive`, `DeleteUser`, `UpdateUserRoles`, `UpdateUserCustomStatus`,
+//! `RemoveUserCustomStatus`; `GetUserStatus`, `GetUserStatusesByIds`, `UpdateUserStatus`,
+//! `SetUserStatusTimedDND`; the four preference methods; and `GetTeams`, `GetTeamsForUser`,
+//! `GetTeamsUnreadForUser`, `GetTeamMembers`, `GetTeamMembersForUser`, `CreateTeamMember`,
+//! `CreateTeamMembers`, `DeleteTeamMember`, `UpdateTeamMemberRoles`, `GetTeamStats`,
+//! `SearchTeams`, `CreateTeam`, `UpdateTeam` and `DeleteTeam`.
+//!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
 //! `ListCommands` and `ExecuteSlashCommand`.
@@ -121,6 +131,8 @@ use crate::plugin_hooks::{
 };
 use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
+
+mod users;
 
 /// Port of `PluginAPI` (app/plugin_api.go:24): the app, and the plugin it serves.
 ///
@@ -859,6 +871,288 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         event.data = (!args.b.is_empty()).then(|| payload_from_wire(&args.b));
         self.app.publish(event).await;
         Ok(api::Z_PublishWebSocketEventReturns {})
+    }
+
+    // -- users, statuses, preferences and teams (`plugin_api/users.rs`) ---------------------
+
+    /// `PluginAPI.GetUsers`; see [`AppPluginApi::users_get_users`].
+    async fn get_users(
+        &self,
+        args: api::Z_GetUsersArgs,
+    ) -> Result<api::Z_GetUsersReturns, NotImplemented> {
+        self.users_get_users(args).await
+    }
+
+    /// `PluginAPI.GetUsersByIds`; see [`AppPluginApi::users_get_users_by_ids`].
+    async fn get_users_by_ids(
+        &self,
+        args: api::Z_GetUsersByIdsArgs,
+    ) -> Result<api::Z_GetUsersByIdsReturns, NotImplemented> {
+        self.users_get_users_by_ids(args).await
+    }
+
+    /// `PluginAPI.GetUsersInChannel`; see [`AppPluginApi::users_get_users_in_channel`].
+    async fn get_users_in_channel(
+        &self,
+        args: api::Z_GetUsersInChannelArgs,
+    ) -> Result<api::Z_GetUsersInChannelReturns, NotImplemented> {
+        self.users_get_users_in_channel(args).await
+    }
+
+    /// `PluginAPI.GetUsersInTeam`; see [`AppPluginApi::users_get_users_in_team`].
+    async fn get_users_in_team(
+        &self,
+        args: api::Z_GetUsersInTeamArgs,
+    ) -> Result<api::Z_GetUsersInTeamReturns, NotImplemented> {
+        self.users_get_users_in_team(args).await
+    }
+
+    /// `PluginAPI.SearchUsers`; see [`AppPluginApi::users_search_users`].
+    async fn search_users(
+        &self,
+        args: api::Z_SearchUsersArgs,
+    ) -> Result<api::Z_SearchUsersReturns, NotImplemented> {
+        self.users_search_users(args).await
+    }
+
+    /// `PluginAPI.GetProfileImage`; see [`AppPluginApi::users_get_profile_image`].
+    async fn get_profile_image(
+        &self,
+        args: api::Z_GetProfileImageArgs,
+    ) -> Result<api::Z_GetProfileImageReturns, NotImplemented> {
+        self.users_get_profile_image(args).await
+    }
+
+    /// `PluginAPI.UpdateUser`; see [`AppPluginApi::users_update_user`].
+    async fn update_user(
+        &self,
+        args: api::Z_UpdateUserArgs,
+    ) -> Result<api::Z_UpdateUserReturns, NotImplemented> {
+        self.users_update_user(args).await
+    }
+
+    /// `PluginAPI.UpdateUserActive`; see [`AppPluginApi::users_update_user_active`].
+    async fn update_user_active(
+        &self,
+        args: api::Z_UpdateUserActiveArgs,
+    ) -> Result<api::Z_UpdateUserActiveReturns, NotImplemented> {
+        self.users_update_user_active(args).await
+    }
+
+    /// `PluginAPI.DeleteUser`; see [`AppPluginApi::users_delete_user`].
+    async fn delete_user(
+        &self,
+        args: api::Z_DeleteUserArgs,
+    ) -> Result<api::Z_DeleteUserReturns, NotImplemented> {
+        self.users_delete_user(args).await
+    }
+
+    /// `PluginAPI.UpdateUserRoles`; see [`AppPluginApi::users_update_user_roles`].
+    async fn update_user_roles(
+        &self,
+        args: api::Z_UpdateUserRolesArgs,
+    ) -> Result<api::Z_UpdateUserRolesReturns, NotImplemented> {
+        self.users_update_user_roles(args).await
+    }
+
+    /// `PluginAPI.CreateUser`; see [`AppPluginApi::users_create_user`].
+    async fn create_user(
+        &self,
+        args: api::Z_CreateUserArgs,
+    ) -> Result<api::Z_CreateUserReturns, NotImplemented> {
+        self.users_create_user(args).await
+    }
+
+    /// `PluginAPI.UpdateUserCustomStatus`; see [`AppPluginApi::users_update_user_custom_status`].
+    async fn update_user_custom_status(
+        &self,
+        args: api::Z_UpdateUserCustomStatusArgs,
+    ) -> Result<api::Z_UpdateUserCustomStatusReturns, NotImplemented> {
+        self.users_update_user_custom_status(args).await
+    }
+
+    /// `PluginAPI.RemoveUserCustomStatus`; see [`AppPluginApi::users_remove_user_custom_status`].
+    async fn remove_user_custom_status(
+        &self,
+        args: api::Z_RemoveUserCustomStatusArgs,
+    ) -> Result<api::Z_RemoveUserCustomStatusReturns, NotImplemented> {
+        self.users_remove_user_custom_status(args).await
+    }
+
+    /// `PluginAPI.GetUserStatus`; see [`AppPluginApi::users_get_user_status`].
+    async fn get_user_status(
+        &self,
+        args: api::Z_GetUserStatusArgs,
+    ) -> Result<api::Z_GetUserStatusReturns, NotImplemented> {
+        self.users_get_user_status(args).await
+    }
+
+    /// `PluginAPI.GetUserStatusesByIds`; see [`AppPluginApi::users_get_user_statuses_by_ids`].
+    async fn get_user_statuses_by_ids(
+        &self,
+        args: api::Z_GetUserStatusesByIdsArgs,
+    ) -> Result<api::Z_GetUserStatusesByIdsReturns, NotImplemented> {
+        self.users_get_user_statuses_by_ids(args).await
+    }
+
+    /// `PluginAPI.UpdateUserStatus`; see [`AppPluginApi::users_update_user_status`].
+    async fn update_user_status(
+        &self,
+        args: api::Z_UpdateUserStatusArgs,
+    ) -> Result<api::Z_UpdateUserStatusReturns, NotImplemented> {
+        self.users_update_user_status(args).await
+    }
+
+    /// `PluginAPI.SetUserStatusTimedDND`; see [`AppPluginApi::users_set_user_status_timed_dnd`].
+    async fn set_user_status_timed_dnd(
+        &self,
+        args: api::Z_SetUserStatusTimedDNDArgs,
+    ) -> Result<api::Z_SetUserStatusTimedDNDReturns, NotImplemented> {
+        self.users_set_user_status_timed_dnd(args).await
+    }
+
+    /// `PluginAPI.GetPreferencesForUser`; see [`AppPluginApi::users_get_preferences_for_user`].
+    async fn get_preferences_for_user(
+        &self,
+        args: api::Z_GetPreferencesForUserArgs,
+    ) -> Result<api::Z_GetPreferencesForUserReturns, NotImplemented> {
+        self.users_get_preferences_for_user(args).await
+    }
+
+    /// `PluginAPI.GetPreferenceForUser`; see [`AppPluginApi::users_get_preference_for_user`].
+    async fn get_preference_for_user(
+        &self,
+        args: api::Z_GetPreferenceForUserArgs,
+    ) -> Result<api::Z_GetPreferenceForUserReturns, NotImplemented> {
+        self.users_get_preference_for_user(args).await
+    }
+
+    /// `PluginAPI.UpdatePreferencesForUser`; see [`AppPluginApi::users_update_preferences_for_user`].
+    async fn update_preferences_for_user(
+        &self,
+        args: api::Z_UpdatePreferencesForUserArgs,
+    ) -> Result<api::Z_UpdatePreferencesForUserReturns, NotImplemented> {
+        self.users_update_preferences_for_user(args).await
+    }
+
+    /// `PluginAPI.DeletePreferencesForUser`; see [`AppPluginApi::users_delete_preferences_for_user`].
+    async fn delete_preferences_for_user(
+        &self,
+        args: api::Z_DeletePreferencesForUserArgs,
+    ) -> Result<api::Z_DeletePreferencesForUserReturns, NotImplemented> {
+        self.users_delete_preferences_for_user(args).await
+    }
+
+    /// `PluginAPI.GetTeamsForUser`; see [`AppPluginApi::users_get_teams_for_user`].
+    async fn get_teams_for_user(
+        &self,
+        args: api::Z_GetTeamsForUserArgs,
+    ) -> Result<api::Z_GetTeamsForUserReturns, NotImplemented> {
+        self.users_get_teams_for_user(args).await
+    }
+
+    /// `PluginAPI.GetTeamsUnreadForUser`; see [`AppPluginApi::users_get_teams_unread_for_user`].
+    async fn get_teams_unread_for_user(
+        &self,
+        args: api::Z_GetTeamsUnreadForUserArgs,
+    ) -> Result<api::Z_GetTeamsUnreadForUserReturns, NotImplemented> {
+        self.users_get_teams_unread_for_user(args).await
+    }
+
+    /// `PluginAPI.GetTeamMembers`; see [`AppPluginApi::users_get_team_members`].
+    async fn get_team_members(
+        &self,
+        args: api::Z_GetTeamMembersArgs,
+    ) -> Result<api::Z_GetTeamMembersReturns, NotImplemented> {
+        self.users_get_team_members(args).await
+    }
+
+    /// `PluginAPI.GetTeamMembersForUser`; see [`AppPluginApi::users_get_team_members_for_user`].
+    async fn get_team_members_for_user(
+        &self,
+        args: api::Z_GetTeamMembersForUserArgs,
+    ) -> Result<api::Z_GetTeamMembersForUserReturns, NotImplemented> {
+        self.users_get_team_members_for_user(args).await
+    }
+
+    /// `PluginAPI.CreateTeamMember`; see [`AppPluginApi::users_create_team_member`].
+    async fn create_team_member(
+        &self,
+        args: api::Z_CreateTeamMemberArgs,
+    ) -> Result<api::Z_CreateTeamMemberReturns, NotImplemented> {
+        self.users_create_team_member(args).await
+    }
+
+    /// `PluginAPI.CreateTeamMembers`; see [`AppPluginApi::users_create_team_members`].
+    async fn create_team_members(
+        &self,
+        args: api::Z_CreateTeamMembersArgs,
+    ) -> Result<api::Z_CreateTeamMembersReturns, NotImplemented> {
+        self.users_create_team_members(args).await
+    }
+
+    /// `PluginAPI.DeleteTeamMember`; see [`AppPluginApi::users_delete_team_member`].
+    async fn delete_team_member(
+        &self,
+        args: api::Z_DeleteTeamMemberArgs,
+    ) -> Result<api::Z_DeleteTeamMemberReturns, NotImplemented> {
+        self.users_delete_team_member(args).await
+    }
+
+    /// `PluginAPI.UpdateTeamMemberRoles`; see [`AppPluginApi::users_update_team_member_roles`].
+    async fn update_team_member_roles(
+        &self,
+        args: api::Z_UpdateTeamMemberRolesArgs,
+    ) -> Result<api::Z_UpdateTeamMemberRolesReturns, NotImplemented> {
+        self.users_update_team_member_roles(args).await
+    }
+
+    /// `PluginAPI.GetTeamStats`; see [`AppPluginApi::users_get_team_stats`].
+    async fn get_team_stats(
+        &self,
+        args: api::Z_GetTeamStatsArgs,
+    ) -> Result<api::Z_GetTeamStatsReturns, NotImplemented> {
+        self.users_get_team_stats(args).await
+    }
+
+    /// `PluginAPI.SearchTeams`; see [`AppPluginApi::users_search_teams`].
+    async fn search_teams(
+        &self,
+        args: api::Z_SearchTeamsArgs,
+    ) -> Result<api::Z_SearchTeamsReturns, NotImplemented> {
+        self.users_search_teams(args).await
+    }
+
+    /// `PluginAPI.CreateTeam`; see [`AppPluginApi::users_create_team`].
+    async fn create_team(
+        &self,
+        args: api::Z_CreateTeamArgs,
+    ) -> Result<api::Z_CreateTeamReturns, NotImplemented> {
+        self.users_create_team(args).await
+    }
+
+    /// `PluginAPI.UpdateTeam`; see [`AppPluginApi::users_update_team`].
+    async fn update_team(
+        &self,
+        args: api::Z_UpdateTeamArgs,
+    ) -> Result<api::Z_UpdateTeamReturns, NotImplemented> {
+        self.users_update_team(args).await
+    }
+
+    /// `PluginAPI.DeleteTeam`; see [`AppPluginApi::users_delete_team`].
+    async fn delete_team(
+        &self,
+        args: api::Z_DeleteTeamArgs,
+    ) -> Result<api::Z_DeleteTeamReturns, NotImplemented> {
+        self.users_delete_team(args).await
+    }
+
+    /// `PluginAPI.GetTeams`; see [`AppPluginApi::users_get_teams`].
+    async fn get_teams(
+        &self,
+        _: api::Z_GetTeamsArgs,
+    ) -> Result<api::Z_GetTeamsReturns, NotImplemented> {
+        self.users_get_teams().await
     }
 
     // -- slash commands ---------------------------------------------------------------------

@@ -681,6 +681,15 @@ removes every plugin's entry; only disable and remove drop a plugin's commands).
 the port cannot write is answered as a failed post ([D-1020]); a plugin's dynamic-list suggestion
 still forwards ([D-1021]).
 
+**Then 106 of 258:** the user, status, preference and team thirty-five (`plugin_api/users.rs`):
+`GetUsers`, `GetUsersByIds`, `GetUsersInChannel`, `GetUsersInTeam`, `SearchUsers`,
+`GetProfileImage`, `CreateUser`, `UpdateUser`, `UpdateUserActive`, `DeleteUser`,
+`UpdateUserRoles`, the two custom-status writes, the four status methods, the four preference
+methods, and fourteen team methods from `GetTeams` to `DeleteTeam`. Each sanitises what its store
+query does, not what REST does — `GetUsersByIds` hands the plugin the password hash, a search is
+an admin's. `GetUsers` with a role, the `update_at_asc` sort, `UpdatedAfter` or view restrictions
+([D-1030]) and a search outside a team or channel ([D-1031]) answer not-implemented.
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

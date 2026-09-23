@@ -69,7 +69,7 @@ impl Inputs {
 
 /// One call, written down with its arguments and what came back — or the transport error, such
 /// as `API <Name> called but not implemented.` — and the typed answer for the script to use.
-async fn call<A, R>(api: &Client, out: &mut Vec<Json>, name: &str, args: A) -> Option<R>
+pub async fn call<A, R>(api: &Client, out: &mut Vec<Json>, name: &str, args: A) -> Option<R>
 where
     A: Encode,
     R: Decode + Default + Encode + Send + 'static,
