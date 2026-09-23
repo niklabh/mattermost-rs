@@ -141,6 +141,9 @@
 //! `!users-script` runs `recorder/users.rs` — the user, status, preference and team methods —
 //! and records `{"hook": "UsersScript", ...}` the same way.
 //!
+//! `!channels-script` runs `recorder/channels.rs` — the channel, member, sidebar, post-list,
+//! reaction and emoji methods — and records `{"hook": "ChannelsScript", ...}` the same way.
+//!
 //! `!core-script` runs `recorder/core.rs` — the user, team, channel, post, permission, bot and
 //! websocket methods, reading ids from `HOOK_RECORDER_CORE_*` — and records
 //! `{"hook": "CoreScript", ...}`. Its posts fire this plugin's own message hooks while the outer
@@ -207,6 +210,8 @@ mod commands;
 #[path = "recorder/users.rs"]
 mod users;
 
+#[path = "recorder/channels.rs"]
+mod channels;
 #[path = "recorder/files.rs"]
 mod files;
 
@@ -442,6 +447,16 @@ impl Hooks for Recorder {
                 None => vec![json!({ "error": "no API client" })],
             };
             self.record(&json!({ "hook": "UsersScript", "calls": calls }));
+        }
+        if message == channels::CHANNELS_SCRIPT {
+            let channel = args.b.as_deref().map_or("", |p| p.channel_id.as_str());
+            let calls = match self.api.get() {
+                Some(api) => {
+                    channels::run(api.client(), &channels::Inputs::from_env(channel)).await
+                }
+                None => vec![json!({ "error": "no API client" })],
+            };
+            self.record(&json!({ "hook": "ChannelsScript", "calls": calls }));
         }
         if message == config::CONFIG_SCRIPT {
             let calls = match self.api.get() {

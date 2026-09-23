@@ -255,6 +255,39 @@ impl App {
         Ok(members)
     }
 
+    /// Port of `app.App.GetChannelMembersForUserWithPagination` (channel.go:2627): every
+    /// membership of the user, across teams and in channel-id order, stripped of the team data
+    /// the store query joins in.
+    ///
+    /// One branch, 500-only, with the id [`App::get_channel_members_page`] shares and this
+    /// function's own `Where`. `page * perPage` wraps as Go's `int` does, and a negative page or
+    /// size is Postgres's refusal, so it is this 500 too.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, page, per_page, count))]
+    pub async fn get_channel_members_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> AppResult<Vec<ChannelMember>> {
+        let members = self
+            .store()
+            .channel()
+            .get_members_for_user_with_pagination(user_id, page, per_page)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "paginated channel members lookup failed");
+                AppError::boxed(
+                    "GetChannelMembersForUserWithPagination",
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", members.len());
+        Ok(members.into_iter().map(|m| m.channel_member).collect())
+    }
+
     /// Port of `app.App.GetChannelMemberCount` (channel.go:2664).
     ///
     /// One branch: the store's only failure mode is a broken query, so there is no 404 here — a

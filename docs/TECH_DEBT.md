@@ -9908,3 +9908,18 @@ header and cookie scrubbing, the subpath trim, `GetSession`'s redacted error, `M
 CSRF check with its `XMLHttpRequest` leniency, and `Mattermost-User-Id` for a session that passes.
 **What is owed:** that route, with a `plugin_hooks` tranche that drives the recorder's `ServeHTTP`
 from a client on each host; then [D-1021]'s dynamic list.
+
+---
+
+## D-1050 · A plugin's `SearchPostsInTeam` with a real term answers not implemented
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-23 (app/post.go:2242) · **Owner** the plugin host
+
+`App.SearchPostsInTeam` runs `Post().Search(teamID, "", params)` with `SearchWithoutUserId`, a
+database search that is not scoped to any user's channel memberships. This server's store search
+(`SqlPostStore::search_posts_for_user`) always joins the searching user's memberships and has no
+such branch. The shapes that read nothing are answered as Go does — `EnablePostSearch` off (501)
+and a list whose every term is `*` (empty) — see `mm_app::plugin_api::channels::in_team_search`.
+**What is owed:** the store's no-user branch of `SqlPostStore.search` (post_store.go), then the
+`SearchPostsInTeam` arm, with a script call that finds a post in a channel the host has no
+member in.

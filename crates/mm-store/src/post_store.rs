@@ -832,7 +832,7 @@ pub struct GetPostsAroundOptions<'a> {
 impl GetPostsAroundOptions<'_> {
     /// Go's `options.Page * options.PerPage`, computed before either reaches the SQL.
     fn offset(&self) -> i64 {
-        self.page * self.per_page
+        self.page.wrapping_mul(self.per_page)
     }
 }
 
@@ -2499,11 +2499,9 @@ impl PostStore for SqlPostStore {
     /// sequence. Nothing observable turns on it: neither query writes, and the second's result
     /// is merged into a map keyed by id.
     ///
-    /// **Go's `PerPage > 1000` guard is not reproduced.** It returns `ErrInvalidInput`, which the
-    /// app layer turns into a 400, and it is unreachable through this route: `parse_per_page`
-    /// clamps to `PerPageMaximum` (200) before the value gets here. A second caller with an
-    /// unclamped `per_page` would need it, and would need a `StoreError` variant that maps to
-    /// 400 to carry it.
+    /// **Go's `PerPage > 1000` guard is in the caller**, `App::get_posts_page`, which answers
+    /// the 400 Go's app layer makes of the store's `ErrInvalidInput` before this runs. REST
+    /// clamps to 200 first; a plugin's `GetPostsForChannel` does not.
     #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id, collapsed = opts.collapsed_threads))]
     async fn get_posts(&self, opts: GetPostsOptions<'_>) -> Result<PostList, StoreError> {
         if opts.collapsed_threads {

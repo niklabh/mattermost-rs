@@ -700,6 +700,17 @@ channel and no mini preview; reading such an image back is [D-891]'s repair, not
 Go's nil-map panic makes it. `SendMail` sends nothing ([D-238]). The client-facing
 `/plugins/{id}/*` is still Go's ([D-1040]).
 
+**Then 144 of 258**: the channel, member, sidebar, post-list,
+reaction and emoji twenty-seven (`plugin_api/channels.rs`): `GetChannelsForTeamForUser`,
+`GetPublicChannelsForTeam`, `SearchChannels`, `UpdateChannel`, `DeleteChannel`,
+`GetChannelStats`, the three member reads, `UpdateChannelMemberRoles`,
+`UpdateChannelMemberNotifications`, `PatchChannelMembersNotifications`, `DeleteChannelMember`
+(Go's `LeaveChannel`, new here); the three sidebar-category methods; `GetPostsForChannel`,
+`GetPostsSince`, `GetPostsAfter`, `GetPostsBefore`, `SearchPostsInTeam`,
+`SearchPostsInTeamForUser` and `GetReactions`; and the four emoji reads. A plugin passes page
+sizes REST clamps, so Go's store refusals of them are ported. `SearchPostsInTeam` with a real
+term answers not-implemented ([D-1050]).
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,

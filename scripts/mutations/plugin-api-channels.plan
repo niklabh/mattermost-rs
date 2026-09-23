@@ -1,0 +1,30 @@
+# Mutation plan for the plugin API's channel, member, sidebar, post-list, reaction and emoji
+# methods (docs/PLUGIN_PLAN.md, Phase 6).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-channels.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_channel_methods_answer_as_go_answers`: the
+# channels script from inside MessageWillBePosted on a Go host and a Rust host, every answer, every
+# hook the writes fire, every frame the own user's socket receives, and the Go-read assertions.
+# The two hub lines are the invalidation this unit found missing on REST too. The last two lines
+# are the no-op controls and must SURVIVE.
+
+stats-real-guest-count	crates/mm-app/src/plugin_api/channels.rs	guest_count: second_count,	guest_count: 0,	api	plugin_hooks::the_plugin_api_channel_methods
+members-for-user-reads-team	crates/mm-app/src/plugin_api/channels.rs	.get_channel_members_for_user_with_pagination(&args.b, args.c, args.d)	.get_channel_members_for_user_with_pagination(&args.a, args.c, args.d)	api	plugin_hooks::the_plugin_api_channel_methods
+public-offset-is-page	crates/mm-app/src/plugin_api/channels.rs	args.b.wrapping_mul(args.c), args.c)	args.b, args.c)	api	plugin_hooks::the_plugin_api_channel_methods
+for-team-never-deleted	crates/mm-app/src/plugin_api/channels.rs	include_deleted: args.c,	include_deleted: false,	api	plugin_hooks::the_plugin_api_channel_methods
+space-404-fails-closed	crates/mm-app/src/plugin_api/channels.rs	Err(err) if err.status_code != 404 => Err(err),	Err(err) if err.status_code != 0 => Err(err),	api	plugin_hooks::the_plugin_api_channel_methods
+after-reads-before	crates/mm-app/src/plugin_api/channels.rs	.posts_around(&args.a, &args.b, args.c, args.d, false)	.posts_around(&args.a, &args.b, args.c, args.d, true)	api	plugin_hooks::the_plugin_api_channel_methods
+search-team-user-swapped	crates/mm-app/src/plugin_api/channels.rs	&args.b,\n                &args.a,	&args.a,\n                &args.b,	api	plugin_hooks::the_plugin_api_channel_methods
+in-team-any-star	crates/mm-app/src/plugin_api/channels.rs	params.iter().all(|p| p.terms == "*")	params.iter().any(|p| p.terms == "*")	api	plugin_hooks::the_plugin_api_channel_methods
+emoji-sort-inverted	crates/mm-app/src/plugin_api/channels.rs	args.a == EMOJI_SORT_BY_NAME	args.a != EMOJI_SORT_BY_NAME	api	plugin_hooks::the_plugin_api_channel_methods
+page-ceiling-off-by-one	crates/mm-app/src/post.rs	if opts.per_page > MAX_POSTS_PER_PAGE {	if opts.per_page > MAX_POSTS_PER_PAGE + 1 {	api	plugin_hooks::the_plugin_api_channel_methods
+around-size-unchecked	crates/mm-app/src/post.rs	if opts.page < 0 || opts.per_page < 0 {	if opts.page < 0 {	api	plugin_hooks::the_plugin_api_channel_methods
+leave-direct-allowed	crates/mm-app/src/channel_member.rs	        if channel.is_group_or_direct() {\n            return Err(AppError::boxed(\n                "LeaveChannel",	        if false && channel.is_group_or_direct() {\n            return Err(AppError::boxed(\n                "LeaveChannel",	api	plugin_hooks::the_plugin_api_channel_methods
+leave-post-dropped	crates/mm-app/src/channel_member.rs	.post_leave_channel_message(hook_ctx, &user, &channel)	.post_leave_channel_message(hook_ctx, &user, &Channel::default())	api	plugin_hooks::the_plugin_api_channel_methods
+join-not-invalidated	crates/mm-app/src/channel_member.rs	self.hub().invalidate_channel_members_for_user(&user.id);	let _ = &user.id;	api	plugin_hooks::the_plugin_api_channel_methods
+leave-not-invalidated	crates/mm-app/src/channel_member.rs	self.hub()\n            .invalidate_channel_members_for_user(user_id_to_remove);	let _ = user_id_to_remove;	api	plugin_hooks::the_plugin_api_channel_methods
+patch-limit-off-by-one	crates/mm-app/src/channel_member.rs	if members.len() > UPDATE_MULTIPLE_MAXIMUM {	if members.len() > UPDATE_MULTIPLE_MAXIMUM + 1 {	api	plugin_hooks::the_plugin_api_channel_methods
+patch-partial-commits	crates/mm-store/src/channel_store.rs	if updated != members.len() as u64 {	if updated == u64::MAX {	api	plugin_hooks::the_plugin_api_channel_methods
+control-reactions-rename	crates/mm-app/src/plugin_api/channels.rs	let result = self.app.get_reactions_for_post(&args.a).await;\n        let (a, b) = self.reply_list(result, reaction_to_wire);	let found = self.app.get_reactions_for_post(&args.a).await;\n        let (a, b) = self.reply_list(found, reaction_to_wire);	api	plugin_hooks::the_plugin_api_channel_methods
+control-emoji-field-order	crates/mm-app/src/plugin_api/channels.rs	create_at: emoji.create_at,\n        update_at: emoji.update_at,	update_at: emoji.update_at,\n        create_at: emoji.create_at,	api	plugin_hooks::the_plugin_api_channel_methods

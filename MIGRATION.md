@@ -14659,3 +14659,24 @@ handed over once, so no later status is observable; noted on `PluginResponseWrit
 | `WebConn.ShouldSendEvent`'s membership cache and `Hub.InvalidateUser` (platform/web_conn.go:980, web_hub.go:663) | `App::should_send_event`, `MemberCache` (mm-app `hub`) | DONE | 2 unit, `db_hub_join_order`, `parity::plugin_hooks::the_plugin_api_user_methods_answer_as_go_answers` (own user joins; 10 of 10 green) | Go's answer for a joiner's last default channel is a hub race (13 of 26 via the plugin API, 0 of 30 via REST); this hub gives the REST answer, and a load can no longer outlive an invalidation. |
 
 Mutation tally (`hub-join-order.plan`): 11 run, 9 caught, 2 controls survived, 0 harness faults.
+
+## Plugin API: channels, members, sidebar, post lists, reactions and emoji (2026-09-23)
+
+Twenty-seven more methods, **144 of 258** with the file, dialog and plugin-HTTP ones merged
+beside them, in `mm_app::plugin_api::channels`, which says what each
+answers and what is not implemented. Opens [D-1050].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` channel, member, sidebar, post-list, reaction and emoji methods (app/plugin_api.go:478-1091) | `mm_app::plugin_api::channels` | DONE | `parity::plugin_hooks::the_plugin_api_channel_methods_answer_as_go_answers` (102 calls, hooks, frames) + 7 unit | `GetChannelStats`' `GuestCount` is a second member count, and `GetChannelMembersForUser` ignores its team — Go's, kept. |
+| `LeaveChannel`, `GetChannelMembersForUserWithPagination`, `PatchChannelMembersNotifyProps` + `Channel().PatchMultipleMembersNotifyProps` | `App::leave_channel`, `App::get_channel_members_for_user_with_pagination`, `App::patch_channel_members_notify_props`, `channel_store::patch_multiple_members_notify_props` | DONE | the tranche + 1 unit | A patch naming a non-member is Go's `(nil, nil)`: success, rolled back, no event. |
+| `GetPosts`' `PerPage > 1000`, `getPostsAround`'s negative page/size, `UpdateChannel`'s space branch | `App::get_posts_page`, `App::get_posts_around_post`, `App::update_channel` | DONE | the tranche (not the space branch) | Unreachable on REST, reachable from a plugin. |
+
+**Found on the way, and it is REST's too:** Go's `addUserToChannel`, `removeUserFromChannel`,
+`updateMemberNotifyProps`, `updateChannelMember` and `PatchChannelMembersNotifyProps` all call
+`InvalidateChannelCacheForUser`; the Rust ports did not, so a member's open sockets kept the
+memberships loaded before the change — missing a channel just joined (its own join post
+included) and still hearing one just left. The hub invalidation is now at each of Go's call sites.
+
+Mutation tally (`plugin-api-channels.plan`): 19 run, 17 caught, 2 controls survived, 0 harness
+faults.
