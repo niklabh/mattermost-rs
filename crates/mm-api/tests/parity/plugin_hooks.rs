@@ -7037,6 +7037,13 @@ static USERS_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::n
 /// `GetTeamsForUser` (no `ORDER BY`), `GetUserStatusesByIds` (cache hits first in Go) and
 /// `GetPreferencesForUser` (no `ORDER BY`) have their lists sorted after the scrub. Every other
 /// list keeps its order.
+///
+/// # One frame is Go's coin toss
+///
+/// The own user joins the made team itself, so its socket hears its own default-channel joins
+/// ([`OwnJoins`]). Whether Go's hears off-topic's `user_added` depends on a random `select` in
+/// Go's hub ([D-1032], `App::should_send_event`); that one frame is asserted on its own and
+/// left out of Go's list. Everything else about the joins is compared and asserted.
 #[tokio::test]
 async fn the_plugin_api_user_methods_answer_as_go_answers() {
     use futures_util::FutureExt as _;
@@ -7382,10 +7389,28 @@ async fn run_the_users_tour(client: &reqwest::Client, admin: &str) {
             mask_password(entry);
         }
         sort_unordered_answers(&mut entries);
+        let joins = own_joins(&probe.raw, &calls, &side.own.id).await;
+        let tolerated = joins.assert_goes_as_go_can(host);
+        if let Some(log) = std::env::var_os("MMRS_JOIN_ORDER_LOG") {
+            use std::io::Write as _;
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)
+                .expect("the join-order log");
+            writeln!(
+                log,
+                "{host}: off-topic user_added heard: {}",
+                joins.off_added.is_some()
+            )
+            .expect("the join-order log");
+        }
         let mut frames: Vec<Json> = probe
             .raw
             .iter()
-            .filter_map(|raw| core_frame(raw, &pairs, &shared_ids))
+            .enumerate()
+            .filter(|(index, _)| Some(*index) != tolerated)
+            .filter_map(|(_, raw)| core_frame(raw, &pairs, &shared_ids))
             .collect();
         frames.iter_mut().for_each(mask_password_update);
         frames.sort_by_key(Json::to_string);
@@ -7476,6 +7501,106 @@ async fn run_the_users_tour(client: &reqwest::Client, admin: &str) {
     for side in &sides {
         common::delete_channel(client, admin, &side.channel).await;
     }
+}
+
+/// Which of the own user's socket frames were its own default-channel joins in the team the
+/// script made, by index into the raw frames ([D-1032]): each channel's join post and its
+/// `user_added` naming the own user.
+#[derive(Debug, Default)]
+struct OwnJoins {
+    town_post: Option<usize>,
+    town_added: Option<usize>,
+    off_post: Option<usize>,
+    off_added: Option<usize>,
+}
+
+impl OwnJoins {
+    /// What either host must have heard, and the one frame Go may or may not have: returns the
+    /// index of Go's off-topic `user_added` when it was heard, for the comparison to leave out.
+    ///
+    /// Town-square's two are heard, since the join post's decision loaded the cache after
+    /// town-square was saved; off-topic's join post never is. Off-topic's `user_added` is
+    /// Go's coin toss (`App::should_send_event`): heard in 13 runs of 26 when this was measured.
+    /// This server's hub never falls behind, so it gives Go's other answer, always.
+    fn assert_goes_as_go_can(&self, host: &str) -> Option<usize> {
+        assert!(
+            self.town_post.is_some() && self.town_added.is_some(),
+            "{host}: the own user hears its town-square join: {self:?}"
+        );
+        assert!(
+            self.off_post.is_none(),
+            "{host}: the own user never hears its off-topic join post: {self:?}"
+        );
+        if host == "Go" {
+            return self.off_added;
+        }
+        assert!(
+            self.off_added.is_none(),
+            "{host}: off-topic's user_added is decided against the cache town-square's join post \
+             loaded, as Go's is whenever its hub keeps up: {self:?}"
+        );
+        None
+    }
+}
+
+/// Classify `raw` against the made team's two default channels, read from the database (the
+/// team is archived by then, and its channels with it, but the rows stay).
+async fn own_joins(raw: &[String], calls: &[Json], own: &str) -> OwnJoins {
+    let team = learned(calls, "CreateTeam", 0, "/returns/A/Id").expect("the script made a team");
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let channels: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM channels WHERE teamid = $1")
+            .bind(&team)
+            .fetch_all(&pool)
+            .await
+            .expect("the made team's channels");
+    let id_of = |name: &str| {
+        channels
+            .iter()
+            .find(|(_, n)| n == name)
+            .map(|(id, _)| id.clone())
+            .unwrap_or_else(|| panic!("the made team has a {name}: {channels:?}"))
+    };
+    let (town, off) = (id_of("town-square"), id_of("off-topic"));
+
+    let mut joins = OwnJoins::default();
+    for (index, frame) in raw.iter().enumerate() {
+        let Ok(frame) = serde_json::from_str::<Json>(frame) else {
+            continue;
+        };
+        let channel = frame["broadcast"]["channel_id"]
+            .as_str()
+            .unwrap_or_default();
+        let slot = match frame["event"].as_str() {
+            Some("user_added") if frame["data"]["user_id"] == own => {
+                if channel == town {
+                    &mut joins.town_added
+                } else if channel == off {
+                    &mut joins.off_added
+                } else {
+                    continue;
+                }
+            }
+            Some("posted") => {
+                let post: Json = frame["data"]["post"]
+                    .as_str()
+                    .and_then(|p| serde_json::from_str(p).ok())
+                    .unwrap_or_default();
+                if post["user_id"] != own {
+                    continue;
+                }
+                match (post["type"].as_str(), channel) {
+                    (Some("system_join_team"), c) if c == town => &mut joins.town_post,
+                    (Some("system_join_channel"), c) if c == off => &mut joins.off_post,
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+        assert!(slot.is_none(), "one frame of each kind: {frame}");
+        *slot = Some(index);
+    }
+    joins
 }
 
 /// What parity alone would not pin, because both hosts could agree on a wrong answer: read off

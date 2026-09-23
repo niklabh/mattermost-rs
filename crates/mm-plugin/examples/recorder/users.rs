@@ -562,11 +562,10 @@ async fn preferences(api: &Client, input: &Inputs, out: &mut Vec<Json>) {
     read_preference(api, &input.own, out).await;
 }
 
-/// The team reads before any team write, then a team made, joined by `other` and the made user,
-/// re-roled, left by the made user, renamed, searched for and archived.
+/// The team reads before any team write, then a team made, joined by the own user and the made
+/// user, re-roled, left by the made user, renamed, searched for and archived.
 async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Json>) {
     let own = input.own.as_str();
-    let other = input.other.as_str();
     let side = &input.side;
     let _: Option<Z_GetTeamsForUserReturns> = call(
         api,
@@ -629,10 +628,10 @@ async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Jso
             call(api, out, "CreateTeam", Z_CreateTeamArgs { a: team }).await;
     }
 
-    // The joiners are `other` and the made user, never the own user whose socket is watched:
-    // whether a joiner's own connection hears its default-channel joins depends on when each
-    // hub loads its memberships (D-1032).
-    for (team, user) in [(created.id.as_str(), other), (MISSING, other)] {
+    // The joiners are the own user, whose socket is watched, and the made user. What the own
+    // user's socket hears of its own default-channel joins is decided by when its membership
+    // cache was loaded; Go's answer for off-topic's `user_added` is a coin toss (D-1032).
+    for (team, user) in [(created.id.as_str(), own), (MISSING, own)] {
         let _: Option<Z_CreateTeamMemberReturns> = call(
             api,
             out,
@@ -689,9 +688,7 @@ async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Jso
         api,
         out,
         "GetTeamsForUser",
-        Z_GetTeamsForUserArgs {
-            a: other.to_owned(),
-        },
+        Z_GetTeamsForUserArgs { a: own.to_owned() },
     )
     .await;
     for user in [created_id, MISSING] {
@@ -708,7 +705,7 @@ async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Jso
         .await;
     }
     // The left team's row is still there, with its `DeleteAt`.
-    for (user, page) in [(created_id, 0), (other, 0), (other, 1)] {
+    for (user, page) in [(created_id, 0), (own, 0), (own, 1)] {
         let _: Option<Z_GetTeamMembersForUserReturns> = call(
             api,
             out,
@@ -725,9 +722,7 @@ async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Jso
         api,
         out,
         "GetTeamsUnreadForUser",
-        Z_GetTeamsUnreadForUserArgs {
-            a: other.to_owned(),
-        },
+        Z_GetTeamsUnreadForUserArgs { a: own.to_owned() },
     )
     .await;
 
@@ -778,9 +773,7 @@ async fn teams(api: &Client, input: &Inputs, created_id: &str, out: &mut Vec<Jso
         api,
         out,
         "GetTeamsForUser",
-        Z_GetTeamsForUserArgs {
-            a: other.to_owned(),
-        },
+        Z_GetTeamsForUserArgs { a: own.to_owned() },
     )
     .await;
 }
