@@ -17,6 +17,34 @@
 //! The four whose Go map may be empty and non-nil are served through
 //! `mm_plugin::rpc::PluginApiDynamic`, because the generated structs send an empty map as nil.
 //!
+//! And the methods a plugin calls after activation (the model values in `crate::plugin_api_wire`):
+//! the user, team, channel, member, post, thread and session reads; `HasPermissionTo`,
+//! `HasPermissionToTeam` and `HasPermissionToChannel`; `CreatePost`, `UpdatePost`, `DeletePost`,
+//! `SendEphemeralPost`, `UpdateEphemeralPost`, `DeleteEphemeralPost`, `AddReaction`,
+//! `RemoveReaction`, `AddChannelMember`, `CreateChannel`, `GetDirectChannel` and
+//! `GetGroupChannel`; `CreateBot`, `GetBot`, `GetBots`, `PatchBot`, `UpdateBotActive`,
+//! `PermanentDeleteBot` and `EnsureBotUser`; and `PublishWebSocketEvent`.
+//!
+//! # A shape the REST route forwards is not implemented here
+//!
+//! The app functions behind these methods refuse, before any write, the shapes this server does
+//! not reproduce — the REST handler forwards those to Go. A plugin call has nowhere to forward
+//! to, so it answers Go's `API <Name> called but not implemented.` for that call alone (logged
+//! with the reason), and the plugin sees a transport error rather than a wrong answer.
+//!
+//! # The request context is the empty one
+//!
+//! Go's plugin API holds the `request.EmptyContext` its environment was started with, so a hook
+//! fired by an API write — `MessageWillBePosted` for a plugin's own `CreatePost` — is handed a
+//! `plugin.Context` of six empty strings, and the session is the zero session: no user, not
+//! OAuth. Every method here passes `HookContext::default()` and `Session::default()`.
+//!
+//! # `Where` is on the wire here
+//!
+//! An `*AppError`'s `Where` is `json:"-"`, so REST clients never see it; gob carries it to a
+//! plugin. A port that delegated between app functions and let `Where` drift was invisible until
+//! these methods — `App::get_channel_by_name_for_team_name` was one.
+//!
 //! # The configuration is read per call
 //!
 //! Go answers from its in-memory copy; this server re-reads the document each call
@@ -66,7 +94,29 @@ use mm_plugin::wire::plugin::{
     Z_LogErrorReturns, Z_LogInfoArgs, Z_LogInfoReturns, Z_LogWarnArgs, Z_LogWarnReturns,
 };
 
+use mm_model::channel::Channel;
+use mm_model::post::Post;
+use mm_model::session::Session;
+use mm_model::websocket_message::WebSocketEvent;
+use mm_plugin::error::PluginError;
+use mm_plugin::wire::plugin as api;
+use mm_store::post_store::{GetPostThreadOptions, ThreadDirection};
+
 use crate::App;
+use crate::bot::EnsureBotError;
+use crate::channel_create::ChannelCreate;
+use crate::channel_member::{ChannelMemberOpts, MemberWrite};
+use crate::plugin_api_wire::{
+    bot_from_wire, bot_get_options_from_wire, bot_patch_from_wire, bot_to_wire,
+    broadcast_from_wire, custom_event_name, payload_from_wire, permission_from_wire,
+    post_list_for_plugin, reaction_from_wire, session_to_wire, team_to_wire,
+};
+use crate::plugin_hooks::{
+    HookContext, channel_from_wire, channel_member_to_wire, channel_to_wire, post_from_wire_whole,
+    post_to_wire, reaction_to_wire, team_member_to_wire, user_to_wire,
+};
+use crate::post::PrepareError;
+use crate::reaction::ReactionWrite;
 
 /// Port of `PluginAPI` (app/plugin_api.go:24): the app, and the plugin it serves.
 ///
@@ -128,9 +178,7 @@ fn bytes(value: &[u8]) -> Option<&[u8]> {
 /// server's locale, as `NewAppError` does with `i18n.T`, and only its exported fields — the error
 /// `Wrap` attached is unexported, so it stays behind and `DetailedError` is what it was.
 pub fn wire_app_error(mut err: Box<AppError>, default_server_locale: &str) -> Box<WireAppError> {
-    if let Some(bundle) = crate::i18n::loaded() {
-        bundle.translate_app_error(bundle.server_locale(default_server_locale), &mut err);
-    }
+    translate(&mut err, default_server_locale);
     Box::new(WireAppError {
         id: err.id,
         message: err.message,
@@ -140,6 +188,13 @@ pub fn wire_app_error(mut err: Box<AppError>, default_server_locale: &str) -> Bo
         r#where: err.where_,
         skip_translation: err.skip_translation,
     })
+}
+
+/// `NewAppError`'s translation with the server's locale, which Go performs at construction.
+fn translate(err: &mut AppError, default_server_locale: &str) {
+    if let Some(bundle) = crate::i18n::loaded() {
+        bundle.translate_app_error(bundle.server_locale(default_server_locale), err);
+    }
 }
 
 /// One complaint `argsToFields` logs at error level instead of a field.
@@ -215,6 +270,714 @@ fn render_fields(fields: &[(String, String)]) -> String {
 }
 
 impl mm_plugin::rpc::PluginApi for AppPluginApi {
+    // -- users ------------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.GetUser` (app/plugin_api.go:285): the store row, **unsanitised** —
+    /// password hash, auth data and MFA secret included, because gob carries every exported
+    /// field and Go sanitises nothing here.
+    async fn get_user(
+        &self,
+        args: api::Z_GetUserArgs,
+    ) -> Result<api::Z_GetUserReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_user(&args.a).await, |u| user_to_wire(&u));
+        Ok(api::Z_GetUserReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetUserByEmail` (app/plugin_api.go:289), unsanitised like `GetUser`.
+    async fn get_user_by_email(
+        &self,
+        args: api::Z_GetUserByEmailArgs,
+    ) -> Result<api::Z_GetUserByEmailReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_user_by_email(&args.a).await, |u| {
+            user_to_wire(&u)
+        });
+        Ok(api::Z_GetUserByEmailReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetUserByUsername` (app/plugin_api.go:293), unsanitised like `GetUser`.
+    async fn get_user_by_username(
+        &self,
+        args: api::Z_GetUserByUsernameArgs,
+    ) -> Result<api::Z_GetUserByUsernameReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_user_by_username(&args.a).await, |u| {
+            user_to_wire(&u)
+        });
+        Ok(api::Z_GetUserByUsernameReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetUsersByUsernames` (app/plugin_api.go:301):
+    /// `GetUsersByUsernames(usernames, asAdmin: true, nil)`. Unlike the three single-user reads
+    /// these **are** sanitised — `sanitizeProfiles` as an admin, which keeps the email and full
+    /// name and drops the password, auth data and MFA secret. A name that matches nobody is
+    /// simply absent.
+    async fn get_users_by_usernames(
+        &self,
+        args: api::Z_GetUsersByUsernamesArgs,
+    ) -> Result<api::Z_GetUsersByUsernamesReturns, NotImplemented> {
+        let answer = match self.app.get_users_by_usernames(&args.a).await {
+            Ok(users) => api::Z_GetUsersByUsernamesReturns {
+                a: users
+                    .into_iter()
+                    .map(|mut user| {
+                        self.app.sanitize_profile(&mut user, true);
+                        user_to_wire(&user)
+                    })
+                    .collect(),
+                b: None,
+            },
+            Err(err) => api::Z_GetUsersByUsernamesReturns {
+                a: Vec::new(),
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.GetSession` (app/plugin_api.go:331): the row, token and all. A miss is
+    /// Go's 400, not a 404.
+    async fn get_session(
+        &self,
+        args: api::Z_GetSessionArgs,
+    ) -> Result<api::Z_GetSessionReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_session_by_id(&args.a).await, |s| {
+            session_to_wire(&s)
+        });
+        Ok(api::Z_GetSessionReturns { a, b })
+    }
+
+    // -- teams ------------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.GetTeam` (app/plugin_api.go:184).
+    async fn get_team(
+        &self,
+        args: api::Z_GetTeamArgs,
+    ) -> Result<api::Z_GetTeamReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_team(&args.a).await, |t| team_to_wire(&t));
+        Ok(api::Z_GetTeamReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetTeamByName` (app/plugin_api.go:193).
+    async fn get_team_by_name(
+        &self,
+        args: api::Z_GetTeamByNameArgs,
+    ) -> Result<api::Z_GetTeamByNameReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_team_by_name(&args.a).await, |t| {
+            team_to_wire(&t)
+        });
+        Ok(api::Z_GetTeamByNameReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetTeamMember` (app/plugin_api.go:248): team id first, then user id.
+    async fn get_team_member(
+        &self,
+        args: api::Z_GetTeamMemberArgs,
+    ) -> Result<api::Z_GetTeamMemberReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_team_member(&args.a, &args.b).await, |m| {
+            team_member_to_wire(&m)
+        });
+        Ok(api::Z_GetTeamMemberReturns { a, b })
+    }
+
+    // -- channels ---------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.GetChannel` (app/plugin_api.go:503).
+    async fn get_channel(
+        &self,
+        args: api::Z_GetChannelArgs,
+    ) -> Result<api::Z_GetChannelReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_channel(&args.a).await, |c| channel_to_wire(&c));
+        Ok(api::Z_GetChannelReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetChannelByName` (app/plugin_api.go:559). The plugin passes the
+    /// **team** first; the app function takes the name first — the swap is Go's.
+    async fn get_channel_by_name(
+        &self,
+        args: api::Z_GetChannelByNameArgs,
+    ) -> Result<api::Z_GetChannelByNameReturns, NotImplemented> {
+        let result = self.app.get_channel_by_name(&args.b, &args.a, args.c).await;
+        let (a, b) = self.reply(result, |c| channel_to_wire(&c));
+        Ok(api::Z_GetChannelByNameReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetChannelByNameForTeamName` (app/plugin_api.go:563): team name first
+    /// from the plugin, channel name first to the app function.
+    async fn get_channel_by_name_for_team_name(
+        &self,
+        args: api::Z_GetChannelByNameForTeamNameArgs,
+    ) -> Result<api::Z_GetChannelByNameForTeamNameReturns, NotImplemented> {
+        let result = self
+            .app
+            .get_channel_by_name_for_team_name(&args.b, &args.a, args.c)
+            .await;
+        let (a, b) = self.reply(result, |c| channel_to_wire(&c));
+        Ok(api::Z_GetChannelByNameForTeamNameReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetChannelMember` (app/plugin_api.go:717): channel id, then user id.
+    async fn get_channel_member(
+        &self,
+        args: api::Z_GetChannelMemberArgs,
+    ) -> Result<api::Z_GetChannelMemberReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_channel_member(&args.a, &args.b).await, |m| {
+            channel_member_to_wire(&m)
+        });
+        Ok(api::Z_GetChannelMemberReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetDirectChannel` (app/plugin_api.go:590): `GetOrCreateDirectChannel`,
+    /// so a "get" that **creates** the channel the first time, with the hooks and events a
+    /// created DM brings. The one shape this server forwards on the REST route
+    /// (`RestrictDirectMessage = "team"`) is answered as not implemented.
+    async fn get_direct_channel(
+        &self,
+        args: api::Z_GetDirectChannelArgs,
+    ) -> Result<api::Z_GetDirectChannelReturns, NotImplemented> {
+        let answer = match self
+            .app
+            .get_or_create_direct_channel(&HookContext::default(), &args.a, &args.b)
+            .await
+        {
+            Ok(ChannelCreate::Created(channel)) => api::Z_GetDirectChannelReturns {
+                a: Some(Box::new(channel_to_wire(&channel))),
+                b: None,
+            },
+            Ok(ChannelCreate::Forward(why)) => {
+                return Err(self.not_implemented("GetDirectChannel", why));
+            }
+            Err(err) => api::Z_GetDirectChannelReturns {
+                a: None,
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.GetGroupChannel` (app/plugin_api.go:594): `CreateGroupChannel` with no
+    /// creator, which finds the channel when it exists and creates it when it does not.
+    async fn get_group_channel(
+        &self,
+        args: api::Z_GetGroupChannelArgs,
+    ) -> Result<api::Z_GetGroupChannelReturns, NotImplemented> {
+        let result = self
+            .app
+            .create_group_channel(&HookContext::default(), &args.a, "")
+            .await;
+        let (a, b) = self.reply(result, |c| channel_to_wire(&c));
+        Ok(api::Z_GetGroupChannelReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.CreateChannel` (app/plugin_api.go:468): `CreateChannel` **without**
+    /// adding a member. With `PrivacySettings.UseAnonymousURLs` on under an Enterprise Advanced
+    /// licence, an open or private channel's name is replaced by a fresh id first.
+    async fn create_channel(
+        &self,
+        args: api::Z_CreateChannelArgs,
+    ) -> Result<api::Z_CreateChannelReturns, NotImplemented> {
+        let mut channel = args.a.as_deref().map(channel_from_wire).unwrap_or_default();
+        let license = match self.app.license().await {
+            Ok(license) => license,
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, error = %err.id, "the licence could not be read");
+                None
+            }
+        };
+        let anonymous_urls = self.app.config().use_anonymous_urls
+            && mm_model::license::minimum_enterprise_advanced_license(license.as_deref());
+        // "Space backing channels have system-assigned names, not user-visible URLs."
+        if !channel.is_group_or_direct() && !channel.is_space() && anonymous_urls {
+            channel.name = mm_model::utils::new_id();
+        }
+        let answer = match self
+            .app
+            .create_channel(&HookContext::default(), &mut channel, false)
+            .await
+        {
+            Ok(()) => api::Z_CreateChannelReturns {
+                a: Some(Box::new(channel_to_wire(&channel))),
+                b: None,
+            },
+            Err(err) => api::Z_CreateChannelReturns {
+                a: None,
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.AddChannelMember` (app/plugin_api.go:685): the channel resolved as
+    /// `resolveChannel` does, then `AddChannelMember` with no requestor and no root, so the
+    /// system post says the user **joined** rather than was added.
+    async fn add_channel_member(
+        &self,
+        args: api::Z_AddChannelMemberArgs,
+    ) -> Result<api::Z_AddChannelMemberReturns, NotImplemented> {
+        let channel = match self.resolve_channel(&args.a).await {
+            Ok(channel) => channel,
+            Err(err) => {
+                return Ok(api::Z_AddChannelMemberReturns {
+                    a: None,
+                    b: self.wire(err),
+                });
+            }
+        };
+        let answer = match self
+            .app
+            .add_channel_member(
+                &args.b,
+                &channel,
+                &ChannelMemberOpts::default(),
+                &HookContext::default(),
+            )
+            .await
+        {
+            Ok(MemberWrite::Done(member)) => api::Z_AddChannelMemberReturns {
+                a: Some(Box::new(channel_member_to_wire(&member))),
+                b: None,
+            },
+            Ok(MemberWrite::Forward(why)) => {
+                return Err(self.not_implemented("AddChannelMember", why));
+            }
+            Err(err) => api::Z_AddChannelMemberReturns {
+                a: None,
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    // -- posts ------------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.GetPost` (app/plugin_api.go:956): `GetSinglePost` without deleted
+    /// posts, answered `ForPlugin`.
+    async fn get_post(
+        &self,
+        args: api::Z_GetPostArgs,
+    ) -> Result<api::Z_GetPostReturns, NotImplemented> {
+        let result = self
+            .app
+            .get_single_post(&HookContext::default(), &args.a, false)
+            .await;
+        let (a, b) = self.reply(result, |p| post_to_wire(&p.for_plugin()));
+        Ok(api::Z_GetPostReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetPostThread` (app/plugin_api.go:948): `GetPostThread` with a zero
+    /// `GetPostsOptions` — not collapsed, no cursor, no limit, and no `ORDER BY` — for no user,
+    /// answered `ForPlugin`.
+    async fn get_post_thread(
+        &self,
+        args: api::Z_GetPostThreadArgs,
+    ) -> Result<api::Z_GetPostThreadReturns, NotImplemented> {
+        let options = GetPostThreadOptions {
+            user_id: "",
+            skip_fetch_threads: false,
+            collapsed_threads: false,
+            updates_only: false,
+            per_page: 0,
+            direction: ThreadDirection::Unset,
+            from_post: "",
+            from_create_at: 0,
+            from_update_at: 0,
+        };
+        let result = self
+            .app
+            .get_post_thread(&HookContext::default(), &args.a, options)
+            .await;
+        let (a, b) = self.reply(result, |list| post_list_for_plugin(&list));
+        Ok(api::Z_GetPostThreadReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.CreatePost` (app/plugin_api.go:896); see
+    /// [`App::create_post_from_plugin`]. A shape the REST route would forward is answered as not
+    /// implemented, decided before anything is written. A nil post — which Go dereferences and
+    /// panics on — is taken as the empty one.
+    async fn create_post(
+        &self,
+        args: api::Z_CreatePostArgs,
+    ) -> Result<api::Z_CreatePostReturns, NotImplemented> {
+        let post = args
+            .a
+            .as_deref()
+            .map(post_from_wire_whole)
+            .unwrap_or_default();
+        let result = self
+            .app
+            .create_post_from_plugin(&HookContext::default(), post)
+            .await;
+        let (a, b) = self.reply(self.served("CreatePost", result)?, |p| post_to_wire(&p));
+        Ok(api::Z_CreatePostReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.UpdatePost` (app/plugin_api.go:996): `UpdatePost` with
+    /// `SafeUpdate: false`, answered `ForPlugin`.
+    ///
+    /// A post carrying `mm_blocks_actions` is answered as not implemented: Go validates it with
+    /// `ValidateMmBlocksActions` and then lets the plugin **replace** the registry, and neither
+    /// half is ported. Without the prop the old post's registry is kept, as Go keeps it.
+    async fn update_post(
+        &self,
+        args: api::Z_UpdatePostArgs,
+    ) -> Result<api::Z_UpdatePostReturns, NotImplemented> {
+        let post = args
+            .a
+            .as_deref()
+            .map(post_from_wire_whole)
+            .unwrap_or_default();
+        if post
+            .get_prop(mm_model::post::POST_PROPS_MM_BLOCKS_ACTIONS)
+            .is_some()
+        {
+            return Err(self.not_implemented(
+                "UpdatePost",
+                "ValidateMmBlocksActions and AllowMmBlocksActionsUpdate are not ported",
+            ));
+        }
+        let result = self
+            .app
+            .update_post(&post, &Session::default(), &HookContext::default())
+            .await
+            .map(|(post, _)| post);
+        let (a, b) = self.reply(self.served("UpdatePost", result)?, |p| {
+            post_to_wire(&p.for_plugin())
+        });
+        Ok(api::Z_UpdatePostReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.DeletePost` (app/plugin_api.go:943): deleted **by the plugin's id**,
+    /// which is what `delete_by` records in the post's props.
+    async fn delete_post(
+        &self,
+        args: api::Z_DeletePostArgs,
+    ) -> Result<api::Z_DeletePostReturns, NotImplemented> {
+        let result = self
+            .app
+            .delete_post(&args.a, &self.id, &HookContext::default())
+            .await
+            .map(|_| ());
+        Ok(api::Z_DeletePostReturns {
+            a: self
+                .served("DeletePost", result)?
+                .err()
+                .and_then(|e| self.wire(e)),
+        })
+    }
+
+    /// Port of `PluginAPI.SendEphemeralPost` (app/plugin_api.go:929): one user's
+    /// `ephemeral_message`, and the post back `ForPlugin`. Go's cannot fail; a store error in the
+    /// prepare here is logged and answered with a nil post.
+    async fn send_ephemeral_post(
+        &self,
+        args: api::Z_SendEphemeralPostArgs,
+    ) -> Result<api::Z_SendEphemeralPostReturns, NotImplemented> {
+        let post = args
+            .b
+            .as_deref()
+            .map(post_from_wire_whole)
+            .unwrap_or_default();
+        let result = self
+            .app
+            .send_ephemeral_post(&HookContext::default(), &args.a, post)
+            .await;
+        Ok(api::Z_SendEphemeralPostReturns {
+            a: self.ephemeral_answer("SendEphemeralPost", result)?,
+        })
+    }
+
+    /// Port of `PluginAPI.UpdateEphemeralPost` (app/plugin_api.go:934): one user's
+    /// `post_edited`; see [`App::update_ephemeral_post`].
+    async fn update_ephemeral_post(
+        &self,
+        args: api::Z_UpdateEphemeralPostArgs,
+    ) -> Result<api::Z_UpdateEphemeralPostReturns, NotImplemented> {
+        let post = args
+            .b
+            .as_deref()
+            .map(post_from_wire_whole)
+            .unwrap_or_default();
+        let result = self
+            .app
+            .update_ephemeral_post(&HookContext::default(), &args.a, post)
+            .await;
+        Ok(api::Z_UpdateEphemeralPostReturns {
+            a: self.ephemeral_answer("UpdateEphemeralPost", result)?,
+        })
+    }
+
+    /// Port of `PluginAPI.DeleteEphemeralPost` (app/plugin_api.go:939): user id, then post id.
+    async fn delete_ephemeral_post(
+        &self,
+        args: api::Z_DeleteEphemeralPostArgs,
+    ) -> Result<api::Z_DeleteEphemeralPostReturns, NotImplemented> {
+        self.app.delete_ephemeral_post(&args.a, &args.b).await;
+        Ok(api::Z_DeleteEphemeralPostReturns {})
+    }
+
+    /// Port of `PluginAPI.AddReaction` (app/plugin_api.go:917): `SaveReactionForPost`, whose
+    /// checks are the REST route's minus the handler's permission gate.
+    async fn add_reaction(
+        &self,
+        args: api::Z_AddReactionArgs,
+    ) -> Result<api::Z_AddReactionReturns, NotImplemented> {
+        let reaction = args
+            .a
+            .as_deref()
+            .map(reaction_from_wire)
+            .unwrap_or_default();
+        let answer = match self
+            .app
+            .save_reaction_for_post(&reaction, &HookContext::default())
+            .await
+        {
+            Ok(ReactionWrite::Done(saved)) => api::Z_AddReactionReturns {
+                a: Some(Box::new(reaction_to_wire(&saved))),
+                b: None,
+            },
+            Ok(ReactionWrite::Forward(_)) => {
+                return Err(self.not_implemented("AddReaction", "a burn-on-read post's reaction"));
+            }
+            Err(err) => api::Z_AddReactionReturns {
+                a: None,
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.RemoveReaction` (app/plugin_api.go:921): `DeleteReactionForPost`;
+    /// removing a reaction that is not there succeeds.
+    async fn remove_reaction(
+        &self,
+        args: api::Z_RemoveReactionArgs,
+    ) -> Result<api::Z_RemoveReactionReturns, NotImplemented> {
+        let reaction = args
+            .a
+            .as_deref()
+            .map(reaction_from_wire)
+            .unwrap_or_default();
+        let answer = match self
+            .app
+            .delete_reaction_for_post(&reaction, &HookContext::default())
+            .await
+        {
+            Ok(ReactionWrite::Done(())) => api::Z_RemoveReactionReturns { a: None },
+            Ok(ReactionWrite::Forward(_)) => {
+                return Err(
+                    self.not_implemented("RemoveReaction", "a burn-on-read post's reaction")
+                );
+            }
+            Err(err) => api::Z_RemoveReactionReturns { a: self.wire(err) },
+        };
+        Ok(answer)
+    }
+
+    // -- permissions ------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.HasPermissionTo` (app/plugin_api.go:1250). Only the permission's `Id`
+    /// is read. A nil permission — Go dereferences it and panics — is no permission.
+    async fn has_permission_to(
+        &self,
+        args: api::Z_HasPermissionToArgs,
+    ) -> Result<api::Z_HasPermissionToReturns, NotImplemented> {
+        let a = match args.b.as_deref() {
+            Some(permission) => {
+                self.app
+                    .has_permission_to(&args.a, &permission_from_wire(permission))
+                    .await
+            }
+            None => false,
+        };
+        Ok(api::Z_HasPermissionToReturns { a })
+    }
+
+    /// Port of `PluginAPI.HasPermissionToTeam` (app/plugin_api.go:1254).
+    async fn has_permission_to_team(
+        &self,
+        args: api::Z_HasPermissionToTeamArgs,
+    ) -> Result<api::Z_HasPermissionToTeamReturns, NotImplemented> {
+        let a = match args.c.as_deref() {
+            Some(permission) => {
+                self.app
+                    .has_permission_to_team(&args.a, &args.b, &permission_from_wire(permission))
+                    .await
+            }
+            None => false,
+        };
+        Ok(api::Z_HasPermissionToTeamReturns { a })
+    }
+
+    /// Port of `PluginAPI.HasPermissionToChannel` (app/plugin_api.go:1258): the first of the
+    /// app function's two answers; the second (whether the channel was found) is dropped.
+    async fn has_permission_to_channel(
+        &self,
+        args: api::Z_HasPermissionToChannelArgs,
+    ) -> Result<api::Z_HasPermissionToChannelReturns, NotImplemented> {
+        let a = match args.c.as_deref() {
+            Some(permission) => {
+                self.app
+                    .has_permission_to_channel(&args.a, &args.b, &permission_from_wire(permission))
+                    .await
+                    .0
+            }
+            None => false,
+        };
+        Ok(api::Z_HasPermissionToChannelReturns { a })
+    }
+
+    // -- websocket --------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.PublishWebSocketEvent` (app/plugin_api.go:1240): the event is
+    /// `custom_<plugin id>_<event>`, the broadcast the plugin's **whole** — so its user, channel,
+    /// team, connection and omissions decide who receives it — and the payload the data.
+    ///
+    /// An empty payload arrives as gob's nil map, which Go's `SetData` stores and marshals as
+    /// `"data": null`; so does this.
+    async fn publish_web_socket_event(
+        &self,
+        args: api::Z_PublishWebSocketEventArgs,
+    ) -> Result<api::Z_PublishWebSocketEventReturns, NotImplemented> {
+        let name = custom_event_name(&self.id, &args.a);
+        let mut event = WebSocketEvent::new(name, "", "", "", None, "")
+            .set_broadcast(broadcast_from_wire(args.c.as_deref()));
+        event.data = (!args.b.is_empty()).then(|| payload_from_wire(&args.b));
+        self.app.publish(event).await;
+        Ok(api::Z_PublishWebSocketEventReturns {})
+    }
+
+    // -- bots -------------------------------------------------------------------------------
+
+    /// Port of `PluginAPI.CreateBot` (app/plugin_api.go:1287). An empty owner becomes the
+    /// plugin's id, and an owner that is itself a bot is refused (400
+    /// `plugin_api.bot_cant_create_bot`) before anything is written.
+    ///
+    /// A bot owned by a **human** is answered as not implemented: Go then opens a DM with the
+    /// owner and posts into it as the bot, which this server does not reproduce ([D-281]). The
+    /// owner is read here before any write, so that refusal leaves nothing behind.
+    async fn create_bot(
+        &self,
+        args: api::Z_CreateBotArgs,
+    ) -> Result<api::Z_CreateBotReturns, NotImplemented> {
+        let mut bot = args.a.as_deref().map(bot_from_wire).unwrap_or_default();
+        if bot.owner_id.is_empty() {
+            bot.owner_id.clone_from(&self.id);
+        }
+        if let Ok(owner) = self.app.get_user(&bot.owner_id).await {
+            if owner.is_bot {
+                return Ok(api::Z_CreateBotReturns {
+                    a: None,
+                    b: self.wire(AppError::boxed(
+                        "CreateBot",
+                        "plugin_api.bot_cant_create_bot",
+                        None,
+                        String::new(),
+                        400,
+                    )),
+                });
+            }
+            return Err(self.not_implemented(
+                "CreateBot",
+                "a bot owned by a user gets a DM from its bot (D-281)",
+            ));
+        }
+        let (a, b) = self.reply(self.app.create_bot(&bot).await, |b| bot_to_wire(&b));
+        Ok(api::Z_CreateBotReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.PatchBot` (app/plugin_api.go:1303). A nil patch patches nothing.
+    async fn patch_bot(
+        &self,
+        args: api::Z_PatchBotArgs,
+    ) -> Result<api::Z_PatchBotReturns, NotImplemented> {
+        let patch = args
+            .b
+            .as_deref()
+            .map(bot_patch_from_wire)
+            .unwrap_or_default();
+        let (a, b) = self.reply(self.app.patch_bot(&args.a, &patch).await, |b| {
+            bot_to_wire(&b)
+        });
+        Ok(api::Z_PatchBotReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetBot` (app/plugin_api.go:1307).
+    async fn get_bot(
+        &self,
+        args: api::Z_GetBotArgs,
+    ) -> Result<api::Z_GetBotReturns, NotImplemented> {
+        let (a, b) = self.reply(self.app.get_bot(&args.a, args.b).await, |b| bot_to_wire(&b));
+        Ok(api::Z_GetBotReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.GetBots` (app/plugin_api.go:1311). Nil options are the zero options.
+    async fn get_bots(
+        &self,
+        args: api::Z_GetBotsArgs,
+    ) -> Result<api::Z_GetBotsReturns, NotImplemented> {
+        let options = args
+            .a
+            .as_deref()
+            .map(bot_get_options_from_wire)
+            .unwrap_or_default();
+        let answer = match self.app.get_bots(&options).await {
+            Ok(bots) => api::Z_GetBotsReturns {
+                a: bots.0.iter().map(bot_to_wire).collect(),
+                b: None,
+            },
+            Err(err) => api::Z_GetBotsReturns {
+                a: Vec::new(),
+                b: self.wire(err),
+            },
+        };
+        Ok(answer)
+    }
+
+    /// Port of `PluginAPI.UpdateBotActive` (app/plugin_api.go:1317): a soft delete of both rows,
+    /// or its undoing, with the deactivation hook.
+    async fn update_bot_active(
+        &self,
+        args: api::Z_UpdateBotActiveArgs,
+    ) -> Result<api::Z_UpdateBotActiveReturns, NotImplemented> {
+        let result = self
+            .app
+            .update_bot_active(&HookContext::default(), &args.a, args.b)
+            .await;
+        let (a, b) = self.reply(result, |b| bot_to_wire(&b));
+        Ok(api::Z_UpdateBotActiveReturns { a, b })
+    }
+
+    /// Port of `PluginAPI.PermanentDeleteBot` (app/plugin_api.go:1321).
+    async fn permanent_delete_bot(
+        &self,
+        args: api::Z_PermanentDeleteBotArgs,
+    ) -> Result<api::Z_PermanentDeleteBotReturns, NotImplemented> {
+        let result = self.app.permanent_delete_bot(&args.a).await;
+        Ok(api::Z_PermanentDeleteBotReturns {
+            a: result.err().and_then(|e| self.wire(e)),
+        })
+    }
+
+    /// Port of `PluginAPI.EnsureBotUser` (app/plugin_api.go:1325): the owner is **always** the
+    /// plugin's id, whatever the plugin set; see [`App::ensure_bot`]. The error is an `error`,
+    /// not an `*AppError`, so it crosses as `encodableError` makes it.
+    async fn ensure_bot_user(
+        &self,
+        args: api::Z_EnsureBotUserArgs,
+    ) -> Result<api::Z_EnsureBotUserReturns, NotImplemented> {
+        let bot = args.a.as_deref().map(|wire| {
+            let mut bot = bot_from_wire(wire);
+            bot.owner_id.clone_from(&self.id);
+            bot
+        });
+        let answer = match self.app.ensure_bot(&self.id, bot.as_ref()).await {
+            Ok(id) => api::Z_EnsureBotUserReturns { a: id, b: None },
+            Err(err) => api::Z_EnsureBotUserReturns {
+                a: String::new(),
+                b: mm_plugin::error::encodable_error(Some(&self.ensure_bot_error(err))),
+            },
+        };
+        Ok(answer)
+    }
+
     /// Port of `PluginAPI.LogDebug` (app/plugin_api.go:1271).
     async fn log_debug(&self, args: Z_LogDebugArgs) -> Result<Z_LogDebugReturns, NotImplemented> {
         self.log(tracing::Level::DEBUG, &args.a, &args.b);
@@ -530,6 +1293,94 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
 }
 
 impl AppPluginApi {
+    /// A read's two returns: the value converted, or the error as it crosses.
+    fn reply<T, W>(
+        &self,
+        result: Result<T, Box<AppError>>,
+        convert: impl FnOnce(T) -> W,
+    ) -> (Option<Box<W>>, Option<Box<WireAppError>>) {
+        match result {
+            Ok(value) => (Some(Box::new(convert(value))), None),
+            Err(err) => (None, self.wire(err)),
+        }
+    }
+
+    /// Go's `API <Name> called but not implemented.` for a call whose shape this server does not
+    /// reproduce — the same answer the REST route turns into a forward. Every such refusal is
+    /// decided before anything is written.
+    fn not_implemented(&self, method: &'static str, why: &str) -> NotImplemented {
+        tracing::warn!(plugin_id = %self.id, method, why, "a plugin API call this server does not reproduce");
+        NotImplemented
+    }
+
+    /// A write's outcome with its unreproducible shape answered as not implemented.
+    fn served<T>(
+        &self,
+        method: &'static str,
+        result: Result<T, PrepareError>,
+    ) -> Result<Result<T, Box<AppError>>, NotImplemented> {
+        match result {
+            Ok(value) => Ok(Ok(value)),
+            Err(PrepareError::App(err)) => Ok(Err(err)),
+            Err(PrepareError::Unreproducible(why)) => Err(self.not_implemented(method, why)),
+        }
+    }
+
+    /// The post `SendEphemeralPost` and `UpdateEphemeralPost` answer with, `ForPlugin`. Go's
+    /// cannot fail, so an error here is logged and answered as a nil post.
+    fn ephemeral_answer(
+        &self,
+        method: &'static str,
+        result: Result<Post, PrepareError>,
+    ) -> Result<Option<Box<mm_plugin::wire::model::Post>>, NotImplemented> {
+        Ok(match self.served(method, result)? {
+            Ok(post) => Some(Box::new(post_to_wire(&post.for_plugin()))),
+            Err(err) => {
+                tracing::error!(plugin_id = %self.id, method, error = %err, "the ephemeral post could not be prepared");
+                None
+            }
+        })
+    }
+
+    /// Port of `PluginAPI.resolveChannel` (app/plugin_api.go:536): `GetChannel`, and on its 404
+    /// only, the same id as a space channel — which the generic read excludes. A space lookup
+    /// that fails any other way is that failure; a second 404 is the first one.
+    async fn resolve_channel(&self, channel_id: &str) -> Result<Channel, Box<AppError>> {
+        let err = match self.app.get_channel(channel_id).await {
+            Ok(channel) => return Ok(channel),
+            Err(err) => err,
+        };
+        if err.status_code != 404 {
+            return Err(err);
+        }
+        match self
+            .app
+            .get_channel_of_type(channel_id, mm_model::channel::CHANNEL_TYPE_SPACE)
+            .await
+        {
+            Ok(space) => Ok(space),
+            Err(space_err) if space_err.status_code != 404 => Err(space_err),
+            Err(_) => Err(err),
+        }
+    }
+
+    /// An `EnsureBot` failure as the plugin receives it. An app error inside `fmt.Errorf` is
+    /// rendered with its **translated** message, as Go's `Error()` renders it — which is why the
+    /// text is made here, where the server locale is known.
+    fn ensure_bot_error(&self, err: EnsureBotError) -> PluginError {
+        match err {
+            EnsureBotError::Message(text) => PluginError::Message(text),
+            EnsureBotError::App(err) => PluginError::App(wire_app_error(
+                err,
+                &self.app.config().default_server_locale,
+            )),
+            EnsureBotError::Wrapped(prefix, mut err) => {
+                translate(&mut err, &self.app.config().default_server_locale);
+                PluginError::Message(format!("{prefix}: {err}"))
+            }
+        }
+    }
+
     /// `GetConfig` or `GetUnsanitizedConfig` as the dynamic `Z_<Method>Returns` named `name`.
     /// Go's answer cannot fail; a document this server cannot read, or cannot put into gob's
     /// shape, is logged and answered with a nil config.
@@ -735,5 +1586,73 @@ mod tests {
         assert_eq!(wire.status_code, 500);
         assert_eq!(wire.r#where, "ListPluginKeys");
         assert!(!wire.skip_translation);
+    }
+
+    fn unreachable_api() -> AppPluginApi {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        let app = crate::App::new(mm_store::SqlStore::from_pool(pool));
+        let manifest = Manifest {
+            id: "com.example.Core".into(),
+            ..Manifest::default()
+        };
+        AppPluginApi::new(app, &manifest)
+    }
+
+    /// A nil permission, which Go would dereference, is no permission — and no store is asked.
+    #[tokio::test]
+    async fn a_nil_permission_is_denied_without_a_lookup() {
+        use mm_plugin::rpc::PluginApi as _;
+        let api = unreachable_api();
+        let to = api
+            .has_permission_to(api::Z_HasPermissionToArgs {
+                a: "u".into(),
+                b: None,
+            })
+            .await
+            .expect("served");
+        assert!(!to.a);
+        let team = api
+            .has_permission_to_team(api::Z_HasPermissionToTeamArgs {
+                a: "u".into(),
+                b: "t".into(),
+                c: None,
+            })
+            .await
+            .expect("served");
+        assert!(!team.a);
+        let channel = api
+            .has_permission_to_channel(api::Z_HasPermissionToChannelArgs {
+                a: "u".into(),
+                b: "c".into(),
+                c: None,
+            })
+            .await
+            .expect("served");
+        assert!(!channel.a);
+    }
+
+    /// An `EnsureBot` failure crosses as `encodableError` makes it: a message as an
+    /// `ErrorString`, an app error whole, and a wrapped one as its prefix and `Error()` text.
+    #[tokio::test]
+    async fn an_ensure_bot_error_crosses_as_go_encodes_it() {
+        let api = unreachable_api();
+        assert_eq!(
+            api.ensure_bot_error(EnsureBotError::Message("m".into())),
+            PluginError::Message("m".into())
+        );
+        let app = || AppError::boxed("W", "an.id", None, String::new(), 500);
+        match api.ensure_bot_error(EnsureBotError::App(app())) {
+            PluginError::App(wire) => {
+                assert_eq!((wire.id.as_str(), wire.status_code), ("an.id", 500))
+            }
+            other => panic!("an app error crosses whole: {other:?}"),
+        }
+        assert_eq!(
+            api.ensure_bot_error(EnsureBotError::Wrapped("failed to patch bot", app())),
+            PluginError::Message("failed to patch bot: W: an.id".into())
+        );
     }
 }

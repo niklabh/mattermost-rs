@@ -69,11 +69,13 @@ use crate::notification::PermalinkFate;
 use crate::post::{PrepareError, PreparePostForClientOpts};
 
 /// Port of `model.CreatePostFlags` (post.go:414), restricted to the fields a served entry point
-/// sets: `POST /api/v4/posts` sets the first two, `App::send_test_message` the third.
+/// sets: `POST /api/v4/posts` sets the first two, `App::send_test_message` the third, and the
+/// plugin API's `CreatePost` ([`App::create_post_from_plugin`]) the fourth.
 ///
 /// `TriggerWebhooks` is not modelled: `CreatePostAsUserWithFlags` assigns it `true`
-/// unconditionally (app/post.go:69), so on this route it is a constant. The three remaining fields
-/// belong to the webhook, plugin and scheduled-post entry points, none of which reach here.
+/// unconditionally (app/post.go:69) and the plugin API passes `true`, so on every entry point that
+/// reaches here it is a constant. `FromIncomingWebhook` and `AllowMmBlocksActions` belong to the
+/// webhook and scheduled-post entry points, neither of which reaches here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CreatePostFlags {
     pub set_online: bool,
@@ -82,6 +84,10 @@ pub struct CreatePostFlags {
     /// a string, although `Post.IsValid`'s props check wants a bool; the store save does not run
     /// that check, and the Go row reads `"force_notification": "<26 chars>"` (measured).
     pub force_notification: bool,
+    /// `FromPlugin`, set only by `PluginAPI.CreatePost`: it adds `from_plugin: "true"` to the
+    /// post and makes the author an integration for `isIntegrationPostAuthor`, so a plugin may
+    /// post silently as a human user.
+    pub from_plugin: bool,
 }
 
 /// How long a pending post id stays in the deduplication cache.
@@ -639,8 +645,15 @@ impl App {
             );
         }
 
-        // Go's order: `from_bot`, `from_webhook`, `from_plugin` (neither entry point), then this,
-        // then `silent_notification`. `HasForceNotification` accepts any non-empty string.
+        // Go's order: `from_bot`, `from_webhook` (no entry point here), `from_plugin`, then
+        // `force_notification`, then `silent_notification`. `HasForceNotification` accepts any
+        // non-empty string.
+        if flags.from_plugin {
+            post.add_prop(
+                POST_PROPS_FROM_PLUGIN,
+                serde_json::Value::String("true".to_owned()),
+            );
+        }
         if flags.force_notification {
             post.add_prop(
                 POST_PROPS_FORCE_NOTIFICATION,
@@ -650,8 +663,8 @@ impl App {
 
         if flags.silent_notification {
             // `isIntegrationPostAuthor` — deliberately narrower than `Session.IsIntegration()`:
-            // a personal access token is *not* an integration here.
-            if !(user.is_bot || session.is_oauth) {
+            // a personal access token is *not* an integration here; a plugin is.
+            if !(user.is_bot || session.is_oauth || flags.from_plugin) {
                 tracing::warn!(
                     user_id = %user.id,
                     channel_id = %channel.id,
@@ -1047,8 +1060,55 @@ impl App {
             post.set_props(Some(mm_model::utils::StringInterface::new()));
         }
 
-        // `GenerateActionIds`, then the prepare, then `AddPostActionCookies` — all three read
-        // `props.attachments`, which `prepare_post_for_client` refuses.
+        self.prepare_and_publish_ephemeral(ctx, user_id, post, WEBSOCKET_EVENT_EPHEMERAL_MESSAGE)
+            .await
+    }
+
+    /// Port of `app.App.UpdateEphemeralPost` (app/post.go:799): [`App::send_ephemeral_post`]'s
+    /// twin, reached only through the plugin API.
+    ///
+    /// It keeps the post's id and `CreateAt` as given — nothing is filled in but `UpdateAt`, which
+    /// is always now — and publishes `post_edited`, not `ephemeral_message`, to the one user. Like
+    /// its twin it writes nothing: an ephemeral post has no row to update.
+    #[tracing::instrument(skip_all, fields(channel_id = %post.channel_id))]
+    pub async fn update_ephemeral_post(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        user_id: &str,
+        mut post: Post,
+    ) -> Result<Post, PrepareError> {
+        post.post_type = POST_TYPE_EPHEMERAL.to_owned();
+        post.update_at = get_millis();
+        if post.get_props().is_none() {
+            post.set_props(Some(mm_model::utils::StringInterface::new()));
+        }
+
+        self.prepare_and_publish_ephemeral(
+            ctx,
+            user_id,
+            post,
+            mm_model::websocket_message::WEBSOCKET_EVENT_POST_EDITED,
+        )
+        .await
+    }
+
+    /// The shared tail of `SendEphemeralPost` and `UpdateEphemeralPost`: `GenerateActionIds`, the
+    /// prepare with `IsNewPost` and `IncludePriority`, `AddPostActionCookies`, the sanitise for
+    /// the recipient, and one event to that user carrying the post as a JSON **string**.
+    ///
+    /// `GenerateActionIds` and `AddPostActionCookies` read `props.attachments`, which
+    /// `prepare_post_for_client` refuses, so both are no-ops on every shape served here.
+    ///
+    /// Go's sanitise failure is logged and the metadata dropped; here it is an error, because
+    /// `sanitize_post_metadata_for_user` fails only on a store error Go would also have logged
+    /// with a post it could not prepare.
+    async fn prepare_and_publish_ephemeral(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        user_id: &str,
+        post: Post,
+        event: &str,
+    ) -> Result<Post, PrepareError> {
         let post = self
             .prepare_post_for_client_with_embeds_and_images(
                 ctx,
@@ -1064,14 +1124,9 @@ impl App {
         let (sanitized, _is_member_for_previews) =
             self.sanitize_post_metadata_for_user(post, user_id).await?;
 
-        let mut message = WebSocketEvent::new(
-            WEBSOCKET_EVENT_EPHEMERAL_MESSAGE,
-            "",
-            &sanitized.channel_id,
-            user_id,
-            None,
-            "",
-        );
+        // `NewWebSocketEvent(event, "", post.ChannelId, userID, nil, "")`: the hub targets the
+        // user, so the channel id is carried and not used.
+        let mut message = WebSocketEvent::new(event, "", &sanitized.channel_id, user_id, None, "");
         match sanitized.to_json() {
             Ok(json) => message.add("post", serde_json::Value::String(json)),
             Err(err) => {
@@ -1083,6 +1138,83 @@ impl App {
         self.publish(message).await;
 
         Ok(sanitized)
+    }
+
+    /// Port of `app.App.DeleteEphemeralPost` (app/post.go:833): no lookup and no row — a
+    /// `post_deleted` event to the one user, carrying a post built from nothing but the id, the
+    /// user, the ephemeral type and two identical timestamps. It carries **no channel**, so the
+    /// event's broadcast has none either, and it cannot fail.
+    #[tracing::instrument(skip(self))]
+    pub async fn delete_ephemeral_post(&self, user_id: &str, post_id: &str) {
+        let now = get_millis();
+        let post = Post {
+            id: post_id.to_owned(),
+            user_id: user_id.to_owned(),
+            post_type: POST_TYPE_EPHEMERAL.to_owned(),
+            delete_at: now,
+            update_at: now,
+            ..Post::default()
+        };
+        let mut message = WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_POST_DELETED,
+            "",
+            "",
+            user_id,
+            None,
+            "",
+        );
+        match post.to_json() {
+            Ok(json) => message.add("post", serde_json::Value::String(json)),
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to encode post to JSON");
+                message.add("post", serde_json::Value::String(String::new()));
+            }
+        }
+        self.publish(message).await;
+    }
+
+    /// Port of `PluginAPI.CreatePost` (app/plugin_api.go:896): the one post write a plugin makes.
+    ///
+    /// # It is not the REST path
+    ///
+    /// No `CreatePostAsUser`: the channel is read through [`App::get_channel`], so a missing one
+    /// is **404 `app.channel.get.existing.app_error`** rather than the REST handler's 400
+    /// `post.channel_id`; `CreatePostAsUser`'s archived-channel and restricted-DM checks do not
+    /// run, and neither does its `MarkChannelsAsViewed` afterwards. The flags are `SetOnline`, `FromPlugin` and whatever
+    /// `silent_notification` the plugin set — read **before** `SanitizeProps` strips it.
+    ///
+    /// # Its session is the empty one
+    ///
+    /// The plugin API's request context is `request.EmptyContext` (channels.go:262), so the
+    /// session is zero: not OAuth, no user, and `SanitizePostMetadataForUser` runs for the empty
+    /// user id. The hooks this post fires — `MessageWillBePosted`, `MessageHasBeenPosted`, on the
+    /// **calling** plugin too — are handed a `plugin.Context` of six empty strings.
+    ///
+    /// The answer is `ForPlugin`: no metadata.
+    #[tracing::instrument(skip_all, fields(channel_id = %post.channel_id))]
+    pub async fn create_post_from_plugin(
+        &self,
+        ctx: &crate::plugin_hooks::HookContext,
+        mut post: Post,
+    ) -> Result<Post, PrepareError> {
+        let channel = self.get_channel(&post.channel_id).await?;
+        let silent = post.has_silent_notification();
+        post.sanitize_props();
+        let (saved, _author_is_bot) = self
+            .create_post(
+                post,
+                &channel,
+                &Session::default(),
+                CreatePostFlags {
+                    set_online: true,
+                    silent_notification: silent,
+                    force_notification: false,
+                    from_plugin: true,
+                },
+                ctx,
+            )
+            .await?;
+        Ok(saved.for_plugin())
     }
 
     /// Port of `app.App.attachFilesToPost` (app/post.go:529).

@@ -127,7 +127,9 @@ fn props_to_wire(props: Option<&mm_model::utils::StringInterface>) -> wire_model
 /// The reverse. Go's numbers come back as `float64`, and `go_normalize_json_numbers` writes an
 /// integral one the way Go's `json.Marshal` does — without it a prop that went out as `5` would
 /// be stored as `5.0`.
-fn props_from_wire(props: &wire_model::StringInterface) -> mm_model::utils::StringInterface {
+pub(crate) fn props_from_wire(
+    props: &wire_model::StringInterface,
+) -> mm_model::utils::StringInterface {
     let mut out = mm_model::utils::StringInterface::new();
     for (key, value) in props {
         let mut json = match value {
@@ -145,7 +147,9 @@ fn props_from_wire(props: &wire_model::StringInterface) -> mm_model::utils::Stri
 /// `mm-model` models Go's nil map as `None`, and gob omits an empty map as readily as a nil one,
 /// so the two are indistinguishable once they cross — which is why [`channel_member_from_wire`]
 /// and [`team_member_from_wire`] take the caller's value back when what returned is empty.
-fn string_map_to_wire(map: Option<&mm_model::utils::StringMap>) -> wire_model::StringMap {
+pub(crate) fn string_map_to_wire(
+    map: Option<&mm_model::utils::StringMap>,
+) -> wire_model::StringMap {
     map.into_iter()
         .flatten()
         .map(|(k, v)| (k.clone(), v.clone()))

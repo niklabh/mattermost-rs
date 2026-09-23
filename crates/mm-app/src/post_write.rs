@@ -1098,9 +1098,32 @@ impl App {
 
         self.message_has_been_posted(ctx, &saved);
 
+        // `PreparePostForClient(rctx, rpost, {IsEditPost: true})`, as for any post: a system
+        // message's `posted` event and answer carry `metadata` — `{}` when there is nothing to
+        // put in it — which a post straight from the store does not. Go's prepare cannot fail; a
+        // shape this server does not reproduce keeps the store's post with empty metadata, which
+        // is what Go's prepare leaves on every system message that quotes no emoji or link.
+        let mut saved = match self
+            .prepare_post_for_client(
+                &saved,
+                PreparePostForClientOpts {
+                    is_edit_post: true,
+                    ..PreparePostForClientOpts::default()
+                },
+            )
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                tracing::warn!(error = %err, post_type = %saved.post_type, "the system post could not be prepared; sent with empty metadata");
+                let mut bare = saved;
+                bare.metadata = Some(mm_model::post_metadata::PostMetadata::default());
+                bare
+            }
+        };
+
         // `applyPostWillBeConsumedHook(rctx, &rpost)`, and the `posted` event carries what the
         // plugins answered, as it does for a user's post.
-        let mut saved = saved;
         self.apply_post_will_be_consumed_hook(ctx, &mut saved).await;
         self.publish_posted_event(ctx, &saved, channel, &user).await;
 

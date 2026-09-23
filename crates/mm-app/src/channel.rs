@@ -863,10 +863,9 @@ impl App {
     ///   genuine database failure resolving the team answers 404 here where every sibling
     ///   answers 500. Reproduced by delegating to [`crate::App::get_team_by_name`], which
     ///   already carries that shape.
-    /// - **`where` differs from Go's** — this delegates, so the team errors say `GetTeamByName`
-    ///   where Go says `GetChannelByNameForTeamName`. `where` is not a field of the JSON error
-    ///   body (`id`, `message`, `detailed_error`, `request_id`, `status_code`), so nothing on
-    ///   the wire moves; duplicating the function to change an invisible string would not.
+    /// - **`where` is Go's on every branch**, `GetChannelByNameForTeamName`, although both halves
+    ///   delegate. It is not in the JSON error body, but gob carries it to a plugin
+    ///   (`PluginAPI.GetChannelByNameForTeamName`), where `parity::plugin_hooks` compares it.
     ///
     /// The team is used only for its id. Its own permissions are checked by the handler against
     /// `channel.TeamId`, which for a DM or GM is the empty string and not this team's id.
@@ -877,9 +876,14 @@ impl App {
         team_name: &str,
         include_deleted: bool,
     ) -> AppResult<Channel> {
-        let team = self.get_team_by_name(team_name).await?;
+        let rename = |mut err: Box<AppError>| {
+            "GetChannelByNameForTeamName".clone_into(&mut err.where_);
+            err
+        };
+        let team = self.get_team_by_name(team_name).await.map_err(rename)?;
         self.get_channel_by_name(channel_name, &team.id, include_deleted)
             .await
+            .map_err(rename)
     }
 
     /// Port of `app.App.GetChannelsForTeamForUser` (channel.go:2409) through the

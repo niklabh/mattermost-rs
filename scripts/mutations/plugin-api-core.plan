@@ -1,0 +1,41 @@
+# Mutation plan for the plugin API's user, team, channel, post, permission, bot and websocket
+# methods (docs/PLUGIN_PLAN.md, Phase 6).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-core.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_core_methods_answer_as_go_answers`: 88 API
+# calls from inside MessageWillBePosted on a Go host and a Rust host, every answer, every hook the
+# script's writes fire on the recorder, every frame the own user's socket receives, and the bot
+# rows left behind. One line is a unit mutation (`plugin_api_wire`), because the recorder's id is
+# already lower case. The last two lines are the no-op controls and must SURVIVE.
+
+by-name-args-swapped	crates/mm-app/src/plugin_api.rs	self.app.get_channel_by_name(&args.b, &args.a, args.c)	self.app.get_channel_by_name(&args.a, &args.b, args.c)	api	plugin_hooks::the_plugin_api_core
+team-member-args-swapped	crates/mm-app/src/plugin_api.rs	self.app.get_team_member(&args.a, &args.b)	self.app.get_team_member(&args.b, &args.a)	api	plugin_hooks::the_plugin_api_core
+usernames-unsanitized	crates/mm-app/src/plugin_api.rs	self.app.sanitize_profile(&mut user, true);	let _ = &mut user;	api	plugin_hooks::the_plugin_api_core
+by-team-name-where-delegated	crates/mm-app/src/channel.rs	"GetChannelByNameForTeamName".clone_into(&mut err.where_);	"GetTeamByName".clone_into(&mut err.where_);	api	plugin_hooks::the_plugin_api_core
+session-miss-404	crates/mm-app/src/auth.rs	"GetSessionById",\n                "app.session.get.app_error",\n                None,\n                String::new(),\n                400,	"GetSessionById",\n                "app.session.get.app_error",\n                None,\n                String::new(),\n                404,	api	plugin_hooks::the_plugin_api_core
+team-permission-args-swapped	crates/mm-app/src/plugin_api.rs	.has_permission_to_team(&args.a, &args.b, &permission_from_wire(permission))	.has_permission_to_team(&args.b, &args.a, &permission_from_wire(permission))	api	plugin_hooks::the_plugin_api_core
+channel-permission-found-flag	crates/mm-app/src/plugin_api.rs	.await\n                    .0\n	.await\n                    .1\n	api	plugin_hooks::the_plugin_api_core
+plugin-post-channel-as-rest	crates/mm-app/src/post_create.rs	let channel = self.get_channel(&post.channel_id).await?;	let channel = self.store().channel().get(&post.channel_id).await.map_err(|_| invalid_param("CreatePostAsUser", "post.channel_id"))?;	api	plugin_hooks::the_plugin_api_core
+from-plugin-prop-dropped	crates/mm-app/src/post_create.rs	if flags.from_plugin {	if false && flags.from_plugin {	api	plugin_hooks::the_plugin_api_core
+silent-plugin-refused	crates/mm-app/src/post_create.rs	if !(user.is_bot || session.is_oauth || flags.from_plugin) {	if !(user.is_bot || session.is_oauth) {	api	plugin_hooks::the_plugin_api_core
+ephemeral-to-author	crates/mm-app/src/post_create.rs	WebSocketEvent::new(event, "", &sanitized.channel_id, user_id, None, "")	WebSocketEvent::new(event, "", &sanitized.channel_id, &sanitized.user_id, None, "")	api	plugin_hooks::the_plugin_api_core
+ephemeral-update-event	crates/mm-app/src/post_create.rs	mm_model::websocket_message::WEBSOCKET_EVENT_POST_EDITED,\n        )\n        .await	WEBSOCKET_EVENT_EPHEMERAL_MESSAGE,\n        )\n        .await	api	plugin_hooks::the_plugin_api_core
+ephemeral-delete-to-everyone	crates/mm-app/src/post_create.rs	WEBSOCKET_EVENT_POST_DELETED,\n            "",\n            "",\n            user_id,	WEBSOCKET_EVENT_POST_DELETED,\n            "",\n            "",\n            "",	api	plugin_hooks::the_plugin_api_core
+deleted-by-nobody	crates/mm-app/src/plugin_api.rs	.delete_post(&args.a, &self.id, &HookContext::default())	.delete_post(&args.a, "", &HookContext::default())	api	plugin_hooks::the_plugin_api_core
+add-member-with-requestor	crates/mm-app/src/plugin_api.rs	&ChannelMemberOpts::default(),	&ChannelMemberOpts { user_requestor_id: args.b.clone(), ..ChannelMemberOpts::default() },	api	plugin_hooks::the_plugin_api_core
+create-channel-adds-creator	crates/mm-app/src/plugin_api.rs	.create_channel(&HookContext::default(), &mut channel, false)	.create_channel(&HookContext::default(), &mut channel, true)	api	plugin_hooks::the_plugin_api_core
+event-name-unprefixed	crates/mm-app/src/plugin_api.rs	let name = custom_event_name(&self.id, &args.a);	let name = args.a.clone();	api	plugin_hooks::the_plugin_api_core
+omit-users-dropped	crates/mm-app/src/plugin_api_wire.rs	omit_users: (!wire.omit_users.is_empty()).then(|| {	omit_users: (wire.omit_users.is_empty()).then(|| {	api	plugin_hooks::the_plugin_api_core
+empty-payload-as-map	crates/mm-app/src/plugin_api.rs	event.data = (!args.b.is_empty()).then(|| payload_from_wire(&args.b));	event.data = Some(payload_from_wire(&args.b));	api	plugin_hooks::the_plugin_api_core
+bot-owner-not-defaulted	crates/mm-app/src/plugin_api.rs	if bot.owner_id.is_empty() {\n            bot.owner_id.clone_from(&self.id);	if bot.owner_id.is_empty() {\n            bot.owner_id.clear();	api	plugin_hooks::the_plugin_api_core
+bot-may-own-bot	crates/mm-app/src/plugin_api.rs	if owner.is_bot {	if !owner.is_bot {	api	plugin_hooks::the_plugin_api_core
+bot-active-inverted	crates/mm-app/src/plugin_api.rs	.update_bot_active(&HookContext::default(), &args.a, args.b)	.update_bot_active(&HookContext::default(), &args.a, !args.b)	api	plugin_hooks::the_plugin_api_core
+ensure-owner-kept	crates/mm-app/src/plugin_api.rs	let mut bot = bot_from_wire(wire);\n            bot.owner_id.clone_from(&self.id);	let bot = bot_from_wire(wire);	api	plugin_hooks::the_plugin_api_core
+ensure-ignores-kv	crates/mm-app/src/bot.rs	if let Some(bytes) = stored {	if let Some(bytes) = stored.filter(|_| false) {	api	plugin_hooks::the_plugin_api_core
+ensure-adopts-humans	crates/mm-app/src/bot.rs	            if user.is_bot {\n                self.set_plugin_key	            if user.is_bot || !user.is_bot {\n                self.set_plugin_key	api	plugin_hooks::the_plugin_api_core
+bot-user-row-kept	crates/mm-app/src/bot.rs	if let Err(err) = self.store().user().permanent_delete(bot_user_id).await {	if let Err(err) = Ok::<(), mm_store::StoreError>(()) {	api	plugin_hooks::the_plugin_api_core
+system-post-unprepared	crates/mm-app/src/post_write.rs	            Ok(prepared) => prepared,\n            Err(err) => {\n                tracing::warn!(error = %err, post_type	            Ok(prepared) => Post { metadata: None, ..prepared },\n            Err(err) => {\n                tracing::warn!(error = %err, post_type	api	plugin_hooks::the_plugin_api_core
+event-name-lowercased	crates/mm-app/src/plugin_api_wire.rs	format!("custom_{plugin_id}_{event}")	format!("custom_{}_{event}", plugin_id.to_lowercase())	unit	plugin_api_wire
+control-api-reply	crates/mm-app/src/plugin_api.rs	Ok(value) => (Some(Box::new(convert(value))), None),	Ok(value) => (Some(Box::new(convert(value))), Option::None),	api	plugin_hooks::the_plugin_api_core
+control-api-rename	crates/mm-app/src/plugin_api.rs	let name = custom_event_name(&self.id, &args.a);\n        let mut event = WebSocketEvent::new(name, 	let event_name = custom_event_name(&self.id, &args.a);\n        let mut event = WebSocketEvent::new(event_name, 	api	plugin_hooks::the_plugin_api_core
