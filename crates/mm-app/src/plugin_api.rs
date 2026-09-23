@@ -50,6 +50,13 @@
 //! `SetFileSearchableContent`, `OpenInteractiveDialog` and `SendMail`; and `PluginHTTP`, one
 //! plugin's request to another's `ServeHTTP` (`plugin_api/http.rs`).
 //!
+//! And the session, access-token, auth-data, OAuth-app, role and group methods
+//! (`plugin_api/auth.rs`, which says which are behind `checkLDAPLicense` and where `Where` is not
+//! the app function's): `CreateSession`, `ExtendSessionExpiry`, `RevokeSession`,
+//! `CreateUserAccessToken`, `RevokeUserAccessToken`, `UpdateUserAuth`, the four OAuth-app methods,
+//! `RolesGrantPermission`, and the twenty-one group methods from `GetGroup` to
+//! `DeleteGroupConstrainedMemberships`.
+//!
 //! And the slash-command seven (`crate::plugin_commands`): `RegisterCommand`,
 //! `UnregisterCommand`, `ListPluginCommands`, `ListBuiltInCommands`, `ListCustomCommands`,
 //! `ListCommands` and `ExecuteSlashCommand`.
@@ -147,6 +154,7 @@ use crate::plugin_hooks::{
 use crate::post::PrepareError;
 use crate::reaction::ReactionWrite;
 
+mod auth;
 mod channels;
 mod files;
 mod http;
@@ -2122,6 +2130,264 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
             },
         };
         Ok(answer)
+    }
+
+    // -- sessions, tokens, auth data, OAuth apps, roles and groups (`plugin_api/auth.rs`) -----
+
+    /// `PluginAPI.CreateSession`; see [`AppPluginApi::auth_create_session`].
+    async fn create_session(
+        &self,
+        args: api::Z_CreateSessionArgs,
+    ) -> Result<api::Z_CreateSessionReturns, NotImplemented> {
+        self.auth_create_session(args).await
+    }
+
+    /// `PluginAPI.ExtendSessionExpiry`; see [`AppPluginApi::auth_extend_session_expiry`].
+    async fn extend_session_expiry(
+        &self,
+        args: api::Z_ExtendSessionExpiryArgs,
+    ) -> Result<api::Z_ExtendSessionExpiryReturns, NotImplemented> {
+        self.auth_extend_session_expiry(args).await
+    }
+
+    /// `PluginAPI.RevokeSession`; see [`AppPluginApi::auth_revoke_session`].
+    async fn revoke_session(
+        &self,
+        args: api::Z_RevokeSessionArgs,
+    ) -> Result<api::Z_RevokeSessionReturns, NotImplemented> {
+        self.auth_revoke_session(args).await
+    }
+
+    /// `PluginAPI.CreateUserAccessToken`; see [`AppPluginApi::auth_create_user_access_token`].
+    async fn create_user_access_token(
+        &self,
+        args: api::Z_CreateUserAccessTokenArgs,
+    ) -> Result<api::Z_CreateUserAccessTokenReturns, NotImplemented> {
+        self.auth_create_user_access_token(args).await
+    }
+
+    /// `PluginAPI.RevokeUserAccessToken`; see [`AppPluginApi::auth_revoke_user_access_token`].
+    async fn revoke_user_access_token(
+        &self,
+        args: api::Z_RevokeUserAccessTokenArgs,
+    ) -> Result<api::Z_RevokeUserAccessTokenReturns, NotImplemented> {
+        self.auth_revoke_user_access_token(args).await
+    }
+
+    /// `PluginAPI.UpdateUserAuth`; see [`AppPluginApi::auth_update_user_auth`].
+    async fn update_user_auth(
+        &self,
+        args: api::Z_UpdateUserAuthArgs,
+    ) -> Result<api::Z_UpdateUserAuthReturns, NotImplemented> {
+        self.auth_update_user_auth(args).await
+    }
+
+    /// `PluginAPI.CreateOAuthApp`; see [`AppPluginApi::auth_create_oauth_app`].
+    async fn create_o_auth_app(
+        &self,
+        args: api::Z_CreateOAuthAppArgs,
+    ) -> Result<api::Z_CreateOAuthAppReturns, NotImplemented> {
+        self.auth_create_oauth_app(args).await
+    }
+
+    /// `PluginAPI.GetOAuthApp`; see [`AppPluginApi::auth_get_oauth_app`].
+    async fn get_o_auth_app(
+        &self,
+        args: api::Z_GetOAuthAppArgs,
+    ) -> Result<api::Z_GetOAuthAppReturns, NotImplemented> {
+        self.auth_get_oauth_app(args).await
+    }
+
+    /// `PluginAPI.UpdateOAuthApp`; see [`AppPluginApi::auth_update_oauth_app`].
+    async fn update_o_auth_app(
+        &self,
+        args: api::Z_UpdateOAuthAppArgs,
+    ) -> Result<api::Z_UpdateOAuthAppReturns, NotImplemented> {
+        self.auth_update_oauth_app(args).await
+    }
+
+    /// `PluginAPI.DeleteOAuthApp`; see [`AppPluginApi::auth_delete_oauth_app`].
+    async fn delete_o_auth_app(
+        &self,
+        args: api::Z_DeleteOAuthAppArgs,
+    ) -> Result<api::Z_DeleteOAuthAppReturns, NotImplemented> {
+        self.auth_delete_oauth_app(args).await
+    }
+
+    /// `PluginAPI.RolesGrantPermission`; see [`AppPluginApi::auth_roles_grant_permission`].
+    async fn roles_grant_permission(
+        &self,
+        args: api::Z_RolesGrantPermissionArgs,
+    ) -> Result<api::Z_RolesGrantPermissionReturns, NotImplemented> {
+        self.auth_roles_grant_permission(args).await
+    }
+
+    /// `PluginAPI.GetGroup`; see [`AppPluginApi::auth_get_group`].
+    async fn get_group(
+        &self,
+        args: api::Z_GetGroupArgs,
+    ) -> Result<api::Z_GetGroupReturns, NotImplemented> {
+        self.auth_get_group(args).await
+    }
+
+    /// `PluginAPI.GetGroupByName`; see [`AppPluginApi::auth_get_group_by_name`].
+    async fn get_group_by_name(
+        &self,
+        args: api::Z_GetGroupByNameArgs,
+    ) -> Result<api::Z_GetGroupByNameReturns, NotImplemented> {
+        self.auth_get_group_by_name(args).await
+    }
+
+    /// `PluginAPI.GetGroupMemberUsers`; see [`AppPluginApi::auth_get_group_member_users`].
+    async fn get_group_member_users(
+        &self,
+        args: api::Z_GetGroupMemberUsersArgs,
+    ) -> Result<api::Z_GetGroupMemberUsersReturns, NotImplemented> {
+        self.auth_get_group_member_users(args).await
+    }
+
+    /// `PluginAPI.GetGroupsBySource`; see [`AppPluginApi::auth_get_groups_by_source`].
+    async fn get_groups_by_source(
+        &self,
+        args: api::Z_GetGroupsBySourceArgs,
+    ) -> Result<api::Z_GetGroupsBySourceReturns, NotImplemented> {
+        self.auth_get_groups_by_source(args).await
+    }
+
+    /// `PluginAPI.GetGroupsForUser`; see [`AppPluginApi::auth_get_groups_for_user`].
+    async fn get_groups_for_user(
+        &self,
+        args: api::Z_GetGroupsForUserArgs,
+    ) -> Result<api::Z_GetGroupsForUserReturns, NotImplemented> {
+        self.auth_get_groups_for_user(args).await
+    }
+
+    /// `PluginAPI.UpsertGroupMember`; see [`AppPluginApi::auth_upsert_group_member`].
+    async fn upsert_group_member(
+        &self,
+        args: api::Z_UpsertGroupMemberArgs,
+    ) -> Result<api::Z_UpsertGroupMemberReturns, NotImplemented> {
+        self.auth_upsert_group_member(args).await
+    }
+
+    /// `PluginAPI.UpsertGroupMembers`; see [`AppPluginApi::auth_upsert_group_members`].
+    async fn upsert_group_members(
+        &self,
+        args: api::Z_UpsertGroupMembersArgs,
+    ) -> Result<api::Z_UpsertGroupMembersReturns, NotImplemented> {
+        self.auth_upsert_group_members(args).await
+    }
+
+    /// `PluginAPI.GetGroupByRemoteID`; see [`AppPluginApi::auth_get_group_by_remote_id`].
+    async fn get_group_by_remote_id(
+        &self,
+        args: api::Z_GetGroupByRemoteIDArgs,
+    ) -> Result<api::Z_GetGroupByRemoteIDReturns, NotImplemented> {
+        self.auth_get_group_by_remote_id(args).await
+    }
+
+    /// `PluginAPI.CreateGroup`; see [`AppPluginApi::auth_create_group`].
+    async fn create_group(
+        &self,
+        args: api::Z_CreateGroupArgs,
+    ) -> Result<api::Z_CreateGroupReturns, NotImplemented> {
+        self.auth_create_group(args).await
+    }
+
+    /// `PluginAPI.UpdateGroup`; see [`AppPluginApi::auth_update_group`].
+    async fn update_group(
+        &self,
+        args: api::Z_UpdateGroupArgs,
+    ) -> Result<api::Z_UpdateGroupReturns, NotImplemented> {
+        self.auth_update_group(args).await
+    }
+
+    /// `PluginAPI.DeleteGroup`; see [`AppPluginApi::auth_delete_group`].
+    async fn delete_group(
+        &self,
+        args: api::Z_DeleteGroupArgs,
+    ) -> Result<api::Z_DeleteGroupReturns, NotImplemented> {
+        self.auth_delete_group(args).await
+    }
+
+    /// `PluginAPI.RestoreGroup`; see [`AppPluginApi::auth_restore_group`].
+    async fn restore_group(
+        &self,
+        args: api::Z_RestoreGroupArgs,
+    ) -> Result<api::Z_RestoreGroupReturns, NotImplemented> {
+        self.auth_restore_group(args).await
+    }
+
+    /// `PluginAPI.DeleteGroupMember`; see [`AppPluginApi::auth_delete_group_member`].
+    async fn delete_group_member(
+        &self,
+        args: api::Z_DeleteGroupMemberArgs,
+    ) -> Result<api::Z_DeleteGroupMemberReturns, NotImplemented> {
+        self.auth_delete_group_member(args).await
+    }
+
+    /// `PluginAPI.GetGroupSyncable`; see [`AppPluginApi::auth_get_group_syncable`].
+    async fn get_group_syncable(
+        &self,
+        args: api::Z_GetGroupSyncableArgs,
+    ) -> Result<api::Z_GetGroupSyncableReturns, NotImplemented> {
+        self.auth_get_group_syncable(args).await
+    }
+
+    /// `PluginAPI.GetGroupSyncables`; see [`AppPluginApi::auth_get_group_syncables`].
+    async fn get_group_syncables(
+        &self,
+        args: api::Z_GetGroupSyncablesArgs,
+    ) -> Result<api::Z_GetGroupSyncablesReturns, NotImplemented> {
+        self.auth_get_group_syncables(args).await
+    }
+
+    /// `PluginAPI.UpsertGroupSyncable`; see [`AppPluginApi::auth_upsert_group_syncable`].
+    async fn upsert_group_syncable(
+        &self,
+        args: api::Z_UpsertGroupSyncableArgs,
+    ) -> Result<api::Z_UpsertGroupSyncableReturns, NotImplemented> {
+        self.auth_upsert_group_syncable(args).await
+    }
+
+    /// `PluginAPI.UpdateGroupSyncable`; see [`AppPluginApi::auth_update_group_syncable`].
+    async fn update_group_syncable(
+        &self,
+        args: api::Z_UpdateGroupSyncableArgs,
+    ) -> Result<api::Z_UpdateGroupSyncableReturns, NotImplemented> {
+        self.auth_update_group_syncable(args).await
+    }
+
+    /// `PluginAPI.DeleteGroupSyncable`; see [`AppPluginApi::auth_delete_group_syncable`].
+    async fn delete_group_syncable(
+        &self,
+        args: api::Z_DeleteGroupSyncableArgs,
+    ) -> Result<api::Z_DeleteGroupSyncableReturns, NotImplemented> {
+        self.auth_delete_group_syncable(args).await
+    }
+
+    /// `PluginAPI.GetGroups`; see [`AppPluginApi::auth_get_groups`].
+    async fn get_groups(
+        &self,
+        args: api::Z_GetGroupsArgs,
+    ) -> Result<api::Z_GetGroupsReturns, NotImplemented> {
+        self.auth_get_groups(args).await
+    }
+
+    /// `PluginAPI.CreateDefaultSyncableMemberships`; see [`AppPluginApi::auth_create_default_syncable_memberships`].
+    async fn create_default_syncable_memberships(
+        &self,
+        args: api::Z_CreateDefaultSyncableMembershipsArgs,
+    ) -> Result<api::Z_CreateDefaultSyncableMembershipsReturns, NotImplemented> {
+        self.auth_create_default_syncable_memberships(args).await
+    }
+
+    /// `PluginAPI.DeleteGroupConstrainedMemberships`; see [`AppPluginApi::auth_delete_group_constrained_memberships`].
+    async fn delete_group_constrained_memberships(
+        &self,
+        _: api::Z_DeleteGroupConstrainedMembershipsArgs,
+    ) -> Result<api::Z_DeleteGroupConstrainedMembershipsReturns, NotImplemented> {
+        self.auth_delete_group_constrained_memberships().await
     }
 }
 

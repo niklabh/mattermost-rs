@@ -72,7 +72,21 @@ impl SyncErrors {
 }
 
 fn store_error(where_: &'static str, id: &'static str, err: StoreError) -> Box<AppError> {
-    AppError::boxed(where_, id, None, err.to_string(), 500)
+    store_wrapped(where_, id, None, 500, err)
+}
+
+/// `model.NewAppError(where, id, params, "", status).Wrap(err)`: the store's error is
+/// **wrapped**, not written into `DetailedError`. REST folds it into `detailed_error` when the
+/// error is marshalled (`ToJSON`), so the two are one thing there; gob carries only the exported
+/// fields, so a plugin sees an empty `DetailedError` — which writing the text in made it see.
+fn store_wrapped(
+    where_: &'static str,
+    id: &'static str,
+    params: Option<HashMap<String, serde_json::Value>>,
+    status: i32,
+    err: StoreError,
+) -> Box<AppError> {
+    Box::new(AppError::new(where_, id, params, String::new(), status).wrap(err))
 }
 
 /// `NewWebSocketEvent(received_group_[not_]associated_to_team, syncable, "", …)` or the channel
@@ -127,13 +141,7 @@ impl App {
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::boxed(
-                        "GetGroupSyncable",
-                        "app.group.no_rows",
-                        None,
-                        err.to_string(),
-                        404,
-                    )
+                    store_wrapped("GetGroupSyncable", "app.group.no_rows", None, 404, err)
                 } else {
                     store_error("GetGroupSyncable", "app.select_error", err)
                 }
@@ -187,40 +195,40 @@ impl App {
                         serde_json::Value::String(group_syncable.syncable_id.clone()),
                     )]);
                     if err.is_not_found() {
-                        AppError::boxed(
+                        store_wrapped(
                             "UpsertGroupSyncable",
                             "app.channel.get.existing.app_error",
                             Some(params),
-                            err.to_string(),
                             404,
+                            err,
                         )
                     } else {
-                        AppError::boxed(
+                        store_wrapped(
                             "UpsertGroupSyncable",
                             "app.channel.get.find.app_error",
                             Some(params),
-                            err.to_string(),
                             500,
+                            err,
                         )
                     }
                 })?;
 
             let team = store.team().get(&channel.team_id).await.map_err(|err| {
                 if err.is_not_found() {
-                    AppError::boxed(
+                    store_wrapped(
                         "UpsertGroupSyncable",
                         "app.team.get.find.app_error",
                         None,
-                        err.to_string(),
                         404,
+                        err,
                     )
                 } else {
-                    AppError::boxed(
+                    store_wrapped(
                         "UpsertGroupSyncable",
                         "app.team.get.finding.app_error",
                         None,
-                        err.to_string(),
                         500,
+                        err,
                     )
                 }
             })?;
@@ -258,12 +266,12 @@ impl App {
                 .await
                 .map_err(|err| match err {
                     StoreError::Invalid { app_error, .. } => app_error,
-                    err if err.is_not_found() => AppError::boxed(
+                    err if err.is_not_found() => store_wrapped(
                         "UpsertGroupSyncable",
                         "store.sql_channel.get.existing.app_error",
                         None,
-                        err.to_string(),
                         404,
+                        err,
                     ),
                     err => store_error("UpsertGroupSyncable", "app.insert_error", err),
                 })?
@@ -321,20 +329,14 @@ impl App {
     ) -> AppResult<GroupSyncable> {
         let delete_error = |err: StoreError| {
             if err.is_not_found() {
-                AppError::boxed(
-                    "DeleteGroupSyncable",
-                    "app.group.no_rows",
-                    None,
-                    err.to_string(),
-                    404,
-                )
+                store_wrapped("DeleteGroupSyncable", "app.group.no_rows", None, 404, err)
             } else if err.is_invalid_input() {
-                AppError::boxed(
+                store_wrapped(
                     "DeleteGroupSyncable",
                     "app.group.group_syncable_already_deleted",
                     None,
-                    err.to_string(),
                     400,
+                    err,
                 )
             } else {
                 store_error("DeleteGroupSyncable", "app.update_error", err)
@@ -549,7 +551,7 @@ impl App {
     /// Port of `App.createDefaultTeamMemberships` (app/syncables.go:91). A refusal for the
     /// team's allowed domains is an info line, not an error; everything else is collected.
     #[tracing::instrument(skip_all, fields(candidates, added))]
-    async fn create_default_team_memberships(
+    pub(crate) async fn create_default_team_memberships(
         &self,
         params: &CreateDefaultMembershipParams,
         hook_ctx: &crate::plugin_hooks::HookContext,
@@ -603,7 +605,7 @@ impl App {
     /// case it cannot reproduce; in a background task there is nobody to hand over to, so it is
     /// logged as a warning and the user is not added.
     #[tracing::instrument(skip_all, fields(candidates, added))]
-    async fn create_default_channel_memberships(
+    pub(crate) async fn create_default_channel_memberships(
         &self,
         params: &CreateDefaultMembershipParams,
         hook_ctx: &crate::plugin_hooks::HookContext,
@@ -708,7 +710,7 @@ impl App {
     /// Port of `App.DeleteGroupConstrainedTeamMemberships` (app/syncables.go:161), with no
     /// requester — Go passes `""`.
     #[tracing::instrument(skip(self), fields(candidates))]
-    async fn delete_group_constrained_team_memberships(
+    pub(crate) async fn delete_group_constrained_team_memberships(
         &self,
         team_id: Option<&str>,
         hook_ctx: &crate::plugin_hooks::HookContext,
@@ -741,7 +743,7 @@ impl App {
 
     /// Port of `App.DeleteGroupConstrainedChannelMemberships` (app/syncables.go:189).
     #[tracing::instrument(skip(self), fields(candidates))]
-    async fn delete_group_constrained_channel_memberships(
+    pub(crate) async fn delete_group_constrained_channel_memberships(
         &self,
         channel_id: Option<&str>,
         hook_ctx: &crate::plugin_hooks::HookContext,

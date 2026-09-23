@@ -9502,3 +9502,817 @@ fn assert_channels_answers_are_gos(calls: &[Json], hooks: &[Json], emoji: &Chann
         "a system emoji is not a custom one"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// The plugin API tranche: sessions, access tokens, auth data, OAuth apps, roles and groups
+// (Phase 6)
+// ---------------------------------------------------------------------------------------------
+
+/// The Rust host of the auth tranche; see `second_server_ports`.
+const AUTH_HOST_PORT: u16 = 8128;
+/// Its Go server: **below 100**, because Go's port + 100 is the next stack's Go server.
+const AUTH_GO_OFFSET: u16 = 61;
+/// Each side's tag: in its users' names, its team, and every name its script makes.
+const AUTH_SIDES: [&str; 2] = ["pausidego", "pausiders"];
+/// `recorder/auth.rs`' fixed expiry.
+const AUTH_FAR: i64 = 4_102_444_800_000;
+
+/// The plain users the auth tour makes, for the cleanup.
+static AUTH_USERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Cross-server parity for the plugin API's session, access-token, auth-data, OAuth-app, role
+/// and group methods (`mm_app::plugin_api::auth`).
+///
+/// An `!auth-script` post, made by each side's own user in its own channel, runs
+/// `examples/recorder/auth.rs` inside `MessageWillBePosted`, **twice**: first with both hosts
+/// unlicensed — the regular Go build, where every group method behind `checkLDAPLicense` answers
+/// `app.group.license_error` — and then with both hosts carrying the licensed oracle's licence
+/// (the enterprise-ready Go build), where the group methods write. Every answer is compared in
+/// order, every hook the script's writes fired, and every websocket frame of the own user's
+/// socket that names this side.
+///
+/// # What differs between the sides, and how it is taken out
+///
+/// Each side has its own team, channel, and three users (own, other, and an outsider made on
+/// the team and removed from it, for the auto-add sync to bring back), made through main Go.
+/// The side's ids and tag are scrubbed, and the ids the script learned first (the session, the
+/// token, the OAuth app, the group). What is left is masked, and each mask is named:
+/// [`normalise`]'s id and time keys, [`mask_core`]'s `<minted>` ids (the session token, the
+/// access token's secret and the OAuth client secret among them) and session clocks, a
+/// `Password` hash as `<hash>`, a frame's `last_password_update`, and the script's fixed expiry
+/// as `<far>` before `mask_core` can take it. `MemberIDs` has no promised order (Go's
+/// `GetMemberUsers` has no `ORDER BY`) and is sorted.
+///
+/// # What is not reached
+///
+/// `DeleteGroupConstrainedMemberships` runs over the whole installation, which other suites
+/// share, so it is called only unlicensed, where it refuses. `RevokeSession` of an OAuth session
+/// is not implemented here, and not called.
+#[tokio::test]
+async fn the_plugin_api_auth_methods_answer_as_go_answers() {
+    use futures_util::FutureExt as _;
+
+    if !stack_enabled() {
+        return;
+    }
+    let _states = common::PLUGIN_STATES.lock().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    auth_purge_rows().await;
+    let outcome = std::panic::AssertUnwindSafe(run_the_auth_tour(&client, &admin))
+        .catch_unwind()
+        .await;
+    plant_state(&client, &admin, None).await;
+    let users = std::mem::take(
+        &mut *AUTH_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for id in &users {
+        common::delete_plain_user(&client, &admin, id).await;
+    }
+    auth_purge_rows().await;
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// What the tour leaves that the fixture purge does not reach: each side's groups with their
+/// members and links, its sessions, tokens and OAuth apps, and its team with everything on it.
+async fn auth_purge_rows() {
+    let pool = common::fixture_pool().await.expect("the stack database");
+    let sources: Vec<String> = AUTH_SIDES
+        .iter()
+        .map(|side| format!("plugin_{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM groupmembers WHERE groupid IN (SELECT id FROM usergroups WHERE source = ANY($1))",
+        "DELETE FROM groupteams WHERE groupid IN (SELECT id FROM usergroups WHERE source = ANY($1))",
+        "DELETE FROM groupchannels WHERE groupid IN (SELECT id FROM usergroups WHERE source = ANY($1))",
+        "DELETE FROM usergroups WHERE source = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&sources)
+            .execute(&pool)
+            .await
+            .expect("the side groups go");
+    }
+    let usernames: Vec<String> = AUTH_SIDES
+        .iter()
+        .flat_map(|side| {
+            ["auown", "auoth", "auout"].map(|who| common::plain_username(&format!("{who}{side}")))
+        })
+        .collect();
+    for statement in [
+        "DELETE FROM useraccesstokens WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM oauthapps WHERE creatorid IN (SELECT id FROM users WHERE username = ANY($1))",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username = ANY($1))",
+    ] {
+        sqlx::query(statement)
+            .bind(&usernames)
+            .execute(&pool)
+            .await
+            .expect("the side users' credentials go");
+    }
+    sqlx::query("DELETE FROM sessions WHERE deviceid LIKE 'plugdev-pausid%'")
+        .execute(&pool)
+        .await
+        .expect("the sessions made for nobody go");
+    let teams: Vec<String> = AUTH_SIDES
+        .iter()
+        .map(|side| format!("mmrs-parity-hookauth{side}"))
+        .collect();
+    for statement in [
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM threads WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c JOIN teams t ON t.id = c.teamid WHERE t.name = ANY($1))",
+        "DELETE FROM publicchannels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM channels WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM sidebarcategories WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name = ANY($1))",
+        "DELETE FROM teams WHERE name = ANY($1)",
+    ] {
+        sqlx::query(statement)
+            .bind(&teams)
+            .execute(&pool)
+            .await
+            .expect("the side teams go");
+    }
+}
+
+/// One side of the auth tour.
+struct AuthSide {
+    tag: &'static str,
+    own: common::PlainUser,
+    own_name: String,
+    other: common::PlainUser,
+    outsider: common::PlainUser,
+    team: String,
+    channel: String,
+}
+
+impl AuthSide {
+    /// What the host passes down to the recorder for this side.
+    fn env(&self, licensed: bool) -> Vec<(&'static str, String)> {
+        vec![
+            ("HOOK_RECORDER_AUTH_OWN", self.own.id.clone()),
+            ("HOOK_RECORDER_AUTH_OWN_NAME", self.own_name.clone()),
+            ("HOOK_RECORDER_AUTH_OTHER", self.other.id.clone()),
+            ("HOOK_RECORDER_AUTH_OUTSIDER", self.outsider.id.clone()),
+            ("HOOK_RECORDER_AUTH_TEAM", self.team.clone()),
+            ("HOOK_RECORDER_AUTH_SIDE", self.tag.to_owned()),
+            (
+                "HOOK_RECORDER_AUTH_PHASE",
+                if licensed { "licensed" } else { "unlicensed" }.to_owned(),
+            ),
+        ]
+    }
+
+    /// This side's scrub pairs: what the script's answers taught it first, then the fixture.
+    fn pairs(&self, calls: &[Json]) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for (name, n, pointer, token) in [
+            ("CreateSession", 0, "/returns/A/Id", "<session>"),
+            ("CreateSession", 1, "/returns/A/Id", "<nobody-session>"),
+            ("CreateUserAccessToken", 0, "/returns/A/Id", "<pat>"),
+            ("CreateOAuthApp", 0, "/returns/A/Id", "<app>"),
+            ("CreateGroup", 0, "/returns/A/Id", "<group>"),
+        ] {
+            if let Some(value) = learned(calls, name, n, pointer) {
+                pairs.push((value, token.to_owned()));
+            }
+        }
+        pairs.extend([
+            (self.own.id.clone(), "<own>".to_owned()),
+            (self.other.id.clone(), "<other>".to_owned()),
+            (self.outsider.id.clone(), "<outsider>".to_owned()),
+            (self.team.clone(), "<side-team>".to_owned()),
+            (self.channel.clone(), "<own-channel>".to_owned()),
+            (self.own.token.clone(), "<token>".to_owned()),
+            (self.tag.to_owned(), "<side>".to_owned()),
+        ]);
+        pairs
+    }
+}
+
+/// The script's fixed expiry, and the one a second later, as tokens: [`mask_core`] would turn
+/// any set `ExpiresAt` into `<time>`, and the point of these two is that they were written.
+fn auth_mask_far(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(auth_mask_far),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(key.as_str(), "ExpiresAt" | "B") {
+                    match entry.as_i64() {
+                        Some(AUTH_FAR) => *entry = Json::String("<far>".to_owned()),
+                        Some(n) if n == AUTH_FAR + 1000 => {
+                            *entry = Json::String("<far+1s>".to_owned());
+                        }
+                        _ => {}
+                    }
+                }
+                auth_mask_far(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `MemberIDs` in a fixed order: Go's `GetMemberUsers` promises none.
+fn auth_sort_member_ids(value: &mut Json) {
+    match value {
+        Json::Array(items) => items.iter_mut().for_each(auth_sort_member_ids),
+        Json::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if key == "MemberIDs" {
+                    if let Some(ids) = entry.as_array_mut() {
+                        ids.sort_by_key(Json::to_string);
+                    }
+                    continue;
+                }
+                auth_sort_member_ids(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A frame this side caused: one naming something of this side's. The own user hears every
+/// `received_group` on the installation, and other suites make groups.
+fn auth_is_own_frame(frame: &Json) -> bool {
+    let text = frame.to_string();
+    [
+        "<own>",
+        "<other>",
+        "<outsider>",
+        "<side-team>",
+        "<own-channel>",
+        "<group>",
+        "<side>",
+    ]
+    .iter()
+    .any(|token| text.contains(token))
+}
+
+async fn run_the_auth_tour(client: &reqwest::Client, admin: &str) {
+    plant_state(client, admin, Some(true)).await;
+
+    let me: Json = client
+        .get(format!("{GO}/api/v4/users/me"))
+        .bearer_auth(admin)
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the admin");
+    let admin_id = me["id"].as_str().expect("an id").to_owned();
+
+    // Every fixture is made through **main** Go, which hosts no plugins.
+    let mut sides = Vec::new();
+    for tag in AUTH_SIDES {
+        let team = common::create_team(client, admin, &format!("hookauth{tag}")).await;
+        let own = common::create_plain_user(client, admin, &team, &format!("auown{tag}")).await;
+        let other = common::create_plain_user(client, admin, &team, &format!("auoth{tag}")).await;
+        let outsider =
+            common::create_plain_user(client, admin, &team, &format!("auout{tag}")).await;
+        AUTH_USERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend([own.id.clone(), other.id.clone(), outsider.id.clone()]);
+        let channel = common::create_channel(client, admin, &team, &format!("auth{tag}")).await;
+        common::add_user_to_channel(client, admin, &channel, &own.id).await;
+        common::add_user_to_channel(client, admin, &channel, &other.id).await;
+        // A departed member, for the auto-add sync to bring back; and the admin, who made the
+        // team and the channel, out of both.
+        common::remove_user_from_team(client, admin, &team, &outsider.id).await;
+        common::remove_user_from_team(client, admin, &team, &admin_id).await;
+        sides.push(AuthSide {
+            tag,
+            own_name: common::plain_username(&format!("auown{tag}")),
+            own,
+            other,
+            outsider,
+            team,
+            channel,
+        });
+    }
+
+    let shared_ids = vec![admin_id, CORE_MISSING.to_owned()];
+    for licensed in [false, true] {
+        auth_run_phase(client, admin, &sides, &shared_ids, licensed).await;
+    }
+}
+
+/// One phase: both hosts started (licensed or not), the script run under each, and everything
+/// compared.
+async fn auth_run_phase(
+    client: &reqwest::Client,
+    admin: &str,
+    sides: &[AuthSide],
+    shared_ids: &[String],
+    licensed: bool,
+) {
+    let phase = if licensed { "licensed" } else { "unlicensed" };
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("plugin-hooks-auth")
+        .join(phase);
+    let (go_run, rs_run) = (scratch.join("go"), scratch.join("rust"));
+    let go_log = lay_out(&go_run);
+    let rust_log = lay_out(&rs_run);
+
+    let (signed, key_file) = if licensed {
+        common::stack_license_files()
+    } else {
+        (String::new(), String::new())
+    };
+    let mut shared_env: Vec<(&str, &str)> = vec![
+        ("MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS", "true"),
+        ("MM_SERVICESETTINGS_ENABLEOAUTHSERVICEPROVIDER", "true"),
+    ];
+    if licensed {
+        shared_env.extend([
+            ("MM_LICENSE", signed.as_str()),
+            ("MMRS_LICENSE_PUBLIC_KEY_FILE", key_file.as_str()),
+        ]);
+    }
+
+    let go_side_env = sides[0].env(licensed);
+    let go_transcript = go_log.to_string_lossy().into_owned();
+    let mut env: Vec<(&str, &str)> = vec![("HOOK_RECORDER_TRANSCRIPT", go_transcript.as_str())];
+    env.extend(shared_env.iter().copied());
+    env.extend(go_side_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let binary = if licensed {
+        "mattermost-licensed"
+    } else {
+        "mattermost"
+    };
+    let go = start_go_binary(binary, &go_run, &env, AUTH_GO_OFFSET).await;
+
+    let s = |p: &str| rs_run.join(p).to_string_lossy().into_owned();
+    let (dir, client_dir, data) = (s("plugins"), s("client"), format!("{}/", s("data")));
+    let rust_transcript = rust_log.to_string_lossy().into_owned();
+    let rust_side_env = sides[1].env(licensed);
+    let mut env: Vec<(&str, &str)> = vec![
+        ("MMRS_PLUGIN_HOST", "rust"),
+        ("MM_PLUGINSETTINGS_DIRECTORY", dir.as_str()),
+        ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
+        ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
+        ("HOOK_RECORDER_TRANSCRIPT", rust_transcript.as_str()),
+    ];
+    env.extend(shared_env.iter().copied());
+    env.extend(rust_side_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let rust = SecondServer::start_in(AUTH_HOST_PORT, &rs_run, &env)
+        .await
+        .expect("the Rust host starts");
+    wait_until_running(client, admin, &go.base).await;
+    wait_until_running(client, admin, &rust.base).await;
+
+    let mut recorded = Vec::new();
+    for (side, base, log, host) in [
+        (&sides[0], go.base.as_str(), go_log.as_path(), "Go"),
+        (&sides[1], rust.base.as_str(), rust_log.as_path(), "Rust"),
+    ] {
+        let mut probe = common::SocketProbe::connect(base, &side.own.token).await;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "channel_id": side.channel,
+            "message": "!auth-script",
+        }))
+        .expect("the post");
+        let (status, answer, served_by) = request_raw(
+            client,
+            base,
+            reqwest::Method::POST,
+            Some(&side.own.token),
+            "/api/v4/posts",
+            Some(&body),
+        )
+        .await;
+        assert_eq!(
+            status,
+            201,
+            "{phase} {host}: the trigger: {}",
+            String::from_utf8_lossy(&answer)
+        );
+        if host == "Rust" {
+            assert_eq!(
+                served_by.as_deref(),
+                Some("rust"),
+                "the trigger was forwarded"
+            );
+        }
+        script_transcript_settles(log, "AuthScript", host).await;
+        core_frames_settle(&mut probe).await;
+
+        let calls = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Json>(line).ok())
+            .find(|e| e["hook"] == "AuthScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .unwrap_or_default();
+        let pairs = side.pairs(&calls);
+        let mut entries = transcript_of(log, &pairs);
+        for entry in entries.iter_mut() {
+            auth_mask_far(entry);
+            mask_core(entry, shared_ids);
+            mask_password(entry);
+            auth_sort_member_ids(entry);
+        }
+        let mut frames: Vec<Json> = probe
+            .raw
+            .iter()
+            .filter_map(|raw| core_frame(raw, &pairs, shared_ids))
+            .filter(auth_is_own_frame)
+            .collect();
+        frames.iter_mut().for_each(|f| {
+            mask_member_clocks(f);
+            mask_password_update(f);
+        });
+        frames.sort_by_key(Json::to_string);
+        recorded.push((entries, frames));
+    }
+    let (go_side, rust_side) = (&recorded[0], &recorded[1]);
+
+    // The answers, in order.
+    let script = |entries: &[Json]| -> Vec<Json> {
+        entries
+            .iter()
+            .find(|e| e["hook"] == "AuthScript")
+            .and_then(|e| e["calls"].as_array().cloned())
+            .expect("the script ran")
+    };
+    let (go_calls, rust_calls) = (script(&go_side.0), script(&rust_side.0));
+    assert!(
+        go_calls.iter().all(|c| c.get("error").is_none()),
+        "{phase}: Go implements every method the script calls: {:?}",
+        go_calls
+            .iter()
+            .filter(|c| c.get("error").is_some())
+            .collect::<Vec<_>>()
+    );
+    let differing: Vec<String> = go_calls
+        .iter()
+        .zip(&rust_calls)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("call {index} ({}):\n  go:   {g}\n  rust: {r}", g["call"]))
+        .collect();
+    assert!(differing.is_empty(), "{phase}: {}", differing.join("\n"));
+    assert_eq!(
+        go_calls.len(),
+        rust_calls.len(),
+        "{phase}: the script ran to the end"
+    );
+
+    // The hooks the script's writes fired, in canonical order.
+    let hooks = |entries: &[Json]| -> Vec<Json> {
+        let rest: Vec<Json> = entries
+            .iter()
+            .filter(|e| e["hook"] != "AuthScript")
+            .cloned()
+            .collect();
+        in_canonical_order(&rest)
+    };
+    let (go_hooks, rust_hooks) = (hooks(&go_side.0), hooks(&rust_side.0));
+    assert_eq!(
+        names(&go_hooks),
+        names(&rust_hooks),
+        "{phase}: the hooks that fired"
+    );
+    let differing: Vec<String> = go_hooks
+        .iter()
+        .zip(&rust_hooks)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("hook {index} ({}):\n  go:   {g}\n  rust: {r}", g["hook"]))
+        .collect();
+    assert!(differing.is_empty(), "{phase}: {}", differing.join("\n"));
+
+    // Every frame of this side's the own user's socket received, in canonical order.
+    let event_names = |frames: &[Json]| -> Vec<String> {
+        frames
+            .iter()
+            .filter_map(|f| f["event"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        event_names(&go_side.1),
+        event_names(&rust_side.1),
+        "{phase}: the events the own user received:\n  go:   {:?}\n  rust: {:?}",
+        go_side.1,
+        rust_side.1
+    );
+    let differing: Vec<String> = go_side
+        .1
+        .iter()
+        .zip(&rust_side.1)
+        .enumerate()
+        .filter(|(_, (g, r))| g != r)
+        .map(|(index, (g, r))| format!("frame {index} ({}):\n  go:   {g}\n  rust: {r}", g["event"]))
+        .collect();
+    assert!(differing.is_empty(), "{phase}: {}", differing.join("\n"));
+
+    assert_auth_answers_are_gos(&go_calls, &go_hooks, &go_side.1, licensed);
+
+    drop(rust);
+    drop(go);
+}
+
+/// What parity alone would not pin, because both hosts could agree on a wrong answer: read off
+/// Go's scrubbed answers.
+fn assert_auth_answers_are_gos(calls: &[Json], hooks: &[Json], frames: &[Json], licensed: bool) {
+    let answer = |name: &str, n: usize| -> Json {
+        calls
+            .iter()
+            .filter(|c| c["call"] == name)
+            .nth(n)
+            .map(|c| c["returns"].clone())
+            .unwrap_or(Json::Null)
+    };
+    let error = |name: &str, n: usize, key: &str| -> (Json, Json, Json) {
+        let returns = answer(name, n);
+        (
+            returns[key]["Id"].clone(),
+            returns[key]["StatusCode"].clone(),
+            returns[key]["Where"].clone(),
+        )
+    };
+    let e = |id: &str, status: i64, where_: &str| {
+        (Json::from(id), Json::from(status), Json::from(where_))
+    };
+
+    // Sessions.
+    let made = answer("CreateSession", 0)["A"].clone();
+    assert_eq!(made["Token"], "<minted>", "a token was minted: {made}");
+    assert_eq!(made["Props"]["$map"]["platform"], "plug", "{made}");
+    assert_eq!(
+        error("CreateSession", 2, "B"),
+        e("app.session.save.existing.app_error", 400, "CreateSession")
+    );
+    assert_eq!(
+        error("CreateSession", 3, "B"),
+        e("app.session.save.app_error", 500, "CreateSession")
+    );
+    assert_eq!(
+        (
+            answer("GetSession", 1)["A"]["ExpiresAt"].clone(),
+            answer("GetSession", 2)["A"]["ExpiresAt"].clone()
+        ),
+        (Json::from("<far>"), Json::from("<far+1s>")),
+        "extended by id, then by token"
+    );
+    assert_eq!(
+        error("ExtendSessionExpiry", 2, "A"),
+        e(
+            "app.session.get_sessions.app_error",
+            500,
+            "extendSessionExpiry"
+        )
+    );
+    assert_eq!(
+        error("RevokeSession", 1, "A"),
+        e("app.session.get.app_error", 400, "RevokeSessionById"),
+        "a revoked session is gone"
+    );
+    assert_eq!(answer("RevokeSession", 2)["A"], Json::Null, "nobody's too");
+
+    // Tokens.
+    let token = answer("CreateUserAccessToken", 0)["A"].clone();
+    assert_eq!(
+        (&token["Token"], &token["IsActive"], &token["ExpiresAt"]),
+        (
+            &Json::from("<minted>"),
+            &Json::from(true),
+            &Json::from("<far>")
+        ),
+        "{token}"
+    );
+    assert_eq!(
+        error("CreateUserAccessToken", 1, "B"),
+        e(
+            "app.user.missing_account.const",
+            404,
+            "CreateUserAccessToken"
+        )
+    );
+    assert_eq!(
+        error("RevokeUserAccessToken", 1, "A"),
+        e(
+            "app.user_access_token.get_by_user.app_error",
+            404,
+            "GetUserAccessToken"
+        )
+    );
+
+    // OAuth apps.
+    let created = answer("CreateOAuthApp", 0)["A"].clone();
+    assert_eq!(created["ClientSecret"], "<minted>", "{created}");
+    let updated = answer("UpdateOAuthApp", 0)["A"].clone();
+    assert_eq!(
+        (
+            &updated["CreatorId"],
+            &updated["ClientSecret"],
+            &updated["IsTrusted"]
+        ),
+        (
+            &Json::from("<own>"),
+            &Json::from("<minted>"),
+            &Json::from(true)
+        ),
+        "the creator and secret are the stored app's: {updated}"
+    );
+    assert_eq!(
+        error("GetOAuthApp", 2, "B"),
+        e("app.oauth.get_app.find.app_error", 404, "GetOAuthApp"),
+        "a deleted app is gone"
+    );
+
+    // Roles.
+    // Gob omits a false, so it renders as nothing.
+    let granted: Vec<bool> = (0..5)
+        .map(|n| {
+            answer("RolesGrantPermission", n)["A"]
+                .as_bool()
+                .unwrap_or(false)
+        })
+        .collect();
+    assert_eq!(granted, [true, false, true, false, false]);
+
+    // Auth data.
+    assert_eq!(
+        error("UpdateUserAuth", 1, "B"),
+        e(
+            "app.user.update_auth_data.email_exists.app_error",
+            400,
+            "UpdateUserAuth"
+        ),
+        "a second account with the same auth data"
+    );
+    let other = answer("GetUser", 0)["A"].clone();
+    assert_eq!(
+        (
+            &other["AuthService"],
+            other["Password"].as_str().unwrap_or("")
+        ),
+        (&Json::from("gitlab"), ""),
+        "moved to gitlab, its password blanked: {other}"
+    );
+
+    // Groups: the ungated reads answer either way.
+    assert_eq!(
+        error("GetGroup", 0, "B"),
+        e("app.group.no_rows", 404, "GetGroup")
+    );
+    if !licensed {
+        for name in [
+            "CreateGroup",
+            "UpsertGroupMember",
+            "UpsertGroupMembers",
+            "GetGroupByRemoteID",
+            "UpdateGroup",
+            "DeleteGroup",
+            "RestoreGroup",
+            "DeleteGroupMember",
+            "GetGroupSyncable",
+            "GetGroupSyncables",
+            "UpsertGroupSyncable",
+            "UpdateGroupSyncable",
+            "DeleteGroupSyncable",
+            "GetGroups",
+        ] {
+            assert_eq!(
+                error(name, 0, "B"),
+                e("app.group.license_error", 403, name),
+                "unlicensed, {name} refuses under its own name"
+            );
+        }
+        for name in [
+            "CreateDefaultSyncableMemberships",
+            "DeleteGroupConstrainedMemberships",
+        ] {
+            assert_eq!(error(name, 0, "A"), e("app.group.license_error", 403, name));
+        }
+        return;
+    }
+
+    let group = answer("CreateGroup", 0)["A"].clone();
+    assert_eq!(
+        (&group["MemberCount"], &group["Source"]),
+        (&Json::from(7), &Json::from("plugin_<side>")),
+        "answered as sent: {group}"
+    );
+    assert_eq!(
+        [1, 2, 3, 4].map(|n| error("CreateGroup", n, "B").0),
+        [
+            Json::from("app.group.id.app_error"),
+            Json::from("app.group.username_conflict"),
+            Json::from("model.group.display_name.app_error"),
+            Json::from("app.insert_error"),
+        ]
+    );
+    assert_eq!(
+        error("UpsertGroupMember", 1, "B"),
+        e("app.update_error", 500, "UpsertGroupMember"),
+        "a group that is not there"
+    );
+    assert_eq!(
+        error("UpsertGroupMembers", 1, "B").0,
+        "app.group.user_not_found"
+    );
+    let names_of = |n: usize| -> Vec<Json> {
+        answer("GetGroupMemberUsers", n)["A"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|u| u["Id"].clone())
+            .collect()
+    };
+    assert_eq!(names_of(0).len(), 3, "three members");
+    assert_eq!(names_of(1).len(), 1, "page 1 of 2 is the third");
+    assert_eq!(
+        error("GetGroupMemberUsers", 2, "B"),
+        e("app.select_error", 500, "GetGroupMemberUsersPage"),
+        "a negative page size"
+    );
+    let listed = answer("GetGroups", 0)["A"][0].clone();
+    assert_eq!(
+        (
+            &listed["MemberCount"],
+            listed["MemberIDs"].as_array().map(Vec::len)
+        ),
+        (&Json::from(3), Some(3)),
+        "{listed}"
+    );
+    assert_eq!(
+        answer("UpdateGroup", 0)["A"]["MemberCount"],
+        3,
+        "the count is re-read"
+    );
+    assert_eq!(
+        error("UpdateGroup", 1, "B"),
+        e("app.group.no_rows", 404, "UpdateGroup")
+    );
+    assert_eq!(
+        error("UpsertGroupSyncable", 2, "B").0,
+        "app.channel.get.existing.app_error"
+    );
+    assert_eq!(
+        answer("CreateDefaultSyncableMemberships", 0)["A"],
+        Json::Null
+    );
+    assert!(
+        hooks
+            .iter()
+            .any(|h| h["hook"] == "UserHasJoinedTeam" && h.to_string().contains("<outsider>")),
+        "the sync brought the outsider back onto the team"
+    );
+    let team_link = answer("GetGroupSyncables", 1)["A"][0].clone();
+    assert!(
+        team_link["GroupId"] == "<group>" && !team_link["AutoAdd"].as_bool().unwrap_or(false),
+        "the channel link re-linked the team with its own AutoAdd: {team_link}"
+    );
+    assert_eq!(
+        [1, 2].map(|n| error("DeleteGroupSyncable", n, "B").0),
+        [
+            Json::from("app.group.group_syncable_already_deleted"),
+            Json::from("app.group.no_rows"),
+        ],
+        "the team link took the channel's with it"
+    );
+    assert_eq!(
+        error("DeleteGroupMember", 1, "B"),
+        e("app.group.no_rows", 404, "DeleteGroupMember")
+    );
+    assert_eq!(
+        (
+            error("DeleteGroup", 1, "B").0,
+            error("RestoreGroup", 1, "B").0
+        ),
+        (
+            Json::from("app.group.no_rows"),
+            Json::from("app.group.no_rows")
+        ),
+        "a deleted group cannot be deleted, nor a live one restored"
+    );
+    assert_eq!(
+        answer("GetGroupsForUser", 2)["A"][0]["DeleteAt"],
+        "<set>",
+        "a deleted group is still the member's"
+    );
+    let events: Vec<&str> = frames.iter().filter_map(|f| f["event"].as_str()).collect();
+    for event in [
+        "group_member_add",
+        "received_group",
+        "received_group_associated_to_team",
+        "received_group_associated_to_channel",
+        "received_group_not_associated_to_team",
+    ] {
+        assert!(
+            events.contains(&event),
+            "the own user heard {event}: {events:?}"
+        );
+    }
+}

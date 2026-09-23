@@ -234,10 +234,13 @@ impl App {
     ) -> AppResult<UserAccessToken> {
         // `userService.GetUser` — `MissingAccountError` at **404** for a miss and
         // `app.user.get.app_error` at 500 for anything else, which is exactly the split
-        // [`App::get_user`] already makes. Propagated unchanged rather than rebuilt with this
-        // function's name: `where` is `json:"-"` and the handler overwrites it with the request
-        // path, so the only thing a rebuild could change is invisible.
-        let user = self.get_user(&token.user_id).await?;
+        // [`App::get_user`] already makes, rebuilt with this function's name. REST never shows
+        // `where` (the handler overwrites it), but gob carries it to a plugin's
+        // `CreateUserAccessToken`.
+        let user = self.get_user(&token.user_id).await.map_err(|mut err| {
+            err.where_ = "CreateUserAccessToken".to_owned();
+            err
+        })?;
 
         if !self.config().enable_user_access_tokens && !user.is_bot {
             return Err(AppError::boxed(

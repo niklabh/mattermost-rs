@@ -9923,3 +9923,17 @@ and a list whose every term is `*` (empty) — see `mm_app::plugin_api::channels
 **What is owed:** the store's no-user branch of `SqlPostStore.search` (post_store.go), then the
 `SearchPostsInTeam` arm, with a script call that finds a post in a channel the host has no
 member in.
+
+## D-1070 · A plugin's `DeleteGroupConstrainedMemberships` is compared only where it refuses
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-23 (app/plugin_api.go:1689) · **Owner** the plugin host
+
+Behind `checkLDAPLicense` the method is `App.DeleteGroupConstrainedMemberships`: every
+group-constrained channel, then every such team, on the whole installation, loses the members who
+are in none of its groups. The parity suites share one database and several of them make
+group-constrained teams and channels, so the auth tranche calls it only unlicensed, where it
+refuses. The two sweeps behind it are the ones the REST unlink dispatches scoped to one syncable
+(`parity::group_syncables`), so what is unverified is the unscoped composition and its 500.
+**What is owed:** a licensed comparison on a database no other suite writes — a dedicated stack,
+or a tranche that runs alone — with one constrained team and one constrained channel, each holding
+a member outside its groups.

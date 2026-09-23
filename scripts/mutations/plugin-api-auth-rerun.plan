@@ -1,0 +1,8 @@
+# Rerun of plugin-api-auth.plan: the line that was a HARNESS FAULT (E0275, a Send-inference overflow,
+# whenever the async body of create_default_memberships changed; now the team scope is emptied
+# in the wire conversion instead, which changes no type) and the two
+# no-op controls, which must SURVIVE.
+
+default-memberships-no-team	crates/mm-app/src/plugin_api/auth.rs	scoped_team_id: wire.scoped_team_id.clone(),	scoped_team_id: Some(String::new()),	api	plugin_hooks::the_plugin_api_auth_methods
+control-get-groups-rename	crates/mm-app/src/plugin_api/auth.rs	let opts = auth_group_search_opts_from_wire(&args.c);\n        let restrictions = args.d.as_deref().map(|r| ViewUsersRestrictions {\n            teams: r.teams.clone(),\n            channels: r.channels.clone(),\n        });\n        let result = self\n            .app\n            .get_groups(args.a, args.b, &opts, restrictions.as_ref())	let search = auth_group_search_opts_from_wire(&args.c);\n        let restrictions = args.d.as_deref().map(|r| ViewUsersRestrictions {\n            teams: r.teams.clone(),\n            channels: r.channels.clone(),\n        });\n        let result = self\n            .app\n            .get_groups(args.a, args.b, &search, restrictions.as_ref())	api	plugin_hooks::the_plugin_api_auth_methods
+control-member-field-order	crates/mm-app/src/plugin_api/auth.rs	group_id: member.group_id.clone(),\n        user_id: member.user_id.clone(),	user_id: member.user_id.clone(),\n        group_id: member.group_id.clone(),	api	plugin_hooks::the_plugin_api_auth_methods

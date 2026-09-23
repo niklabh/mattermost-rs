@@ -1773,23 +1773,23 @@ impl SqlGroupStore {
 }
 
 /// The ten stored columns of `UserGroups` (`userGroupsSelectQuery`, group_store.go:62).
-struct GroupRow {
-    id: String,
-    name: Option<String>,
-    displayname: Option<String>,
-    description: Option<String>,
-    source: Option<String>,
-    remoteid: Option<String>,
-    createat: Option<i64>,
-    updateat: Option<i64>,
-    deleteat: Option<i64>,
-    allowreference: Option<bool>,
+pub(crate) struct GroupRow {
+    pub(crate) id: String,
+    pub(crate) name: Option<String>,
+    pub(crate) displayname: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) remoteid: Option<String>,
+    pub(crate) createat: Option<i64>,
+    pub(crate) updateat: Option<i64>,
+    pub(crate) deleteat: Option<i64>,
+    pub(crate) allowreference: Option<bool>,
 }
 
 impl GroupRow {
     /// `group.ToModel()` (group_store.go:1155) for a row read without the joined counts: the
     /// five `db:"-"` fields stay at their zero values, as Go's scan leaves them.
-    fn into_group(self) -> Group {
+    pub(crate) fn into_group(self) -> Group {
         Group {
             id: self.id,
             name: self.name,
@@ -1835,7 +1835,7 @@ fn like_pattern(q: &str) -> String {
 /// `IsUniqueConstraintError(err, []string{"Name", "groups_name_key"})` (group_store.go:172):
 /// the `UNIQUE(name)` of `000007_create_user_groups.up.sql`, which Postgres names
 /// `usergroups_name_key`.
-fn is_group_name_unique_violation(err: &sqlx::Error) -> bool {
+pub(crate) fn is_group_name_unique_violation(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .and_then(|db| db.constraint())
         .is_some_and(|constraint| constraint.contains("groups_name_key"))

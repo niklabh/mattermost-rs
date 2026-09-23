@@ -14680,3 +14680,23 @@ included) and still hearing one just left. The hub invalidation is now at each o
 
 Mutation tally (`plugin-api-channels.plan`): 19 run, 17 caught, 2 controls survived, 0 harness
 faults.
+
+## Plugin API: sessions, access tokens, auth data, OAuth apps, roles and groups (2026-09-23)
+
+Thirty-two more methods, **176 of 258** (relative to `main` at 191c5654), in
+`mm_app::plugin_api::auth`, which says which are behind `checkLDAPLicense` and where Go's `Where`
+is not the app function's. Opens [D-1070].
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `PluginAPI` session, token, `UpdateUserAuth`, OAuth-app, `RolesGrantPermission` and group methods (app/plugin_api.go:331-893, :1263, :1498-1519, :1669-1700) | `mm_app::plugin_api::auth` | DONE | `parity::plugin_hooks::the_plugin_api_auth_methods_answer_as_go_answers` (an unlicensed phase of 91 calls and a licensed one of 90, hooks, frames) + 6 unit | Every group method but five reads refuses with `app.group.license_error` 403 under its own name when unlicensed. `RevokeSession` of an OAuth session is not implemented ([D-283]). |
+| `App.CreateGroup`, `GetGroupByRemoteID`, `GetGroupsBySource`, `GetGroupsByUserId`, `GetGroupMemberUsersPage`, `UpsertGroupMember`, `DeleteGroupMember`, `GetGroupSyncables`, `GetGroups`, `CreateDefaultMemberships`, `DeleteGroupConstrainedMemberships`; `SqlGroupStore.Create`, `GetByRemoteID`, `GetAllBySource`, `GetByUser`, `GetMemberUsers`, `GetMemberUsersSortedPage`; `SqlSessionStore.UpdateExpiresAt` | `mm_app::group_lookup`, `mm_store::group_lookup_store`, `SessionStore::update_expires_at` | DONE | the tranche + 1 unit | `Create` answers the caller's group (a sent `MemberCount` comes back) and publishes nothing; a negative member page is Postgres' "bigint out of range", a 500. |
+
+Found by the tranche, invisible to REST because a handler overwrites `Where` and folds the wrapped
+error into `detailed_error`: the syncable app functions wrote the store error into
+`DetailedError`, which gob carried to the plugin (now `Wrap`ped, as Go does); a channel link read
+by `GetAllGroupSyncablesByGroupId` has **no** `TeamID` in Go (its scan fills a shadowing field);
+and `CreateUserAccessToken`'s missing-user error is under `CreateUserAccessToken`, not `GetUser`.
+
+Mutation tally (`plugin-api-auth.plan`, the faulted line rerun with both controls in
+`plugin-api-auth-rerun.plan`): 19 lines, 17 caught, 2 controls survived, 0 harness faults.
