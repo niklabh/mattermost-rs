@@ -14423,6 +14423,14 @@ Mutation tally (`scheduled-posts.plan`): 33 run, 31 caught, 2 controls survived,
 faults. A first run was void: a key-order assertion in the direct-channels test assumed
 `directChannels` sorts first, and a team id starting `a`–`c` sorts ahead of it.
 
+## `checkFieldDeleteAccess` asks the Rust plugin host (2026-09-23)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| The `pluginChecker` `NewAccessControlHook` is given (server.go:328), at `checkFieldDeleteAccess` (properties/access_control.go:859) | `App::access_control_pre_delete_field`, `App::plugin_installed` | DONE under the Rust host; the Go host's arm is [D-542] | the property step of `parity::plugin_hooks::the_support_data_hook_fires_as_go_fires_it` + 1 unit | The plugin asked about is the field's **source**, not the caller: a protected field whose source is installed is refused to everyone else with `access_denied`. |
+
+Mutation tally (`field-plugin-check.plan`): 5 run, 3 caught, 2 controls survived, 0 harness faults.
+
 ## Plugin hook call sites: the system posts, and the two notices never written (2026-09-22)
 
 No hook is added to the 35; [D-950] and [D-243] close, and D-235's creation paragraph with them.

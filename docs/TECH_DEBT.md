@@ -8638,6 +8638,9 @@ changes every map in the tree and needs the full parity suite to say what else m
 ## D-542 · `checkFieldDeleteAccess` asks the plugin host whether a source plugin is installed
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
+**Narrowed** 2026-09-23 — under `MMRS_PLUGIN_HOST=rust` the checker is Go's own
+(`GetPluginStatus` without an error), answered from this host's environment and compared in
+`parity::plugin_hooks::the_support_data_hook_fires_as_go_fires_it`. Only the Go host's arm is owed.
 
 A protected property field is deletable by anyone with the field permission **when its source
 plugin is not installed** (app/properties/access_control.go:859, `!h.pluginChecker(id)`). Go asks
@@ -9532,8 +9535,10 @@ exactly as they did before:
 ```text
 notification EmailNotificationWillBeSent, NotificationWillBePushed
 plugin.go    OnPluginClusterEvent
-properties   the `checkFieldDeleteAccess` plugin check ([D-542])
 ```
+
+The `checkFieldDeleteAccess` plugin check, listed here until 2026-09-23, is not a hook: it asks
+`GetPluginStatus`, which the Rust host now answers from its own environment ([D-542]).
 
 **Two call sites of hooks that do fire are still missing.** `FileWillBeUploaded` is also invoked
 by `DoUploadFileExpectModification` (file.go:1110), with its own rules — a buffered replacement,
