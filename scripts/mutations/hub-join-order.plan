@@ -1,0 +1,22 @@
+# Mutation plan for D-1032: when a websocket connection's channel memberships are read, and
+# when the joiner's connections are invalidated (2026-09-23).
+#
+#   scripts/mutate-batch.sh scripts/mutations/hub-join-order.plan
+#
+# Oracles: the generation unit tests (hub::), the DB test that publishes in JoinDefaultChannels'
+# order (mm-app --test db_hub_join_order), and the users tranche, where the own user joins a
+# team through the plugin API and its socket is compared with Go's (one frame, Go's coin toss,
+# tolerated on Go's side only). The two `invalidate`/`reload` lines are the fixes D-1032
+# considered; both must be CAUGHT. Each suite has a no-op control, and both must SURVIVE.
+
+generation-not-checked	crates/mm-app/src/hub.rs	        if cache.generation != generation {\n            return false;\n        }	        if cache.generation != generation && generation == u64::MAX {\n            return false;\n        }	unit	hub::
+invalidation-keeps-generation	crates/mm-app/src/hub.rs	        cache.generation = cache.generation.wrapping_add(1);	        let _ = cache.generation;	unit	hub::
+cached-members-never-read	crates/mm-app/src/hub.rs	                let members = match conn.cached_channel_members() {	                let members = match conn.cached_channel_members().and_then(|_| Err(0u64)) {	app	hub_join_order
+cache-load-never-kept	crates/mm-app/src/hub.rs	        cache.members = Some((members, get_millis()));\n        true	        let _ = members;\n        false	app	hub_join_order
+invalidation-keeps-members	crates/mm-app/src/hub.rs	        cache.members = None;\n        cache.generation	        let _ = &cache.members;\n        cache.generation	app	hub_join_order
+hub-invalidate-user-noop	crates/mm-app/src/hub.rs	        for conn in self.for_user(user_id) {\n            conn.invalidate_cache();\n        }	        for conn in self.for_user(user_id) {\n            let _ = conn;\n        }	app	hub_join_order
+control-invalidation-statement-order	crates/mm-app/src/hub.rs	        cache.members = None;\n        cache.generation = cache.generation.wrapping_add(1);	        cache.generation = cache.generation.wrapping_add(1);\n        cache.members = None;	app	hub_join_order
+invalidate-after-each-save	crates/mm-app/src/team_member.rs	            if let Err(err) = self.store().channel().save_member(member).await {\n                last_save_error = Some(err);\n            }	            if let Err(err) = self.store().channel().save_member(member).await {\n                last_save_error = Some(err);\n            }\n            self.hub().invalidate_user(&user.id);	api	plugin_hooks::the_plugin_api_user_methods
+reload-before-each-user-added	crates/mm-app/src/team_member.rs	            self.publish(event).await;\n        }\n\n        match last_save_error {	            self.hub().invalidate_user(&user.id);\n            self.publish(event).await;\n        }\n\n        match last_save_error {	api	plugin_hooks::the_plugin_api_user_methods
+join-invalidation-dropped	crates/mm-app/src/team_member.rs	        // `a.ClearSessionCacheForUser(user.Id)` (team.go:872).\n        self.clear_session_cache_for_user(&user.id).await;	        // `a.ClearSessionCacheForUser(user.Id)` (team.go:872).\n        let _ = &user.id;	api	plugin_hooks::the_plugin_api_user_methods
+control-admin-comparison-swapped	crates/mm-app/src/team_member.rs	        let should_be_admin = team.email == user.email;	        let should_be_admin = user.email == team.email;	api	plugin_hooks::the_plugin_api_user_methods

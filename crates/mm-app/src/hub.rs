@@ -316,8 +316,8 @@ pub struct WebConn {
 
     /// Go's `allChannelMembers` + `lastAllChannelMembersTime`: channel id → roles, refreshed
     /// every [`WEB_CONN_MEMBER_CACHE_TIME`] ms. Only the *keys* are ever read; the roles come
-    /// along because the store call returns them.
-    all_channel_members: RwLock<Option<(HashMap<String, String>, i64)>>,
+    /// along because the store call returns them. See [`MemberCache`] for the generation.
+    all_channel_members: RwLock<MemberCache>,
 
     /// Go's `reuseCount`: how many times this connection's queues have been handed to a client
     /// that reconnected. `hello` is queued on registration only when it is zero.
@@ -391,7 +391,7 @@ impl WebConn {
             active_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
             active_rhs_thread_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
             active_thread_view_thread_channel_id: RwLock::new(UNSET_PRESENCE_INDICATOR.to_owned()),
-            all_channel_members: RwLock::new(None),
+            all_channel_members: RwLock::new(MemberCache::default()),
             reuse_count,
             last_user_activity_at: AtomicI64::new(get_millis()),
             parked: Mutex::new(None),
@@ -538,32 +538,45 @@ impl WebConn {
         };
     }
 
-    /// The membership half of [`WebConn::invalidate_cache`] alone.
+    /// The membership half of [`WebConn::invalidate_cache`] alone. It also moves the cache to a
+    /// new generation, so a load already in flight cannot put the old memberships back.
     pub fn invalidate_channel_members(&self) {
-        *self
+        let mut cache = self
             .all_channel_members
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.members = None;
+        cache.generation = cache.generation.wrapping_add(1);
     }
 
-    fn cached_channel_members(&self) -> Option<HashMap<String, String>> {
-        let guard = self
+    /// The cached memberships, or — when there are none, or they are older than
+    /// [`WEB_CONN_MEMBER_CACHE_TIME`] — the generation a load started now must present to
+    /// [`WebConn::store_channel_members`].
+    fn cached_channel_members(&self) -> Result<HashMap<String, String>, u64> {
+        let cache = self
             .all_channel_members
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match guard.as_ref() {
+        match cache.members.as_ref() {
             Some((members, at)) if get_millis() - *at <= WEB_CONN_MEMBER_CACHE_TIME => {
-                Some(members.clone())
+                Ok(members.clone())
             }
-            _ => None,
+            _ => Err(cache.generation),
         }
     }
 
-    fn store_channel_members(&self, members: HashMap<String, String>) {
-        *self
+    /// Keep a load's result, unless the cache was invalidated after the load began (its
+    /// `generation` is no longer current). Returns whether it was kept.
+    fn store_channel_members(&self, generation: u64, members: HashMap<String, String>) -> bool {
+        let mut cache = self
             .all_channel_members
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((members, get_millis()));
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.generation != generation {
+            return false;
+        }
+        cache.members = Some((members, get_millis()));
+        true
     }
 
     /// Whether the connection's queue has passed [`SEND_SLOW_WARN`].
@@ -590,6 +603,22 @@ impl WebConn {
     ) -> Result<(), mpsc::error::TrySendError<OutgoingFrame>> {
         self.send.try_send(frame)
     }
+}
+
+/// A connection's membership cache: Go's two fields, and a generation Go does not need.
+///
+/// Go loads and invalidates this cache on one goroutine, the hub's, so an invalidation is always
+/// either wholly before a load or wholly after it. Here a publish loads it on the publishing task
+/// while any other task may invalidate it, so a load that read the old memberships could store
+/// them *after* the invalidation that was meant to drop them, and the connection would then miss
+/// the new channel's events for [`WEB_CONN_MEMBER_CACHE_TIME`]. Every invalidation moves the
+/// generation, and a load stores its result only if the generation it began under is still
+/// current. The load's answer is still used for the event that made it: Go could equally have
+/// decided that event before the invalidation arrived.
+#[derive(Debug, Default)]
+struct MemberCache {
+    members: Option<(HashMap<String, String>, i64)>,
+    generation: u64,
 }
 
 /// Which presence slot [`WebConn::set_presence`] addresses.
@@ -1239,6 +1268,27 @@ impl App {
     /// over `channel_id`, which wins over `team_id`. A broadcast carrying two of them is not an
     /// intersection — the earlier field decides and the later is never consulted — so reordering
     /// them silently widens or narrows the audience of every event that sets more than one.
+    ///
+    /// # When the membership is read ([D-1032])
+    ///
+    /// A channel-scoped event asks the connection's cached memberships, loaded at the first such
+    /// event after the cache was last invalidated and kept until the next invalidation (or 30
+    /// minutes). Nothing in a join loop invalidates it: Go's `JoinDefaultChannels` publishes each
+    /// default channel's join post and `user_added` as it goes, and the joiner's connections are
+    /// invalidated only after the loop (`ClearSessionCacheForUser` and two more, team.go:872).
+    /// So a joiner whose cache was empty hears town-square's join post and `user_added` — the
+    /// post's decision loaded a cache holding town-square — and neither of off-topic's, which was
+    /// saved after that load. Measured on Go over REST (`POST /teams/{id}/members`), 30 runs of
+    /// 30. This server decides as it publishes, which is Go's hub keeping up, and gives the same.
+    ///
+    /// **Go's own answer is a race when its hub falls one event behind.** `InvalidateUser` is an
+    /// unbuffered send to the hub goroutine and `Broadcast` a buffered one; when the hub is still
+    /// busy with off-topic's join post as the loop publishes off-topic's `user_added` and then
+    /// invalidates, the hub's `select` finds both ready and picks one at random. Picking the
+    /// invalidation first reloads the cache, and the queued `user_added` is heard. Through the
+    /// plugin API's `CreateTeamMember` that happened in 13 runs of 26 — the hub never fell two
+    /// behind, so off-topic's join post was never heard. Go's coin cannot be ported; the parity
+    /// test tolerates exactly that frame (`parity::plugin_hooks`, the users tranche).
     pub async fn should_send_event(&self, conn: &WebConn, event: &WebSocketEvent) -> bool {
         if !self.conn_is_authenticated(conn).await {
             return false;
@@ -1263,15 +1313,17 @@ impl App {
             Verdict::GuestVisibility => self.should_send_event_to_guest(conn, event).await,
             Verdict::RequiresChannelMembership(channel_id) => {
                 let members = match conn.cached_channel_members() {
-                    Some(members) => members,
-                    None => match self
+                    Ok(members) => members,
+                    Err(generation) => match self
                         .store()
                         .channel()
                         .get_all_channel_members_for_user(&conn.user_id(), false)
                         .await
                     {
                         Ok(members) => {
-                            conn.store_channel_members(members.clone());
+                            // The clone is the cache's copy; the load's own answer decides
+                            // this event even when the cache refuses it.
+                            conn.store_channel_members(generation, members.clone());
                             members
                         }
                         Err(err) => {
@@ -1759,6 +1811,44 @@ mod tests {
         let mut broadcast = event.get_broadcast().cloned().unwrap_or_default();
         mutate(&mut broadcast);
         event.set_broadcast(broadcast)
+    }
+
+    fn members(channels: &[&str]) -> HashMap<String, String> {
+        channels
+            .iter()
+            .map(|c| ((*c).to_owned(), "channel_user".to_owned()))
+            .collect()
+    }
+
+    /// The generation rule ([`MemberCache`]): a load that began before an invalidation cannot
+    /// store what it read, so the next event loads again and sees the new channel.
+    #[test]
+    fn a_load_that_began_before_an_invalidation_is_not_kept() {
+        let (conn, _rx) = conn(USER);
+        let before = conn.cached_channel_members().unwrap_err();
+        conn.invalidate_channel_members();
+        assert!(!conn.store_channel_members(before, members(&[CHANNEL])));
+        let after = conn.cached_channel_members().unwrap_err();
+        assert_ne!(before, after, "the invalidation moved the generation");
+
+        // A load that began after it is kept, and answers the next event from the cache.
+        assert!(conn.store_channel_members(after, members(&[CHANNEL, TEAM])));
+        assert_eq!(
+            conn.cached_channel_members().unwrap(),
+            members(&[CHANNEL, TEAM])
+        );
+    }
+
+    /// `invalidate_cache`, which drops the session too, moves the generation exactly as the
+    /// membership half alone does: the hub's `invalidate_user` goes through it.
+    #[test]
+    fn the_whole_invalidation_moves_the_generation_too() {
+        let (conn, _rx) = conn(USER);
+        let first = conn.cached_channel_members().unwrap_err();
+        assert!(conn.store_channel_members(first, members(&[CHANNEL])));
+        conn.invalidate_cache();
+        assert!(!conn.store_channel_members(first, members(&[CHANNEL])));
+        assert!(conn.cached_channel_members().is_err());
     }
 
     #[test]
