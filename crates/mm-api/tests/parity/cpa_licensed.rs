@@ -45,7 +45,7 @@ const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
 
 /// A 26-character id under the suite's prefix — padded with zeros, and **checked**: a planted
 /// row with a 27-character id is refused by the column and takes the whole test with it.
-fn planted_id(suffix: &str) -> String {
+pub(crate) fn planted_id(suffix: &str) -> String {
     let id = format!("{PREFIX}{suffix:0>16}");
     assert_eq!(id.len(), 26, "{id}");
     id
@@ -161,7 +161,7 @@ async fn access_control_group_id() -> String {
 
 /// Plant a `user` field with arbitrary attrs — the only way to get `protected`, an
 /// `access_mode`, `owners` or a sync source onto a field, since the REST API refuses all four.
-async fn plant_field(id: &str, name: &str, type_: &str, attrs: &str) {
+pub(crate) async fn plant_field(id: &str, name: &str, type_: &str, attrs: &str) {
     let pool = common::fixture_pool().await.expect("the fixture pool");
     let group = access_control_group_id().await;
     sqlx::query(

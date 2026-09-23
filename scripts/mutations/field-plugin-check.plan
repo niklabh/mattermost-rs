@@ -1,0 +1,12 @@
+# Mutation plan for the `checkFieldDeleteAccess` plugin check under the Rust host ([D-542]).
+#
+#   scripts/mutate-batch.sh scripts/mutations/field-plugin-check.plan
+#
+# The oracle is the property step of `parity::plugin_hooks::the_support_data_hook_fires_as_go_fires_it`.
+# The last two lines are the no-op controls and must SURVIVE.
+
+never-installed	crates/mm-app/src/property_hooks.rs	        self.plugin_host().hosted() && self.get_plugin_status(id).is_ok()	        self.plugin_host().hosted() && self.get_plugin_status(id).is_ok() && false	api	plugin_hooks::the_support
+asks-about-the-caller	crates/mm-app/src/property_hooks.rs	    if !plugin_installed(source) {	    if !plugin_installed(&caller.id) {	api	plugin_hooks::the_support
+installed-arm-inverted	crates/mm-app/src/property_hooks.rs	    if !plugin_installed(source) {	    if plugin_installed(source) {	api	plugin_hooks::the_support
+control-rename-the-closure-parameter	crates/mm-app/src/property_hooks.rs	        check_field_delete_access(existing, caller, |id| self.plugin_installed(id))	        check_field_delete_access(existing, caller, |plugin_id| self.plugin_installed(plugin_id))	api	plugin_hooks::the_support
+control-bind-the-status-first	crates/mm-app/src/property_hooks.rs	        self.plugin_host().hosted() && self.get_plugin_status(id).is_ok()	        let hosted = self.plugin_host().hosted();\n        hosted && self.get_plugin_status(id).is_ok()	api	plugin_hooks::the_support
