@@ -371,8 +371,7 @@ impl GroupSyncableStore for SqlGroupStore {
                        COALESCE(c.displayname, '') AS "channeldisplayname!",
                        COALESCE(t.displayname, '') AS "teamdisplayname!",
                        COALESCE(c.type::text, '')  AS "channeltype!",
-                       COALESCE(t.type::text, '')  AS "teamtype!",
-                       t.id                        AS "teamid!"
+                       COALESCE(t.type::text, '')  AS "teamtype!"
                   FROM groupchannels gc
                   JOIN channels c ON c.id = gc.channelid
                   JOIN teams t ON t.id = c.teamid
@@ -398,7 +397,11 @@ impl GroupSyncableStore for SqlGroupStore {
                 channel_type: r.channeltype,
                 team_display_name: r.teamdisplayname,
                 team_type: r.teamtype,
-                team_id: r.teamid,
+                // Go selects `Teams.Id AS TeamId` into `groupChannelJoin.TeamId` and then reads
+                // `result.TeamID` — the embedded `GroupSyncable`'s field, which nothing filled.
+                // So a channel link read this way has no team id; the plugin API's
+                // `GetGroupSyncables` measured it.
+                team_id: String::new(),
                 scheme_admin: r.schemeadmin.unwrap_or_default(),
             })
             .collect(),

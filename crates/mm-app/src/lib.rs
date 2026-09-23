@@ -52,6 +52,7 @@ pub mod file_upload;
 pub mod filestore;
 /// The one unlicensed read of `app/group.go`, for `members_minus_group_members`.
 pub mod group;
+pub mod group_lookup;
 /// The supported-locale list, for `users.CreateUser`'s locale reset.
 pub mod http_guard;
 /// The websocket connection registry and event fan-out — Go's `app/platform` hub.

@@ -644,7 +644,8 @@ async fn syncable_writes_follow_the_store_rules() {
         .unwrap();
     assert_eq!(live_channels.len(), 1);
     assert_eq!(live_channels[0].channel_type, "P");
-    assert_eq!(live_channels[0].team_id, TEAM);
+    // Go reads the embedded `TeamID` that its scan never fills (the plugin tranche measured it).
+    assert_eq!(live_channels[0].team_id, "");
     assert!(live_channels[0].scheme_admin);
 
     let synced = store.group_ids_synced_to_team(TEAM).await.unwrap();

@@ -711,6 +711,16 @@ reaction and emoji twenty-seven (`plugin_api/channels.rs`): `GetChannelsForTeamF
 sizes REST clamps, so Go's store refusals of them are ported. `SearchPostsInTeam` with a real
 term answers not-implemented ([D-1050]).
 
+**Then 176 of 258:** the session, token, auth-data, OAuth-app, role and group thirty-two
+(`plugin_api/auth.rs`): `CreateSession`, `ExtendSessionExpiry`, `RevokeSession`,
+`CreateUserAccessToken`, `RevokeUserAccessToken`, `UpdateUserAuth`, the four OAuth-app methods,
+`RolesGrantPermission`, and twenty-one group methods — the five ungated reads (`GetGroup`,
+`GetGroupByName`, `GetGroupMemberUsers`, `GetGroupsBySource`, `GetGroupsForUser`) and sixteen
+behind `checkLDAPLicense`, which refuses with `app.group.license_error` 403 under the method's own
+name. The tranche runs its script twice, unlicensed and licensed. `RevokeSession` of an OAuth
+session answers not-implemented ([D-283]); `DeleteGroupConstrainedMemberships` sweeps the whole
+installation and is compared only where it refuses ([D-1070]).
+
 ### Phase 7 · Publish
 
 `gobwire`, `gobwire-derive`, `go-netrpc` and `goplugin` go to crates.io. **Ready 2026-09-19,
