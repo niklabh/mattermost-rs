@@ -398,6 +398,234 @@ impl App {
     }
 }
 
+/// `UploadFileForUserAndTeam`'s stand-ins for an upload that names no user or team
+/// (app/file.go:625): the literal owner `nouser` and the team `noteam`.
+const NO_USER: &str = "nouser";
+
+impl App {
+    /// Port of `app.App.UploadFile` (app/file.go:615) — `UploadFileForUserAndTeam` with no user
+    /// and no team — the plugin API's `UploadFile`.
+    ///
+    /// The channel must exist unless it is empty, and any lookup failure is the 400
+    /// `api.file.upload_file.incorrect_channelId.app_error`. Then
+    /// [`App::do_upload_file_expect_modification`], and `HandleImages` over the bytes the
+    /// **caller** passed — not a plugin's replacement — at the paths the row ended with.
+    ///
+    /// # Not implemented, decided before anything is written
+    ///
+    /// A `WebP` canvas declaring alpha (its header is read first; [`PrepareError::Unreproducible`]).
+    /// A file backend this port does not drive is only discovered at the write, **after** the
+    /// plugins ran, and answered the same way.
+    #[tracing::instrument(skip(self, hook_ctx, data), fields(channel_id = %channel_id, filename = %filename))]
+    pub async fn upload_file(
+        &self,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+        data: Vec<u8>,
+        channel_id: &str,
+        filename: &str,
+    ) -> Result<FileInfo, PrepareError> {
+        if self.get_channel(channel_id).await.is_err() && !channel_id.is_empty() {
+            return Err(PrepareError::App(AppError::boxed(
+                "UploadFile",
+                "api.file.upload_file.incorrect_channelId.app_error",
+                Some(HashMap::from([(
+                    "channelId".to_owned(),
+                    serde_json::Value::String(channel_id.to_owned()),
+                )])),
+                String::new(),
+                400,
+            )));
+        }
+
+        let info = self
+            .do_upload_file_expect_modification(
+                hook_ctx,
+                chrono::Local::now(),
+                FILE_TEAM_ID,
+                channel_id,
+                NO_USER,
+                filename,
+                &data,
+            )
+            .await?;
+
+        if !info.preview_path.is_empty() || !info.thumbnail_path.is_empty() {
+            // Go's `HandleImages` cannot fail. The one refusal the pipeline has — a format it
+            // does not decode — was taken on these same bytes before anything was written, unless
+            // a plugin gave a non-image derived paths; then the images are skipped, logged.
+            if let Err(err) = self.handle_images(&info, data).await {
+                tracing::warn!(error = %err, file_id = %info.id, "HandleImages skipped");
+            }
+        }
+        Ok(info)
+    }
+
+    /// Port of `app.App.DoUploadFileExpectModification` (app/file.go:1063), less the modified
+    /// bytes it also returns, which its one migrated caller drops.
+    ///
+    /// In Go's order: every name through `filepath.Base` (so an empty channel is `.` in the
+    /// path), [`get_info_for_bytes`] (a failure is a 400 whatever it was), the EXIF orientation
+    /// read **by mime type**, which swaps the dimensions for the four sideways orientations and
+    /// only logs when it cannot be read, the id, owner and `CreateAt`, the dated path, and — for
+    /// a raster image — the resolution refusal and the two derived paths. Then the plugins'
+    /// `FileWillBeUploaded` ([`App::run_upload_file_hooks`]), the write (of their replacement,
+    /// when one wrote any, at the path as they left it) and the row.
+    ///
+    /// **`ChannelId` is never set** — the channel reaches the path and nothing else — and the row
+    /// has no `MiniPreview`: this path generates none, so the first `GetFileInfo` of an image
+    /// uploaded here is the repair [D-891] keeps with Go. Content extraction is [D-651].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn do_upload_file_expect_modification(
+        &self,
+        hook_ctx: &crate::plugin_hooks::HookContext,
+        now: chrono::DateTime<chrono::Local>,
+        raw_team_id: &str,
+        raw_channel_id: &str,
+        raw_user_id: &str,
+        raw_filename: &str,
+        data: &[u8],
+    ) -> Result<FileInfo, PrepareError> {
+        let filename = go_path::base(raw_filename);
+        let team_id = go_path::base(raw_team_id);
+        let channel_id = go_path::base(raw_channel_id);
+        let user_id = go_path::base(raw_user_id);
+
+        let mut info = get_info_for_bytes(&filename, data)?;
+
+        match get_image_orientation(Input::Seeker(data), &info.mime_type) {
+            Ok(outcome) => match &outcome.err {
+                None if matches!(
+                    outcome.orientation,
+                    ROTATED_CW_MIRRORED | ROTATED_CCW | ROTATED_CCW_MIRRORED | ROTATED_CW
+                ) =>
+                {
+                    std::mem::swap(&mut info.width, &mut info.height);
+                }
+                None => {}
+                Some(err) => tracing::warn!(error = %err, "Failed to get image orientation"),
+            },
+            Err(crate::imaging_orientation::Unreproducible(why)) => {
+                return Err(PrepareError::Unreproducible(why));
+            }
+        }
+
+        info.id = new_id();
+        info.creator_id.clone_from(&user_id);
+        info.create_at = now.timestamp_millis();
+        let prefix = path_prefix(&info.id, &user_id, &team_id, &channel_id, now);
+        info.path = format!("{prefix}{filename}");
+
+        if info.is_image() && !info.is_svg() {
+            if crate::imaging::check_image_resolution_limit(
+                info.width,
+                info.height,
+                self.config().file_max_image_resolution,
+            )
+            .is_err()
+            {
+                return Err(PrepareError::App(AppError::boxed(
+                    "uploadFile",
+                    "api.file.upload_file.large_image.app_error",
+                    Some(HashMap::from([(
+                        "Filename".to_owned(),
+                        serde_json::Value::String(filename.clone()),
+                    )])),
+                    String::new(),
+                    400,
+                )));
+            }
+            // `filename[:strings.LastIndex(filename, ".")]`: an image mime type came from an
+            // extension, so the dot is there.
+            let stem = filename
+                .rsplit_once('.')
+                .map_or(filename.as_str(), |(stem, _)| stem);
+            let ext = file_ext_from_mime_type(&info.mime_type);
+            info.preview_path = format!("{prefix}{stem}_preview.{ext}");
+            info.thumbnail_path = format!("{prefix}{stem}_thumb.{ext}");
+        }
+
+        let replaced = self
+            .run_upload_file_hooks(hook_ctx, &mut info, data)
+            .await
+            .map_err(PrepareError::App)?;
+        let bytes = replaced.as_deref().unwrap_or(data);
+
+        self.write_file(bytes, &info.path).await?;
+
+        match self.store().file_info().save(info).await {
+            Ok(info) => Ok(info),
+            Err(StoreError::Invalid { app_error, .. }) => Err(PrepareError::App(app_error)),
+            Err(err) => {
+                tracing::error!(error = %err, "FileInfo save failed");
+                Err(PrepareError::App(AppError::boxed(
+                    "DoUploadFileExpectModification",
+                    "app.file_info.save.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )))
+            }
+        }
+        // `ExtractContent`: [D-651].
+    }
+}
+
+/// Port of `getInfoForBytes` (app/file_info.go:18) — `DoUploadFileExpectModification`'s row
+/// before it has an id, whose one refusal is a GIF.
+///
+/// The name as given, the size of the bytes, the lower-cased extension and the mime type it
+/// maps to. For an image name, the header's dimensions when `image.DecodeConfig` reads one — and
+/// a header that does not decode leaves the file an image with no dimensions and **no** preview.
+/// A decoded GIF has a preview only when it has exactly one frame, and a GIF whose frames do not
+/// count is the 400 `app.file_info.get.gif.app_error` (its `HasPreviewImage` set on the way out,
+/// which nobody reads). Every other decoded image has a preview.
+///
+/// Go's `err` is declared and never assigned outside the GIF branch — every other failure is
+/// shadowed — so there is no other refusal. A `WebP` canvas declaring alpha, which this port does
+/// not decode, is [`PrepareError::Unreproducible`].
+pub fn get_info_for_bytes(name: &str, data: &[u8]) -> Result<FileInfo, PrepareError> {
+    let extension = mm_model::file_info::file_extension(name);
+    let mut info = FileInfo {
+        name: name.to_owned(),
+        size: i64::try_from(data.len()).unwrap_or(i64::MAX),
+        mime_type: crate::mime::type_by_extension(&format!(".{extension}")),
+        extension,
+        ..FileInfo::default()
+    };
+    if !info.is_image() {
+        return Ok(info);
+    }
+    let config = match image_pipeline::decode_config(data) {
+        Ok(config) => config,
+        Err(PipelineError::NotPorted(_)) => {
+            return Err(PrepareError::Unreproducible(
+                "a WebP canvas that declares alpha is decoded by Go",
+            ));
+        }
+        Err(PipelineError::Go(_)) => return Ok(info),
+    };
+    info.width = config.width;
+    info.height = config.height;
+    if info.mime_type == "image/gif" {
+        match crate::link_image::count_gif_frames(data) {
+            Ok(frames) => info.has_preview_image = frames == 1,
+            Err(err) => {
+                tracing::debug!(error = %err, "the GIF's frames do not count");
+                return Err(PrepareError::App(AppError::boxed(
+                    "getInfoForBytes",
+                    "app.file_info.get.gif.app_error",
+                    None,
+                    String::new(),
+                    400,
+                )));
+            }
+        }
+    } else {
+        info.has_preview_image = true;
+    }
+    Ok(info)
+}
+
 /// Why `preprocess_image` stopped.
 enum Preprocess {
     TooLarge,
@@ -444,4 +672,80 @@ mod tests {
     }
 
     use chrono::TimeZone;
+
+    /// `imgutils.GenGIFData(1, 1, frames)`; zero frames leaves no frame and no trailer.
+    fn gif(frames: usize) -> Vec<u8> {
+        let mut data = vec![
+            b'G', b'I', b'F', b'8', b'9', b'a', 1, 0, 1, 0, 128, 0, 0, 0, 0, 0, 1, 1, 1,
+        ];
+        if frames == 0 {
+            return data;
+        }
+        for _ in 0..frames {
+            data.extend_from_slice(&[0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0x2, 0x2, 0x4c, 0x1, 0]);
+        }
+        data.push(0x3b);
+        data
+    }
+
+    #[test]
+    fn a_text_file_is_its_name_size_and_mime_type() {
+        let info = get_info_for_bytes("Notes.TXT", b"hello").expect("an info");
+        assert_eq!(
+            (info.name.as_str(), info.extension.as_str(), info.size),
+            ("Notes.TXT", "txt", 5)
+        );
+        assert_eq!(info.mime_type, "text/plain; charset=utf-8");
+        assert!(!info.has_preview_image);
+        let bare = get_info_for_bytes("noext", b"").expect("an info");
+        assert_eq!((bare.extension.as_str(), bare.mime_type.as_str()), ("", ""));
+    }
+
+    /// A decoded image has its dimensions and a preview; one that does not decode has neither,
+    /// and is still an image, with no refusal.
+    #[test]
+    fn an_image_is_measured_only_when_its_header_decodes() {
+        const TINY_PNG: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+            8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 207,
+            192, 0, 0, 3, 1, 1, 0, 201, 254, 146, 239, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96,
+            130,
+        ];
+        let png = get_info_for_bytes("p.png", TINY_PNG).expect("an info");
+        assert_eq!((png.width, png.height, png.has_preview_image), (1, 1, true));
+        let garbage = get_info_for_bytes("g.png", b"not a png").expect("an info");
+        assert_eq!(
+            (garbage.width, garbage.height, garbage.has_preview_image),
+            (0, 0, false)
+        );
+        assert!(garbage.is_image());
+    }
+
+    /// A GIF has a preview only with exactly one frame, and one whose frames do not count is
+    /// the one refusal, a 400.
+    #[test]
+    fn a_gif_is_previewed_only_with_one_frame() {
+        assert!(
+            get_info_for_bytes("s.gif", &gif(1))
+                .expect("an info")
+                .has_preview_image
+        );
+        assert!(
+            !get_info_for_bytes("a.gif", &gif(2))
+                .expect("an info")
+                .has_preview_image
+        );
+        match get_info_for_bytes("t.gif", &gif(0)) {
+            Err(PrepareError::App(err)) => {
+                assert_eq!(
+                    (err.id.as_str(), err.status_code, err.where_.as_str()),
+                    ("app.file_info.get.gif.app_error", 400, "getInfoForBytes")
+                );
+            }
+            other => panic!("a GIF with no frames: {other:?}"),
+        }
+        // A `.gif` whose header does not decode is not counted at all.
+        let garbage = get_info_for_bytes("x.gif", b"GIF").expect("an info");
+        assert!(!garbage.has_preview_image);
+    }
 }

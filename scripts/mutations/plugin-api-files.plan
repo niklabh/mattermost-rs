@@ -1,0 +1,49 @@
+# Mutation plan for the plugin API's file, dialog, mail and inter-plugin HTTP methods
+# (docs/PLUGIN_PLAN.md, Phase 6).
+#
+#   scripts/mutate-batch.sh scripts/mutations/plugin-api-files.plan
+#
+# The oracle is `parity::plugin_hooks::the_plugin_api_file_methods_answer_as_go_answers`: 72
+# calls from inside ExecuteCommand on a Go host and a Rust host, every answer, every hook, every
+# frame, the FileInfo rows and every stored byte. One line is a unit mutation: a status written
+# after the head was handed over cannot reach any answer. The last two lines are the no-op
+# controls and must SURVIVE.
+
+reject-id-generic	crates/mm-app/src/plugin_hooks.rs	format!("File rejected by plugin. {}", returns.b),	"app.upload.run_plugins_hook.rejected",	api	plugin_hooks::the_plugin_api_file_methods
+reject-where-runhook	crates/mm-app/src/plugin_hooks.rs	"DoUploadFile",\n                    format!	"runPluginsHook",\n                    format!	api	plugin_hooks::the_plugin_api_file_methods
+replacement-size-kept	crates/mm-app/src/plugin_hooks.rs	info.size = i64::try_from(written.len()).unwrap_or(i64::MAX);	let _ = written.len();	api	plugin_hooks::the_plugin_api_file_methods
+replacement-not-written	crates/mm-app/src/file_upload.rs	let bytes = replaced.as_deref().unwrap_or(data);	let bytes = { let _ = &replaced; data };	api	plugin_hooks::the_plugin_api_file_methods
+handle-images-skipped	crates/mm-app/src/file_upload.rs	if !info.preview_path.is_empty() || !info.thumbnail_path.is_empty() {	if false && !info.preview_path.is_empty() {	api	plugin_hooks::the_plugin_api_file_methods
+orientation-not-swapped	crates/mm-app/src/file_upload.rs	{\n                    std::mem::swap(&mut info.width, &mut info.height);\n                }\n                None => {}	{}\n                None => {}	api	plugin_hooks::the_plugin_api_file_methods
+gif-preview-any-frames	crates/mm-app/src/file_upload.rs	Ok(frames) => info.has_preview_image = frames == 1,	Ok(frames) => info.has_preview_image = frames >= 1,	api	plugin_hooks::the_plugin_api_file_methods
+gif-count-error-ignored	crates/mm-app/src/file_upload.rs	tracing::debug!(error = %err, "the GIF's frames do not count");\n                return Err(	tracing::debug!(error = %err, "the GIF's frames do not count");\n                return Ok(info);\n                return Err(	api	plugin_hooks::the_plugin_api_file_methods
+undecoded-image-previewed	crates/mm-app/src/file_upload.rs	Err(PipelineError::Go(_)) => return Ok(info),	Err(PipelineError::Go(_)) => {\n            info.has_preview_image = true;\n            return Ok(info);\n        }	api	plugin_hooks::the_plugin_api_file_methods
+resolution-unchecked	crates/mm-app/src/file_upload.rs	if crate::imaging::check_image_resolution_limit(\n                info.width,\n                info.height,\n                self.config().file_max_image_resolution,\n            )\n            .is_err()\n            {\n                return Err(PrepareError::App(AppError::boxed(\n                    "uploadFile",	if crate::imaging::check_image_resolution_limit(\n                info.width,\n                info.height,\n                self.config().file_max_image_resolution,\n            )\n            .is_err() && false\n            {\n                return Err(PrepareError::App(AppError::boxed(\n                    "uploadFile",	api	plugin_hooks::the_plugin_api_file_methods
+empty-channel-refused	crates/mm-app/src/file_upload.rs	if self.get_channel(channel_id).await.is_err() && !channel_id.is_empty() {	if self.get_channel(channel_id).await.is_err() {	api	plugin_hooks::the_plugin_api_file_methods
+channel-id-set	crates/mm-app/src/file_upload.rs	info.creator_id.clone_from(&user_id);\n        info.create_at = now.timestamp_millis();	info.creator_id.clone_from(&user_id);\n        info.channel_id.clone_from(&channel_id);\n        info.create_at = now.timestamp_millis();	api	plugin_hooks::the_plugin_api_file_methods
+empty-channel-not-dot	crates/mm-app/src/file_upload.rs	let channel_id = go_path::base(raw_channel_id);	let channel_id = raw_channel_id.to_owned();	api	plugin_hooks::the_plugin_api_file_methods
+content-set-without-row	crates/mm-app/src/file.rs	let info = self.server_get_file_info(file_id).await?;\n        self.store()	let info = FileInfo { id: file_id.to_owned(), ..FileInfo::default() };\n        self.store()	api	plugin_hooks::the_plugin_api_file_methods
+copy-keeps-channel	crates/mm-app/src/file.rs	info.post_id = String::new();\n            info.channel_id = String::new();	info.post_id = String::new();	api	plugin_hooks::the_plugin_api_file_methods
+copy-keeps-post	crates/mm-app/src/file.rs	info.update_at = now;\n            info.post_id = String::new();	info.update_at = now;	api	plugin_hooks::the_plugin_api_file_methods
+copy-invalid-as-500	crates/mm-app/src/file.rs	Err(mm_store::error::StoreError::Invalid { app_error, .. }) => {\n                    return Err(app_error);\n                }\n                Err(err) => {	Err(err) => {	api	plugin_hooks::the_plugin_api_file_methods
+infos-refusal-as-500	crates/mm-app/src/file.rs	let status = if err.is_invalid_input() || err.is_limit_exceeded() {	let status = if false {	api	plugin_hooks::the_plugin_api_file_methods
+since-exclusive	crates/mm-store/src/file_info_store.rs	AND ($3::bigint <= 0 OR fileinfo.createat >= $3)	AND ($3::bigint <= 0 OR fileinfo.createat > $3)	api	plugin_hooks::the_plugin_api_file_methods
+deleted-always-hidden	crates/mm-store/src/file_info_store.rs	AND ($4::bool OR fileinfo.deleteat = 0)	AND (($4::bool OR NOT $4::bool) AND fileinfo.deleteat = 0)	api	plugin_hooks::the_plugin_api_file_methods
+empty-content-null-only	crates/mm-store/src/file_info_store.rs	AND (NOT $5::bool OR fileinfo.content IS NULL OR fileinfo.content = '')	AND (NOT $5::bool OR fileinfo.content IS NULL)	api	plugin_hooks::the_plugin_api_file_methods
+size-desc-as-asc	crates/mm-store/src/file_info_store.rs	CASE WHEN NOT $6::bool AND $7::bool THEN fileinfo.size END DESC,	CASE WHEN NOT $6::bool AND $7::bool THEN fileinfo.size END ASC,	api	plugin_hooks::the_plugin_api_file_methods
+offset-is-page	crates/mm-store/src/file_info_store.rs	let offset = per_page.saturating_mul(page);	let offset = page;	api	plugin_hooks::the_plugin_api_file_methods
+negative-page-queried	crates/mm-store/src/file_info_store.rs	if page < 0 {	if page < -1 {	api	plugin_hooks::the_plugin_api_file_methods
+bad-sort-as-created	crates/mm-store/src/file_info_store.rs	            FILEINFO_SORT_BY_SIZE => false,\n            other => {	            FILEINFO_SORT_BY_SIZE => false,\n            _ if true => true,\n            other => {	api	plugin_hooks::the_plugin_api_file_methods
+link-for-unattached	crates/mm-app/src/plugin_api/files.rs	if info.post_id.is_empty() {	if info.post_id.is_empty() && false {	api	plugin_hooks::the_plugin_api_file_methods
+dialog-empty-elements-array	crates/mm-app/src/plugin_api/files.rs	elements: nil_if_empty(	elements: Some::<Vec<_>>(	api	plugin_hooks::the_plugin_api_file_methods
+mail-subject-first	crates/mm-app/src/plugin_api/files.rs	let id = if to.is_empty() {\n        "plugin_api.send_mail.missing_to"\n    } else if subject.is_empty() {\n        "plugin_api.send_mail.missing_subject"	let id = if subject.is_empty() {\n        "plugin_api.send_mail.missing_subject"\n    } else if to.is_empty() {\n        "plugin_api.send_mail.missing_to"	api	plugin_hooks::the_plugin_api_file_methods
+mail-sends-when-off	crates/mm-app/src/plugin_api/files.rs	if self.app.config().send_email_notifications {	if !self.app.config().send_email_notifications {	api	plugin_hooks::the_plugin_api_file_methods
+nil-header-served	crates/mm-app/src/plugin_api/http.rs	if request.header.is_empty() {	if request.header.is_empty() && false {	api	plugin_hooks::the_plugin_api_file_methods
+plugin-id-header-uncanonical	crates/mm-app/src/plugin_api/http.rs	.insert("Mattermost-Plugin-Id".to_owned(), vec![self.id.clone()]);	.insert("Mattermost-Plugin-ID".to_owned(), vec![self.id.clone()]);	api	plugin_hooks::the_plugin_api_file_methods
+query-not-reencoded	crates/mm-app/src/plugin_api/http.rs	new_url.raw_query = parsed.query().encode();	new_url.raw_query.clone_from(&parsed.raw_query);	api	plugin_hooks::the_plugin_api_file_methods
+ready-not-at-write	crates/mm-app/src/plugin_api/http.rs	fn write(&mut self, body: &[u8]) -> std::io::Result<()> {\n        self.mark_ready();	fn write(&mut self, body: &[u8]) -> std::io::Result<()> {	api	plugin_hooks::the_plugin_api_file_methods
+user-agent-dropped	crates/mm-app/src/plugin_api/http.rs	.get("User-Agent")	.get("X-No-Such-Header")	api	plugin_hooks::the_plugin_api_file_methods
+short-path-accepted	crates/mm-app/src/plugin_api/http.rs	if split.len() != 3 {	if split.len() < 2 {	api	plugin_hooks::the_plugin_api_file_methods
+status-last-wins	crates/mm-app/src/plugin_api/http.rs	    fn write_header(&mut self, status: i64) {\n        if self.status == 0 {	    fn write_header(&mut self, status: i64) {\n        if self.status == 0 || status != 0 {	unit	plugin_api::http
+control-options-rename	crates/mm-app/src/plugin_api/files.rs	let options = file_infos_options_from_wire(args.c);	let opts = file_infos_options_from_wire(args.c);\n        let options = opts;	api	plugin_hooks::the_plugin_api_file_methods
+control-offset-rename	crates/mm-store/src/file_info_store.rs	let offset = per_page.saturating_mul(page);	let skipped = per_page.saturating_mul(page);\n        let offset = skipped;	api	plugin_hooks::the_plugin_api_file_methods

@@ -1,0 +1,150 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT fileinfo.id                            AS \"id!\",\n                   fileinfo.creatorid                     AS \"creator_id!\",\n                   fileinfo.postid                        AS \"post_id!\",\n                   COALESCE(fileinfo.channelid, '')       AS \"channel_id!\",\n                   fileinfo.createat                      AS \"create_at!\",\n                   fileinfo.updateat                      AS \"update_at!\",\n                   fileinfo.deleteat                      AS \"delete_at!\",\n                   fileinfo.path                          AS \"path!\",\n                   fileinfo.thumbnailpath                 AS \"thumbnail_path!\",\n                   fileinfo.previewpath                   AS \"preview_path!\",\n                   fileinfo.name                          AS \"name!\",\n                   fileinfo.extension                     AS \"extension!\",\n                   fileinfo.size                          AS \"size!\",\n                   fileinfo.mimetype                      AS \"mime_type!\",\n                   fileinfo.width                         AS \"width!\",\n                   fileinfo.height                        AS \"height!\",\n                   fileinfo.haspreviewimage               AS \"has_preview_image!\",\n                   fileinfo.minipreview                   AS \"mini_preview?\",\n                   COALESCE(fileinfo.content, '')         AS \"content!\",\n                   COALESCE(fileinfo.remoteid, '')        AS \"remote_id!\",\n                   fileinfo.archived                      AS \"archived!\"\n              FROM fileinfo\n             WHERE (cardinality($1::text[]) = 0 OR fileinfo.channelid = ANY($1))\n               AND (cardinality($2::text[]) = 0 OR fileinfo.creatorid = ANY($2))\n               AND ($3::bigint <= 0 OR fileinfo.createat >= $3)\n               AND ($4::bool OR fileinfo.deleteat = 0)\n               AND (NOT $5::bool OR fileinfo.content IS NULL OR fileinfo.content = '')\n             ORDER BY CASE WHEN $6::bool AND NOT $7::bool THEN fileinfo.createat END ASC,\n                      CASE WHEN $6::bool AND $7::bool THEN fileinfo.createat END DESC,\n                      CASE WHEN NOT $6::bool AND NOT $7::bool THEN fileinfo.size END ASC,\n                      CASE WHEN NOT $6::bool AND $7::bool THEN fileinfo.size END DESC,\n                      fileinfo.id ASC\n             LIMIT $8 OFFSET $9\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "creator_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "thumbnail_path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "preview_path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "extension!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "size!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "mime_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "width!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "height!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_preview_image!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "mini_preview?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 18,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "remote_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 20,
+        "name": "archived!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "5c5371df1db50aeb58bb107ce8135b7def67863a54dc1faa1dcc3a81500c5e90"
+}

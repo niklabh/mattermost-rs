@@ -166,6 +166,31 @@ pub trait FileInfoStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.GetWithOptions` (file_info_store.go:256), the read behind the
+    /// plugin API's `GetFileInfos`.
+    ///
+    /// The refusals come before the query and in Go's order: a negative `per_page`, then a
+    /// negative `page`, each [`StoreError::LimitExceeded`] (which the app answers 400). A
+    /// `per_page` of **zero is an empty answer**, not "no limit". The channel and user lists
+    /// filter only when non-empty, `since` only when positive, and the sort is `CreateAt` (the
+    /// default for an empty `sort_by`) or `Size`, either way, then `Id` ascending; any other
+    /// `sort_by` is [`StoreError::InvalidInput`]. The row is scanned into `model.FileInfo`
+    /// directly, so `archived` survives, as in [`FileInfoStore::get`].
+    fn get_with_options(
+        &self,
+        page: i64,
+        per_page: i64,
+        options: &mm_model::file_info::GetFileInfosOptions,
+    ) -> impl std::future::Future<Output = Result<Vec<FileInfo>, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.SetContent` (file_info_store.go:438): an `UPDATE` of `Content`
+    /// by id alone — deleted or not — whose row count nobody reads, so an absent id succeeds.
+    fn set_content(
+        &self,
+        file_id: &str,
+        content: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -913,6 +938,149 @@ impl FileInfoStore for SqlFileInfoStore {
         let deleted = result.rows_affected();
         tracing::Span::current().record("deleted", deleted);
         Ok(i64::try_from(deleted).unwrap_or(i64::MAX))
+    }
+
+    /// Go builds the query with squirrel, adding a predicate only when its option is set; here
+    /// each predicate is always present and switched off by its own parameter, which is the same
+    /// statement for every input. The four `CASE` sort keys are the same idea for Go's one
+    /// `ORDER BY <column> <direction>`: exactly one of them is non-NULL for any call.
+    #[tracing::instrument(skip(self, options), fields(page, per_page, found))]
+    async fn get_with_options(
+        &self,
+        page: i64,
+        per_page: i64,
+        options: &mm_model::file_info::GetFileInfosOptions,
+    ) -> Result<Vec<FileInfo>, StoreError> {
+        use mm_model::file_info::{FILEINFO_SORT_BY_CREATED, FILEINFO_SORT_BY_SIZE};
+
+        if per_page < 0 {
+            return Err(StoreError::LimitExceeded {
+                what: "perPage",
+                count: per_page,
+                details: "value used in pagination while getting FileInfos".to_owned(),
+            });
+        }
+        if page < 0 {
+            return Err(StoreError::LimitExceeded {
+                what: "page",
+                count: page,
+                details: "value used in pagination while getting FileInfos".to_owned(),
+            });
+        }
+        if per_page == 0 {
+            return Ok(Vec::new());
+        }
+        let by_created = match options.sort_by.as_str() {
+            "" | FILEINFO_SORT_BY_CREATED => true,
+            FILEINFO_SORT_BY_SIZE => false,
+            other => {
+                return Err(StoreError::InvalidInput {
+                    entity: "FileInfo",
+                    field: "<sortOption>",
+                    value: other.to_owned(),
+                });
+            }
+        };
+        let channel_ids: &[String] = options.channel_ids.as_deref().unwrap_or_default();
+        let user_ids: &[String] = options.user_ids.as_deref().unwrap_or_default();
+        let offset = per_page.saturating_mul(page);
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT fileinfo.id                            AS "id!",
+                   fileinfo.creatorid                     AS "creator_id!",
+                   fileinfo.postid                        AS "post_id!",
+                   COALESCE(fileinfo.channelid, '')       AS "channel_id!",
+                   fileinfo.createat                      AS "create_at!",
+                   fileinfo.updateat                      AS "update_at!",
+                   fileinfo.deleteat                      AS "delete_at!",
+                   fileinfo.path                          AS "path!",
+                   fileinfo.thumbnailpath                 AS "thumbnail_path!",
+                   fileinfo.previewpath                   AS "preview_path!",
+                   fileinfo.name                          AS "name!",
+                   fileinfo.extension                     AS "extension!",
+                   fileinfo.size                          AS "size!",
+                   fileinfo.mimetype                      AS "mime_type!",
+                   fileinfo.width                         AS "width!",
+                   fileinfo.height                        AS "height!",
+                   fileinfo.haspreviewimage               AS "has_preview_image!",
+                   fileinfo.minipreview                   AS "mini_preview?",
+                   COALESCE(fileinfo.content, '')         AS "content!",
+                   COALESCE(fileinfo.remoteid, '')        AS "remote_id!",
+                   fileinfo.archived                      AS "archived!"
+              FROM fileinfo
+             WHERE (cardinality($1::text[]) = 0 OR fileinfo.channelid = ANY($1))
+               AND (cardinality($2::text[]) = 0 OR fileinfo.creatorid = ANY($2))
+               AND ($3::bigint <= 0 OR fileinfo.createat >= $3)
+               AND ($4::bool OR fileinfo.deleteat = 0)
+               AND (NOT $5::bool OR fileinfo.content IS NULL OR fileinfo.content = '')
+             ORDER BY CASE WHEN $6::bool AND NOT $7::bool THEN fileinfo.createat END ASC,
+                      CASE WHEN $6::bool AND $7::bool THEN fileinfo.createat END DESC,
+                      CASE WHEN NOT $6::bool AND NOT $7::bool THEN fileinfo.size END ASC,
+                      CASE WHEN NOT $6::bool AND $7::bool THEN fileinfo.size END DESC,
+                      fileinfo.id ASC
+             LIMIT $8 OFFSET $9
+            "#,
+            channel_ids,
+            user_ids,
+            options.since,
+            options.include_deleted,
+            options.only_empty_content,
+            by_created,
+            options.sort_descending,
+            per_page,
+            offset,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find FileInfos".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        Ok(rows
+            .into_iter()
+            .map(|row| FileInfo {
+                id: row.id,
+                creator_id: row.creator_id,
+                post_id: row.post_id,
+                channel_id: row.channel_id,
+                create_at: row.create_at,
+                update_at: row.update_at,
+                delete_at: row.delete_at,
+                path: row.path,
+                thumbnail_path: row.thumbnail_path,
+                preview_path: row.preview_path,
+                name: row.name,
+                extension: row.extension,
+                size: row.size,
+                mime_type: row.mime_type,
+                width: i64::from(row.width),
+                height: i64::from(row.height),
+                has_preview_image: row.has_preview_image,
+                mini_preview: row.mini_preview,
+                content: row.content,
+                remote_id: Some(row.remote_id),
+                archived: row.archived,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip(self, content), fields(file_id = %file_id))]
+    async fn set_content(&self, file_id: &str, content: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE fileinfo SET content = $1 WHERE id = $2",
+            content,
+            file_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update FileInfo content with id={file_id}"),
+            source,
+        })?;
+        Ok(())
     }
 }
 
