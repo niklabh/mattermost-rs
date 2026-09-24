@@ -43,7 +43,7 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_app::channel_write::{ChannelWrite, default_category_after_patch};
+use mm_app::channel_write::ChannelWrite;
 use mm_model::channel::{
     CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP, CHANNEL_TYPE_OPEN, CHANNEL_TYPE_PRIVATE, Channel,
     ChannelPatch, DEFAULT_CHANNEL_NAME,
@@ -448,10 +448,12 @@ enum PatchDecision {
 /// [`Channel::patch`] never applies the field anyway ([D-016]). A patch of nothing but
 /// `managed_category_name` is a 200 whose body is unchanged apart from `update_at`. Measured.
 ///
-/// # Two branches are forwarded because they write something this file does not own
+/// # The two writes behind the patch
 ///
-/// See [`patch_needs_go`]. Both are decided *before* `PatchChannel` runs, so a forwarded request
-/// has not been half-applied.
+/// A non-empty `default_category_name` files the channel in the **caller's** sidebar
+/// ([`mm_app::App::add_channel_to_default_category`], inside `patch_channel`), and turning
+/// `group_constrained` on removes the members outside the channel's groups afterwards, on a task
+/// of its own ([`spawn_group_constrained_removal`]). Both were forwarded until 2026-09-25 (D-234).
 #[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed, forwarded = false))]
 pub async fn patch_channel(
     State(state): State<AppState>,
@@ -496,6 +498,8 @@ pub async fn patch_channel(
         Err(err) => return err.into_response(),
     };
 
+    let turns_constraint_on = turns_group_constraint_on(&channel, &patch);
+
     match state
         .app
         .patch_channel(&hook_ctx, &mut channel, &patch, &session.0.user_id)
@@ -508,6 +512,10 @@ pub async fn patch_channel(
             return proxy::forward_to_go(State(state), request).await;
         }
         Err(err) => return ApiError::from(err).into_response(),
+    }
+
+    if turns_constraint_on {
+        spawn_group_constrained_removal(&state, channel.id.clone(), hook_ctx);
     }
 
     // **`patchChannel` fills in the props and `updateChannel` does not.** A `~mention` of a live
@@ -686,14 +694,6 @@ async fn decide_patch(
     // that would follow it. Unlicensed, both are skipped and Go logs "Managed category update
     // ignored: feature not available" — the field is accepted and does nothing.
 
-    if let Some(why) = patch_needs_go(
-        &channel,
-        patch,
-        state.app.config().enable_channel_category_sorting,
-    ) {
-        return Ok(PatchDecision::Forward(why));
-    }
-
     Ok(PatchDecision::Serve(Box::new(channel)))
 }
 
@@ -750,32 +750,41 @@ async fn can_edit_channel_banner(
     ApiError::from(error)
 }
 
-/// The two `patchChannel` branches that must go to Go, decided from the patch and the channel
-/// **before** anything is written.
+/// `patch.GroupConstrained != nil && *patch.GroupConstrained && (old == nil || !*old)`
+/// (api4/channel.go:543) — the edge after which Go removes every member outside the channel's
+/// groups. Setting the flag to `false`, or to `true` on a channel that already has it, removes
+/// nobody; both halves matter. Read on the channel **before** the patch is applied.
+pub(crate) fn turns_group_constraint_on(channel: &Channel, patch: &ChannelPatch) -> bool {
+    patch.group_constrained == Some(true) && !channel.is_group_constrained()
+}
+
+/// `c.App.Srv().Go(func() { DeleteGroupConstrainedChannelMemberships(c.AppContext, &id) })`.
 ///
-/// Kept apart from the handler so the decision is testable without a database, and so the reason
-/// each branch exists stays attached to the condition:
+/// # Asynchronous, as in Go
 ///
-/// - `group_constrained` going from off to **on** kicks non-group members
-///   (`DeleteGroupConstrainedChannelMemberships`, in a goroutine). Setting it to `false`, or to
-///   `true` on a channel that is already group-constrained, writes no memberships — Go's condition
-///   is `*patch.GroupConstrained && (old == nil || !*old)`, and both halves matter.
-/// - a non-empty `default_category_name` after the patch reaches `addChannelToDefaultCategory`,
-///   which creates a sidebar category and moves the channel into it. Gated on
-///   `TeamSettings.EnableChannelCategorySorting`, whose Go default is `true` — so on a stock
-///   server the gate is really just "is the name non-empty".
-pub(crate) fn patch_needs_go(
-    channel: &Channel,
-    patch: &ChannelPatch,
-    category_sorting_enabled: bool,
-) -> Option<&'static str> {
-    if patch.group_constrained == Some(true) && !channel.is_group_constrained() {
-        return Some("turning group_constrained on removes members outside the channel's groups");
-    }
-    if category_sorting_enabled && !default_category_after_patch(channel, patch).is_empty() {
-        return Some("a default_category_name patch creates or moves a sidebar category");
-    }
-    None
+/// Go starts the removal on a goroutine after `PatchChannel` and answers without waiting, so a
+/// client can read the membership list the instant the `200` lands and still find the members
+/// that are about to go. Reproduced with a task of its own rather than an `.await`: awaiting
+/// would make this server's answer strictly later than Go's and hide the window a client of Go
+/// has to cope with. Failures are logged by the task (`Warn`, as Go), never surfaced.
+///
+/// The one branch of `remove_user_from_channel` that forwards — a shared channel while Go's
+/// shared-channel service runs — cannot be reached from here: that service needs a licence, and
+/// a licensed patch has already been forwarded whole by [`decide_patch`].
+fn spawn_group_constrained_removal(
+    state: &AppState,
+    channel_id: String,
+    hook_ctx: mm_app::plugin_hooks::HookContext,
+) {
+    let app = state.app.clone();
+    tokio::spawn(async move {
+        if let Err(err) = app
+            .delete_group_constrained_channel_memberships(Some(&channel_id), &hook_ctx)
+            .await
+        {
+            tracing::warn!(error = %err, channel_id, "Error deleting group-constrained channel memberships");
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1378,52 +1387,39 @@ mod tests {
         );
     }
 
-    /// Both halves of Go's condition. Turning the flag **off** writes no memberships, and neither
-    /// does setting it on a channel that already has it — only the off→on edge does.
+    /// Both halves of Go's condition. Turning the flag **off** removes nobody, and neither does
+    /// setting it on a channel that already has it — only the off→on edge does.
     #[test]
-    fn only_group_constrained_turning_on_needs_go() {
+    fn only_group_constrained_turning_on_removes_members() {
         let plain = channel_of(CHANNEL_TYPE_OPEN);
         let on = ChannelPatch {
             group_constrained: Some(true),
             ..ChannelPatch::default()
         };
-        assert!(patch_needs_go(&plain, &on, false).is_some());
+        assert!(turns_group_constraint_on(&plain, &on));
 
         let off = ChannelPatch {
             group_constrained: Some(false),
             ..ChannelPatch::default()
         };
-        assert!(patch_needs_go(&plain, &off, false).is_none());
+        assert!(!turns_group_constraint_on(&plain, &off));
+        assert!(!turns_group_constraint_on(&plain, &ChannelPatch::default()));
 
         let already = Channel {
             group_constrained: Some(true),
             ..channel_of(CHANNEL_TYPE_OPEN)
         };
         assert!(
-            patch_needs_go(&already, &on, false).is_none(),
+            !turns_group_constraint_on(&already, &on),
             "re-setting the flag on a group-constrained channel kicks nobody"
         );
-    }
-
-    /// The sidebar branch and its config gate. With category sorting off, Go never reaches
-    /// `addChannelToDefaultCategory` and the patch is serviceable here.
-    #[test]
-    fn the_default_category_branch_is_gated_on_the_config() {
-        let channel = channel_of(CHANNEL_TYPE_OPEN);
-        let named = ChannelPatch {
-            default_category_name: Some("Zed".to_owned()),
-            ..ChannelPatch::default()
+        let explicitly_off = Channel {
+            group_constrained: Some(false),
+            ..channel_of(CHANNEL_TYPE_OPEN)
         };
-        assert!(patch_needs_go(&channel, &named, true).is_some());
         assert!(
-            patch_needs_go(&channel, &named, false).is_none(),
-            "EnableChannelCategorySorting off means no sidebar write"
+            turns_group_constraint_on(&explicitly_off, &on),
+            "a stored false is off, as a nil is"
         );
-
-        let header_only = ChannelPatch {
-            header: Some("hi".to_owned()),
-            ..ChannelPatch::default()
-        };
-        assert!(patch_needs_go(&channel, &header_only, true).is_none());
     }
 }

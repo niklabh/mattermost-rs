@@ -14827,3 +14827,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `Channel.BannerInfo` (`*ChannelBannerInfo`) | `channel_from_row` | DONE | `…a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct` | jsonb `null` is the struct with three `null` fields. |
 | `StringArray` over text (`OutgoingWebhook`, `OAuthApp`, `Draft.FileIds`, `ScheduledPost.FileIds`), `ThreadParticipants`, `GetChannelMembersTimezones` | `webhook_store::string_array_column`, `oauth_store`, `draft_store::decode_array`, `threaded_post_from_row`, `get_channel_members_timezones` | DONE | `…string_array…`, `…draft…`, `…participant…`, the timezones half of the user test | The text `null` — what `StringArray.Value` writes for nil — decoded as a failed read. |
 
+## Tech-debt payoff: `patchChannel`'s last two forwards — D-234 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `patchChannel`'s `DeleteGroupConstrainedChannelMemberships` goroutine (api4/channel.go:543) | `mm_api::channel_writes::{turns_group_constraint_on, spawn_group_constrained_removal}` | DONE | 1 unit + `parity::channel_patch_writes` | Asynchronous as in Go: the `200` does not wait for the sweep, and the patching admin is swept too when no group holds them. |
+| `addChannelToDefaultCategory` (app/channel.go:4706), whole | `App::add_channel_to_default_category`, `default_category_plan` | DONE | 5 unit + `parity::channel_patch_writes` (create and patch) | The "already in a category" half was called dead on the create path and is not: the new channel is an orphan in Channels, so Go writes Channels back and publishes a second `sidebar_category_updated`. |
