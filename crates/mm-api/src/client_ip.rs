@@ -5,9 +5,11 @@
 //! request context, where `pluginContext`, `MakeAuditRecord`, `LogAudit` and the websocket
 //! upgrade read it. [`stamp_client_ip`] is that step: a middleware on both routers that stores
 //! the answer as a [`ClientIp`] request extension, read back by [`client_ip`]. Of Go's readers,
-//! the plugin hook context ([`crate::plugin_context`]) is the one this server has; audit rows and
-//! session attributes are not written here at all. The rate limiter ([`crate::ratelimit`]) keys
-//! with [`get_ip_address`] directly, over the trusted headers it was built with, as Go's does.
+//! this server has the plugin hook context ([`crate::plugin_context`]) and the `Audits` rows its
+//! handlers write through `App::log_audit` (`LogAudit` is not on every served route yet —
+//! [D-270]); session attributes are not written here at all. The rate limiter
+//! ([`crate::ratelimit`]) keys with [`get_ip_address`] directly, over the trusted headers it was
+//! built with, as Go's does.
 //!
 //! # The peer half
 //!

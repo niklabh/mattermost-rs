@@ -14790,3 +14790,10 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `(*WebSocketEvent).Add` of a struct (`message.Add("user", user)`, `"field"`, `"manifest"`) | `mm_model::websocket_message::WebSocketEvent::{add_raw, add_struct}` | DONE, closes [D-541] | 9 unit; `parity::cpa_licensed` and `parity::custom_status_writes` compare frames as bytes (`common::json_skeleton`); 11 mutations, 9 caught, 2 controls survived | A struct added as a `Value` goes out sorted; `serde_json`'s `preserve_order` must stay off (49 suite failures measured). |
+
+## Tech-debt payoff: `removeUserFromChannel`'s guest, group and shared branches — D-1130 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `removeUserFromChannel` guest arm (app/channel.go:3036), `FilterNonGroupChannelMembers` (user.go:2666), `User().GetChannelGroupUsers` | `App::remove_user_from_channel_inner`, `App::filter_non_group_channel_members`, `UserStore::get_channel_group_user_ids` | DONE, closes [D-1130], opens [D-1170] | `parity::channel_member_removal` (5), 1 unit; `scripts/mutations/channel-remove-member-d1130.plan` — 14 run, 14 caught (after a fixture fix), 2 controls survived | A guest's eviction reuses `LeaveTeam`'s `remove_team_member`/`post_process_team_member_leave` but writes no team-leave post; a shared channel forwards only while Go's sync service runs. |
+| `removeChannelMember`'s and `localRemoveChannelMember`'s `c.LogAudit`; `LogAudit`'s `c.AppContext.IPAddress()` | `mm_api::channel_member_writes`, `local_channels`, `channel_move` via `client_ip::client_ip` | DONE, [D-270] continued | `parity::channel_member_writes`, `parity::local_channels` read the rows back | The address was already the same value through the hook context; it is now read where Go reads it. |

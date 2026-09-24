@@ -466,6 +466,34 @@ async fn the_local_channel_writes_match_over_the_socket() {
         latest_post(&rust_socket_, &mine).await,
     );
     assert_same_notice(&go_removed, &rs_removed, "the removal notice");
+    // `c.LogAudit` on the socket too: no session and no peer, so the row is its path and text.
+    if let Some(pool) = common::fixture_pool().await {
+        for channel in [&theirs, &mine] {
+            let path = format!("/api/v4/channels/{channel}/members/{}", plain.id);
+            let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+                "SELECT extrainfo, userid, sessionid, ipaddress FROM audits WHERE action = $1",
+            )
+            .bind(&path)
+            .fetch_all(&pool)
+            .await
+            .expect("the audit rows");
+            let name: String = sqlx::query_scalar("SELECT name FROM channels WHERE id = $1")
+                .bind(channel)
+                .fetch_one(&pool)
+                .await
+                .expect("the channel");
+            assert_eq!(
+                rows,
+                [(
+                    format!("name={name} user_id={}", plain.id),
+                    String::new(),
+                    String::new(),
+                    String::new()
+                )],
+                "{path}"
+            );
+        }
+    }
     assert_eq!(go_removed["type"], "system_remove_from_channel");
     let system_bot = go_removed["user_id"]
         .as_str()

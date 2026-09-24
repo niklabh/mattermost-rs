@@ -12,13 +12,13 @@
 //!
 //! # What is forwarded
 //!
-//! Only the `force` sweep can forward, and only **before** the move writes anything: a member
-//! whose removal this port cannot reproduce — a guest (whose last channel on the team evicts
-//! them from it), a group-constrained channel swept by somebody else, a shared channel; see
-//! [`mm_app::App::remove_user_from_channel`] — makes the sweep a [`MemberWrite::Forward`], and
-//! the request is handed to Go whole. All three are public Go code this port owes, not private
-//! code ([D-1130]). The deactivated-member sweep may already have run by then; it is a plain
-//! `DELETE` Go repeats without effect. `App::move_channel` itself never forwards.
+//! Only the `force` sweep can forward, and only **before** the move writes anything: a shared
+//! channel while Go's shared-channel sync service runs, whose `NotifyMembershipChanged` is state
+//! in the Go process — see [`mm_app::App::remove_user_from_channel`] and [D-1170] — makes the
+//! sweep a [`MemberWrite::Forward`], and the request is handed to Go whole. The
+//! deactivated-member sweep may already have run by then; it is a plain `DELETE` Go repeats
+//! without effect. `App::move_channel` itself never forwards. Guests and group-constrained
+//! channels are swept here.
 //!
 //! # The audit
 //!
@@ -69,8 +69,10 @@ pub async fn move_channel(
     };
 
     let (parts, body) = request.into_parts();
-    // `c.AppContext.Path()`, the `Action` of the two audit rows.
+    // `c.AppContext.Path()` and `c.AppContext.IPAddress()`, the `Action` and `IpAddress` of the
+    // two audit rows.
     let path = parts.uri.path().to_owned();
+    let ip_address = crate::client_ip::client_ip(&parts.headers, &parts.extensions);
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -160,8 +162,8 @@ pub async fn move_channel(
             .app
             .log_audit(
                 &session.0.user_id,
-                &hook_ctx.session_id,
-                &hook_ctx.ip_address,
+                &session.0.id,
+                &ip_address,
                 &path,
                 &extra_info,
             )

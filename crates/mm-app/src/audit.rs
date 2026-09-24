@@ -17,9 +17,10 @@ impl App {
     /// config gate. A failed save is logged (`app.audit.save.saving.app_error`) and never fails
     /// the request, as in Go.
     ///
-    /// The handler passes the pieces of Go's `Context`: the session's user id and the
-    /// `HookContext`'s session id and IP address, which is `utils.GetIPAddress` already. A
-    /// local-socket request has none of the three, and neither has Go's.
+    /// The handler passes the pieces of Go's `Context`: the session's user and session ids, and
+    /// `mm_api::client_ip::client_ip` for the address — `c.AppContext.IPAddress()`,
+    /// `utils.GetIPAddress` over `TrustedProxyIPHeader`, computed once per request. A
+    /// local-socket request has no session, and neither has Go's.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, action = %action))]
     pub async fn log_audit(
         &self,

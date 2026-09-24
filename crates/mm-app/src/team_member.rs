@@ -1382,7 +1382,7 @@ impl App {
     /// `ExplicitRoles` to the column). Kept because it is what the source says; a mutation that
     /// deletes this line is **equivalent**, not a gap.
     #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
-    async fn remove_team_member(&self, member: &mut TeamMember) -> AppResult<()> {
+    pub(crate) async fn remove_team_member(&self, member: &mut TeamMember) -> AppResult<()> {
         let mut to_team = WebSocketEvent::new(
             WEBSOCKET_EVENT_LEAVE_TEAM,
             &member.team_id,
@@ -1448,7 +1448,7 @@ impl App {
     /// writes that can fail the request; of the three cache calls, the session one is
     /// [`App::clear_session_cache_for_user`] and the other two are [D-190].
     #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
-    async fn post_process_team_member_leave(
+    pub(crate) async fn post_process_team_member_leave(
         &self,
         member: &TeamMember,
         requestor_id: &str,
