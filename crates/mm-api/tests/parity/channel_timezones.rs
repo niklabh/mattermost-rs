@@ -98,6 +98,20 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
 
             let empty_channel_id = create_channel(client, token, &team_id, "tzempty").await;
             add_user_to_channel(client, token, &empty_channel_id, &none.id).await;
+            // The creator joins its own channel, and the shared fixture user's timezone is
+            // whatever the last client to log in as it reported — a browser on the stack sets
+            // `automaticTimezone`. Leaving makes `none` the only member, so nothing outside
+            // this fixture can move the `null`.
+            let left = client
+                .delete(format!(
+                    "{GO}/api/v4/channels/{empty_channel_id}/members/{}",
+                    logged_in_user_id()
+                ))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("Go answers");
+            assert!(left.status().is_success(), "the creator leaves tzempty");
 
             let private_channel_id =
                 create_channel_typed(client, token, &team_id, "tzpriv", "P").await;

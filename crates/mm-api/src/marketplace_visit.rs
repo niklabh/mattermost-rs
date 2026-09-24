@@ -59,7 +59,10 @@ async fn require_manage_system(state: &AppState, session: &Session) -> Result<()
 pub async fn get_first_admin_visit_marketplace_status(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
+    // `c.LogAudit("attempt")`, first, on a `GET` — and no `"success"` row after it.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     match serve_get(&state, &session.0).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
@@ -82,9 +85,12 @@ async fn serve_get(state: &AppState, session: &Session) -> Result<Response, ApiE
 pub async fn set_first_admin_visit_marketplace_status(
     State(state): State<AppState>,
     session: OptionalSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Response {
     let session = session.0.unwrap_or_default();
     tracing::Span::current().record("user_id", &session.user_id);
+    // `c.LogAudit("attempt")`, first — an anonymous caller's row names nobody.
+    audit.log(&state.app, Some(&session), "attempt").await;
     match serve_set(&state, &session).await {
         Ok(response) => response,
         Err(err) => err.into_response(),

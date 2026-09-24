@@ -52,6 +52,7 @@ mod parity {
     pub mod channel_members_for_user;
     pub mod channel_members_list;
     pub mod channel_move;
+    pub mod channel_patch_writes;
     pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_posts_unread;
@@ -274,6 +275,7 @@ mod parity {
     pub mod postrest;
     // Appended 2026-09-15: the searchmisc family.
     pub mod agents;
+    pub mod audit_rows;
     pub mod file_search;
     // Appended 2026-09-16: the configuration projection follows a write (D-701).
     pub mod config_reload;
@@ -311,4 +313,7 @@ mod parity {
     pub mod ratelimit;
     // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
     pub mod malformed_bodies;
+    // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
+    // (D-331, D-158).
+    pub mod null_columns;
 }

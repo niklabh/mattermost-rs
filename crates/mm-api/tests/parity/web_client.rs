@@ -494,13 +494,24 @@ async fn what_is_not_the_web_clients_is_still_forwarded() {
 
 /// D-903: a forwarded `HEAD` is framed as Go framed it. The proxy rebuilds every body, and a
 /// `HEAD` has none, so Go's `Content-Length` — the entity's length — must be carried over rather
-/// than recomputed as `0`; and where Go sent none (its handler wrote nothing), none is invented.
+/// than recomputed as `0`; and where Go sent none, none is invented.
+///
+/// # Where Go sends no length, on every stack
+///
+/// `net/http` declares a length only when the handler finished inside its 2048-byte chunking
+/// buffer; past that it streams and, on a `HEAD`, states nothing. The unknown-API 404 echoes the
+/// path in `detailed_error`, so [`LONG_UNKNOWN_API`] — a 1900-byte segment — pushes that body to
+/// ~2150 bytes. This used to rely on `/` serving `root.html`, which is over the buffer only where
+/// the webapp bundle is built; on a stack without `webapp/channels/dist` it is a 123-byte 500 with
+/// a length, and the no-length branch went unexercised. (Much longer and Go answers 414.)
 #[tokio::test]
 async fn a_forwarded_head_keeps_gos_content_length() {
     if !stack_enabled() {
         return;
     }
+    let long_unknown_api = format!("/api/v5/{}", "a".repeat(LONG_UNKNOWN_API));
     let mut sized = 0;
+    let mut lengthless = Vec::new();
     for target in [
         "/api/v5/x",
         // Not `/api/v4/no-such-route`: a `HEAD` into the api4 tree is `mux_guard`'s own 404 now
@@ -510,26 +521,41 @@ async fn a_forwarded_head_keeps_gos_content_length() {
         "/login/sso/saml",
         "/oauth/authorize",
         "/?access_token=abcdefghijklmnopqrstuvwxyz",
+        long_unknown_api.as_str(),
     ] {
         let (go, rust) = both("HEAD", target, &[]).await;
+        let shown = &target[..target.len().min(40)];
         assert_eq!(
             rust.served_by.as_deref(),
             Some("go"),
-            "HEAD {target} must be forwarded, or this compares nothing"
+            "HEAD {shown} must be forwarded, or this compares nothing"
         );
-        assert_eq!(go.status, rust.status, "HEAD {target}");
+        assert_eq!(go.status, rust.status, "HEAD {shown}");
         assert_eq!(
             go.header("content-length"),
             rust.header("content-length"),
-            "HEAD {target}: Content-Length"
+            "HEAD {shown}: Content-Length"
         );
-        assert_eq!(go.chunked, rust.chunked, "HEAD {target}: framing");
-        sized += usize::from(go.header("content-length").is_some_and(|l| l != "0"));
+        assert_eq!(go.chunked, rust.chunked, "HEAD {shown}: framing");
+        if go.header("content-length").is_some_and(|l| l != "0") {
+            sized += 1;
+        } else {
+            lengthless.push(shown.to_owned());
+        }
     }
     // Both branches must be exercised: a length Go stated, and none at all.
     assert!(sized >= 2, "at least two answers carry a non-zero length");
-    assert!(sized < 6, "at least one answer carries no length");
+    assert!(
+        lengthless.iter().any(|t| t.starts_with("/api/v5/aaaa")),
+        "Go stated a length for the {LONG_UNKNOWN_API}-byte unknown-API path, so its 404 body no \
+         longer passes net/http's 2048-byte buffer and the no-length branch is untested; \
+         answers without a length: {lengthless:?}"
+    );
 }
+
+/// The segment length that puts the unknown-API 404 body past net/http's chunking buffer; see
+/// [`a_forwarded_head_keeps_gos_content_length`].
+const LONG_UNKNOWN_API: usize = 1900;
 
 /// D-782's off-branch with no client directory at all: a server whose working directory has no
 /// `client/` anywhere above it reads `root.html` from `./` and answers Go's 500 with the

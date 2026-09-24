@@ -2044,6 +2044,7 @@ pub async fn save_user_terms_of_service(
     // Bound so the shape of the route is visible, then dropped — see the doc comment.
     let _ = user_id;
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
@@ -2067,6 +2068,14 @@ pub async fn save_user_terms_of_service(
         .save_user_terms_of_service(&session.0.user_id, terms_of_service_id, accepted)
         .await?;
 
+    // `"TermsOfServiceId=" + id + ", accepted=" + strconv.FormatBool(accepted)`.
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("TermsOfServiceId={terms_of_service_id}, accepted={accepted}"),
+        )
+        .await;
     Ok(status_ok())
 }
 

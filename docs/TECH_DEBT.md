@@ -5682,37 +5682,13 @@ believing the server is unlicensed — but unlike the two settings above, being 
 
 ---
 
-## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it
+## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
 
-Reading `StringInterface.Scan` (model/utils.go:185) says a NULL column leaves the field nil, and a
-nil Go map marshals as `null`. That is what `mm-store/src/post_store.rs` did, and it was wrong:
-the running server answers `"props":{}` for a post whose `props` column is SQL NULL.
-
-The scan never sees a nil map. **sqlx allocates one first** — `reflectx.FieldByIndexes` calls
-`reflect.MakeMap` for any nil map on the path to the field it is about to scan into — so `Scan`'s
-early return on NULL lands on an empty map. Slices get no such treatment, which is why a NULL
-`fileids` column really does reach the client as `null`. Measured three ways on the same row:
-
-| `posts.props` | Go answers |
-|---|---|
-| SQL `NULL` | `{}` |
-| jsonb `'null'` | `null` — `json.Unmarshal` sets the map back to nil |
-| jsonb `'[1,2]'` | 500, `app.post.get.app_error` |
-
-Fixed for `Post` and pinned by `parity_channel_posts::a_null_props_column_is_an_empty_object_on_every_route`,
-which asserts it on `GET /posts/{id}` as well — the divergence had been shipping there since that
-route landed, undetected because no fixture had a NULL column.
-
-**What is owed:** the same question for every other ported store that scans a Go **map** field out
-of a nullable column. `Channel.Props`, `Session.Props`, `User.NotifyProps` and
-`User.Props` are all `StringMap`/`StringInterface` over nullable columns, and each is one
-`UPDATE … SET col = NULL` and one request away from an answer. None of them can be produced
-through the REST API, which is why none was noticed; that is an argument for checking them, not
-for assuming they are fine.
-
-**Where the pin lives:** the module doc on `mm-store/src/post_store.rs`, with the table above.
+Paid off with [D-331]: every map, slice and pointer column `mm-store` reads was audited against
+how Go scans it, five sites were fixed, and `parity::null_columns` plants SQL NULL and jsonb `null`
+for each distinct shape and compares both servers.
 
 ---
 
@@ -6499,8 +6475,11 @@ parity suite against Go rather than one that would be changing it in passing.
 
 ## D-224 · Muting a sidebar category does not mute its channels
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
-**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Closed** 2026-09-24 — `App::set_channels_muted` (`mm_app::channel_member`) on a ported
+`update_multiple_members` / `get_members_by_channel_ids` now runs behind the reconciliation and
+publishes Go's `channel_member_updated` per changed member;
+`parity::sidebar_category_writes::muting_a_category_mutes_its_channels_like_go` and two siblings.
 
 `UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
 which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
@@ -6602,8 +6581,12 @@ that channel onward in `total_msg_count` and `last_post_at`. No test re-reads a 
 channel's row, so this suite cannot currently detect the gap widening.
 ## D-234 · Two channel-patch branches are forwarded because they write what this file does not own
 
-**Status** OPEN · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
+**Status** CLOSED · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
 lifecycle)
+**Closed** 2026-09-25 — both served: the group sweep runs on a spawned task after the write, as
+Go's goroutine does (`mm_api::channel_writes::spawn_group_constrained_removal`), and
+`App::add_channel_to_default_category` is ported whole, create path included;
+`parity::channel_patch_writes` (3).
 
 `PUT /api/v4/channels/{channel_id}/patch` is served here except for two bodies, both decided
 before anything is written (`mm_api::channel_writes::patch_needs_go`):
@@ -6904,35 +6887,13 @@ property of a backend this server does not construct. The sibling `/test`, gated
 conditional on it.
 ---
 
-## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table
+## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
 
-`Context.LogAudit` (web/context.go:95) builds a `model.Audit` and calls `Store().Audit().Save`
-**unconditionally** — no config gate, no feature flag. Five of the seven personal-access-token
-writes call it, once on entry and again on success, so a token revoked through Go leaves two
-`Audits` rows and the same revoke through `mm-api` leaves none.
-
-That is observable through the API, which is what makes this an entry rather than a note:
-`GET /api/v4/users/{user_id}/audits` is already served from Rust (`mm_api::audits`) and reads the
-same table. So the two servers disagree about a user's audit history in proportion to how much of
-their traffic each one answered.
-
-It is **not** specific to this family. Every migrated write has the gap — the channel-member
-writes, the team-member writes, the auth writes, the post writes — and it had not been written
-down. Raised here because this is the first family whose Go handlers call `LogAudit` on *every*
-route rather than on some of them, and because the reading route is already ported, so the
-divergence can be measured rather than argued about.
-
-What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only today) and a
-`Context`-equivalent hook in `mm-api` that has the session, the request path and the client IP —
-`mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
-**separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
-database, so nothing over the API can see them and they need no entry.
-
-**Started 2026-09-24:** `AuditStore::save` and `App::log_audit` exist, and `moveChannel` and
-`removeChannelMember` (REST and local socket) write their rows through them, with the address from
-`mm_api::client_ip` — the pattern for the rest.
+Every served branch of a Go handler that calls `c.LogAudit`/`c.LogAuditWithUserId` now writes the
+same rows at the same point, through `mm_api::audit_log::AuditRequest`; `parity::audit_rows`
+compares them family by family and through `GET /users/{id}/audits`.
 ---
 
 ## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment
@@ -7158,33 +7119,14 @@ that identifies a server, rather than on a path or a ping.
 
 ---
 
-## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed
+## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
 
-`PropertyField.Attrs` is a Go **map**, and sqlx's `reflectx.FieldByIndexes` allocates a nil map
-before scanning into it. `StringInterface.Scan` returns early for a nil driver value
-(`model/utils.go:186`), so a SQL `NULL` leaves that freshly allocated empty map behind and
-marshals as **`{}`** — while a jsonb `null` reaches `json.Unmarshal`, which zeroes the map, and
-marshals as **`null`**. Measured on both, twice.
-
-`mm-store`'s port had the two the wrong way round and it was invisible: the CPA reads that first
-used `search_fields` can only return an empty page unlicensed, so no row ever carried an `attrs`.
-Fixed for `PropertyFields`.
-
-**What is owed:** the same question for every other `jsonb` column this crate reads into an
-`Option`. `crates/mm-store` has roughly a dozen `None | Some(Value::Null) => None` sites —
-`channel_store` (×4), `user_store` (×2), `team_store`, `post_store`, `job_store`, `draft_store`,
-`role_store` — and each is correct **only if** Go's destination is not a bare map. A pointer or a
-`*StringMap` destination really is nil for both cases; a plain `StringMap`/`StringInterface` is
-not. The audit is one grep of the Go struct per site.
-
-**Why it is not urgent:** Go's own writers never leave these columns SQL NULL — `Value()` on a nil
-map emits the four bytes `null` — so the divergence needs a row written by a migration or by hand.
-That is exactly how this one was found, and a migration adding a nullable `jsonb` would reach it
-for real.
-
-**Where the pin lives:** `PropertyFieldRow::into_field` in `crates/mm-store/src/property_store.rs`.
+Paid off: the rule is how Go scans, not the column (sqlx map field `{}`/`null`, pointer
+`null`/empty struct, slice `null`/`null`, manual `[]byte` scan a 500 on NULL); fixed for users,
+channel members, sessions, channel banners, the `StringArray` text columns and thread participants,
+and proven per shape in `parity::null_columns` (8 tests).
 
 ---
 
@@ -9313,17 +9255,14 @@ under a Go host. Closes when the Rust host becomes the default (D-811).
 
 ---
 
-## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own
+## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
 
-`mm_api::go_cache::clear_user_sessions` makes Go forget a user's sessions by having it revoke a
-probe session through `POST /users/{id}/sessions/revoke`, authenticated as
-`MM_API_GO_CACHE_USER`. Go audits that request, so every deactivation (and permanent delete)
-served here adds an `Audits` row — action `/api/v4/users/<id>/sessions/revoke`, attributed to the
-cache administrator — that the same operation through Go does not. Measured by
-`parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
-route that Go does not audit, or deleting the row after the call.
+`mm_api::go_cache` now purges Go's session cache through `PUT /users/sessions/device` with an empty
+body, authenticated by the probe session itself, which Go does not audit;
+`parity::audit_rows::the_session_purge_is_not_audited` and the unfiltered `audits` table in
+`parity::user_permanent_delete` pin it.
 
 ## D-880 · An edit that previews a permalink forwards: `addPostPreviewProp` and the edit's `PermalinkFate`
 
@@ -10114,7 +10053,11 @@ store ones through a parameter), with a test that moves each flag.
 
 ## D-1150 · With `RateLimitSettings.Enable`, a forwarded request is limited twice
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — this server's stores decide for every request: the forward leg sets the trusted
+header when Go would fall back to the peer (`client_ip::forwarded_address_header`), Go's rate-limit
+headers are dropped from forwarded answers, and the per-user step counts forwarded Go web handlers too;
+`parity::ratelimit::forwarded_requests_are_limited_once_on_the_clients_key`. Open: [D-1210].
 
 `mm_api::ratelimit` limits every request at the front, as Go's `Server.Start` wrapper does, and a
 forwarded one then meets the Go process's own limiters: its global one keys on **this server's
@@ -10130,7 +10073,9 @@ Go. **What is owed:** a forward leg Go can key on the client — an `X-Forwarded
 
 ## D-1151 · `UserIdRateLimit` does not run for the web client's pages
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — `web_static::fallback` runs the per-user step for `NewStaticHandler`'s catch-all
+(the SPA page; `/static/…` is a plain handler and has none) with `IsStatic`'s headers on the refusal.
 
 Go's static handler (`NewStaticHandler`, the SPA page and `/static/…`) is a `web.Handler`, so with
 `VaryByUser` a request that carries a session cookie spends the user's budget there too and can be
@@ -10138,6 +10083,55 @@ refused after `IsStatic`'s headers (`X-Frame-Options`, the CSP). `ratelimit::per
 `route_layer` and never sees `web_static::fallback`. **What is owed:** call the per-user step from
 `web_static`'s `root` and `static_files`, with the static header set on its refusal, and a parity row
 that exhausts a user's budget on `/`.
+
+---
+
+## D-1210 · A forwarded branch of a rate-limited route meets Go's route limiter on this server's address
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+Go builds the three `RateLimitedHandler` limiters with `NewRateLimiter(&settings, []string{})`
+(api4/handlers.go:229): no trusted header, so they key on `RemoteAddr` alone, and behind this server
+that is this server. `login` forwards its magic-link, LDAP, cloud and MFA branches and
+`register_oauth_client` forwards the whole registration when DCR is on; each such request is counted
+here on the client's key and then in Go's route limiter on one key shared by every client — 5/s for
+MFA logins, 2/s for registrations, across the deployment — and Go's 429 is passed through.
+**What is owed:** port those branches (MFA login first), so no request of these three routes reaches Go.
+
+---
+
+## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+`ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
+the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
+per-user rate limit included. The web client's fallback and `/manualtest` check it; the API router
+does not: `GET /api/v4/system/ping?x=<3000 bytes>` is Go 414, here 200, and the per-user step counts
+it. **What is owed:** a layer on the API router with Go's 414 body, ahead of `ratelimit::per_user`.
+
+---
+
+## D-1220 · `updateIncomingHook` skips the owner's access check on the new channel
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+
+When the body moves an incoming hook to another channel, Go runs
+`ValidateIncomingWebhookUserChannelAccess` for the hook's **owner** (api4/webhook.go:177) and answers
+403 `api.webhook.incoming.user_membership.app_error` plus a `"fail - invalid webhook user"` audit
+row when the owner cannot read it; `mm_api::webhooks::update_incoming_hook` performs the update.
+**What is owed:** the check (split out of `App::validate_incoming_webhook_user`) and its row.
+
+---
+
+## D-1221 · `updateOutgoingHook` does not refuse a body naming another team
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+
+Go fills an empty `team_id` from the stored hook and answers 400 `api.webhook.team_mismatch.app_error`
+for a different one (api4/webhook.go:425-432); `mm_api::webhooks::update_outgoing_hook` lets the app
+layer reset the team silently and answers 200. **What is owed:** the fill and the 400, with a parity
+row (`the_id_checks_and_the_team_mismatch_agree` covers only incoming hooks).
 
 ---
 

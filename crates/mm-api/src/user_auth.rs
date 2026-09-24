@@ -232,6 +232,7 @@ pub async fn update_user_auth(
     }
     tracing::Span::current().record("user_id", &user_id);
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (_request, bytes) = match split_body(request, "user").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -258,7 +259,21 @@ pub async fn update_user_auth(
     tracing::Span::current().record("auth_service", &user_auth.auth_service);
 
     match state.app.update_user_auth(&user_id, &user_auth).await {
-        Ok(updated) => json_response("updateUserAuth", &updated),
+        Ok(updated) => {
+            // `c.LogAudit(fmt.Sprintf("updated user %s auth to service=%v", …))` — the service
+            // the write returned, which is `""` once an e-mail service is normalised away.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!(
+                        "updated user {user_id} auth to service={}",
+                        updated.auth_service
+                    ),
+                )
+                .await;
+            json_response("updateUserAuth", &updated)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -304,6 +319,7 @@ pub async fn update_user_mfa(
         return proxy::forward_to_go(State(state), request).await;
     }
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let (request, bytes) = match split_body(request, "activate").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
@@ -324,11 +340,19 @@ pub async fn update_user_mfa(
         ""
     };
 
+    // `c.LogAudit("attempt")` sits after the body checks and before `UpdateMfa`, so it is written
+    // on both arms here — except when the deactivation is handed to Go, which writes its own.
     if activate {
+        audit.log(&state.app, Some(&session.0), "attempt").await;
         return match state.app.activate_mfa(&user_id, code).await {
             // Unreachable while the flag is off, which the forward above guarantees; kept so the
             // arm is not a `panic!` if that ever changes.
-            Ok(()) => status_ok(),
+            Ok(()) => {
+                audit
+                    .log(&state.app, Some(&session.0), "success - mfa updated")
+                    .await;
+                status_ok()
+            }
             Err(err) => ApiError::from(err).into_response(),
         };
     }
@@ -337,6 +361,7 @@ pub async fn update_user_mfa(
     // and the two `UPDATE`s plus the MFA-change e-mail that follows them are Go's — decided
     // before anything is written, which is the whole constraint. See the module doc and [D-500].
     if let Err(err) = state.app.get_user(&user_id).await {
+        audit.log(&state.app, Some(&session.0), "attempt").await;
         return ApiError::from(err).into_response();
     }
     tracing::Span::current().record("forwarded", true);

@@ -741,9 +741,10 @@ impl App {
         errors.error_or_nil()
     }
 
-    /// Port of `App.DeleteGroupConstrainedChannelMemberships` (app/syncables.go:189).
+    /// Port of `App.DeleteGroupConstrainedChannelMemberships` (app/syncables.go:189) — behind the
+    /// group-syncable sync and, for one channel, a `patchChannel` that turns `group_constrained` on.
     #[tracing::instrument(skip(self), fields(candidates))]
-    pub(crate) async fn delete_group_constrained_channel_memberships(
+    pub async fn delete_group_constrained_channel_memberships(
         &self,
         channel_id: Option<&str>,
         hook_ctx: &crate::plugin_hooks::HookContext,

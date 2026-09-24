@@ -163,6 +163,12 @@ pub async fn logout(
         return proxy::forward_to_go(State(state), request).await;
     }
 
+    // `c.LogAudit("")` before the cookie is cleared and before the revoke, so every answer here
+    // carries it — the anonymous 200 and a failed revoke's 500 included.
+    crate::audit_log::AuditRequest::of_request(&request)
+        .log(&state.app, session.0.as_ref(), "")
+        .await;
+
     let cookie = remove_session_cookie(&state);
 
     let mut response = match session.0 {
@@ -227,6 +233,10 @@ pub async fn update_password(
     if let Err(err) = require_id(&user_id, "user_id") {
         return err.into_response();
     }
+
+    // `c.LogAudit("attempted")` right after `RequireUserId`.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "attempted").await;
 
     // Go's decoder swallows a read failure into an empty map; there is no body-read error path
     // in this handler at all.
@@ -304,9 +314,17 @@ pub async fn update_password(
         Err(context_error())
     };
 
+    // The empty `current_password` 400 returned above with `"attempted"` alone; every other
+    // refusal, hand-built or from the app, is `"failed"`.
     match result {
-        Ok(()) => status_ok(),
-        Err(err) => ApiError::from(err).into_response(),
+        Ok(()) => {
+            audit.log(&state.app, Some(&session.0), "completed").await;
+            status_ok()
+        }
+        Err(err) => {
+            audit.log(&state.app, Some(&session.0), "failed").await;
+            ApiError::from(err).into_response()
+        }
     }
 }
 
@@ -351,6 +369,7 @@ pub async fn reset_password(
     session: OptionalSession,
     request: Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let props = body_props(request).await;
     let token = props.get("token").cloned().unwrap_or_default();
     if token.len() != TOKEN_SIZE {
@@ -358,13 +377,33 @@ pub async fn reset_password(
     }
     let new_password = props.get("new_password").cloned().unwrap_or_default();
 
+    // `tokenPrefix := token[:5]` — five **bytes**. When they end inside a character Go's string is
+    // not UTF-8, Postgres refuses the insert and Go is left with no row, so none is written here.
+    let token_prefix = token.get(..5);
+    let log = |outcome: &'static str| {
+        let text = token_prefix.map(|prefix| format!("{outcome} - token_prefix={prefix}"));
+        let (audit, app, session) = (&audit, &state.app, session.0.as_ref());
+        async move {
+            if let Some(text) = text {
+                audit.log(app, session, &text).await;
+            }
+        }
+    };
+    log("attempt").await;
+
     match state
         .app
         .reset_password_from_token(session.0.as_ref(), &token, &new_password)
         .await
     {
-        Ok(()) => status_ok(),
-        Err(err) => ApiError::from(err).into_response(),
+        Ok(()) => {
+            log("success").await;
+            status_ok()
+        }
+        Err(err) => {
+            log("fail").await;
+            ApiError::from(err).into_response()
+        }
     }
 }
 
@@ -387,9 +426,12 @@ pub async fn reset_password(
 #[tracing::instrument(skip_all)]
 pub async fn verify_user_email(
     State(state): State<AppState>,
-    _csrf: crate::auth::CsrfGuard,
+    // `OptionalSession` rather than a bare CSRF guard: the same token checks, and the session a
+    // token carries is whose `"Email Verified"` row this is.
+    session: OptionalSession,
     request: Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let props = body_props(request).await;
     let token = props.get("token").cloned().unwrap_or_default();
     if token.len() != TOKEN_SIZE {
@@ -397,7 +439,12 @@ pub async fn verify_user_email(
     }
 
     match state.app.verify_email_from_token(&token).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(&state.app, session.0.as_ref(), "Email Verified")
+                .await;
+            status_ok()
+        }
         Err(err) => {
             tracing::debug!(inner = %err.id, "email verification failed; reporting bad_link");
             ApiError::from(AppError::new(

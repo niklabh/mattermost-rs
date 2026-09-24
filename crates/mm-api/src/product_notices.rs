@@ -34,8 +34,11 @@ fn sorted_array_from_json(bytes: &[u8]) -> Result<Vec<String>, serde_json::Error
 pub async fn update_viewed_product_notices(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
+    // `c.LogAudit("attempt")`, first; no `"success"` follows.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();

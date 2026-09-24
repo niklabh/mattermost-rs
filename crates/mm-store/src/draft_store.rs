@@ -399,13 +399,16 @@ pub(crate) fn json_text<T: serde::Serialize>(value: Option<&T>) -> Result<String
     }
 }
 
-/// `StringArray.Scan` (model/utils.go:118): NULL stays nil, anything else is parsed as JSON.
+/// `StringArray.Scan` (model/utils.go:118): NULL stays nil, anything else is parsed as JSON —
+/// and the text `null`, which `StringArray.Value` writes for a nil slice, unmarshals to nil too
+/// rather than failing the read. [D-331]
 pub(crate) fn decode_array(
     column: &'static str,
     raw: Option<String>,
 ) -> Result<Option<StringArray>, StoreError> {
-    raw.map(|raw| serde_json::from_str::<StringArray>(&raw))
+    raw.map(|raw| serde_json::from_str::<Option<StringArray>>(&raw))
         .transpose()
+        .map(Option::flatten)
         .map_err(|source| StoreError::Decode {
             entity: "Draft",
             column,

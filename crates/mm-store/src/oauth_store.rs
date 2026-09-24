@@ -151,17 +151,18 @@ struct OAuthAppRow {
 
 impl OAuthAppRow {
     fn into_model(self) -> Result<OAuthApp, StoreError> {
-        let callback_urls =
-            match self.callbackurls {
-                None => None,
-                Some(json) => Some(serde_json::from_str::<StringArray>(&json).map_err(
-                    |source| StoreError::Decode {
-                        entity: "OAuthApp",
-                        column: "CallbackUrls",
-                        source,
-                    },
-                )?),
-            };
+        // `StringArray.Scan`: NULL leaves nil, and so does the text `null` (what
+        // `StringArray.Value` writes for a nil slice). [D-331]
+        let callback_urls = match self.callbackurls {
+            None => None,
+            Some(json) => serde_json::from_str::<Option<StringArray>>(&json).map_err(|source| {
+                StoreError::Decode {
+                    entity: "OAuthApp",
+                    column: "CallbackUrls",
+                    source,
+                }
+            })?,
+        };
         Ok(OAuthApp {
             id: self.id,
             creator_id: self.creatorid,

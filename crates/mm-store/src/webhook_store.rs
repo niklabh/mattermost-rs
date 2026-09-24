@@ -318,15 +318,17 @@ fn string_array_column(
     raw: Option<String>,
     column: &'static str,
 ) -> Result<Option<StringArray>, StoreError> {
+    // The text `null` — `StringArray.Value` of a nil slice, so what Go itself writes for a hook
+    // with no trigger words — unmarshals to nil. [D-331]
     match raw {
         None => Ok(None),
-        Some(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|source| StoreError::Decode {
+        Some(json) => serde_json::from_str::<Option<StringArray>>(&json).map_err(|source| {
+            StoreError::Decode {
                 entity: "OutgoingWebhook",
                 column,
                 source,
-            }),
+            }
+        }),
     }
 }
 

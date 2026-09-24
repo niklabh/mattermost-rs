@@ -689,7 +689,13 @@ async fn refuse_profile_image(
         ));
     };
     match state.app.set_profile_image(user_id, &image.data).await {
-        Ok(()) => Ok(Some(crate::thread_writes::status_ok())),
+        Ok(()) => {
+            // `c.LogAudit("")`, on success only.
+            crate::audit_log::AuditRequest::of(parts)
+                .log(&state.app, Some(&session.0), "")
+                .await;
+            Ok(Some(crate::thread_writes::status_ok()))
+        }
         Err(mm_app::post::PrepareError::App(err)) => Err(ApiError::from(*err)),
         Err(mm_app::post::PrepareError::Unreproducible(why)) => {
             tracing::debug!(why, "the profile image is Go's to decode");
@@ -972,8 +978,12 @@ async fn refuse_brand_image(
         ));
     };
     match state.app.save_brand_image(&image.data).await {
-        // `w.WriteHeader(http.StatusCreated)` then `ReturnStatusOK(w)`: a 201 with the OK body.
-        Ok(()) => Ok(Some(
+        // `w.WriteHeader(http.StatusCreated)` then `ReturnStatusOK(w)`: a 201 with the OK body,
+        // after `c.LogAudit("")`.
+        Ok(()) => Ok(Some({
+            crate::audit_log::AuditRequest::of(parts)
+                .log(&state.app, Some(&session.0), "")
+                .await;
             (
                 axum::http::StatusCode::CREATED,
                 [
@@ -985,8 +995,8 @@ async fn refuse_brand_image(
                 ],
                 r#"{"status":"OK"}"#,
             )
-                .into_response(),
-        )),
+                .into_response()
+        })),
         Err(PrepareError::App(err)) => Err(ApiError::from(*err)),
         Err(PrepareError::Unreproducible(reason)) => {
             tracing::debug!(reason, "forwarding to Go");

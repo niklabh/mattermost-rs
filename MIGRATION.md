@@ -9383,7 +9383,7 @@ started.
 | Go source | Rust | Status | Tests | Notes |
 |---|---|---|---|---|
 | store/sqlstore/channel_store_categories.go — `CreateInitialSidebarCategories`, `CreateSidebarCategory`, `UpdateSidebarCategoryOrder`, `UpdateSidebarCategories`, `DeleteSidebarCategory` | `mm-store/src/sidebar_category_store.rs` | DONE | 12 pass (`tests/db_sidebar_category_writes.rs`) | Each one transaction, with Go's statement order inside it — categories before channels, and the category updates in **id** order, both for deadlock avoidance against a concurrent transaction. `UpdateSidebarCategories` also writes `favorite_channel` **`Preferences`** rows, and its two branches are asymmetrical: Favorites deletes the *original* channel list and re-adds the new one, every other type deletes the *request's*. |
-| app/channel_category.go — `createInitialSidebarCategories` and the four writes | `mm-app/src/sidebar.rs` | DONE | 16 pass | Four websocket events with **two payload conventions**: `order` is a JSON array, `updatedCategories` a marshalled string. None of the four omits the originating connection (Go passes `""`), unlike the draft and preference writes. `muteChannelsForUpdatedCategories` is ported as far as the decision only — see [D-224]. |
+| app/channel_category.go — `createInitialSidebarCategories` and the four writes | `mm-app/src/sidebar.rs` | DONE | 16 pass | Four websocket events with **two payload conventions**: `order` is a JSON array, `updatedCategories` a marshalled string. None of the four omits the originating connection (Go passes `""`), unlike the draft and preference writes. `muteChannelsForUpdatedCategories` ends in `setChannelsMuted` (D-224 closed). |
 | api4/channel_category.go — the five writes | `mm-api/src/sidebar.rs` | DONE | 40 parity | The per-category refusal on the collection route is a **400** naming `category`, not the 403 its singular sibling answers from the same gate. `/order` is the one route whose decode failure is `api.payload.parse.error` with no `Name`, and `null` is not a decode failure there at all. Mutations: see the tally below. |
 
 Four things a reader would otherwise get wrong, each of them a test:
@@ -14804,6 +14804,43 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `encoding/json`'s absent-field-is-zero, for every struct a handler or the app decodes | `#[serde(default)]` on every `Deserialize` struct; `mm_model::serde_default_guard` | DONE, closes [D-192], [D-043] | `every_deserialize_struct_zero_fills_an_absent_key` (a `syn` walk of six crates) | Exempt only where Go's own decoder also refuses a missing key: `AutocompleteArgWire`, i18n `Entry`, `EcdsaKeyRow`. An explicit `null` in a scalar field is still [D-057]'s. |
 | `json.NewDecoder(r.Body).Decode` into a value or a pointer, `json.Unmarshal`, `MapFromJSON`, `MapBoolFromJSON`, `StringInterfaceFromJSON` — at every api4 body read | `mm_model::utils::{decode_one_from_json, decode_one_value_from_json, unmarshal_from_json, map_from_json, map_bool_from_json, string_interface_from_json}`, `mm_model::go_decode::Strict` | DONE, closes [D-941] | `body_decode_go_parity` (48 bodies × 3 decodes, map-bool and int64 rows), 5 `go_decode` unit, `parity::malformed_bodies` (24 cases, whole error bodies) | An array is never a struct and a repeated key is last-wins at any depth; each call site uses the form its Go declaration implies. The local `MapFromJSON` copies (eleven) now keep Go's partial decode (a mistyped member is `""`, not an empty map). |
+
+## Tech-debt payoff: muting a sidebar category — D-224 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| app/channel.go `setChannelsMuted`, store `UpdateMultipleMembers`, `GetMembersByChannelIds` | `mm_app::channel_member::set_channels_muted`, `mm_store::channel_store` | DONE | 6 unit + `parity::sidebar_category_writes` (3 new); 8/8 mutations caught | Only members whose mute differs are written (no `LastUpdateAt` bump otherwise), and every member is validated before any write, so one invalid membership leaves the whole category unmuted — as Go does. |
+
+## Tech-debt payoff: one deciding rate limiter in front of Go (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `utils.GetIPAddress` behind a proxy; `RateLimitHandler`'s and `ServeHTTP`'s limiters for forwarded requests | `client_ip::forwarded_address_header`, `proxy::forward`, `ratelimit::{global, strip_go_rate_limit_headers, per_user}` | DONE, closes [D-1150]; opens [D-1210], [D-1211] | `parity::ratelimit::forwarded_requests_are_limited_once_on_the_clients_key` (Go direct vs mm-api in front of a second Go, two loopback clients), 5 unit; `scripts/mutations/ratelimit-front.plan` | This server counts every request and Go, keyed on the client through the trusted header, sees a subset; with `TrustedProxyIPHeader` empty Go keys on this server, which is logged at start. The route limiters now run in `global`, ahead of the per-user step, as in Go. |
+| The per-user step for `NewStaticHandler(root)` and the web routes (`InitOAuth`, `InitSaml`, `InitMagicLink`, `InitWebhooks`, `/manualtest`) | `web_static::{go_handler_kind, per_user_step}` | DONE, closes [D-1151] | the same parity test (page and web-handler refusals), 1 unit (45 rows) | `/static/…`, `robots.txt` and the plugin subrouter are plain handlers with no per-user step. |
+
+## SQL NULL versus JSON `null` in map, slice and pointer columns — D-331, D-158 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `SqlUserStore.Get`/`GetAllProfilesInChannel` manual scan; every other user read via sqlx | `mm_store::user_store::{require_manual_scan_columns, user_from_row}`, `App::get_user` | DONE | `parity::null_columns::a_null_user_column_is_a_failed_get_and_an_empty_map_elsewhere` | A NULL `props`/`notifyprops`/`timezone` fails `GET /users/{id}` (500, `app.user.get_by_username.app_error`) and is `{}` elsewhere. |
+| `ChannelMember.NotifyProps`, `Session.Props` (sqlx `StringMap`) | `channel_member_from_row`, `group_syncable_store` RETURNING, `SessionRow::into_session` | DONE | `…a_null_string_map_column_is_an_empty_object_and_a_json_null_is_null`, `…job_data…` | SQL NULL is `{}`, jsonb `null` is `null`; a `null` session row no longer fails auth. |
+| `Channel.BannerInfo` (`*ChannelBannerInfo`) | `channel_from_row` | DONE | `…a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct` | jsonb `null` is the struct with three `null` fields. |
+| `StringArray` over text (`OutgoingWebhook`, `OAuthApp`, `Draft.FileIds`, `ScheduledPost.FileIds`), `ThreadParticipants`, `GetChannelMembersTimezones` | `webhook_store::string_array_column`, `oauth_store`, `draft_store::decode_array`, `threaded_post_from_row`, `get_channel_members_timezones` | DONE | `…string_array…`, `…draft…`, `…participant…`, the timezones half of the user test | The text `null` — what `StringArray.Value` writes for nil — decoded as a failed read. |
+
+## Tech-debt payoff: `patchChannel`'s last two forwards — D-234 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `patchChannel`'s `DeleteGroupConstrainedChannelMemberships` goroutine (api4/channel.go:543) | `mm_api::channel_writes::{turns_group_constraint_on, spawn_group_constrained_removal}` | DONE | 1 unit + `parity::channel_patch_writes` | Asynchronous as in Go: the `200` does not wait for the sweep, and the patching admin is swept too when no group holds them. |
+| `addChannelToDefaultCategory` (app/channel.go:4706), whole | `App::add_channel_to_default_category`, `default_category_plan` | DONE | 5 unit + `parity::channel_patch_writes` (create and patch) | The "already in a category" half was called dead on the create path and is not: the new channel is an orphan in Channels, so Go writes Channels back and publishes a second `sidebar_category_updated`. |
+
+## Tech-debt payoff: the `Audits` rows of every served `LogAudit` — D-270, D-870 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web.Context.LogAudit`, `LogAuditWithUserId` (web/context.go:95, :103) at all 207 api4/web call sites | `mm_api::audit_log::AuditRequest`, called from the channel, view, command, webhook, OAuth, outgoing-OAuth, licence, marketplace, notice, onboarding, role, team, image, user, session, token, login and terms handlers | DONE, closes [D-270]; opens [D-1220], [D-1221] | `parity::audit_rows` (9), 3 unit; `scripts/mutations/audit-rows-d270.plan` — 14 run, 12 caught, 2 controls survived | Rows are written only on branches served here, at Go's point (entry, refusal or success); the web OAuth/SAML/magic-link handlers are forwarded whole, so theirs are Go's. |
+| The Go session-cache purge (`mm_api::go_cache`) | `PUT /users/sessions/device` as the probe session instead of an audited revoke | DONE, closes [D-870] | `audit_rows::the_session_purge_is_not_audited`, `user_permanent_delete` compares `audits` whole | |
+| `FilterNonGroupChannelMembers` on the add paths (`addChannelMember`, `localAddChannelMember`, `addUserToChannel`) | `channel_member_writes::group_filter_refusal`, `App::add_user_to_channel_row` | DONE | `channel_member_removal::an_add_to_a_group_constrained_channel_admits_only_whom_a_group_vouches_for` | A group-constrained add was forwarded; the filter's two error kinds are now a typed `NonGroupFilterError`. |
 
 ## Body decoding: Go's `null`, key-fold and repeated-key rules — D-057, D-075, D-460, D-071 (2026-09-25)
 

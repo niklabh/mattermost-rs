@@ -435,13 +435,10 @@ pub async fn remove_channel_member(
         Ok(MemberWrite::Done(())) => {
             tracing::Span::current().record("forwarded", false);
             // `c.LogAudit("name=" + channel.Name + " user_id=" + c.Params.UserId)` on success.
-            state
-                .app
-                .log_audit(
-                    &session.0.user_id,
-                    &session.0.id,
-                    &crate::client_ip::client_ip(request.headers(), request.extensions()),
-                    request.uri().path(),
+            crate::audit_log::AuditRequest::of_request(&request)
+                .log(
+                    &state.app,
+                    Some(&session.0),
                     &format!("name={} user_id={user_id}", channel.name),
                 )
                 .await;
@@ -453,6 +450,45 @@ pub async fn remove_channel_member(
             proxy::forward_to_go(State(state), request).await
         }
         Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// The group-constrained block of `addChannelMember` (api4/channel.go:2452) and
+/// `localAddChannelMember` (channel_local.go:202): `FilterNonGroupChannelMembers` over every
+/// requested id, before any is added.
+///
+/// A filter failure is answered two ways, because Go type-switches on the `error`: the
+/// group-user read's `*AppError` (500 `app.user.get_profiles.app_error`) is passed through
+/// unchanged, and the profile read's bare store error becomes 400 `api.channel.add_members.error`.
+/// Any id no linked group vouches for (and that is not a bot) makes the whole request 400
+/// `api.channel.add_members.user_denied`, naming them in the profile read's username order.
+pub(crate) async fn group_filter_refusal(
+    state: &AppState,
+    where_: &str,
+    user_ids: &[String],
+    channel: &mm_model::channel::Channel,
+) -> Option<ApiError> {
+    match state
+        .app
+        .filter_non_group_channel_members(user_ids, channel)
+        .await
+    {
+        Ok(non_members) if non_members.is_empty() => None,
+        Ok(non_members) => Some(ApiError::from(mm_app::channel_member::user_denied(
+            where_,
+            non_members,
+        ))),
+        Err(mm_app::group::NonGroupFilterError::GroupUsers(err)) => Some(ApiError::from(err)),
+        Err(err @ mm_app::group::NonGroupFilterError::Profiles(_)) => {
+            tracing::warn!(error = %err, "the group filter failed");
+            Some(ApiError::from(AppError::new(
+                where_,
+                "api.channel.add_members.error",
+                None,
+                String::new(),
+                400,
+            )))
+        }
     }
 }
 
@@ -501,7 +537,8 @@ struct AddMemberRequest {
 ///
 /// A **guest** session (`UserCanSeeOtherUser`'s restricted branch), a `post_root_id`
 /// (`GetSinglePost` plus a `ThreadMemberships` write), a **discoverable private** channel (the
-/// join-request queue), and a **group-constrained** channel (`FilterNonGroupChannelMembers`).
+/// join-request queue). A **group-constrained** channel is filtered here: see
+/// [`group_filter_refusal`].
 #[tracing::instrument(skip_all, fields(channel_id = %channel_id, added, forwarded))]
 pub async fn add_channel_member(
     State(state): State<AppState>,
@@ -515,6 +552,7 @@ pub async fn add_channel_member(
 
     let (parts, body) = request.into_parts();
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -617,9 +655,11 @@ pub async fn add_channel_member(
         }
     }
 
-    if channel.is_group_constrained() {
-        tracing::Span::current().record("forwarded", true);
-        return forward(state, parts, bytes).await;
+    if channel.is_group_constrained()
+        && let Some(refusal) =
+            group_filter_refusal(&state, "addChannelMember", &parsed.user_ids, &channel).await
+    {
+        return refusal.into_response();
     }
 
     // Go's loop, with `lastError` and `c.Err` tracked separately: `lastError` decides whether the
@@ -695,7 +735,18 @@ pub async fn add_channel_member(
             .add_channel_member(member_user_id, &channel, &opts, &hook_ctx)
             .await
         {
-            Ok(MemberWrite::Done(member)) => new_members.push(member),
+            Ok(MemberWrite::Done(member)) => {
+                // `c.LogAudit("name=" + channel.Name + " user_id=" + cm.UserId)`, once per member
+                // the loop adds — not for one it skipped as already present.
+                audit
+                    .log(
+                        &state.app,
+                        Some(&session.0),
+                        &format!("name={} user_id={}", channel.name, member.user_id),
+                    )
+                    .await;
+                new_members.push(member);
+            }
             Ok(MemberWrite::Forward(why)) => {
                 tracing::Span::current().record("forwarded", true);
                 tracing::debug!(reason = why, "handing the member add to Go");

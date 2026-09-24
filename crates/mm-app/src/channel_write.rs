@@ -35,8 +35,6 @@
 //!
 //! - `ChannelAccessControlled` (ABAC) — `MinimumEnterpriseAdvancedLicense` gates it to `false`
 //!   on an unlicensed installation, and the handlers forward a licensed one outright.
-//! - `addChannelToDefaultCategory` — a sidebar write; the handler forwards the patches that
-//!   would reach it. See [`default_category_after_patch`].
 //! - `cleanupChannelAccessControlPolicy` and `CancelPendingChannelJoinRequestsOnConvert` —
 //!   enterprise, and Go logs rather than returns their failures.
 
@@ -72,24 +70,6 @@ pub enum ChannelWrite {
     Done,
     /// Nothing was written. Forward the request whole.
     Forward(&'static str),
-}
-
-/// `channel.DefaultCategoryName` as it will be *after* `patch` is applied — the value
-/// `addChannelToDefaultCategory` (app/channel.go:4706) tests, not the value on the row now.
-///
-/// Go's gate is `channel.DefaultCategoryName != "" && *EnableChannelCategorySorting`, evaluated
-/// on the **patched** channel, and the patch trims the name
-/// ([`Channel::patch`]). So a patch sending `"  Zed  "` reaches the sidebar and one sending
-/// `"   "` does not — the trim happens before the emptiness test, and a port that tested the raw
-/// string would forward a request Go serves.
-///
-/// A free function rather than an inline expression because the answer decides whether the
-/// request is served here at all, and it must be computable *before* the write.
-pub fn default_category_after_patch(channel: &Channel, patch: &ChannelPatch) -> String {
-    match &patch.default_category_name {
-        Some(name) => name.trim().to_owned(),
-        None => channel.default_category_name.clone(),
-    }
 }
 
 impl App {
@@ -221,10 +201,10 @@ impl App {
     /// 2. `channel.Patch(patch)` — see [`Channel::patch`], including the two fields it trims and
     ///    the `managed_category_name` it accepts and ignores.
     /// 3. [`App::update_channel`].
-    /// 4. `addChannelToDefaultCategory`, then the display-name, header and purpose system posts —
-    ///    **in that order**, each guarded on its own field having changed, each logged and
-    ///    swallowed. The sidebar step is the caller's problem (it has to be decided *before*
-    ///    step 3, see [`default_category_after_patch`]).
+    /// 4. `addChannelToDefaultCategory` ([`App::add_channel_to_default_category`], for the
+    ///    **patching** user's sidebar, on the name the channel carries after the patch), then the
+    ///    display-name, header and purpose system posts — **in that order**, each guarded on its
+    ///    own field having changed, each logged and swallowed.
     ///
     /// The fourth post, `postUpdateChannelAutotranslationMessage`, has no call site here: an
     /// `autotranslation` patch is a **403** from the handler on an unlicensed installation, so
@@ -268,6 +248,8 @@ impl App {
 
         channel.patch(patch);
         self.update_channel(ctx, channel).await?;
+
+        self.add_channel_to_default_category(user_id, channel).await;
 
         if old_display_name != channel.display_name {
             self.post_update_channel_display_name_message(
@@ -1185,54 +1167,6 @@ mod tests {
         assert_eq!(wrapped.id, "api.channel.post_channel_privacy_message.error");
         assert_eq!(wrapped.status_code, 500);
         assert_eq!(wrapped.where_, "postChannelPrivacyMessage");
-    }
-
-    fn channel_with_category(name: &str) -> Channel {
-        Channel {
-            default_category_name: name.to_owned(),
-            ..Channel::default()
-        }
-    }
-
-    /// The gate reads the **patched** value, and the patch trims. A test on the raw string passes
-    /// for `"Zed"` and forwards nothing for `"  Zed  "`.
-    #[test]
-    fn the_default_category_gate_reads_the_trimmed_patched_value() {
-        let channel = channel_with_category("");
-        let patch = ChannelPatch {
-            default_category_name: Some("  Zed  ".to_owned()),
-            ..ChannelPatch::default()
-        };
-        assert_eq!(default_category_after_patch(&channel, &patch), "Zed");
-
-        let whitespace = ChannelPatch {
-            default_category_name: Some("   ".to_owned()),
-            ..ChannelPatch::default()
-        };
-        assert_eq!(
-            default_category_after_patch(&channel, &whitespace),
-            "",
-            "a whitespace-only name trims to empty and never reaches the sidebar"
-        );
-    }
-
-    /// A patch that does not mention the field keeps whatever the row already carries — so a
-    /// channel already in a default category forwards even for a header-only patch.
-    #[test]
-    fn an_untouched_default_category_still_counts() {
-        let channel = channel_with_category("Zed");
-        let header_only = ChannelPatch {
-            header: Some("hi".to_owned()),
-            ..ChannelPatch::default()
-        };
-        assert_eq!(default_category_after_patch(&channel, &header_only), "Zed");
-
-        // And clearing it explicitly takes the request out of the sidebar path.
-        let cleared = ChannelPatch {
-            default_category_name: Some(String::new()),
-            ..ChannelPatch::default()
-        };
-        assert_eq!(default_category_after_patch(&channel, &cleared), "");
     }
 
     /// The four arms, in Go's order, each keeping its own id and status. `Conflict` first: it is

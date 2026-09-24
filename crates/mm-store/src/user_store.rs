@@ -998,6 +998,27 @@ pub(crate) struct UserRow {
     pub(crate) botlasticonupdate: i64,
 }
 
+/// `SqlUserStore.Get` and `GetAllProfilesInChannel` (user_store.go:608, :962) scan the three JSON
+/// columns into `[]byte` and `json.Unmarshal` each one unconditionally, and a SQL NULL is a nil
+/// slice: `unexpected end of JSON input`, a failed read. A jsonb `null` is four bytes and decodes.
+/// `props` is checked first, then `notifyprops`, then `timezone` — Go's order.
+pub(crate) fn require_manual_scan_columns(row: &UserRow) -> Result<(), StoreError> {
+    for (column, value) in [
+        ("props", &row.props),
+        ("notifyprops", &row.notifyprops),
+        ("timezone", &row.timezone),
+    ] {
+        if value.is_none() {
+            return Err(StoreError::Decode {
+                entity: "User",
+                column,
+                source: serde::de::Error::custom("unexpected end of JSON input"),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// The row-to-model mapping both lookups share.
 ///
 /// Go unmarshals the three JSON columns unconditionally and returns the error, so a malformed
@@ -1010,12 +1031,27 @@ pub(crate) struct UserRow {
 /// shapes mean "absent" and only a *type* mismatch is an error. Treating JSON null as a decode
 /// failure made `GET /users/me` a 500 for every user except the one the parity tests happen to
 /// log in as — see [D-135].
+///
+/// # SQL NULL and jsonb `null` are two different answers ([D-331], [D-158])
+///
+/// Every Go read but two scans into `*model.User` through sqlx, whose `reflectx.FieldByIndexes`
+/// allocates a nil map before scanning into it. `StringMap.Scan` returns early on a SQL NULL,
+/// leaving that **empty** map — `"timezone":{}` — while a jsonb `null` reaches `json.Unmarshal`,
+/// which sets the map back to nil — `"timezone":null`. (`props` and `notify_props` are
+/// `omitempty`, so only `timezone` shows the difference on the wire.) The other two reads —
+/// `Get` and `GetAllProfilesInChannel` — scan into `[]byte` and unmarshal by hand, and a SQL NULL
+/// fails there instead; see [`require_manual_scan_columns`].
+///
+/// Go's user cache re-encodes a nil map as an empty one (msgp), so a *cached* `null` comes back
+/// as `{}`. That is Go process state this server does not have; the uncached answer is the one
+/// reproduced.
 pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
     let decode_map = |value: Option<serde_json::Value>,
                       column: &'static str|
      -> Result<Option<StringMap>, StoreError> {
         match value {
-            None | Some(serde_json::Value::Null) => Ok(None),
+            None => Ok(Some(StringMap::new())),
+            Some(serde_json::Value::Null) => Ok(None),
             Some(value) => Ok(Some(serde_json::from_value::<StringMap>(value).map_err(
                 |source| StoreError::Decode {
                     entity: "User",
@@ -1460,6 +1496,7 @@ impl UserStore for SqlUserStore {
         };
         tracing::Span::current().record("found", true);
 
+        require_manual_scan_columns(&row)?;
         user_from_row(row)
     }
 
@@ -2306,6 +2343,7 @@ impl UserStore for SqlUserStore {
 
         rows.into_iter()
             .map(|row| {
+                require_manual_scan_columns(&row)?;
                 let mut user = user_from_row(row)?;
                 user.sanitize(&std::collections::HashMap::new());
                 Ok((user.id.clone(), user))
