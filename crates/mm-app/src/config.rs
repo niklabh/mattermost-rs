@@ -1708,9 +1708,13 @@ impl Config {
     ///
     /// The variable names are Mattermost's own convention, so this agrees with the neighbouring
     /// Go server for free whenever that server is configured by environment.
+    ///
+    /// The variables are read the way `GetEnvironment` reads them — see [`process_lookup`] — not
+    /// with `std::env::var`, whose exact-case, exact-name match misses variables Go applies.
     #[must_use]
     pub fn apply_env(self) -> Self {
-        self.apply_env_from(&|key| std::env::var(key).ok())
+        let env = get_environment();
+        self.apply_env_from(&|key| process_lookup(&env, key))
     }
 
     /// [`Config::apply_env`] against an arbitrary lookup.
@@ -1852,10 +1856,10 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
             .unwrap_or(default.allowed_untrusted_internal_connections),
-            // `strings.Split(value, " ")` (environment.go:80): spaces, and an empty variable is one
-            // empty name — which `GetIPAddress` then looks up and never finds.
+            // [`split_env_list`]: an empty variable is one empty name, which `GetIPAddress` then
+            // looks up and never finds.
             trusted_proxy_ip_header: lookup("MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER")
-                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.trusted_proxy_ip_header),
             restrict_link_previews: lookup("MM_SERVICESETTINGS_RESTRICTLINKPREVIEWS")
                 .unwrap_or(default.restrict_link_previews),
@@ -1955,12 +1959,11 @@ impl Config {
                 "MM_TEAMSETTINGS_MAXNOTIFICATIONSPERCHANNEL",
                 default.max_notifications_per_channel,
             ),
-            // Go's env decoder splits a `[]string` setting on commas, so the environment form of
-            // this is `town-square,welcome`. An unset variable and an empty one are different:
-            // unset keeps the default, and `""` is an empty list — which is also the default, so
-            // the distinction is invisible here and would not be for a non-empty default.
+            // See [`split_env_list`]: `town-square welcome`, and an empty variable is `[""]` —
+            // which [`crate::App::default_channel_names`] then treats as a configured list, so it
+            // drops `off-topic` exactly as Go's `DefaultChannelNames` does.
             experimental_default_channels: lookup("MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS")
-                .map(|raw| split_list(&raw))
+                .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: lookup_bool(
                 lookup,
@@ -2052,7 +2055,18 @@ impl Config {
             ),
             plugin_client_directory: lookup("MM_PLUGINSETTINGS_CLIENTDIRECTORY")
                 .unwrap_or(default.plugin_client_directory),
-            plugin_states: default.plugin_states,
+            // The map arm of `applyEnvKey`: the variable **replaces** the map, `SetDefaults`' four
+            // entries included, and a value that does not decode changes nothing.
+            plugin_states: lookup("MM_PLUGINSETTINGS_PLUGINSTATES")
+                .and_then(|raw| decode_env_plugin_states(&raw))
+                .map(|states| {
+                    states
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|(id, enable)| enable.map(|on| (id, on)))
+                        .collect()
+                })
+                .unwrap_or(default.plugin_states),
             plugin_require_signature: lookup_bool(
                 lookup,
                 "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
@@ -2085,9 +2099,8 @@ impl Config {
                 "MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL",
                 default.plugin_allow_insecure_download_url,
             ),
-            // `strings.Split(value, " ")`: unlike `split_list`, an empty value is one empty name.
             plugin_signature_public_key_files: lookup("MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES")
-                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.plugin_signature_public_key_files),
             feature_flag_enable_mfi_plugin_signature_public_key: lookup_bool(
                 lookup,
@@ -3109,7 +3122,8 @@ impl Config {
     /// missing row with a marshalled default config (database.go:232) — so this falls back to
     /// [`Config::default`] and still applies the overlay.
     pub async fn load(store: &impl mm_store::ConfigStore) -> Result<Self, ConfigError> {
-        Self::load_with_env(store, &|key| std::env::var(key).ok()).await
+        let env = get_environment();
+        Self::load_with_env(store, &|key| process_lookup(&env, key)).await
     }
 
     /// [`Config::load`] against an arbitrary environment lookup, so the *composition* of document
@@ -3822,14 +3836,121 @@ fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64)
         .unwrap_or(default)
 }
 
-/// Go's environment decoder for a `[]string` setting: split on commas, keep the pieces as
-/// written. Whitespace is **not** trimmed — `"a, b"` is `["a", " b"]` in Go too — and an empty
-/// string yields an empty list rather than one empty element.
-fn split_list(raw: &str) -> Vec<String> {
-    if raw.is_empty() {
-        return Vec::new();
+/// The slice arm of `applyEnvKey` (config/environment.go:80): `strings.Split(value, " ")`.
+///
+/// **A single ASCII space, not a comma** and not any whitespace: `"a,b"` is one element, a tab
+/// does not separate, and doubled or edge spaces leave empty elements (`" a  b "` is
+/// `["", "a", "", "b", ""]`). An empty variable is `[""]` — one empty element, never `[]` — because
+/// that is what `strings.Split("", " ")` returns. Every `[]string` setting read from the
+/// environment goes through this, in both [`Config::apply_env_from`] and [`apply_environment_map`].
+fn split_env_list(raw: &str) -> Vec<String> {
+    raw.split(' ').map(str::to_owned).collect()
+}
+
+/// `GetEnvironment`'s view of one variable, for [`Config::apply_env_from`].
+///
+/// `env` is [`get_environment`]'s map, so the names are already upper-cased: Go applies
+/// `mm_teamsettings_experimentaldefaultchannels` exactly as it applies the upper-case spelling.
+/// A variable naming a setting **plus leftover key parts** also reaches it — `applyEnvKey` stops
+/// at the first non-struct field and ignores the rest, so `MM_SERVICESETTINGS_SITEURL_X` sets
+/// `SiteURL`. The exact name wins when both are set; Go's choice between them is map-iteration
+/// order, i.e. undefined.
+///
+/// `MM_LICENSE` and the `MMRS_` variables are not part of the overlay — Go reads the licence
+/// with `os.Getenv` (app/platform/license.go:26), exact case and exact name — so those are read
+/// from the process directly.
+fn process_lookup(env: &std::collections::BTreeMap<String, String>, key: &str) -> Option<String> {
+    if key == "MM_LICENSE" || key.starts_with("MMRS_") {
+        return std::env::var(key).ok();
     }
-    raw.split(',').map(str::to_owned).collect()
+    overlay_lookup(env, key)
+}
+
+/// The overlay half of [`process_lookup`], over an upper-cased environment map.
+fn overlay_lookup(env: &std::collections::BTreeMap<String, String>, key: &str) -> Option<String> {
+    if let Some(value) = env.get(key) {
+        return Some(value.to_owned());
+    }
+    let prefix = format!("{key}_");
+    env.range::<str, _>((
+        std::ops::Bound::Included(prefix.as_str()),
+        std::ops::Bound::Unbounded,
+    ))
+    .take_while(|(name, _)| name.starts_with(&prefix))
+    .map(|(_, value)| value.to_owned())
+    .next()
+}
+
+/// The map arm of `applyEnvKey` for `PluginSettings.PluginStates` (`map[string]*PluginState`):
+/// `json.Unmarshal` of the whole variable into a **fresh** map.
+///
+/// `None` is "did not decode", under which Go assigns nothing. `Some(None)` is a JSON `null`,
+/// which Go assigns as a nil map. An entry is `None` for a `null` state (a nil `*PluginState`)
+/// and otherwise its `Enable`. What `encoding/json` does and serde does not by default, and so
+/// what [`GoPluginState`] reproduces: the field name matches case-insensitively, the **last**
+/// matching key wins, a `null` `Enable` leaves it `false`, unknown keys are skipped, and a
+/// wrong-typed `Enable` fails the whole variable.
+fn decode_env_plugin_states(
+    raw: &str,
+) -> Option<Option<std::collections::BTreeMap<String, Option<bool>>>> {
+    let decoded: Option<std::collections::BTreeMap<String, Option<GoPluginState>>> =
+        serde_json::from_str(raw).ok()?;
+    Some(decoded.map(|states| {
+        states
+            .into_iter()
+            .map(|(id, state)| (id, state.map(|s| s.enable)))
+            .collect()
+    }))
+}
+
+/// `model.PluginState` (config.go:3598) as `encoding/json` decodes it — see
+/// [`decode_env_plugin_states`].
+struct GoPluginState {
+    enable: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for GoPluginState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = GoPluginState;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a PluginState object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<GoPluginState, A::Error> {
+                let mut enable = false;
+                while let Some(key) = map.next_key::<String>()? {
+                    // `encoding/json`'s fold is ASCII case-insensitive for a name with no `k`
+                    // or `s` in it (fold.go) — `Enable` has neither.
+                    if key.eq_ignore_ascii_case("Enable") {
+                        if let Some(value) = map.next_value::<Option<bool>>()? {
+                            enable = value;
+                        }
+                    } else {
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                }
+                Ok(GoPluginState { enable })
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+/// The map arm of `applyEnvKey` for `PluginSettings.Plugins` (`map[string]map[string]any`): a
+/// JSON object whose entries are objects or `null`, or `null` itself. `None` when it would not
+/// decode into that type.
+fn decode_env_plugins(raw: &str) -> Option<serde_json::Value> {
+    let decoded: Option<
+        std::collections::BTreeMap<
+            String,
+            Option<std::collections::BTreeMap<String, serde_json::Value>>,
+        >,
+    > = serde_json::from_str(raw).ok()?;
+    serde_json::to_value(decoded).ok()
 }
 
 #[cfg(test)]
@@ -5404,9 +5525,25 @@ mod go_parity {
 /// beginning with those two letters; `applyEnvironmentMap` trims a leading `MM_` and simply finds
 /// no field for what is left. Narrowing the filter to `MM_` would look tidier and would change
 /// which keys [`generate_environment_map`] reports.
+///
+/// Read with `vars_os` and decoded lossily: `std::env::vars` panics on a variable that is not
+/// UTF-8, and Go reads such a variable without complaint.
 pub fn get_environment() -> std::collections::BTreeMap<String, String> {
-    std::env::vars()
-        .map(|(key, value)| (key.to_uppercase(), value))
+    environment_from(std::env::vars_os().map(|(key, value)| {
+        (
+            key.to_string_lossy().into_owned(),
+            value.to_string_lossy().into_owned(),
+        )
+    }))
+}
+
+/// [`get_environment`] over arbitrary pairs: the key is upper-cased (`strings.ToUpper`, Unicode
+/// like [`str::to_uppercase`]) and kept when it starts with `MM`. A later pair whose name
+/// upper-cases to an earlier one's replaces it, as Go's map assignment does.
+fn environment_from(
+    vars: impl Iterator<Item = (String, String)>,
+) -> std::collections::BTreeMap<String, String> {
+    vars.map(|(key, value)| (key.to_uppercase(), value))
         .filter(|(key, _)| key.starts_with("MM"))
         .collect()
 }
@@ -5480,14 +5617,39 @@ fn apply_env_key(key: &str, value: &str, subject: &mut serde_json::Value, path: 
         return;
     };
 
-    if RAW_MESSAGE_PATHS.contains(&child_path.as_str())
-        || MAP_VALUED_PATHS.contains(&child_path.as_str())
-    {
-        // `json.Unmarshal([]byte(value), target)` for a map; a raw assignment of the bytes for a
-        // `json.RawMessage`. Both are "the variable is the value, parsed as JSON", and both leave
-        // the field alone when it does not parse — Go's map arm by its `if err == nil`, and the
-        // raw-message arm because storing non-JSON bytes there would only produce a document that
-        // cannot be marshalled again.
+    if MAP_VALUED_PATHS.contains(&child_path.as_str()) {
+        // `json.Unmarshal([]byte(value), target)` into a fresh map of the field's **type**, and
+        // nothing assigned when it fails (`if err == nil`). Valid JSON of the wrong shape — a
+        // number where a plugin's state belongs — is a failure too, so the value is decoded as
+        // the Go type rather than merely parsed; see [`decode_env_plugin_states`].
+        let decoded = if child_path == "PluginSettings.PluginStates" {
+            decode_env_plugin_states(value).map(|states| match states {
+                Some(states) => serde_json::Value::Object(
+                    states
+                        .into_iter()
+                        .map(|(id, enable)| {
+                            let state = enable.map_or(
+                                serde_json::Value::Null,
+                                |on| serde_json::json!({ "Enable": on }),
+                            );
+                            (id, state)
+                        })
+                        .collect(),
+                ),
+                None => serde_json::Value::Null,
+            })
+        } else {
+            decode_env_plugins(value)
+        };
+        if let Some(decoded) = decoded {
+            *child = decoded;
+        }
+        return;
+    }
+    if RAW_MESSAGE_PATHS.contains(&child_path.as_str()) {
+        // A raw assignment of the bytes. Go stores even non-JSON bytes; this leaves the field
+        // alone instead, because such bytes would only produce a document that cannot be
+        // marshalled again — on Go's side too.
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
             *child = parsed;
         }
@@ -5510,14 +5672,14 @@ fn apply_env_key(key: &str, value: &str, subject: &mut serde_json::Value, path: 
                 *child = serde_json::Value::from(parsed);
             }
         }
-        // `strings.Split(value, " ")` — **spaces, not commas**, and unlike [`split_list`] an
-        // empty variable yields one empty element rather than an empty list, because that is what
-        // `strings.Split("", " ")` returns.
+        // [`split_env_list`]. The one slice setting that is not a `[]string`,
+        // `SqlSettings.ReplicaLagSettings`, makes Go's `reflect.Set` **panic** at boot; here the
+        // strings land in the document and its decode into `mm_model::config::Config` fails.
         serde_json::Value::Array(_) => {
             *child = serde_json::Value::Array(
-                value
-                    .split(' ')
-                    .map(|piece| serde_json::Value::String(piece.to_owned()))
+                split_env_list(value)
+                    .into_iter()
+                    .map(serde_json::Value::String)
                     .collect(),
             );
         }
@@ -7414,8 +7576,8 @@ mod document {
         assert_eq!(config["ServiceSettings"]["WebsocketPort"], 80);
     }
 
-    /// `strings.Split(value, " ")` — **spaces**, not the commas [`split_list`] uses for the
-    /// settings the narrow `Config` reads. Getting this wrong turns one cipher name into several.
+    /// `strings.Split(value, " ")` — **spaces**, not commas. Getting this wrong turns one cipher
+    /// name into several.
     #[test]
     fn a_slice_splits_on_spaces_and_never_on_commas() {
         let mut config = document();
@@ -8192,5 +8354,318 @@ mod licensed_client_config {
         assert_eq!(settings.get_message_retention_hours(), 72);
         settings.message_retention_hours = Some(5);
         assert_eq!(settings.get_message_retention_hours(), 5);
+    }
+}
+
+/// The environment overlay against `fixtures/behaviour_env_override.json`, which Go's own
+/// `Store.Load` produced from real process variables (`reference/dump/behaviour_env_override.go`).
+/// Both overlays are held to it: [`Config::apply_env_from`] behind [`process_lookup`], and
+/// [`apply_environment_map`] over the decoded document.
+#[cfg(test)]
+mod env_go_parity {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn rows() -> Vec<serde_json::Value> {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_env_override.json"
+        ))
+        .expect("behaviour_env_override.json is generated by reference/dump");
+        let rows = oracle["env_override"].as_array().expect("rows").clone();
+        assert!(rows.len() >= 55, "the corpus is all there");
+        rows
+    }
+
+    fn row_env(row: &serde_json::Value) -> BTreeMap<String, String> {
+        environment_from(row["env"].as_array().expect("env").iter().map(|pair| {
+            (
+                pair[0].as_str().expect("name").to_owned(),
+                pair[1].as_str().expect("value").to_owned(),
+            )
+        }))
+    }
+
+    fn strings(value: &serde_json::Value) -> Vec<String> {
+        value
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|piece| piece.as_str().expect("a string").to_owned())
+            .collect()
+    }
+
+    /// Go's `PluginStates` as the narrow config holds it: a nil map is empty and a nil state is
+    /// absent.
+    fn states(value: &serde_json::Value) -> BTreeMap<String, bool> {
+        value
+            .as_object()
+            .map(|states| {
+                states
+                    .iter()
+                    .filter(|(_, state)| !state.is_null())
+                    .map(|(id, state)| (id.clone(), state["Enable"].as_bool().expect("bool")))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_narrow_config_overlays_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let env = row_env(&row);
+            let got = Config::default().apply_env_from(&|key| overlay_lookup(&env, key));
+            let want = &row["want"];
+            assert_eq!(
+                got.experimental_default_channels,
+                strings(&want["TeamSettings"]["ExperimentalDefaultChannels"]),
+                "{name}: ExperimentalDefaultChannels"
+            );
+            assert_eq!(
+                got.max_channels_per_team,
+                want["TeamSettings"]["MaxChannelsPerTeam"]
+                    .as_i64()
+                    .expect("i64"),
+                "{name}: MaxChannelsPerTeam"
+            );
+            assert_eq!(
+                got.trusted_proxy_ip_header,
+                strings(&want["ServiceSettings"]["TrustedProxyIPHeader"]),
+                "{name}: TrustedProxyIPHeader"
+            );
+            assert_eq!(
+                Some(got.enable_custom_emoji),
+                want["ServiceSettings"]["EnableCustomEmoji"].as_bool(),
+                "{name}: EnableCustomEmoji"
+            );
+            assert_eq!(
+                Some(got.goroutine_health_threshold),
+                want["ServiceSettings"]["GoroutineHealthThreshold"].as_i64(),
+                "{name}: GoroutineHealthThreshold"
+            );
+            // `Store.Load` plants `""` before `SetDefaults`; `Config::default` leaves it absent.
+            assert_eq!(
+                got.site_url.unwrap_or_default(),
+                want["ServiceSettings"]["SiteURL"].as_str().expect("str"),
+                "{name}: SiteURL"
+            );
+            assert_eq!(
+                got.plugin_signature_public_key_files,
+                strings(&want["PluginSettings"]["SignaturePublicKeyFiles"]),
+                "{name}: SignaturePublicKeyFiles"
+            );
+            assert_eq!(
+                got.plugin_states,
+                states(&want["PluginSettings"]["PluginStates"]),
+                "{name}: PluginStates"
+            );
+            assert_eq!(
+                Some(got.feature_flag_burn_on_read),
+                want["FeatureFlags"]["BurnOnRead"].as_bool(),
+                "{name}: FeatureFlags.BurnOnRead"
+            );
+            assert_eq!(
+                got.feature_flag_test_feature,
+                want["FeatureFlags"]["TestFeature"].as_str().expect("str"),
+                "{name}: FeatureFlags.TestFeature"
+            );
+        }
+    }
+
+    /// The first row is Go's config with nothing set; each row's overlay, applied to it as a
+    /// document, must land exactly on that row's answer.
+    #[test]
+    fn the_document_overlay_matches_every_row_exactly() {
+        let rows = rows();
+        assert_eq!(rows[0]["name"], "nothing set");
+        let base = rows[0]["want"].clone();
+        for row in &rows {
+            let name = row["name"].as_str().expect("name");
+            let mut document = base.clone();
+            apply_environment_map(&mut document, &row_env(row));
+            assert_eq!(document, row["want"], "{name}");
+        }
+    }
+
+    /// The rows the corpus exists for, named, so a regenerated fixture cannot quietly lose them.
+    #[test]
+    fn the_rows_that_decide_the_rules_are_present() {
+        let rows = rows();
+        let want = |name: &str| {
+            rows.iter()
+                .find(|row| row["name"] == name)
+                .unwrap_or_else(|| panic!("row {name:?} is missing"))["want"]
+                .clone()
+        };
+        assert_eq!(
+            want("slice from an empty variable is one empty name")["TeamSettings"]["ExperimentalDefaultChannels"],
+            serde_json::json!([""])
+        );
+        assert_eq!(
+            want("slice never splits on a comma")["TeamSettings"]["ExperimentalDefaultChannels"],
+            serde_json::json!(["alpha,beta"])
+        );
+        assert_eq!(
+            want("states replace the whole map")["PluginSettings"]["PluginStates"],
+            serde_json::json!({"x": {"Enable": true}})
+        );
+        assert_eq!(
+            want("states: the last fold-equal key wins")["PluginSettings"]["PluginStates"],
+            serde_json::json!({"x": {"Enable": false}})
+        );
+    }
+}
+
+#[cfg(test)]
+mod env_overlay {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        environment_from(
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        )
+    }
+
+    #[test]
+    fn a_list_splits_on_single_spaces_only() {
+        assert_eq!(split_env_list("a b"), ["a", "b"]);
+        assert_eq!(split_env_list("a,b"), ["a,b"]);
+        assert_eq!(split_env_list(""), [""]);
+        assert_eq!(split_env_list(" a  b "), ["", "a", "", "b", ""]);
+        assert_eq!(split_env_list("a\tb"), ["a\tb"]);
+    }
+
+    /// `[""]` is a configured list, so `off-topic` goes — the observable half of D-1141.
+    #[test]
+    fn an_empty_default_channels_variable_is_one_empty_name_not_none() {
+        let config = Config::default().apply_env_from(&|key| {
+            (key == "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS").then(String::new)
+        });
+        assert_eq!(config.experimental_default_channels, [""]);
+    }
+
+    #[test]
+    fn the_environment_names_are_upper_cased_and_filtered_on_mm() {
+        let map = env(&[
+            ("mm_servicesettings_siteurl", "a"),
+            ("Mm_X", "b"),
+            ("MMRS_STACK", "5"),
+            ("PATH", "/bin"),
+            ("XMM_Y", "c"),
+        ]);
+        assert_eq!(
+            map.keys().collect::<Vec<_>>(),
+            ["MMRS_STACK", "MM_SERVICESETTINGS_SITEURL", "MM_X"]
+        );
+    }
+
+    #[test]
+    fn a_leftover_key_part_still_reaches_the_setting_and_the_exact_name_wins() {
+        let map = env(&[("MM_SERVICESETTINGS_SITEURL_EXTRA", "suffix")]);
+        assert_eq!(
+            overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL").as_deref(),
+            Some("suffix")
+        );
+
+        let map = env(&[
+            ("MM_SERVICESETTINGS_SITEURL", "exact"),
+            ("MM_SERVICESETTINGS_SITEURL_EXTRA", "suffix"),
+        ]);
+        assert_eq!(
+            overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL").as_deref(),
+            Some("exact")
+        );
+
+        // A longer field name is not a leftover key part of a shorter one.
+        let map = env(&[("MM_SERVICESETTINGS_SITEURLX", "other")]);
+        assert_eq!(overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL"), None);
+        let map = env(&[("MM_SERVICESETTINGS__SITEURL", "other")]);
+        assert_eq!(overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL"), None);
+    }
+
+    #[test]
+    fn the_licence_variable_is_not_an_overlay_key() {
+        // `MM_LICENSE_EXTRA` would reach `MM_LICENSE` through the overlay rule; Go's `os.Getenv`
+        // never sees it. Nothing in the test process sets either name.
+        let map = env(&[("MM_LICENSE_EXTRA", "x"), ("mm_license", "y")]);
+        assert_eq!(process_lookup(&map, "MM_LICENSE"), None);
+        assert_eq!(
+            process_lookup(&map, "MM_LICENSE_EXTRA").as_deref(),
+            Some("x"),
+            "an ordinary key goes through the overlay rule"
+        );
+    }
+
+    #[test]
+    fn plugin_states_decode_as_encoding_json_decodes_them() {
+        let decode = |raw: &str| decode_env_plugin_states(raw);
+        let map = |pairs: &[(&str, Option<bool>)]| {
+            Some(Some(
+                pairs
+                    .iter()
+                    .map(|(id, on)| ((*id).to_owned(), *on))
+                    .collect::<BTreeMap<_, _>>(),
+            ))
+        };
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true}}"#),
+            map(&[("x", Some(true))])
+        );
+        assert_eq!(
+            decode(r#"{"x":{"eNaBlE":true}}"#),
+            map(&[("x", Some(true))])
+        );
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true,"enable":false}}"#),
+            map(&[("x", Some(false))]),
+            "the last matching key wins"
+        );
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true,"enable":null}}"#),
+            map(&[("x", Some(true))]),
+            "a null leaves the field as it was"
+        );
+        assert_eq!(decode(r#"{"x":{"Other":1}}"#), map(&[("x", Some(false))]));
+        assert_eq!(decode(r#"{"x":null}"#), map(&[("x", None)]));
+        assert_eq!(decode("null"), Some(None));
+        assert_eq!(decode(r#"{"x":{"Enable":"true"}}"#), None);
+        assert_eq!(decode(r#"{"x":{"Enable":1}}"#), None);
+        assert_eq!(decode(r#"{"x":1}"#), None);
+        assert_eq!(decode("[]"), None);
+        assert_eq!(decode(""), None);
+        assert_eq!(decode(r#"{} {}"#), None);
+    }
+
+    #[test]
+    fn the_plugin_states_variable_replaces_the_defaults_and_a_bad_one_changes_nothing() {
+        let with = |raw: &'static str| {
+            Config::default().apply_env_from(&move |key| {
+                (key == "MM_PLUGINSETTINGS_PLUGINSTATES").then(|| raw.to_owned())
+            })
+        };
+        assert_eq!(
+            with(r#"{"x":{"Enable":true},"y":null}"#).plugin_states,
+            BTreeMap::from([("x".to_owned(), true)])
+        );
+        assert_eq!(with("null").plugin_states, BTreeMap::new());
+        assert_eq!(
+            with(r#"{"x":1}"#).plugin_states,
+            Config::default().plugin_states
+        );
+    }
+
+    #[test]
+    fn plugins_decode_only_as_a_map_of_maps() {
+        assert_eq!(
+            decode_env_plugins(r#"{"p":{"k":[1]},"q":null}"#),
+            Some(serde_json::json!({"p": {"k": [1]}, "q": null}))
+        );
+        assert_eq!(decode_env_plugins("null"), Some(serde_json::Value::Null));
+        assert_eq!(decode_env_plugins(r#"{"p":1}"#), None);
+        assert_eq!(decode_env_plugins(r#"{"p":[]}"#), None);
+        assert_eq!(decode_env_plugins("1"), None);
     }
 }

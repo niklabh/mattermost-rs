@@ -10063,7 +10063,9 @@ pairs Go registers with `HEAD`, and a parity sweep over `scripts/routes.py`'s `G
 
 ## D-1141 · A `[]string` setting from the environment is split on commas, where Go splits on spaces
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+**Closed** 2026-09-24 — `split_list` is gone; every `[]string` setting read from the environment goes through
+`mm_app::config::split_env_list` (Go's space split, `""` is `[""]`), held to a 60-row Go oracle (`behaviour_env_override.json`).
 
 `applyEnvKey` sets a slice setting to `strings.Split(value, " ")` (config/environment.go:80), so
 `MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS="a b"` is `["a", "b"]` in Go and an empty variable is
@@ -10071,3 +10073,17 @@ pairs Go registers with `HEAD`, and a parity sweep over `scripts/routes.py`'s `G
 to `[]` — its doc comment states the comma rule as Go's. The other two slice settings
 (`SignaturePublicKeyFiles`, `TrustedProxyIPHeader`) split on spaces. **What is owed:** replace
 `split_list` with the space split and turn its test round.
+
+---
+
+## D-1160 · `fixConfig` is not applied when this server loads the configuration
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+
+`Store.Load` runs `fixConfig` (config/utils.go:135) on both the stored and the environment-applied
+config: `SiteURL` loses its trailing slashes, a local driver's `FileSettings.Directory` gains one,
+and an unsupported `DefaultServerLocale`/`DefaultClientLocale`/`AvailableLocales` is reset to
+`en`/all. Neither `Config::load` nor `load_model_config` does any of it, so
+`MM_SERVICESETTINGS_SITEURL=http://x/` is `http://x` in Go and `http://x/` here (the Go oracle
+`behaviour_env_override.go` avoids trailing slashes for that reason). **What is owed:** port
+`fixConfig` into both load paths and add a trailing-slash and a bad-locale row to the oracle.
