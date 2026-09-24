@@ -907,6 +907,32 @@ mod tests {
         }
     }
 
+    /// `writeHeader`'s budget, swept: three-word subjects whose lengths straddle every fold
+    /// point, cut down to the Subject header as Go wrote it.
+    #[test]
+    fn header_folding_sweep_matches_go() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_mail.json")).unwrap();
+        let rows = oracle["header_fold"].as_array().unwrap();
+        assert!(rows.len() > 1000);
+        for row in rows {
+            let subject = row["subject"].as_str().unwrap();
+            let mut mw = MsgWriter {
+                out: Vec::new(),
+                depth: 0,
+                writers: Vec::new(),
+                charset: CHARSET_UTF8.into(),
+                encoder: WordEncoder::Q,
+            };
+            mw.write_header("Subject", &[subject.to_owned()]);
+            assert_eq!(
+                String::from_utf8(mw.out).unwrap(),
+                row["header"].as_str().unwrap(),
+                "{subject}"
+            );
+        }
+    }
+
     #[test]
     fn filepath_ext_and_sanitize() {
         assert_eq!(filepath_ext("a/b.c/d"), "");

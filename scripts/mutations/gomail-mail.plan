@@ -1,0 +1,28 @@
+# gomail's own suites: MUTATE_PACKAGE=gomail
+control-qp-default	crates/gomail/src/msg.rs	let mut qp = quotedprintable::Writer::new();	let mut qp = quotedprintable::Writer::default();	pkg
+control-multipart-hex-digits	crates/gomail/src/mime/multipart.rs	const DIGITS: &[u8; 16] = b"0123456789abcdef";	const DIGITS: &[u8; 16] = &*b"0123456789abcdef";	pkg
+gen-header-order-reversed	crates/gomail/src/msg.rs	for (key, values) in &self.gen_header {	for (key, values) in self.gen_header.iter().rev() {	pkg
+fold-threshold-0	crates/gomail/src/msg.rs	if char_length - len <= 1 {	if char_length - len <= 0 {	pkg
+fold-budget-reset	crates/gomail/src/msg.rs	char_length = MAX_HEADER_LENGTH - 3;	char_length = MAX_HEADER_LENGTH - 2;	pkg
+fold-space-cleanup-dropped	crates/gomail/src/msg.rs	let buffer = buffer.replace(" \\r\\n", "\\r\\n");	let buffer = buffer.replace(" \\r\\n\\r", "\\r\\n");	pkg
+qp-soft-break-column	crates/gomail/src/mime/quotedprintable.rs	if self.line.len() == LINE_MAX_LEN - 1 {	if self.line.len() == LINE_MAX_LEN - 2 {	pkg
+qp-encode-room	crates/gomail/src/mime/quotedprintable.rs	if LINE_MAX_LEN - 1 - self.line.len() < 3 {	if LINE_MAX_LEN - 1 - self.line.len() < 2 {	pkg
+qp-trailing-tab-not-encoded	crates/gomail/src/mime/quotedprintable.rs	if is_whitespace(b) {\n                self.line.pop();	if b == b' ' {\n                self.line.pop();	pkg
+dot-stuffing-wrong-byte	crates/gomail/src/smtp/textproto.rs	if c == b'.' {	if c == b',' {	pkg
+dot-close-after-cr	crates/gomail/src/smtp/textproto.rs	DotState::Cr => out.push(b'\\n'),	DotState::Cr => out.extend_from_slice(b"\\r\\n"),	pkg
+8bitmime-lowercase-key	crates/gomail/src/smtp/client.rs	if ext.contains_key("8BITMIME") {	if ext.contains_key("8bitmime") {	pkg
+smtputf8-dropped	crates/gomail/src/smtp/client.rs	line.push_str(" SMTPUTF8");	line.push_str("");	pkg
+rcpt-expects-250	crates/gomail/src/smtp/client.rs	self.cmd(25, &format!("RCPT TO:<{to}>"))	self.cmd(250, &format!("RCPT TO:<{to}>"))	pkg
+helo-fallback-dropped	crates/gomail/src/smtp/client.rs	self.hello_error = self.helo().await.err();	self.hello_error = Some(Error::Eof);	pkg
+validate-line-cr-ignored	crates/gomail/src/smtp/client.rs	if line.contains(['\\n', '\\r']) {	if line.contains(['\\n']) {	pkg
+multipart-header-order-reversed	crates/gomail/src/mime/multipart.rs	keys.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));	keys.sort_by(|a, b| b.0.as_bytes().cmp(a.0.as_bytes()));	pkg
+base64-line-length	crates/gomail/src/msg.rs	pub const MAX_BODY_LENGTH: usize = 76;	pub const MAX_BODY_LENGTH: usize = 72;	pkg
+local-part-trailing-dot-allowed	crates/gomail/src/netmail.rs	if r == '.' && i > 0 && bytes[i - 1] != b'.' && i < local.len() - 1 {	if r == '.' && i > 0 && bytes[i - 1] != b'.' {	pkg
+b-encoding-comma-not-special	crates/gomail/src/netmail.rs	.contains(|c| "\\"#$%&'(),.:;<>@[]^`{|}~".contains(c))	.contains(|c| "\\"#$%&'().:;<>@[]^`{|}~".contains(c))	pkg
+encoded-word-75-to-76	crates/gomail/src/mime/word.rs	const MAX_ENCODED_WORD_LEN: usize = 75;	const MAX_ENCODED_WORD_LEN: usize = 76;	pkg
+textproto-error-unquoted	crates/gomail/src/smtp/textproto.rs	#[error("{code:03} {}", strconv::quote(.msg))]	#[error("{code:03} {msg}")]	pkg
+multiline-error-rewrap-inverted	crates/gomail/src/smtp/textproto.rs	if err.is_some() && multi && !message.is_empty() {	if err.is_some() && !multi && !message.is_empty() {	pkg
+plain-localhost-exemption-dropped	crates/gomail/src/smtp/client.rs	if !server.tls && !is_localhost(&server.name) {	if !server.tls {	pkg
+nested-mp-header-in-child	crates/gomail/src/msg.rs	.checked_sub(1)\n            .and_then(|i| self.writers.get_mut(i))	.checked_sub(0)\n            .and_then(|i| self.writers.get_mut(i))	pkg
+addr-spec-quoted-error-kept	crates/gomail/src/netmail.rs	Ok(s) if !s.is_empty() => s,\n                _ => return Err(ParseError::EmptyQuotedString),	Ok(s) if !s.is_empty() => s,\n                Err(e) => return Err(e),\n                _ => return Err(ParseError::EmptyQuotedString),	pkg
+phrase-encoded-words-spaced	crates/gomail/src/netmail.rs	if is_encoded {\n                encoded_run.push_str(&word);	if is_encoded && encoded_run.is_empty() {\n                encoded_run.push_str(&word);	pkg

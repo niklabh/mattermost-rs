@@ -179,6 +179,9 @@ var mailAddressCorpus = []string{
 	"test+tag@sub.example.co.uk",
 	"a!#$%&'*+-/=?^_`{|}~@example.com",
 	"x@y (a\\)b)",
+	"John <\"bad\x01\"@example.com>",
+	"John <\"unclosed@example.com>",
+	"John <\"\"@example.com>",
 	"x@y (a\\",
 }
 
@@ -1011,6 +1014,7 @@ func smtpCases() []smtpCase {
 		{Name: "send_cc_trailing_comma", Call: "send", Config: cfg(), Args: withA(args(), func(a *smtpArgs) { a.Cc = "c@example.com," }), Script: ok(nil)},
 		{Name: "send_to_with_name_smtp_to_raw", Call: "send", Config: cfg(), Args: withA(args(), func(a *smtpArgs) { a.To = "John <john@example.com>" }), Script: ok(nil)},
 		{Name: "send_from_with_crlf", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.FeedbackEmail = "f@example.com\r\nRCPT TO:<x@y>" }), Args: args(), Script: ok(nil)},
+		{Name: "send_hostname_with_bare_cr", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.Hostname = "a\rb" }), Args: args(), Script: ok(nil)},
 		{Name: "send_hostname_with_crlf", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.Hostname = "a\nb" }), Args: args(), Script: ok(nil)},
 		{Name: "send_no_reply_to_empty_feedback", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) {
 			c.ReplyToAddress = ""
@@ -1149,6 +1153,14 @@ func smtpCases() []smtpCase {
 			Script: withS(ok(nil), func(s *sinkScript) { s.Greeting = "" })},
 		{Name: "send_zero_timeout", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.ServerTimeout = 0 }), Args: args(),
 			Script: withS(ok(nil), func(s *sinkScript) { s.Greeting = "" })},
+		// A prompt greeting still loses to a zero timeout: the context is done before the read,
+		// and success only cancels it — ctx.Err() stays DeadlineExceeded. Deterministic.
+		{Name: "send_zero_timeout_prompt_greeting", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.ServerTimeout = 0 }), Args: args(), Script: ok(nil)},
+		// A negative timeout is a dial deadline already in the past.
+		{Name: "test_negative_timeout", Call: "test", Config: with(cfg(), func(c *smtpConfigOut) {
+			c.ServerTimeout = -1
+			c.Port = "1"
+		}), NoSink: true},
 		{Name: "send_empty_server", Call: "send", Config: with(cfg(), func(c *smtpConfigOut) { c.Server = "" }), Args: args(), NoSink: true},
 		{Name: "test_empty_server", Call: "test", Config: with(cfg(), func(c *smtpConfigOut) {
 			c.Server = ""
@@ -1255,7 +1267,37 @@ func runSMTPCase(c smtpCase) (map[string]any, error) {
 
 // ---------------------------------------------------------------------------------------------
 
+// foldRows sweeps writeHeader's budget: three-word subjects whose lengths straddle the fold
+// points, rendered through go-mail and cut down to the Subject header's lines.
+func foldRows() ([]map[string]any, error) {
+	var rows []map[string]any
+	for _, a := range []int{1, 60, 65, 68, 70, 71, 72} {
+		for b := 55; b <= 76; b++ {
+			for _, c := range []int{1, 2, 3, 70, 71, 72, 73} {
+				subject := strings.Repeat("w", a) + " " + strings.Repeat("v", b) + " " + strings.Repeat("u", c)
+				m := gomail.NewMsg()
+				m.SetGenHeader(gomail.HeaderSubject, subject)
+				m.SetGenHeader(gomail.HeaderDate, "x")
+				m.SetGenHeader(gomail.HeaderMessageID, "x")
+				var buf bytes.Buffer
+				if _, err := m.WriteTo(&buf); err != nil {
+					return nil, err
+				}
+				out := buf.String()
+				start := strings.Index(out, "\r\nSubject:") + 2
+				end := strings.Index(out[start:], "\r\nUser-Agent: ")
+				rows = append(rows, map[string]any{"subject": subject, "header": out[start : start+end+2]})
+			}
+		}
+	}
+	return rows, nil
+}
+
 func writeMailBehaviourFixture(outDir string) error {
+	folds, err := foldRows()
+	if err != nil {
+		return err
+	}
 	messages, err := messageRows()
 	if err != nil {
 		return err
@@ -1290,6 +1332,7 @@ func writeMailBehaviourFixture(outDir string) error {
 		"read_response":      readResponseRows(),
 		"dot_writer":         dotWriterRows(),
 		"messages":           messages,
+		"header_fold":        folds,
 		"smtp":               smtpRows,
 		"sink_cert_pem":      sinkCertPEM,
 		"sink_key_pem":       sinkKeyPEM,

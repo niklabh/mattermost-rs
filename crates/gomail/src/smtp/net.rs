@@ -14,9 +14,10 @@
 //!   own DNS client. For a name that does not exist Go says
 //!   `lookup {host} on {server}: no such host`, naming the name server it asked; this port names
 //!   the first `nameserver` of `/etc/resolv.conf` (Go's default `127.0.0.1:53` when there is
-//!   none), which is the server Go asks first. Other resolver failures (timeouts, SERVFAIL) are
-//!   reported as `lookup {host} on {server}: server misbehaving`, Go's text for SERVFAIL; a
-//!   resolver timeout would read `i/o timeout` in Go.
+//!   none), which is the server Go asks first. A resolution that outlives the timeout reads
+//!   `lookup {host} on {server}: i/o timeout`, as Go's does; other resolver failures (SERVFAIL
+//!   and the like) are reported as `lookup {host} on {server}: server misbehaving`, Go's text
+//!   for SERVFAIL, whatever the C library's actual reason.
 //! - **Address order**: Go sorts DNS answers by RFC 6724 and races IPv4 against IPv6 (Happy
 //!   Eyeballs); glibc applies the same RFC 6724 sort and this port dials serially, so the order
 //!   agrees on ordinary hosts and the reported error is the first address's in both.
@@ -68,6 +69,12 @@ pub async fn dial_tcp(addr: &str, timeout: Option<Duration>) -> Result<TcpStream
     };
     let mut first_err = None;
     for (target, shown) in targets {
+        // `dialSerial` checks the deadline before each attempt: one already past (a negative
+        // timeout) is an i/o timeout without a connect.
+        if deadline.is_some_and(|d| d <= tokio::time::Instant::now()) {
+            first_err.get_or_insert(DialError::Timeout { addr: shown });
+            break;
+        }
         let attempt = TcpStream::connect(target);
         let result = match deadline {
             Some(deadline) => match tokio::time::timeout_at(deadline, attempt).await {

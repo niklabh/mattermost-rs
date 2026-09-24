@@ -1,0 +1,24 @@
+# mm-app's mail:: unit tests: MUTATE_PACKAGE=mm-app, suite lib (scripts/mutate.sh)
+control-smtp-address-concat	crates/mm-app/src/mail.rs	let smtp_address = format!("{}:{}", config.server, config.port);	let smtp_address = [config.server.as_str(), ":", config.port.as_str()].concat();	lib	mail::
+control-gen-header-call-order	crates/mm-app/src/mail.rs	m.set_gen_header("Auto-Submitted", &["auto-generated"]);\n    m.set_gen_header("Precedence", &["bulk"]);	m.set_gen_header("Precedence", &["bulk"]);\n    m.set_gen_header("Auto-Submitted", &["auto-generated"]);	lib	mail::
+plain-vs-login-choice	crates/mm-app/src/mail.rs	if server.auth.iter().any(|m| m == "PLAIN") {	if server.auth.iter().any(|m| m == "LOGIN") {	lib	mail::
+empty-server-short-circuit	crates/mm-app/src/mail.rs	if config.server.is_empty() {\n        return Ok(());	if config.server == "never" {\n        return Ok(());	lib	mail::
+wrap-from-address-text	crates/mm-app/src/mail.rs	.wrap("failed to set the from address")?;	.wrap("failed to set from address")?;	lib	mail::
+wrap-tls-dial-text	crates/mm-app/src/mail.rs	.wrap("unable to connect to the SMTP server through TLS")	.wrap("unable to connect to the SMTP server")	lib	mail::
+wrap-cc-as-to	crates/mm-app/src/mail.rs	validate_single_address(&mail.cc).wrap("invalid Cc header")?;	validate_single_address(&mail.cc).wrap("invalid To header")?;	lib	mail::
+test-connection-wrap-dropped	crates/mm-app/src/mail.rs	let conn = connect_to_smtp_server(config)\n        .await\n        .wrap("unable to connect")?;	let conn = connect_to_smtp_server(config).await?;	lib	mail::
+zero-timeout-allowed	crates/mm-app/src/mail.rs	if config.server_timeout <= 0 {	if config.server_timeout < 0 {	lib	mail::
+starttls-error-propagated	crates/mm-app/src/mail.rs	let _ = c.start_tls(&tls).await;	c.start_tls(&tls).await.wrap("starttls")?;	lib	mail::
+address-count-allows-zero	crates/mm-app/src/mail.rs	if addresses.len() != 1 {	if addresses.len() > 1 {	lib	mail::
+reply-to-keyed-on-name	crates/mm-app/src/mail.rs	if !mail.reply_to.address.is_empty() {	if !mail.reply_to.name.is_empty() {	lib	mail::
+category-unquoted	crates/mm-app/src/mail.rs	mm_model::utils::go_quote(&mail.category)	format!("\\"{}\\"", mail.category)	lib	mail::
+login-host-check-inverted	crates/mm-app/src/mail.rs	if server.name != self.host {\n            return Err(AuthError::WrongHostName.into());\n        }\n        Ok(("LOGIN"	if server.name == self.host {\n            return Err(AuthError::WrongHostName.into());\n        }\n        Ok(("LOGIN"	lib	mail::
+message-id-never-generated	crates/mm-app/src/mail.rs	let msg_id = if mail.message_id.is_empty() {	let msg_id = if mail.message_id.len() > 1000 {	lib	mail::
+quit-after-send	crates/mm-app/src/mail.rs	    c.close();\n    result	    let _ = c.quit().await;\n    c.close();\n    result	lib	mail::
+hello-skipped	crates/mm-app/src/mail.rs	if !config.hostname.is_empty() {\n        c.hello	if config.hostname.is_empty() {\n        c.hello	lib	mail::
+auth-abort-star	crates/gomail/src/smtp/client.rs	let _ = self.cmd(501, "*").await;	let _ = self.cmd(501, "RSET").await;	lib	mail::
+auth-abort-quit-dropped	crates/gomail/src/smtp/client.rs	let _ = self.cmd(501, "*").await;\n                    let _ = self.quit().await;	let _ = self.cmd(501, "*").await;	lib	mail::
+dial-connect-text	crates/gomail/src/smtp/net.rs	#[error("dial tcp {addr}: connect: {errno}")]	#[error("dial tcp {addr}: {errno}")]	lib	mail::
+tls-hostname-before-chain-skipped	crates/gomail/src/smtp/tls.rs	if !self.host.is_empty() {\n            verify_hostname(&leaf, &self.host)?;	if self.host.is_empty() {\n            verify_hostname(&leaf, &self.host)?;	lib	mail::
+tls-first-record-text	crates/gomail/src/smtp/tls.rs	InvalidMessage::InvalidContentType | InvalidMessage::UnknownProtocolVersion,\n        ) => TlsError::NotTls,	InvalidMessage::InvalidContentType | InvalidMessage::UnknownProtocolVersion,\n        ) => TlsError::Eof,	lib	mail::
+dial-past-deadline-attempted	crates/gomail/src/smtp/net.rs	if deadline.is_some_and(|d| d <= tokio::time::Instant::now()) {	if deadline.is_some_and(|d| d < tokio::time::Instant::now() - std::time::Duration::from_secs(3600)) {	lib	mail::

@@ -443,6 +443,10 @@ mod tests {
             c.rcpt("a\r\nb").await.unwrap_err().to_string(),
             "smtp: A line must not contain CR or LF"
         );
+        assert_eq!(
+            c.rcpt("a\rb").await.unwrap_err().to_string(),
+            "smtp: A line must not contain CR or LF"
+        );
         assert!(c.extension("8bitmime").await.is_none());
         assert_eq!(
             c.hello("x").await.unwrap_err().to_string(),
