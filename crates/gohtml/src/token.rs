@@ -1,25 +1,24 @@
 //! Port of `golang.org/x/net@v0.56.0/html`'s tokenizer (token.go) and entity decoding
-//! (escape.go), plus the standard library's `html.UnescapeString` — not Mattermost source, the
-//! same category as [`crate::go_url`].
+//! (escape.go), plus the standard library's `html.UnescapeString`.
 //!
-//! # Why the tokenizer and not an HTML crate
+//! # Two callers
 //!
-//! `github.com/dyatlov/go-opengraph` reads a page's `<meta>` tags off this tokenizer, token by
-//! token, with no tree builder behind it — so what reaches a link preview is decided by the
-//! tokenizer's own rules, not by the HTML5 parsing algorithm a Rust crate implements. Two of them
-//! matter every day: the ten **raw-text** elements (`<script>`, `<style>`, `<noscript>`,
-//! `<title>`, `<textarea>`, …) swallow any `<meta>` inside them, and a tag's **duplicate
-//! attributes are dropped, the first one winning** (`attrNames`, readTag). A tree builder would
-//! have made different choices about both. The oracle is `fixtures/behaviour_opengraph.json`,
-//! which records Go's whole token stream for every corpus document.
+//! Mattermost's link previews (`github.com/dyatlov/go-opengraph`) read a page's `<meta>` tags off
+//! this tokenizer token by token, with no tree builder behind it — so the tokenizer's own rules
+//! decide what reaches a preview: the ten **raw-text** elements (`<script>`, `<style>`,
+//! `<noscript>`, `<title>`, `<textarea>`, …) swallow any `<meta>` inside them, and a tag's
+//! **duplicate attributes are dropped, the first one winning** (`attrNames`, readTag). That
+//! oracle is `fixtures/behaviour_opengraph.json`, which records Go's whole token stream for every
+//! corpus document. The other caller is this crate's tree builder ([`crate::parse`]), which drives
+//! [`Tokenizer::token`], [`Tokenizer::allow_cdata`] and [`Tokenizer::next_is_not_raw_text`] exactly
+//! as parse.go drives Go's.
 //!
 //! # What is not ported
 //!
-//! `maxBuf` (`SetMaxBuf` is never called on this path), `AllowCDATA` (always false here, so
-//! `<![CDATA[` is a bogus comment), `NewTokenizerFragment` and `Raw`'s byte-sharing contract.
-//! The reader plumbing collapses to a slice: Go's `readByte` refills from an `io.Reader`, but the
-//! caller hands the whole (already limited and decoded) document over, so running out of buffer
-//! and reaching `io.EOF` are the same event.
+//! `maxBuf` (`SetMaxBuf` is never called on either path), `NewTokenizerFragment` and `Raw`'s
+//! byte-sharing contract. The reader plumbing collapses to a slice: Go's `readByte` refills from
+//! an `io.Reader`, but both callers hand the whole document over, so running out of buffer and
+//! reaching `io.EOF` are the same event.
 //!
 //! # Two different `unescape`s
 //!
@@ -29,11 +28,12 @@
 //! description. They are separate implementations and they disagree: `&#x;` is left alone by
 //! the first and becomes U+FFFD in the second, a numeric reference past `0x10FFFF` is clamped by
 //! the first and wraps `int32` in the second, and the second does not know `&nLt;` or `&nGt;`
-//! ([`crate::go_html_tables::ENTITY2_NOT_IN_STD`]).
+//! ([`crate::entity::ENTITY2_NOT_IN_STD`]).
 
 use std::collections::HashSet;
 
-use crate::go_html_tables::{ENTITY, ENTITY2, ENTITY2_NOT_IN_STD};
+use crate::atom::{self, Atom};
+use crate::entity::{ENTITY, ENTITY2, ENTITY2_NOT_IN_STD};
 
 /// Port of `html.TokenType` (token.go:18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +84,7 @@ pub struct Tokenizer<'a> {
     raw_tag: Vec<u8>,
     text_is_raw: bool,
     convert_nul: bool,
+    allow_cdata: bool,
 }
 
 const WHITESPACE: [u8; 5] = [b' ', b'\n', b'\r', b'\t', 0x0c];
@@ -104,7 +105,27 @@ impl<'a> Tokenizer<'a> {
             raw_tag: Vec::new(),
             text_is_raw: false,
             convert_nul: false,
+            allow_cdata: false,
         }
+    }
+
+    /// Port of `AllowCDATA` (token.go:189): whether `<![CDATA[x]]>` is the text `x` (foreign
+    /// content) or a bogus comment (everything else, and the default).
+    pub fn allow_cdata(&mut self, allow: bool) {
+        self.allow_cdata = allow;
+    }
+
+    /// Port of `NextIsNotRawText` (token.go:217): the next token is not raw text even though the
+    /// tag just read would normally make it so — the parser calls it for `<noscript>` without
+    /// scripting and for any tag in foreign content.
+    pub fn next_is_not_raw_text(&mut self) {
+        self.raw_tag.clear();
+    }
+
+    /// `Err() != nil` (token.go:223): the only error a slice can produce is `io.EOF`, so this is
+    /// whether the current token is the error token that ends the stream.
+    pub fn at_eof(&self) -> bool {
+        self.tt == TokenType::Error && self.eof
     }
 
     /// Port of `readByte` (token.go:205). At the end of the input it sets the error and answers
@@ -518,7 +539,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Port of `readMarkupDeclaration` (token.go:694). CDATA is never allowed on this path.
+    /// Port of `readMarkupDeclaration` (token.go:701).
     fn read_markup_declaration(&mut self) -> TokenType {
         self.data.start = self.raw.end;
         let mut c = [0u8; 2];
@@ -540,6 +561,10 @@ impl<'a> Tokenizer<'a> {
         self.raw.end -= 2;
         if self.read_doctype() {
             return TokenType::Doctype;
+        }
+        if self.allow_cdata && self.read_cdata() {
+            self.convert_nul = true;
+            return TokenType::Text;
         }
         // It's a bogus comment.
         self.read_until_close_angle();
@@ -572,7 +597,42 @@ impl<'a> Tokenizer<'a> {
         true
     }
 
-    /// Port of `startTagIn` (token.go:803).
+    /// Port of `readCDATA` (token.go:766). The opening `<!` has been consumed.
+    fn read_cdata(&mut self) -> bool {
+        for &s in b"[CDATA[" {
+            let c = self.read_byte();
+            if self.eof {
+                // "Back up to read the fragment of "[CDATA[" again, reset z.err to signal EOF
+                // on the next call."
+                self.raw.end = self.data.start;
+                self.eof = false;
+                return false;
+            }
+            if c != s {
+                self.raw.end = self.data.start;
+                return false;
+            }
+        }
+        self.data.start = self.raw.end;
+        let mut brackets = 0;
+        loop {
+            let c = self.read_byte();
+            if self.eof {
+                self.data.end = self.raw.end;
+                return true;
+            }
+            match c {
+                b']' => brackets += 1,
+                b'>' if brackets >= 2 => {
+                    self.data.end = self.raw.end - "]]>".len();
+                    return true;
+                }
+                _ => brackets = 0,
+            }
+        }
+    }
+
+    /// Port of `startTagIn` (token.go:812).
     fn start_tag_in(&self, ss: &[&[u8]]) -> bool {
         let name = &self.buf[self.data.start..self.data.end];
         ss.iter().any(|s| name.eq_ignore_ascii_case(s))
@@ -924,6 +984,66 @@ impl<'a> Tokenizer<'a> {
         }
         (Vec::new(), Vec::new(), false)
     }
+}
+
+/// Port of `html.Attribute` (token.go:67). `namespace` is only ever set by the parser.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct Attribute {
+    pub namespace: String,
+    pub key: String,
+    pub val: String,
+}
+
+/// Port of `html.Token` (token.go:77). `data_atom` is `None` where Go's `DataAtom` is zero.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub token_type: TokenType,
+    pub data_atom: Option<Atom>,
+    pub data: String,
+    pub attr: Vec<Attribute>,
+}
+
+impl Tokenizer<'_> {
+    /// Port of `Token` (token.go:1255). Every string is built from spans that start and end on
+    /// ASCII delimiters of the input, or from decoded entities, so a UTF-8 document yields UTF-8
+    /// strings; [`lossless_string`] only guards a byte input that was not UTF-8 to begin with.
+    pub fn token(&mut self) -> Token {
+        let mut t = Token {
+            token_type: self.tt,
+            data_atom: None,
+            data: String::new(),
+            attr: Vec::new(),
+        };
+        match self.tt {
+            TokenType::Text | TokenType::Comment | TokenType::Doctype => {
+                t.data = lossless_string(self.text().unwrap_or_default());
+            }
+            TokenType::StartTag | TokenType::SelfClosingTag | TokenType::EndTag => {
+                let (name, mut more) = self.tag_name();
+                while more {
+                    let (key, val, m) = self.tag_attr();
+                    more = m;
+                    t.attr.push(Attribute {
+                        namespace: String::new(),
+                        key: lossless_string(key),
+                        val: lossless_string(val),
+                    });
+                }
+                let name = name.unwrap_or_default();
+                t.data_atom = atom::lookup(&name);
+                t.data = lossless_string(name);
+            }
+            TokenType::Error => {}
+        }
+        t
+    }
+}
+
+/// `string(b)`. Go keeps invalid UTF-8 as it is; a Rust `String` cannot, so a byte input that was
+/// not UTF-8 has each maximal invalid sequence replaced by one U+FFFD — a **divergence** from Go
+/// for such input. A `&str` input never reaches the fallback.
+fn lossless_string(b: Vec<u8>) -> String {
+    String::from_utf8(b).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 /// `bytes.ReplaceAll(s, "\x00", "�")`.
