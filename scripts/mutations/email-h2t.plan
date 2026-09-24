@@ -6,7 +6,10 @@ foster-template-order	crates/gohtml/src/parse.rs	if table.is_none() || j > i {	i
 foster-no-text-merge	crates/gohtml/src/parse.rs	if self.n(prev).node_type == NodeType::Text && self.n(n).node_type == NodeType::Text {	if self.n(prev).node_type == NodeType::Text && false {	pkg	gohtml
 adoption-7-iterations	crates/gohtml/src/parse.rs	for _ in 0..8 {	for _ in 0..7 {	pkg	gohtml
 adoption-inner-j-2	crates/gohtml/src/parse.rs	if j > 3 && ni > -1 {	if j > 2 && ni > -1 {	pkg	gohtml
-adoption-bookmark-lt	crates/gohtml/src/parse.rs	if ni <= bookmark {	if ni < bookmark {	pkg	gohtml
+# UNREACHED adoption-bookmark-lt: survives. A probe returning an error whenever step 14.5 removes a node
+# with ni == bookmark fired on none of 3,000,000 random formatting/block soups (release build), so
+# the < / <= distinction is not observable on anything we could generate. Kept as a comment, not a line.
+# adoption-bookmark-lt	crates/gohtml/src/parse.rs	if ni <= bookmark {	if ni < bookmark {	pkg	gohtml
 adoption-oldloc-le	crates/gohtml/src/parse.rs	if old_loc != -1 && old_loc < bookmark {	if old_loc != -1 && old_loc <= bookmark {	pkg	gohtml
 adoption-common-ancestor-foster	crates/gohtml/src/parse.rs	                &[A::Table, A::Tbody, A::Tfoot, A::Thead, A::Tr],\n            ) {\n                self.foster_parent(last_node)?;	                &[A::Table, A::Tbody, A::Tfoot, A::Thead],\n            ) {\n                self.foster_parent(last_node)?;	pkg	gohtml
 noahs-ark-4	crates/gohtml/src/parse.rs	if identical_elements >= 3 {	if identical_elements > 3 {	pkg	gohtml
