@@ -10102,7 +10102,11 @@ store ones through a parameter), with a test that moves each flag.
 
 ## D-1150 · With `RateLimitSettings.Enable`, a forwarded request is limited twice
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — this server's stores decide for every request: the forward leg sets the trusted
+header when Go would fall back to the peer (`client_ip::forwarded_address_header`), Go's rate-limit
+headers are dropped from forwarded answers, and the per-user step counts forwarded Go web handlers too;
+`parity::ratelimit::forwarded_requests_are_limited_once_on_the_clients_key`. Open: [D-1210].
 
 `mm_api::ratelimit` limits every request at the front, as Go's `Server.Start` wrapper does, and a
 forwarded one then meets the Go process's own limiters: its global one keys on **this server's
@@ -10118,7 +10122,9 @@ Go. **What is owed:** a forward leg Go can key on the client — an `X-Forwarded
 
 ## D-1151 · `UserIdRateLimit` does not run for the web client's pages
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+**Closed** 2026-09-25 — `web_static::fallback` runs the per-user step for `NewStaticHandler`'s catch-all
+(the SPA page; `/static/…` is a plain handler and has none) with `IsStatic`'s headers on the refusal.
 
 Go's static handler (`NewStaticHandler`, the SPA page and `/static/…`) is a `web.Handler`, so with
 `VaryByUser` a request that carries a session cookie spends the user's budget there too and can be
@@ -10126,4 +10132,30 @@ refused after `IsStatic`'s headers (`X-Frame-Options`, the CSP). `ratelimit::per
 `route_layer` and never sees `web_static::fallback`. **What is owed:** call the per-user step from
 `web_static`'s `root` and `static_files`, with the static header set on its refusal, and a parity row
 that exhausts a user's budget on `/`.
+
+---
+
+## D-1210 · A forwarded branch of a rate-limited route meets Go's route limiter on this server's address
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+Go builds the three `RateLimitedHandler` limiters with `NewRateLimiter(&settings, []string{})`
+(api4/handlers.go:229): no trusted header, so they key on `RemoteAddr` alone, and behind this server
+that is this server. `login` forwards its magic-link, LDAP, cloud and MFA branches and
+`register_oauth_client` forwards the whole registration when DCR is on; each such request is counted
+here on the client's key and then in Go's route limiter on one key shared by every client — 5/s for
+MFA logins, 2/s for registrations, across the deployment — and Go's 429 is passed through.
+**What is owed:** port those branches (MFA login first), so no request of these three routes reaches Go.
+
+---
+
+## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+
+`ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
+the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
+per-user rate limit included. The web client's fallback and `/manualtest` check it; the API router
+does not: `GET /api/v4/system/ping?x=<3000 bytes>` is Go 414, here 200, and the per-user step counts
+it. **What is owed:** a layer on the API router with Go's 414 body, ahead of `ratelimit::per_user`.
 

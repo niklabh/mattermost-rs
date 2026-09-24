@@ -14810,3 +14810,11 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | app/channel.go `setChannelsMuted`, store `UpdateMultipleMembers`, `GetMembersByChannelIds` | `mm_app::channel_member::set_channels_muted`, `mm_store::channel_store` | DONE | 6 unit + `parity::sidebar_category_writes` (3 new); 8/8 mutations caught | Only members whose mute differs are written (no `LastUpdateAt` bump otherwise), and every member is validated before any write, so one invalid membership leaves the whole category unmuted — as Go does. |
+
+## Tech-debt payoff: one deciding rate limiter in front of Go (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `utils.GetIPAddress` behind a proxy; `RateLimitHandler`'s and `ServeHTTP`'s limiters for forwarded requests | `client_ip::forwarded_address_header`, `proxy::forward`, `ratelimit::{global, strip_go_rate_limit_headers, per_user}` | DONE, closes [D-1150]; opens [D-1210], [D-1211] | `parity::ratelimit::forwarded_requests_are_limited_once_on_the_clients_key` (Go direct vs mm-api in front of a second Go, two loopback clients), 5 unit; `scripts/mutations/ratelimit-front.plan` | This server counts every request and Go, keyed on the client through the trusted header, sees a subset; with `TrustedProxyIPHeader` empty Go keys on this server, which is logged at start. The route limiters now run in `global`, ahead of the per-user step, as in Go. |
+| The per-user step for `NewStaticHandler(root)` and the web routes (`InitOAuth`, `InitSaml`, `InitMagicLink`, `InitWebhooks`, `/manualtest`) | `web_static::{go_handler_kind, per_user_step}` | DONE, closes [D-1151] | the same parity test (page and web-handler refusals), 1 unit (45 rows) | `/static/…`, `robots.txt` and the plugin subrouter are plain handlers with no per-user step. |
+

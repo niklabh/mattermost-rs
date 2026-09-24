@@ -23,7 +23,7 @@
 use std::net::{IpAddr, SocketAddr};
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{Extensions, HeaderMap};
+use axum::http::{Extensions, HeaderMap, HeaderName, HeaderValue};
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -72,6 +72,43 @@ pub fn get_ip_address(
 
     peer.map(|addr| addr.ip().to_canonical().to_string())
         .unwrap_or_default()
+}
+
+/// The header the forward leg must set so that the Go process behind this one derives the same
+/// client address this one did — or `None` when forwarding the client's headers verbatim already
+/// does. [D-1150].
+///
+/// Go walks `TrustedProxyIPHeader` and falls back to the peer, and behind this server the peer is
+/// **this server**. So:
+///
+/// - no trusted header configured: nothing Go would read can carry the client, and nothing is
+///   set — Go keys every forwarded request on this server's address, exactly as it would behind
+///   any other proxy it was not told to trust. The operator's remedy is Go's own: configure the
+///   header (`ratelimit` logs it at start when rate limiting is on);
+/// - a configured header held a parseable address: the client's headers are forwarded verbatim,
+///   and Go's walk finds the same one;
+/// - none did, so the address was the peer's: the **first** configured name that is a valid
+///   header name is set to it, replacing whatever unparseable value it held. Go's walk reaches it
+///   before any other that could parse — names before it are ones no request can carry — and
+///   returns it as written, which is what this side computed.
+///
+/// The one thing Go sees differently is that header's raw value where the client sent none: with
+/// `X-Forwarded-For` first, `request.CTX`'s `XForwardedFor` is the peer rather than `""`.
+pub fn forwarded_address_header(
+    headers: &HeaderMap,
+    peer: Option<SocketAddr>,
+    trusted_proxy_ip_header: &[String],
+) -> Option<(HeaderName, HeaderValue)> {
+    let peer = peer?;
+    let from_header = get_ip_address(headers, None, trusted_proxy_ip_header);
+    if !from_header.is_empty() {
+        return None;
+    }
+    let name = trusted_proxy_ip_header
+        .iter()
+        .find_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())?;
+    let value = HeaderValue::from_str(&peer.ip().to_canonical().to_string()).ok()?;
+    Some((name, value))
 }
 
 /// The peer as `net/http` formats `r.RemoteAddr` (`TCPAddr.String()`): a v4-mapped peer is
@@ -151,6 +188,54 @@ mod tests {
         extensions.insert(ConnectInfo(v6));
         assert_eq!(go_remote_addr(&extensions), "[2001:db8::7]:443");
         assert_eq!(go_remote_addr(&Extensions::new()), "");
+    }
+
+    /// The forward leg's header, each branch: nothing configured, a configured header that parsed,
+    /// none that did (the first valid name gets the peer, replacing a bad value), no peer.
+    #[test]
+    fn the_forwarded_header_carries_the_peer_only_when_go_would_fall_back_to_it() {
+        let peer: Option<SocketAddr> = Some("[::ffff:10.1.2.3]:9".parse().unwrap());
+        let mut headers = HeaderMap::new();
+        assert_eq!(forwarded_address_header(&headers, peer, &[]), None);
+        let xff = trusted(&["X-Forwarded-For"]);
+        let (name, value) = forwarded_address_header(&headers, peer, &xff).expect("set");
+        assert_eq!(
+            (name.as_str(), value.to_str().unwrap()),
+            ("x-forwarded-for", "10.1.2.3")
+        );
+        headers.insert("x-forwarded-for", HeaderValue::from_static("junk"));
+        assert!(
+            forwarded_address_header(&headers, peer, &xff).is_some(),
+            "a bad value"
+        );
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("1.2.3.4, 5.6.7.8"),
+        );
+        assert_eq!(
+            forwarded_address_header(&headers, peer, &xff),
+            None,
+            "Go finds it too"
+        );
+        assert_eq!(
+            forwarded_address_header(&HeaderMap::new(), None, &xff),
+            None
+        );
+        // A name no request can carry is skipped for the next.
+        let (name, _) = forwarded_address_header(
+            &HeaderMap::new(),
+            peer,
+            &trusted(&["", "X-Real-IP", "X-Forwarded-For"]),
+        )
+        .expect("set");
+        assert_eq!(name.as_str(), "x-real-ip");
+        // A later header that parses wins in Go too: nothing to set.
+        let mut real = HeaderMap::new();
+        real.insert("x-forwarded-for", HeaderValue::from_static("9.9.9.9"));
+        assert_eq!(
+            forwarded_address_header(&real, peer, &trusted(&["X-Real-IP", "X-Forwarded-For"])),
+            None
+        );
     }
 
     /// A non-UTF-8 byte after the first comma does not spoil the first element.
