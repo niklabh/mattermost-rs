@@ -14797,3 +14797,13 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `removeUserFromChannel` guest arm (app/channel.go:3036), `FilterNonGroupChannelMembers` (user.go:2666), `User().GetChannelGroupUsers` | `App::remove_user_from_channel_inner`, `App::filter_non_group_channel_members`, `UserStore::get_channel_group_user_ids` | DONE, closes [D-1130], opens [D-1170] | `parity::channel_member_removal` (5), 1 unit; `scripts/mutations/channel-remove-member-d1130.plan` — 14 run, 14 caught (after a fixture fix), 2 controls survived | A guest's eviction reuses `LeaveTeam`'s `remove_team_member`/`post_process_team_member_leave` but writes no team-leave post; a shared channel forwards only while Go's sync service runs. |
 | `removeChannelMember`'s and `localRemoveChannelMember`'s `c.LogAudit`; `LogAudit`'s `c.AppContext.IPAddress()` | `mm_api::channel_member_writes`, `local_channels`, `channel_move` via `client_ip::client_ip` | DONE, [D-270] continued | `parity::channel_member_writes`, `parity::local_channels` read the rows back | The address was already the same value through the hook context; it is now read where Go reads it. |
+
+## SQL NULL versus JSON `null` in map, slice and pointer columns — D-331, D-158 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `SqlUserStore.Get`/`GetAllProfilesInChannel` manual scan; every other user read via sqlx | `mm_store::user_store::{require_manual_scan_columns, user_from_row}`, `App::get_user` | DONE | `parity::null_columns::a_null_user_column_is_a_failed_get_and_an_empty_map_elsewhere` | A NULL `props`/`notifyprops`/`timezone` fails `GET /users/{id}` (500, `app.user.get_by_username.app_error`) and is `{}` elsewhere. |
+| `ChannelMember.NotifyProps`, `Session.Props` (sqlx `StringMap`) | `channel_member_from_row`, `group_syncable_store` RETURNING, `SessionRow::into_session` | DONE | `…a_null_string_map_column_is_an_empty_object_and_a_json_null_is_null`, `…job_data…` | SQL NULL is `{}`, jsonb `null` is `null`; a `null` session row no longer fails auth. |
+| `Channel.BannerInfo` (`*ChannelBannerInfo`) | `channel_from_row` | DONE | `…a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct` | jsonb `null` is the struct with three `null` fields. |
+| `StringArray` over text (`OutgoingWebhook`, `OAuthApp`, `Draft.FileIds`, `ScheduledPost.FileIds`), `ThreadParticipants`, `GetChannelMembersTimezones` | `webhook_store::string_array_column`, `oauth_store`, `draft_store::decode_array`, `threaded_post_from_row`, `get_channel_members_timezones` | DONE | `…string_array…`, `…draft…`, `…participant…`, the timezones half of the user test | The text `null` — what `StringArray.Value` writes for nil — decoded as a failed read. |
+

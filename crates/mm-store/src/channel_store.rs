@@ -2059,9 +2059,14 @@ struct ChannelMemberRow {
 /// Go's `sql.NullBool` and `sql.NullString` both mean "NULL is the zero value" here —
 /// `Valid && Bool` for the flags, `""` for the role names — so `unwrap_or_default` is the same
 /// rule, not a looser one.
+///
+/// **SQL NULL is `{}` and jsonb `null` is `null`** ([D-331]): Go scans into
+/// `channelMemberWithSchemeRoles` through sqlx, which allocates the nil `StringMap` before
+/// `StringMap.Scan` returns early on a NULL; `json.Unmarshal` of `null` sets it back to nil.
 fn channel_member_from_row(row: ChannelMemberRow) -> Result<ChannelMember, StoreError> {
     let notify_props = match row.notifyprops {
-        None | Some(serde_json::Value::Null) => None,
+        None => Some(StringMap::new()),
+        Some(serde_json::Value::Null) => None,
         Some(value) => Some(
             serde_json::from_value::<StringMap>(value).map_err(|source| StoreError::Decode {
                 entity: "ChannelMember",
@@ -2564,9 +2569,14 @@ struct ChannelRow {
 
 /// Port of `channelSliceColumns`'s scan target becoming a `model.Channel`.
 fn channel_from_row(row: ChannelRow) -> Result<Channel, StoreError> {
-    // `bannerinfo` is `jsonb`, so the same SQL-NULL-versus-JSON-`null` split as [D-135] applies.
+    // `BannerInfo` is a `*ChannelBannerInfo`. sqlx allocates it, but `database/sql` is handed
+    // `**ChannelBannerInfo` and sets it back to nil for a SQL NULL (convert.go, `SetZero`), so
+    // NULL is `null`. A jsonb `null` is not NULL: it gets a fresh struct and
+    // `json.Unmarshal("null")` leaves it untouched, so the client sees the struct with all three
+    // fields `null`. [D-331]
     let banner_info = match row.bannerinfo {
-        None | Some(serde_json::Value::Null) => None,
+        None => None,
+        Some(serde_json::Value::Null) => Some(ChannelBannerInfo::default()),
         Some(value) => Some(serde_json::from_value::<ChannelBannerInfo>(value).map_err(
             |source| StoreError::Decode {
                 entity: "Channel",
@@ -5315,8 +5325,11 @@ pub async fn get_channel_members_timezones(
 
     rows.into_iter()
         .map(|value| match value {
-            // `StringMap.Scan` returns early on a NULL, leaving the zero value.
-            None => Ok(StringMap::new()),
+            // `Select(&[]model.StringMap)` scans a scalar Scanner, which reflectx never
+            // allocates: SQL NULL (`StringMap.Scan` returns early) and jsonb `null`
+            // (`json.Unmarshal` zeroes the map) both leave a nil map. The app layer reads only
+            // lookups from it, so nil and empty are the same thing here. [D-331]
+            None | Some(serde_json::Value::Null) => Ok(StringMap::new()),
             Some(serde_json::Value::Object(map)) => map
                 .into_iter()
                 .map(|(key, value)| match value {

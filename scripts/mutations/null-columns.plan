@@ -1,0 +1,16 @@
+# D-331 / D-158: SQL NULL versus JSON null, each site against parity::null_columns.
+user-null-is-nil	crates/mm-store/src/user_store.rs	            None => Ok(Some(StringMap::new())),	            None => Ok(None),	api	null_columns
+get-skips-manual-scan-check	crates/mm-store/src/user_store.rs	        require_manual_scan_columns(&row)?;\n        user_from_row(row)	        user_from_row(row)	api	null_columns
+get-user-500-id	crates/mm-app/src/user.rs	            AppError::boxed(\n                "GetUser",\n                "app.user.get_by_username.app_error",	            AppError::boxed(\n                "GetUser",\n                "app.user.get.app_error",	api	null_columns
+member-null-is-nil	crates/mm-store/src/channel_store.rs	        None => Some(StringMap::new()),\n        Some(serde_json::Value::Null) => None,	        None => None,\n        Some(serde_json::Value::Null) => None,	api	null_columns
+banner-json-null-is-nil	crates/mm-store/src/channel_store.rs	        Some(serde_json::Value::Null) => Some(ChannelBannerInfo::default()),	        Some(serde_json::Value::Null) => None,	api	null_columns
+session-null-is-nil	crates/mm-store/src/session_store.rs	            None => Some(StringMap::new()),	            None => None,	api	null_columns
+session-json-null-is-empty	crates/mm-store/src/session_store.rs	            Some(serde_json::Value::Null) => None,	            Some(serde_json::Value::Null) => Some(StringMap::new()),	api	null_columns
+draft-array-null-fails	crates/mm-store/src/draft_store.rs	    raw.map(|raw| serde_json::from_str::<Option<StringArray>>(&raw))	    raw.map(|raw| serde_json::from_str::<StringArray>(&raw).map(Some))	api	null_columns
+hook-array-null-fails	crates/mm-store/src/webhook_store.rs	        Some(json) => serde_json::from_str::<Option<StringArray>>(&json).map_err(|source| {	        Some(json) => serde_json::from_str::<StringArray>(&json).map(Some).map_err(|source| {	api	null_columns
+oauth-array-null-fails	crates/mm-store/src/oauth_store.rs	            Some(json) => serde_json::from_str::<Option<StringArray>>(&json).map_err(|source| {	            Some(json) => serde_json::from_str::<StringArray>(&json).map(Some).map_err(|source| {	api	null_columns
+participants-null-fails	crates/mm-store/src/post_store.rs	        serde_json::from_value::<Option<Vec<String>>>(row.thread_participants)	        serde_json::from_value::<Vec<String>>(row.thread_participants).map(Some)	api	null_columns
+timezones-json-null-fails	crates/mm-store/src/channel_store.rs	            None | Some(serde_json::Value::Null) => Ok(StringMap::new()),	            None => Ok(StringMap::new()),	api	null_columns
+# Controls: must survive.
+control-rename-scan-binding	crates/mm-store/src/user_store.rs	        if value.is_none() {	        if Option::is_none(value) {	api	null_columns
+control-reorder-banner-arms	crates/mm-store/src/channel_store.rs	        None => None,\n        Some(serde_json::Value::Null) => Some(ChannelBannerInfo::default()),	        Some(serde_json::Value::Null) => Some(ChannelBannerInfo::default()),\n        None => None,	api	null_columns
