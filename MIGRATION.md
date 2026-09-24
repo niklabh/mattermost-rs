@@ -14839,3 +14839,4 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `GetOrCreateDirectChannel`'s `RestrictDirectMessage = "team"` branch, `Team().GetCommonTeamIDsForTwoUsers`, `IsBotExemptFromDMRestrictions` | `App::get_or_create_direct_channel`, `mm_store::team_store::get_common_team_ids_for_two_users`, `App::is_bot_exempt_from_dm_restrictions` | DONE | 4 unit + `parity::dm_team_restriction` (8 cases) | A bot a plugin may own is forwarded while Go hosts plugins with plugins on; the two-user query is what lets a self-DM through. The session now reaches the DM create from search's `in:@user` too. |
+| `UserCanSeeOtherUser` for a restricted caller on both message-channel creates | `App::user_can_see_other_user` (already ported) | DONE | `parity::view_restricted_creates` | Test only; the team half needs edited roles to be reached. |

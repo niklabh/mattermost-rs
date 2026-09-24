@@ -233,6 +233,7 @@ mod parity {
     pub mod users_stats;
     pub mod users_stats_filtered;
     pub mod users_wipe;
+    pub mod view_restricted_creates;
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;

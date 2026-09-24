@@ -1272,6 +1272,10 @@ impl App {
     /// every account on a stock server. A restricted caller — a guest, in practice — sees a user
     /// who is a current member of one of its permitted teams, **or** a member of one of its
     /// channels; the team test runs first and each list is skipped when empty.
+    ///
+    /// A **stock guest's team list is always empty** — `team_guest` holds only `view_team` — so
+    /// the team half runs only where `team_user`/`team_guest` permissions were edited; the parity
+    /// suite (`parity::view_restricted_creates`) reaches the channel half alone.
     pub async fn user_can_see_other_user(
         &self,
         user_id: &str,

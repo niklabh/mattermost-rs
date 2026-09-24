@@ -6752,7 +6752,11 @@ on **both** servers, which is the shape [D-213] describes.
 
 ## D-240 · A view-restricted caller is forwarded on both message-channel creates
 
-**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+**Status** CLOSED · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+**Closed** 2026-09-25 — the store methods and the restricted branch had already landed (2026-09-15,
+`GET /users/by_auth_data` served since); a guest now creates both kinds against Go in
+`parity::view_restricted_creates`. The team half is unreachable with stock roles (see
+`App::user_can_see_other_user`).
 
 `createDirectChannel` and `createGroupChannel` both call `UserCanSeeOtherUser` (app/user.go:2710),
 which consults `GetViewUsersRestrictions` and — when the caller *is* restricted — asks
