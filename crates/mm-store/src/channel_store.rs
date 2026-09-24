@@ -6410,7 +6410,7 @@ pub async fn update_member(
     prepare_member_update(&mut member)?;
 
     let mut tx = begin_member_write(pool).await?;
-    let updated = write_member(&mut *tx, &member).await?;
+    let updated = write_member(&mut tx, &member).await?;
     commit_member_write(tx).await?;
 
     Ok(updated)
@@ -6439,7 +6439,7 @@ pub async fn update_multiple_members(
     let mut tx = begin_member_write(pool).await?;
     let mut updated = Vec::with_capacity(members.len());
     for member in &members {
-        updated.push(write_member(&mut *tx, member).await?);
+        updated.push(write_member(&mut tx, member).await?);
     }
     commit_member_write(tx).await?;
 
