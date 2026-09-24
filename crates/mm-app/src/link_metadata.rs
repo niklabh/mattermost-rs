@@ -1026,7 +1026,7 @@ impl App {
 
         let mut image_urls = Vec::new();
         for string in post.all_strings(mm_model::post::AllStringsOptions {
-            omit_interactive_blocks: !config.feature_flag_mm_blocks_enabled,
+            omit_interactive_blocks: !config.feature_flags.mm_blocks_enabled,
         }) {
             image_urls.extend(
                 get_images(&config.restrict_link_previews, &string)
@@ -1034,7 +1034,7 @@ impl App {
             );
         }
         image_urls
-            .extend(post.interactive_blocks_image_urls(config.feature_flag_mm_blocks_enabled));
+            .extend(post.interactive_blocks_image_urls(config.feature_flags.mm_blocks_enabled));
 
         for embed in post.metadata.iter().flat_map(|metadata| &metadata.embeds) {
             match embed.type_.as_str() {

@@ -1,0 +1,28 @@
+# Mutation plan for D-903 (the proxy's HEAD framing) and D-930 (TrustedProxyIPHeader, GetIPAddress).
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/proxy-debt.plan
+#
+# Not planned, because they are equivalent: `head = true` (copying Go's Content-Length on every
+# method agrees with the rebuilt body, since the forward leg never decompresses); `address`
+# reset per iteration and dropping `!address.is_empty()` (a value that failed to parse fails again,
+# and "" never parses).
+
+# ---- D-903
+proxy-head-keeps-no-length	crates/mm-api/src/proxy.rs	|| (head && name == header::CONTENT_LENGTH)	|| (false && name == header::CONTENT_LENGTH)	lib	a_forwarded_answer_is_framed
+proxy-head-invents-zero	crates/mm-api/src/proxy.rs	.map(|response| crate::web_static::head_framing(&parts.method, response))	.map(|response| response)	lib	a_forwarded_answer_is_framed
+proxy-control-reorder-eq	crates/mm-api/src/proxy.rs	let head = parts.method == Method::HEAD;	let head = Method::HEAD == parts.method;	lib	proxy::
+
+# ---- D-930: GetIPAddress
+ip-split-on-space	crates/mm-api/src/client_ip.rs	header.split(|b| *b == b',')	header.split(|b| *b == b' ')	lib	client_ip::
+ip-trim-ascii-space-only	crates/mm-api/src/client_ip.rs	String::from_utf8_lossy(first).trim().to_owned()	String::from_utf8_lossy(first).trim_matches(' ').to_owned()	lib	client_ip::
+ip-walk-reversed	crates/mm-api/src/client_ip.rs	for proxy_header in trusted_proxy_ip_header {	for proxy_header in trusted_proxy_ip_header.iter().rev() {	lib	client_ip::
+ip-peer-not-canonical	crates/mm-api/src/client_ip.rs	peer.map(|addr| addr.ip().to_canonical().to_string())	peer.map(|addr| addr.ip().to_string())	lib	client_ip::
+ip-v4-only	crates/mm-api/src/client_ip.rs	address.parse::<IpAddr>().is_ok()	address.parse::<std::net::Ipv4Addr>().is_ok()	lib	client_ip::
+ip-last-header-line	crates/mm-api/src/client_ip.rs	.get(proxy_header.as_str())\n            .map(|value| value.as_bytes())	.get_all(proxy_header.as_str())\n            .iter()\n            .last()\n            .map(|value| value.as_bytes())	lib	client_ip::
+ip-control-with-capacity	crates/mm-api/src/client_ip.rs	let mut address = String::new();	let mut address = String::with_capacity(0);	lib	client_ip::
+hook-context-ignores-stamp	crates/mm-api/src/plugin_context.rs	ip_address: crate::client_ip::client_ip(headers, extensions),	ip_address: crate::client_ip::get_ip_address(headers, None, &[]),	lib	plugin_context::
+
+# ---- D-930: the setting, and its one reader on the wire
+config-document-ignored	crates/mm-app/src/config.rs	trusted_proxy_ip_header: service\n                .trusted_proxy_ip_header\n                .unwrap_or(default.trusted_proxy_ip_header),	trusted_proxy_ip_header: default.trusted_proxy_ip_header,	unit	trusted_proxy_ip_header
+config-env-comma-split	crates/mm-app/src/config.rs	lookup("MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER")\n                .map(|raw| raw.split(' ')	lookup("MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER")\n                .map(|raw| raw.split(',')	unit	trusted_proxy_ip_header
+stamp-ignores-config	crates/mm-api/src/client_ip.rs	&state.app.config().trusted_proxy_ip_header,	&[],	api	the_post_and_reaction_hooks_fire_as_go_fires_them

@@ -758,7 +758,7 @@ pub async fn login_sso_code_exchange(
     _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
-    let enabled = state.app.config().feature_flag_mobile_sso_code_exchange;
+    let enabled = state.app.config().feature_flags.mobile_sso_code_exchange;
     tracing::Span::current().record("enabled", enabled);
     if enabled {
         tracing::debug!("handing an SSO code exchange to Go");

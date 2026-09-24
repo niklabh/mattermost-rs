@@ -475,7 +475,7 @@ impl App {
 
         // Activate it when the configuration already enables it.
         if config.plugin_states.get(&manifest.id).copied() == Some(true) {
-            if manifest.id == crate::plugins::PLUGIN_ID_APPS && !config.feature_flag_apps_enabled {
+            if manifest.id == crate::plugins::PLUGIN_ID_APPS && !config.feature_flags.apps_enabled {
                 return Ok(manifest);
             }
             match environment.activate(&manifest.id).await {

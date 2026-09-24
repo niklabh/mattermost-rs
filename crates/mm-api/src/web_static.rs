@@ -996,7 +996,7 @@ pub(crate) async fn session_preamble(state: &AppState, parts: &Parts) -> Preambl
     match state.app.get_session(&token).await {
         Err(err) if err.status_code == 500 => Preamble::Error(err),
         Err(_) => Preamble::Continue,
-        Ok(_) if state.app.config().feature_flag_session_attributes => Preamble::Forward,
+        Ok(_) if state.app.config().feature_flags.session_attributes => Preamble::Forward,
         Ok(session) if !session.is_oauth && location == crate::auth::TokenLocation::QueryString => {
             Preamble::Error(mm_model::utils::AppError::boxed(
                 "ServeHTTP",

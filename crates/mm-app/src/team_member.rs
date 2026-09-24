@@ -1595,6 +1595,13 @@ mod tests {
             vec!["town-square", "off-topic"],
             "off-topic survives only by being named"
         );
+        // What an empty `MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS` decodes to (D-1141):
+        // a one-element list, so `off-topic` goes and an empty name is joined instead.
+        assert_eq!(
+            app_with(configured(&[""])).default_channel_names(),
+            vec!["town-square", ""],
+            "an empty name is still a configured list"
+        );
     }
 
     /// `IsTeamEmailAllowed`'s two short-circuits, which the domain corpus below cannot reach: a

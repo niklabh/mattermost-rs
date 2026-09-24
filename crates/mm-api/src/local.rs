@@ -311,6 +311,12 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
             state.clone(),
             crate::translate_error_messages,
         ))
+        // The socket goes through `ServeHTTP` too, so its header walk runs; with no peer its
+        // fallback is `""`. See [`crate::client_ip`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::client_ip::stamp_client_ip,
+        ))
         .with_state(state)
 }
 
@@ -677,9 +683,9 @@ pub async fn send_over_unix(socket: &Path, request: Request) -> Result<Response,
 
 /// Copy headers, dropping the ones that belong to a single connection.
 ///
-/// The same list as [`crate::proxy`]'s, minus `accept-encoding`: that entry exists there because
-/// `reqwest` applies its own decompression policy, and hyper at this level applies none — so
-/// dropping it would silently deny the client a compressed answer Go was willing to give.
+/// The same list as [`crate::proxy`]'s: `accept-encoding` is forwarded on both legs, since hyper
+/// at this level decodes nothing and dropping it would silently deny the client a compressed
+/// answer Go was willing to give.
 fn forwardable(headers: &axum::http::HeaderMap) -> axum::http::HeaderMap {
     const HOP_BY_HOP: &[&str] = &[
         "connection",

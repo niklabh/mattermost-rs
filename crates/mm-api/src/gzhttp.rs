@@ -37,7 +37,7 @@
 //! most 2048 bytes written before the handler returns gets a `Content-Length`, a longer one is
 //! chunked. [`go_framed_body`] reproduces that rule; the corpus pins it.
 
-use axum::body::{Body, Bytes};
+use axum::body::{Body, BodyDataStream, Bytes, HttpBody as _};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::Response;
 
@@ -177,10 +177,18 @@ fn body_allowed_for_status(status: StatusCode) -> bool {
 
 /// Whether the wrapper compresses a response of this shape — steps 3 and 4 of the module docs.
 ///
-/// `body_len` is what the handler wrote. `content_type` is the header, which the static handler
-/// always sets before writing, so gzhttp's own `DetectContentType` fallback is not reached.
-fn should_compress(status: StatusCode, headers: &HeaderMap, body_len: usize) -> bool {
-    if body_len == 0 || !body_allowed_for_status(status) {
+/// `buffered` is what the handler had written when gzhttp decided: at least `MinSize` bytes, or
+/// the whole body when it was shorter. `content_type` is the header, or the sniffed type when the
+/// handler set none (see [`wrap`]). Reduced from `Write` and `Close`: with a declared length the
+/// decision is made on the first write, from the declared length alone; without one, gzhttp
+/// buffers until it holds `MinSize` bytes or the handler returns.
+fn should_compress(
+    status: StatusCode,
+    headers: &HeaderMap,
+    content_type: &str,
+    buffered: usize,
+) -> bool {
+    if buffered == 0 || !body_allowed_for_status(status) {
         return false;
     }
     if headers.contains_key(header::CONTENT_ENCODING) || headers.contains_key(header::CONTENT_RANGE)
@@ -189,22 +197,15 @@ fn should_compress(status: StatusCode, headers: &HeaderMap, body_len: usize) -> 
     }
     let declared = content_length(headers);
     let long_enough = if declared == 0 {
-        body_len >= DEFAULT_MIN_SIZE
+        buffered >= DEFAULT_MIN_SIZE
     } else {
         declared >= DEFAULT_MIN_SIZE
     };
-    if !long_enough {
-        return false;
-    }
-    let ct = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
-    default_content_type_filter(ct)
+    long_enough && default_content_type_filter(content_type)
 }
 
-/// The wrapper's errors — only the compressor's, which on an in-memory buffer can only be an
-/// allocation failure surfacing as `io::Error`.
+/// The wrapper's errors: reading the handler's body, or the compressor's, which on an in-memory
+/// buffer can only be an allocation failure surfacing as `io::Error`.
 #[derive(Debug, thiserror::Error)]
 pub enum GzhttpError {
     #[error("reading the response body to compress it: {0}")]
@@ -218,9 +219,23 @@ pub enum GzhttpError {
 /// Port of `GzipHandler(h)` applied to a finished response: add `Vary`, then compress when the
 /// request accepts an encoding and the response qualifies.
 ///
-/// The body is read whole to compress it. A static asset is at most a few tens of megabytes (the
-/// largest are source maps), and `http.FileServer` behind gzhttp buffers nothing, so this is the
-/// one place the port holds more in memory than Go does.
+/// # The body is a stream, as the handler's writes are
+///
+/// Go decides after the handler has written `MinSize` bytes (or on its first write, when it
+/// declared a length), and compresses the rest as it arrives. So does this: at most `MinSize`
+/// bytes of the body — one chunk, for a body built in memory — are read before deciding, and a
+/// file download (`serve_content`, which declares its length and streams) is compressed chunk by
+/// chunk rather than held whole. What reaches the client is framed by `net/http`'s rule applied
+/// to what is actually *written*: at most 2048 bytes by the time the handler returns get a
+/// `Content-Length`, anything longer is chunked — so up to 2049 bytes of output are held back to
+/// tell the two apart, compressed or not.
+///
+/// # A response with no `Content-Type`
+///
+/// gzhttp sniffs one with `http.DetectContentType` over what it has buffered and **sets the
+/// header** (its `setContentType` default) before filtering on it, so a JPEG written without a
+/// type is recognised and left alone. `net/http` would sniff the same bytes had gzhttp not, so
+/// the header is on the wire either way.
 pub async fn wrap(
     method: &Method,
     accept_encoding: Option<&str>,
@@ -241,12 +256,52 @@ pub async fn wrap(
         return Ok(Response::from_parts(parts, body));
     }
 
-    let bytes = axum::body::to_bytes(body, usize::MAX).await?;
-    if !should_compress(parts.status, &parts.headers, bytes.len()) {
-        return Ok(Response::from_parts(parts, go_framed_body(bytes)));
+    let mut stream = body.into_data_stream();
+    let mut head = Vec::new();
+    let mut ended = read_until(&mut stream, &mut head, DEFAULT_MIN_SIZE).await?;
+
+    let declared = content_length(&parts.headers);
+    let content_type = match parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(ct) if !ct.is_empty() => ct.to_owned(),
+        _ if head.is_empty() => String::new(),
+        _ => {
+            let sniffed = mm_app::link_image::detect_content_type(&head);
+            if !parts.headers.contains_key(header::CONTENT_TYPE) {
+                parts
+                    .headers
+                    .insert(header::CONTENT_TYPE, HeaderValue::from_static(sniffed));
+            }
+            sniffed.to_owned()
+        }
+    };
+
+    if !should_compress(parts.status, &parts.headers, &content_type, head.len()) {
+        if declared > 0 {
+            // The handler's own `Content-Length` frames it; nothing to hold back.
+            let body = futures_util::StreamExt::chain(
+                futures_util::stream::once(async move { Ok(Bytes::from(head)) }),
+                stream,
+            );
+            return Ok(Response::from_parts(parts, Body::from_stream(body)));
+        }
+        if !ended {
+            ended = read_until(&mut stream, &mut head, BUFFER_BEFORE_CHUNKING_SIZE + 1).await?;
+        }
+        let body = if ended {
+            go_framed_body(Bytes::from(head))
+        } else {
+            Body::from_stream(futures_util::StreamExt::chain(
+                futures_util::stream::once(async move { Ok(Bytes::from(head)) }),
+                stream,
+            ))
+        };
+        return Ok(Response::from_parts(parts, body));
     }
 
-    let compressed = tokio::task::spawn_blocking(move || compress(encoding, &bytes)).await??;
     let value = match encoding {
         Encoding::Zstd => "zstd",
         _ => "gzip",
@@ -256,25 +311,154 @@ pub async fn wrap(
         .insert(header::CONTENT_ENCODING, HeaderValue::from_static(value));
     parts.headers.remove(header::CONTENT_LENGTH);
     parts.headers.remove(header::ACCEPT_RANGES);
-    Ok(Response::from_parts(
-        parts,
-        go_framed_body(Bytes::from(compressed)),
-    ))
+    let body = compressed_body(encoding, Bytes::from(head), stream, ended).await?;
+    Ok(Response::from_parts(parts, body))
 }
 
-fn compress(encoding: Encoding, bytes: &[u8]) -> std::io::Result<Vec<u8>> {
-    use std::io::Write as _;
-    match encoding {
-        // `zstd.SpeedFastest` is the library's level 1.
-        Encoding::Zstd => zstd::stream::encode_all(bytes, 1),
-        _ => {
-            // `gzip.DefaultCompression` — level 6 in both implementations.
-            let mut encoder =
-                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-            encoder.write_all(bytes)?;
-            encoder.finish()
+/// Pull chunks into `buf` until it holds at least `want` bytes; `true` when the body ended first.
+async fn read_until(
+    stream: &mut BodyDataStream,
+    buf: &mut Vec<u8>,
+    want: usize,
+) -> Result<bool, axum::Error> {
+    while buf.len() < want {
+        match futures_util::StreamExt::next(stream).await {
+            Some(chunk) => buf.extend_from_slice(&chunk?),
+            None => return Ok(true),
         }
     }
+    Ok(false)
+}
+
+/// One of the two encoders, fed a chunk at a time; each call returns what it emitted.
+enum Compressor {
+    Gzip(flate2::write::GzEncoder<Vec<u8>>),
+    Zstd(zstd::stream::write::Encoder<'static, Vec<u8>>),
+}
+
+impl Compressor {
+    fn new(encoding: Encoding) -> std::io::Result<Self> {
+        Ok(match encoding {
+            // `zstd.SpeedFastest` is the library's level 1.
+            Encoding::Zstd => Compressor::Zstd(zstd::stream::write::Encoder::new(Vec::new(), 1)?),
+            // `gzip.DefaultCompression` — level 6 in both implementations.
+            _ => Compressor::Gzip(flate2::write::GzEncoder::new(
+                Vec::new(),
+                flate2::Compression::default(),
+            )),
+        })
+    }
+
+    fn write(&mut self, chunk: &[u8]) -> std::io::Result<Vec<u8>> {
+        use std::io::Write as _;
+        let out = match self {
+            Compressor::Gzip(e) => {
+                e.write_all(chunk)?;
+                e.get_mut()
+            }
+            Compressor::Zstd(e) => {
+                e.write_all(chunk)?;
+                e.get_mut()
+            }
+        };
+        Ok(std::mem::take(out))
+    }
+
+    fn finish(self) -> std::io::Result<Vec<u8>> {
+        match self {
+            Compressor::Gzip(e) => e.finish(),
+            Compressor::Zstd(e) => e.finish(),
+        }
+    }
+}
+
+/// Compress one chunk off the async threads; the encoder travels in and back out.
+async fn feed(
+    mut compressor: Compressor,
+    chunk: Bytes,
+) -> Result<(Compressor, Vec<u8>), GzhttpError> {
+    let (compressor, out) = tokio::task::spawn_blocking(move || {
+        let out = compressor.write(&chunk);
+        (compressor, out)
+    })
+    .await?;
+    Ok((compressor, out?))
+}
+
+async fn finish(compressor: Compressor) -> Result<Vec<u8>, GzhttpError> {
+    Ok(tokio::task::spawn_blocking(move || compressor.finish()).await??)
+}
+
+/// The compressed body, framed as `net/http` frames what the compressor writes: output is held
+/// until it passes 2048 bytes or the body ends, which decides between a length and chunks.
+async fn compressed_body(
+    encoding: Encoding,
+    head: Bytes,
+    mut stream: BodyDataStream,
+    mut ended: bool,
+) -> Result<Body, GzhttpError> {
+    let (mut compressor, mut out) = feed(Compressor::new(encoding)?, head).await?;
+    while out.len() <= BUFFER_BEFORE_CHUNKING_SIZE {
+        if ended {
+            out.extend(finish(compressor).await?);
+            return Ok(go_framed_body(Bytes::from(out)));
+        }
+        match futures_util::StreamExt::next(&mut stream).await {
+            Some(chunk) => {
+                let (next, emitted) = feed(compressor, chunk?).await?;
+                compressor = next;
+                out.extend(emitted);
+            }
+            None => ended = true,
+        }
+    }
+
+    let rest =
+        futures_util::stream::try_unfold(Some((compressor, stream, ended)), |state| async move {
+            let Some((mut compressor, mut stream, ended)) = state else {
+                return Ok::<_, GzhttpError>(None);
+            };
+            if !ended {
+                while let Some(chunk) = futures_util::StreamExt::next(&mut stream).await {
+                    let (next, emitted) = feed(compressor, chunk?).await?;
+                    compressor = next;
+                    if !emitted.is_empty() {
+                        return Ok(Some((
+                            Bytes::from(emitted),
+                            Some((compressor, stream, false)),
+                        )));
+                    }
+                }
+            }
+            Ok(Some((Bytes::from(finish(compressor).await?), None)))
+        });
+    let first = futures_util::stream::once(async move { Ok(Bytes::from(out)) });
+    Ok(Body::from_stream(futures_util::StreamExt::chain(
+        first, rest,
+    )))
+}
+
+/// `net/http`'s framing of an answer the wrapper left alone — no acceptable encoding, or not
+/// `gzip` mode: a body over [`BUFFER_BEFORE_CHUNKING_SIZE`] bytes that declared no length is
+/// chunked, where hyper would write the length of a body it holds whole.
+///
+/// `HEAD` is left to hyper: `net/http` writes neither a length nor chunks for a `HEAD` whose
+/// handler wrote more than the buffer, and no API client reads that framing.
+pub fn net_http_framing(method: &Method, response: Response) -> Response {
+    let long = response
+        .body()
+        .size_hint()
+        .exact()
+        .is_some_and(|n| n > BUFFER_BEFORE_CHUNKING_SIZE as u64);
+    if !long
+        || method == Method::HEAD
+        || !body_allowed_for_status(response.status())
+        || response.headers().contains_key(header::CONTENT_LENGTH)
+    {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    Response::from_parts(parts, Body::from_stream(body.into_data_stream()))
 }
 
 /// A body framed the way `net/http` frames one a handler wrote without setting
@@ -357,13 +541,34 @@ mod tests {
     #[test]
     fn the_minimum_size_is_judged_by_the_declared_length_when_there_is_one() {
         let js = [("content-type", "text/javascript; charset=utf-8")];
+        let js_ct = "text/javascript; charset=utf-8";
         let ok = StatusCode::OK;
-        assert!(!should_compress(ok, &headers(&js), 1023));
-        assert!(should_compress(ok, &headers(&js), 1024));
+        assert!(!should_compress(ok, &headers(&js), js_ct, 1023));
+        assert!(should_compress(ok, &headers(&js), js_ct, 1024));
+        assert!(!should_compress(ok, &headers(&js), js_ct, 0));
         let declared_small = [("content-type", "text/css"), ("content-length", "10")];
-        assert!(!should_compress(ok, &headers(&declared_small), 5000));
+        assert!(!should_compress(
+            ok,
+            &headers(&declared_small),
+            "text/css",
+            5000
+        ));
         let declared_big = [("content-type", "text/css"), ("content-length", "5000")];
-        assert!(should_compress(ok, &headers(&declared_big), 5000));
+        assert!(should_compress(
+            ok,
+            &headers(&declared_big),
+            "text/css",
+            5000
+        ));
+        // Go decides on the first write when a length is declared, however short that write.
+        assert!(should_compress(ok, &headers(&declared_big), "text/css", 1));
+        // The filter reads the type it is given (the sniffed one when the header is absent).
+        assert!(!should_compress(
+            ok,
+            &headers(&declared_big),
+            "image/jpeg",
+            5000
+        ));
         let ranged = [
             ("content-type", "text/css"),
             ("content-range", "bytes 0-9/5000"),
@@ -371,11 +576,13 @@ mod tests {
         assert!(!should_compress(
             StatusCode::PARTIAL_CONTENT,
             &headers(&ranged),
+            "text/css",
             5000
         ));
         assert!(!should_compress(
             StatusCode::NOT_MODIFIED,
             &headers(&js),
+            js_ct,
             5000
         ));
     }
@@ -386,7 +593,6 @@ mod go_parity {
     //! Against `fixtures/behaviour_web_static.json`, which drives the real `gzhttp.GzipHandler`
     //! behind a real `net/http` server — see reference/dump/behaviour_web_static.go.
     use super::*;
-    use axum::body::HttpBody as _;
 
     fn oracle() -> serde_json::Value {
         serde_json::from_str(include_str!("../../../fixtures/behaviour_web_static.json"))
@@ -522,6 +728,114 @@ mod go_parity {
             if !head && written {
                 assert_eq!(decoded, input, "{context}: decodes to the input");
             }
+        }
+    }
+
+    /// `reference/dump`'s `noise`: the top byte of a 64-bit LCG, MMIX constants.
+    fn noise(n: usize) -> Vec<u8> {
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        (0..n)
+            .map(|_| {
+                x = x
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                (x >> 56) as u8
+            })
+            .collect()
+    }
+
+    fn stream_payload(kind: &str, n: usize) -> Vec<u8> {
+        match kind {
+            "noise" => noise(n),
+            "jpeg" => {
+                let mut out = noise(n);
+                let magic = [0xFF, 0xD8, 0xFF, 0xE0];
+                let k = magic.len().min(n);
+                out[..k].copy_from_slice(&magic[..k]);
+                out
+            }
+            _ => body_of(n),
+        }
+    }
+
+    /// The API handlers' shape: several writes, a streamed declared length, no content type —
+    /// `gzhttp_stream` in the oracle. The handler's writes become the chunks of a stream body of
+    /// unknown size, which is what `serve_content` hands the wrapper.
+    #[tokio::test]
+    async fn every_streamed_gzhttp_row_matches_go() {
+        let oracle = oracle();
+        let rows = oracle["gzhttp_stream"].as_array().unwrap();
+        assert!(rows.len() >= 17, "the corpus is there");
+        for row in rows {
+            let case = &row["case"];
+            let want = &row["response"];
+            let name = case["name"].as_str().unwrap();
+            let ae = case["accept_encoding"].as_str().unwrap();
+            let ct = case["content_type"].as_str().unwrap();
+            let declared = case["declared_length"].as_u64().unwrap();
+            let n = case["body_length"].as_u64().unwrap() as usize;
+            let write = case["write_size"].as_u64().unwrap() as usize;
+            let input = stream_payload(case["body_kind"].as_str().unwrap(), n);
+
+            let mut builder = Response::builder().status(StatusCode::OK);
+            if !ct.is_empty() {
+                builder = builder.header(header::CONTENT_TYPE, ct);
+            }
+            if declared > 0 {
+                builder = builder.header(header::CONTENT_LENGTH, declared.to_string());
+            }
+            let body = if write == 0 {
+                Body::from(input.clone())
+            } else {
+                let chunks: Vec<Result<Bytes, std::convert::Infallible>> = input
+                    .chunks(write)
+                    .map(|c| Ok(Bytes::copy_from_slice(c)))
+                    .collect();
+                Body::from_stream(futures_util::stream::iter(chunks))
+            };
+            let response = builder.body(body).unwrap();
+            let out = wrap(&Method::GET, (!ae.is_empty()).then_some(ae), response)
+                .await
+                .unwrap();
+
+            let got = |name: header::HeaderName| {
+                out.headers()
+                    .get(name)
+                    .map(|v| v.to_str().unwrap().to_owned())
+            };
+            let wanted = |name: &str| want["headers"][name].as_str().map(str::to_owned);
+            for h in [header::CONTENT_ENCODING, header::VARY, header::CONTENT_TYPE] {
+                assert_eq!(got(h.clone()), wanted(h.as_str()), "{name}: {h}");
+            }
+            let compressed = wanted("content-encoding").is_some();
+            let framed_length = got(header::CONTENT_LENGTH)
+                .or_else(|| out.body().size_hint().exact().map(|l| l.to_string()));
+            if compressed {
+                assert_eq!(
+                    framed_length.is_some(),
+                    wanted("content-length").is_some(),
+                    "{name}: a compressed length is present on both or neither"
+                );
+            } else {
+                assert_eq!(framed_length, wanted("content-length"), "{name}: length");
+            }
+            assert_eq!(
+                framed_length.is_none(),
+                want["chunked"].as_bool().unwrap(),
+                "{name}: framing"
+            );
+
+            let bytes = axum::body::to_bytes(out.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let decoded = decode(wanted("content-encoding").as_deref(), &bytes);
+            assert_eq!(
+                decoded.len() as u64,
+                want["decoded_length"].as_u64().unwrap(),
+                "{name}: decoded length"
+            );
+            assert!(want["decodes_to_body"].as_bool().unwrap(), "{name}");
+            assert!(decoded == input, "{name}: decodes to the input");
         }
     }
 

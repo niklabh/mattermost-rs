@@ -1,0 +1,21 @@
+# Mutation plan for D-480's close-out of POST /channels/{channel_id}/move: the webhook settings
+# gates, the store's UpdateAt stamps, the departed-member filter, the server-locale notice, and
+# the two LogAudit rows (REST and local socket). channel-move.plan covers the rest of the route.
+# 2026-09-24: 12 run, 10 caught, 2 controls survived (with channel-move.plan's two re-anchored lines: both caught).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-move-d480.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+incoming-gate-bypassed	crates/mm-app/src/channel_move.rs	            .get_incoming_webhooks_for_team_page_by_user(&previous_team.id, "", 0, ALL_MEMBERS)	            .store()\n            .webhook()\n            .get_incoming_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)	api	channel_move
+outgoing-gate-bypassed	crates/mm-app/src/channel_move.rs	            .get_outgoing_webhooks_for_team_page_by_user(&previous_team.id, "", 0, ALL_MEMBERS)	            .store()\n            .webhook()\n            .get_outgoing_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)	api	channel_move
+notice-in-english-always	crates/mm-app/src/channel_move.rs	                bundle.server_locale(&self.config().default_server_locale),	                "en",	api	channel_move
+incoming-update-not-stamped	crates/mm-store/src/webhook_store.rs	async fn update_incoming(&self, hook: &mut IncomingWebhook) -> Result<(), StoreError> {\n        hook.update_at = mm_model::utils::get_millis();	async fn update_incoming(&self, hook: &mut IncomingWebhook) -> Result<(), StoreError> {	api	channel_move
+outgoing-update-not-stamped	crates/mm-store/src/webhook_store.rs	async fn update_outgoing(&self, hook: &mut OutgoingWebhook) -> Result<(), StoreError> {\n        hook.update_at = mm_model::utils::get_millis();	async fn update_outgoing(&self, hook: &mut OutgoingWebhook) -> Result<(), StoreError> {	api	channel_move
+departed-member-counts-as-member	crates/mm-store/src/team_store.rs	           AND tm.userid = ANY($2::text[])\n           AND tm.deleteat = 0	           AND tm.userid = ANY($2::text[])\n           AND tm.deleteat >= 0	api	channel_move
+audit-team-row-names-channel	crates/mm-api/src/channel_move.rs	        format!("team={}", team.name),	        format!("team={}", channel.name),	api	channel_move
+audit-row-without-user	crates/mm-api/src/channel_move.rs	                &session.0.user_id,\n                &hook_ctx.session_id,	                "",\n                &hook_ctx.session_id,	api	channel_move
+audit-create-at-not-stamped	crates/mm-store/src/audit_store.rs	        audit.create_at = mm_model::utils::get_millis();	        audit.create_at = 1;	api	channel_move
+local-audit-names-a-user	crates/mm-api/src/local_channels.rs	            .log_audit("", "", &hook_ctx.ip_address, &path, &extra_info)	            .log_audit("x", "", &hook_ctx.ip_address, &path, &extra_info)	api	local_channels
+control-typed-path-binding	crates/mm-api/src/channel_move.rs	    let path = parts.uri.path().to_owned();	    let path: String = parts.uri.path().to_owned();	api	channel_move
+control-sprintf-capacity	crates/mm-app/src/channel_move.rs	    let mut out = String::with_capacity(format.len() + arg.len());	    let mut out = String::new();	api	channel_move

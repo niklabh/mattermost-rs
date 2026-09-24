@@ -13100,8 +13100,11 @@ remove (a guest, a shared channel) forwards the whole request.
 | test | `crates/mm-api/tests/parity/channel_move.rs` — 3, each move on its own channel, the five writes read back from the database | DONE |
 | mutation | `scripts/mutations/channel-move.plan` — 12 run, 10 caught, 2 controls survived | DONE |
 
-- **The move post is English** (`api.team.move_channel.success` with the *previous* team's
-  name), the same exception every system post makes — see `App::create_system_post`.
+- **The move post is in the server locale** since 2026-09-24 (`i18n.T` + `fmt.Sprintf`, see
+  `App::post_channel_move_message`); it was English until then.
+- **D-480 closed (2026-09-24):** webhooks re-homed through the settings-gated page reads (a disabled
+  kind stays behind) with the store stamping `UpdateAt`, and the two `LogAudit` rows written — 5
+  parity tests; `scripts/mutations/channel-move-d480.plan` — 12 run, 10 caught, 2 controls survived.
 
 ## `POST /api/v4/notifications/ack` (2026-09-14)
 
@@ -14245,7 +14248,7 @@ the behaviour is what it was. D-402 and D-811 are narrowed; the other 28 sites a
 
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
-| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (`TrustedProxyIPHeader` not modelled, [D-930]) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
+| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (the header walk since 2026-09-24, [D-930] closed) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
 | `Channels.RunMultiHook*` (app/channels.go:341), `runGuardedMessageWillBePosted`/`Updated` and `resolveGuards` (app/guarded_hooks.go), `store.ChannelGuardStore.GetForChannel` | `mm-app/src/plugin_hooks.rs`, `mm-store/src/channel_guard_store.rs` | DONE (the guard *register* API is Phase 6) | 1 parity | The two `MessageWillBe*` hooks disagree on what a rejection is — a reason for one, a nil post for the other — and the reason is concatenated into the error **id**. A guard whose plugin is not active is 503 before any hook runs. |
 | `MessageWillBePosted`, `MessageHasBeenPosted` (post.go:368, :430), `MessageWillBeUpdated`, `MessageHasBeenUpdated` (post.go:978, :1007), `MessageHasBeenDeleted` (post.go:3393), `ReactionHasBeenAdded`/`Removed` (reaction.go:105, :187) | `mm-app/src/{post_create,post_write,reaction}.rs` | DONE | 1 parity (`plugin_hooks`, 14 hooks diffed) + 4 unit | `PostStore::update` now mutates both arguments as Go does: `MessageHasBeenUpdated`'s old post **is** the edit-history row (minted id, `OriginalId`, `DeleteAt`), which this suite is what found. |
 
@@ -14738,6 +14741,21 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `app/notification_push.go`, push half of `SendNotifications` | `mm_app::push`, `App::send_post_pushes` | DONE | `parity::push_send` (8), `parity::push_ack` (2) | Badge counts every team's threads — the store's thread counts gated the team filter unconditionally until this. `ActiveChannel` is per-process ([D-1071]). |
 | `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
 | `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
+
+## API compression — D-208 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `gzhttp.GzipHandler` around every `APIHandler`-family handler (api4/handlers.go:42, web/handlers.go:553) | `mm_api::go_global_headers` → `gzhttp::wrap` (now streaming), `gzhttp::net_http_framing`; `proxy::forwardable` keeps `Accept-Encoding` | DONE | `gzhttp_stream` oracle (17 rows), `parity::api_compression` (3); mutations in `scripts/mutations/api-gzip.plan` | The mode is read at start, as Go wraps at registration; an answer with no type is sniffed and the header set, as gzhttp does. |
+
+## Tech-debt payoff: the proxy's `HEAD` framing and `TrustedProxyIPHeader` (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `net/http`'s `HEAD` framing through the Strangler proxy | `mm_api::proxy::forward` | DONE, closes [D-903] | `parity::web_client::a_forwarded_head_keeps_gos_content_length`, 1 unit (8 framing cases over real sockets) | A `HEAD` keeps Go's `Content-Length` verbatim and gets none when Go sent none; `204`/`304` already matched (Go suppresses the header, hyper writes none). |
+| `ServiceSettings.TrustedProxyIPHeader`, `utils.GetIPAddress` (utils.go:94), its `web.Handler.ServeHTTP` call | `mm_app::config`, `mm_api::client_ip` (a middleware on both routers), `plugin_context` | DONE, closes [D-930] | `go_parity` (70 rows, `behaviour_ip_address.json`) + 3 unit + 2 config; `parity::plugin_hooks` walks two trusted headers | The address is returned as written, not re-formatted; the plugin hook context is the only reader this server has (audit rows, session attributes and rate limiting are unported). |
+| `config.GetEnvironment`, `applyEnvKey` (config/environment.go:16, :28) — the whole overlay, audited | `mm_app::config` (`split_env_list`, `process_lookup`, `decode_env_plugin_states`) | DONE, closes [D-1141]; opens [D-1160] | `env_go_parity` (60 rows, `behaviour_env_override.json`, Go's own `Store.Load`) + 8 unit | Slices split on single spaces (`""` is `[""]`), names match case-insensitively and a leaf ignores leftover key parts, and `PluginStates` from the environment replaces the map whole with `encoding/json`'s fold and last-key-wins rules; bools and ints already matched. |
+| `model.FeatureFlags` in `Config` (config.go:4226, `SetDefaults`, the `MM_FEATUREFLAGS_*` overlay), `ExportLinkProvider.GetCommand` (command_exportlink.go:35), `GeneratePresignURLForExport`'s gates, `validateCommandTriggerUniqueness` via the providers | `mm_app::config` (`feature_flags`), `command_provider`, `command`, `filestore::generates_links`, `export` | DONE, closes [D-260]; opens [D-1161] | `config_feature_flags.json` (Go's running flags, from `dump-config-fixture.sh`), `behaviour_export_link.json` go_parity, 7 unit | The flags are read from the document when a row has the section (a partial one zeroes the rest, as in Go) and the row on this stack has none. `/exportlink` asks the export backend built at boot, as Go does; the flag is settable only by environment at Go's start, so there is no two-server parity test of the reserved branch. |
 
 ## Sliding session expiry (2026-09-24)
 

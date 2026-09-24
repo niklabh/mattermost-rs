@@ -7,15 +7,20 @@
 //! A move is a one-way write, so every success case builds its own channel on each server and
 //! the two are compared by shape, by the fields the move sets, and by what the database says
 //! afterwards: the sidebar rows gone, the threads and webhooks re-homed, the members not on the
-//! new team removed, and the `system_move_channel` post written by the mover.
+//! new team removed, the `system_move_channel` post written by the mover, and the two `Audits`
+//! rows `c.LogAudit` leaves.
 
 use crate::common;
 
 use common::{
-    GO, RUST, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
-    create_channel_typed, create_plain_user, create_team, fixture_pool, go_minted_token,
-    post_message, stack_enabled,
+    GO, RUST, SecondServer, add_user_to_channel, assert_error_bodies_match_except_known_gaps,
+    client, create_channel_typed, create_plain_user, create_team, fixture_pool, go_minted_token,
+    post_message, remove_user_from_team, stack_enabled,
 };
+
+/// The mm-api with both kinds of webhook off and a German server locale; see
+/// `second_server_ports`.
+const SETTINGS_RUST_PORT: u16 = 8112;
 
 const MOVE_MESSAGE_PREFIX: &str = "This channel has been moved to this team from ";
 
@@ -172,7 +177,7 @@ async fn create_outgoing_hook(
     admin: &str,
     team_id: &str,
     channel_id: &str,
-) {
+) -> String {
     let response = client
         .post(format!("{GO}/api/v4/hooks/outgoing"))
         .header("Authorization", format!("Bearer {admin}"))
@@ -186,11 +191,11 @@ async fn create_outgoing_hook(
         .send()
         .await
         .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "the outgoing hook exists: {}",
-        response.text().await.unwrap_or_default()
-    );
+    assert!(response.status().is_success(), "the outgoing hook exists");
+    response.json::<serde_json::Value>().await.expect("JSON")["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned()
 }
 
 async fn scalar_i64(pool: &sqlx::PgPool, sql: &str, arg: &str) -> i64 {
@@ -215,6 +220,7 @@ struct Moved {
     channel_id: String,
     root_id: String,
     hook_id: String,
+    out_hook_id: String,
     member: common::PlainUser,
 }
 
@@ -234,11 +240,23 @@ async fn build(
     let root_id = post_message(client, &member.token, &channel_id, "a root", None).await;
     reply(client, &member.token, &channel_id, &root_id).await;
     let hook_id = create_incoming_hook(client, admin, &channel_id).await;
-    create_outgoing_hook(client, admin, team_a, &channel_id).await;
+    let out_hook_id = create_outgoing_hook(client, admin, team_a, &channel_id).await;
+    // Both hooks' `UpdateAt` pushed into the past, so the move's stamp is visible even inside
+    // the millisecond the hook was created in.
+    for table in ["incomingwebhooks", "outgoingwebhooks"] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET updateat = 1 WHERE channelid = $1"
+        ))
+        .bind(&channel_id)
+        .execute(pool)
+        .await
+        .expect("the hook is back-dated");
+    }
     Moved {
         channel_id,
         root_id,
         hook_id,
+        out_hook_id,
         member,
     }
 }
@@ -271,9 +289,12 @@ async fn a_move_rehomes_the_channel_its_threads_its_hooks_and_writes_the_post() 
         .as_str()
         .expect("a username")
         .to_owned();
+    let team_b_name: String =
+        scalar_string(&pool, "SELECT name FROM teams WHERE id = $1", &team_b).await;
     let body = format!(r#"{{"team_id":"{team_b}","force":false}}"#);
 
     let mut bodies = Vec::new();
+    let mut audit_sessions = Vec::new();
     for (base, tag) in [(GO, "mvgo"), (RUST, "mvrs")] {
         let built = build(&client, &pool, &admin, &team_a, &team_b, tag).await;
         assert!(
@@ -359,6 +380,58 @@ async fn a_move_rehomes_the_channel_its_threads_its_hooks_and_writes_the_post() 
             team_b,
             "{base}: the outgoing hook follows"
         );
+        // `SqlWebhookStore.UpdateIncoming`/`UpdateOutgoing` stamp `UpdateAt` themselves.
+        for (table, id) in [
+            ("incomingwebhooks", &built.hook_id),
+            ("outgoingwebhooks", &built.out_hook_id),
+        ] {
+            assert!(
+                scalar_i64(
+                    &pool,
+                    &format!("SELECT updateat FROM {table} WHERE id = $1"),
+                    id
+                )
+                .await
+                    > 1,
+                "{base}: {table} re-stamped"
+            );
+        }
+        // `c.LogAudit` twice: the path as the action, the mover's session.
+        let moved_at = channel["update_at"].as_i64().unwrap_or(0);
+        let audits: Vec<(String, String, String, String, i64)> = sqlx::query_as(
+            "SELECT extrainfo, userid, sessionid, ipaddress, createat FROM audits \
+             WHERE action = $1 ORDER BY extrainfo",
+        )
+        .bind(format!("/api/v4/channels/{}/move", built.channel_id))
+        .fetch_all(&pool)
+        .await
+        .expect("the audit rows");
+        let channel_name: String = scalar_string(
+            &pool,
+            "SELECT name FROM channels WHERE id = $1",
+            &built.channel_id,
+        )
+        .await;
+        assert_eq!(
+            audits.iter().map(|a| a.0.clone()).collect::<Vec<_>>(),
+            [
+                format!("channel={channel_name}"),
+                format!("team={team_b_name}")
+            ],
+            "{base}: two audit rows"
+        );
+        for (_, user_id, session_id, ip, create_at) in &audits {
+            assert!(
+                *create_at >= moved_at,
+                "{base}: stamped by the store after the move"
+            );
+            assert_eq!(user_id, common::logged_in_user_id(), "{base}: the mover");
+            assert!(
+                ["127.0.0.1", "::1"].contains(&ip.as_str()),
+                "{base}: the caller's address, {ip}"
+            );
+            audit_sessions.push(session_id.clone());
+        }
         let (message, props): (String, serde_json::Value) = sqlx::query_as(
             "SELECT message, props FROM posts WHERE channelid = $1 AND type = 'system_move_channel'",
         )
@@ -390,6 +463,12 @@ async fn a_move_rehomes_the_channel_its_threads_its_hooks_and_writes_the_post() 
         bodies.push(channel);
     }
 
+    assert_eq!(audit_sessions.len(), 4);
+    assert!(
+        !audit_sessions[0].is_empty() && audit_sessions.iter().all(|s| *s == audit_sessions[0]),
+        "one token, one session id on all four rows: {audit_sessions:?}"
+    );
+
     let [go, rs] = [&bodies[0], &bodies[1]];
     assert_eq!(
         go.as_object()
@@ -416,7 +495,8 @@ async fn a_move_rehomes_the_channel_its_threads_its_hooks_and_writes_the_post() 
 
 /// A member who is not on the new team: without `force` the 500; with it, swept off the channel
 /// through the inner removal — no "removed" post — and the move succeeds. A deactivated member
-/// is swept either way.
+/// is swept either way. A member who **left** the new team (a soft-deleted `TeamMembers` row)
+/// counts as not on it: `GetMembersByIds` filters `DeleteAt = 0`.
 #[tokio::test]
 async fn members_not_on_the_new_team_block_the_move_unless_forced() {
     if !stack_enabled() {
@@ -434,6 +514,10 @@ async fn members_not_on_the_new_team_block_the_move_unless_forced() {
         let channel_id = create_channel_typed(&client, &admin, &team_a, tag, "P").await;
         let only_a = create_plain_user(&client, &admin, &team_a, tag).await;
         add_user_to_channel(&client, &admin, &channel_id, &only_a.id).await;
+        let left_b = create_plain_user(&client, &admin, &team_a, &format!("{tag}l")).await;
+        add_user_to_team(&client, &admin, &team_b, &left_b.id).await;
+        remove_user_from_team(&client, &admin, &team_b, &left_b.id).await;
+        add_user_to_channel(&client, &admin, &channel_id, &left_b.id).await;
         let gone = create_plain_user(&client, &admin, &team_a, &format!("{tag}d")).await;
         add_user_to_channel(&client, &admin, &channel_id, &gone.id).await;
         let response = client
@@ -455,7 +539,7 @@ async fn members_not_on_the_new_team_block_the_move_unless_forced() {
                 .await
             }
         };
-        assert_eq!(members(channel_id.clone()).await, 3);
+        assert_eq!(members(channel_id.clone()).await, 4);
 
         let (status, served, response) = post(
             &client,
@@ -476,8 +560,8 @@ async fn members_not_on_the_new_team_block_the_move_unless_forced() {
             parsed(&response)["id"],
             "app.channel.move_channel.members_do_not_match.error"
         );
-        // The deactivated sweep ran before the refusal; the live member stayed.
-        assert_eq!(members(channel_id.clone()).await, 2, "{base}");
+        // The deactivated sweep ran before the refusal; the live members stayed.
+        assert_eq!(members(channel_id.clone()).await, 3, "{base}");
         assert_eq!(
             scalar_string(
                 &pool,
@@ -649,4 +733,111 @@ async fn the_refusals_come_in_gos_order() {
         "api.context.permissions.app_error",
     )
     .await;
+}
+
+/// With `EnableIncomingWebhooks` and `EnableOutgoingWebhooks` off, `GetIncomingWebhooksForTeamPage`
+/// and `GetOutgoingWebhooksForTeamPage` answer 501 and `MoveChannel` only logs it — the channel
+/// moves and **both hooks stay on the old team** (webhook.go:646, :851; channel.go:3888-3914).
+/// With `DefaultServerLocale` `de`, the notice is `i18n.T`'s German sentence, not the mover's
+/// locale's (channel.go:3938).
+///
+/// There is no Go oracle under these settings — the stack's Go runs with webhooks on and English
+/// — so this runs an mm-api of its own and asserts what the Go source says, the sentence read
+/// from the same `de.json` Go loads.
+#[tokio::test]
+async fn disabled_webhooks_stay_behind_and_the_notice_is_in_the_server_locale() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let Some(server) = SecondServer::start(
+        SETTINGS_RUST_PORT,
+        &[
+            ("MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS", "false"),
+            ("MM_SERVICESETTINGS_ENABLEOUTGOINGWEBHOOKS", "false"),
+            ("MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE", "de"),
+        ],
+    )
+    .await
+    else {
+        panic!("the settings mm-api did not start");
+    };
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team_a = create_team(&client, &admin, "mvsa").await;
+    let team_b = create_team(&client, &admin, "mvsb").await;
+    let team_a_name = scalar_string(&pool, "SELECT name FROM teams WHERE id = $1", &team_a).await;
+    let built = build(&client, &pool, &admin, &team_a, &team_b, "mvs").await;
+
+    let (status, served, response) = post(
+        &client,
+        &server.base,
+        &admin,
+        &built.channel_id,
+        &format!(r#"{{"team_id":"{team_b}","force":false}}"#),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&response));
+    assert!(served);
+    assert_eq!(parsed(&response)["team_id"], team_b);
+
+    for (table, id) in [
+        ("incomingwebhooks", &built.hook_id),
+        ("outgoingwebhooks", &built.out_hook_id),
+    ] {
+        assert_eq!(
+            scalar_string(
+                &pool,
+                &format!("SELECT teamid FROM {table} WHERE id = $1"),
+                id
+            )
+            .await,
+            team_a,
+            "{table}: a disabled kind is not re-homed"
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                &format!("SELECT updateat FROM {table} WHERE id = $1"),
+                id
+            )
+            .await,
+            1,
+            "{table}: nor written at all"
+        );
+    }
+    assert_eq!(
+        scalar_string(
+            &pool,
+            "SELECT threadteamid FROM threads WHERE postid = $1",
+            &built.root_id
+        )
+        .await,
+        team_b,
+        "the threads still follow"
+    );
+
+    let de: Vec<serde_json::Value> = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../reference/mattermost/server/i18n/de.json"),
+        )
+        .expect("de.json"),
+    )
+    .expect("JSON");
+    let sentence = de
+        .iter()
+        .find(|e| e["id"] == "api.team.move_channel.success")
+        .and_then(|e| e["translation"].as_str())
+        .expect("a German sentence");
+    let message: String = scalar_string(
+        &pool,
+        "SELECT message FROM posts WHERE channelid = $1 AND type = 'system_move_channel'",
+        &built.channel_id,
+    )
+    .await;
+    assert_eq!(message, sentence.replacen("%v", &team_a_name, 1));
+    assert!(!message.starts_with(MOVE_MESSAGE_PREFIX));
 }

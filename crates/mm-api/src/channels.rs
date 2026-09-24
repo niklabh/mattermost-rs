@@ -3222,8 +3222,8 @@ pub async fn get_recommended_channels_for_team(
 /// # The route exists only while `FeatureFlags.ManagedChannelCategories` is on
 ///
 /// `InitChannel` registers it inside `if …FeatureFlags.ManagedChannelCategories` (api4/
-/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) and is
-/// environment-only (see [`mm_app::config::Config::feature_flag_integrated_boards`]). With it off
+/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) (see
+/// [`mm_app::config::Config::feature_flags`]). With it off
 /// gorilla has never heard of the path and answers its own 404 `api.context.404.app_error`,
 /// *before* any session check. [`managed_categories_flag_or_forward`] reproduces that by
 /// forwarding ahead of the session extractor, so an unauthenticated request gets Go's 404 and
@@ -3296,7 +3296,7 @@ pub(crate) async fn managed_categories_flag_or_forward(
     request: Request,
     next: axum::middleware::Next,
 ) -> Response {
-    if !state.app.config().feature_flag_managed_channel_categories {
+    if !state.app.config().feature_flags.managed_channel_categories {
         return proxy::forward_to_go(State(state), request).await;
     }
     next.run(request).await
@@ -3829,7 +3829,8 @@ fn require_mark_all_as_read(state: &AppState, where_: &'static str) -> Result<()
     if state
         .app
         .config()
-        .feature_flag_enable_shift_escape_to_mark_all_read
+        .feature_flags
+        .enable_shift_escape_to_mark_all_read
     {
         return Ok(());
     }

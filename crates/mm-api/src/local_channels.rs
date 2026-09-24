@@ -563,6 +563,7 @@ async fn local_move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    let path = parts.uri.path().to_owned();
     // A local-socket request has no session and no peer address, which is what Go's
     // `pluginContext` reads off one: every field but `RequestId` is empty there too.
     let hook_ctx = crate::plugin_context::hook_context(&parts, None);
@@ -621,14 +622,24 @@ async fn local_move_channel(
         }
     }
 
-    match state
+    if let Err(err) = state
         .app
         .move_channel(&team, &mut channel, None, &hook_ctx)
         .await
     {
-        Ok(MemberWrite::Done(())) => {}
-        Ok(MemberWrite::Forward(why)) => return forward_over_unix(&go.0, forward(why)).await,
-        Err(err) => return ApiError::from(err).into_response(),
+        return ApiError::from(err).into_response();
+    }
+
+    // `c.LogAudit` twice: a local session has no user or session id and the socket no address,
+    // so the rows carry only the path and the text, as Go's do.
+    for extra_info in [
+        format!("channel={}", channel.name),
+        format!("team={}", team.name),
+    ] {
+        state
+            .app
+            .log_audit("", "", &hook_ctx.ip_address, &path, &extra_info)
+            .await;
     }
 
     match channel_writes::channel_response("moveChannel", &channel) {
