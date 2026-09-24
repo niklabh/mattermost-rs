@@ -5670,37 +5670,13 @@ believing the server is unlicensed — but unlike the two settings above, being 
 
 ---
 
-## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it
+## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
 
-Reading `StringInterface.Scan` (model/utils.go:185) says a NULL column leaves the field nil, and a
-nil Go map marshals as `null`. That is what `mm-store/src/post_store.rs` did, and it was wrong:
-the running server answers `"props":{}` for a post whose `props` column is SQL NULL.
-
-The scan never sees a nil map. **sqlx allocates one first** — `reflectx.FieldByIndexes` calls
-`reflect.MakeMap` for any nil map on the path to the field it is about to scan into — so `Scan`'s
-early return on NULL lands on an empty map. Slices get no such treatment, which is why a NULL
-`fileids` column really does reach the client as `null`. Measured three ways on the same row:
-
-| `posts.props` | Go answers |
-|---|---|
-| SQL `NULL` | `{}` |
-| jsonb `'null'` | `null` — `json.Unmarshal` sets the map back to nil |
-| jsonb `'[1,2]'` | 500, `app.post.get.app_error` |
-
-Fixed for `Post` and pinned by `parity_channel_posts::a_null_props_column_is_an_empty_object_on_every_route`,
-which asserts it on `GET /posts/{id}` as well — the divergence had been shipping there since that
-route landed, undetected because no fixture had a NULL column.
-
-**What is owed:** the same question for every other ported store that scans a Go **map** field out
-of a nullable column. `Channel.Props`, `Session.Props`, `User.NotifyProps` and
-`User.Props` are all `StringMap`/`StringInterface` over nullable columns, and each is one
-`UPDATE … SET col = NULL` and one request away from an answer. None of them can be produced
-through the REST API, which is why none was noticed; that is an argument for checking them, not
-for assuming they are fine.
-
-**Where the pin lives:** the module doc on `mm-store/src/post_store.rs`, with the table above.
+Paid off with [D-331]: every map, slice and pointer column `mm-store` reads was audited against
+how Go scans it, five sites were fixed, and `parity::null_columns` plants SQL NULL and jsonb `null`
+for each distinct shape and compares both servers.
 
 ---
 
@@ -7149,33 +7125,14 @@ that identifies a server, rather than on a path or a ping.
 
 ---
 
-## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed
+## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
 
-`PropertyField.Attrs` is a Go **map**, and sqlx's `reflectx.FieldByIndexes` allocates a nil map
-before scanning into it. `StringInterface.Scan` returns early for a nil driver value
-(`model/utils.go:186`), so a SQL `NULL` leaves that freshly allocated empty map behind and
-marshals as **`{}`** — while a jsonb `null` reaches `json.Unmarshal`, which zeroes the map, and
-marshals as **`null`**. Measured on both, twice.
-
-`mm-store`'s port had the two the wrong way round and it was invisible: the CPA reads that first
-used `search_fields` can only return an empty page unlicensed, so no row ever carried an `attrs`.
-Fixed for `PropertyFields`.
-
-**What is owed:** the same question for every other `jsonb` column this crate reads into an
-`Option`. `crates/mm-store` has roughly a dozen `None | Some(Value::Null) => None` sites —
-`channel_store` (×4), `user_store` (×2), `team_store`, `post_store`, `job_store`, `draft_store`,
-`role_store` — and each is correct **only if** Go's destination is not a bare map. A pointer or a
-`*StringMap` destination really is nil for both cases; a plain `StringMap`/`StringInterface` is
-not. The audit is one grep of the Go struct per site.
-
-**Why it is not urgent:** Go's own writers never leave these columns SQL NULL — `Value()` on a nil
-map emits the four bytes `null` — so the divergence needs a row written by a migration or by hand.
-That is exactly how this one was found, and a migration adding a nullable `jsonb` would reach it
-for real.
-
-**Where the pin lives:** `PropertyFieldRow::into_field` in `crates/mm-store/src/property_store.rs`.
+Paid off: the rule is how Go scans, not the column (sqlx map field `{}`/`null`, pointer
+`null`/empty struct, slice `null`/`null`, manual `[]byte` scan a 500 on NULL); fixed for users,
+channel members, sessions, channel banners, the `StringArray` text columns and thread participants,
+and proven per shape in `parity::null_columns` (8 tests).
 
 ---
 

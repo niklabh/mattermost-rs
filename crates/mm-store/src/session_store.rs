@@ -209,8 +209,14 @@ struct SessionRow {
 impl SessionRow {
     /// Map a row to the wire type. `team_members` is `db:"-"` in Go and hydrated separately.
     fn into_session(self) -> Result<Session, StoreError> {
+        // Every Go read scans `[]*model.Session` through sqlx, which allocates the nil
+        // `StringMap` first: a SQL NULL leaves it **empty** (`StringMap.Scan` returns early) and a
+        // jsonb `null` sets it back to nil. The second is what `update_props` writes for `None`,
+        // so it is reachable without a hand-edited row. [D-331]
         let props =
             match self.props {
+                None => Some(StringMap::new()),
+                Some(serde_json::Value::Null) => None,
                 Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
                     |source| StoreError::Decode {
                         entity: "Session",
@@ -218,7 +224,6 @@ impl SessionRow {
                         source,
                     },
                 )?),
-                None => None,
             };
 
         Ok(Session {
@@ -790,7 +795,8 @@ mod tests {
         assert_eq!(session.token, "");
         assert_eq!(session.expires_at, 0);
         assert!(!session.is_oauth);
-        assert_eq!(session.props, None);
+        // sqlx allocated the map before `StringMap.Scan` returned early ([D-331]).
+        assert_eq!(session.props, Some(StringMap::new()));
         // Hydrated by the caller, never by the row.
         assert_eq!(session.team_members, None);
     }

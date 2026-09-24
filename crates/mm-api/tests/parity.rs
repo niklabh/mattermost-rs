@@ -311,4 +311,7 @@ mod parity {
     pub mod ratelimit;
     // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
     pub mod malformed_bodies;
+    // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
+    // (D-331, D-158).
+    pub mod null_columns;
 }
