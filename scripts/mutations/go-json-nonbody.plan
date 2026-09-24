@@ -1,0 +1,6 @@
+# D-1241 narrowed: non-body decoders on Go's rules.
+n_member_invite_wire	crates/mm-model/src/member_invite.rs	            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;	            serde_json::from_value(value).map_err(serde::de::Error::custom)?;	lib	member_invite
+n_member_invite_list	crates/mm-model/src/member_invite.rs	        if let Ok(emails) = crate::utils::from_value_go::<Vec<Option<String>>>(&value) {	        if let Ok(emails) = serde_json::from_value::<Vec<Option<String>>>(value.clone()) {	lib	member_invite
+n_attachments	crates/mm-model/src/post.rs	            if let Ok(decoded) = crate::utils::from_value_go::<MessageAttachment>(&element) {	            if let Ok(decoded) = serde_json::from_value::<MessageAttachment>(element) {	lib	attachments
+control_n_attachments_binding	crates/mm-model/src/post.rs	            if let Ok(decoded) = crate::utils::from_value_go::<MessageAttachment>(&element) {	            if let Ok(decoded) = crate::utils::from_value_go::<MessageAttachment>(&*&element) {	lib	attachments
+control_n_member_invite_turbofish	crates/mm-model/src/member_invite.rs	            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;	            crate::utils::from_value_go::<MemberInviteWire>(&value).map_err(serde::de::Error::custom)?;	lib	member_invite

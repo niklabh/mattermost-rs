@@ -149,16 +149,21 @@ impl App {
                 400,
             )
         })?;
-        let notices: ProductNotices = serde_json::from_slice(&data).map_err(|err| {
-            tracing::warn!(error = %err, "notices parse failed");
-            AppError::boxed(
-                "UpdateProductNotices",
-                "api.system.update_notices.parse_failed",
-                None,
-                String::new(),
-                400,
-            )
-        })?;
+        // `json.Unmarshal(data, &notices)` (model/product_notices.go:21): Go's decoding rules, and
+        // a `null` feed is an empty list rather than a parse failure.
+        let notices: ProductNotices =
+            mm_model::utils::unmarshal_from_json::<Option<ProductNotices>>(&data)
+                .map(Option::unwrap_or_default)
+                .map_err(|err| {
+                    tracing::warn!(error = %err, "notices parse failed");
+                    AppError::boxed(
+                        "UpdateProductNotices",
+                        "api.system.update_notices.parse_failed",
+                        None,
+                        String::new(),
+                        400,
+                    )
+                })?;
         tracing::Span::current().record("notices", notices.0.len());
 
         if let Err(err) = self

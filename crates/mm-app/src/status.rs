@@ -692,16 +692,18 @@ impl App {
             None => mm_model::custom_status::RecentCustomStatuses(vec![status.clone()]),
             Some(preference) => {
                 let decoded: mm_model::custom_status::RecentCustomStatuses =
-                    serde_json::from_str(&preference.value).map_err(|err| {
-                        tracing::debug!(error = %err, "recent custom statuses did not decode");
-                        AppError::boxed(
-                            "addRecentCustomStatus",
-                            "api.unmarshal_error",
-                            None,
-                            String::new(),
-                            400,
-                        )
-                    })?;
+                    mm_model::utils::unmarshal_from_json(preference.value.as_bytes()).map_err(
+                        |err| {
+                            tracing::debug!(error = %err, "recent custom statuses did not decode");
+                            AppError::boxed(
+                                "addRecentCustomStatus",
+                                "api.unmarshal_error",
+                                None,
+                                String::new(),
+                                400,
+                            )
+                        },
+                    )?;
                 decoded.add(status)
             }
         };
@@ -757,7 +759,7 @@ impl App {
         }
 
         let existing: mm_model::custom_status::RecentCustomStatuses =
-            serde_json::from_str(&preference.value).map_err(|err| {
+            mm_model::utils::unmarshal_from_json(preference.value.as_bytes()).map_err(|err| {
                 tracing::debug!(error = %err, "recent custom statuses did not decode");
                 AppError::boxed(
                     "RemoveRecentCustomStatus",

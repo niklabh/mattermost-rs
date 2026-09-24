@@ -14854,3 +14854,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | `encoding/json` on a struct with an embedded (promoted) struct: `ScheduledPost`, `SidebarCategoryWithChannels`, `GroupWithUserIds`, `RetentionPolicyWithTeamAndChannelIDs`, `getPostsForReporting`'s anonymous body | a hand-written `Deserialize` per type over `go_decode::{embedded_document, embedded_part}`; `#[serde(flatten)]` kept for `Serialize` | DONE, closes [D-1240] | `embed_decode` oracle (16 bodies), `the_embedding_body_types_have_disjoint_parts`, `parity::malformed_bodies` (sidebar create, two report-post cases) | Each part is decoded from the same object; correct while no key folds onto two parts, which the test asserts per type. `scheduled_posts`' `GoFields` remap is gone. |
+
+## Go's decoding rules outside request bodies — D-1241 narrowed (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `json.Unmarshal`/`Decode` of JSON another program wrote: GitHub release, push-proxy answer, Marketplace and notices feeds, mm_blocks context, recent custom statuses, custom-status prop, `plugin.json`, property/CPA/session attrs, `MemberInvite`, post attachments, scheme-id/invite/post-search/doPostAction/emoji-part bodies | `mm_model::utils::{unmarshal_from_json, decode_one_value_from_json, from_value_go}` at each site | PARTIAL, [D-1241] narrowed | `member_invite` fold/array unit test; `post::a_nil_action_option_keeps_the_attachment_as_go_does`; existing suites | Each site decided from its Go twin; the `Config` bodies, env plugin states, the OIDC issuer and the search-results impls remain ([D-1241]). A `null` action option now keeps its attachment, as Go does ([D-033] narrowed). |

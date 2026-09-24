@@ -901,7 +901,8 @@ impl<T: PropertyOption> PropertyOptions<T> {
     where
         T: serde::de::DeserializeOwned,
     {
-        let mut options: Vec<T> = serde_json::from_value(options_arr.clone())
+        // Marshal then `json.Unmarshal` in Go (property_field.go:606): its decoding rules.
+        let mut options: Vec<T> = crate::utils::from_value_go(options_arr)
             .map_err(|_| PropertyFieldError::InvalidOptionsFormat(String::new()))?;
 
         for option in options.iter_mut() {

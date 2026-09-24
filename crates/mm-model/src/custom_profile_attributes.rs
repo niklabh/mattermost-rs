@@ -459,7 +459,8 @@ impl CPAField {
     /// rather than failing.
     pub fn from_property_field(pf: &PropertyField) -> Result<Self, CPAError> {
         let attrs: CPAAttrs = match &pf.attrs {
-            Some(map) => serde_json::from_value(serde_json::Value::Object(map.clone()))
+            // Marshal then `json.Unmarshal` in Go (custom_profile_attributes.go:240).
+            Some(map) => crate::utils::from_value_go(&serde_json::Value::Object(map.clone()))
                 .map_err(|e| CPAError::Attrs(e.to_string()))?,
             None => CPAAttrs::default(),
         };

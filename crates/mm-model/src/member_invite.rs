@@ -136,7 +136,9 @@ impl<'de> Deserialize<'de> for MemberInvite {
             return Ok(MemberInvite::default());
         }
 
-        if let Ok(emails) = serde_json::from_value::<Vec<Option<String>>>(value.clone()) {
+        // Both attempts are `json.Unmarshal` in Go (member_invite.go:99), so both take its rules:
+        // an array is never the wire struct, and a folded key such as `"Emails"` lands.
+        if let Ok(emails) = crate::utils::from_value_go::<Vec<Option<String>>>(&value) {
             let emails: Vec<String> = emails.into_iter().map(Option::unwrap_or_default).collect();
             // Go assigns `*i = MemberInvite{}` first: the array form yields nothing else.
             return Ok(MemberInvite {
@@ -146,7 +148,7 @@ impl<'de> Deserialize<'de> for MemberInvite {
         }
 
         let wire: MemberInviteWire =
-            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            crate::utils::from_value_go(&value).map_err(serde::de::Error::custom)?;
         Ok(MemberInvite {
             emails: wire.emails,
             channel_ids: wire.channel_ids,
@@ -402,6 +404,19 @@ mod go_parity {
 #[cfg(test)]
 mod wire_parity {
     use super::*;
+
+    /// Both of Go's `json.Unmarshal` attempts take its rules ([D-1241]): a folded key lands, and
+    /// an array of objects is neither a list of emails nor the wire struct.
+    #[test]
+    fn the_two_decode_attempts_take_go_s_rules() {
+        let invite: MemberInvite =
+            serde_json::from_str(r#"{"EMAILS":["a@b.c"],"Channel_Ids":null}"#).unwrap();
+        assert_eq!(invite.emails, vec!["a@b.c"]);
+        assert_eq!(invite.channel_ids, None);
+        assert!(serde_json::from_str::<MemberInvite>(r#"[{"emails":["a@b.c"]}]"#).is_err());
+        let listed: MemberInvite = serde_json::from_str(r#"["a@b.c",null]"#).unwrap();
+        assert_eq!(listed.emails, vec!["a@b.c", ""]);
+    }
 
     /// Round-trips the Go-generated fixture: decode into the port's type, re-encode, and compare
     /// the value graphs. The fixture is produced by `reference/dump`, whose reflective filler

@@ -738,8 +738,12 @@ impl App {
             .bytes()
             .await
             .map_err(|err| PushError::Decode(err.to_string()))?;
-        serde_json::from_slice::<std::collections::HashMap<String, String>>(&bytes)
-            .map_err(|err| PushError::Decode(err.to_string()))
+        // `json.NewDecoder(resp.Body).Decode(&pushResponse)` into a `map[string]string`
+        // (notification_push.go:570): one value, `null` a nil map, a `null` member `""`.
+        mm_model::utils::decode_one_value_from_json::<std::collections::HashMap<String, String>>(
+            &bytes,
+        )
+        .map_err(|err| PushError::Decode(err.to_string()))
     }
 
     /// Port of `App.sendToPushProxy` (notification_push.go:577).
