@@ -1205,3 +1205,102 @@ async fn the_session_purge_is_not_audited() {
             .expect("the count");
     assert_eq!(purge_rows, 0, "the purge wrote an Audits row");
 }
+
+/// The `Action` is Go's `r.URL.Path` — **decoded**. A user id with one letter percent-encoded is
+/// served here (the path parameter is decoded before the id check) and both servers record the
+/// decoded path, not the target as sent.
+#[tokio::test]
+async fn an_encoded_path_is_recorded_decoded() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let who = callers(&http, &pool, "audenc").await;
+    let (first, rest) = who.plain_id.split_at(1);
+    let encoded = format!("/api/v4/users/%{:02X}{rest}/patch", first.as_bytes()[0]);
+    let decoded = format!("/api/v4/users/{}/patch", who.plain_id);
+
+    let mut results = Vec::new();
+    for base in [GO, RUST] {
+        let since = now_millis() - 1;
+        let (status, _) = send(
+            &http,
+            base,
+            &Call::new("PUT", encoded.clone(), &who.admin)
+                .body(serde_json::json!({ "nickname": format!("audenc{}", base.len()) })),
+        )
+        .await;
+        let decoded_rows = rows(&pool, &decoded, since, &who.sessions(), &[], &[]).await;
+        let raw_rows = rows(&pool, &encoded, since, &who.sessions(), &[], &[]).await;
+        results.push((
+            status,
+            decoded_rows
+                .iter()
+                .map(|r| named(r, &who.subs()))
+                .collect::<Vec<_>>(),
+            raw_rows.len(),
+        ));
+    }
+    let rust = results.pop().expect("two runs");
+    let go = results.pop().expect("two runs");
+    assert_eq!(go.0, 200, "{go:?}");
+    assert_eq!(go.1.len(), 1, "Go recorded the decoded path: {go:?}");
+    assert_eq!(go.2, 0, "and never the target as sent");
+    assert_eq!(rust, go);
+}
+
+/// A target `url.ParseRequestURI` refuses never reaches a handler on Go — `net/http` answers its
+/// own `400 Bad Request` — so there is no row, and this server hands such a request to Go rather
+/// than answering it from a route whose parameter would have matched.
+#[tokio::test]
+async fn a_target_go_cannot_parse_is_its_400_and_writes_no_row() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let who = callers(&http, &pool, "audbad").await;
+    for path in [
+        "/api/v4/users/username/ab%zz",
+        format!("/api/v4/users/{}/patch%zz", who.plain_id).leak(),
+    ] {
+        let mut answers = Vec::new();
+        for base in [GO, RUST] {
+            let since = now_millis() - 1;
+            let response = http
+                .put(format!("{base}{path}"))
+                .header("Authorization", format!("Bearer {}", who.admin))
+                .json(&serde_json::json!({ "nickname": "never" }))
+                .send()
+                .await
+                .expect("the server answers");
+            let status = response.status().as_u16();
+            let served = response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let body = response.text().await.unwrap_or_default();
+            let written: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM audits WHERE createat >= $1 AND sessionid = $2",
+            )
+            .bind(since)
+            .bind(&who.admin_session)
+            .fetch_one(&pool)
+            .await
+            .expect("the count");
+            answers.push((status, body, written));
+            if base == RUST {
+                assert_ne!(served.as_deref(), Some("rust"), "{path}: Go answers it");
+            }
+        }
+        assert_eq!(answers[0].0, 400, "{path}: {answers:?}");
+        assert_eq!(answers[0].2, 0, "{path}: no row");
+        assert_eq!(answers[1], answers[0], "{path}");
+    }
+}

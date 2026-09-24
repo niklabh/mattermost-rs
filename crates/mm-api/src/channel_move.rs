@@ -69,8 +69,7 @@ pub async fn move_channel(
     let (parts, body) = request.into_parts();
     // `c.AppContext.Path()` and `c.AppContext.IPAddress()`, the `Action` and `IpAddress` of the
     // two audit rows.
-    let path = parts.uri.path().to_owned();
-    let ip_address = crate::client_ip::client_ip(&parts.headers, &parts.extensions);
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -156,16 +155,7 @@ pub async fn move_channel(
         format!("channel={}", channel.name),
         format!("team={}", team.name),
     ] {
-        state
-            .app
-            .log_audit(
-                &session.0.user_id,
-                &session.0.id,
-                &ip_address,
-                &path,
-                &extra_info,
-            )
-            .await;
+        audit.log(&state.app, Some(&session.0), &extra_info).await;
     }
 
     let mut body = match serde_json::to_vec(&channel) {

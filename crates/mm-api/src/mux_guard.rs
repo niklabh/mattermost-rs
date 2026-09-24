@@ -39,6 +39,8 @@
 //!
 //! What it cannot answer exactly, which is then Go's own answer:
 //!
+//! - any request whose target `url.ParseRequestURI` refuses, on any method: `net/http` answers
+//!   those itself with a bare `400 Bad Request` before a handler exists;
 //! - a `HEAD` under a configured subpath, where Go's root router redirects `/api/v4/…` into the
 //!   subpath and `IsAPICall` measures from it;
 //! - a `HEAD` whose path is not UTF-8 once decoded, whose `detailed_error` Go's encoder would
@@ -89,13 +91,16 @@ fn is_file_read_taking_head(path: &str) -> bool {
 /// The decision for a request, from its method, its request target as sent, the router's file
 /// reads and the configured subpath.
 fn decide(method: &Method, target: &str, files: FileReads, subpath: &str) -> Decision {
-    // Only a path-absolute target; `*` and anything Go's `ParseRequestURI` refuses are left to
-    // the router, whose fallback forwards them as it always has.
+    // Only a path-absolute target; `*` is left to the router, whose fallback forwards it.
     if !target.starts_with('/') {
         return Decision::Route;
     }
+    // A target `url.ParseRequestURI` refuses — an escape that is not two hex digits — never
+    // reaches gorilla: `net/http`'s `readRequest` fails and the server writes its own plain
+    // `400 Bad Request` and closes. A route here with a parameter outside the id charset would
+    // otherwise answer it (`/users/username/ab%zz` was our 401 to Go's 400), so Go answers.
     let Ok(url) = parse_request_uri(target) else {
-        return Decision::Route;
+        return Decision::Forward;
     };
     // gorilla matches the decoded `URL.Path`, so the prefix is tested on that.
     let head_into_api4 = *method == Method::HEAD && url.path.starts_with(b"/api/v4/");
@@ -284,6 +289,30 @@ mod tests {
         assert_eq!(
             head("/api%2Fv4/system/ping"),
             Decision::NotFound("/api/v4/system/ping".to_owned())
+        );
+    }
+
+    /// `net/http` refuses these before gorilla sees them, on every method; a query escape is not
+    /// checked there, so it is left to the router.
+    #[test]
+    fn a_target_go_cannot_parse_is_go_s_to_answer() {
+        for target in ["/api/v4/users/username/ab%zz", "/api/v4/a%2", "/%g0"] {
+            for method in [Method::GET, Method::POST, Method::HEAD] {
+                assert_eq!(
+                    decide(&method, target, FileReads::TakeHead, "/"),
+                    Decision::Forward,
+                    "{method} {target}"
+                );
+            }
+        }
+        assert_eq!(
+            decide(
+                &Method::GET,
+                "/api/v4/system/ping?x=%zz",
+                FileReads::TakeHead,
+                "/"
+            ),
+            Decision::Route
         );
     }
 
