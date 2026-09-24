@@ -657,7 +657,11 @@ impl App {
             return Ok(Vec::new());
         }
 
-        let names = get_emoji_names_for_post(post, reactions);
+        let names = get_emoji_names_for_post(
+            post,
+            reactions,
+            self.config().feature_flags.mm_blocks_enabled,
+        );
         if names.is_empty() {
             return Ok(Vec::new());
         }
@@ -1604,14 +1608,16 @@ fn refuse_on_props_with(
 /// keeps first occurrences, and the resulting name list is what the `IN (…)` is built from.
 /// Post strings come first, reaction names after.
 ///
-/// `omit_interactive_blocks` is `!FeatureFlags.MmBlocksEnabled`, and that flag defaults to
-/// `true` (feature_flags.go:214) and is `true` on this deployment, so the blocks *are* walked.
-/// Every post carrying them is refused before reaching here, which makes the choice
-/// unobservable — but the faithful value is the one that stays right when the refusal is lifted.
-fn get_emoji_names_for_post(post: &Post, reactions: &[Reaction]) -> Vec<String> {
+/// `mm_blocks_enabled` is `FeatureFlags.MmBlocksEnabled` (default `true`, feature_flags.go:214):
+/// off, the interactive blocks' strings are not scanned (`OmitInteractiveBlocks`).
+fn get_emoji_names_for_post(
+    post: &Post,
+    reactions: &[Reaction],
+    mm_blocks_enabled: bool,
+) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for string in post.all_strings(AllStringsOptions {
-        omit_interactive_blocks: false,
+        omit_interactive_blocks: !mm_blocks_enabled,
     }) {
         names.extend(
             find_emoji_references(&string)
@@ -1826,9 +1832,60 @@ mod tests {
             },
         ];
         assert_eq!(
-            get_emoji_names_for_post(&post, &reactions),
+            get_emoji_names_for_post(&post, &reactions, true),
             // Sorted, not first-seen — see `get_emoji_names_for_post`.
             ["one", "three", "two"]
         );
+    }
+
+    /// The flag reaches `getCustomEmojisForPost` from the config (post_metadata.go:716): off,
+    /// an emoji only in the blocks leaves no name, so the store is never asked; on, it is — here
+    /// an unreachable one, so an error.
+    #[tokio::test]
+    async fn custom_emoji_lookup_reads_the_mm_blocks_flag() {
+        let app = |mm_blocks_enabled: bool| {
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(250))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+                .expect("a lazy pool is built without connecting");
+            let mut config = crate::config::Config {
+                enable_custom_emoji: true,
+                ..crate::config::Config::default()
+            };
+            config.feature_flags.mm_blocks_enabled = mm_blocks_enabled;
+            crate::App::with_config(mm_store::SqlStore::from_pool(pool), config)
+        };
+        let mut post = post_with_message("plain");
+        post.add_prop(
+            POST_PROPS_MM_BLOCKS,
+            serde_json::json!([{"type": "text", "text": ":mmrs-custom-only:"}]),
+        );
+        assert!(
+            app(false)
+                .get_custom_emojis_for_post(&post, &[])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            app(true)
+                .get_custom_emojis_for_post(&post, &[])
+                .await
+                .is_err()
+        );
+    }
+
+    /// `getEmojiNamesForPost(post, reactions, FeatureFlags.MmBlocksEnabled)`
+    /// (post_metadata.go:698, :716): an emoji inside `props.mm_blocks` is looked up only with the
+    /// flag on.
+    #[test]
+    fn emoji_in_mm_blocks_are_scanned_only_with_the_flag_on() {
+        let mut post = post_with_message("a :one:");
+        post.add_prop(
+            POST_PROPS_MM_BLOCKS,
+            serde_json::json!([{"type": "text", "text": "b :taco:"}]),
+        );
+        assert_eq!(get_emoji_names_for_post(&post, &[], true), ["one", "taco"]);
+        assert_eq!(get_emoji_names_for_post(&post, &[], false), ["one"]);
     }
 }

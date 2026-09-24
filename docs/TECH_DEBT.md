@@ -6418,30 +6418,13 @@ this route than on the ones that are compared, nothing here would catch it.
 
 ---
 
-## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route
+## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
 
-Go calls `c.ExtendSessionExpiryIfNeeded(w, r)` at the end of `viewChannel` (api4/channel.go:2052)
-— the request every client makes on every channel switch, and therefore the one that keeps a long
-session alive. It rewrites `Sessions.ExpiresAt` to `now + sessionLength` and re-attaches the
-session cookies with the new max-age (web/context.go:174, app/session.go:421).
-
-Nothing in this port does either. The route was migrated anyway because the whole thing is behind
-`ServiceSettings.ExtendSessionLengthWithActivity`, which Go defaults to `!isUpdate` — **false for
-every persisted configuration document**, since `Store.Load` plants a `SiteURL` before calling
-`SetDefaults` ([D-088] measured this). On this stack it is off, so both servers do nothing.
-
-What is owed, when the setting is on:
-
-* the 1%-of-session-length-or-one-day threshold, floored at five minutes, so a session's expiry is
-  not rewritten on every request;
-* `platform.ExtendSessionExpiry`, which updates the row **and** the session cache;
-* `AttachSessionCookies`, which is a `Set-Cookie` on the response — the only piece of this that is
-  wire-visible, and the reason it cannot be quietly skipped for ever.
-
-Until then a client talking to the Rust server on a stack with the setting enabled would have its
-session expire on schedule while the same client talking to Go would not.
+Paid off: sliding expiry (`mm_app::session::session_extension_due`) and the `Set-Cookie` headers
+(`mm_api::session_expiry`) run on all three of Go's call sites — `viewChannel`, `createPost` and
+`user_typing` — and `parity::session_expiry` compares the row and the cookies with the setting on.
 
 ---
 
@@ -7834,7 +7817,10 @@ forward remains, [D-551].
 
 ## D-430 · `POST /users/login` is not rate limited here; Go limits it to 5/s
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+**Closed** 2026-09-24 — `mm_api::ratelimit` ports throttled's GCRA and LRU store and all three of Go's
+limiters (the three `RateLimitedHandler` routes, `Server.Start`'s global one, `ServeHTTP`'s per-user one);
+`go_parity` against `behaviour_ratelimit.json` and `parity::ratelimit` against a rate-limited Go. Open: [D-1150], [D-1151].
 
 Go registers the route as
 `RateLimitedHandler(APIHandler(login), RateLimitSettings{PerSec: 5, MaxBurst: 10})`
@@ -10033,7 +10019,10 @@ Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`
 
 ## D-1110 · `HEAD` on an api4 `GET` route is Go's 404 and our `GET` headers
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Closed** 2026-09-24 — `mm_api::mux_guard` answers every `HEAD /api/v4/…` but the three file reads with
+the catch-all's `Handle404` on both routers (and gorilla's clean-path redirect on every method);
+`partially_migrated` no longer adds `Allow` to a forwarded method. `parity::api_head` sweeps all api4 `GET`s.
 
 Go registers api4 routes with `.Methods("GET")`, and gorilla does not add `HEAD`, so
 `HEAD /api/v4/system/ping` is a 404 from Go. axum's `get()` answers `HEAD` with the `GET` handler,
@@ -10089,7 +10078,9 @@ cluster sends), after which the removal calls it here.
 
 ## D-1160 · `fixConfig` is not applied when this server loads the configuration
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+**Closed** 2026-09-24 — `Config::load`, `Config::from_env` and `load_model_config` now run `fixConfig` on the
+document and again after the overlay, as `Store.Load` does; held to a 48-row Go oracle (`behaviour_fix_config.json`).
 
 `Store.Load` runs `fixConfig` (config/utils.go:135) on both the stored and the environment-applied
 config: `SiteURL` loses its trailing slashes, a local driver's `FileSettings.Directory` gains one,
@@ -10103,7 +10094,9 @@ and an unsupported `DefaultServerLocale`/`DefaultClientLocale`/`AvailableLocales
 
 ## D-1161 · Six feature-flag reads are still constants now that `Config::feature_flags` exists
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+**Closed** 2026-09-24 — every site reads `Config::feature_flags` (CJKSearch as a `search_posts_for_user` parameter); the
+`EnableDocs` "cascade" was never flag-gated in Go and its doc comment is corrected; a shared DM/GM under a running sync service forwards.
 
 Each is Go's default and so right on a stock server, and wrong under the matching
 `MM_FEATUREFLAGS_*` variable: `channel_create.rs`'s `FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS` and
@@ -10113,3 +10106,33 @@ Each is Go's default and so right on a stock server, and wrong under the matchin
 hashes; and in `mm-store`, `CJKSearch` (always on) and `channel_store`'s `EnableDocs` cascade,
 which have no config in reach. **What is owed:** read `Config::feature_flags` at each site (the
 store ones through a parameter), with a test that moves each flag.
+
+---
+
+## D-1150 · With `RateLimitSettings.Enable`, a forwarded request is limited twice
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+
+`mm_api::ratelimit` limits every request at the front, as Go's `Server.Start` wrapper does, and a
+forwarded one then meets the Go process's own limiters: its global one keys on **this server's
+address** (the client's `X-Forwarded-For` is not trusted unless `TrustedProxyIPHeader` says so, and
+the forward leg adds none), so every client's forwarded traffic shares one budget there, and a
+per-user budget is split between two stores. The global set Go adds to a forwarded answer is replaced
+with ours (`ratelimit::prepend`); a 429 from Go's own limiter is not. A served handler that forwards a
+branch, or a path segment outside Go's mux class, is counted by the per-user limiter here and again in
+Go. **What is owed:** a forward leg Go can key on the client — an `X-Forwarded-For` it trusts, set from
+`client_ip` — or a documented operator setting, plus a parity test that forwards a burst.
+
+---
+
+## D-1151 · `UserIdRateLimit` does not run for the web client's pages
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+
+Go's static handler (`NewStaticHandler`, the SPA page and `/static/…`) is a `web.Handler`, so with
+`VaryByUser` a request that carries a session cookie spends the user's budget there too and can be
+refused after `IsStatic`'s headers (`X-Frame-Options`, the CSP). `ratelimit::per_user` is a
+`route_layer` and never sees `web_static::fallback`. **What is owed:** call the per-user step from
+`web_static`'s `root` and `static_files`, with the static header set on its refusal, and a parity row
+that exhausts a user's budget on `/`.
+

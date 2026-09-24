@@ -144,7 +144,13 @@ impl App {
         let mut results = self
             .store()
             .post()
-            .search_posts_for_user(final_params_list, user_id, team_id, page)
+            .search_posts_for_user(
+                final_params_list,
+                user_id,
+                team_id,
+                page,
+                self.config().feature_flags.cjk_search,
+            )
             .await
             .map_err(|err| match err {
                 // `errors.As(err, &appErr)` — the `IsSearchParamsListValid` failure, verbatim.

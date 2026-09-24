@@ -763,9 +763,10 @@ pub trait ChannelStore {
     /// Zero rows is an empty list, **not** `ErrNotFound` — unlike [`get_channels`], whose empty
     /// result is an error. The caller does not special-case it.
     ///
-    /// Spaces need `FeatureFlags.EnableDocs`, off on this deployment, so this returns nothing in
-    /// practice today; the cascade is written because the flag is the only thing between here
-    /// and a leaked membership.
+    /// Neither this query nor its callers (`LeaveTeam`, team.go:1383; `removeUserFromChannel`,
+    /// channel.go:3048) read `FeatureFlags.EnableDocs`: the flag gates only *creating* a space
+    /// (`CreateChannel`, channel.go:243), and a space created while it was on keeps its members
+    /// after it is turned off, so the cascade runs unconditionally, as Go's does.
     fn get_team_space_channels_for_user(
         &self,
         team_id: &str,

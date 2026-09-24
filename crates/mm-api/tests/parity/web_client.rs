@@ -503,7 +503,9 @@ async fn a_forwarded_head_keeps_gos_content_length() {
     let mut sized = 0;
     for target in [
         "/api/v5/x",
-        "/api/v4/no-such-route",
+        // Not `/api/v4/no-such-route`: a `HEAD` into the api4 tree is `mux_guard`'s own 404 now
+        // (D-1110). The bare prefix is the web client's, and still forwarded.
+        "/api/v4",
         "/plugins/com.example.none/x",
         "/login/sso/saml",
         "/oauth/authorize",

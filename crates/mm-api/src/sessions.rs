@@ -569,7 +569,8 @@ async fn attach_device_ids(
 ///
 /// Attribute order is `Path`, `Domain`, `Expires`, `Max-Age`, `HttpOnly`, `SameSite` — Go's
 /// emission order, which the parity suite compares verbatim. An empty `Path` or `Domain` is
-/// **omitted entirely** rather than sent empty; that is the same rule
+/// **omitted entirely** rather than sent empty, and a `Domain` `net/http` will not accept is
+/// dropped (see [`valid_cookie_domain`]); that is the same rule
 /// [`crate::auth`]'s `remove_session_cookie_header` documents, and the reachable case here is a
 /// `SiteURL` Go cannot parse.
 ///
@@ -597,17 +598,20 @@ pub(crate) fn render_session_cookie(
     secure: bool,
     same_site_none: bool,
 ) -> String {
-    let mut cookie = format!("{name}={token}");
+    let mut cookie = format!("{name}={}", cookie_value(token));
 
     let path = sanitize_cookie_value(subpath);
     if !path.is_empty() {
         cookie.push_str("; Path=");
         cookie.push_str(&path);
     }
-    let domain = sanitize_cookie_value(domain);
-    if !domain.is_empty() {
+    // `Cookie.String` does not sanitize a `Domain`: it **drops** one `validCookieDomain` refuses
+    // (logging it) and strips a leading dot from one it accepts. Reachable both ways — the
+    // cloud cookie's domain is always dotted, and `GetCookieDomain` hands over an IPv6 SiteURL's
+    // hostname, which has colons and is refused.
+    if !domain.is_empty() && valid_cookie_domain(domain) {
         cookie.push_str("; Domain=");
-        cookie.push_str(&domain);
+        cookie.push_str(domain.strip_prefix('.').unwrap_or(domain));
     }
     if let Some(expires) = chrono::DateTime::from_timestamp(expires_unix_seconds, 0) {
         cookie.push_str("; Expires=");
@@ -652,6 +656,77 @@ fn sanitize_cookie_value(value: &str) -> String {
         .filter(|&b| (0x20..0x7f).contains(&b) && b != b';')
         .map(char::from)
         .collect()
+}
+
+/// Port of `sanitizeCookieValue` (net/http/cookie.go:510) for an unquoted cookie: the bytes
+/// `validCookieValueByte` refuses — outside `0x20..0x7f`, and `"`, `;`, `\` — are dropped, and
+/// a value that then holds a space or a comma is wrapped in double quotes.
+fn cookie_value(value: &str) -> String {
+    let kept: String = value
+        .bytes()
+        .filter(|&b| (0x20..0x7f).contains(&b) && b != b'"' && b != b';' && b != b'\\')
+        .map(char::from)
+        .collect();
+    if kept.contains([' ', ',']) {
+        format!("\"{kept}\"")
+    } else {
+        kept
+    }
+}
+
+/// Port of `validCookieDomain` (net/http/cookie.go:418): a cookie domain name, or an IPv4
+/// literal. An IP with a colon — any IPv6 form — is refused, which is all Go's
+/// `net.ParseIP(v) != nil && !strings.Contains(v, ":")` leaves of `ParseIP`; the standard
+/// library's IPv4 parser shares Go's refusal of a leading zero.
+fn valid_cookie_domain(domain: &str) -> bool {
+    is_cookie_domain_name(domain) || domain.parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+/// Port of `isCookieDomainName` (net/http/cookie.go:437), byte for byte.
+///
+/// The 255-byte cap is checked **before** an optional leading dot is stripped. Then labels of
+/// letters, digits and inner dashes, each 1-63 bytes, with at least one letter somewhere. A
+/// trailing dot passes (the last label is then empty and never checked); an underscore does not.
+fn is_cookie_domain_name(domain: &str) -> bool {
+    if domain.is_empty() || domain.len() > 255 {
+        return false;
+    }
+    let bytes = domain.as_bytes();
+    let bytes = bytes.strip_prefix(b".").unwrap_or(bytes);
+
+    let mut last = b'.';
+    let mut seen_letter = false;
+    let mut part_len = 0;
+    for &c in bytes {
+        match c {
+            b'a'..=b'z' | b'A'..=b'Z' => {
+                seen_letter = true;
+                part_len += 1;
+            }
+            b'0'..=b'9' => part_len += 1,
+            b'-' => {
+                if last == b'.' {
+                    return false;
+                }
+                part_len += 1;
+            }
+            b'.' => {
+                if last == b'.' || last == b'-' {
+                    return false;
+                }
+                if part_len > 63 || part_len == 0 {
+                    return false;
+                }
+                part_len = 0;
+            }
+            _ => return false,
+        }
+        last = c;
+    }
+    if last == b'-' || part_len > 63 {
+        return false;
+    }
+    seen_letter
 }
 
 /// Port of `utils.CheckEmbeddedCookie` (channels/utils/api.go:42).

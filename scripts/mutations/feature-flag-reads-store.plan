@@ -1,0 +1,3 @@
+# D-1161: CJKSearch through a parameter. lib suite, MUTATE_PACKAGE=mm-store.
+cjk-flag-ignored	crates/mm-store/src/post_store.rs	    if cjk_search && (contains_cjk(terms) || contains_cjk(excluded_terms)) {	    if (contains_cjk(terms) || contains_cjk(excluded_terms)) {	lib	the_cjk_flag
+cjk-flag-inverted	crates/mm-store/src/post_store.rs	    if cjk_search && (contains_cjk(terms) || contains_cjk(excluded_terms)) {	    if !cjk_search && (contains_cjk(terms) || contains_cjk(excluded_terms)) {	lib	the_cjk_flag

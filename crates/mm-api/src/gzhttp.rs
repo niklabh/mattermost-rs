@@ -48,7 +48,7 @@ const DEFAULT_MIN_SIZE: usize = 1024;
 
 /// `bufferBeforeChunkingSize` (net/http/server.go) — the most a handler can write and still get
 /// a `Content-Length` computed for it.
-const BUFFER_BEFORE_CHUNKING_SIZE: usize = 2048;
+pub(crate) const BUFFER_BEFORE_CHUNKING_SIZE: usize = 2048;
 
 /// The encoding `selectEncoding` picks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

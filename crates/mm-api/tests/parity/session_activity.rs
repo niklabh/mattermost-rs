@@ -441,6 +441,8 @@ async fn an_idle_session_is_refused_and_revoked_by_both_servers() {
     if !stack_enabled() {
         return;
     }
+    // Sliding expiry disarms the idle check; `session_expiry` turns it on.
+    let _setting = common::SESSION_EXPIRY_SETTING.read().await;
     fixture_user_id().await;
     let pool = pool().await;
 
@@ -493,6 +495,8 @@ async fn the_idle_refusal_body_matches_go() {
     if !stack_enabled() {
         return;
     }
+    // Sliding expiry disarms the idle check; `session_expiry` turns it on.
+    let _setting = common::SESSION_EXPIRY_SETTING.read().await;
     fixture_user_id().await;
     let pool = pool().await;
     let idle = (IDLE_TIMEOUT_MINUTES + 60) * MINUTE;

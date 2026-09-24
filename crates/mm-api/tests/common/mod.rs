@@ -3448,3 +3448,10 @@ pub async fn set_bot_fixture_text(bot_user_id: &str, description: &str, display_
 /// write holds it exclusively from the patch to the restore. The client-config maps are not
 /// affected: the patched keys are not projected into them.
 pub static CONFIG_DOCUMENT: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// **`ServiceSettings.ExtendSessionLengthWithActivity` is one resource.** `parity::session_expiry`
+/// turns it on for both servers and restores it, holding this exclusively from the patch to the
+/// restore. The setting also **disarms the idle-timeout revoke** (`GetSession` skips it when
+/// sliding expiry is on), so `parity::session_activity`'s idle tests hold it shared: run while it
+/// is on, their idle session would be accepted rather than revoked.
+pub static SESSION_EXPIRY_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());

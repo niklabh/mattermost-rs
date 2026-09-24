@@ -489,6 +489,23 @@ pub fn is_keyword_multibyte<'k>(
 ///
 /// `mm_blocks_enabled` is `FeatureFlags.MmBlocksEnabled`, which decides whether the interactive
 /// blocks' human-readable strings are among the inputs.
+impl crate::App {
+    /// `getExplicitMentions(post, keywords, a.Config().FeatureFlags.MmBlocksEnabled)` — the call
+    /// every Go caller spells out (notification.go:261, :1100; post.go:2555). Off, a mention that
+    /// appears only inside `props.mm_blocks` is not a mention.
+    pub(crate) fn explicit_mentions(
+        &self,
+        post: &Post,
+        keywords: &MentionKeywords,
+    ) -> MentionResults {
+        get_explicit_mentions(
+            post,
+            keywords,
+            self.config().feature_flags.mm_blocks_enabled,
+        )
+    }
+}
+
 pub fn get_explicit_mentions(
     post: &Post,
     keywords: &MentionKeywords,
@@ -574,6 +591,54 @@ mod tests {
 
     fn mentioned(results: &MentionResults, user_id: &str) -> Option<MentionType> {
         results.mentions.get(user_id).copied()
+    }
+
+    // ---- FeatureFlags.MmBlocksEnabled -------------------------------------------------------
+
+    fn offline_app(mm_blocks_enabled: bool) -> crate::App {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        let mut config = crate::config::Config::default();
+        config.feature_flags.mm_blocks_enabled = mm_blocks_enabled;
+        crate::App::with_config(mm_store::SqlStore::from_pool(pool), config)
+    }
+
+    /// Go passes `a.Config().FeatureFlags.MmBlocksEnabled` at every call (notification.go:261,
+    /// :1100; post.go:2555): on — the default — a mention inside `props.mm_blocks` counts; off,
+    /// `OmitInteractiveBlocks` drops the blocks' strings and it does not.
+    #[tokio::test]
+    async fn a_mention_inside_mm_blocks_counts_only_with_the_flag_on() {
+        let alice = user(ALICE, "alice", "", &[]);
+        let keywords = keywords_for(&alice);
+        let mut post = Post {
+            message: "no mention here".to_owned(),
+            ..Default::default()
+        };
+        post.add_prop(
+            mm_model::post::POST_PROPS_MM_BLOCKS,
+            serde_json::json!([{"type": "text", "text": "hello @alice"}]),
+        );
+        assert!(
+            crate::config::Config::default()
+                .feature_flags
+                .mm_blocks_enabled
+        );
+        assert_eq!(
+            mentioned(
+                &offline_app(true).explicit_mentions(&post, &keywords),
+                ALICE
+            ),
+            Some(MentionType::KeywordMention)
+        );
+        assert_eq!(
+            mentioned(
+                &offline_app(false).explicit_mentions(&post, &keywords),
+                ALICE
+            ),
+            None
+        );
     }
 
     // ---- MentionableId --------------------------------------------------------------------

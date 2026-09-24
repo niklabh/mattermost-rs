@@ -3605,7 +3605,10 @@ fn view_response(
 ///    to say "focus loss or initial view" and must not be rejected.
 /// 5. Each non-empty id is checked against [`reject_board_channel_by_id`], again `channel_id`
 ///    first.
-/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`.
+/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`, then `ExtendSessionExpiryIfNeeded`
+///    — the sliding-expiry write and its `Set-Cookie` headers ([`crate::session_expiry`]). This
+///    is the request every client makes on every channel switch, so it is the one that keeps a
+///    long session alive when `ExtendSessionLengthWithActivity` is on.
 ///
 /// # What a bad `channel_id` is *not*
 ///
@@ -3613,13 +3616,6 @@ fn view_response(
 /// the caller is not in contributes no row to the join, so it is simply absent from
 /// `last_viewed_at_times` — a **200**, not a 403 or a 404.
 ///
-/// # `ExtendSessionExpiryIfNeeded` is not ported
-///
-/// Go calls it after `UpdateLastActivityAtIfNeeded` (channel.go:2052). It is a no-op unless
-/// `ServiceSettings.ExtendSessionLengthWithActivity` is on, and that setting defaults to
-/// `!isUpdate` — false for every persisted configuration document (see [D-088]'s note). When it
-/// *is* on it rewrites `Sessions.ExpiresAt` and re-attaches the session cookies, neither of which
-/// this port does anywhere yet. [D-214].
 #[tracing::instrument(skip_all, fields(user_id = %user_id, channels))]
 pub async fn view_channel(
     State(state): State<AppState>,
@@ -3657,7 +3653,8 @@ async fn serve_view_channel(
         )));
     }
 
-    let bytes = read_body(request, "viewChannel").await?;
+    let (parts, body) = request.into_parts();
+    let bytes = read_body(Request::new(body), "viewChannel").await?;
     // `json.NewDecoder(r.Body).Decode(&view)` into a **value**, not a pointer. Two consequences,
     // and both need the `Value` round-trip rather than a direct `from_slice`:
     //
@@ -3725,8 +3722,11 @@ async fn serve_view_channel(
         .app
         .update_last_activity_at_if_needed(&session.0)
         .await;
+    let cookies =
+        crate::session_expiry::extend_session_expiry_if_needed(state, &parts.headers, &session.0)
+            .await;
 
-    view_response(times, "viewChannel")
+    view_response(times, "viewChannel").map(|response| cookies.apply(response))
 }
 
 /// Port of `readMultipleChannels` (api4/channel.go:2066), reached as
