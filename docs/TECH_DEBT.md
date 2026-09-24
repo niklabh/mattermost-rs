@@ -9508,7 +9508,9 @@ for every forwarded `HEAD`. **What is owed:** keep Go's `Content-Length` on a `H
 
 ## D-930 · `TrustedProxyIPHeader` is not modelled, so a hook's `IPAddress` is the peer's
 
-**Status** OPEN · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Status** CLOSED · **Severity** gap · **Raised** 2026-09-20 (plugin hook call sites)
+**Closed** 2026-09-24 — `ServiceSettings.TrustedProxyIPHeader` is in `mm_app::config` and `mm_api::client_ip` ports
+`GetIPAddress` whole (70-row Go oracle), stamped per request on both routers; `parity::plugin_hooks` now walks it.
 
 `utils.GetIPAddress` (channels/utils/utils.go:94) walks
 `ServiceSettings.TrustedProxyIPHeader` for the first header holding a parseable address and only
@@ -10049,3 +10051,16 @@ Go 404, this server 401. It holds for every served `GET` pair whose Go registrat
 (the file routes and the web client register both, and are right). **What is owed:** route a
 `HEAD` on those pairs to the JSON 404 — one router-level guard keyed on which pairs Go registers
 with `HEAD`, and a parity sweep over `scripts/routes.py`'s `GET` list.
+
+---
+
+## D-1141 · A `[]string` setting from the environment is split on commas, where Go splits on spaces
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+
+`applyEnvKey` sets a slice setting to `strings.Split(value, " ")` (config/environment.go:80), so
+`MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS="a b"` is `["a", "b"]` in Go and an empty variable is
+`[""]`. `mm_app::config::split_list`, which only that setting uses, splits on commas and maps `""`
+to `[]` — its doc comment states the comma rule as Go's. The other two slice settings
+(`SignaturePublicKeyFiles`, `TrustedProxyIPHeader`) split on spaces. **What is owed:** replace
+`split_list` with the space split and turn its test round.

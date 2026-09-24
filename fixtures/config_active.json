@@ -181,6 +181,7 @@
     "SessionLengthWebInDays": 180,
     "SessionLengthWebInHours": 4320,
     "SiteURL": "",
+    "TrustedProxyIPHeader": [],
     "UniqueEmojiReactionLimitPerPost": 50
   },
   "SqlSettings": {

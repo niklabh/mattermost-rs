@@ -13,19 +13,10 @@
 //!
 //! # `ip_address`
 //!
-//! Port of `utils.GetIPAddress` (channels/utils/utils.go:94), which walks
-//! `ServiceSettings.TrustedProxyIPHeader` for the first header holding a parseable address and
-//! otherwise takes the host of `RemoteAddr`. **That list is not modelled in this server's
-//! configuration** and its Go default is empty (`config.go:679`), so only the `RemoteAddr` half
-//! is ported and a stock server matches exactly; see `docs/TECH_DEBT.md` [D-930].
-//!
-//! The peer address comes from axum's `ConnectInfo`, which `mm_api::main` installs on the TCP
-//! listener. A request over the local socket has none, and Go's `net.SplitHostPort` of a unix
-//! `RemoteAddr` also fails and yields `""`, so both answer the empty string there.
+//! `request.CTX.IPAddress()`: `utils.GetIPAddress` over `ServiceSettings.TrustedProxyIPHeader`,
+//! computed once per request by [`crate::client_ip::stamp_client_ip`] and read back here. See
+//! [`crate::client_ip`] for the header walk and the peer fallback.
 
-use std::net::SocketAddr;
-
-use axum::extract::ConnectInfo;
 use axum::http::request::Parts;
 
 use mm_app::plugin_hooks::HookContext;
@@ -62,12 +53,7 @@ fn build(
     HookContext {
         request_id: mm_model::utils::new_id(),
         session_id: session.map(|s| s.id.clone()).unwrap_or_default(),
-        // The `RemoteAddr` half of `utils.GetIPAddress`: `net.SplitHostPort(r.RemoteAddr)`,
-        // whose error Go discards, so no peer address is the empty string.
-        ip_address: extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|ConnectInfo(addr)| addr.ip().to_string())
-            .unwrap_or_default(),
+        ip_address: crate::client_ip::client_ip(headers, extensions),
         accept_language: header("Accept-Language"),
         user_agent: header("User-Agent"),
         connection_id: header(CONNECTION_ID_HEADER),
@@ -77,6 +63,8 @@ fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::ConnectInfo;
+    use std::net::SocketAddr;
 
     fn parts_with(headers: &[(&str, &str)]) -> Parts {
         let mut builder = axum::http::Request::builder().uri("/");
@@ -126,5 +114,18 @@ mod tests {
             .extensions
             .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 54_321_u16))));
         assert_eq!(hook_context(&parts, None).ip_address, "127.0.0.1");
+    }
+
+    /// The address [`crate::client_ip::stamp_client_ip`] derived wins over the peer's.
+    #[test]
+    fn the_stamped_client_address_is_the_hooks() {
+        let mut parts = parts_with(&[("X-Forwarded-For", "1.2.3.4")]);
+        parts
+            .extensions
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 54_321_u16))));
+        parts
+            .extensions
+            .insert(crate::client_ip::ClientIp("1.2.3.4".to_owned()));
+        assert_eq!(hook_context(&parts, None).ip_address, "1.2.3.4");
     }
 }

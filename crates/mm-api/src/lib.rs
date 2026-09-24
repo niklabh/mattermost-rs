@@ -19,6 +19,7 @@ pub mod channel_member_writes;
 pub mod channel_move;
 pub mod channel_writes;
 pub mod channels;
+pub mod client_ip;
 pub mod client_log;
 pub mod client_perf;
 pub mod cloud;
@@ -3774,6 +3775,12 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             translate_error_messages,
+        ))
+        // `ServeHTTP` computes the client address for the request context before the handler
+        // runs; see [`client_ip`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            client_ip::stamp_client_ip,
         ))
         .with_state(state)
 }
