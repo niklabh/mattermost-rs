@@ -123,8 +123,8 @@ async fn the_extended_pings_are_forwarded() {
     );
     assert_eq!(
         served_by("?device_id=abc").await.as_deref(),
-        Some("go"),
-        "there is no push client here"
+        Some("rust"),
+        "the device test is served since the push hub landed"
     );
 
     // The near misses. Go compares `get_server_status` against the literal `"true"` and

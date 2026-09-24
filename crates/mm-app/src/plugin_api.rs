@@ -2811,13 +2811,13 @@ mod tests {
         assert!(answer.a.is_empty());
     }
 
-    /// `SendMail` refuses a missing field before it looks at the setting; past the refusals, with
-    /// notifications on — the default — the mail would go out, which is not implemented here.
+    /// The three refusals are served, and past them the mail is attempted: with the database
+    /// unreachable the live configuration cannot be read, and the failure comes back as Go's
+    /// reused `missing_htmlbody` id rather than as not-implemented.
     #[tokio::test]
-    async fn send_mail_is_not_implemented_only_once_it_would_send() {
+    async fn send_mail_refuses_then_sends_and_reports_a_failure_as_go_does() {
         use mm_plugin::rpc::PluginApi as _;
         let api = unreachable_api();
-        assert!(api.app.config().send_email_notifications);
         let refused = api
             .send_mail(api::Z_SendMailArgs {
                 a: String::new(),
@@ -2836,8 +2836,12 @@ mod tests {
                 b: "s".into(),
                 c: "b".into(),
             })
-            .await;
-        assert!(sent.is_err(), "no sender here");
+            .await
+            .expect("served, not forwarded");
+        assert_eq!(
+            sent.a.map(|e| e.id),
+            Some("plugin_api.send_mail.missing_htmlbody".to_owned())
+        );
     }
 
     /// An `EnsureBot` failure crosses as `encodableError` makes it: a message as an

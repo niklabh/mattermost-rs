@@ -1084,7 +1084,7 @@ mod tests {
         // `json.Marshal` escapes `<` and `>` — the claims are Go's encoder's bytes.
         assert_eq!(
             engine.decode(parts[1]).expect("b64"),
-            br#"{"ack_id":"ack<1>","device_id":"apple_rn:dev"}"#
+            br#"{"ack_id":"ack\u003c1\u003e","device_id":"apple_rn:dev"}"#
         );
         let signature = p256::ecdsa::Signature::from_slice(&engine.decode(parts[2]).expect("b64"))
             .expect("r || s");
