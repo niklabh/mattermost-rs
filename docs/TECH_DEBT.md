@@ -6926,8 +6926,9 @@ What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only t
 **separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
 database, so nothing over the API can see them and they need no entry.
 
-**Started 2026-09-24:** `AuditStore::save` and `App::log_audit` exist, and `moveChannel` (REST
-and local socket) writes its two rows through them — the pattern for the rest.
+**Started 2026-09-24:** `AuditStore::save` and `App::log_audit` exist, and `moveChannel` and
+`removeChannelMember` (REST and local socket) write their rows through them, with the address from
+`mm_api::client_ip` — the pattern for the rest.
 ---
 
 ## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment

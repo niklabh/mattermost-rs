@@ -444,6 +444,17 @@ pub async fn remove_channel_member(
     {
         Ok(MemberWrite::Done(())) => {
             tracing::Span::current().record("forwarded", false);
+            // `c.LogAudit("name=" + channel.Name + " user_id=" + c.Params.UserId)` on success.
+            state
+                .app
+                .log_audit(
+                    &session.0.user_id,
+                    &session.0.id,
+                    &crate::client_ip::client_ip(request.headers(), request.extensions()),
+                    request.uri().path(),
+                    &format!("name={} user_id={user_id}", channel.name),
+                )
+                .await;
             status_ok()
         }
         Ok(MemberWrite::Forward(why)) => {

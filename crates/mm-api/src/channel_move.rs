@@ -69,8 +69,10 @@ pub async fn move_channel(
     };
 
     let (parts, body) = request.into_parts();
-    // `c.AppContext.Path()`, the `Action` of the two audit rows.
+    // `c.AppContext.Path()` and `c.AppContext.IPAddress()`, the `Action` and `IpAddress` of the
+    // two audit rows.
     let path = parts.uri.path().to_owned();
+    let ip_address = crate::client_ip::client_ip(&parts.headers, &parts.extensions);
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -160,8 +162,8 @@ pub async fn move_channel(
             .app
             .log_audit(
                 &session.0.user_id,
-                &hook_ctx.session_id,
-                &hook_ctx.ip_address,
+                &session.0.id,
+                &ip_address,
                 &path,
                 &extra_info,
             )
