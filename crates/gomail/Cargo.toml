@@ -12,10 +12,19 @@ repository.workspace = true
 description = "Byte-exact port of the SMTP client and MIME writer behind Mattermost's mail"
 
 [dependencies]
-gohtml2text = { path = "../gohtml2text" }
 thiserror.workspace = true
 tokio.workspace = true
 chrono.workspace = true
+rand.workspace = true
+tracing.workspace = true
+# TLS for implicit TLS and STARTTLS: the rustls/ring stack already in the tree through reqwest
+# and sqlx, without aws-lc-rs.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+
+[features]
+# The SMTP sink and transcript normaliser that mm-app's mail tests share (src/testing.rs).
+testing = []
 
 [dev-dependencies]
 serde_json.workspace = true
