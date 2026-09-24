@@ -80,6 +80,8 @@ MODELLED = {
         # Both keys again, though this cascade has no `isUpdate` arm.
         "SessionLengthSSOInHours", "SessionLengthSSOInDays",
         "MaximumLoginAttempts", "EnableMultifactorAuthentication", "EnforceMultifactorAuthentication",
+        # basicSecurityChecks: the 414 on a request URI longer than this, on every web.Handler.
+        "MaximumURLLength",
         # The sole gate on `DELETE /api/v4/users/{user_id}?permanent=true`.
         "EnableAPIUserDeletion",
         # The first gate on POST /api/v4/users/trigger-notify-admin-posts.

@@ -14827,3 +14827,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `Channel.BannerInfo` (`*ChannelBannerInfo`) | `channel_from_row` | DONE | `…a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct` | jsonb `null` is the struct with three `null` fields. |
 | `StringArray` over text (`OutgoingWebhook`, `OAuthApp`, `Draft.FileIds`, `ScheduledPost.FileIds`), `ThreadParticipants`, `GetChannelMembersTimezones` | `webhook_store::string_array_column`, `oauth_store`, `draft_store::decode_array`, `threaded_post_from_row`, `get_channel_members_timezones` | DONE | `…string_array…`, `…draft…`, `…participant…`, the timezones half of the user test | The text `null` — what `StringArray.Value` writes for nil — decoded as a failed read. |
 
+## Tech-debt payoff: `basicSecurityChecks`, and the MFA login (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Handler.basicSecurityChecks` (web/handlers.go:143), `ServiceSettings.MaximumURLLength` | `mm_api::serve_http` (a `route_layer` on both routers), `mm_app::config::Config::maximum_url_length` | DONE, closes [D-1211] | `parity::url_length` (3: at, under and over the limit, the socket, the mux 404), 2 unit + config; `scripts/mutations/url-length.plan` | `len(RequestURI)` strictly greater, before the security headers and the per-user limit, so the 414 carries only `Content-Type` and gzip's `Vary`. The web client's page and `/manualtest` already checked it. |
+

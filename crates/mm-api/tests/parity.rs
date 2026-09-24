@@ -314,4 +314,6 @@ mod parity {
     // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
     // (D-331, D-158).
     pub mod null_columns;
+    // Appended 2026-09-25: basicSecurityChecks' 414 (D-1211).
+    pub mod url_length;
 }

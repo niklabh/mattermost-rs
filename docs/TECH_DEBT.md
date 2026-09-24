@@ -10108,7 +10108,9 @@ MFA logins, 2/s for registrations, across the deployment — and Go's 429 is pas
 
 ## D-1211 · An API request over `MaximumURLLength` is answered, where Go's `basicSecurityChecks` refuses it
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (D-1150)
+**Closed** 2026-09-25 — `mm_api::serve_http` refuses it on every served route of both routers, after
+gorilla's charset match and before the per-user limit, with Go's bare 414; `parity::url_length`.
 
 `ServeHTTP` refuses a request URI longer than `ServiceSettings.MaximumURLLength` (default 2048) with
 the 414 `basic_security_check.url.too_long_error` before anything else it does (web/handlers.go:143),
