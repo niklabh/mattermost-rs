@@ -367,7 +367,7 @@ pub async fn create_access_control_policy(
     tracing::Span::current().record("policy_type", policy.type_.as_str());
 
     if policy.type_ == ACCESS_CONTROL_POLICY_TYPE_PERMISSION
-        && !state.app.config().feature_flag_permission_policies
+        && !state.app.config().feature_flags.permission_policies
     {
         return feature_disabled(
             "createAccessControlPolicy",
@@ -994,7 +994,7 @@ pub async fn search_access_control_policies(
         state.app.search_access_control_policies()
     } else {
         if props.type_ == ACCESS_CONTROL_POLICY_TYPE_PERMISSION
-            && !state.app.config().feature_flag_permission_policies
+            && !state.app.config().feature_flags.permission_policies
         {
             return feature_disabled(
                 "searchAccessControlPolicies",

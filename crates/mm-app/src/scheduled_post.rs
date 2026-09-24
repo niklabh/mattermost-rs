@@ -77,7 +77,7 @@ impl App {
         scheduled_post.is_valid(max_message_length)?;
 
         if scheduled_post.repeat_type != SCHEDULED_POST_REPEAT_TYPE_NONE
-            && !self.config().feature_flag_recurring_scheduled_posts
+            && !self.config().feature_flags.recurring_scheduled_posts
         {
             return Err(recurring_disabled("App.SaveScheduledPost"));
         }
@@ -239,7 +239,7 @@ impl App {
 
         if scheduled_post.repeat_type != SCHEDULED_POST_REPEAT_TYPE_NONE
             && existing.repeat_type == SCHEDULED_POST_REPEAT_TYPE_NONE
-            && !self.config().feature_flag_recurring_scheduled_posts
+            && !self.config().feature_flags.recurring_scheduled_posts
         {
             return Err(recurring_disabled("App.UpdateScheduledPost"));
         }

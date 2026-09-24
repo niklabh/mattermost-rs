@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Regenerate fixtures/config_active.json from the running Go server's own configuration.
+# Regenerate fixtures/config_active.json (and fixtures/config_feature_flags.json) from the running
+# Go server's own configuration.
 #
 # The oracle for `mm_app::config::Config::from_document` is the document the **Go server** writes
 # into `Configurations.Value` — not `reference/dump`, which is where every other fixture in this
@@ -224,3 +225,26 @@ sys.stdout.write("\n")
 ' >fixtures/config_active.json
 
 echo "wrote fixtures/config_active.json ($(wc -c <fixtures/config_active.json) bytes)"
+
+# FEATURE FLAGS: the running values, from the client config, because the row cannot hold them.
+#
+# The row has no FeatureFlags section (asserted above), so the flags mm_app::config models cannot
+# be projected from it. Go publishes every flag of the config it is RUNNING on as a
+# `FeatureFlag<Name>` key of the unauthenticated limited client config (config/client.go:458,
+# `FeatureFlags.ToMap`), which is Go's own reflection over the whole struct: SetDefaults, then the
+# MM_FEATUREFLAGS_* overlay of the Go process. The Rust test applies the same overlay the stack's
+# Go is started with (scripts/go-server.sh) before comparing, so the fixture is not a default list
+# typed by hand.
+: "${MMRS_GO_BASE:=$(bash -c 'source scripts/stack-env.sh >/dev/null 2>&1; echo "$MMRS_GO_BASE"')}"
+curl -fsS "$MMRS_GO_BASE/api/v4/config/client?format=old" | python3 -c '
+import json, sys
+client = json.load(sys.stdin)
+flags = {key[len("FeatureFlag"):]: value for key, value in client.items() if key.startswith("FeatureFlag")}
+if len(flags) < 40:
+    sys.stderr.write("error: the client config carries only %d FeatureFlag keys\n" % len(flags))
+    raise SystemExit(1)
+json.dump(flags, sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")
+' >fixtures/config_feature_flags.json
+
+echo "wrote fixtures/config_feature_flags.json ($(wc -c <fixtures/config_feature_flags.json) bytes, from $MMRS_GO_BASE)"

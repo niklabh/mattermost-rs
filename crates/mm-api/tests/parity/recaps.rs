@@ -157,21 +157,19 @@ fn the_gate_is_read_from_configuration() {
         "a stock server has the feature flag off, so all fifteen routes are ours"
     );
 
-    let enabled = Config {
-        feature_flag_enable_ai_recaps: true,
-        ..Config::default()
-    };
+    let mut enabled = Config::default();
+    enabled.feature_flags.enable_ai_recaps = true;
     assert!(
         enabled.ai_recaps_enabled(),
         "setting the flag alone enables recaps — the settings block defaults to *enabled*, and \
          every one of these routes must then forward"
     );
 
-    let explicitly_off = Config {
-        feature_flag_enable_ai_recaps: true,
+    let mut explicitly_off = Config {
         ai_recap_settings_enable: Some(false),
         ..Config::default()
     };
+    explicitly_off.feature_flags.enable_ai_recaps = true;
     assert!(
         !explicitly_off.ai_recaps_enabled(),
         "and an administrator can still turn them off with the flag on"

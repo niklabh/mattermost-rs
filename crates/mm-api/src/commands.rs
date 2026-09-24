@@ -791,12 +791,8 @@ pub async fn list_autocomplete_commands(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     match state.app.list_autocomplete_commands(&team_id).await {
-        Ok(Some(commands)) => encoded_ok(&commands, "listAutocompleteCommands")
+        Ok(commands) => encoded_ok(&commands, "listAutocompleteCommands")
             .unwrap_or_else(IntoResponse::into_response),
-        Ok(None) => {
-            tracing::Span::current().record("forwarded", true);
-            crate::proxy::forward_to_go(State(state), request).await
-        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -841,11 +837,7 @@ pub async fn list_command_autocomplete_suggestions(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     let mut commands = match state.app.list_autocomplete_commands(&team_id).await {
-        Ok(Some(commands)) => commands,
-        Ok(None) => {
-            tracing::Span::current().record("forwarded", true);
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
+        Ok(commands) => commands,
         Err(err) => return ApiError::from(err).into_response(),
     };
 
@@ -1142,8 +1134,7 @@ async fn serve_execute(
     {
         mm_app::command_provider::CommandDispatch::NotFound(err) => Err(ApiError::from(err)),
         mm_app::command_provider::CommandDispatch::Custom
-        | mm_app::command_provider::CommandDispatch::BuiltIn
-        | mm_app::command_provider::CommandDispatch::Undecidable => Ok(Execute::Forward),
+        | mm_app::command_provider::CommandDispatch::BuiltIn => Ok(Execute::Forward),
     }
 }
 

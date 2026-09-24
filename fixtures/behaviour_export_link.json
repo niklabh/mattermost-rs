@@ -1,0 +1,37 @@
+{
+    "export_backend": [
+        {
+            "constructed": true,
+            "driver": "local",
+            "driver_name": "local",
+            "link_generator": false
+        },
+        {
+            "constructed": true,
+            "driver": "amazons3",
+            "driver_name": "amazons3",
+            "link_generator": true
+        },
+        {
+            "constructed": true,
+            "driver": "azureblob",
+            "driver_name": "azureblob",
+            "link_generator": true
+        },
+        {
+            "constructed": false,
+            "driver": "AmazonS3",
+            "link_generator": false
+        },
+        {
+            "constructed": false,
+            "driver": "s3",
+            "link_generator": false
+        },
+        {
+            "constructed": false,
+            "driver": "",
+            "link_generator": false
+        }
+    ]
+}

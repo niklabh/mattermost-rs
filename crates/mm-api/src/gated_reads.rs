@@ -413,7 +413,7 @@ pub async fn get_session_attributes_manifest(
     State(state): State<AppState>,
     request: Request,
 ) -> Response {
-    let enabled = state.app.config().feature_flag_session_attributes;
+    let enabled = state.app.config().feature_flags.session_attributes;
     tracing::Span::current().record("flag_enabled", enabled);
     if enabled {
         return crate::proxy::forward_to_go(State(state), request).await;

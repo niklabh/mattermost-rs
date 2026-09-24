@@ -6875,7 +6875,10 @@ local while these two are not, which is visible as `x-mmrs-served-by` on an othe
 path family.
 ## D-260 · `/exportlink` is never reserved as a built-in trigger
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+**Closed** 2026-09-24 — `Config::feature_flags` models the whole `FeatureFlags` block, and `provider_command` returns
+`/exportlink` when the flag, `DedicatedExportStore` and an S3/Azure export backend built at boot all hold (Go oracle
+`behaviour_export_link.json`); the uniqueness check now asks the providers, so it is reserved exactly then.
 
 `ExportLinkProvider.GetCommand` (app/slashcommands/command_exportlink.go:32) returns `nil` — and
 so frees the trigger `exportlink` for a custom slash command — unless all three of:
@@ -10046,7 +10049,9 @@ pairs Go registers with `HEAD`, and a parity sweep over `scripts/routes.py`'s `G
 
 ## D-1141 · A `[]string` setting from the environment is split on commas, where Go splits on spaces
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (`TrustedProxyIPHeader`)
+**Closed** 2026-09-24 — `split_list` is gone; every `[]string` setting read from the environment goes through
+`mm_app::config::split_env_list` (Go's space split, `""` is `[""]`), held to a 60-row Go oracle (`behaviour_env_override.json`).
 
 `applyEnvKey` sets a slice setting to `strings.Split(value, " ")` (config/environment.go:80), so
 `MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS="a b"` is `["a", "b"]` in Go and an empty variable is
@@ -10078,3 +10083,32 @@ starts only under a `HasSharedChannels` licence with `EnableSharedChannels` on
 /channels/{id}/members/{user}`, `LeaveChannel`, `moveChannel`'s `force` sweep — is handed to Go whole
 before any write. **What is owed:** a port of the shared-channel sync service (task queue, remote
 cluster sends), after which the removal calls it here.
+
+---
+
+## D-1160 · `fixConfig` is not applied when this server loads the configuration
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+
+`Store.Load` runs `fixConfig` (config/utils.go:135) on both the stored and the environment-applied
+config: `SiteURL` loses its trailing slashes, a local driver's `FileSettings.Directory` gains one,
+and an unsupported `DefaultServerLocale`/`DefaultClientLocale`/`AvailableLocales` is reset to
+`en`/all. Neither `Config::load` nor `load_model_config` does any of it, so
+`MM_SERVICESETTINGS_SITEURL=http://x/` is `http://x` in Go and `http://x/` here (the Go oracle
+`behaviour_env_override.go` avoids trailing slashes for that reason). **What is owed:** port
+`fixConfig` into both load paths and add a trailing-slash and a bad-locale row to the oracle.
+
+---
+
+## D-1161 · Six feature-flag reads are still constants now that `Config::feature_flags` exists
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-260, `FeatureFlags` block)
+
+Each is Go's default and so right on a stock server, and wrong under the matching
+`MM_FEATUREFLAGS_*` variable: `channel_create.rs`'s `FEATURE_FLAG_ENABLE_SHARED_CHANNELS_DMS` and
+`FEATURE_FLAG_ENABLE_DOCS`; `thread_read.rs`'s `MM_BLOCKS_ENABLED` and the same literal in
+`post.rs` and `post_write.rs` (the config field is read elsewhere); `team.rs`'s
+`TeamMembershipAccessControl` (`true`); `mm_api::web_static`'s `EnableConcurrentReact` script
+hashes; and in `mm-store`, `CJKSearch` (always on) and `channel_store`'s `EnableDocs` cascade,
+which have no config in reach. **What is owed:** read `Config::feature_flags` at each site (the
+store ones through a parameter), with a test that moves each flag.

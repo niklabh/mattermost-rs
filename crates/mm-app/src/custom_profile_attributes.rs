@@ -454,7 +454,7 @@ impl App {
     fn rank_property_field_gate(&self, where_: &'static str, field: &PropertyField) -> AppResult {
         if field.type_.as_str() != PropertyFieldType::RANK
             || field.object_type != PROPERTY_FIELD_OBJECT_TYPE_USER
-            || self.config().feature_flag_property_field_rank
+            || self.config().feature_flags.property_field_rank
         {
             return Ok(());
         }
