@@ -356,7 +356,7 @@ impl App {
     /// Port of `App.isUniqueToUsernames` (app/group.go:132): a group may not take a name any
     /// user has. An empty name is not checked; a store failure other than "no such user" is a
     /// 500 whose id is `model.NoTranslation` — the literal `<untranslated>`.
-    async fn is_unique_to_usernames(&self, name: &str) -> AppResult<()> {
+    pub(crate) async fn is_unique_to_usernames(&self, name: &str) -> AppResult<()> {
         if name.is_empty() {
             return Ok(());
         }
@@ -624,7 +624,7 @@ impl App {
 
     /// Port of `App.publishGroupMemberEvent` (app/group.go:879): addressed to the member's own
     /// user id, payload the membership row as a JSON string under `group_member`.
-    async fn publish_group_member_event(
+    pub(crate) async fn publish_group_member_event(
         &self,
         event_name: &str,
         member: &GroupMember,

@@ -98,10 +98,12 @@ fn no_two_second_servers_share_a_port() {
     // `parity::plugin_startup` starts its own Go server at + 73, and `parity::plugin_hooks` at
     // + 74.
     // `parity::plugin_hooks`' support-packet tranche starts its Go server at + 87, and its
-    // plugin API tranches at + 88, + 89, + 90, + 92 and + 94, its slash-command tranche at
-    // + 91, and its client plugin-HTTP tranche at + 97.
+    // plugin API tranches at + 88, + 89, + 90, + 92, + 94 and + 97, its slash-command tranche
+    // at + 91, and its client plugin-HTTP tranche at + 98. Its auth tranche's is at + 61: an
+    // offset of 100 or more is the next stack's Go server (stack k's Go is 8065 + 100k), so a
+    // tranche's Go offset stays below 100.
     let reserved: Vec<u16> = [
-        8065, 8066, 8115, 8138, 8139, 8152, 8153, 8154, 8155, 8156, 8157, 8159, 8162,
+        8065, 8066, 8115, 8126, 8138, 8139, 8152, 8153, 8154, 8155, 8156, 8157, 8159, 8162, 8163,
     ]
     .into_iter()
     .chain(8095..=8104)

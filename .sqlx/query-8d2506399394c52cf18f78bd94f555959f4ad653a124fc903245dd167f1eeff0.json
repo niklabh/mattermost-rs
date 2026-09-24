@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE channelmembers\n           SET notifyprops = notifyprops || $1::jsonb,\n               lastupdateat = $2\n         WHERE (channelid, userid) IN (SELECT * FROM UNNEST($3::text[], $4::text[]))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Int8",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d2506399394c52cf18f78bd94f555959f4ad653a124fc903245dd167f1eeff0"
+}

@@ -739,6 +739,14 @@ pub trait ChannelStore {
         props: &StringMap,
     ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.PatchMultipleMembersNotifyProps` (channel_store.go:2117); see
+    /// [`patch_multiple_members_notify_props`] for the `None` that is Go's `(nil, nil)`.
+    fn patch_multiple_members_notify_props(
+        &self,
+        members: &[(String, String)],
+        props: &StringMap,
+    ) -> impl std::future::Future<Output = Result<Option<Vec<ChannelMember>>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802), which is
     /// `RemoveMembers` (channel_store.go:2771) with a one-element list.
     /// Port of `SqlChannelStore.GetTeamSpaceChannelsForUser` (channel_store.go) — the space
@@ -1855,6 +1863,14 @@ impl ChannelStore for SqlChannelStore {
         props: &StringMap,
     ) -> Result<ChannelMember, StoreError> {
         update_member_notify_props(&self.pool, channel_id, user_id, props).await
+    }
+
+    async fn patch_multiple_members_notify_props(
+        &self,
+        members: &[(String, String)],
+        props: &StringMap,
+    ) -> Result<Option<Vec<ChannelMember>>, StoreError> {
+        patch_multiple_members_notify_props(&self.pool, members, props).await
     }
 
     #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
@@ -3773,7 +3789,8 @@ pub async fn get_members_for_user_with_pagination(
     page: i64,
     per_page: i64,
 ) -> Result<ChannelMembersWithTeamData, StoreError> {
-    let offset = page * per_page;
+    // Go's `int` product wraps; a wrapped offset is Postgres's refusal, as it is there.
+    let offset = page.wrapping_mul(per_page);
 
     let rows = sqlx::query_as!(
         ChannelMemberWithTeamRow,
@@ -6465,6 +6482,76 @@ pub async fn update_member_notify_props(
     })?;
 
     Ok(updated)
+}
+
+/// Port of `SqlChannelStore.PatchMultipleMembersNotifyProps` (channel_store.go:2117): one
+/// merge (`notifyprops || props`) over every named `(channel, user)` pair, then the updated
+/// members read back, in one transaction.
+///
+/// # Go answers `(nil, nil)` when a member is missing, and so does this
+///
+/// When the rows updated are not as many as the pairs named — a pair that is not a member, or
+/// the same pair twice — Go returns `errors.Wrap(err, …)` with `err` nil, which **is** nil: no
+/// error and no members, and the deferred finaliser rolls the update back. So the caller
+/// succeeds and publishes nothing. `Ok(None)` here, with the transaction dropped.
+///
+/// The validation Go runs first (no props; `IsChannelMemberNotifyPropsValid`) is the caller's,
+/// `App::patch_channel_members_notify_props`. The members come back in the order named, where
+/// Go's `SELECT` promises none; the only reader publishes one event per member.
+#[tracing::instrument(skip(pool, members, props), fields(members = members.len(), keys = props.len()))]
+pub async fn patch_multiple_members_notify_props(
+    pool: &PgPool,
+    members: &[(String, String)],
+    props: &StringMap,
+) -> Result<Option<Vec<ChannelMember>>, StoreError> {
+    let (channel_ids, user_ids): (Vec<String>, Vec<String>) = members.iter().cloned().unzip();
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+    let patch = serde_json::json!(props);
+    let now = mm_model::utils::get_millis();
+    let updated = sqlx::query!(
+        r#"
+        UPDATE channelmembers
+           SET notifyprops = notifyprops || $1::jsonb,
+               lastupdateat = $2
+         WHERE (channelid, userid) IN (SELECT * FROM UNNEST($3::text[], $4::text[]))
+        "#,
+        patch,
+        now,
+        &channel_ids,
+        &user_ids
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "PatchMultipleMembersNotifyProps: Failed to update ChannelMembers".to_owned(),
+        source,
+    })?
+    .rows_affected();
+    if updated != members.len() as u64 {
+        return Ok(None);
+    }
+
+    let mut out = Vec::with_capacity(members.len());
+    for (channel_id, user_id) in members {
+        let row = select_member_with_scheme_roles(&mut *tx, channel_id, user_id)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "PatchMultipleMembersNotifyProps: Failed to get updated ChannelMembers"
+                    .to_owned(),
+                source,
+            })?;
+        if let Some(row) = row {
+            out.push(channel_member_from_row(row)?);
+        }
+    }
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+    Ok(Some(out))
 }
 
 /// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802) → `RemoveMembers`

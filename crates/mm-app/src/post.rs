@@ -78,6 +78,10 @@ pub enum PrepareError {
     App(#[from] Box<AppError>),
 }
 
+/// `SqlPostStore.GetPosts`' ceiling (post_store.go:1356): a larger `PerPage` is
+/// `ErrInvalidInput`, which `App.GetPostsPage` answers with a 400.
+pub const MAX_POSTS_PER_PAGE: i64 = 1000;
+
 /// Props whose presence changes a branch this module does not reproduce.
 ///
 /// Each entry stands in for a specific Go branch:
@@ -798,15 +802,24 @@ impl App {
     /// - `applyPostsWillBeConsumedHook` is [`App::apply_posts_will_be_consumed_hook`], and it
     ///   is why every list reader below takes a [`HookContext`].
     ///
-    /// Only Go's 500 branch is reachable from here. Its 400 sibling
-    /// (`app.post.get_posts.app_error`) is raised for `ErrInvalidInput`, which the store returns
-    /// for `PerPage > 1000` — a value `parse_per_page` clamps away before the handler runs.
+    /// Its 400 sibling (`app.post.get_posts.app_error`) is the store's `ErrInvalidInput` for
+    /// `PerPage > 1000`, checked here before the query. REST never reaches it — `parse_per_page`
+    /// clamps the value away — but a plugin's `GetPostsForChannel` passes its size through.
     #[tracing::instrument(skip(self, ctx), fields(channel_id = %opts.channel_id))]
     pub async fn get_posts_page(
         &self,
         ctx: &HookContext,
         opts: GetPostsOptions<'_>,
     ) -> AppResult<PostList> {
+        if opts.per_page > MAX_POSTS_PER_PAGE {
+            return Err(AppError::boxed(
+                "GetPostsPage",
+                "app.post.get_posts.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
         let mut list = self.store().post().get_posts(opts).await.map_err(|err| {
             tracing::error!(error = %err, "post page lookup failed");
             AppError::boxed(
@@ -1130,11 +1143,12 @@ impl App {
     /// Port of `app.App.GetPostsBeforePost` (post.go:1703) and `GetPostsAfterPost` (:1740).
     ///
     /// One function where Go has two, because they differ only in the flag they pass on and in
-    /// their `Where` — which is `json:"-"`. Both carry the **same** error id,
-    /// `app.post.get_posts_around.get.app_error`, and differ only in status: `ErrInvalidInput` is
-    /// a 400, anything else a 500. The 400 is unreachable from here, because
-    /// `getPostsForChannelAroundLastUnread` passes page 0 and a limit the handler has already
-    /// validated.
+    /// their `Where` — which is `json:"-"` on REST and on the wire to a plugin. Both carry the
+    /// **same** error id, `app.post.get_posts_around.get.app_error`, and differ only in status:
+    /// the store's `ErrInvalidInput` for a negative page or size is a 400, checked here before
+    /// the query, and anything else a 500. REST never reaches the 400
+    /// (`getPostsForChannelAroundLastUnread` passes page 0 and a validated limit); a plugin's
+    /// `GetPostsBefore`/`GetPostsAfter` passes both through.
     ///
     /// The four stages Go runs after the store are the ones [`App::get_posts_page`] documents,
     /// inert here for the same reasons — bar the hook, which runs, and runs for **each** window
@@ -1146,6 +1160,21 @@ impl App {
         opts: GetPostsAroundOptions<'_>,
         before: bool,
     ) -> AppResult<PostList> {
+        let where_ = if before {
+            "GetPostsBeforePost"
+        } else {
+            "GetPostsAfterPost"
+        };
+        // `getPostsAround` checks the page before the size; both are the one 400.
+        if opts.page < 0 || opts.per_page < 0 {
+            return Err(AppError::boxed(
+                where_,
+                "app.post.get_posts_around.get.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
         let mut list = self
             .store()
             .post()
@@ -1154,11 +1183,7 @@ impl App {
             .map_err(|err| {
                 tracing::error!(error = %err, "post window lookup failed");
                 AppError::boxed(
-                    if before {
-                        "GetPostsBeforePost"
-                    } else {
-                        "GetPostsAfterPost"
-                    },
+                    where_,
                     "app.post.get_posts_around.get.app_error",
                     None,
                     String::new(),

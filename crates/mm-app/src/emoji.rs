@@ -160,8 +160,9 @@ impl App {
     /// # `page * per_page` is computed here, in `int`
     ///
     /// Go multiplies before the store sees either number and passes the product as `offset`.
-    /// `web.ParamsFromRequest` floors `page` at 0 and clamps `per_page` to 200, so the product
-    /// cannot be negative and cannot overflow an `i64`.
+    /// `web.ParamsFromRequest` floors `page` at 0 and clamps `per_page` to 200, so on REST the
+    /// product cannot be negative or overflow. A plugin's `GetEmojiList` passes both through, so
+    /// it wraps as Go's `int` does, and a negative value is Postgres's refusal — this 500.
     ///
     /// One error id, `app.emoji.get_list.internal_error`, and no not-found branch: an offset
     /// past the end of the table is an empty list, not a 404.
@@ -174,7 +175,7 @@ impl App {
     ) -> AppResult<Vec<Emoji>> {
         self.store()
             .emoji()
-            .get_list(page * per_page, per_page, sort_by_name)
+            .get_list(page.wrapping_mul(per_page), per_page, sort_by_name)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "emoji list lookup failed");

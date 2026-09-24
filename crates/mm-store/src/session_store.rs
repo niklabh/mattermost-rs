@@ -69,6 +69,15 @@ pub trait SessionStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
 
+    /// Port of `SqlSessionStore.UpdateExpiresAt` (session_store.go:315): the new expiry, and
+    /// `ExpiredNotify` cleared so the session can be warned about again. **Id only**, like
+    /// [`SessionStore::update_last_activity_at`]; a miss updates nothing and succeeds.
+    fn update_expires_at(
+        &self,
+        session_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlSessionStore.UpdateLastActivityAt` (session_store.go:323).
     ///
     /// The first **write** in this store, and the reason it exists is that `LastActivityAt` is
@@ -474,6 +483,22 @@ impl SessionStore for SqlSessionStore {
 
         tracing::Span::current().record("count", sessions.len());
         Ok(sessions)
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session_id, time = time))]
+    async fn update_expires_at(&self, session_id: &str, time: i64) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE sessions SET expiresat = $1, expirednotify = false WHERE id = $2",
+            time,
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with sessionId={session_id}"),
+            source,
+        })?;
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, fields(session_id = %session_id, time = time))]
