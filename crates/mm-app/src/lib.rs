@@ -74,6 +74,8 @@ pub mod link_image;
 /// Link selection for previews — `getFirstLink`, `getImages`, `isLinkAllowedForPreview`.
 pub mod link_metadata;
 pub mod login;
+/// Outbound mail — port of `platform/shared/mail/mail.go` over `gomail`.
+pub mod mail;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
 pub mod marketplace;
 pub mod marketplace_visit;
@@ -152,7 +154,6 @@ pub mod view;
 pub mod webhook;
 // Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
 pub mod logs;
-pub mod mail;
 pub mod manualtest;
 pub mod markdown_utils;
 pub mod searchengine;
