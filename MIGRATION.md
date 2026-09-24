@@ -9241,8 +9241,8 @@ first. The same request — another user's id, `not json` — is a 403 on one an
 
 ### Three things this port does not do on these routes
 
-* **`ExtendSessionExpiryIfNeeded`** ([D-214]). Off on every persisted configuration document, so
-  both servers do nothing here today; it is a `Set-Cookie` when it is on.
+* **`ExtendSessionExpiryIfNeeded`** — ported 2026-09-24 ([D-214], closed); see *Sliding session
+  expiry* below.
 * **`clearPushNotification`** ([D-215]). There is no hub. The channel list it would consume is
   computed in full anyway, because its notify-prop fall-through is three branches deep and would
   be invisible until there *is* a hub.
@@ -14739,3 +14739,10 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
 | `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
 
+## Sliding session expiry (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Context.ExtendSessionExpiryIfNeeded`, `App.ExtendSessionExpiryIfNeeded`, `GetSessionLengthInMillis`, `platform.ExtendSessionExpiry`, `AttachSessionCookies` + `AttachCloudSessionCookie` | `mm_app::session::{session_extension_due, session_length_in_millis, extension_threshold}`, `mm_api::session_expiry` | DONE | 22 unit + cloud-cookie oracle; `parity::session_expiry` (3) | On `viewChannel`, `createPost` and `user_typing` (no cookies); a bot's expiring token session is never due, a never-expiring session always is. No session cache to update here (D-087). |
+| `Context.SessionRequired` (web/context.go:138) | `mm_api::auth::session_required` | DONE | 5 unit + `parity::session_expiry::a_humans_token_session_is_refused_while_tokens_are_off` | Was missing: a non-bot token session with `EnableUserAccessTokens` off got a 200 here and a 401 from Go. |
+| `net/http` `Cookie.String` domain and value rules | `mm_api::sessions::{valid_cookie_domain, cookie_value}` | DONE | `behaviour_session_write.json` (+28 rows) | An invalid `Domain` (an IPv6 SiteURL's hostname) is dropped, a leading dot stripped, a value with a space or comma quoted. |

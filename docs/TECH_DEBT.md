@@ -6413,30 +6413,13 @@ this route than on the ones that are compared, nothing here would catch it.
 
 ---
 
-## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route
+## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
 
-Go calls `c.ExtendSessionExpiryIfNeeded(w, r)` at the end of `viewChannel` (api4/channel.go:2052)
-— the request every client makes on every channel switch, and therefore the one that keeps a long
-session alive. It rewrites `Sessions.ExpiresAt` to `now + sessionLength` and re-attaches the
-session cookies with the new max-age (web/context.go:174, app/session.go:421).
-
-Nothing in this port does either. The route was migrated anyway because the whole thing is behind
-`ServiceSettings.ExtendSessionLengthWithActivity`, which Go defaults to `!isUpdate` — **false for
-every persisted configuration document**, since `Store.Load` plants a `SiteURL` before calling
-`SetDefaults` ([D-088] measured this). On this stack it is off, so both servers do nothing.
-
-What is owed, when the setting is on:
-
-* the 1%-of-session-length-or-one-day threshold, floored at five minutes, so a session's expiry is
-  not rewritten on every request;
-* `platform.ExtendSessionExpiry`, which updates the row **and** the session cache;
-* `AttachSessionCookies`, which is a `Set-Cookie` on the response — the only piece of this that is
-  wire-visible, and the reason it cannot be quietly skipped for ever.
-
-Until then a client talking to the Rust server on a stack with the setting enabled would have its
-session expire on schedule while the same client talking to Go would not.
+Paid off: sliding expiry (`mm_app::session::session_extension_due`) and the `Set-Cookie` headers
+(`mm_api::session_expiry`) run on all three of Go's call sites — `viewChannel`, `createPost` and
+`user_typing` — and `parity::session_expiry` compares the row and the cookies with the setting on.
 
 ---
 

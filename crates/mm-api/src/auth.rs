@@ -5,6 +5,7 @@ use axum::extract::FromRequestParts;
 use axum::http::Method;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
+use mm_app::config::Config;
 use mm_model::session::Session;
 
 use crate::AppState;
@@ -540,7 +541,42 @@ async fn resolve_required_session(
     // `checkCSRFToken` (handlers.go:295) — after the session resolves, before `SessionRequired`
     // and `MfaRequired`.
     enforce_csrf(parts, state, location, &session)?;
+    session_required(&state.app.config(), &session)?;
     Ok(session)
+}
+
+/// Port of `Context.SessionRequired` (web/context.go:138), which `ServeHTTP` runs for every
+/// handler with `RequireSession` (handlers.go:340) — after the session and CSRF checks, before
+/// `MfaRequired`.
+///
+/// Two refusals, both the generic 401 `api.context.session_expired.app_error` with **no** cookie
+/// cleared (Go does not call `RemoveSessionCookie` here):
+///
+/// 1. `EnableUserAccessTokens` is **off** and the session was minted from a personal access token
+///    for a **non-bot** user — so turning the setting off disables every human's tokens at once,
+///    live sessions included, while a bot's keep working. The setting defaults off.
+/// 2. The session has no user id (`UserRequired`), reachable only through a row no login writes.
+///
+/// The type test is Go's inline `Props[SessionPropType] == SessionTypeUserAccessToken`, and the
+/// bot test an exact `"true"` ([`Session::is_bot_user`]).
+fn session_required(config: &Config, session: &Session) -> Result<(), SessionRejection> {
+    let refuse = |detail: &str| {
+        SessionRejection::from(ApiError::from(mm_model::utils::AppError::new(
+            "",
+            "api.context.session_expired.app_error",
+            None,
+            detail,
+            401,
+        )))
+    };
+    if !config.enable_user_access_tokens && session.is_user_access_token() && !session.is_bot_user()
+    {
+        return Err(refuse("UserAccessToken"));
+    }
+    if session.user_id.is_empty() {
+        return Err(refuse("UserRequired"));
+    }
+    Ok(())
 }
 
 impl FromRequestParts<AppState> for AuthenticatedSession {
@@ -1037,6 +1073,95 @@ mod tests {
             parse_auth_token(&parts),
             None,
             "non-ASCII header values are not parseable as text, so no token is found"
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // `SessionRequired`
+    // ---------------------------------------------------------------------------------------
+
+    fn required_session(props: &[(&str, &str)], user_id: &str) -> Session {
+        let mut session = Session {
+            user_id: user_id.to_owned(),
+            ..Session::default()
+        };
+        for (key, value) in props {
+            session.add_prop(*key, *value);
+        }
+        session
+    }
+
+    fn tokens(enabled: bool) -> Config {
+        Config {
+            enable_user_access_tokens: enabled,
+            ..Config::default()
+        }
+    }
+
+    /// The refusal's id, detail and status, and that it clears no cookie.
+    fn refusal(result: Result<(), SessionRejection>) -> (String, String, i32) {
+        let rejection = result.expect_err("refused");
+        assert_eq!(
+            rejection.clear_session_cookie, None,
+            "SessionRequired clears no cookie"
+        );
+        let err = rejection.error.0;
+        (err.id.clone(), err.detailed_error.clone(), err.status_code)
+    }
+
+    const PAT: (&str, &str) = ("type", "UserAccessToken");
+    const USER: &str = "opukwu61f7ft8exssjxf3huyjy";
+
+    #[test]
+    fn a_humans_token_session_is_refused_while_tokens_are_off() {
+        assert_eq!(
+            refusal(session_required(
+                &tokens(false),
+                &required_session(&[PAT], USER)
+            )),
+            (
+                "api.context.session_expired.app_error".to_owned(),
+                "UserAccessToken".to_owned(),
+                401
+            )
+        );
+    }
+
+    #[test]
+    fn a_token_session_is_accepted_while_tokens_are_on() {
+        assert!(session_required(&tokens(true), &required_session(&[PAT], USER)).is_ok());
+    }
+
+    /// A bot's token keeps working with the setting off — but only for the exact `"true"`.
+    #[test]
+    fn a_bots_token_session_is_exempt() {
+        let bot = required_session(&[PAT, ("is_bot", "true")], USER);
+        assert!(session_required(&tokens(false), &bot).is_ok());
+        let not_quite = required_session(&[PAT, ("is_bot", "True")], USER);
+        assert!(session_required(&tokens(false), &not_quite).is_err());
+    }
+
+    #[test]
+    fn a_session_of_another_type_is_not_a_token_session() {
+        for props in [&[][..], &[("type", "CloudKey")][..]] {
+            assert!(session_required(&tokens(false), &required_session(props, USER)).is_ok());
+        }
+    }
+
+    /// `UserRequired`, and the token test runs first.
+    #[test]
+    fn a_session_with_no_user_is_refused_after_the_token_test() {
+        assert_eq!(
+            refusal(session_required(&tokens(true), &required_session(&[], ""))).1,
+            "UserRequired"
+        );
+        assert_eq!(
+            refusal(session_required(
+                &tokens(false),
+                &required_session(&[PAT], "")
+            ))
+            .1,
+            "UserAccessToken"
         );
     }
 }

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use mm_model::license::DAY_IN_MILLISECONDS;
 use mm_model::session::{SESSION_ACTIVITY_TIMEOUT, Session};
 use mm_model::utils::{AppError, AppResult, get_millis};
 use mm_store::{OAuthStore, SessionStore};
@@ -585,6 +586,144 @@ impl App {
     }
 }
 
+/// The five-minute floor under the extension threshold (session.go:435-441): "we won't write a
+/// new expiry more than every 5 minutes".
+const EXTEND_THRESHOLD_FLOOR_MILLIS: i64 = 5 * 60 * 1000;
+
+/// Port of `App.GetSessionLengthInMillis` (app/session.go:473), with the clock a parameter.
+///
+/// Three lengths, chosen **mobile first, then SSO, then web** — a phone that logged in through
+/// OAuth takes the mobile length. The configured hours are the resolved `*int` values
+/// ([`Config::session_length_mobile_in_hours`] and its two siblings), times 3,600,000.
+///
+/// # A personal access token's session with an expiry has its *remaining* lifetime as its length
+///
+/// So that sliding expiry can never push `ExpiresAt` past the token's own. `elapsed` in
+/// [`session_extension_due`] then collapses to zero and the session is never extended. A PAT
+/// session with `ExpiresAt == 0` falls through to the web length — and is then *always* due,
+/// since `ExpiresAt - length` is negative. Go's, including that last consequence: the first
+/// request through a served call site turns a never-expiring session into one that expires in
+/// `SessionLengthWebInHours`.
+pub fn session_length_in_millis(config: &Config, session: &Session, now: i64) -> i64 {
+    // Go spells this `session.Props[SessionPropType] == SessionTypeUserAccessToken`, the same
+    // predicate as `IsUserAccessToken`.
+    if session.is_user_access_token() && session.expires_at > 0 {
+        return (session.expires_at - now).max(0);
+    }
+
+    let hours = if session.is_mobile_app() {
+        config.session_length_mobile_in_hours
+    } else if session.is_sso_login() {
+        config.session_length_sso_in_hours
+    } else {
+        config.session_length_web_in_hours
+    };
+    hours * 60 * 60 * 1000
+}
+
+/// The threshold of `App.ExtendSessionExpiryIfNeeded` (session.go:432-441): the **lesser** of 1%
+/// of the session length and one day, but never under five minutes.
+///
+/// Computed in `float64` and truncated back, as Go does (`int64(math.Min(float64(l)*0.01, …))`),
+/// so a length that is not a multiple of 100 ms rounds toward zero. For the reachable lengths —
+/// whole hours — the float is exact. The web default of 4320 hours gives one day (1% is 43.2
+/// hours); SSO's 720 gives 7.2 hours.
+pub fn extension_threshold(session_length: i64) -> i64 {
+    ((session_length as f64 * 0.01).min(DAY_IN_MILLISECONDS as f64) as i64)
+        .max(EXTEND_THRESHOLD_FLOOR_MILLIS)
+}
+
+/// The decision half of `App.ExtendSessionExpiryIfNeeded` (session.go:421-446): the new
+/// `ExpiresAt` when the session is due, `None` when it is not.
+///
+/// In Go's order: the setting, then an expired session (`IsExpired`: a positive `ExpiresAt`
+/// strictly before now), then the threshold. `elapsed` is measured from when the session's
+/// current lifetime began, `ExpiresAt - length`, and the skip is a strict `elapsed < threshold`
+/// — so a session exactly one threshold old **is** extended. The new expiry is `now + length`.
+///
+/// There is no exemption for OAuth, mobile or bot sessions; the kind of session only changes
+/// which length applies. A token session with an expiry is exempt by arithmetic, not by a check
+/// — see [`session_length_in_millis`].
+pub fn session_extension_due(config: &Config, session: &Session, now: i64) -> Option<i64> {
+    if !config.extend_session_length_with_activity {
+        return None;
+    }
+    // `session.IsExpired()` inlined with this `now`, so the whole decision reads one clock.
+    if session.expires_at > 0 && now > session.expires_at {
+        return None;
+    }
+
+    let session_length = session_length_in_millis(config, session, now);
+    let elapsed = now - (session.expires_at - session_length);
+    if elapsed < extension_threshold(session_length) {
+        return None;
+    }
+    Some(now + session_length)
+}
+
+impl App {
+    /// Port of `App.GetSessionLengthInMillis` (app/session.go:473). See
+    /// [`session_length_in_millis`].
+    pub fn get_session_length_in_millis(&self, session: &Session) -> i64 {
+        session_length_in_millis(&self.config(), session, get_millis())
+    }
+
+    /// Port of `App.ExtendSessionExpiryIfNeeded` (app/session.go:421) and the
+    /// `PlatformService.ExtendSessionExpiry` (platform/session.go:283) it calls. Returns whether
+    /// the session was extended; the caller re-attaches the session cookies when it was
+    /// (`mm_api::session_expiry`).
+    ///
+    /// Behind `ServiceSettings.ExtendSessionLengthWithActivity`, which is **off** on every
+    /// persisted configuration document that predates the setting (its default is `!isUpdate`).
+    /// When on, it rewrites `Sessions.ExpiresAt` at most once per [`extension_threshold`], so a
+    /// session a client keeps using never expires — Go's sliding expiry.
+    ///
+    /// # What `ExtendSessionExpiry` does here, and what it does not
+    ///
+    /// The row write is `SessionStore::update_expires_at`, which also clears `ExpiredNotify`, as
+    /// Go's `UpdateExpiresAt` does. Go then puts the updated session back into **its session
+    /// cache**; this server has none ([D-087]) and reads the row on every request, so there is
+    /// nothing to update. The Go process next door may still hold the old `ExpiresAt` in its
+    /// cache for up to `SessionCacheInMinutes` — Go's own comment accepts exactly that between
+    /// cluster nodes ("worst case … a redundant expiry update"), and it is the same here.
+    ///
+    /// The failure arm is Go's: logged, and `false`, so the request succeeds without cookies.
+    /// The audit record Go writes (`extendSessionExpiry`) goes to its audit log, which this server
+    /// does not keep for any route.
+    #[tracing::instrument(skip_all, fields(session_id = %session.id, extended))]
+    pub async fn extend_session_expiry_if_needed(&self, session: &Session) -> bool {
+        let Some(new_expiry) = session_extension_due(&self.config(), session, get_millis()) else {
+            tracing::Span::current().record("extended", false);
+            return false;
+        };
+
+        if let Err(err) = self
+            .store()
+            .session()
+            .update_expires_at(&session.id, new_expiry)
+            .await
+        {
+            tracing::error!(
+                error = %err,
+                user_id = %session.user_id,
+                session_id = %session.id,
+                "Failed to update ExpiresAt"
+            );
+            tracing::Span::current().record("extended", false);
+            return false;
+        }
+
+        tracing::debug!(
+            user_id = %session.user_id,
+            session_id = %session.id,
+            new_expiry,
+            "Session extended"
+        );
+        tracing::Span::current().record("extended", true);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1076,5 +1215,292 @@ mod tests {
         assert_eq!(err.id, "app.session.update_device_id.app_error");
         assert_eq!(err.status_code, 500);
         assert_eq!(err.where_, "AttachDeviceId");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Sliding expiry: `ExtendSessionExpiryIfNeeded` and `GetSessionLengthInMillis`.
+    // ---------------------------------------------------------------------------------------
+
+    const HOUR: i64 = 60 * 60 * 1000;
+    const DAY: i64 = 24 * HOUR;
+
+    /// Sliding expiry on, and the three lengths **distinct**, so a test that picks the wrong one
+    /// fails rather than agreeing by coincidence — on the stack web and mobile are both 4320.
+    fn sliding() -> Config {
+        Config {
+            extend_session_length_with_activity: true,
+            session_length_web_in_hours: 4320,
+            session_length_mobile_in_hours: 1000,
+            session_length_sso_in_hours: 720,
+            ..Config::default()
+        }
+    }
+
+    fn with_props(pairs: &[(&str, &str)]) -> Session {
+        let mut session = Session::default();
+        for (key, value) in pairs {
+            session.add_prop(*key, *value);
+        }
+        session
+    }
+
+    /// A session whose current lifetime began `elapsed` ago as of [`NOW`], for `length`.
+    fn aged(mut session: Session, length: i64, elapsed: i64) -> Session {
+        session.expires_at = NOW - elapsed + length;
+        session
+    }
+
+    #[test]
+    fn the_threshold_is_one_percent_capped_at_a_day_floored_at_five_minutes() {
+        // 4320 h: 1% is 43.2 h, so the day cap applies.
+        assert_eq!(extension_threshold(4320 * HOUR), DAY);
+        // 720 h: 1% is 7.2 h, under the cap.
+        assert_eq!(extension_threshold(720 * HOUR), 720 * HOUR / 100);
+        // Exactly 100 days: 1% **is** a day, both arms agree.
+        assert_eq!(extension_threshold(2400 * HOUR), DAY);
+        // Just over: still the day.
+        assert_eq!(extension_threshold(2401 * HOUR), DAY);
+        // 24 h: 1% is 14.4 minutes, above the floor.
+        assert_eq!(extension_threshold(24 * HOUR), 864_000);
+        // 1 h: 1% is 36 s, floored to five minutes; so is nothing at all.
+        assert_eq!(extension_threshold(HOUR), 300_000);
+        assert_eq!(extension_threshold(0), 300_000);
+        // The floor's own boundary: 1% of 30,000,000 is exactly five minutes; one hundred
+        // milliseconds more is one millisecond over it.
+        assert_eq!(extension_threshold(30_000_000), 300_000);
+        assert_eq!(extension_threshold(30_000_100), 300_001);
+    }
+
+    /// `int64(float64)` truncates toward zero; rounding would give 500,001 here.
+    #[test]
+    fn the_threshold_truncates_the_float() {
+        assert_eq!(extension_threshold(50_000_050), 500_000);
+        assert_eq!(extension_threshold(50_000_099), 500_000);
+    }
+
+    #[test]
+    fn a_web_session_takes_the_web_length() {
+        assert_eq!(
+            session_length_in_millis(&sliding(), &Session::default(), NOW),
+            4320 * HOUR
+        );
+    }
+
+    #[test]
+    fn a_device_id_or_the_mobile_prop_takes_the_mobile_length() {
+        let device = Session {
+            device_id: "apple_rn:abc".to_owned(),
+            ..Session::default()
+        };
+        assert_eq!(
+            session_length_in_millis(&sliding(), &device, NOW),
+            1000 * HOUR
+        );
+        let flagged = with_props(&[(USER_AUTH_SERVICE_IS_MOBILE, "true")]);
+        assert_eq!(
+            session_length_in_millis(&sliding(), &flagged, NOW),
+            1000 * HOUR
+        );
+    }
+
+    #[test]
+    fn an_oauth_user_or_saml_session_takes_the_sso_length() {
+        use mm_model::session::external::{USER_AUTH_SERVICE_IS_OAUTH, USER_AUTH_SERVICE_IS_SAML};
+        for prop in [USER_AUTH_SERVICE_IS_OAUTH, USER_AUTH_SERVICE_IS_SAML] {
+            let session = with_props(&[(prop, "true")]);
+            assert_eq!(
+                session_length_in_millis(&sliding(), &session, NOW),
+                720 * HOUR,
+                "{prop}"
+            );
+        }
+    }
+
+    /// Mobile is tested first, so a phone that logged in through OAuth has the mobile length.
+    #[test]
+    fn mobile_beats_sso() {
+        use mm_model::session::external::USER_AUTH_SERVICE_IS_OAUTH;
+        let mut session = with_props(&[(USER_AUTH_SERVICE_IS_OAUTH, "true")]);
+        session.device_id = "android_rn:abc".to_owned();
+        assert_eq!(
+            session_length_in_millis(&sliding(), &session, NOW),
+            1000 * HOUR
+        );
+    }
+
+    /// The `IsOAuth` **column** marks an OAuth-app access token, not an OAuth login; it is not
+    /// `IsSSOLogin`, so the session keeps the web length.
+    #[test]
+    fn an_oauth_app_session_is_not_sso() {
+        let session = Session {
+            is_oauth: true,
+            ..Session::default()
+        };
+        assert_eq!(
+            session_length_in_millis(&sliding(), &session, NOW),
+            4320 * HOUR
+        );
+    }
+
+    #[test]
+    fn a_token_session_with_an_expiry_has_its_remaining_lifetime() {
+        let mut session = with_props(&[("type", "UserAccessToken")]);
+        session.expires_at = NOW + 3 * DAY;
+        assert_eq!(session_length_in_millis(&sliding(), &session, NOW), 3 * DAY);
+
+        // Past it: zero, not negative.
+        session.expires_at = NOW - 1;
+        assert_eq!(session_length_in_millis(&sliding(), &session, NOW), 0);
+
+        // `ExpiresAt == 0` falls through to the kind of session it otherwise is.
+        session.expires_at = 0;
+        assert_eq!(
+            session_length_in_millis(&sliding(), &session, NOW),
+            4320 * HOUR
+        );
+    }
+
+    /// Only `UserAccessToken` has the special case; another `type` is an ordinary session.
+    #[test]
+    fn another_session_type_with_an_expiry_takes_the_web_length() {
+        let mut session = with_props(&[("type", "CloudKey")]);
+        session.expires_at = NOW + 3 * DAY;
+        assert_eq!(
+            session_length_in_millis(&sliding(), &session, NOW),
+            4320 * HOUR
+        );
+    }
+
+    #[test]
+    fn the_setting_off_extends_nothing() {
+        let config = Config {
+            extend_session_length_with_activity: false,
+            ..sliding()
+        };
+        let session = aged(Session::default(), 4320 * HOUR, 30 * DAY);
+        assert_eq!(session_extension_due(&config, &session, NOW), None);
+    }
+
+    /// The skip is a strict `elapsed < threshold`: one threshold old is due, a millisecond less
+    /// is not.
+    #[test]
+    fn a_session_exactly_one_threshold_old_is_extended() {
+        let length = 4320 * HOUR;
+        let due = aged(Session::default(), length, DAY);
+        assert_eq!(
+            session_extension_due(&sliding(), &due, NOW),
+            Some(NOW + length)
+        );
+        let not_yet = aged(Session::default(), length, DAY - 1);
+        assert_eq!(session_extension_due(&sliding(), &not_yet, NOW), None);
+    }
+
+    /// The threshold follows the session's own length: ten hours is past SSO's 7.2 and short of
+    /// web's day, and the new expiry is `now` plus the SSO length.
+    #[test]
+    fn the_threshold_and_the_new_expiry_use_the_sessions_own_length() {
+        use mm_model::session::external::USER_AUTH_SERVICE_IS_OAUTH;
+        let sso = aged(
+            with_props(&[(USER_AUTH_SERVICE_IS_OAUTH, "true")]),
+            720 * HOUR,
+            10 * HOUR,
+        );
+        assert_eq!(
+            session_extension_due(&sliding(), &sso, NOW),
+            Some(NOW + 720 * HOUR)
+        );
+        let web = aged(Session::default(), 4320 * HOUR, 10 * HOUR);
+        assert_eq!(session_extension_due(&sliding(), &web, NOW), None);
+    }
+
+    /// A mobile session is measured against the mobile length, **both** for `elapsed` (whose base
+    /// is `ExpiresAt - length`) and for the new expiry.
+    #[test]
+    fn a_mobile_session_is_measured_against_the_mobile_length() {
+        let phone = Session {
+            device_id: "apple_rn:abc".to_owned(),
+            ..Session::default()
+        };
+        // Twelve hours into a 1000-hour lifetime: past its 10-hour threshold (1%). Read with the
+        // web length instead, the lifetime would not have begun yet and nothing would be due.
+        let session = aged(phone, 1000 * HOUR, 12 * HOUR);
+        assert_eq!(
+            session_extension_due(&sliding(), &session, NOW),
+            Some(NOW + 1000 * HOUR)
+        );
+    }
+
+    #[test]
+    fn an_expired_session_is_not_extended() {
+        let mut session = aged(Session::default(), 4320 * HOUR, 30 * DAY);
+        session.expires_at = NOW - 1;
+        assert_eq!(session_extension_due(&sliding(), &session, NOW), None);
+    }
+
+    /// `IsExpired` is a strict `now > ExpiresAt`, so a session at its exact expiry millisecond is
+    /// still live — and, its whole length having elapsed, due.
+    #[test]
+    fn a_session_at_its_expiry_millisecond_is_still_extended() {
+        let session = Session {
+            expires_at: NOW,
+            ..Session::default()
+        };
+        assert_eq!(
+            session_extension_due(&sliding(), &session, NOW),
+            Some(NOW + 4320 * HOUR)
+        );
+    }
+
+    /// `ExpiresAt == 0` is "never expires", and `elapsed` is then `now + length` — always due.
+    /// Go's arithmetic: the first request turns a never-expiring session into an expiring one.
+    #[test]
+    fn a_never_expiring_session_is_given_an_expiry() {
+        assert_eq!(
+            session_extension_due(&sliding(), &Session::default(), NOW),
+            Some(NOW + 4320 * HOUR)
+        );
+    }
+
+    /// A token session with an expiry is never due, however old: its length is its remaining
+    /// lifetime, so `elapsed` is zero.
+    #[test]
+    fn a_token_session_with_an_expiry_is_never_extended() {
+        let mut session = with_props(&[("type", "UserAccessToken")]);
+        session.create_at = NOW - 300 * DAY;
+        session.expires_at = NOW + 10 * DAY;
+        assert_eq!(session_extension_due(&sliding(), &session, NOW), None);
+    }
+
+    /// A bot's token session with no expiry is not exempt.
+    #[test]
+    fn a_token_session_without_an_expiry_is_extended_like_a_web_one() {
+        let session = with_props(&[("type", "UserAccessToken"), ("is_bot", "true")]);
+        assert_eq!(
+            session_extension_due(&sliding(), &session, NOW),
+            Some(NOW + 4320 * HOUR)
+        );
+    }
+
+    /// Nothing is due, so the store — unreachable here — is never asked.
+    #[tokio::test]
+    async fn not_due_is_false_without_touching_the_store() {
+        let app = offline_app(Config {
+            extend_session_length_with_activity: false,
+            ..sliding()
+        });
+        assert!(
+            !app.extend_session_expiry_if_needed(&Session::default())
+                .await
+        );
+    }
+
+    /// A due session whose write fails is not extended: `false`, so no cookies go out.
+    #[tokio::test]
+    async fn a_failed_write_is_not_an_extension() {
+        let app = offline_app(sliding());
+        assert!(
+            !app.extend_session_expiry_if_needed(&Session::default())
+                .await
+        );
     }
 }

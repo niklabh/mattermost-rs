@@ -21,7 +21,7 @@
 //! and that ordering is the whole difference between a 200 and a 400 for an old post.
 
 use axum::extract::{Path, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::plugin_hooks::HookContext;
 use mm_app::post::PrepareError;
@@ -883,7 +883,16 @@ pub async fn create_post(
     let query = parts.uri.query().map(str::to_owned);
 
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
-    match serve_create(&state, &session, post, query.as_deref(), &hook_ctx).await {
+    match serve_create(
+        &state,
+        &session,
+        post,
+        query.as_deref(),
+        &parts.headers,
+        &hook_ctx,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -900,6 +909,7 @@ async fn serve_create(
     session: &AuthenticatedSession,
     mut post: Post,
     query: Option<&str>,
+    headers: &HeaderMap,
     hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     // "if post.CreateAt != 0 && !c.App.SessionHasPermissionTo(session, PermissionManageSystem)".
@@ -965,14 +975,16 @@ async fn serve_create(
     }
 
     // `c.App.Srv().Platform().UpdateLastActivityAtIfNeeded(*c.AppContext.Session())` — throttled,
-    // so most requests write nothing. `ExtendSessionExpiryIfNeeded` needs
-    // `ExtendSessionLengthWithActivity`, which is off by default and is not modelled.
+    // so most requests write nothing — then `c.ExtendSessionExpiryIfNeeded(w, r)`, a no-op unless
+    // `ExtendSessionLengthWithActivity` is on (see `crate::session_expiry`).
     state
         .app
         .update_last_activity_at_if_needed(&session.0)
         .await;
+    let cookies =
+        crate::session_expiry::extend_session_expiry_if_needed(state, headers, &session.0).await;
 
-    created_post(created)
+    created_post(created).map(|response| cookies.apply(response))
 }
 
 /// Port of `createEphemeralPost` (api4/post.go:215) — `POST /api/v4/posts/ephemeral`.

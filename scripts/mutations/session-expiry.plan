@@ -1,0 +1,22 @@
+# session-expiry.plan — sliding session expiry (D-214), SessionRequired, cookie rendering, 2026-09-24.
+# api lines run parity::session_expiry on the stack; unit lines run the oracle/unit tests.
+threshold-cap-max	crates/mm-app/src/session.rs	.min(DAY_IN_MILLISECONDS as f64)	.max(DAY_IN_MILLISECONDS as f64)	api	session_expiry
+threshold-floor-dropped	crates/mm-app/src/session.rs	as i64)\n        .max(EXTEND_THRESHOLD_FLOOR_MILLIS)	as i64)	unit	session::tests
+threshold-boundary-inclusive	crates/mm-app/src/session.rs	if elapsed < extension_threshold(session_length) {	if elapsed <= extension_threshold(session_length) {	unit	session::tests
+sso-before-mobile	crates/mm-app/src/session.rs	    let hours = if session.is_mobile_app() {\n        config.session_length_mobile_in_hours\n    } else if session.is_sso_login() {\n        config.session_length_sso_in_hours	    let hours = if session.is_sso_login() {\n        config.session_length_sso_in_hours\n    } else if session.is_mobile_app() {\n        config.session_length_mobile_in_hours	api	session_expiry
+pat-guard-includes-zero	crates/mm-app/src/session.rs	session.is_user_access_token() && session.expires_at > 0 {	session.is_user_access_token() && session.expires_at >= 0 {	api	session_expiry
+pat-guard-dropped	crates/mm-app/src/session.rs	session.is_user_access_token() && session.expires_at > 0 {	false && session.expires_at > 0 {	api	session_expiry
+setting-ignored	crates/mm-app/src/session.rs	    if !config.extend_session_length_with_activity {\n        return None;	    if false {\n        return None;	api	session_expiry
+new-expiry-from-old	crates/mm-app/src/session.rs	    Some(now + session_length)\n}	    Some(session.expires_at + session_length)\n}	api	session_expiry
+expired-check-dropped	crates/mm-app/src/session.rs	    if session.expires_at > 0 && now > session.expires_at {	    if false && now > session.expires_at {	unit	session::tests
+view-cookies-dropped	crates/mm-api/src/channels.rs	view_response(times, "viewChannel").map(|response| cookies.apply(response))	view_response(times, "viewChannel").map(|response| { let _ = cookies; response })	api	session_expiry
+post-cookies-dropped	crates/mm-api/src/post_writes.rs	created_post(created).map(|response| cookies.apply(response))	created_post(created).map(|response| { let _ = cookies; response })	api	session_expiry
+typing-extension-dropped	crates/mm-api/src/wsapi.rs	    state.app.extend_session_expiry_if_needed(session).await;	    let _ = session;	api	session_expiry
+session-required-dropped	crates/mm-api/src/auth.rs	    session_required(&state.app.config(), &session)?;	    let _ = &session;	api	session_expiry
+pat-bot-exemption-dropped	crates/mm-api/src/auth.rs	session.is_user_access_token() && !session.is_bot_user()	session.is_user_access_token()	api	session_expiry
+cookie-domain-dot-kept	crates/mm-api/src/sessions.rs	cookie.push_str(domain.strip_prefix('.').unwrap_or(domain));	cookie.push_str(domain);	unit	sessions::tests
+domain-len-inclusive	crates/mm-api/src/sessions.rs	domain.is_empty() || domain.len() > 255	domain.is_empty() || domain.len() >= 255	unit	sessions::tests
+cookie-value-comma-unquoted	crates/mm-api/src/sessions.rs	if kept.contains([' ', ','])	if kept.contains(' ')	unit	sessions::tests
+cloud-localhost-exact	crates/mm-api/src/session_expiry.rs	if hostname.contains("localhost")	if hostname == "localhost"	unit	session_expiry
+control-log-text	crates/mm-app/src/session.rs	"Failed to update ExpiresAt"	"Failed to update ExpiresAt!"	api	session_expiry
+control-rename-binding	crates/mm-api/src/channels.rs	    let cookies =\n        crate::session_expiry::extend_session_expiry_if_needed(state, &parts.headers, &session.0)\n            .await;\n\n    view_response(times, "viewChannel").map(|response| cookies.apply(response))	    let set_cookies =\n        crate::session_expiry::extend_session_expiry_if_needed(state, &parts.headers, &session.0)\n            .await;\n\n    view_response(times, "viewChannel").map(|response| set_cookies.apply(response))	api	session_expiry
