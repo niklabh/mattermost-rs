@@ -16,7 +16,8 @@
 //!    everything else: static files, the websocket upgrade, the api4 catch-all. [`global`].
 //! 3. **Per user** — `web.Handler.ServeHTTP` (web/handlers.go:288) rate-limits by the session's
 //!    user id on the global limiter's store when `VaryByUser` is on, for every request that
-//!    carries a token, after the session lookup and before the CSRF check. [`per_user`].
+//!    carries a token, after the session lookup and before the CSRF check. [`per_user`], and
+//!    `web_static::fallback` for the handlers outside the API router.
 //!
 //! All three exist only when `RateLimitSettings.Enable` was true **when the process started**:
 //! the route limiters are decided at registration, the global one at `Start`. [`RateLimits`] is
@@ -32,12 +33,27 @@
 //! they carry nothing else; the per-user refusal is written inside `ServeHTTP`, after its
 //! security headers.
 //!
-//! # Two processes, two stores
+//! # Two processes, one deciding store
 //!
-//! A forwarded request is limited here and then again by the Go process, whose global limiter
-//! sees every forwarded request coming from this server's address. [D-1150] has the details; the
-//! global set Go adds to a forwarded answer is replaced by ours, so the headers a client reads are
-//! this server's.
+//! Go keeps its limiter state in its own memory, and a forwarded request meets the Go process's
+//! limiters as well as these. The end state ([D-1150]) is that **this server's stores decide for
+//! every request**, served or forwarded, and Go's never refuse first:
+//!
+//! - every request is counted here: the global and route limiters at the front ([`global`]), the
+//!   per-user step on every request Go would hand a `web.Handler` — the served routes
+//!   ([`per_user`]) and, in `web_static::fallback`, the web client's page and the Go web routes
+//!   it forwards;
+//! - the forward leg tells Go who the client was, through the header Go trusts
+//!   (`client_ip::forwarded_address_header`), so Go keys each forwarded request as this server
+//!   did and, seeing only a subset of that key's requests, allows whatever was allowed here;
+//! - the `X-RateLimit-*` values Go adds to a forwarded answer are dropped by the proxy
+//!   ([`strip_go_rate_limit_headers`]) and this server's written in Go's order.
+//!
+//! What this cannot reach: with `TrustedProxyIPHeader` empty, nothing Go reads can carry the
+//! client, and Go keys every forwarded request on this server's address — as it would behind any
+//! proxy it was not told to trust. That is Go's own configuration answer, logged at start. And
+//! Go's **route** limiters pass no trusted header at all, so a forwarded branch of the three
+//! rate-limited routes is keyed on this server's address whatever is configured ([D-1210]).
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -45,9 +61,9 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, RawPathParams, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -492,14 +508,24 @@ async fn limits(state: &AppState) -> &RateLimits {
         .rate_limits
         .get_or_init(|| async {
             match mm_app::config::load_model_config(state.app.store().config()).await {
-                Ok(config) => RateLimits::from_config(
-                    &config.rate_limit_settings,
-                    config
+                Ok(config) => {
+                    let trusted = config
                         .service_settings
                         .trusted_proxy_ip_header
                         .as_deref()
-                        .unwrap_or_default(),
-                ),
+                        .unwrap_or_default();
+                    let limits = RateLimits::from_config(&config.rate_limit_settings, trusted);
+                    if limits.global.is_some() && trusted.is_empty() {
+                        // [D-1150]: nothing can tell the Go process behind this one who the
+                        // client was, so its own limiter keys every forwarded request on this
+                        // server's address, and may refuse them together.
+                        tracing::warn!(
+                            "RateLimitSettings.Enable is on and ServiceSettings.TrustedProxyIPHeader \
+                             is empty: the Go server limits every forwarded request as one client"
+                        );
+                    }
+                    limits
+                }
                 Err(err) => {
                     tracing::error!(error = %err, "could not read RateLimitSettings; no rate limiting");
                     RateLimits::default()
@@ -516,14 +542,58 @@ fn peer(parts: &Parts) -> Option<SocketAddr> {
         .map(|ConnectInfo(addr)| *addr)
 }
 
-/// `RateLimitHandler` around the whole TCP router (app/server.go:1056). Outermost, so it sees
-/// every request — served, forwarded or the web client's — before anything else runs.
+/// Which of the three `RateLimitedHandler` routes gorilla would match, if any: the method and the
+/// **decoded, clean** path exactly — an unclean one is redirected before any route matches, and
+/// the templates are anchored.
+fn rate_limited_route(parts: &Parts) -> Option<Route> {
+    if parts.method != Method::POST {
+        return None;
+    }
+    let target = parts.uri.path_and_query().map_or("/", |pq| pq.as_str());
+    let url = mm_model::go_url::parse_request_uri(target).ok()?;
+    let path = std::str::from_utf8(&url.path).ok()?;
+    if crate::web_static::mux_clean_path(path) != path {
+        return None;
+    }
+    match path {
+        "/api/v4/users/login" => Some(Route::Login),
+        "/api/v4/users/login/desktop_token" => Some(Route::DesktopToken),
+        "/api/v4/oauth/apps/register" => Some(Route::OAuthRegister),
+        _ => None,
+    }
+}
+
+/// A 429 the Go process wrote with its own limiter: it is passed through as Go wrote it, headers
+/// and all, rather than dressed in ours. See [D-1210] for when Go still refuses first.
+fn is_go_refusal(response: &Response) -> bool {
+    response.status() == StatusCode::TOO_MANY_REQUESTS
+        && response
+            .headers()
+            .get(crate::error::SERVED_BY)
+            .is_some_and(|v| v.as_bytes() == b"go")
+        && response.headers().contains_key(X_RATELIMIT_LIMIT)
+}
+
+/// `Server.Start`'s `RateLimitHandler` around the whole TCP router (app/server.go:1056), and then
+/// the matching `RateLimitedHandler` (api4/handlers.go:222) — the order Go runs them in, since
+/// the route's limiter sits **outside** `ServeHTTP` and so outside [`per_user`]. Outermost, so it
+/// sees every request — served, forwarded or the web client's — before anything else runs.
+///
+/// # This server's limiters decide, for forwarded requests too
+///
+/// Every request reaches Go's front wrapper, so every request is counted here, forwarded ones
+/// included; the Go process behind this one sees a subset of each key's requests and so, keyed on
+/// the same client ([`crate::client_ip::forwarded_address_header`]), never refuses first. The
+/// headers Go's limiters add to a forwarded answer are dropped by the proxy
+/// ([`strip_go_rate_limit_headers`]) and these written in their place — the global set, then the
+/// route's, then `ServeHTTP`'s per-user set, which is Go's order. [D-1150].
 pub(crate) async fn global(
     State(state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Response {
-    let Some(limiter) = limits(&state).await.global.as_ref() else {
+    let limits = limits(&state).await;
+    let Some(limiter) = limits.global.as_ref() else {
         return next.run(request).await;
     };
     let (parts, body) = request.into_parts();
@@ -532,96 +602,74 @@ pub(crate) async fn global(
     if verdict.limited {
         return bare_limit_exceeded(&verdict.headers);
     }
+    let mut ours = verdict.headers;
+    if let Some(route) = rate_limited_route(&parts).and_then(|route| limits.route(route)) {
+        let verdict = route.rate_limit_writer(&route.generate_key(&parts, peer(&parts)));
+        ours.extend(verdict.headers);
+        if verdict.limited {
+            return bare_limit_exceeded(&ours);
+        }
+    }
     let mut response = next.run(Request::from_parts(parts, body)).await;
-    let forwarded = response
-        .headers()
-        .get(crate::error::SERVED_BY)
-        .is_some_and(|v| v.as_bytes() == b"go");
-    prepend(response.headers_mut(), &verdict.headers, forwarded);
+    if !is_go_refusal(&response) {
+        prepend(response.headers_mut(), &ours);
+    }
     response
 }
 
-/// Put the global set **first**, as Go's outermost `Header().Add` does. On a forwarded answer the
-/// first value of each is Go's own global limiter's — keyed on this server's address — and is
-/// replaced rather than kept.
-fn prepend(headers: &mut HeaderMap, ours: &[(HeaderName, HeaderValue)], forwarded: bool) {
-    for (name, value) in ours {
-        let mut existing: Vec<HeaderValue> = headers.get_all(name).iter().cloned().collect();
-        if forwarded && !existing.is_empty() {
-            existing.remove(0);
+/// Put `ours` **first**, as Go's outermost `Header().Add`s are, ahead of whatever an inner layer
+/// added.
+fn prepend(headers: &mut HeaderMap, ours: &[(HeaderName, HeaderValue)]) {
+    let mut names: Vec<&HeaderName> = Vec::new();
+    for (name, _) in ours {
+        if !names.contains(&name) {
+            names.push(name);
         }
+    }
+    for name in names {
+        let existing: Vec<HeaderValue> = headers.get_all(name).iter().cloned().collect();
         headers.remove(name);
-        headers.append(name.clone(), value.clone());
+        for (_, value) in ours.iter().filter(|(n, _)| n == name) {
+            headers.append(name.clone(), value.clone());
+        }
         for rest in existing {
             headers.append(name.clone(), rest);
         }
     }
 }
 
-/// `RateLimitedHandler` for one route: a `route_layer` on its `POST`.
-async fn route(state: AppState, which: Route, request: Request, next: Next) -> Response {
-    let Some(limiter) = limits(&state).await.route(which) else {
-        return next.run(request).await;
-    };
-    let (parts, body) = request.into_parts();
-    let key = limiter.generate_key(&parts, peer(&parts));
-    let verdict = limiter.rate_limit_writer(&key);
-    if verdict.limited {
-        return bare_limit_exceeded(&verdict.headers);
+/// Drop the `X-RateLimit-*` values Go's limiters wrote on a forwarded answer, when this server's
+/// limiters are the ones deciding (see [`global`]). A 429 is left whole: that is Go refusing, and
+/// its headers are the refusal's. `Retry-After` is never Go's limiter's on anything but a 429.
+pub(crate) fn strip_go_rate_limit_headers(state: &AppState, response: &mut Response) {
+    let deciding = state
+        .rate_limits
+        .get()
+        .is_some_and(|limits| limits.global.is_some());
+    if !deciding || response.status() == StatusCode::TOO_MANY_REQUESTS {
+        return;
     }
-    let mut response = next.run(Request::from_parts(parts, body)).await;
-    add_headers(response.headers_mut(), &verdict.headers);
-    response
+    let headers = response.headers_mut();
+    for name in [X_RATELIMIT_LIMIT, X_RATELIMIT_REMAINING, X_RATELIMIT_RESET] {
+        headers.remove(name);
+    }
 }
 
-/// [`route`] for `POST /users/login`.
-pub(crate) async fn login(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    route(state, Route::Login, request, next).await
-}
-
-/// [`route`] for `POST /users/login/desktop_token`.
-pub(crate) async fn desktop_token(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    route(state, Route::DesktopToken, request, next).await
-}
-
-/// [`route`] for `POST /oauth/apps/register`.
-pub(crate) async fn oauth_register(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    route(state, Route::OAuthRegister, request, next).await
-}
-
-/// `UserIdRateLimit` in `web.Handler.ServeHTTP` (web/handlers.go:288), as a `route_layer` over
-/// every route this server serves — each is a `web.Handler` in Go — and not over the fallbacks,
-/// which are Go's to answer.
+/// The per-user step of `ServeHTTP` (web/handlers.go:288) for one request: `None` when it does not
+/// run — no limiter, `VaryByUser` off, no token outside the two service headers — and otherwise the
+/// verdict on the session's user id.
 ///
-/// It runs whenever a token was found outside the two service headers, **whether or not the
-/// session resolved**: a failed lookup or a refused query-string token leaves the context's
-/// session empty, so those requests share the key `""`. The refusal is written after `ServeHTTP`'s
-/// own headers, which `go_global_headers` adds to it as to any API answer.
-pub(crate) async fn per_user(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let Some(limiter) = limits(&state).await.global.as_ref() else {
-        return next.run(request).await;
-    };
+/// It runs whenever a token was found, **whether or not the session resolved**: a failed lookup or
+/// a refused query-string token leaves the context's session empty, so those requests share the
+/// key `""`.
+pub(crate) async fn per_user_verdict(state: &AppState, parts: &Parts) -> Option<Verdict> {
+    let limiter = limits(state).await.global.as_ref()?;
     if !limiter.use_auth {
-        return next.run(request).await;
+        return None;
     }
-    let (parts, body) = request.into_parts();
-    let Some((token, location)) = auth::parse_auth_token(&parts) else {
-        return next.run(Request::from_parts(parts, body)).await;
-    };
+    let (token, location) = auth::parse_auth_token(parts)?;
     if token.is_empty() {
-        return next.run(Request::from_parts(parts, body)).await;
+        return None;
     }
     let user_id = match state.app.get_session(&token).await {
         Ok(session) if session.is_oauth || location != TokenLocation::QueryString => {
@@ -629,14 +677,77 @@ pub(crate) async fn per_user(
         }
         _ => String::new(),
     };
-    let Some(verdict) = limiter.user_id_rate_limit(&user_id) else {
+    limiter.user_id_rate_limit(&user_id)
+}
+
+/// Whether [`per_user_verdict`] can ever run here — so a caller can skip the work around it.
+pub(crate) async fn per_user_enabled(state: &AppState) -> bool {
+    limits(state)
+        .await
+        .global
+        .as_ref()
+        .is_some_and(|limiter| limiter.use_auth)
+}
+
+/// Add a per-user verdict's headers to the answer — after everything the handler set, as Go's
+/// inner `Header().Add` is — unless Go refused the request itself.
+pub(crate) fn append_verdict(response: &mut Response, verdict: &Verdict) {
+    if !is_go_refusal(response) {
+        add_headers(response.headers_mut(), &verdict.headers);
+    }
+}
+
+/// The per-user refusal for an API handler (`IsStatic` false): `http.Error` after `ServeHTTP`'s
+/// headers. `go_global_headers` adds the fixed security set, `Expires` and the gzip wrapper's
+/// `Vary`, as to any API answer; the caller adds the request and version ids where it has them.
+pub(crate) fn per_user_refusal(verdict: &Verdict) -> Response {
+    limit_exceeded(&verdict.headers)
+}
+
+/// A refusal written **outside** every handler, which `go_global_headers` must leave alone.
+pub(crate) fn per_user_static_refusal(verdict: &Verdict, headers: HeaderMap) -> Response {
+    let mut response = limit_exceeded(&verdict.headers);
+    let target = response.headers_mut();
+    for (name, value) in &headers {
+        if !target.contains_key(name) {
+            target.insert(name.clone(), value.clone());
+        }
+    }
+    response
+        .extensions_mut()
+        .insert(crate::web_static::WebOwnHeaders);
+    response
+}
+
+/// `UserIdRateLimit` in `web.Handler.ServeHTTP` (web/handlers.go:288), as a `route_layer` over
+/// every route this server serves — each is a `web.Handler` in Go — and not over the fallbacks:
+/// the web client's pages and the Go web routes it forwards are counted by
+/// `web_static::fallback`, and nothing else a fallback reaches is a `web.Handler`.
+///
+/// **Not for a path segment gorilla would not have matched.** Such a request is forwarded by
+/// `mux_segments_or_forward` and answered by Go's api4 catch-all, a bare `HandlerFunc` with no
+/// per-user step; this layer runs before that one, so it asks the same question itself.
+pub(crate) async fn per_user(
+    State(state): State<AppState>,
+    params: RawPathParams,
+    request: Request,
+    next: Next,
+) -> Response {
+    if params
+        .iter()
+        .any(|(name, value)| !crate::segment_matches_go_mux_for(name, value))
+    {
+        return next.run(request).await;
+    }
+    let (parts, body) = request.into_parts();
+    let Some(verdict) = per_user_verdict(&state, &parts).await else {
         return next.run(Request::from_parts(parts, body)).await;
     };
     if verdict.limited {
-        return limit_exceeded(&verdict.headers);
+        return per_user_refusal(&verdict);
     }
     let mut response = next.run(Request::from_parts(parts, body)).await;
-    add_headers(response.headers_mut(), &verdict.headers);
+    append_verdict(&mut response, &verdict);
     response
 }
 
@@ -710,27 +821,66 @@ mod tests {
         assert!(Gcra::new(1, 0, 0).is_ok(), "an unbounded store is legal");
     }
 
-    /// The global set goes first; on a forwarded answer Go's own first value is dropped.
+    /// Ours go first, in the order written — the global set, then a route's — ahead of an inner
+    /// layer's per-user values.
     #[test]
-    fn the_global_set_is_prepended_and_replaces_gos() {
-        let ours = [(X_RATELIMIT_LIMIT, HeaderValue::from(101))];
-        let mut served = HeaderMap::new();
-        served.append(X_RATELIMIT_LIMIT, HeaderValue::from(11));
-        prepend(&mut served, &ours, false);
-        let values: Vec<_> = served.get_all(X_RATELIMIT_LIMIT).iter().collect();
-        assert_eq!(values, ["101", "11"]);
+    fn our_sets_are_prepended_in_order() {
+        let ours = [
+            (X_RATELIMIT_LIMIT, HeaderValue::from(101)),
+            (X_RATELIMIT_REMAINING, HeaderValue::from(100)),
+            (X_RATELIMIT_LIMIT, HeaderValue::from(11)),
+            (X_RATELIMIT_REMAINING, HeaderValue::from(10)),
+        ];
+        let mut inner = HeaderMap::new();
+        inner.append(X_RATELIMIT_LIMIT, HeaderValue::from(31));
+        prepend(&mut inner, &ours);
+        let values: Vec<_> = inner.get_all(X_RATELIMIT_LIMIT).iter().collect();
+        assert_eq!(values, ["101", "11", "31"]);
+        let values: Vec<_> = inner.get_all(X_RATELIMIT_REMAINING).iter().collect();
+        assert_eq!(values, ["100", "10"]);
+    }
 
-        let mut forwarded = HeaderMap::new();
-        forwarded.append(X_RATELIMIT_LIMIT, HeaderValue::from(7));
-        forwarded.append(X_RATELIMIT_LIMIT, HeaderValue::from(11));
-        prepend(&mut forwarded, &ours, true);
-        let values: Vec<_> = forwarded.get_all(X_RATELIMIT_LIMIT).iter().collect();
-        assert_eq!(values, ["101", "11"]);
-
-        let mut bare = HeaderMap::new();
-        prepend(&mut bare, &ours, true);
-        let values: Vec<_> = bare.get_all(X_RATELIMIT_LIMIT).iter().collect();
-        assert_eq!(values, ["101"]);
+    #[test]
+    fn the_three_routes_match_gorillas_templates() {
+        let route = |method: &str, target: &str| {
+            let parts = axum::http::Request::builder()
+                .method(method)
+                .uri(target)
+                .body(())
+                .expect("a request")
+                .into_parts()
+                .0;
+            rate_limited_route(&parts)
+        };
+        assert_eq!(route("POST", "/api/v4/users/login"), Some(Route::Login));
+        assert_eq!(
+            route("POST", "/api/v4/users/login?x=1"),
+            Some(Route::Login),
+            "the query is not the path"
+        );
+        assert_eq!(
+            route("POST", "/api/v4/users/%6Cogin"),
+            Some(Route::Login),
+            "gorilla matches the decoded path"
+        );
+        assert_eq!(
+            route("POST", "/api/v4/users/login/desktop_token"),
+            Some(Route::DesktopToken)
+        );
+        assert_eq!(
+            route("POST", "/api/v4/oauth/apps/register"),
+            Some(Route::OAuthRegister)
+        );
+        for (method, target) in [
+            ("GET", "/api/v4/users/login"),
+            ("PUT", "/api/v4/users/login"),
+            ("POST", "/api/v4/users/login/"),
+            ("POST", "/api/v4//users/login"),
+            ("POST", "/api/v4/users/login/type"),
+            ("POST", "/api/v4/users/x/../login"),
+        ] {
+            assert_eq!(route(method, target), None, "{method} {target}");
+        }
     }
 
     #[test]

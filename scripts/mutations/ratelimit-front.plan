@@ -1,0 +1,27 @@
+# Mutation plan for D-1150 (this server's limiters decide for forwarded requests too, and Go keys on
+# the client) and D-1151 (the per-user step on the web client's pages and Go's web routes).
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/ratelimit-front.plan
+#
+# Not planned: the over-long-URL skip in `per_user_step` (no parity row sends a URL past
+# MaximumURLLength with a token under VaryByUser); the request and version ids on an API-kind
+# refusal (per-process values, filtered by every comparison).
+
+fwd-header-off	crates/mm-api/src/proxy.rs	        outbound.insert(name, value);	        let _ = (name, value);	api	ratelimit
+fwd-header-appends	crates/mm-api/src/client_ip.rs	    let from_header = get_ip_address(headers, None, trusted_proxy_ip_header);\n    if !from_header.is_empty() {\n        return None;\n    }	    let from_header = get_ip_address(headers, None, trusted_proxy_ip_header);\n    if from_header.is_empty() {\n        return None;\n    }	lib	client_ip::
+fwd-header-last-name	crates/mm-api/src/client_ip.rs	        .iter()\n        .find_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())?;	        .iter()\n        .rev()\n        .find_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())?;	lib	client_ip::
+strip-off	crates/mm-api/src/ratelimit.rs	    if !deciding || response.status() == StatusCode::TOO_MANY_REQUESTS {\n        return;\n    }	    if true || !deciding || response.status() == StatusCode::TOO_MANY_REQUESTS {\n        return;\n    }	api	ratelimit
+route-limiter-skipped	crates/mm-api/src/ratelimit.rs	        "/api/v4/users/login" => Some(Route::Login),	        "/api/v4/users/login" => None,	api	ratelimit
+route-limiter-unclean	crates/mm-api/src/ratelimit.rs	    if crate::web_static::mux_clean_path(path) != path {\n        return None;\n    }\n    match path {	    match path.trim_end_matches('/') {	lib	ratelimit::
+prepend-appends	crates/mm-api/src/ratelimit.rs	        prepend(response.headers_mut(), &ours);	        add_headers(response.headers_mut(), &ours);	api	ratelimit
+per-user-charset-ignored	crates/mm-api/src/ratelimit.rs	        .any(|(name, value)| !crate::segment_matches_go_mux_for(name, value))	        .any(|(name, value)| name.is_empty() && !crate::segment_matches_go_mux_for(name, value))	api	ratelimit
+web-per-user-off	crates/mm-api/src/web_static.rs	        Some(kind) if crate::ratelimit::per_user_enabled(&state).await => {	        Some(kind) if false && crate::ratelimit::per_user_enabled(&state).await => {	api	ratelimit
+static-refused-as-api	crates/mm-api/src/web_static.rs	            crate::ratelimit::per_user_static_refusal(&verdict, headers)	            crate::ratelimit::per_user_static_refusal(&verdict, HeaderMap::new())	api	ratelimit
+api-refused-as-static	crates/mm-api/src/web_static.rs	            let mut refusal = crate::ratelimit::per_user_refusal(&verdict);	            let mut refusal = crate::ratelimit::per_user_static_refusal(&verdict, HeaderMap::new());	api	ratelimit
+kind-web-routes-static	crates/mm-api/src/web_static.rs	            "complete" | "login" | "mobile_login" | "signup",\n        ] => get && is_service(service),	            "complete" | "login" | "mobile_login" | "signup",\n        ] => false,	api	ratelimit
+kind-head-not-static	crates/mm-api/src/web_static.rs	    (get || *method == Method::HEAD).then_some(HandlerKind::Static)	    get.then_some(HandlerKind::Static)	lib	web_static::
+kind-plugins-counted	crates/mm-api/src/web_static.rs	    if rel.starts_with("/api/v4/") || crate::plugin_requests::plugin_route(rel).is_some() {	    if rel.starts_with("/api/v4/") {	lib	web_static::
+
+# ---- controls
+front-control-names-cap	crates/mm-api/src/ratelimit.rs	    let mut names: Vec<&HeaderName> = Vec::new();	    let mut names: Vec<&HeaderName> = Vec::with_capacity(4);	api	ratelimit
+front-control-service	crates/mm-api/src/web_static.rs	    !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_alphanumeric())\n}	    !segment.is_empty() && segment.bytes().all(|c| c.is_ascii_alphanumeric())\n}	lib	web_static::
