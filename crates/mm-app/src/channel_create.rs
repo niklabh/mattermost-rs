@@ -57,6 +57,7 @@ use mm_model::websocket_message::{
 };
 use mm_store::channel_member_history_store::ChannelMemberHistoryStore;
 use mm_store::channel_store::ChannelStore;
+use mm_store::team_store::TeamStore;
 use mm_store::user_store::UserStore;
 use mm_store::{ChannelSave, StoreError};
 
@@ -600,16 +601,24 @@ impl App {
     /// id this function then recognises and swallows, returning the channel the loser's insert
     /// found. Both paths are ported and only the first is reachable in a test.
     ///
-    /// # `RestrictDirectMessage = "team"` is forwarded
+    /// # `RestrictDirectMessage = "team"`
     ///
-    /// That branch needs `IsBotExemptFromDMRestrictions` (a plugin decision) or
-    /// `GetCommonTeamIDsForTwoUsers` (a store method this port does not have). The setting
-    /// defaults to `"any"`, so the forward is unreachable on a stock server; it is a forward
-    /// rather than a guess because refusing where Go allows would break every cross-team DM.
-    #[tracing::instrument(skip(self), fields(user_id = %user_id, other_user_id = %other_user_id, existed))]
+    /// After the lookup, so an existing DM is returned however the setting stands. Unless the
+    /// session holds `manage_system`, the two users must share a live team
+    /// ([`get_common_team_ids_for_two_users`](mm_store::team_store::get_common_team_ids_for_two_users),
+    /// which is also what lets a self-DM through) — **403
+    /// `api.channel.create_channel.direct_channel.team_restricted_error`** — unless one of them is
+    /// a bot [`App::is_bot_exempt_from_dm_restrictions`] exempts, checked first, in the order
+    /// `GetUsersByIds` returns them. A bot whose exemption is Go's to decide (plugins on, hosted
+    /// by Go) makes the whole create a forward, taken before anything is written.
+    ///
+    /// `session` is `None` where Go's context carries no session (the plugin API): no
+    /// `manage_system`, and no bot owner.
+    #[tracing::instrument(skip(self, session), fields(user_id = %user_id, other_user_id = %other_user_id, existed))]
     pub async fn get_or_create_direct_channel(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         user_id: &str,
         other_user_id: &str,
     ) -> AppResult<ChannelCreate> {
@@ -620,9 +629,24 @@ impl App {
         tracing::Span::current().record("existed", false);
 
         if self.config().restrict_direct_message == crate::config::DIRECT_MESSAGE_TEAM {
-            return Ok(ChannelCreate::Forward(
-                "TeamSettings.RestrictDirectMessage is 'team'",
-            ));
+            let manages_system = match session {
+                Some(session) => {
+                    self.session_has_permission_to(
+                        session,
+                        &mm_model::permission::PERMISSION_MANAGE_SYSTEM,
+                    )
+                    .await
+                }
+                None => false,
+            };
+            if !manages_system {
+                if let Some(forward) = self
+                    .check_direct_message_team_restriction(session, user_id, other_user_id)
+                    .await?
+                {
+                    return Ok(forward);
+                }
+            }
         }
 
         let channel = match self.create_direct_channel(user_id, other_user_id).await {
@@ -642,6 +666,61 @@ impl App {
         self.handle_creation_event(ctx, user_id, other_user_id, &channel)
             .await;
         Ok(ChannelCreate::Created(Box::new(channel)))
+    }
+
+    /// The body of `GetOrCreateDirectChannel`'s team-restriction branch (app/channel.go:361):
+    /// `Ok(None)` to go on and create, `Ok(Some(forward))` when a bot's exemption is Go's to
+    /// decide, and the 403 when the two users share no live team.
+    async fn check_direct_message_team_restriction(
+        &self,
+        session: Option<&mm_model::session::Session>,
+        user_id: &str,
+        other_user_id: &str,
+    ) -> AppResult<Option<ChannelCreate>> {
+        let users = self
+            .get_users_by_ids(&[user_id.to_owned(), other_user_id.to_owned()], 0)
+            .await?;
+        let session_user_id = session.map(|session| session.user_id.as_str());
+        for user in users.iter().filter(|user| user.is_bot) {
+            match self
+                .is_bot_exempt_from_dm_restrictions(session_user_id, &user.id)
+                .await?
+            {
+                crate::bot::BotExemption::Exempt => return Ok(None),
+                crate::bot::BotExemption::NotExempt => {}
+                crate::bot::BotExemption::Undecidable => {
+                    return Ok(Some(ChannelCreate::Forward(
+                        "a plugin-owned bot's DM exemption needs Go's plugin directory",
+                    )));
+                }
+            }
+        }
+
+        let common = self
+            .store()
+            .team()
+            .get_common_team_ids_for_two_users(user_id, other_user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "common teams for two users failed");
+                AppError::boxed(
+                    "GetCommonTeamIDsForUsers",
+                    "app.team.get_common_team_ids_for_users.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if common.is_empty() {
+            return Err(AppError::boxed(
+                "createDirectChannel",
+                "api.channel.create_channel.direct_channel.team_restricted_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+        Ok(None)
     }
 
     /// Port of `app.Server.getDirectChannel` (app/channel.go:4484).

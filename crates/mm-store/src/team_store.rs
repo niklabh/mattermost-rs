@@ -262,6 +262,13 @@ pub trait TeamStore {
         ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetCommonTeamIDsForTwoUsers` (team_store.go:1580).
+    fn get_common_team_ids_for_two_users(
+        &self,
+        user_id: &str,
+        other_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetCommonTeamIDsForMultipleUsers` (team_store.go:1606).
     fn get_common_team_ids_for_multiple_users(
         &self,
@@ -629,6 +636,15 @@ impl TeamStore for SqlTeamStore {
         get_many(&self.pool, ids).await
     }
 
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, other_user_id = %other_user_id))]
+    async fn get_common_team_ids_for_two_users(
+        &self,
+        user_id: &str,
+        other_user_id: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        get_common_team_ids_for_two_users(&self.pool, user_id, other_user_id).await
+    }
+
     #[tracing::instrument(skip_all, fields(users = user_ids.len(), found))]
     async fn get_common_team_ids_for_multiple_users(
         &self,
@@ -745,6 +761,49 @@ pub async fn get_many(pool: &PgPool, ids: &[String]) -> Result<Vec<Team>, StoreE
 
     tracing::Span::current().record("found", rows.len());
     Ok(rows.into_iter().map(team_from_row).collect())
+}
+
+/// Port of `SqlTeamStore.GetCommonTeamIDsForTwoUsers` (team_store.go:1580) — the team check
+/// behind `TeamSettings.RestrictDirectMessage = "team"` on a DM create.
+///
+/// # Why not [`get_common_team_ids_for_multiple_users`] with two ids
+///
+/// Both drop a departed membership and a soft-deleted team. They differ on the **self-DM**: this
+/// is a self-join of `TeamMembers`, so `user_id == other_user_id` returns every team the user is
+/// in, while the other counts memberships against the list's length — one row per team against
+/// a length of two — and answers none. Reusing it would refuse every self-DM Go allows.
+///
+/// No `ORDER BY`, as in Go; the only caller tests emptiness.
+#[tracing::instrument(skip(pool), fields(found))]
+pub async fn get_common_team_ids_for_two_users(
+    pool: &PgPool,
+    user_id: &str,
+    other_user_id: &str,
+) -> Result<Vec<String>, StoreError> {
+    let ids: Vec<String> = sqlx::query_scalar!(
+        r#"
+        SELECT tm1.teamid AS "teamid!"
+          FROM teammembers AS tm1
+         INNER JOIN teammembers AS tm2 ON tm1.teamid = tm2.teamid
+         INNER JOIN teams ON tm1.teamid = teams.id
+         WHERE tm1.userid = $1
+           AND tm1.deleteat = 0
+           AND tm2.userid = $2
+           AND tm2.deleteat = 0
+           AND teams.deleteat = 0
+        "#,
+        user_id,
+        other_user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with user IDs {user_id} and {other_user_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", ids.len());
+    Ok(ids)
 }
 
 /// Port of `SqlTeamStore.GetCommonTeamIDsForMultipleUsers` (team_store.go:1606).

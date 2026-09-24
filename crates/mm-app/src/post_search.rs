@@ -85,6 +85,7 @@ impl App {
     pub async fn search_posts_for_user(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         terms: &str,
         user_id: &str,
         team_id: &str,
@@ -114,6 +115,7 @@ impl App {
                 params.in_channels = self
                     .convert_channel_names_to_channel_ids(
                         ctx,
+                        session,
                         params.in_channels,
                         user_id,
                         team_id,
@@ -123,6 +125,7 @@ impl App {
                 params.excluded_channels = self
                     .convert_channel_names_to_channel_ids(
                         ctx,
+                        session,
                         params.excluded_channels,
                         user_id,
                         team_id,
@@ -182,6 +185,7 @@ impl App {
     pub(crate) async fn convert_channel_names_to_channel_ids(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         mut channels: StringArray,
         user_id: &str,
         team_id: &str,
@@ -191,6 +195,7 @@ impl App {
             match self
                 .parse_and_fetch_channel_id_by_name_from_in_filter(
                     ctx,
+                    session,
                     name,
                     user_id,
                     team_id,
@@ -242,6 +247,7 @@ impl App {
     async fn parse_and_fetch_channel_id_by_name_from_in_filter(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         channel_name: &str,
         user_id: &str,
         team_id: &str,
@@ -261,7 +267,7 @@ impl App {
             let user = self.get_user_by_username(rest).await?;
             return Ok(
                 match self
-                    .get_or_create_direct_channel(ctx, user_id, &user.id)
+                    .get_or_create_direct_channel(ctx, session, user_id, &user.id)
                     .await?
                 {
                     ChannelCreate::Created(channel) => InFilterChannel::Found(channel),

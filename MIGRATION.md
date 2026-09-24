@@ -14856,3 +14856,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `handleWebhookEvents` relevance loop (app/webhook.go:62) | `mm_app::post_create::outgoing_hook_fires` | DONE | 1 unit table, `parity::post_creates::only_an_outgoing_webhook_that_fires_forwards_the_post`; 8 mutations, 6 caught, 2 controls survived | A createPost is forwarded only when a hook would fire; any hook on the team used to forward every post (the `licensed_sweep` priority regression). |
 | `countMentionsFromPost`, `isPostMention`, `isCommentMention`, `markChannelAsUnreadFromPostCRTUnsupported`'s reply arm | `mm_app::post_unread` | DONE, closes [D-421] | 2 unit, `parity::set_unread_mentions` (2), `parity::post_acks` flipped to served; 14 mutations, 12 caught, 2 controls survived | `GetPostsAfterPost` reads as the **session's** user, not the marked user. |
 
+## Tech-debt payoff: the DM restrictions — D-239, D-240 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `GetOrCreateDirectChannel`'s `RestrictDirectMessage = "team"` branch, `Team().GetCommonTeamIDsForTwoUsers`, `IsBotExemptFromDMRestrictions` | `App::get_or_create_direct_channel`, `mm_store::team_store::get_common_team_ids_for_two_users`, `App::is_bot_exempt_from_dm_restrictions` | DONE | 4 unit + `parity::dm_team_restriction` (8 cases) | A bot a plugin may own is forwarded while Go hosts plugins with plugins on; the two-user query is what lets a self-DM through. The session now reaches the DM create from search's `in:@user` too. |
+| `UserCanSeeOtherUser` for a restricted caller on both message-channel creates | `App::user_can_see_other_user` (already ported) | DONE | `parity::view_restricted_creates` | Test only; the team half needs edited roles to be reached. |

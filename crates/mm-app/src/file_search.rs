@@ -78,6 +78,7 @@ impl App {
     pub async fn search_files_in_team_for_user(
         &self,
         ctx: &crate::plugin_hooks::HookContext,
+        session: Option<&mm_model::session::Session>,
         terms: &str,
         user_id: &str,
         team_id: &str,
@@ -108,6 +109,7 @@ impl App {
                 params.in_channels = self
                     .convert_channel_names_to_channel_ids(
                         ctx,
+                        session,
                         params.in_channels,
                         user_id,
                         team_id,
@@ -117,6 +119,7 @@ impl App {
                 params.excluded_channels = self
                     .convert_channel_names_to_channel_ids(
                         ctx,
+                        session,
                         params.excluded_channels,
                         user_id,
                         team_id,
