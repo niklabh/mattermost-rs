@@ -12,10 +12,20 @@
 //!
 //! # What is forwarded
 //!
-//! A member whose removal this port cannot reproduce (a guest, a shared channel — see
-//! [`mm_app::App::remove_user_from_channel`]) makes the sweep a [`MemberWrite::Forward`], and the
-//! request is handed to Go whole. The deactivated-member sweep may already have run by then; it
-//! is a plain `DELETE` Go repeats without effect.
+//! Only the `force` sweep can forward, and only **before** the move writes anything: a member
+//! whose removal this port cannot reproduce — a guest (whose last channel on the team evicts
+//! them from it), a group-constrained channel swept by somebody else, a shared channel; see
+//! [`mm_app::App::remove_user_from_channel`] — makes the sweep a [`MemberWrite::Forward`], and
+//! the request is handed to Go whole. All three are public Go code this port owes, not private
+//! code ([D-1130]). The deactivated-member sweep may already have run by then; it is a plain
+//! `DELETE` Go repeats without effect. `App::move_channel` itself never forwards.
+//!
+//! # The audit
+//!
+//! Go's two `c.LogAudit` calls on success are two `Audits` rows (`channel=<name>`,
+//! `team=<name>`), written here through [`mm_app::App::log_audit`]. The `MakeAuditRecord` /
+//! `LogAuditRec` record goes to Go's audit *log* (mlog), which nothing over the API can read and
+//! this server does not keep.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -59,6 +69,8 @@ pub async fn move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    // `c.AppContext.Path()`, the `Action` of the two audit rows.
+    let path = parts.uri.path().to_owned();
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -131,14 +143,29 @@ pub async fn move_channel(
         }
     }
 
-    match state
+    if let Err(err) = state
         .app
         .move_channel(&team, &mut channel, Some(&user), &hook_ctx)
         .await
     {
-        Ok(MemberWrite::Done(())) => {}
-        Ok(MemberWrite::Forward(why)) => return forward(state, why).await,
-        Err(err) => return ApiError::from(*err).into_response(),
+        return ApiError::from(*err).into_response();
+    }
+
+    // `c.LogAudit` twice, on success only — two `Audits` rows.
+    for extra_info in [
+        format!("channel={}", channel.name),
+        format!("team={}", team.name),
+    ] {
+        state
+            .app
+            .log_audit(
+                &session.0.user_id,
+                &hook_ctx.session_id,
+                &hook_ctx.ip_address,
+                &path,
+                &extra_info,
+            )
+            .await;
     }
 
     let mut body = match serde_json::to_vec(&channel) {

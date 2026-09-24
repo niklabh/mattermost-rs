@@ -414,6 +414,12 @@ async fn an_outgoing_hook_round_trips_and_regenerates_its_token() {
         regenerated["create_at"], updated["create_at"],
         "regen does not touch create_at"
     );
+    // `SqlWebhookStore.UpdateOutgoing` stamps `UpdateAt` itself and the regen answers the hook
+    // it stamped (webhook_store.go:395, webhook.go:882).
+    assert!(
+        regenerated["update_at"].as_i64() > updated["update_at"].as_i64(),
+        "regen answers the store's fresh update_at: {regenerated} after {updated}"
+    );
 
     // And Go agrees about the regen's status and shape, on its own hook.
     let (go_status, go_regen_raw) = post_hook(
