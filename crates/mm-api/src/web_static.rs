@@ -342,7 +342,7 @@ fn with_query(path: &str, raw_query: &str) -> String {
 }
 
 /// Port of gorilla's `cleanPath` (mux.go:464): `path.Clean`, with a trailing slash put back.
-fn mux_clean_path(p: &str) -> String {
+pub(crate) fn mux_clean_path(p: &str) -> String {
     if p.is_empty() {
         return "/".to_owned();
     }
@@ -434,7 +434,7 @@ pub async fn fallback(State(state): State<AppState>, request: Request) -> Respon
 
 /// Gorilla's redirect to the clean path: `Location` and a 301, nothing else — it runs before any
 /// handler, so none of their headers are set.
-fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response {
+pub(crate) fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response {
     let mut target = url.clone();
     target.path = cleaned.into_bytes();
     let mut headers = HeaderMap::new();
@@ -447,7 +447,7 @@ fn mux_clean_redirect(url: &GoUrl, cleaned: String, method: &Method) -> Response
 /// An empty body framed as `net/http` frames it: `Content-Length: 0` on a `GET` whose handler
 /// wrote nothing, **no length at all** on a `HEAD` (chunkWriter.writeHeader's
 /// `!isHEAD || len(p) > 0`).
-fn empty_body(method: &Method) -> Body {
+pub(crate) fn empty_body(method: &Method) -> Body {
     if *method == Method::HEAD {
         Body::from_stream(futures_util::stream::empty::<
             Result<Bytes, std::convert::Infallible>,
@@ -1145,7 +1145,7 @@ fn is_api_call(path: &str, subpath: &str) -> bool {
 /// Its message is the one `NewAppError` set at construction, which is `i18n.T`: the
 /// **`DefaultServerLocale`** translation, not the caller's. This page never sees an
 /// `Accept-Language`, because `handleContextError` is exactly what it does not go through.
-fn handle_404(server_locale: &str, mut headers: HeaderMap, path: &str) -> Response {
+pub(crate) fn handle_404(server_locale: &str, mut headers: HeaderMap, path: &str) -> Response {
     let mut err =
         mm_model::utils::AppError::new("Handle404", "api.context.404.app_error", None, "", 404);
     if let Some(bundle) = mm_app::i18n::loaded() {

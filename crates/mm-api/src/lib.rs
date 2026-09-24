@@ -71,6 +71,7 @@ pub mod login;
 pub mod manualtest;
 pub mod migrate_auth;
 pub mod multipart;
+pub mod mux_guard;
 pub mod notify_admin;
 pub mod oauth;
 pub mod outgoing_oauth_writes;
@@ -265,8 +266,17 @@ impl AppState {
 /// route did exactly that, and a parity test caught it as an empty response body.
 ///
 /// So every migrated path goes through here rather than being registered directly.
+///
+/// # No `Allow` header
+///
+/// Merged with an `any` router rather than given a `fallback`, because a `MethodRouter` with a
+/// fallback stamps `Allow: <its methods>` on whatever the fallback answers — so every forwarded
+/// method on a partially migrated path carried an `Allow` header Go never sends (nothing in the Go
+/// tree sets one, and gorilla's own 405 has none). `any` marks the merged router
+/// `AllowHeader::Skip`, which is the one way to turn that off. Found with [D-1110]: a `HEAD` to
+/// `POST /users/login` answered `allow: POST` beside Go's 404.
 fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
-    methods.fallback(proxy::forward_to_go)
+    methods.merge(axum::routing::any(proxy::forward_to_go))
 }
 
 /// Mark the method routes registered so far as `TrustRequester` — Go's
@@ -3806,6 +3816,13 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             translate_error_messages,
+        ))
+        // gorilla's method match, ahead of every route: a `HEAD` into `/api/v4` is `Handle404`
+        // except on the three file reads. Outside the error translation, because `Handle404`
+        // never goes through `handleContextError`. See [`mux_guard`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            mux_guard::api4_head,
         ))
         // `ServeHTTP` computes the client address for the request context before the handler
         // runs; see [`client_ip`].

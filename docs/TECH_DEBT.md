@@ -10032,7 +10032,10 @@ Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`
 
 ## D-1110 · `HEAD` on an api4 `GET` route is Go's 404 and our `GET` headers
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Closed** 2026-09-24 — `mm_api::mux_guard` answers every `HEAD /api/v4/…` but the three file reads with
+the catch-all's `Handle404` on both routers (and gorilla's clean-path redirect on every method);
+`partially_migrated` no longer adds `Allow` to a forwarded method. `parity::api_head` sweeps all api4 `GET`s.
 
 Go registers api4 routes with `.Methods("GET")`, and gorilla does not add `HEAD`, so
 `HEAD /api/v4/system/ping` is a 404 from Go. axum's `get()` answers `HEAD` with the `GET` handler,

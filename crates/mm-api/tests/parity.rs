@@ -303,4 +303,6 @@ mod parity {
     pub mod manualtest;
     // Appended 2026-09-20: the translated error message in eight locales (D-092).
     pub mod error_i18n;
+    // Appended 2026-09-24: HEAD on the api4 tree, as gorilla answers it (D-1110).
+    pub mod api_head;
 }

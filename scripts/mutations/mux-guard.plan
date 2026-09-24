@@ -1,0 +1,28 @@
+# Mutation plan for D-1110 (HEAD on the api4 tree is gorilla's catch-all 404), gorilla's clean-path
+# redirect on every method, and the Allow header axum's method fallback added to every forwarded
+# method.
+#
+#   MUTATE_PACKAGE=mm-api scripts/mutate-batch.sh scripts/mutations/mux-guard.plan
+#
+# Not planned, because they are wire-equivalent: the local guard taking the file reads (the socket
+# registers no file route, so the HEAD falls to the socket fallback and Go answers the same 404).
+
+head-file-tail-info	crates/mm-api/src/mux_guard.rs	matches!(tail, "" | "/thumbnail" | "/preview")	matches!(tail, "" | "/thumbnail" | "/preview" | "/info")	lib	mux_guard::
+head-file-id-any	crates/mm-api/src/mux_guard.rs	&& id.bytes().all(|b| b.is_ascii_alphanumeric())	&& id.bytes().all(|b| b != b'/')	lib	mux_guard::
+head-no-file-exception	crates/mm-api/src/mux_guard.rs	if files == FileReads::TakeHead && is_file_read_taking_head(path) {	if false && files == FileReads::TakeHead && is_file_read_taking_head(path) {	api	api_head
+head-raw-prefix	crates/mm-api/src/mux_guard.rs	*method == Method::HEAD && url.path.starts_with(b"/api/v4/");	*method == Method::HEAD && target.as_bytes().starts_with(b"/api/v4/");	lib	mux_guard::
+head-subpath-ignored	crates/mm-api/src/mux_guard.rs	if subpath != "/" {	if subpath.is_empty() {	lib	mux_guard::
+head-unclean-forwarded	crates/mm-api/src/mux_guard.rs	return Decision::Redirect(Box::new(url), cleaned);	return Decision::Route;	api	api_head
+head-long-at-2048	crates/mm-api/src/mux_guard.rs	.is_none_or(|n| n > gzhttp::BUFFER_BEFORE_CHUNKING_SIZE as u64);	.is_none_or(|n| n >= gzhttp::BUFFER_BEFORE_CHUNKING_SIZE as u64);	api	api_head
+head-long-never	crates/mm-api/src/mux_guard.rs	if !long {	if true || !long {	api	api_head
+head-guard-off	crates/mm-api/src/mux_guard.rs	let head_into_api4 = *method == Method::HEAD &&	let head_into_api4 = *method == Method::PATCH &&	lib	mux_guard::
+head-local-guard-off	crates/mm-api/src/mux_guard.rs	guard(state, FileReads::Absent, request, next).await	next.run(request).await	api	api_head
+allow-back-tcp	crates/mm-api/src/lib.rs	methods.merge(axum::routing::any(proxy::forward_to_go))	methods.fallback(proxy::forward_to_go)	lib	mux_guard::
+allow-back-local	crates/mm-api/src/local.rs	methods.merge(axum::routing::any(forward_to_go_local))	methods.fallback(forward_to_go_local)	api	api_head
+
+clean-only-for-head	crates/mm-api/src/mux_guard.rs	if cleaned != path {	if head_into_api4 && cleaned != path {	api	api_head
+clean-redirect-as-head	crates/mm-api/src/mux_guard.rs	web_static::mux_clean_redirect(&url, cleaned, request.method())	web_static::mux_clean_redirect(&url, cleaned, &Method::HEAD)	api	api_head
+
+# ---- controls
+head-control-path-fn	crates/mm-api/src/mux_guard.rs	.map_or("/", |pq| pq.as_str())	.map_or("/", axum::http::uri::PathAndQuery::as_str)	api	api_head
+head-control-tail-order	crates/mm-api/src/mux_guard.rs	matches!(tail, "" | "/thumbnail" | "/preview")	matches!(tail, "/preview" | "" | "/thumbnail")	lib	mux_guard::
