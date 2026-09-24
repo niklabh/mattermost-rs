@@ -567,22 +567,17 @@ pub(crate) async fn decode_full_channel_search(
             return Err(ApiError::invalid_param("channel_search"));
         }
     };
-    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
+    // `var channelSearch *model.ChannelSearch`: a decode error and the nil `null` leaves are the
+    // same 400.
+    match mm_model::utils::decode_one_from_json::<Option<mm_model::channel_search::ChannelSearch>>(
+        &bytes,
+    ) {
+        Ok(Some(search)) => Ok(search),
+        Ok(None) => Err(ApiError::invalid_param("channel_search")),
         Err(err) => {
             tracing::debug!(error = %err, "channel search body did not decode");
-            return Err(ApiError::invalid_param("channel_search"));
+            Err(ApiError::invalid_param("channel_search"))
         }
-    };
-    match decoded {
-        Some(value @ serde_json::Value::Object(_)) => serde_json::from_value::<
-            mm_model::channel_search::ChannelSearch,
-        >(value)
-        .map_err(|err| {
-            tracing::debug!(error = %err, "channel search body has the wrong field types");
-            ApiError::invalid_param("channel_search")
-        }),
-        _ => Err(ApiError::invalid_param("channel_search")),
     }
 }
 
@@ -656,21 +651,14 @@ async fn decode_channel_search(request: Request) -> Result<ChannelSearch, ApiErr
             return Err(ApiError::invalid_param("channel_search"));
         }
     };
-    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
-        Ok(decoded) => decoded,
+    // `var props *model.ChannelSearch`: a decode error and a `null` body are the same 400.
+    match mm_model::utils::decode_one_from_json::<Option<ChannelSearch>>(&bytes) {
+        Ok(Some(search)) => Ok(search),
+        Ok(None) => Err(ApiError::invalid_param("channel_search")),
         Err(err) => {
             tracing::debug!(error = %err, "channel search body did not decode");
-            return Err(ApiError::invalid_param("channel_search"));
+            Err(ApiError::invalid_param("channel_search"))
         }
-    };
-    match decoded {
-        Some(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value::<ChannelSearch>(value).map_err(|err| {
-                tracing::debug!(error = %err, "channel search body has the wrong field types");
-                ApiError::invalid_param("channel_search")
-            })
-        }
-        _ => Err(ApiError::invalid_param("channel_search")),
     }
 }
 
@@ -3665,24 +3653,13 @@ async fn serve_view_channel(
     //   so `["x","y",true]` would decode to a populated view and answer 200. Same trap
     //   `search_channels_for_team` documents.
     //
-    // The two decoding divergences already measured on this type stand and are not re-litigated
-    // here: Go accepts `null` into an individual scalar where serde rejects the whole document
-    // ([D-057]), and Go matches field names case-insensitively ([D-040]).
-    let decoded: Option<serde_json::Value> = mm_model::utils::decode_one_from_json(&bytes)
-        .map_err(|err| {
+    // A `null` member, a folded key or a repeated one decode as Go decodes them ([D-057], [D-040],
+    // [D-071]), through the shared body decoder.
+    let view: mm_model::channel_view::ChannelView =
+        mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
             tracing::debug!(error = %err, "channel view body did not decode");
             ApiError::invalid_param("channel_view")
         })?;
-    let view: mm_model::channel_view::ChannelView = match decoded {
-        None => mm_model::channel_view::ChannelView::default(),
-        Some(value @ serde_json::Value::Object(_)) => {
-            serde_json::from_value(value).map_err(|err| {
-                tracing::debug!(error = %err, "channel view body has the wrong field types");
-                ApiError::invalid_param("channel_view")
-            })?
-        }
-        Some(_) => return Err(ApiError::invalid_param("channel_view")),
-    };
     tracing::Span::current().record(
         "channels",
         !view.channel_id.is_empty() as usize + !view.prev_channel_id.is_empty() as usize,

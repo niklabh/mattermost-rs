@@ -520,22 +520,14 @@ fn encode_event(event: &WebSocketEvent, precomputed: bool) -> Result<String, ser
 /// The body of `readPump`'s loop (web_conn.go:463) for one text frame: decode, then route unless
 /// the action belongs to plugins. `Break` closes the connection.
 async fn dispatch_text(state: &AppState, conn: &Arc<WebConn>, text: &str) -> ControlFlow<()> {
-    // `json.NewDecoder(rd).Decode(&req)` reads **one** JSON value and never looks past it, so
-    // `{"seq":1,"action":"ping"} trailing` is a ping. `from_str` would refuse the trailing bytes;
-    // the stream deserializer stops where the decoder does.
-    let request = match serde_json::Deserializer::from_str(text)
-        .into_iter::<WebSocketRequest>()
-        .next()
-    {
-        Some(Ok(request)) => request,
-        Some(Err(err)) => {
-            // `readPump` returns on a decode failure, which closes the socket.
+    // `var req model.WebSocketRequest; json.NewDecoder(rd).Decode(&req)` — the shared body
+    // decoder's rules: one JSON value and nothing past it (`{"seq":1,"action":"ping"} trailing`
+    // is a ping), `null` is the zero request, keys fold and `null` members are ignored. A failure,
+    // an empty frame (`io.EOF`) included, makes `readPump` return, which closes the socket.
+    let request: WebSocketRequest = match mm_model::utils::decode_one_from_json(text.as_bytes()) {
+        Ok(request) => request,
+        Err(err) => {
             tracing::debug!(error = %err, "websocket.Decode");
-            return ControlFlow::Break(());
-        }
-        None => {
-            // An empty or all-whitespace frame is `io.EOF` from the decoder — the same return.
-            tracing::debug!("websocket.Decode: empty frame");
             return ControlFlow::Break(());
         }
     };

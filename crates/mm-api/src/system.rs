@@ -398,7 +398,11 @@ pub async fn complete_onboarding(
     let bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
-    let parsed = serde_json::from_slice::<Value>(&bytes);
+    // `CompleteOnboardingRequestFromReader` is `Decode` into a `*CompleteOnboardingRequest`: any
+    // decode error is the 400, and `null` is the nil pointer the handler then dereferences.
+    let parsed = mm_model::utils::decode_one_from_json::<
+        Option<mm_model::onboarding::CompleteOnboardingRequest>,
+    >(&bytes);
     let forward = |state: AppState, why: &'static str| async move {
         tracing::Span::current().record("forwarded", true);
         tracing::debug!(reason = why, "handing the onboarding completion to Go");
@@ -406,14 +410,9 @@ pub async fn complete_onboarding(
         proxy::forward_to_go(State(state), request).await
     };
     let onboarding = match parsed {
-        Ok(Value::Null) => return forward(state, "a nil request Go dereferences").await,
-        Ok(value @ Value::Object(_)) => {
-            match serde_json::from_value::<mm_model::onboarding::CompleteOnboardingRequest>(value) {
-                Ok(onboarding) => onboarding,
-                Err(_) => return forward(state, "a body Go decodes partially").await,
-            }
-        }
-        _ => {
+        Ok(None) => return forward(state, "a nil request Go dereferences").await,
+        Ok(Some(onboarding)) => onboarding,
+        Err(_) => {
             return ApiError::from(AppError::new(
                 "completeOnboarding",
                 "app.system.complete_onboarding_request.app_error",

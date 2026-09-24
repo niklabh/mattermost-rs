@@ -32,8 +32,19 @@ async fn send(
         .await
         .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
     let status = response.status().as_u16();
-    if base == RUST {
+    // A folded forwarded field is expected to reach Go; every other case must be served here.
+    if base == RUST && !body.contains("NOT_IN_CHANNEL_ID") {
         assert_served_by_rust(response.headers(), path);
+    }
+    if base == RUST && body.contains("NOT_IN_CHANNEL_ID") {
+        assert_eq!(
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("go"),
+            "a folded forwarded field must be handed to Go"
+        );
     }
     (status, response.bytes().await.expect("body reads").to_vec())
 }
@@ -118,6 +129,151 @@ async fn an_array_a_null_and_trailing_bytes_are_answered_as_go_answers_them() {
             assert_error_bodies_match_except_known_gaps(&go_body, &rust_body, &label);
         });
         if outcome.is_err() {
+            failures.push(format!(
+                "{label}: bodies differ\n  go: {}\n  rs: {}",
+                String::from_utf8_lossy(&go_body),
+                String::from_utf8_lossy(&rust_body)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} cases differ:\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n")
+    );
+}
+
+/// Go's other decoding rules, now in the shared body decoder: a `null` member ([D-057]), a `null`
+/// slice element ([D-075]), a key in another case — including U+212A KELVIN SIGN, which folds to
+/// `K` ([D-040], [D-460]) — and a repeated key ([D-071]). serde's derive alone answers each of
+/// these differently from Go; every case below was a divergence before.
+///
+/// Success answers are compared byte for byte (each is a search that matches nothing, or a
+/// focus-loss view), errors as whole documents.
+#[tokio::test]
+async fn null_members_folded_keys_and_repeated_keys_are_answered_as_go_answers_them() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = logged_in_user_id().to_owned();
+    let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let absent = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
+    let none = "mmrs-go-json-nomatch-zq";
+
+    let cases: Vec<(&str, String, String)> = vec![
+        // Emoji search: a folded `term`, a Kelvin-sign `prefix_only`'s cousin, a `null` bool.
+        (
+            "POST",
+            "/api/v4/emoji/search".into(),
+            format!(r#"{{"TERM":"{none}"}}"#),
+        ),
+        (
+            "POST",
+            "/api/v4/emoji/search".into(),
+            format!(r#"{{"term":"{none}","prefix_only":null}}"#),
+        ),
+        (
+            "POST",
+            "/api/v4/emoji/search".into(),
+            format!(r#"{{"term":"x","term":"{none}"}}"#),
+        ),
+        // A folded forwarded field still hands the search to Go, whose answer for a
+        // `not_in_channel_id` without a `team_id` is a 400.
+        (
+            "POST",
+            "/api/v4/users/search".into(),
+            format!(r#"{{"term":"{none}","NOT_IN_CHANNEL_ID":"{absent}"}}"#),
+        ),
+        // User and team searches: folded keys.
+        (
+            "POST",
+            "/api/v4/users/search".into(),
+            format!(r#"{{"Term":"{none}"}}"#),
+        ),
+        (
+            "POST",
+            "/api/v4/teams/search".into(),
+            format!(r#"{{"TERM":"{none}"}}"#),
+        ),
+        (
+            "POST",
+            format!("/api/v4/teams/{team}/channels/search"),
+            format!(r#"{{"tErM":"{none}","team_ids":[null]}}"#),
+        ),
+        // Status: a folded `user_id` reaches the status check rather than the id check.
+        (
+            "PUT",
+            format!("/api/v4/users/{me}/status"),
+            format!(r#"{{"USER_ID":"{me}","status":"bogus"}}"#),
+        ),
+        // Reactions: folded keys, a Kelvin sign, and a repeated `user_id` whose last value wins.
+        (
+            "POST",
+            "/api/v4/reactions".into(),
+            format!(r#"{{"USER_ID":"{me}","POST_ID":"{absent}","EMOJI_NAME":"smile"}}"#),
+        ),
+        (
+            "POST",
+            "/api/v4/reactions".into(),
+            format!(
+                "{{\"user_id\":\"{me}\",\"post_id\":\"{absent}\",\"emoji_name\":\"smile\",\"create_at\":null}}"
+            ),
+        ),
+        (
+            "POST",
+            "/api/v4/reactions".into(),
+            format!(
+                r#"{{"user_id":"{absent}","user_id":"{me}","post_id":"{absent}","emoji_name":"smile"}}"#
+            ),
+        ),
+        // A focus-loss view with `null` ids.
+        (
+            "POST",
+            "/api/v4/channels/members/me/view".into(),
+            r#"{"channel_id":null,"prev_channel_id":null,"collapsed_threads_supported":null}"#
+                .into(),
+        ),
+        // Preferences: a `null` value and a folded key in an element.
+        (
+            "PUT",
+            format!("/api/v4/users/{me}/preferences"),
+            format!(r#"[{{"user_id":"{me}","category":"mmrs_go_json","name":"n","value":null}}]"#),
+        ),
+        (
+            "PUT",
+            format!("/api/v4/users/{me}/preferences"),
+            format!(
+                "[{{\"USER_ID\":\"{me}\",\"category\":\"mmrs_go_json\",\"NAME\":\"\u{212a}\",\"Value\":\"v\"}}]"
+            ),
+        ),
+    ];
+
+    let mut failures = Vec::new();
+    for (method, path, body) in &cases {
+        let label = format!("{method} {path} {body}");
+        let (go_status, go_body) = send(&http, GO, &token, method, path, body).await;
+        let (rust_status, rust_body) = send(&http, RUST, &token, method, path, body).await;
+        if go_status != rust_status {
+            failures.push(format!(
+                "{label}: status go {go_status} rust {rust_status}\n  go: {}\n  rs: {}",
+                String::from_utf8_lossy(&go_body),
+                String::from_utf8_lossy(&rust_body)
+            ));
+            continue;
+        }
+        let same = if go_status < 400 {
+            go_body == rust_body
+        } else {
+            std::panic::catch_unwind(|| {
+                assert_error_bodies_match_except_known_gaps(&go_body, &rust_body, &label);
+            })
+            .is_ok()
+        };
+        if !same {
             failures.push(format!(
                 "{label}: bodies differ\n  go: {}\n  rs: {}",
                 String::from_utf8_lossy(&go_body),

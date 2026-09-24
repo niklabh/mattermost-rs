@@ -627,12 +627,6 @@ async fn serve_marketplace(
 
 pub(crate) const INSTALL_MARKETPLACE: &str = "installMarketplacePlugin";
 
-/// The `json:` names of `InstallMarketplacePluginRequest`, for Go's case-insensitive match.
-const INSTALL_REQUEST_FIELDS: mm_model::go_json::GoFields = mm_model::go_json::GoFields {
-    names: &["id", "version"],
-    nested: &[],
-};
-
 /// `PluginRequestFromReader` (marketplace_plugin.go:127): `json.NewDecoder(…).Decode(&r)` into a
 /// pointer — the first JSON value, keys matched case-insensitively. `None` is a failure.
 ///
@@ -642,12 +636,11 @@ const INSTALL_REQUEST_FIELDS: mm_model::go_json::GoFields = mm_model::go_json::G
 fn plugin_request_from_json(
     bytes: &[u8],
 ) -> Option<mm_model::marketplace_plugin::InstallMarketplacePluginRequest> {
-    let mut value: serde_json::Value = mm_model::utils::decode_one_from_json(bytes).ok()?;
-    if !value.is_object() {
-        return None;
-    }
-    mm_model::go_json::remap_object_keys(&mut value, &INSTALL_REQUEST_FIELDS);
-    serde_json::from_value(value).ok()
+    mm_model::utils::decode_one_from_json::<
+        Option<mm_model::marketplace_plugin::InstallMarketplacePluginRequest>,
+    >(bytes)
+    .ok()
+    .flatten()
 }
 
 /// `PluginRequestFromReader` as `installMarketplacePlugin` answers its failure: a **501**.

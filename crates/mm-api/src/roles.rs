@@ -549,12 +549,7 @@ fn patch_roles_error(id: &'static str, details: String) -> ApiError {
 /// not an error — and it still reaches `UpdateRole`, which rewrites the row; an object is the
 /// patch, its unknown keys dropped; anything else, an empty body included, is the 400.
 fn decode_role_patch(bytes: &[u8]) -> Option<RolePatch> {
-    let mut values = serde_json::Deserializer::from_slice(bytes).into_iter::<serde_json::Value>();
-    match values.next()? {
-        Ok(serde_json::Value::Null) => Some(RolePatch::default()),
-        Ok(value @ serde_json::Value::Object(_)) => serde_json::from_value(value).ok(),
-        _ => None,
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).ok()
 }
 
 #[cfg(test)]
