@@ -1,0 +1,15 @@
+# dm-restrictions.plan — D-239 (RestrictDirectMessage = team) and D-240 (view-restricted creates), 2026-09-25.
+no-admin-bypass	crates/mm-app/src/channel_create.rs	            if !manages_system {	            if true {	api	dm_team_restriction
+deleted-team-counts	crates/mm-store/src/team_store.rs	           AND tm2.deleteat = 0\n           AND teams.deleteat = 0\n	           AND tm2.deleteat = 0\n	api	dm_team_restriction
+departed-member-counts	crates/mm-store/src/team_store.rs	           AND tm2.deleteat = 0\n           AND teams.deleteat = 0\n	           AND teams.deleteat = 0\n	api	dm_team_restriction
+multi-user-variant	crates/mm-app/src/channel_create.rs	.get_common_team_ids_for_two_users(user_id, other_user_id)	.get_common_team_ids_for_multiple_users(&[user_id.to_owned(), other_user_id.to_owned()])	api	dm_team_restriction
+owner-not-exempt	crates/mm-app/src/bot.rs	if session_user_id.is_some_and(|user_id| user_id == bot.owner_id) {	if false {	api	dm_team_restriction
+plugin-bot-guessed	crates/mm-app/src/bot.rs	        return Ok(if plugins_enabled {\n            BotExemption::Undecidable	        return Ok(if plugins_enabled {\n            BotExemption::NotExempt	api	dm_team_restriction
+empty-inverted	crates/mm-app/src/channel_create.rs	        if common.is_empty() {	        if !common.is_empty() {	api	dm_team_restriction
+channel-branch-skipped	crates/mm-app/src/user.rs	        if !restrictions.channels.is_empty() {	        if false {	api	view_restricted_creates
+# team-branch-skipped survived 2026-09-25 and is equivalent on any stock fixture: team_guest holds only
+# view_team, so a guest's restriction team list is always empty. Reaching it needs an edited role.
+# team-branch-skipped	crates/mm-app/src/user.rs	        if !restrictions.teams.is_empty() {	        if false {	api	view_restricted_creates
+# no-op controls
+control-annotate	crates/mm-app/src/channel_create.rs	let session_user_id = session.map(|session| session.user_id.as_str());	let session_user_id: Option<&str> = session.map(|session| session.user_id.as_str());	api	dm_team_restriction
+control-reorder-where	crates/mm-store/src/team_store.rs	         WHERE tm1.userid = $1\n           AND tm1.deleteat = 0\n	         WHERE tm1.deleteat = 0\n           AND tm1.userid = $1\n	api	dm_team_restriction

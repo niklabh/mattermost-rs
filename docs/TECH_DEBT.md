@@ -6724,7 +6724,11 @@ invalidate explicitly for exactly that reason. Unlike the reaction cache in [D-1
 enough. It ends when the Go server does.
 ## D-239 · `POST /channels/direct` forwards a team-restricted installation
 
-**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+**Status** CLOSED · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+**Closed** 2026-09-25 — served: `get_common_team_ids_for_two_users`, the `manage_system` bypass and
+`App::is_bot_exempt_from_dm_restrictions`; the only forward left is a bot a plugin may own while Go
+hosts plugins with plugins on. The reason given below is wrong: both store variants drop deleted
+teams; they differ on the self-DM. `parity::dm_team_restriction`.
 
 `GetOrCreateDirectChannel` (app/channel.go:361) has a branch for
 `TeamSettings.RestrictDirectMessage == "team"`: unless the caller holds `manage_system`, the two

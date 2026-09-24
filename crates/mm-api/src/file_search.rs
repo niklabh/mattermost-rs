@@ -173,6 +173,7 @@ async fn serve_search(
         .app
         .search_files_in_team_for_user(
             hook_ctx,
+            Some(&session.0),
             terms,
             user_id,
             team_id,

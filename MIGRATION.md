@@ -14833,3 +14833,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `patchChannel`'s `DeleteGroupConstrainedChannelMemberships` goroutine (api4/channel.go:543) | `mm_api::channel_writes::{turns_group_constraint_on, spawn_group_constrained_removal}` | DONE | 1 unit + `parity::channel_patch_writes` | Asynchronous as in Go: the `200` does not wait for the sweep, and the patching admin is swept too when no group holds them. |
 | `addChannelToDefaultCategory` (app/channel.go:4706), whole | `App::add_channel_to_default_category`, `default_category_plan` | DONE | 5 unit + `parity::channel_patch_writes` (create and patch) | The "already in a category" half was called dead on the create path and is not: the new channel is an orphan in Channels, so Go writes Channels back and publishes a second `sidebar_category_updated`. |
+
+## Tech-debt payoff: the DM restrictions — D-239, D-240 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `GetOrCreateDirectChannel`'s `RestrictDirectMessage = "team"` branch, `Team().GetCommonTeamIDsForTwoUsers`, `IsBotExemptFromDMRestrictions` | `App::get_or_create_direct_channel`, `mm_store::team_store::get_common_team_ids_for_two_users`, `App::is_bot_exempt_from_dm_restrictions` | DONE | 4 unit + `parity::dm_team_restriction` (8 cases) | A bot a plugin may own is forwarded while Go hosts plugins with plugins on; the two-user query is what lets a self-DM through. The session now reaches the DM create from search's `in:@user` too. |

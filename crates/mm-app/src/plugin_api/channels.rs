@@ -643,6 +643,7 @@ impl AppPluginApi {
             .app
             .search_posts_for_user(
                 &HookContext::default(),
+                None,
                 &search.terms,
                 &args.b,
                 &args.a,

@@ -930,7 +930,7 @@ impl App {
             }
         };
         let channel = match self
-            .get_or_create_direct_channel(hook_ctx, &session.user_id, &bot.user_id)
+            .get_or_create_direct_channel(hook_ctx, Some(session), &session.user_id, &bot.user_id)
             .await
         {
             Ok(crate::channel_create::ChannelCreate::Created(channel)) => channel,

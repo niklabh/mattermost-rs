@@ -85,6 +85,7 @@ mod parity {
     pub mod custom_status_writes;
     pub mod data_retention;
     pub mod desktop_login;
+    pub mod dm_team_restriction;
     pub mod draft_and_preference_writes;
     pub mod drafts;
     pub mod email_send;

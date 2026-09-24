@@ -493,7 +493,7 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
     ) -> Result<api::Z_GetDirectChannelReturns, NotImplemented> {
         let answer = match self
             .app
-            .get_or_create_direct_channel(&HookContext::default(), &args.a, &args.b)
+            .get_or_create_direct_channel(&HookContext::default(), None, &args.a, &args.b)
             .await
         {
             Ok(ChannelCreate::Created(channel)) => api::Z_GetDirectChannelReturns {

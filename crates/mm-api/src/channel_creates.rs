@@ -384,7 +384,7 @@ async fn serve_create_direct_channel(
     // The two ids keep the **body's** order, which is what decides `creator_id` on the event.
     match state
         .app
-        .get_or_create_direct_channel(hook_ctx, &user_ids[0], &user_ids[1])
+        .get_or_create_direct_channel(hook_ctx, Some(session), &user_ids[0], &user_ids[1])
         .await?
     {
         ChannelCreate::Created(channel) => created("createDirectChannel", &channel).map(Some),
