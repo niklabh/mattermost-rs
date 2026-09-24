@@ -909,6 +909,9 @@ func gtTextCorpus() []gtCase {
 	add(gtCase{Name: "field/missingkey_zero", Sources: [][2]string{{"t", "[{{.Missing}}][{{.M.zz}}]"}}, Exec: []string{"t"}, Data: data, Option: "missingkey=zero"})
 	add(gtCase{Name: "field/missingkey_error", Sources: [][2]string{{"t", "[{{.M.zz}}]"}}, Exec: []string{"t"}, Data: data, Option: "missingkey=error"})
 	add(gtCase{Name: "field/missingkey_error_nil", Sources: [][2]string{{"t", "[{{.Missing.X}}]"}}, Exec: []string{"t"}, Data: data, Option: "missingkey=error"})
+	// missingkey=zero yields a nil interface, not an absent value: only a further field access
+	// can tell them apart.
+	add(gtCase{Name: "field/missingkey_zero_chain", Sources: [][2]string{{"t", "[{{.M.zz.X}}]"}}, Exec: []string{"t"}, Data: data, Option: "missingkey=zero"})
 	add(gtOne("field/on_nil_data", "[{{.X}}]", nil))
 
 	// Control structures.
@@ -963,6 +966,7 @@ func gtTextCorpus() []gtCase {
 	t("fn/printf_misc", `{{printf "%t|%v|%v|%v|%v|%%|%d|%s|%d" true .L .M .Q nil 1 .LS .Q}}`)
 	t("fn/printf_errors", `{{printf "%d|%s|%z|%d" "str" 5 1}}|{{printf "%d %d" 1}}|{{printf "%d" 1 2 "x"}}|{{printf "%!"}}|{{printf "%"}}`)
 	t("fn/printf_star", `{{printf "%*d|%-*d|%.*f" 5 1 4 2 2 3.14159}}`)
+	t("fn/printf_g_precision", `{{printf "%.0g|%.1g|%.2g|%.0e|%.3g|%g" 2.5 0.000012345 123456.0 7.5 100.0 1e-5}}`)
 	t("fn/printf_hex_const", `{{printf "%d|%v" 0x1E 0x1p-2}}`)
 	t("fn/printf_ptr", `{{printf "%s|%v|%d" .NP .NP .Z}}`)
 	t("fn/printf_nonstring_format", `{{printf .N}}`)
@@ -1036,6 +1040,8 @@ func gtTextCorpus() []gtCase {
 		{"double_else", "{{with .S}}{{else}}{{else}}{{end}}"},
 		{"bad_delim_space", "{{ -3}}"},
 		{"unicode_ident", "{{.Nämé}}"},
+		{"lex_error_later_line", "{{.S\n\n'x}}"},
+		{"unclosed_action_later_line", "{{\n\n.S"},
 	} {
 		add(gtOne("parse/"+pe[0], pe[1], data))
 	}

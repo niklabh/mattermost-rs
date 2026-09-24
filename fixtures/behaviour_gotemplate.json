@@ -87321,6 +87321,345 @@
   },
   {
    "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "field/missingkey_zero_chain",
+   "option": "missingkey=zero",
+   "runs": [
+    {
+     "err": "template: t:1:5: executing \"t\" at \u003c.M.zz.X\u003e: nil pointer evaluating interface {}.X",
+     "name": "t",
+     "out": "["
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "[{{.M.zz.X}}]"
+    ]
+   ]
+  },
+  {
+   "data": {
     "t": "nil"
    },
    "exec": [
@@ -103260,6 +103599,345 @@
     [
      "t",
      "{{printf \"%*d|%-*d|%.*f\" 5 1 4 2 2 3.14159}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "fn/printf_g_precision",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "2|1e-05|1.2e+05|8e+00|100|1e-05"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "{{printf \"%.0g|%.1g|%.2g|%.0e|%.3g|%g\" 2.5 0.000012345 123456.0 7.5 100.0 1e-5}}"
     ]
    ]
   },
@@ -125410,6 +126088,672 @@
      "{{.Nämé}}"
     ]
    ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "parse/lex_error_later_line",
+   "option": "",
+   "parse_err": "template: t:3: unterminated character constant in action started at t:1",
+   "sources": [
+    [
+     "t",
+     "{{.S\n\n'x}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "parse/unclosed_action_later_line",
+   "option": "",
+   "parse_err": "template: t:3: unclosed action started at t:1",
+   "sources": [
+    [
+     "t",
+     "{{\n\n.S"
+    ]
+   ]
   }
  ],
  "text_as_html": [
@@ -133331,6 +134675,345 @@
     [
      "t",
      "[{{.Missing.X}}]"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "field/missingkey_zero_chain",
+   "option": "missingkey=zero",
+   "runs": [
+    {
+     "err": "template: t:1:5: executing \"t\" at \u003c.M.zz.X\u003e: nil pointer evaluating interface {}.X",
+     "name": "t",
+     "out": "["
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "[{{.M.zz.X}}]"
     ]
    ]
   },
@@ -149275,6 +150958,345 @@
     [
      "t",
      "{{printf \"%*d|%-*d|%.*f\" 5 1 4 2 2 3.14159}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "fn/printf_g_precision",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "2|1e-05|1.2e\u0026#43;05|8e\u0026#43;00|100|1e-05"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "{{printf \"%.0g|%.1g|%.2g|%.0e|%.3g|%g\" 2.5 0.000012345 123456.0 7.5 100.0 1e-5}}"
     ]
    ]
   },
@@ -171423,6 +173445,672 @@
     [
      "t",
      "{{.Nämé}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "parse/lex_error_later_line",
+   "option": "",
+   "parse_err": "template: t:3: unterminated character constant in action started at t:1",
+   "sources": [
+    [
+     "t",
+     "{{.S\n\n'x}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "parse/unclosed_action_later_line",
+   "option": "",
+   "parse_err": "template: t:3: unclosed action started at t:1",
+   "sources": [
+    [
+     "t",
+     "{{\n\n.S"
     ]
    ]
   }

@@ -898,3 +898,20 @@ pub(crate) fn fmt_rv(v: &Rv<'_>, verb: char) -> String {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{TextTemplates, Value};
+
+    /// exec.go:714: a field `FieldByName` finds but that is not exported is an error, not a
+    /// value. The oracle's encoder only sees exported fields, so this branch is transcribed.
+    #[test]
+    fn unexported_field_is_an_error() {
+        let t = TextTemplates::parse("t", "{{.low}}").unwrap();
+        let data = Value::Struct("main.T".into(), vec![("low".into(), Value::Int(1))]);
+        assert_eq!(
+            t.execute(&data).unwrap_err().to_string(),
+            "template: t:1:2: executing \"t\" at <.low>: low is an unexported field of struct type main.T"
+        );
+    }
+}
