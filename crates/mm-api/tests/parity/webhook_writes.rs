@@ -307,8 +307,7 @@ async fn an_outgoing_hook_round_trips_and_regenerates_its_token() {
     let token = go_minted_token(&http).await;
     let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
 
-    // Trigger words have to be unique per team across *every* hook, including deleted ones — the
-    // intersection scan carries no `DeleteAt` predicate — so each run needs its own words.
+    // Each run takes its own trigger words, so a hook a failed run left live cannot collide.
     let tag = format!("mmrsout{}", logged_in_user_id().get(..6).unwrap_or("x"));
     let body = |suffix: &str| {
         serde_json::json!({
@@ -669,6 +668,26 @@ async fn two_outgoing_hooks_may_not_share_a_trigger_and_a_callback() {
         &format!("/api/v4/hooks/outgoing/{second_id}"),
     )
     .await;
+
+    // **A deleted hook collides with nothing**: `GetOutgoingByTeam` reads `DeleteAt = 0`, so the
+    // same trigger and callback are free again on both servers. Until 2026-09-25 the store read
+    // kept deleted rows and this server refused with the intersect 500 where Go created the hook.
+    for base in [GO, RUST] {
+        let (status, raw) = post_hook(&http, base, &token, "/api/v4/hooks/outgoing", &first).await;
+        assert_eq!(
+            status, 201,
+            "{base}: a deleted hook's trigger and callback are free again: {raw}"
+        );
+        let again: serde_json::Value = serde_json::from_str(&raw).expect("a hook");
+        let again_id = again["id"].as_str().expect("an id").to_owned();
+        delete_hook(
+            &http,
+            base,
+            &token,
+            &format!("/api/v4/hooks/outgoing/{again_id}"),
+        )
+        .await;
+    }
 }
 
 #[tokio::test]

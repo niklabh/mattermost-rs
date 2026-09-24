@@ -1059,6 +1059,34 @@ async fn only_an_outgoing_webhook_that_fires_forwards_the_post() {
         assert_eq!(response.status(), 201, "{body}");
     }
 
+    // A hook that *would* fire on every post here, deleted: `GetOutgoingByTeam` reads
+    // `DeleteAt = 0` only, so it is no reason to forward. Until 2026-09-25 the store read kept
+    // deleted rows and a suite's cleaned-up hook forwarded every later post in its channel.
+    let doomed: serde_json::Value = client
+        .post(format!("{GO}/api/v4/hooks/outgoing"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "team_id": team, "channel_id": channel, "display_name": "mmrs deleted hook",
+            "callback_urls": ["http://localhost:9/mmrs-deleted"],
+        }))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the hook decodes");
+    let doomed = doomed["id"].as_str().expect("an id");
+    let deleted = client
+        .delete(format!("{GO}/api/v4/hooks/outgoing/{doomed}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        deleted.status().is_success(),
+        "deleting the channel-wide hook"
+    );
+
     for (message, forwarded) in [
         ("mmrs hooks plain", false),
         ("mmrszapper is not the exact word", false),

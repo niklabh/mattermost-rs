@@ -555,9 +555,12 @@ impl WebhookStore for SqlWebhookStore {
         Ok(())
     }
 
-    /// **No `DeleteAt` predicate**, and that is Go's. The intersection check therefore compares a
-    /// new hook against *deleted* ones too, so a trigger word freed by deleting a hook stays
-    /// unusable. Reproduced: the alternative accepts hooks Go refuses.
+    /// Port of `GetOutgoingByTeam(teamId, -1, -1)` → `GetOutgoingByTeamByUser` (webhook_store.go:337):
+    /// live hooks only (`DeleteAt = 0`), ordered by `DisplayName, Id`. Its two callers are the
+    /// intersection check on create and update, and `createPost`'s would-a-hook-fire forward. An
+    /// earlier version read deleted rows too, on a claim that Go does — measured wrong 2026-09-25:
+    /// Go re-creates a deleted hook's trigger and callback with a 201, and a deleted hook fires
+    /// nothing. `parity::webhook_writes` and `parity::post_creates` pin both.
     ///
     /// Go's `-1` offset and limit reach `squirrel` as `OFFSET -1 LIMIT -1`, which Postgres treats
     /// as "no offset, no limit"; expressed here as the absence of both clauses.
@@ -587,6 +590,8 @@ impl WebhookStore for SqlWebhookStore {
                    iconurl       AS "iconurl!"
               FROM outgoingwebhooks
              WHERE teamid = $1
+               AND deleteat = 0
+             ORDER BY displayname, id
             "#,
             team_id,
         )
