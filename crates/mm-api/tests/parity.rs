@@ -304,4 +304,6 @@ mod parity {
     pub mod manualtest;
     // Appended 2026-09-20: the translated error message in eight locales (D-092).
     pub mod error_i18n;
+    // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
+    pub mod malformed_bodies;
 }

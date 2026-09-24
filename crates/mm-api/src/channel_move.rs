@@ -41,14 +41,12 @@ use crate::channels::require_id;
 use crate::error::ApiError;
 use crate::proxy;
 
-/// `model.StringInterfaceFromJSON(r.Body)`: an object, or an empty map for anything else.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 pub(crate) fn string_interface_from_json(
     bytes: &[u8],
 ) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::from_slice::<serde_json::Value>(bytes) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `moveChannel` — `POST /api/v4/channels/{channel_id}/move`.

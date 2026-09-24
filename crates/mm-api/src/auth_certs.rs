@@ -40,8 +40,6 @@
 //! refuses **two** `certificate` parts (`multiple_files`) where the other two take the first.
 //! Measured, all three, before this module existed.
 
-use std::collections::HashMap;
-
 use axum::Router;
 use axum::extract::{Path as UrlPath, RawQuery, Request, State};
 use axum::http::{StatusCode, header};
@@ -539,38 +537,16 @@ pub async fn get_saml_certificate_status(
     }
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507), the way it actually behaves: the decode error is
-/// discarded and whatever `objmap` holds is returned. `encoding/json` fills every string-valued
-/// key of an object even when a sibling's type is wrong — it "completes the unmarshaling as best
-/// it can" and reports the first mismatch afterwards — so `{"saml_metadata_url":"x","n":5}`
-/// carries the URL. A body that is not an object, or is not JSON, leaves `objmap` nil: empty.
-/// Only the **first** JSON value is read, as `Decoder.Decode` reads one.
-fn map_from_json(bytes: &[u8]) -> HashMap<String, String> {
-    let Some(Ok(serde_json::Value::Object(object))) = serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next()
-    else {
-        return HashMap::new();
-    };
-    object
-        .into_iter()
-        .filter_map(|(key, value)| match value {
-            serde_json::Value::String(text) => Some((key, text)),
-            _ => None,
-        })
-        .collect()
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
+fn map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590), the same shape for `map[string]any`
-/// — every value fits, so the first JSON value is the whole map or nothing.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
-    match serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next()
-    {
-        Some(Ok(serde_json::Value::Object(object))) => object,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `getSamlMetadataFromIdp` (api4/saml.go:238).
@@ -1136,16 +1112,27 @@ mod tests {
 
     #[test]
     fn map_from_json_keeps_the_string_entries_of_a_mixed_object() {
-        let props = map_from_json(br#"{"saml_metadata_url":"x","n":5} trailing"#);
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"saml_metadata_url":"x","n":5} trailing"#);
         assert_eq!(
-            props.get("saml_metadata_url").map(String::as_str),
+            mixed.get("saml_metadata_url").map(String::as_str),
             Some("x")
         );
-        assert!(!props.contains_key("n"));
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"[1]").is_empty());
-        assert!(map_from_json(b"{\"a\":").is_empty());
-        assert!(map_from_json(b"").is_empty());
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
+        assert_eq!(
+            map_from_json(br#"{"saml_metadata_url":7}"#)
+                .get("saml_metadata_url")
+                .map(String::as_str),
+            Some("")
+        );
     }
 
     #[test]

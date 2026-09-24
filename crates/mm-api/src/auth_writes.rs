@@ -55,15 +55,10 @@ use crate::channels::{ME, require_id};
 use crate::error::ApiError;
 use crate::proxy;
 
-/// Port of `model.MapFromJSON` (utils.go:507).
-///
-/// Identical to `crate::channel_member_writes::map_from_json`, which is private to that module;
-/// duplicated rather than shared because four agents edit this workspace at once and a two-line
-/// function is a worse merge risk as a shared symbol than as a copy. The behaviour it encodes —
-/// every failure is an empty map, including a partially decodable object, where Go keeps the
-/// prefix it managed to read — is documented there.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing
@@ -579,15 +574,24 @@ mod tests {
     }
 
     #[test]
-    fn map_from_json_turns_every_failure_into_an_empty_map() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(br#"{"a":1}"#).is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"token":"x","n":5} trailing"#);
+        assert_eq!(mixed.get("token").map(String::as_str), Some("x"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"token":"x"}"#)
+            map_from_json(br#"{"token":7}"#)
                 .get("token")
                 .map(String::as_str),
-            Some("x")
+            Some("")
         );
     }
 

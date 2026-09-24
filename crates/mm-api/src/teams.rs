@@ -1701,7 +1701,7 @@ pub async fn update_team(
             return ApiError::invalid_param("team").into_response();
         }
     };
-    let mut team: Team = match serde_json::from_slice(&bytes) {
+    let mut team: Team = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(team) => team,
         Err(err) => {
             tracing::debug!(error = %err, "team body did not decode");
@@ -1818,7 +1818,7 @@ pub async fn patch_team(
             return ApiError::invalid_param("team").into_response();
         }
     };
-    let patch: TeamPatch = match serde_json::from_slice(&bytes) {
+    let patch: TeamPatch = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(patch) => patch,
         Err(err) => {
             tracing::debug!(error = %err, "team patch body did not decode");

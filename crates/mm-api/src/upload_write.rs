@@ -95,10 +95,11 @@ async fn serve_create_upload(
 
     let bytes = read_capped_body(state, parts, body).await?;
 
-    let mut us: UploadSession = serde_json::from_slice(&bytes).map_err(|err| {
-        tracing::warn!(error = %err, "the upload session body will not decode");
-        Refusal::Api(ApiError::invalid_param("upload"))
-    })?;
+    let mut us: UploadSession =
+        mm_model::utils::decode_one_value_from_json(&bytes).map_err(|err| {
+            tracing::warn!(error = %err, "the upload session body will not decode");
+            Refusal::Api(ApiError::invalid_param("upload"))
+        })?;
 
     // Not supported for client uploads; shared channels only.
     us.remote_id = String::new();

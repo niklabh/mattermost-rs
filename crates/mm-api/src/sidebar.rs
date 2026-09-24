@@ -592,13 +592,14 @@ pub async fn create_category_for_team_for_user(
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
     };
-    let mut category: SidebarCategoryWithChannels = match serde_json::from_slice(&bytes) {
-        Ok(category) => category,
-        Err(err) => {
-            tracing::debug!(error = %err, "category body did not decode");
-            return ApiError::invalid_param("category").into_response();
-        }
-    };
+    let mut category: SidebarCategoryWithChannels =
+        match mm_model::utils::decode_one_value_from_json(&bytes) {
+            Ok(category) => category,
+            Err(err) => {
+                tracing::debug!(error = %err, "category body did not decode");
+                return ApiError::invalid_param("category").into_response();
+            }
+        };
     if category.category.user_id != user_id || category.category.team_id != team_id {
         return ApiError::invalid_param("category").into_response();
     }
@@ -663,7 +664,9 @@ pub async fn update_categories_for_team_for_user(
     };
     // `Option`, so a JSON `null` is Go's nil slice rather than a decode error.
     let mut categories: Vec<SidebarCategoryWithChannels> =
-        match serde_json::from_slice::<Option<Vec<SidebarCategoryWithChannels>>>(&bytes) {
+        match mm_model::utils::decode_one_from_json::<Option<Vec<SidebarCategoryWithChannels>>>(
+            &bytes,
+        ) {
             Ok(categories) => categories.unwrap_or_default(),
             Err(err) => {
                 tracing::debug!(error = %err, "categories body did not decode");
@@ -745,11 +748,16 @@ pub async fn update_category_order_for_team_for_user(
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
     };
+    // `model.NonSortedArrayFromJSON` (utils.go:557): one value off the body, a `null` element is
+    // `""`, and a `null` body is nil — which, unlike the shared helper, this route's answer keeps.
     let category_order: Option<Vec<String>> =
-        match serde_json::from_slice::<Option<Vec<String>>>(&bytes) {
+        match mm_model::utils::decode_one_from_json::<Option<Vec<Option<String>>>>(&bytes) {
             // `RemoveDuplicateStringsNonSort`, which also turns a nil into `[]` — but Go applies
             // it only on the non-nil path, so the `None` here stays `None`.
-            Ok(Some(order)) => Some(mm_model::utils::remove_duplicate_strings_non_sort(&order)),
+            Ok(Some(order)) => {
+                let order: Vec<String> = order.into_iter().map(Option::unwrap_or_default).collect();
+                Some(mm_model::utils::remove_duplicate_strings_non_sort(&order))
+            }
             Ok(None) => None,
             Err(err) => {
                 tracing::debug!(error = %err, "category order body did not decode");
@@ -883,13 +891,14 @@ pub async fn update_category_for_team_for_user(
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
     };
-    let mut update: SidebarCategoryWithChannels = match serde_json::from_slice(&bytes) {
-        Ok(update) => update,
-        Err(err) => {
-            tracing::debug!(error = %err, "category body did not decode");
-            return ApiError::invalid_param("category").into_response();
-        }
-    };
+    let mut update: SidebarCategoryWithChannels =
+        match mm_model::utils::decode_one_value_from_json(&bytes) {
+            Ok(update) => update,
+            Err(err) => {
+                tracing::debug!(error = %err, "category body did not decode");
+                return ApiError::invalid_param("category").into_response();
+            }
+        };
     // Note the order: Go tests `TeamId` first here and `UserId` first in the create handler. Same
     // error either way, so nothing on the wire moves.
     if update.category.team_id != team_id || update.category.user_id != user_id {

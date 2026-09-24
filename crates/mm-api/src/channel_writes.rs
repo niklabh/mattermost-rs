@@ -58,7 +58,7 @@ use mm_model::permission::{
 };
 use mm_model::session::Session;
 use mm_model::user::User;
-use mm_model::utils::{AppError, decode_one_from_json, decode_one_object_from_json};
+use mm_model::utils::{AppError, decode_one_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -241,7 +241,7 @@ pub async fn update_channel(
     // `decode_one_from_json` rather than `serde_json::from_slice`: `json.Decoder.Decode` reads one
     // value and **stops**, so `{"id":"…"} garbage` and two concatenated objects are both a 200 on
     // Go, taking the first. `from_slice` rejects the trailing bytes and would 400. Measured.
-    let submitted: Channel = match decode_one_object_from_json::<Option<Channel>>(&bytes) {
+    let submitted: Channel = match decode_one_from_json::<Option<Channel>>(&bytes) {
         Ok(Some(channel)) => channel,
         Ok(None) => return ApiError::invalid_param("channel").into_response(),
         Err(err) => {

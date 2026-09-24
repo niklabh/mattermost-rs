@@ -49,26 +49,16 @@ use crate::proxy;
 /// `maxListSize` (api4/channel.go:18) — the cap on `user_ids`.
 const MAX_LIST_SIZE: usize = 1000;
 
-/// Port of `model.MapFromJSON` (utils.go:507).
-///
-/// **Every failure is an empty map**, including a body that is not an object, an object with a
-/// non-string value, and an empty body. Go's `json.NewDecoder(...).Decode(&objmap)` result is
-/// discarded and a nil map is replaced with an allocated one, so the caller can never distinguish
-/// "no keys" from "unparseable".
-///
-/// Note the partial-decode case: Go's decoder fills the map as it goes and only *then* fails, but
-/// `objmap` is non-nil by then, so `{"a":"b","c":5}` yields `{"a":"b"}` — not `{}`. `serde_json`
-/// has no partial result, so this returns `{}` for that input. The difference is reachable only
-/// with a mixed-type object, and only on the three routes that read a single key out of the map;
-/// see the parity suite, which asserts the shared cases and records this one.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same swallow-everything shape for
-/// `map[string]any`.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_json::Value> {
-    serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes).unwrap_or_default()
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127).
@@ -254,7 +244,7 @@ pub async fn update_channel_member_scheme_roles(
             return ApiError::invalid_param("scheme_roles").into_response();
         }
     };
-    let scheme_roles: SchemeRoles = match serde_json::from_slice(&bytes) {
+    let scheme_roles: SchemeRoles = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(roles) => roles,
         Err(err) => {
             tracing::debug!(error = %err, "scheme_roles body did not decode");
@@ -890,7 +880,7 @@ pub async fn set_channel_members(
     };
 
     let req: mm_model::channel_member::SetChannelMembersRequest =
-        match serde_json::from_slice(&bytes) {
+        match mm_model::utils::decode_one_value_from_json(&bytes) {
             Ok(req) => req,
             Err(err) => {
                 tracing::debug!(error = %err, "set_channel_members body did not decode");
@@ -1038,14 +1028,24 @@ mod tests {
     /// The swallow-everything decode is the behaviour three routes depend on, and it is the one a
     /// reader is most likely to "fix" into a 400.
     #[test]
-    fn map_from_json_turns_every_failure_into_an_empty_map() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(b"\"x\"").is_empty());
-        assert!(map_from_json(b"{\"roles\": 5}").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"roles":"channel_user","n":5} trailing"#);
+        assert_eq!(mixed.get("roles").map(String::as_str), Some("channel_user"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(b"{\"roles\":\"channel_user\"}").get("roles"),
-            Some(&"channel_user".to_owned())
+            map_from_json(br#"{"roles":7}"#)
+                .get("roles")
+                .map(String::as_str),
+            Some("")
         );
     }
 

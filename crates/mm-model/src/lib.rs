@@ -72,6 +72,8 @@ pub mod go_charset;
 /// x/net/html's tokenizer, which lives in the generic crate `gohtml` (it is Go's code, not
 /// Mattermost's) and is re-exported here under the path the link-preview code has always used.
 pub use gohtml::token as go_html;
+/// The array-into-struct refusal every body decoder in `utils` applies ([D-941]).
+mod go_decode;
 /// The htmlindex label table, emitted from the Go module cache by
 /// `scripts/gen-go-html-tables.py`. Private: `go_charset` wraps it.
 mod go_html_tables;

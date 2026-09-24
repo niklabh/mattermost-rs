@@ -43,7 +43,7 @@ use mm_model::permission::{
     make_permission_error,
 };
 use mm_model::user::UserPatch;
-use mm_model::utils::{AppError, decode_one_from_json, is_valid_id};
+use mm_model::utils::{AppError, decode_one_value_from_json, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -193,7 +193,8 @@ pub async fn convert_bot_to_user(
             return ApiError::invalid_param("userPatch").into_response();
         }
     };
-    let patch: UserPatch = match decode_one_from_json(&bytes) {
+    // `var userPatch model.UserPatch` (bot.go:285): `null` is the zero patch, refused below.
+    let patch: UserPatch = match decode_one_value_from_json(&bytes) {
         Ok(patch) => patch,
         Err(_) => return ApiError::invalid_param("userPatch").into_response(),
     };
@@ -491,10 +492,13 @@ mod tests {
     #[test]
     fn the_body_gate_refuses_a_missing_and_an_empty_password_alike() {
         let refused: Vec<Option<UserPatch>> = vec![
-            decode_one_from_json(b"").ok(),
-            decode_one_from_json(b"not json").ok(),
-            decode_one_from_json(b"{}").ok(),
-            decode_one_from_json(br#"{"password":""}"#).ok(),
+            decode_one_value_from_json(b"").ok(),
+            decode_one_value_from_json(b"not json").ok(),
+            decode_one_value_from_json(b"{}").ok(),
+            decode_one_value_from_json(br#"{"password":""}"#).ok(),
+            // `null` is Go's zero patch, which the same gate refuses; `[]` is not a patch.
+            decode_one_value_from_json(b"null").ok(),
+            decode_one_value_from_json(b"[]").ok(),
         ];
         for (index, patch) in refused.iter().enumerate() {
             let has_password = patch
@@ -505,7 +509,7 @@ mod tests {
         }
 
         let accepted: UserPatch =
-            decode_one_from_json(br#"{"password":"a"}"#).expect("a password decodes");
+            decode_one_value_from_json(br#"{"password":"a"}"#).expect("a password decodes");
         assert_eq!(accepted.password.as_deref(), Some("a"));
     }
 }
