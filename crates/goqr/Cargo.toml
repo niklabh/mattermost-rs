@@ -1,0 +1,22 @@
+[package]
+name = "goqr"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# A port of github.com/mattermost/rsc/qr, qr/coding and gf256 (Russ Cox's rsc.io/qr, BSD-3-Clause;
+# LICENSE). It contains no Mattermost code and must never depend on an `mm-*` crate.
+license = "BSD-3-Clause"
+repository.workspace = true
+description = "Byte-exact port of rsc.io/qr: QR codes and the PNG it renders them to"
+keywords = ["qr", "qrcode", "png", "go"]
+categories = ["encoding", "multimedia::images"]
+readme = "README.md"
+# The tests are left out: they read the Go-generated corpus under fixtures/, which does not ship.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+base64.workspace = true

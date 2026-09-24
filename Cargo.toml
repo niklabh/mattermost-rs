@@ -36,6 +36,9 @@ members = [
     # Mattermost's push-notification text and notification e-mail HTML are rendered with.
     # Forbidden from depending on any mm-* crate. mm-app drives it.
     "crates/gogoldmark",
+    # Byte-exact port of rsc.io/qr as github.com/mattermost/rsc vendors it (BSD-3-Clause): the QR
+    # code and PNG of Mattermost's MFA enrolment. Forbidden from depending on any mm-* crate.
+    "crates/goqr",
 ]
 
 [workspace.package]

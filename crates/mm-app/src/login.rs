@@ -4,21 +4,16 @@
 //! # What is here and what the handler forwards
 //!
 //! Everything in this module is the **local-password** path: resolve a login id to a row, claim a
-//! failed-attempt slot, check the password, create a session. Four branches of Go's `login` are
-//! not here at all, and `mm_api::login` detects each of them and hands the request to the Go
-//! server **before** anything in this module runs:
+//! failed-attempt slot, check the password, check the MFA token ([`App::check_user_mfa`], since
+//! 2026-09-25), create a session. Three branches of Go's `login` are not here, and
+//! `mm_api::login` detects each of them and hands the request to the Go server **before**
+//! anything in this module runs:
 //!
 //! | Branch | Detected by | Why it is not here |
 //! |---|---|---|
 //! | guest magic link | `magic_link_token` in the body | needs `AuthenticateUserForGuestMagicLink` and a licence |
 //! | LDAP | `LdapSettings.Enable` | needs an LDAP client |
-//! | MFA | `user.MfaActive && EnableMultifactorAuthentication` | needs `platform/shared/mfa` |
 //! | CWS | unreachable from this route | `login` passes `cwsToken` as `""` (api4/user.go:2229) |
-//!
-//! The MFA one is the delicate case. Go checks MFA **after** claiming a failed-attempt slot and
-//! after verifying the password (`CheckPasswordAndAllCriteria`, authentication.go:127-153), so a
-//! forward taken at that point would leave the counter moved and let Go move it again. The
-//! handler therefore decides before any write. See `mm_api::login`.
 //!
 //! # The counter is the state this file is really about
 //!
@@ -121,29 +116,6 @@ impl App {
             String::new(),
             400,
         ))
-    }
-
-    /// Whether a login for this body would need the MFA machinery this port does not have.
-    ///
-    /// **Read-only, and that is the whole point.** `CheckUserMfa` is consulted by Go *after* a
-    /// failed-attempt slot has been claimed and the password verified, so a handler that
-    /// discovered it needed to forward at that moment would already have moved a counter Go is
-    /// about to move again. This asks the same question — `MfaActive && EnableMultifactorAuthentication`
-    /// — before anything is written, at the cost of one extra `SELECT`.
-    ///
-    /// A login id that resolves to nothing answers `false`: there is no user to have MFA, and the
-    /// refusal that follows is identical on both servers.
-    #[tracing::instrument(skip_all, fields(needs_mfa))]
-    pub async fn login_needs_mfa(&self, id: &str, login_id: &str) -> bool {
-        if !self.config().enable_multifactor_authentication {
-            return false;
-        }
-        let needs = matches!(
-            self.get_user_for_login(id, login_id).await,
-            Ok(user) if user.mfa_active
-        );
-        tracing::Span::current().record("needs_mfa", needs);
-        needs
     }
 
     /// Port of `App.AuthenticateUserForLogin` (app/login.go:29), minus the CWS branch.
@@ -267,9 +239,8 @@ impl App {
     ///    in step 2 which branches. Two ids for one condition, reached by two paths.
     /// 5. **Check the password**, refunding the slot for every failure except a credential
     ///    mismatch — so a broken hasher cannot lock anybody out.
-    /// 6. **MFA**, refunding only when no token was supplied. Not reached here: the handler
-    ///    forwards before step 3 when MFA would do anything, and [`App::check_user_mfa`] is a
-    ///    no-op otherwise.
+    /// 6. **MFA** ([`App::check_user_mfa`]), refunding the claimed slot only when no token was
+    ///    supplied — that request is a probe for whether MFA is on, not an attempt.
     /// 7. **Zero the counter**, then postflight: e-mail verification.
     ///
     /// Step 7's order matters — the counter is cleared *before* the verification check, so a user
@@ -330,7 +301,7 @@ impl App {
             return Err(err);
         }
 
-        if let Err(err) = self.check_user_mfa(&user, mfa_token) {
+        if let Err(err) = self.check_user_mfa(&user, mfa_token).await {
             if mfa_token.is_empty()
                 && let Err(refund) = self
                     .store()
@@ -387,32 +358,57 @@ impl App {
         Ok(())
     }
 
-    /// Port of `App.CheckUserMfa` (authentication.go:395), **first branch only**.
+    /// Port of `App.CheckUserMfa` (authentication.go:357) over `mfa.ValidateToken`.
     ///
-    /// Go returns `nil` immediately when the user has no MFA enrolled or the server has MFA off,
-    /// and only then reaches the token validation this port does not have. `mm_api::login`
-    /// forwards any request that would get past that guard, so this can only ever return `Ok` —
-    /// the `Err` arm exists so that a *future* caller that forgot to forward fails loudly instead
-    /// of authenticating without a second factor.
+    /// Nothing unless the user has MFA on **and** the server has it enabled; the second `if` in
+    /// Go's source re-tests the flag the first already returned on, and is dead. Then the token at
+    /// the current step against the stored secret and replay list ([`crate::otp::authenticate`]):
     ///
-    /// The second `if` in Go's source is dead code: it re-tests
-    /// `!EnableMultifactorAuthentication`, which the first `if` already returned on.
-    pub fn check_user_mfa(&self, user: &User, _token: &str) -> AppResult {
+    /// - a code that is not six digits — **an empty one included**, which is what a client that
+    ///   has not asked for the code yet sends — is the **400**
+    ///   `mfa.validate_token.authenticate.app_error`, as is a replay list that cannot be read or
+    ///   stored (`ValidateToken` returns `true` *and* the error then; the error wins);
+    /// - a well-formed code that matches no step in the window, or a step already used, is the
+    ///   **401** `api.user.check_user_mfa.bad_code.app_error`;
+    /// - otherwise the step is added to the replay list and stored.
+    pub async fn check_user_mfa(&self, user: &User, token: &str) -> AppResult {
         if !user.mfa_active || !self.config().enable_multifactor_authentication {
             return Ok(());
         }
-
-        tracing::error!(
-            user_id = %user.id,
-            "MFA validation reached in a port that has none — the caller should have forwarded"
-        );
-        Err(AppError::boxed(
-            "CheckUserMfa",
-            "mfa.mfa_disabled.app_error",
-            None,
-            String::new(),
-            501,
-        ))
+        let authenticate_failed = || {
+            AppError::boxed(
+                "CheckUserMfa",
+                "mfa.validate_token.authenticate.app_error",
+                None,
+                String::new(),
+                400,
+            )
+        };
+        let users = self.store().user();
+        let used = users
+            .get_mfa_used_timestamps(&user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "reading the MFA replay list failed");
+                authenticate_failed()
+            })?;
+        match crate::otp::authenticate(&user.mfa_secret, &used, token, crate::otp::current_step()) {
+            Ok(reuse) => users
+                .store_mfa_used_timestamps(&user.id, &reuse)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "storing the MFA replay list failed");
+                    authenticate_failed()
+                }),
+            Err(crate::otp::TokenError::Parse) => Err(authenticate_failed()),
+            Err(crate::otp::TokenError::Invalid) => Err(AppError::boxed(
+                "checkUserMfa",
+                "api.user.check_user_mfa.bad_code.app_error",
+                None,
+                String::new(),
+                401,
+            )),
+        }
     }
 
     /// Port of `App.CreateSession` (app/session.go:26).
@@ -893,6 +889,7 @@ mod tests {
         let on = crate::App::with_config(
             mm_store::SqlStore::from_pool(
                 sqlx::postgres::PgPoolOptions::new()
+                    .acquire_timeout(std::time::Duration::from_millis(200))
                     .connect_lazy("postgres://x/y")
                     .expect("a lazy pool needs no server"),
             ),
@@ -906,16 +903,24 @@ mod tests {
             ..user()
         };
 
-        assert!(off.check_user_mfa(&user(), "").is_ok(), "nobody enrolled");
         assert!(
-            off.check_user_mfa(&enrolled, "").is_ok(),
+            off.check_user_mfa(&user(), "").await.is_ok(),
+            "nobody enrolled"
+        );
+        assert!(
+            off.check_user_mfa(&enrolled, "").await.is_ok(),
             "server has it off"
         );
-        assert!(on.check_user_mfa(&user(), "").is_ok(), "user has it off");
         assert!(
-            on.check_user_mfa(&enrolled, "123456").is_err(),
-            "both on must refuse rather than silently accept"
+            on.check_user_mfa(&user(), "").await.is_ok(),
+            "user has it off"
         );
+        // Both on reads the replay list first; with no database that is the 400, never an `Ok`.
+        let refused = on
+            .check_user_mfa(&enrolled, "123456")
+            .await
+            .expect_err("both on must refuse rather than silently accept");
+        assert_eq!(refused.id, "mfa.validate_token.authenticate.app_error");
     }
 
     /// The postflight reads **both** its inputs. Neither alone refuses.

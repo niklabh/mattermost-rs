@@ -1011,19 +1011,13 @@ async fn the_mfa_pair_is_self_or_edit_other_users() {
     scrub("mfaowner").await;
 }
 
-/// **The deactivation is forwarded, and the forward is taken before anything is written.**
+/// **The deactivation is served, and writes what Go's writes.**
 ///
 /// `DeactivateMfa` has no configuration gate: it writes `MfaActive = false` and `MfaSecret = ''`,
-/// bumping `UpdateAt` twice, and then sends an MFA-change e-mail from a goroutine. The e-mail is
-/// the part this process cannot reproduce ([D-238]), so the whole request goes to Go — after the
-/// `GetUser` whose 404 is served here, and before the first `UPDATE`.
-///
-/// What proves the forward is `x-mmrs-served-by`: a served answer carries `rust` and a forwarded
-/// one carries nothing at all. What proves it precedes the write is the unknown-id case in
-/// `the_mfa_refusals_agree_and_keep_their_order`, which is answered here without Go ever seeing
-/// it.
+/// bumping `UpdateAt` twice, and then sends an MFA-change e-mail from a goroutine. Served since
+/// 2026-09-25 (D-500); forwarded before, when there was no e-mail service here.
 #[tokio::test]
-async fn deactivating_mfa_is_forwarded_and_still_answers_ok() {
+async fn deactivating_mfa_is_served_and_answers_ok() {
     if !stack_enabled() {
         return;
     }
@@ -1060,16 +1054,12 @@ async fn deactivating_mfa_is_forwarded_and_still_answers_ok() {
     );
     assert_eq!(rs_body, go_body, "identical bytes");
     assert_eq!(rs_body, br#"{"status":"OK"}"#, "ReturnStatusOK, no newline");
-    assert_eq!(
-        served.as_deref(),
-        Some("go"),
-        "forwarded — the proxy stamps `go`, a served answer stamps `rust`"
-    );
+    assert_eq!(served.as_deref(), Some("rust"), "served here");
 
-    // Go did the write, which is the point: the two no-op `UPDATE`s still move `UpdateAt`.
+    // The two no-op `UPDATE`s still move `UpdateAt`, as Go's do.
     assert!(
         number_of("mfaoffrs", "updateat").await > before,
-        "the forwarded request wrote the row"
+        "the served request wrote the row"
     );
     assert_eq!(
         column_of("mfaoffrs", "mfaactive").await.as_deref(),

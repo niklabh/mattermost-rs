@@ -30,36 +30,14 @@
 //! administrator naming the same id gets a 400 — measured, because reading the two checks in
 //! source order is exactly how a port gets this backwards.
 //!
-//! # MFA: the gates serve, anything that would touch a secret forwards
+//! # MFA: served whole
 //!
-//! `ServiceSettings.EnableMultifactorAuthentication` is off on this deployment and cannot be
-//! turned on through the API, and `Users.MfaActive` cannot be set through it either. Every
-//! reachable answer on the MFA pair is therefore a refusal decided from a `SELECT` and the
-//! configuration:
-//!
-//! | request | answer | served |
-//! |---|---|---|
-//! | malformed `{user_id}` | 400 `api.context.invalid_url_param.app_error` | yes |
-//! | an OAuth-app session | 403 naming `edit_other_users` | yes |
-//! | somebody else's account, no `edit_other_users` | 403 | yes |
-//! | `{}` / a non-boolean `activate` | 400 naming `activate` | yes |
-//! | `{"activate":true}` with no `code` | 400 naming `code` | yes |
-//! | `{"activate":true,"code":…}`, unknown id | 404 `app.user.missing_account.const` | yes |
-//! | `{"activate":true,…}`, `auth_service` not `""`/`ldap` | 400 `api.user.activate_mfa.email_and_ldap_only.app_error` | yes |
-//! | `{"activate":true,…}`, otherwise | 501 `mfa.mfa_disabled.app_error` | yes |
-//! | `{"activate":false}`, unknown id | 404 | yes |
-//! | `{"activate":false}`, otherwise | 200 `{"status":"OK"}` | **forwarded** |
-//! | `mfa/generate`, unknown id | 404 | yes |
-//! | `mfa/generate`, otherwise | 501 | yes |
-//! | either route, `EnableMultifactorAuthentication` on | — | **forwarded** |
-//!
-//! Two forwards, both taken before anything is written. The deactivation forward is the one that
-//! costs a 200: `DeactivateMfa` has no configuration gate, writes `MfaActive = false` and
-//! `MfaSecret = ''`, and then sends an MFA-change e-mail from a goroutine — a side effect after
-//! the write, and there is no e-mail service here ([D-238]). The flag forward is the one that
-//! matters: past it Go mints 160 bits of `crypto/rand` and renders a QR code, or validates a TOTP
-//! token against `dgoogauth`. Neither is ported and neither could be tested against Go if it
-//! were, since both sides would be comparing different random numbers. See [D-500].
+//! `generateMfaSecret` mints the secret and its QR code, `updateUserMfa` activates against a TOTP
+//! code or deactivates, and both answer every refusal — the id 400, the OAuth-app 403, the
+//! `edit_other_users` 403, enforcement for somebody else's account, the body 400s, `GetUser`'s 404,
+//! the auth-service 400 and the disabled 501. The TOTP and QR code are `mm_app::otp`, checked
+//! against Go's own `dgoogauth` and `rsc/qr` output; see [`mm_app::user_auth`] for the app half
+//! and D-500 for the history.
 //!
 //! # `switchAccountType` is four routes wearing one path
 //!
@@ -269,15 +247,13 @@ pub async fn update_user_auth(
 
 /// Port of `updateUserMfa` (api4/user.go:1910).
 ///
-/// # The flag forward is taken where Go reads the flag, not where it would write
+/// # `MFARequired` for somebody else's account
 ///
-/// Go's next line after the permission check is `c.App.MFARequired(c.AppContext)`, guarded by
-/// `!session.Local && session.UserId != c.Params.UserId`. `MFARequired` returns `nil` immediately
-/// unless the server is licensed **and** `EnableMultifactorAuthentication` **and**
-/// `EnforceMultifactorAuthentication` are all on, so with the flag off it cannot fire and the
-/// whole line is a no-op. With the flag on it can, and it sits ahead of the two body-parameter
-/// 400s — so the forward is taken here rather than after the parse, or an administrator with a
-/// malformed body would get this server's 400 where Go gives the enforcement error.
+/// After the permission check Go evaluates `c.App.MFARequired(c.AppContext)` and refuses with it
+/// only when the session is not local **and** names another user — an administrator changing
+/// someone's MFA must satisfy enforcement themselves; a user setting up their own never has to.
+/// It sits ahead of the two body-parameter 400s, so an unenrolled administrator with a malformed
+/// body gets the enforcement error, not the 400.
 ///
 /// # `activate` is `props["activate"].(bool)`, not a parse
 ///
@@ -285,7 +261,9 @@ pub async fn update_user_auth(
 /// `api.context.invalid_body_param.app_error` naming `activate` — only a JSON boolean passes. The
 /// `code` check below it is the same assertion plus a non-empty test, and it runs **before**
 /// `GetUser`: `{"activate":true}` for an id that does not exist is the 400, not the 404.
-#[tracing::instrument(skip_all, fields(forwarded = false, user_id, activate))]
+///
+/// Then `App::update_mfa` — see there for the two arms and the e-mail.
+#[tracing::instrument(skip_all, fields(user_id, activate))]
 pub async fn update_user_mfa(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
@@ -299,12 +277,16 @@ pub async fn update_user_mfa(
         Err(response) => return response,
     };
 
-    if state.app.config().enable_multifactor_authentication {
-        tracing::Span::current().record("forwarded", true);
-        return proxy::forward_to_go(State(state), request).await;
+    // `rctx.Path()` is this route's, never `/api/v4/users/me`: no path exemption applies.
+    let required = state.app.mfa_required(Some(&session.0), false).await;
+    if let Err(err) = required
+        && !session.0.local
+        && session.0.user_id != user_id
+    {
+        return ApiError::from(err).into_response();
     }
 
-    let (request, bytes) = match split_body(request, "activate").await {
+    let (_request, bytes) = match split_body(request, "activate").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
     };
@@ -324,23 +306,10 @@ pub async fn update_user_mfa(
         ""
     };
 
-    if activate {
-        return match state.app.activate_mfa(&user_id, code).await {
-            // Unreachable while the flag is off, which the forward above guarantees; kept so the
-            // arm is not a `panic!` if that ever changes.
-            Ok(()) => status_ok(),
-            Err(err) => ApiError::from(err).into_response(),
-        };
+    match state.app.update_mfa(activate, &user_id, code).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
     }
-
-    // The deactivation arm. `DeactivateMfa`'s only read is `GetUser`, so its 404 is served here
-    // and the two `UPDATE`s plus the MFA-change e-mail that follows them are Go's — decided
-    // before anything is written, which is the whole constraint. See the module doc and [D-500].
-    if let Err(err) = state.app.get_user(&user_id).await {
-        return ApiError::from(err).into_response();
-    }
-    tracing::Span::current().record("forwarded", true);
-    proxy::forward_to_go(State(state), request).await
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -349,17 +318,14 @@ pub async fn update_user_mfa(
 
 /// Port of `generateMfaSecret` (api4/user.go:1969).
 ///
-/// Go sets `Cache-Control: no-cache`, `Pragma: no-cache` and `Expires: 0` immediately before
-/// writing the secret. Those three lines are on the success path only, which this server never
-/// reaches — with the flag on the whole request is forwarded, and with it off the answer is a 501
-/// whose headers come from the error renderer. Named here so that a future port of the generator
-/// does not lose them.
-#[tracing::instrument(skip_all, fields(forwarded = false, user_id))]
+/// The answer is `{"secret","qr_code"}` written with `json.NewEncoder` (so a trailing newline)
+/// after `Cache-Control: no-cache`, `Pragma: no-cache` and `Expires: 0` — the first two only on
+/// this success path, the last also what `ServeHTTP` sets on any `GET`, which this is not.
+#[tracing::instrument(skip_all, fields(user_id))]
 pub async fn generate_mfa_secret(
     State(state): State<AppState>,
     Path(user_id): Path<String>,
     mfa_session: MfaSetupSession,
-    request: Request,
 ) -> Response {
     // `APISessionRequiredMfa`: the one session extractor that does not ask `MfaRequired`.
     let session = AuthenticatedSession(mfa_session.0);
@@ -368,13 +334,19 @@ pub async fn generate_mfa_secret(
         Err(response) => return response,
     };
 
-    if state.app.config().enable_multifactor_authentication {
-        tracing::Span::current().record("forwarded", true);
-        return proxy::forward_to_go(State(state), request).await;
-    }
-
     match state.app.generate_mfa_secret(&user_id).await {
-        Ok(secret) => json_response("generateMfaSecret", &secret),
+        Ok(secret) => {
+            let mut response = json_response("generateMfaSecret", &secret);
+            let headers = response.headers_mut();
+            for (name, value) in [
+                (axum::http::header::CACHE_CONTROL, "no-cache"),
+                (axum::http::header::PRAGMA, "no-cache"),
+                (axum::http::header::EXPIRES, "0"),
+            ] {
+                headers.insert(name, axum::http::HeaderValue::from_static(value));
+            }
+            response
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }

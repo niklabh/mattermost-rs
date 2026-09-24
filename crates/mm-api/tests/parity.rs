@@ -316,4 +316,6 @@ mod parity {
     pub mod null_columns;
     // Appended 2026-09-25: basicSecurityChecks' 414 (D-1211).
     pub mod url_length;
+    // Appended 2026-09-25: MFA enrolment and the MFA login across both servers (D-500, D-1210).
+    pub mod mfa_enrolment;
 }
