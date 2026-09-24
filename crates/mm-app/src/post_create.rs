@@ -392,7 +392,12 @@ impl App {
         // post. Its own two gates come first and both are cheap: `EnableOutgoingWebhooks`, then
         // `channel.Type != ChannelTypeOpen` — a private channel never triggers one however many
         // hooks the team has. Only then is the team's hook list worth reading, and Go reads the
-        // whole list too (`GetOutgoingByTeam(team.Id, -1, -1)`).
+        // whole list too (`GetOutgoingByTeam(team.Id, -1, -1)`), then keeps only the hooks that
+        // fire for *this* post — [`outgoing_hook_fires`]. A hook on another channel, or one whose
+        // trigger words the message does not start with, writes nothing, so its mere existence is
+        // no reason to forward: until 2026-09-25 any hook anywhere on the team forwarded every
+        // post in every open channel of it, and a suite that created one for a moment turned an
+        // unrelated served post into a forwarded one.
         if self.config().enable_outgoing_webhooks && channel.channel_type == CHANNEL_TYPE_OPEN {
             let hooks = self
                 .store()
@@ -403,7 +408,10 @@ impl App {
                     tracing::error!(error = %err, "outgoing webhook lookup failed");
                     PrepareError::Unreproducible("the outgoing webhook lookup failed")
                 })?;
-            if !hooks.is_empty() {
+            if hooks
+                .iter()
+                .any(|hook| outgoing_hook_fires(hook, &post.channel_id, &post.message))
+            {
                 return Err(PrepareError::Unreproducible(
                     "an outgoing webhook turns its response into a second post",
                 ));
@@ -1434,8 +1442,116 @@ fn file_ids_as_go_captured_them(ids: &[String]) -> Vec<String> {
     list
 }
 
+/// Whether `handleWebhookEvents` (app/webhook.go:62) puts `hook` in its `relevantHooks` for a
+/// post of `message` in `channel_id` — the one predicate that decides whether an outgoing webhook
+/// fires. A hook on the post's channel with no trigger words fires on every post there; otherwise
+/// the hook must be on that channel or on none, and the message's **first field**
+/// (`strings.Fields`, so any Unicode space) must match a trigger word — exactly under
+/// `TriggerwordsExactMatch` (0), as a prefix under `TriggerwordsStartsWith` (1). Any other
+/// `TriggerWhen` fires nothing.
+pub(crate) fn outgoing_hook_fires(
+    hook: &mm_model::outgoing_webhook::OutgoingWebhook,
+    channel_id: &str,
+    message: &str,
+) -> bool {
+    if hook.channel_id != channel_id && !hook.channel_id.is_empty() {
+        return false;
+    }
+    let no_trigger_words = hook
+        .trigger_words
+        .as_ref()
+        .is_none_or(|words| words.is_empty());
+    if hook.channel_id == channel_id && no_trigger_words {
+        return true;
+    }
+    let first_word = message.split_whitespace().next().unwrap_or("");
+    match hook.trigger_when {
+        0 => hook.trigger_word_exact_match(first_word),
+        1 => hook.trigger_word_starts_with(first_word),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::outgoing_hook_fires;
+    use mm_model::outgoing_webhook::OutgoingWebhook;
+
+    fn hook(channel_id: &str, words: Option<&[&str]>, trigger_when: i64) -> OutgoingWebhook {
+        OutgoingWebhook {
+            channel_id: channel_id.to_owned(),
+            trigger_words: words.map(|w| w.iter().map(|s| (*s).to_owned()).collect()),
+            trigger_when,
+            ..OutgoingWebhook::default()
+        }
+    }
+
+    /// Every branch of `handleWebhookEvents`' relevance loop (app/webhook.go:63-75).
+    #[test]
+    fn an_outgoing_hook_fires_only_where_go_would_fire_it() {
+        let here = "cccccccccccccccccccccccccc";
+        let there = "dddddddddddddddddddddddddd";
+        // Its own channel and no trigger words: every post, whatever the message.
+        assert!(outgoing_hook_fires(&hook(here, None, 0), here, "anything"));
+        assert!(outgoing_hook_fires(&hook(here, Some(&[]), 1), here, ""));
+        // Another channel never fires, triggers or not.
+        assert!(!outgoing_hook_fires(
+            &hook(there, None, 0),
+            here,
+            "anything"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook(there, Some(&["go"]), 0),
+            here,
+            "go"
+        ));
+        // No channel and no trigger words fires nothing.
+        assert!(!outgoing_hook_fires(&hook("", None, 0), here, "anything"));
+        // Exact match on the first field, and only the first.
+        assert!(outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "go on"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "gone"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 0),
+            here,
+            "now go"
+        ));
+        assert!(outgoing_hook_fires(
+            &hook(here, Some(&["go"]), 0),
+            here,
+            " \u{a0}go"
+        ));
+        // Starts-with: the message word starts with the trigger.
+        assert!(outgoing_hook_fires(
+            &hook("", Some(&["go"]), 1),
+            here,
+            "gone"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["gone"]), 1),
+            here,
+            "go"
+        ));
+        // An unknown TriggerWhen fires nothing; an empty message has no first word.
+        assert!(!outgoing_hook_fires(
+            &hook("", Some(&["go"]), 2),
+            here,
+            "go"
+        ));
+        assert!(!outgoing_hook_fires(
+            &hook(here, Some(&["go"]), 0),
+            here,
+            ""
+        ));
+    }
+
     #[test]
     fn a_captured_file_id_list_is_sorted_and_keeps_its_length() {
         // ["c","a","c"]: sorted ["a","c","c"], compacted in place to ["a","c" | "c"].

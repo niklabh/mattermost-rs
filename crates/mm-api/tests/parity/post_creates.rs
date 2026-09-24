@@ -83,6 +83,7 @@ async fn purge_create_post_fixtures_once() {
         "DELETE FROM channelmembers WHERE channelid IN (SELECT id FROM channels WHERE name LIKE $1)",
         "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE name LIKE $1)",
         "DELETE FROM channels WHERE name LIKE $1",
+        "DELETE FROM outgoingwebhooks WHERE teamid IN (SELECT id FROM teams WHERE name LIKE $1)",
         "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name LIKE $1)",
         "DELETE FROM teams WHERE name LIKE $1",
     ] {
@@ -1000,6 +1001,83 @@ async fn every_forward_condition_forwards_and_leaves_exactly_one_row() {
             "{label}: exactly one row — two means we wrote one and then forwarded. {messages:?}"
         );
     }
+}
+
+/// An outgoing webhook forwards only the posts it **fires** on — `handleWebhookEvents`'
+/// relevance loop, not the team's hook list being non-empty.
+///
+/// Until 2026-09-25 any live hook anywhere on a team forwarded every post in every open channel of
+/// it, so a suite that created a hook for a moment (`null_columns`, `outgoing_hooks`) turned
+/// `licensed_sweep`'s served priority post into a forwarded one, and the failure read as a
+/// regression in the priority arm. Each case here is a hook that exists and does not fire, beside
+/// the ones that do.
+#[tokio::test]
+async fn only_an_outgoing_webhook_that_fires_forwards_the_post() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let (team, channel) = own_channel(&client, &token, "hooks").await;
+    let other: serde_json::Value = client
+        .post(format!("{GO}/api/v4/channels"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "team_id": team, "name": format!("{PREFIX}chanhooks2"),
+            "display_name": "mmrs create post hooks 2", "type": "O",
+        }))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the channel decodes");
+    let other = other["id"].as_str().expect("an id").to_owned();
+
+    for hook in [
+        // Every post on the *other* channel; none here.
+        serde_json::json!({ "channel_id": other }),
+        // Team-wide, exact first word.
+        serde_json::json!({ "trigger_words": ["mmrszap"], "trigger_when": 0 }),
+        // Team-wide, first word starts with.
+        serde_json::json!({ "trigger_words": ["mmrspre"], "trigger_when": 1 }),
+    ] {
+        let mut body = serde_json::json!({
+            "team_id": team, "display_name": "mmrs create post hook",
+            "callback_urls": ["http://localhost:9/mmrs"],
+        });
+        for (key, value) in hook.as_object().expect("an object") {
+            body[key] = value.clone();
+        }
+        let response = client
+            .post(format!("{GO}/api/v4/hooks/outgoing"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&body)
+            .send()
+            .await
+            .expect("Go answers");
+        assert_eq!(response.status(), 201, "{body}");
+    }
+
+    for (message, forwarded) in [
+        ("mmrs hooks plain", false),
+        ("mmrszapper is not the exact word", false),
+        ("now mmrszap is not the first word", false),
+        ("mmrszap fires the exact hook", true),
+        ("mmrsprefix fires the starts-with hook", true),
+    ] {
+        let body = serde_json::json!({ "channel_id": channel, "message": message });
+        let (status, served_by_rust, _) =
+            create_on(&client, RUST, &token, "/api/v4/posts", &body).await;
+        assert_eq!(status, 201, "{message}");
+        assert_eq!(
+            served_by_rust, !forwarded,
+            "{message}: forwarded should be {forwarded}"
+        );
+    }
+
+    let messages = posts_in_channel_named(&client, &token, &channel).await;
+    assert_eq!(messages.len(), 5, "one row per post: {messages:?}");
 }
 
 /// A reply that passes every root check is **served**, and leaves one row.
