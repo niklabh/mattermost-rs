@@ -229,7 +229,7 @@ fn sidebar_categories_error(where_: &str, err: &StoreError) -> Box<AppError> {
 /// Which channels a category update implies should be muted or unmuted.
 ///
 /// Split out of [`App::mute_channels_for_updated_categories`] so the decision can be tested
-/// without a database — the write it feeds is not ported (see that function).
+/// without a database; [`App::set_channels_muted`] consumes it.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct MuteReconciliation {
     pub to_mute: Vec<String>,
@@ -410,7 +410,8 @@ impl App {
         message.add("updatedCategories", serde_json::Value::String(encoded));
         self.publish(message).await;
 
-        self.mute_channels_for_updated_categories(user_id, &update.updated, &update.original);
+        self.mute_channels_for_updated_categories(user_id, &update.updated, &update.original)
+            .await;
 
         Ok(update.updated)
     }
@@ -471,21 +472,12 @@ impl App {
         Ok(())
     }
 
-    /// Port of `app.App.muteChannelsForUpdatedCategories` (channel_category.go:164) — **the
-    /// decision only.**
+    /// Port of `app.App.muteChannelsForUpdatedCategories` (channel_category.go:164).
     ///
-    /// # What is not ported, and why it is not a silent gap
-    ///
-    /// Go finishes by calling `setChannelsMuted` (app/channel.go:4032), which reads the user's
-    /// `ChannelMembers` rows, flips `notify_props["mark_unread"]` and writes them back through
-    /// `Channel().UpdateMultipleMembers` — a `ChannelMembers` write that is not ported. So muting
-    /// a category through this server changes the category's `muted` flag and leaves its channels'
-    /// memberships alone, where Go would mute each of them and publish a
-    /// `channel_member_updated` per channel. Recorded as [D-224].
-    ///
-    /// The *decision* is ported and tested because it is the part with branches, and because it
-    /// is what the missing write will consume unchanged. It is computed on every update so the
-    /// warning below names the channels a Go server would have touched.
+    /// The decision is [`mute_reconciliation`]; the write is [`App::set_channels_muted`], called
+    /// for the mutes and then for the unmutes, each only when its list is non-empty. So muting a
+    /// category flips `mark_unread` on the user's membership in each of its channels and
+    /// publishes one `channel_member_updated` per membership that changed.
     ///
     /// # Two independent sources of mutes
     ///
@@ -498,27 +490,36 @@ impl App {
     ///    these categories since that heavily complicates things"*.
     ///
     /// Both directions are collected, and a channel can appear in both lists — Go does not
-    /// deduplicate across them, and `setChannelsMuted` then mutes and unmutes in sequence.
+    /// deduplicate across them, so such a channel is muted and then unmuted, two events.
+    ///
+    /// # A failure is logged, never returned
+    ///
+    /// The category update has already been written and published; Go logs the error and the
+    /// request still answers 200. So does this.
     #[tracing::instrument(skip(self, updated, original), fields(user_id = %user_id))]
-    pub fn mute_channels_for_updated_categories(
+    pub async fn mute_channels_for_updated_categories(
         &self,
         user_id: &str,
         updated: &[SidebarCategoryWithChannels],
         original: &[SidebarCategoryWithChannels],
     ) {
         let reconciliation = mute_reconciliation(updated, original);
-        if reconciliation.to_mute.is_empty() && reconciliation.to_unmute.is_empty() {
-            return;
+
+        if !reconciliation.to_mute.is_empty()
+            && let Err(err) = self
+                .set_channels_muted(&reconciliation.to_mute, user_id, true)
+                .await
+        {
+            tracing::error!(user_id = %user_id, error = %err, "Failed to mute channels to match category");
         }
-        // Not `error!`: Go logs an error only when the write *fails*, and on a Go server this
-        // path succeeds silently. The gap is ours, so it is reported as one.
-        tracing::warn!(
-            user_id = %user_id,
-            to_mute = ?reconciliation.to_mute,
-            to_unmute = ?reconciliation.to_unmute,
-            "setChannelsMuted is not ported (D-224): these channel memberships keep their \
-             previous mute state and no channel_member_updated was published"
-        );
+
+        if !reconciliation.to_unmute.is_empty()
+            && let Err(err) = self
+                .set_channels_muted(&reconciliation.to_unmute, user_id, false)
+                .await
+        {
+            tracing::error!(user_id = %user_id, error = %err, "Failed to unmute channels to match category");
+        }
     }
 }
 

@@ -1,0 +1,13 @@
+# sidebar-mute.plan — D-224: setChannelsMuted behind muteChannelsForUpdatedCategories, 2026-09-24.
+# api lines run parity::sidebar_category_writes on the stack; the unit line runs channel_member::tests.
+mute-filter-inverted-unit	crates/mm-app/src/channel_member.rs	.filter(|member| member.is_channel_muted() != muted)	.filter(|member| member.is_channel_muted() == muted)	unit	channel_member::tests
+mute-filter-dropped	crates/mm-app/src/channel_member.rs	.filter(|member| member.is_channel_muted() != muted)	.filter(|_member| true)	api	sidebar_category_writes
+mute-branch-passes-false	crates/mm-app/src/sidebar.rs	.set_channels_muted(&reconciliation.to_mute, user_id, true)	.set_channels_muted(&reconciliation.to_mute, user_id, false)	api	sidebar_category_writes
+unmute-branch-skipped	crates/mm-app/src/sidebar.rs	if !reconciliation.to_unmute.is_empty()	if reconciliation.to_unmute.is_empty()	api	sidebar_category_writes
+mute-event-not-published	crates/mm-app/src/channel_member.rs	        for member in &updated {\n            self.send_update_channel_member_event(member).await;\n        }\n\n        Ok(updated)	        Ok(updated)	api	sidebar_category_writes
+invalid-member-skipped	crates/mm-store/src/channel_store.rs	    for member in &mut members {\n        prepare_member_update(member)?;	    for member in &mut members {\n        let _ = prepare_member_update(member);	api	sidebar_category_writes
+read-every-channel	crates/mm-store/src/channel_store.rs	         WHERE cm.channelid = ANY($1::text[])\n           AND cm.userid = $2	         WHERE (cm.channelid = ANY($1::text[]) OR NOT (cm.channelid = ANY($1::text[])))\n           AND cm.userid = $2	api	sidebar_category_writes
+multi-write-not-committed	crates/mm-store/src/channel_store.rs	        updated.push(write_member(&mut tx, member).await?);\n    }\n    commit_member_write(tx).await?;	        updated.push(write_member(&mut tx, member).await?);\n    }\n    drop(tx);	api	sidebar_category_writes
+# no-op controls
+control-annotate-binding	crates/mm-app/src/channel_member.rs	let to_update = members_to_mute(members, muted);	let to_update: Vec<ChannelMember> = members_to_mute(members, muted);	api	sidebar_category_writes
+control-swap-predicates	crates/mm-store/src/channel_store.rs	         WHERE cm.channelid = ANY($1::text[])\n           AND cm.userid = $2	         WHERE cm.userid = $2\n           AND cm.channelid = ANY($1::text[])	api	sidebar_category_writes

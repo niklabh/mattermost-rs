@@ -2063,6 +2063,419 @@ async fn the_four_sidebar_events_agree_and_omit_no_connection() {
 }
 
 // ---------------------------------------------------------------------------
+// muteChannelsForUpdatedCategories → setChannelsMuted
+// ---------------------------------------------------------------------------
+
+/// Put both subjects' memberships of `bravo` and `charlie` back to unmuted with a valid `desktop`,
+/// each through the server that will be asked about it, **before** any socket is connected.
+async fn reset_memberships(http: &reqwest::Client, f: &Fixture) {
+    for (base, subject) in [(GO, &f.go), (RUST, &f.rust)] {
+        for channel in [&f.bravo, &f.charlie] {
+            set_notify_props(
+                http,
+                base,
+                subject,
+                channel,
+                serde_json::json!({ "mark_unread": "all", "desktop": "default" }),
+            )
+            .await;
+        }
+    }
+}
+
+async fn set_notify_props(
+    http: &reqwest::Client,
+    base: &str,
+    subject: &Subject,
+    channel: &str,
+    props: serde_json::Value,
+) {
+    let (status, raw) = send(
+        http,
+        base,
+        &subject.token,
+        reqwest::Method::PUT,
+        &format!(
+            "/api/v4/channels/{channel}/members/{}/notify_props",
+            subject.id
+        ),
+        Some(&props),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "{base}: notify props: {}",
+        String::from_utf8_lossy(&raw)
+    );
+}
+
+/// The subject's membership of `channel`, read back through `base`.
+async fn member(
+    http: &reqwest::Client,
+    base: &str,
+    subject: &Subject,
+    channel: &str,
+) -> serde_json::Value {
+    let (status, raw) = send(
+        http,
+        base,
+        &subject.token,
+        reqwest::Method::GET,
+        &format!("/api/v4/channels/{channel}/members/{}", subject.id),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "{base}: member: {}",
+        String::from_utf8_lossy(&raw)
+    );
+    parse(&raw, "the channel member")
+}
+
+/// A member with what must differ between the two subjects taken out: the user id and the two
+/// clocks. Everything else — every notify prop, the roles, the counters — is compared.
+fn member_shape(value: &serde_json::Value, subject_id: &str) -> serde_json::Value {
+    let mut shaped = normalise(value, subject_id, &[]);
+    if let Some(map) = shaped.as_object_mut() {
+        map.remove("last_update_at");
+        map.remove("last_viewed_at");
+    }
+    shaped
+}
+
+/// Every `channel_member_updated` on `socket`, its stringified member parsed and shaped, sorted by
+/// channel id: `GetMembersByChannelIds` has no `ORDER BY`, so the two servers owe no order.
+fn member_updates(socket: &SocketProbe, subject_id: &str) -> Vec<serde_json::Value> {
+    let mut members: Vec<serde_json::Value> = socket
+        .events_named("channel_member_updated")
+        .iter()
+        .map(|event| {
+            assert_eq!(event["broadcast"]["user_id"], subject_id, "{event}");
+            assert_eq!(event["broadcast"]["channel_id"], "", "{event}");
+            let raw = event["data"]["channelMember"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the member is a JSON string: {event}"));
+            member_shape(&parse(raw.as_bytes(), "channelMember"), subject_id)
+        })
+        .collect();
+    members.sort_by(|a, b| a["channel_id"].as_str().cmp(&b["channel_id"].as_str()));
+    members
+}
+
+/// `PUT` one category on each server, built per subject by `body`; asserts both answer 200.
+async fn update_on_both(
+    http: &reqwest::Client,
+    f: &Fixture,
+    body: &dyn Fn(&Subject) -> serde_json::Value,
+) {
+    for (base, subject) in [(GO, &f.go), (RUST, &f.rust)] {
+        let (status, raw) = send(
+            http,
+            base,
+            &subject.token,
+            reqwest::Method::PUT,
+            &subject.categories(&f.team_id),
+            Some(&body(subject)),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&raw));
+    }
+}
+
+/// A custom category holding `bravo` and `charlie`, created on each server; `(go_id, rust_id)`.
+async fn two_channel_category(http: &reqwest::Client, f: &Fixture) -> (String, String) {
+    let ((go_status, go_raw), (rust_status, rust_raw)) = create_on_both(http, f, &|subject| {
+        serde_json::json!({
+            "user_id": subject.id, "team_id": f.team_id,
+            "display_name": "SBW Mute", "channel_ids": [f.bravo, f.charlie],
+        })
+    })
+    .await;
+    assert_eq!((go_status, rust_status), (200, 200));
+    let id = |raw: &[u8]| {
+        parse(raw, "the created category")["id"]
+            .as_str()
+            .expect("an id")
+            .to_owned()
+    };
+    (id(&go_raw), id(&rust_raw))
+}
+
+fn mute_body(subject: &Subject, f: &Fixture, id: &str, muted: bool) -> serde_json::Value {
+    serde_json::json!([{
+        "id": id, "user_id": subject.id, "team_id": f.team_id, "type": "custom",
+        "display_name": "SBW Mute", "muted": muted, "channel_ids": [f.bravo, f.charlie],
+    }])
+}
+
+/// Muting a category mutes its channels — **only the ones not already muted**, one
+/// `channel_member_updated` each — and unmuting it unmutes all of them. The pre-muted `charlie`
+/// is what tells "the members whose state differs" from "every member": it gets no event and its
+/// `last_update_at` does not move.
+#[tokio::test]
+async fn muting_a_category_mutes_its_channels_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _lock = SIDEBAR.lock().await;
+    let http = client();
+    let f = fixture().await;
+    reset(&http, f).await;
+    reset_memberships(&http, f).await;
+    let (go_id, rust_id) = two_channel_category(&http, f).await;
+    for (base, subject) in [(GO, &f.go), (RUST, &f.rust)] {
+        set_notify_props(
+            &http,
+            base,
+            subject,
+            &f.charlie,
+            serde_json::json!({"mark_unread": "mention"}),
+        )
+        .await;
+    }
+    let charlie_before_go = member(&http, GO, &f.go, &f.charlie).await;
+    let charlie_before_rust = member(&http, RUST, &f.rust, &f.charlie).await;
+
+    let ids = |subject: &Subject| {
+        if subject.id == f.go.id {
+            go_id.as_str()
+        } else {
+            rust_id.as_str()
+        }
+    };
+
+    // --- mute ---
+    let mut go_socket = SocketProbe::connect(GO, &f.go.token).await;
+    let mut rust_socket = SocketProbe::connect(RUST, &f.rust.token).await;
+    update_on_both(&http, f, &|s| mute_body(s, f, ids(s), true)).await;
+    let one = |frames: &[serde_json::Value]| {
+        frames
+            .iter()
+            .any(|e| e["event"] == "channel_member_updated")
+    };
+    assert!(
+        go_socket.collect_until(Duration::from_secs(5), one).await,
+        "Go: {:?}",
+        go_socket.raw
+    );
+    assert!(
+        rust_socket.collect_until(Duration::from_secs(5), one).await,
+        "we: {:?}",
+        rust_socket.raw
+    );
+    // And wait out a window, so a second (wrong) event would be seen.
+    go_socket.collect_for(Duration::from_millis(600)).await;
+    rust_socket.collect_for(Duration::from_millis(600)).await;
+
+    let go_events = member_updates(&go_socket, &f.go.id);
+    let rust_events = member_updates(&rust_socket, &f.rust.id);
+    assert_eq!(go_events.len(), 1, "Go updated bravo alone: {go_events:?}");
+    assert_eq!(
+        go_events, rust_events,
+        "the channel_member_updated payloads differ"
+    );
+    assert_eq!(rust_events[0]["channel_id"], f.bravo.as_str());
+    assert_eq!(rust_events[0]["notify_props"]["mark_unread"], "mention");
+
+    for channel in [&f.bravo, &f.charlie] {
+        let go_member = member(&http, GO, &f.go, channel).await;
+        let rust_member = member(&http, RUST, &f.rust, channel).await;
+        assert_eq!(
+            member_shape(&go_member, &f.go.id),
+            member_shape(&rust_member, &f.rust.id),
+            "the member of {channel} read back differently"
+        );
+        assert_eq!(
+            rust_member["notify_props"]["mark_unread"], "mention",
+            "{channel} is muted"
+        );
+    }
+    // The pre-muted member was not rewritten.
+    assert_eq!(
+        member(&http, GO, &f.go, &f.charlie).await["last_update_at"],
+        charlie_before_go["last_update_at"],
+        "Go did not touch the member already muted"
+    );
+    assert_eq!(
+        member(&http, RUST, &f.rust, &f.charlie).await["last_update_at"],
+        charlie_before_rust["last_update_at"],
+        "an already-muted member is not written again"
+    );
+
+    // --- unmute: both channels, two events ---
+    let mut go_socket = SocketProbe::connect(GO, &f.go.token).await;
+    let mut rust_socket = SocketProbe::connect(RUST, &f.rust.token).await;
+    update_on_both(&http, f, &|s| mute_body(s, f, ids(s), false)).await;
+    let two = |frames: &[serde_json::Value]| {
+        frames
+            .iter()
+            .filter(|e| e["event"] == "channel_member_updated")
+            .count()
+            >= 2
+    };
+    assert!(
+        go_socket.collect_until(Duration::from_secs(5), two).await,
+        "Go: {:?}",
+        go_socket.raw
+    );
+    assert!(
+        rust_socket.collect_until(Duration::from_secs(5), two).await,
+        "we: {:?}",
+        rust_socket.raw
+    );
+    go_socket.collect_for(Duration::from_millis(600)).await;
+    rust_socket.collect_for(Duration::from_millis(600)).await;
+    let go_events = member_updates(&go_socket, &f.go.id);
+    let rust_events = member_updates(&rust_socket, &f.rust.id);
+    assert_eq!(go_events.len(), 2, "Go unmuted both: {go_events:?}");
+    assert_eq!(go_events, rust_events, "the unmute events differ");
+    for channel in [&f.bravo, &f.charlie] {
+        let go_member = member(&http, GO, &f.go, channel).await;
+        let rust_member = member(&http, RUST, &f.rust, channel).await;
+        assert_eq!(
+            member_shape(&go_member, &f.go.id),
+            member_shape(&rust_member, &f.rust.id)
+        );
+        assert_eq!(
+            rust_member["notify_props"]["mark_unread"], "all",
+            "{channel} is unmuted"
+        );
+    }
+
+    reset(&http, f).await;
+}
+
+/// A channel **moved** out of a muted category into an unmuted one is unmuted, though neither
+/// category's `muted` changed — the second source of the reconciliation, through both servers.
+#[tokio::test]
+async fn moving_a_channel_out_of_a_muted_category_unmutes_it_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _lock = SIDEBAR.lock().await;
+    let http = client();
+    let f = fixture().await;
+    reset(&http, f).await;
+    reset_memberships(&http, f).await;
+    let (go_id, rust_id) = two_channel_category(&http, f).await;
+    let ids = |subject: &Subject| {
+        if subject.id == f.go.id {
+            go_id.as_str()
+        } else {
+            rust_id.as_str()
+        }
+    };
+    update_on_both(&http, f, &|s| mute_body(s, f, ids(s), true)).await;
+
+    update_on_both(&http, f, &|s| {
+        serde_json::json!([
+            {
+                "id": ids(s), "user_id": s.id, "team_id": f.team_id, "type": "custom",
+                "display_name": "SBW Mute", "muted": true, "channel_ids": [f.charlie],
+            },
+            {
+                "id": s.default_category("channels", &f.team_id), "user_id": s.id,
+                "team_id": f.team_id, "type": "channels", "display_name": "Channels",
+                "muted": false, "channel_ids": [f.bravo],
+            },
+        ])
+    })
+    .await;
+
+    for (channel, expected) in [(&f.bravo, "all"), (&f.charlie, "mention")] {
+        let go_member = member(&http, GO, &f.go, channel).await;
+        let rust_member = member(&http, RUST, &f.rust, channel).await;
+        assert_eq!(
+            go_member["notify_props"]["mark_unread"], expected,
+            "Go: {channel}"
+        );
+        assert_eq!(
+            member_shape(&go_member, &f.go.id),
+            member_shape(&rust_member, &f.rust.id),
+            "the member of {channel} read back differently"
+        );
+    }
+
+    reset(&http, f).await;
+    reset_memberships(&http, f).await;
+}
+
+/// `UpdateMultipleMembers` validates **every** member before writing any. A membership whose
+/// `desktop` is not a valid level — which the notify-props route stores without validating — makes
+/// the whole mute fail: the valid channel beside it stays unmuted, no event is published, and the
+/// category update still answers 200 because the failure is only logged.
+#[tokio::test]
+async fn one_invalid_membership_leaves_every_channel_unmuted_like_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let _lock = SIDEBAR.lock().await;
+    let http = client();
+    let f = fixture().await;
+    reset(&http, f).await;
+    reset_memberships(&http, f).await;
+    let (go_id, rust_id) = two_channel_category(&http, f).await;
+    let ids = |subject: &Subject| {
+        if subject.id == f.go.id {
+            go_id.as_str()
+        } else {
+            rust_id.as_str()
+        }
+    };
+    // Only `charlie` is invalid, so "write the valid ones" and "validate all first" disagree
+    // about `bravo`.
+    for (base, subject) in [(GO, &f.go), (RUST, &f.rust)] {
+        set_notify_props(
+            &http,
+            base,
+            subject,
+            &f.charlie,
+            serde_json::json!({"desktop": "banana"}),
+        )
+        .await;
+    }
+
+    let mut go_socket = SocketProbe::connect(GO, &f.go.token).await;
+    let mut rust_socket = SocketProbe::connect(RUST, &f.rust.token).await;
+    update_on_both(&http, f, &|s| mute_body(s, f, ids(s), true)).await;
+    go_socket.collect_for(Duration::from_millis(1200)).await;
+    rust_socket.collect_for(Duration::from_millis(1200)).await;
+    assert!(
+        member_updates(&go_socket, &f.go.id).is_empty(),
+        "Go published: {:?}",
+        go_socket.raw
+    );
+    assert!(
+        member_updates(&rust_socket, &f.rust.id).is_empty(),
+        "we published: {:?}",
+        rust_socket.raw
+    );
+
+    for channel in [&f.bravo, &f.charlie] {
+        let go_member = member(&http, GO, &f.go, channel).await;
+        let rust_member = member(&http, RUST, &f.rust, channel).await;
+        assert_eq!(
+            go_member["notify_props"]["mark_unread"], "all",
+            "Go: {channel}"
+        );
+        assert_eq!(
+            member_shape(&go_member, &f.go.id),
+            member_shape(&rust_member, &f.rust.id),
+            "the member of {channel} read back differently"
+        );
+    }
+
+    reset(&http, f).await;
+    reset_memberships(&http, f).await;
+}
+
+// ---------------------------------------------------------------------------
 // Routing and the lazy migration
 // ---------------------------------------------------------------------------
 

@@ -6487,8 +6487,11 @@ parity suite against Go rather than one that would be changing it in passing.
 
 ## D-224 · Muting a sidebar category does not mute its channels
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
-**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Closed** 2026-09-24 — `App::set_channels_muted` (`mm_app::channel_member`) on a ported
+`update_multiple_members` / `get_members_by_channel_ids` now runs behind the reconciliation and
+publishes Go's `channel_member_updated` per changed member;
+`parity::sidebar_category_writes::muting_a_category_mutes_its_channels_like_go` and two siblings.
 
 `UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
 which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
