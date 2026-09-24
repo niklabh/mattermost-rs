@@ -997,6 +997,9 @@ guard would be a CI step that runs the generator twice and fails on any diff.
 ## D-033 · Go's `[]*T` accepts a nil element; our `Vec<T>` rejects the document
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_metadata.go`)
+**Narrowed** 2026-09-25 — Go's decoding rules now reach decoders with such a slice (the body decoders,
+`Post::attachments`), so a `null` element no longer fails the document: it decodes as a zero `T` where Go
+holds a nil, and re-marshals as that zero value rather than `null` — the residue this entry still owes.
 
 Go models every collection of model types as a slice of **pointers**, so `[null]` is a legal
 value: `json.Unmarshal` stores a nil element and `json.Marshal` re-emits it as `null`. Rust's
@@ -10131,7 +10134,11 @@ row (`the_id_checks_and_the_team_mismatch_agree` covers only incoming hooks).
 
 ## D-1240 · A `#[serde(flatten)]` type gets only part of Go's decoding rules
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
+**Closed** 2026-09-25 — the five body types Go embeds into (`ScheduledPost`, `SidebarCategoryWithChannels`,
+`GroupWithUserIds`, `RetentionPolicyWithTeamAndChannelIDs`, `ReportPostRequest`) decode the object once per part
+through `go_decode::embedded_document`/`embedded_part`, so every rule reaches the embedded half; held by the
+`embed_decode` oracle rows and `parity::malformed_bodies`. The remaining flatten types are responses no handler decodes.
 
 serde decodes a struct with a flattened member through `deserialize_map` and buffers the members
 into its private `Content`, so `mm_model::go_decode` never learns the field names. It drops a
@@ -10152,14 +10159,28 @@ it), or give the decoder the names through a trait the types implement.
 ## D-1241 · JSON another program wrote, outside a request body, is still decoded by serde alone
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-071's close)
+**Narrowed** 2026-09-25 — every site was decided from its Go twin; these now use the Go decoders:
+the GitHub release check, the push proxy's answer, the Marketplace and product-notices feeds, the
+mm_blocks context string, the recent-custom-statuses preference, a user's custom-status prop,
+`plugin.json`, the property owners/options/value attrs (model and `property_hooks`), the CPA and
+session attrs, `MemberInvite`'s two attempts, post attachments, the scheme-id and invite and
+post-search bodies, `doPostAction` (whole input) and the emoji upload's `emoji` part.
 
-The body decoders carry Go's rules for `null`, key case and repeated keys; the slash-command
-response (`CommandResponse::from_json`) and the websocket request now use them too. What still
-calls `serde_json` directly on a document it did not write: link metadata and oEmbed responses
-(`mm_app::link_metadata`, `opengraph`), the Marketplace and product-notices feeds, the push proxy's
-answer, `mm_blocks_actions`' cookie payload, plugin RPC JSON (`property_hooks`,
-`broadcast_hooks`, `plugin_commands`), and the configuration and file-store-test `Config` bodies
-(`config_writes`, `email_test`, `file_store_test`, which strip `null` members themselves). Each
-is Go's `json.Unmarshal` on the other side. **What is owed:** move each onto
-`mm_model::utils::{unmarshal_from_json, from_value_go}`, with a corpus row per source that a
-remote actually varies (a folded key from a Marketplace mirror is the plausible one).
+What is owed, each with its Go twin on `encoding/json`:
+
+- **The `Config` bodies** — `updateConfig`/`patchConfig` (`config_writes::decode_config`, which
+  strips `null` members itself), `testEmail` and `testFileStore` (which forward to Go when serde
+  refuses). Moving them means decoding `mm_model::config::Config` through `go_decode`, which
+  carries a flattened member of its own, and re-checking the forwards.
+- **`MM_PLUGINSETTINGS_PLUGINSTATES`** (`mm_app::config`'s hand-rolled `GoPluginState` visitor)
+  — `json.Unmarshal` into a fresh map in Go.
+- **The OIDC discovery document** in the support packet — Go unmarshals into a one-field
+  `{issuer}` struct; ours folds by hand in sorted rather than document order.
+- **`PostSearchResults` / `FileInfoSearchResults`'** hand-written `Deserialize` (no production
+  decoder today) — the embedded list should be decoded with `from_value_go`.
+
+Kept on purpose, not owed: `AutocompleteArg` (Go's custom `UnmarshalJSON` matches exact keys),
+the i18n files (go-i18n reads a map), the oEmbed `Ordered` visitor (already Go's, plus the
+invalid-UTF-8 rewrite the helpers lack), the dynamic-list response (Go uses its partial decode),
+and documents this server or Go marshalled itself (licence, token extra, Systems rows, config row,
+log lines, link-metadata rows).

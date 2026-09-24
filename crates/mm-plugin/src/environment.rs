@@ -261,9 +261,15 @@ pub fn find_manifest(dir: &Path) -> (Option<Manifest>, String, Option<ManifestRe
             return (None, shown, Some(GoIoError::new("open", &path, e).into()));
         }
     };
-    let first = serde_json::Deserializer::from_slice(&bytes)
-        .into_iter::<Manifest>()
-        .next();
+    // `json.NewDecoder(f).Decode(&manifest)` into a value (manifest.go:491): Go's decoding rules
+    // — a folded key, a `null` member, a `null` manifest as the zero one. An empty file is `EOF`.
+    let first = if bytes.iter().all(u8::is_ascii_whitespace) {
+        None
+    } else {
+        Some(mm_model::utils::decode_one_value_from_json::<Manifest>(
+            &bytes,
+        ))
+    };
     match first {
         Some(Ok(mut manifest)) => {
             manifest.id = manifest.id.to_lowercase();

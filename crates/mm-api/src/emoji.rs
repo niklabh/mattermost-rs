@@ -693,7 +693,11 @@ pub async fn create_emoji(
     let Some(raw) = form.first_value("emoji") else {
         return ApiError::invalid_param("emoji").into_response();
     };
-    let Ok(emoji) = serde_json::from_str::<mm_model::emoji::Emoji>(raw) else {
+    // `json.Unmarshal([]byte(m.Value["emoji"][0]), &emoji)` into a value (emoji.go:95).
+    let Ok(emoji) =
+        mm_model::utils::unmarshal_from_json::<Option<mm_model::emoji::Emoji>>(raw.as_bytes())
+            .map(Option::unwrap_or_default)
+    else {
         return ApiError::invalid_param("emoji").into_response();
     };
     tracing::Span::current().record("emoji_name", &emoji.name);

@@ -184,7 +184,8 @@ impl App {
             .map_err(latest_version_error)?;
         let body = response.bytes().await.map_err(latest_version_error)?;
         let release: mm_model::github_release::GithubReleaseInfo =
-            serde_json::from_slice(&body).map_err(latest_version_error)?;
+            // `json.Unmarshal(body, &releaseInfo)` (app/admin.go:223): Go's decoding rules.
+            mm_model::utils::unmarshal_from_json(&body).map_err(latest_version_error)?;
         release
             .is_valid()
             .map_err(|err| latest_version_error(*err))?;

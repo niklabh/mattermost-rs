@@ -52,7 +52,7 @@ pub struct RetentionPolicy {
 ///
 /// The embedded `RetentionPolicy` is **inlined** by `encoding/json`, so `id`, `display_name` and
 /// `post_duration` sit beside `team_ids` at the top level.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct RetentionPolicyWithTeamAndChannelIDs {
     #[serde(flatten)]
@@ -63,6 +63,32 @@ pub struct RetentionPolicyWithTeamAndChannelIDs {
 
     #[serde(rename = "channel_ids")]
     pub channel_ids: Option<Vec<String>>,
+}
+
+/// [`RetentionPolicyWithTeamAndChannelIDs`]'s own fields — the half of the object Go does not embed.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct RetentionPolicyWithTeamAndChannelIDsOwn {
+    #[serde(rename = "team_ids")]
+    team_ids: Option<Vec<String>>,
+    #[serde(rename = "channel_ids")]
+    channel_ids: Option<Vec<String>>,
+}
+
+/// Go embeds `RetentionPolicy`, so the object is decoded once per part and each part gets Go's
+/// decoding rules ([D-1240]); `#[serde(flatten)]` stays for `Serialize`, which it gets right.
+impl<'de> Deserialize<'de> for RetentionPolicyWithTeamAndChannelIDs {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let document = crate::go_decode::embedded_document(d)?;
+        let policy: RetentionPolicy = crate::go_decode::embedded_part(&document)?;
+        let own: RetentionPolicyWithTeamAndChannelIDsOwn =
+            crate::go_decode::embedded_part(&document)?;
+        Ok(RetentionPolicyWithTeamAndChannelIDs {
+            policy,
+            team_ids: own.team_ids,
+            channel_ids: own.channel_ids,
+        })
+    }
 }
 
 /// Port of `model.RetentionPolicyWithTeamAndChannelCounts` (data_retention_policy.go:30).

@@ -78,13 +78,22 @@ pub struct ReportPostOptionsCursor {
 
 /// The body of `POST /api/v4/reports/posts`: Go decodes into an anonymous struct embedding
 /// [`ReportPostOptions`] and [`ReportPostOptionsCursor`], so the nine keys sit flat.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
+///
+/// Both halves are decoded from the same object so each gets Go's decoding rules ([D-1240]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReportPostRequest {
-    #[serde(flatten)]
     pub options: ReportPostOptions,
-    #[serde(flatten)]
     pub cursor: ReportPostOptionsCursor,
+}
+
+impl<'de> Deserialize<'de> for ReportPostRequest {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let document = crate::go_decode::embedded_document(d)?;
+        Ok(ReportPostRequest {
+            options: crate::go_decode::embedded_part(&document)?,
+            cursor: crate::go_decode::embedded_part(&document)?,
+        })
+    }
 }
 
 /// Port of `model.ReportPostListResponse` (post.go:1529).

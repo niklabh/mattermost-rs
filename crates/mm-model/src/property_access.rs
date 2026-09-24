@@ -96,7 +96,8 @@ pub fn get_property_field_owners(field: &PropertyField) -> Option<Vec<PropertyOw
     if raw.is_null() {
         return None;
     }
-    serde_json::from_value(raw.clone()).ok()
+    // Marshal then `json.Unmarshal` in Go (property_access.go:114): its decoding rules.
+    crate::utils::from_value_go(raw).ok()
 }
 
 /// Port of `model.HasPropertyFieldOwners` (property_access.go:122).

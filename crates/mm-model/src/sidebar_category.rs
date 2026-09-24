@@ -126,7 +126,7 @@ pub struct SidebarCategory {
 ///
 /// The Go field is named `Channels` but its tag is `channel_ids`; the name here follows the
 /// wire, because that is the half a client sees.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct SidebarCategoryWithChannels {
     #[serde(flatten)]
@@ -135,6 +135,28 @@ pub struct SidebarCategoryWithChannels {
     /// `null` when Go's slice is nil, `[]` when it is empty — see the module docs.
     #[serde(rename = "channel_ids")]
     pub channel_ids: Option<Vec<String>>,
+}
+
+/// [`SidebarCategoryWithChannels`]'s own fields — the half of the object Go does not embed.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct SidebarCategoryWithChannelsOwn {
+    #[serde(rename = "channel_ids")]
+    channel_ids: Option<Vec<String>>,
+}
+
+/// Go embeds `SidebarCategory`, so the object is decoded once per part and each part gets Go's
+/// decoding rules ([D-1240]); `#[serde(flatten)]` stays for `Serialize`, which it gets right.
+impl<'de> Deserialize<'de> for SidebarCategoryWithChannels {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let document = crate::go_decode::embedded_document(d)?;
+        let category: SidebarCategory = crate::go_decode::embedded_part(&document)?;
+        let own: SidebarCategoryWithChannelsOwn = crate::go_decode::embedded_part(&document)?;
+        Ok(SidebarCategoryWithChannels {
+            category,
+            channel_ids: own.channel_ids,
+        })
+    }
 }
 
 impl SidebarCategoryWithChannels {

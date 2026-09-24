@@ -213,13 +213,13 @@ pub async fn update_team_scheme(
 /// from `channel_admin::body_names_a_valid_scheme_id`, which is why the two are not shared: a
 /// shared helper would have to carry the flag, and the flag is the bug someone would flip.
 fn body_names_a_team_scheme_id(bytes: &[u8]) -> bool {
-    let mut values = serde_json::Deserializer::from_slice(bytes).into_iter::<SchemeIDPatch>();
-    match values.next() {
-        Some(Ok(patch)) => patch
+    // `var p model.SchemeIDPatch; Decode` (team.go:2161): the shared body decoder's rules.
+    match mm_model::utils::decode_one_value_from_json::<SchemeIDPatch>(bytes) {
+        Ok(patch) => patch
             .scheme_id
             .as_deref()
             .is_some_and(|id| is_valid_id(id) || id.is_empty()),
-        _ => false,
+        Err(_) => false,
     }
 }
 
@@ -303,10 +303,11 @@ pub async fn invite_users_to_team(
         }
     };
 
-    let mut values = serde_json::Deserializer::from_slice(&bytes).into_iter::<MemberInvite>();
-    let invite = match values.next() {
-        Some(Ok(invite)) => invite,
-        _ => return invalid_invite_body().into_response(),
+    // `StructFromJSONLimited` (utils.go:601) is `Decode`; `MemberInvite`'s own decode is Go's
+    // custom `UnmarshalJSON`, which the model type reproduces.
+    let invite: MemberInvite = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(invite) => invite,
+        Err(_) => return invalid_invite_body().into_response(),
     };
 
     if invite.emails.is_empty() {

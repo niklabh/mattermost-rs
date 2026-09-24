@@ -1216,7 +1216,7 @@ fn extract_option_ids_from_value(
         }
         PropertyFieldType::MULTISELECT => {
             let list: Vec<String> =
-                serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+                mm_model::utils::from_value_go(value).map_err(|e| e.to_string())?;
             ids.extend(list.into_iter().filter(|id| !id.is_empty()));
         }
         other => {
@@ -1385,7 +1385,7 @@ fn sanitize_and_validate_options(
     };
 
     let mut options: PropertyOptions<CustomProfileAttributesSelectOption> =
-        serde_json::from_value(raw).map_err(|err| {
+        mm_model::utils::from_value_go(&raw).map_err(|err| {
             PropertyServiceError::InvalidFieldAttrs(format!("invalid options: {err}"))
         })?;
 
@@ -1466,7 +1466,7 @@ fn sanitize_and_validate_owners(field: &mut PropertyField) -> Result<(), Propert
         |msg: String| PropertyServiceError::InvalidFieldAttrs(format!("invalid owners: {msg}"));
 
     let owners: Vec<PropertyOwner> =
-        serde_json::from_value(raw).map_err(|err| invalid(err.to_string()))?;
+        mm_model::utils::from_value_go(&raw).map_err(|err| invalid(err.to_string()))?;
     let attrs = field.attrs.get_or_insert_with(StringInterface::new);
     if owners.is_empty() {
         attrs.remove(PROPERTY_ATTRS_OWNERS);
@@ -1574,7 +1574,7 @@ fn extract_option_ids(field: &PropertyField) -> Result<HashSet<String>, String> 
         #[serde(default)]
         id: String,
     }
-    let options: Vec<OnlyId> = serde_json::from_value(raw.clone())
+    let options: Vec<OnlyId> = mm_model::utils::from_value_go(raw)
         .map_err(|err| format!("invalid options format: {err}"))?;
     Ok(options
         .into_iter()
@@ -1623,7 +1623,7 @@ pub fn validate_value_against_field(
             Ok(())
         }
         PropertyFieldType::MULTISELECT => {
-            let list: Vec<String> = serde_json::from_value(value.value.clone())
+            let list: Vec<String> = mm_model::utils::from_value_go(&value.value)
                 .map_err(|_| "expected string array value for multiselect field".to_owned())?;
             let ids =
                 extract_option_ids(field).map_err(|e| format!("failed to extract options: {e}"))?;
@@ -1645,7 +1645,7 @@ pub fn validate_value_against_field(
             Ok(())
         }
         PropertyFieldType::MULTIUSER => {
-            let list: Vec<String> = serde_json::from_value(value.value.clone())
+            let list: Vec<String> = mm_model::utils::from_value_go(&value.value)
                 .map_err(|_| "expected string array value for multiuser field".to_owned())?;
             for id in list {
                 if !is_valid_id(&id) {

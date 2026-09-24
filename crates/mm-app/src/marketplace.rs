@@ -240,21 +240,15 @@ impl MarketplaceClient {
 
 /// `BaseMarketplacePluginsFromReader` (marketplace_plugin.go:48): the **first** JSON value of the
 /// body — trailing bytes are never read — where an empty body (`io.EOF`) and `null` are both the
-/// empty list. Decoded through a `Value` so a repeated key keeps its last value, as Go does.
+/// empty list. The rest is the shared body decoder's: a folded key, a `null` member and a
+/// repeated key decode as `encoding/json` decodes them.
 fn base_plugins_from_json(
     body: &[u8],
 ) -> Result<Vec<Option<BaseMarketplacePlugin>>, MarketplaceClientError> {
-    let Some(first) = serde_json::Deserializer::from_slice(body)
-        .into_iter::<serde_json::Value>()
-        .next()
-    else {
-        return Ok(Vec::new());
-    };
-    let value = first?;
-    if value.is_null() {
+    if body.iter().all(u8::is_ascii_whitespace) {
         return Ok(Vec::new());
     }
-    Ok(serde_json::from_value(value)?)
+    Ok(mm_model::utils::decode_one_value_from_json(body)?)
 }
 
 pub use mm_plugin::environment::PrepackagedPlugin;

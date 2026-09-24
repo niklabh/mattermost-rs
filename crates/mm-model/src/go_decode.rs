@@ -38,7 +38,9 @@
 //! - A struct with a `#[serde(flatten)]` member is decoded by serde as a *map*, so its fields are
 //!   not known here: exact duplicates are last-wins and a top-level `null` member is dropped, but a
 //!   folded key is not matched, a duplicate is not merged, and below the top level serde's
-//!   buffered `Content` decides ([D-1240]).
+//!   buffered `Content` decides. The body types Go embeds into therefore write their
+//!   `Deserialize` over [`embedded_document`] instead ([D-1240]); what still arrives here as a
+//!   flattened map is a response type no handler decodes.
 //! - A type with a hand-written `Deserialize` that goes through `serde_json::Value` sees the
 //!   document after `Value` has collapsed it; the rules apply only down to that point.
 //! - Of the earlier occurrences a repeated scalar key overwrites, only the type is checked, not
@@ -522,6 +524,85 @@ pub(crate) fn from_go_json<'a, T: Deserialize<'a>>(
     T::deserialize(At::one(document))
 }
 
+/// The document a type Go **embeds** another in is decoded from, once per part ([D-1240]).
+///
+/// `#[serde(flatten)]` makes serde decode the outer struct as a map and hand the embedded one
+/// its members through a private buffer, so neither the field names (for the key fold) nor the
+/// target kinds (for `null` and repeated keys) ever reach [`At`]. A type Go embeds into instead
+/// writes its `Deserialize` as: buffer the object once with this, then decode **each part** — the
+/// embedded struct, and a derived struct of the outer type's own fields — from the same document
+/// with [`embedded_part`]. Each part ignores the other's keys as unknown, and gets every rule.
+///
+/// This is Go's answer as long as no key folds onto a field of two parts; Go would give it to the
+/// shallower one. Each type's tests assert its parts' folded names are disjoint.
+pub(crate) fn embedded_document<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<GoJson, D::Error> {
+    GoJson::deserialize(deserializer)
+}
+
+/// One part of an [`embedded_document`], its error in the caller's error type.
+pub(crate) fn embedded_part<T: serde::de::DeserializeOwned, E: de::Error>(
+    document: &GoJson,
+) -> Result<T, E> {
+    from_go_json(document).map_err(E::custom)
+}
+
+/// The `fields` a derived struct hands `deserialize_struct` — its wire names, for the tests that
+/// check an embedded type's parts do not share a folded name.
+#[cfg(test)]
+pub(crate) fn struct_fields<T: serde::de::DeserializeOwned>() -> &'static [&'static str] {
+    struct Probe<'c>(&'c std::cell::Cell<&'static [&'static str]>);
+
+    impl<'de> Deserializer<'de> for Probe<'_> {
+        type Error = serde_json::Error;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> {
+            Err(de::Error::custom("not a struct"))
+        }
+
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            _name: &'static str,
+            fields: &'static [&'static str],
+            _visitor: V,
+        ) -> Result<V::Value, Self::Error> {
+            self.0.set(fields);
+            Err(de::Error::custom("probed"))
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+            option unit unit_struct newtype_struct seq tuple tuple_struct map enum identifier
+            ignored_any
+        }
+    }
+
+    let cell = std::cell::Cell::new(&[][..]);
+    let _ = T::deserialize(Probe(&cell));
+    cell.get()
+}
+
+/// Asserts no two parts of an embedded type have fields whose names fold together.
+#[cfg(test)]
+pub(crate) fn assert_disjoint_folds(parts: &[&[&str]]) {
+    let mut seen: Vec<String> = Vec::new();
+    for part in parts {
+        assert!(
+            !part.is_empty(),
+            "a part has no fields — not a derived struct?"
+        );
+        for field in *part {
+            let folded = fold_name(field);
+            assert!(
+                !seen.contains(&folded),
+                "{field} folds onto a field of another part"
+            );
+            seen.push(folded);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,6 +744,34 @@ mod tests {
         assert_eq!(flat.base.a, "y");
         let map: BTreeMap<String, serde_json::Value> = go(r#"{"a":null}"#).unwrap();
         assert_eq!(map["a"], serde_json::Value::Null);
+    }
+
+    /// Every body type that embeds another decodes each part from the same object, which is
+    /// Go's answer only while no key folds onto fields of two parts.
+    #[test]
+    fn the_embedding_body_types_have_disjoint_parts() {
+        use crate::go_decode::{assert_disjoint_folds, struct_fields};
+        assert_disjoint_folds(&[
+            struct_fields::<crate::draft::Draft>(),
+            struct_fields::<crate::scheduled_post::ScheduledPostOwn>(),
+        ]);
+        assert_disjoint_folds(&[
+            struct_fields::<crate::sidebar_category::SidebarCategory>(),
+            struct_fields::<crate::sidebar_category::SidebarCategoryWithChannelsOwn>(),
+        ]);
+        assert_disjoint_folds(&[
+            struct_fields::<crate::group::Group>(),
+            struct_fields::<crate::group::GroupWithUserIdsOwn>(),
+        ]);
+        assert_disjoint_folds(&[
+            struct_fields::<crate::data_retention_policy::RetentionPolicy>(),
+            struct_fields::<crate::data_retention_policy::RetentionPolicyWithTeamAndChannelIDsOwn>(
+            ),
+        ]);
+        assert_disjoint_folds(&[
+            struct_fields::<crate::post_rest::ReportPostOptions>(),
+            struct_fields::<crate::post_rest::ReportPostOptionsCursor>(),
+        ]);
     }
 
     #[test]

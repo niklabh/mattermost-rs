@@ -697,8 +697,10 @@ pub async fn do_post_action(
     let action_request: DoPostActionRequest = if bytes.iter().all(u8::is_ascii_whitespace) {
         DoPostActionRequest::default()
     } else {
-        match serde_json::from_slice(&bytes) {
-            Ok(req) => req,
+        // A second `Decode` must be `EOF`, which is `json.Unmarshal`'s whole-input rule; the target
+        // is a value, so `null` is the zero request.
+        match mm_model::utils::unmarshal_from_json::<Option<DoPostActionRequest>>(&bytes) {
+            Ok(req) => req.unwrap_or_default(),
             Err(err) => {
                 tracing::debug!(error = %err, "action body did not decode");
                 return ApiError::invalid_param("action_request").into_response();

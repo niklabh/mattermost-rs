@@ -49,6 +49,42 @@ type bodyDecodeOuter struct {
 	Props map[string]any    `json:"props"`
 }
 
+// A struct Go embeds another in (D-1240): the embedded fields are promoted, so every rule — the
+// fold, null, a repeated key, a nested null — reaches them exactly as it reaches the outer's own.
+type bodyDecodeEmbedBase struct {
+	A     string          `json:"a"`
+	Tags  []string        `json:"tags"`
+	Inner bodyDecodeInner `json:"inner"`
+}
+
+type bodyDecodeEmbed struct {
+	bodyDecodeEmbedBase
+	N     int64    `json:"n"`
+	Items []string `json:"items"`
+}
+
+var bodyDecodeEmbedCorpus = []string{
+	`{}`, `null`, `[]`, `{"a":"x","n":1}`, `{"A":"x","N":1}`, `{"a":null,"n":null}`,
+	`{"tags":[null,"t"],"items":[null]}`, `{"inner":{"A":"i","n":null}}`,
+	`{"a":"x","A":"y","n":1,"n":2}`, `{"inner":{"a":"x"},"inner":{"n":3}}`,
+	`{"tags":["a","b"],"tags":[null]}`, `{"TAGS":["t"],"ITEMS":["i"]}`, `{"inner":[]}`,
+	`{"a":7}`, `{"n":"7"}`, "{\"\u017ftate\":1,\"a\":\"s\"}",
+}
+
+func bodyDecodeEmbedCases() []map[string]any {
+	var out []map[string]any
+	for _, body := range bodyDecodeEmbedCorpus {
+		var value bodyDecodeEmbed
+		err := json.NewDecoder(strings.NewReader(body)).Decode(&value)
+		row := map[string]any{"in": body, "ok": err == nil}
+		if err == nil {
+			row["value"] = value
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
 // Two tags that differ only by case: the exact spelling finds its own field, and a folded one
 // finds the first declared (encode.go:1306, "first folded match takes precedence").
 type bodyDecodeCollide struct {
@@ -194,6 +230,7 @@ func bodyDecodeCollideCases() []map[string]any {
 func writeBodyDecodeBehaviourFixture(outDir string) error {
 	out := map[string]any{
 		"collide_decode":  bodyDecodeCollideCases(),
+		"embed_decode":    bodyDecodeEmbedCases(),
 		"struct_decode":   bodyDecodeCases(),
 		"map_bool_decode": mapBoolDecodeCases(),
 		"int64_decode":    int64DecodeCases(),

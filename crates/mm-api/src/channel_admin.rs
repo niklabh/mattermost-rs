@@ -181,10 +181,10 @@ pub async fn update_channel_scheme(
 ///
 /// Separate from the handler so the four ways to fail it can be asserted without a server.
 fn body_names_a_valid_scheme_id(bytes: &[u8]) -> bool {
-    let mut values = serde_json::Deserializer::from_slice(bytes).into_iter::<SchemeIDPatch>();
-    match values.next() {
-        Some(Ok(patch)) => patch.scheme_id.as_deref().is_some_and(is_valid_id),
-        _ => false,
+    // `var p model.SchemeIDPatch; Decode` (channel.go:2828): the shared body decoder's rules.
+    match mm_model::utils::decode_one_value_from_json::<SchemeIDPatch>(bytes) {
+        Ok(patch) => patch.scheme_id.as_deref().is_some_and(is_valid_id),
+        Err(_) => false,
     }
 }
 

@@ -1,0 +1,6 @@
+# D-1240: types Go embeds another in.
+e_part_serde_rules	crates/mm-model/src/go_decode.rs	    from_go_json(document).map_err(E::custom)	    serde_json::to_value(document)\n        .and_then(serde_json::from_value)\n        .map_err(E::custom)	lib	an_embedded_struct
+e_draft_part_dropped	crates/mm-model/src/scheduled_post.rs	        let draft: Draft = crate::go_decode::embedded_part(&document)?;	        let draft: Draft = Draft::default();\n        let _ = &document;	lib	scheduled_post
+e_sidebar_embedded_serde	crates/mm-model/src/sidebar_category.rs	        let category: SidebarCategory = crate::go_decode::embedded_part(&document)?;	        let category: SidebarCategory = serde_json::to_value(&document)\n            .and_then(serde_json::from_value)\n            .map_err(serde::de::Error::custom)?;	api	malformed_bodies
+control_e_part_turbofish	crates/mm-model/src/go_decode.rs	    from_go_json(document).map_err(E::custom)	    from_go_json::<T>(document).map_err(E::custom)	lib	an_embedded_struct
+control_e_draft_binding	crates/mm-model/src/scheduled_post.rs	        let draft: Draft = crate::go_decode::embedded_part(&document)?;	        let draft = crate::go_decode::embedded_part::<Draft, D::Error>(&document)?;	lib	scheduled_post

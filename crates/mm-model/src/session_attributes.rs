@@ -256,7 +256,8 @@ impl SAField {
             return Ok(sa);
         }
 
-        sa.attrs = serde_json::from_value(serde_json::Value::Object(map.clone()))
+        // Marshal then `json.Unmarshal` in Go (session_attributes.go:168): its decoding rules.
+        sa.attrs = crate::utils::from_value_go(&serde_json::Value::Object(map.clone()))
             .map_err(|e| SessionAttributeError::Attrs(e.to_string()))?;
 
         Ok(sa)

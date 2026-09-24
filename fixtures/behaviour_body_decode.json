@@ -41,6 +41,203 @@
             }
         }
     ],
+    "embed_decode": [
+        {
+            "in": "{}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "null",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "[]",
+            "ok": false
+        },
+        {
+            "in": "{\"a\":\"x\",\"n\":1}",
+            "ok": true,
+            "value": {
+                "a": "x",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 1,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"A\":\"x\",\"N\":1}",
+            "ok": true,
+            "value": {
+                "a": "x",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 1,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"a\":null,\"n\":null}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"tags\":[null,\"t\"],\"items\":[null]}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": [
+                    "",
+                    "t"
+                ],
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": [
+                    ""
+                ]
+            }
+        },
+        {
+            "in": "{\"inner\":{\"A\":\"i\",\"n\":null}}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": null,
+                "inner": {
+                    "a": "i",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"a\":\"x\",\"A\":\"y\",\"n\":1,\"n\":2}",
+            "ok": true,
+            "value": {
+                "a": "y",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 2,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"inner\":{\"a\":\"x\"},\"inner\":{\"n\":3}}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": null,
+                "inner": {
+                    "a": "x",
+                    "n": 3
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"tags\":[\"a\",\"b\"],\"tags\":[null]}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": [
+                    "a"
+                ],
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        },
+        {
+            "in": "{\"TAGS\":[\"t\"],\"ITEMS\":[\"i\"]}",
+            "ok": true,
+            "value": {
+                "a": "",
+                "tags": [
+                    "t"
+                ],
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": [
+                    "i"
+                ]
+            }
+        },
+        {
+            "in": "{\"inner\":[]}",
+            "ok": false
+        },
+        {
+            "in": "{\"a\":7}",
+            "ok": false
+        },
+        {
+            "in": "{\"n\":\"7\"}",
+            "ok": false
+        },
+        {
+            "in": "{\"ſtate\":1,\"a\":\"s\"}",
+            "ok": true,
+            "value": {
+                "a": "s",
+                "tags": null,
+                "inner": {
+                    "a": "",
+                    "n": 0
+                },
+                "n": 0,
+                "items": null
+            }
+        }
+    ],
     "int64_decode": [
         {
             "in": "2",
