@@ -3664,6 +3664,89 @@ mod body_decode_go_parity {
         }
     }
 
+    /// `bodyDecodeEmbedBase`, which Go embeds in `bodyDecodeEmbed`.
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[serde(default)]
+    struct EmbedBase {
+        #[serde(rename = "a")]
+        a: String,
+        #[serde(rename = "tags")]
+        tags: Option<Vec<String>>,
+        #[serde(rename = "inner")]
+        inner: Inner,
+    }
+
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[serde(default)]
+    struct EmbedOwn {
+        #[serde(rename = "n")]
+        n: i64,
+        #[serde(rename = "items")]
+        items: Option<Vec<String>>,
+    }
+
+    /// `bodyDecodeEmbed`, decoded the way every embedding body type in the crate is.
+    #[derive(Debug, Default, Serialize)]
+    struct Embed {
+        #[serde(flatten)]
+        base: EmbedBase,
+        #[serde(flatten)]
+        own: EmbedOwn,
+    }
+
+    impl<'de> Deserialize<'de> for Embed {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let document = crate::go_decode::embedded_document(d)?;
+            Ok(Embed {
+                base: crate::go_decode::embedded_part(&document)?,
+                own: crate::go_decode::embedded_part(&document)?,
+            })
+        }
+    }
+
+    /// The same shape as serde's `flatten` alone would decode it — the premise.
+    #[derive(Debug, Default, Deserialize)]
+    #[serde(default)]
+    struct EmbedFlatten {
+        #[serde(flatten)]
+        _base: EmbedBase,
+        #[serde(rename = "n")]
+        _n: i64,
+    }
+
+    #[test]
+    fn an_embedded_struct_decodes_as_go_decodes_it() {
+        let rows = section("embed_decode");
+        assert_eq!(rows.len(), 16, "the embedding corpus changed size");
+        crate::go_decode::assert_disjoint_folds(&[
+            crate::go_decode::struct_fields::<EmbedBase>(),
+            crate::go_decode::struct_fields::<EmbedOwn>(),
+        ]);
+        let mut flatten_alone_differs = 0;
+        for row in &rows {
+            let body = row["in"].as_str().unwrap();
+            match decode_one_value_from_json::<Embed>(body.as_bytes()) {
+                Ok(ours) => {
+                    assert_eq!(row["ok"], true, "Go refuses {body:?}");
+                    assert_eq!(
+                        serde_json::to_value(ours).unwrap(),
+                        row["value"],
+                        "{body:?}"
+                    );
+                }
+                Err(err) => assert_eq!(row["ok"], false, "Go accepts {body:?}: {err}"),
+            }
+            let flatten_ok = decode_one_value_from_json::<EmbedFlatten>(body.as_bytes()).is_ok();
+            if flatten_ok != (row["ok"] == true) {
+                flatten_alone_differs += 1;
+            }
+        }
+        assert!(
+            flatten_alone_differs > 0,
+            "the premise: flatten alone differs somewhere"
+        );
+    }
+
     #[test]
     fn map_bool_from_json_matches_go() {
         for row in section("map_bool_decode") {

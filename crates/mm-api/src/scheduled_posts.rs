@@ -33,7 +33,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_app::post::PrepareError;
 use mm_app::scheduled_post::ScheduledPostWrite;
-use mm_model::go_json::{GoFields, fold_name, remap_object_keys};
+use mm_model::go_json::fold_name;
 use mm_model::permission::{PERMISSION_UPLOAD_FILE, PERMISSION_VIEW_TEAM, make_permission_error};
 use mm_model::scheduled_post::ScheduledPost;
 use mm_model::utils::{AppError, is_valid_id};
@@ -52,74 +52,33 @@ use crate::proxy;
 /// `model.ConnectionId` — `Connection-Id`, no `X-` prefix; see `drafts.rs`.
 const CONNECTION_ID_HEADER: &str = "Connection-Id";
 
-/// The `json:` names of `model.ScheduledPost` — the embedded `Draft`'s twelve first, since Go
-/// inlines them — for `encoding/json`'s case-insensitive key match.
-const SCHEDULED_POST_FIELDS: GoFields = GoFields {
-    names: &[
-        "create_at",
-        "update_at",
-        "delete_at",
-        "user_id",
-        "channel_id",
-        "root_id",
-        "message",
-        "type",
-        "props",
-        "file_ids",
-        "metadata",
-        "priority",
-        "id",
-        "scheduled_at",
-        "processed_at",
-        "error_code",
-        "repeat_type",
-        "repeat_timezone",
-    ],
-    nested: &[],
-};
-
 /// `SetInvalidParamWithErr("schedule_post", err)` — `detailed_error` is wiped on the wire, so it
 /// is [`ApiError::invalid_param`].
 fn invalid_body() -> Response {
     ApiError::invalid_param("schedule_post").into_response()
 }
 
-/// Decode a body into a scheduled post as `encoding/json` would, keys matched case-insensitively.
+/// Decode a body into a scheduled post as `encoding/json` would — every rule of the body
+/// decoder, which `ScheduledPost`'s own `Deserialize` carries into its embedded `Draft`.
 ///
 /// A `null` body is the zero value, not an error — the target is a `model.ScheduledPost`, not a
 /// pointer — and an array is always an error. `whole` is `json.Unmarshal` (the update route: the
 /// whole body must be one value) as against `Decoder.Decode` (create: the first value, and
-/// anything after it is never read).
+/// anything after it is never read). The raw document comes back too, for
+/// [`names_repeat_type`].
 fn decode(bytes: &[u8], whole: bool) -> Option<(ScheduledPost, serde_json::Value)> {
-    if bytes
-        .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        .is_some_and(|byte| *byte == b'[')
-    {
-        return None;
-    }
-    let mut value: serde_json::Value = if whole {
-        mm_model::utils::unmarshal_from_json(bytes).ok()?
+    let (decoded, raw) = if whole {
+        (
+            mm_model::utils::unmarshal_from_json::<Option<ScheduledPost>>(bytes).ok()?,
+            mm_model::utils::unmarshal_from_json::<serde_json::Value>(bytes).ok()?,
+        )
     } else {
-        mm_model::utils::decode_one_from_json(bytes).ok()?
+        (
+            mm_model::utils::decode_one_from_json::<Option<ScheduledPost>>(bytes).ok()?,
+            mm_model::utils::decode_one_from_json::<serde_json::Value>(bytes).ok()?,
+        )
     };
-    if value.is_null() {
-        return Some((ScheduledPost::default(), value));
-    }
-    let raw = value.clone();
-    // A JSON `null` leaves a Go field as it was — for a fresh struct, its zero value — where
-    // serde refuses `null` for a `String` or an `i64`. Every field starts at zero here, so
-    // dropping the top-level nulls is exactly Go's answer, for the pointer, map and slice fields
-    // (nil either way) as much as for the scalars. `"repeat_type": null` is the case a client
-    // sends, and the one [`names_repeat_type`] still sees in `raw`.
-    if let Some(object) = value.as_object_mut() {
-        object.retain(|_, field| !field.is_null());
-    }
-    remap_object_keys(&mut value, &SCHEDULED_POST_FIELDS);
-    // The embedded `Draft` makes this a `#[serde(flatten)]` type, which the body decoder cannot
-    // fold for; the remap above does that. Below the top level its rules apply ([D-075]).
-    let decoded = mm_model::utils::from_value_go(&value).ok()?;
-    Some((decoded, raw))
+    Some((decoded.unwrap_or_default(), raw))
 }
 
 /// Whether the body named `repeat_type` at all — `updateScheduledPost`'s second `Unmarshal`,
@@ -528,21 +487,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_field_names_are_ascii_and_cover_the_wire_form() {
-        assert_eq!(
-            mm_model::go_json::non_ascii_field_name(&SCHEDULED_POST_FIELDS),
-            None
-        );
-        let wire = serde_json::to_value(ScheduledPost::default()).unwrap();
-        for key in wire.as_object().unwrap().keys() {
-            assert!(
-                SCHEDULED_POST_FIELDS.names.contains(&key.as_str()),
-                "{key} is on the wire and not in the schema"
-            );
-        }
-    }
-
-    #[test]
     fn keys_match_case_insensitively_and_a_null_body_is_the_zero_value() {
         let (post, _) = decode(br#"{"ID":"x","Channel_Id":"c","MESSAGE":"m"}"#, true).unwrap();
         assert_eq!(post.id, "x");
@@ -560,6 +504,9 @@ mod tests {
         assert!(decode(b"[]", true).is_none(), "an array is not a struct");
         assert!(decode(b"[]", false).is_none());
         assert!(decode(br#"{"message":5}"#, false).is_none());
+        // Below the top level too: a `null` file id is `""`, as Go decodes it.
+        let (post, _) = decode(br#"{"file_ids":[null]}"#, false).unwrap();
+        assert_eq!(post.file_ids, Some(vec![String::new()]));
     }
 
     /// `Unmarshal` wants the whole body; `Decode` stops after the first value.

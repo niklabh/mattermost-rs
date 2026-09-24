@@ -10143,7 +10143,11 @@ that exhausts a user's budget on `/`.
 
 ## D-1240 · A `#[serde(flatten)]` type gets only part of Go's decoding rules
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-25 (the body decoders, D-057/D-040)
+**Closed** 2026-09-25 — the five body types Go embeds into (`ScheduledPost`, `SidebarCategoryWithChannels`,
+`GroupWithUserIds`, `RetentionPolicyWithTeamAndChannelIDs`, `ReportPostRequest`) decode the object once per part
+through `go_decode::embedded_document`/`embedded_part`, so every rule reaches the embedded half; held by the
+`embed_decode` oracle rows and `parity::malformed_bodies`. The remaining flatten types are responses no handler decodes.
 
 serde decodes a struct with a flattened member through `deserialize_map` and buffers the members
 into its private `Content`, so `mm_model::go_decode` never learns the field names. It drops a

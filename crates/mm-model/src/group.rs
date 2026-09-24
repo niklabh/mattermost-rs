@@ -334,7 +334,7 @@ fn create_err(id: &'static str, param: Option<(&str, usize)>) -> Box<AppError> {
 }
 
 /// Port of `model.GroupWithUserIds` (group.go:74) — `Group` inlined, plus the member list.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct GroupWithUserIds {
     #[serde(flatten)]
@@ -342,6 +342,28 @@ pub struct GroupWithUserIds {
 
     #[serde(rename = "user_ids")]
     pub user_ids: Option<Vec<String>>,
+}
+
+/// [`GroupWithUserIds`]'s own fields — the half of the object Go does not embed.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct GroupWithUserIdsOwn {
+    #[serde(rename = "user_ids")]
+    user_ids: Option<Vec<String>>,
+}
+
+/// Go embeds `Group`, so the object is decoded once per part and each part gets Go's
+/// decoding rules ([D-1240]); `#[serde(flatten)]` stays for `Serialize`, which it gets right.
+impl<'de> Deserialize<'de> for GroupWithUserIds {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let document = crate::go_decode::embedded_document(d)?;
+        let group: Group = crate::go_decode::embedded_part(&document)?;
+        let own: GroupWithUserIdsOwn = crate::go_decode::embedded_part(&document)?;
+        Ok(GroupWithUserIds {
+            group,
+            user_ids: own.user_ids,
+        })
+    }
 }
 
 /// Port of `model.GroupWithSchemeAdmin` (group.go:93).

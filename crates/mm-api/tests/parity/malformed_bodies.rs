@@ -230,6 +230,17 @@ async fn null_members_folded_keys_and_repeated_keys_are_answered_as_go_answers_t
                 r#"{{"user_id":"{absent}","user_id":"{me}","post_id":"{absent}","emoji_name":"smile"}}"#
             ),
         ),
+        // Types Go embeds another in ([D-1240]): the embedded half's keys fold and take `null`.
+        (
+            "POST",
+            "/api/v4/reports/posts".into(),
+            format!(r#"{{"CHANNEL_ID":"{absent}","per_page":null,"cursor":null}}"#),
+        ),
+        (
+            "POST",
+            "/api/v4/reports/posts".into(),
+            r#"{"channel_id":"","Cursor":"not-a-cursor"}"#.into(),
+        ),
         // A focus-loss view with `null` ids.
         (
             "POST",
@@ -288,4 +299,42 @@ async fn null_members_folded_keys_and_repeated_keys_are_answered_as_go_answers_t
         cases.len(),
         failures.join("\n")
     );
+}
+
+/// `SidebarCategoryWithChannels` embeds `SidebarCategory` ([D-1240]): a folded `user_id` and
+/// `team_id` in the embedded half, and a `null` `sorting`, reach the create as Go reads them.
+/// A success on both sides, so the two created categories are compared without their ids and
+/// then deleted.
+#[tokio::test]
+async fn an_embedded_body_type_takes_go_s_rules_in_its_embedded_half() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = logged_in_user_id().to_owned();
+    let (team, channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let path = format!("/api/v4/users/{me}/teams/{team}/channels/categories");
+    let body = format!(
+        r#"{{"USER_ID":"{me}","Team_Id":"{team}","display_name":"mmrs-embed","type":"custom","channel_ids":["{channel}",null],"sorting":null}}"#
+    );
+    let (go_status, go_body) = send(&http, GO, &token, "POST", &path, &body).await;
+    let (rust_status, rust_body) = send(&http, RUST, &token, "POST", &path, &body).await;
+    let parse = |bytes: &[u8]| -> serde_json::Value { serde_json::from_slice(bytes).unwrap() };
+    let (mut go, mut rust) = (parse(&go_body), parse(&rust_body));
+    for created in [&go, &rust] {
+        if let Some(id) = created["id"].as_str() {
+            let _ = http
+                .delete(format!("{GO}{path}/{id}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await;
+        }
+    }
+    assert_eq!(go_status, 200, "Go refused it: {go}");
+    assert_eq!(rust_status, go_status, "{rust}");
+    for created in [&mut go, &mut rust] {
+        created.as_object_mut().unwrap().remove("id");
+    }
+    assert_eq!(rust, go);
 }
