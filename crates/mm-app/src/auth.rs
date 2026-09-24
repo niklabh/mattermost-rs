@@ -21,10 +21,7 @@
 //!
 //! # What is not here
 //!
-//! Login, MFA, LDAP, SAML and the e-mails. `App.UpdatePasswordSendEmail` and
-//! `App.SendPasswordReset` both end in `EmailService`, which this tree does not have; the routes
-//! that exist *only* to send an e-mail are forwarded to Go rather than answered, and the ones
-//! that send one as a side effect of a write do the write and log. See [D-238].
+//! Login, MFA, LDAP and SAML. The e-mails these writes send are in [`crate::email`].
 
 use mm_model::session::Session;
 use mm_model::token::{TOKEN_TYPE_PASSWORD_RECOVERY, TOKEN_TYPE_VERIFY_EMAIL, Token};
@@ -390,23 +387,39 @@ impl App {
 
     /// Port of `App.UpdatePasswordSendEmail` (user.go:1812).
     ///
-    /// The e-mail is a `Srv().Go(...)` goroutine whose failure Go only logs, so it is not part of
-    /// the response either way — but it *is* part of what a user experiences, and it is not sent
-    /// here. See [D-238]. The `method` string Go passes is the translated body of that e-mail and
-    /// has no other reader, so it is not a parameter of this function.
+    /// The e-mail is a `Srv().Go(...)` goroutine whose failure Go only logs, so it is spawned
+    /// here too and is not part of the response either way. `method` is the translated sentence
+    /// naming how the password changed; each caller translates it with a different `T`.
     pub async fn update_password_send_email(
         &self,
         caller_session: Option<&Session>,
         user: &User,
         new_password: &str,
+        method: &str,
     ) -> AppResult {
         self.update_password(caller_session, user, new_password)
             .await?;
-        tracing::warn!(
-            user_id = %user.id,
-            "password changed; the password-change e-mail Go sends here is not ported (D-238)"
-        );
+        let app = self.clone();
+        let (email, locale, method) = (user.email.clone(), user.locale.clone(), method.to_owned());
+        tokio::spawn(async move {
+            let site_url = app.live_site_url().await.unwrap_or_default();
+            if let Err(err) = app
+                .send_password_change_email(&email, &method, &locale, &site_url)
+                .await
+            {
+                tracing::error!(error = %err, "Failed to send password change email");
+            }
+        });
         Ok(())
+    }
+
+    /// `T(id)` with `i18n.GetUserTranslations(locale)`, for the `method` sentences the self and
+    /// reset paths hand to [`App::update_password_send_email`].
+    async fn user_t(locale: &str, id: &str) -> String {
+        match crate::email::user_translations(locale).await {
+            Ok(t) => t.t(id),
+            Err(_) => id.to_owned(),
+        }
     }
 
     /// Port of `App.UpdatePasswordAsUser` (user.go:1142) — the self-service path.
@@ -467,7 +480,8 @@ impl App {
             return Err(err);
         }
 
-        self.update_password_send_email(caller_session, &user, new_password)
+        let method = Self::user_t(&user.locale, "api.user.update_password.menu").await;
+        self.update_password_send_email(caller_session, &user, new_password, &method)
             .await
     }
 
@@ -482,9 +496,10 @@ impl App {
         caller_session: Option<&Session>,
         user_id: &str,
         new_password: &str,
+        method: &str,
     ) -> AppResult {
         let user = self.get_user(user_id).await?;
-        self.update_password_send_email(caller_session, &user, new_password)
+        self.update_password_send_email(caller_session, &user, new_password, method)
             .await
     }
 
@@ -705,7 +720,8 @@ impl App {
             ));
         }
 
-        self.update_password_send_email(caller_session, &user, new_password)
+        let method = Self::user_t(&user.locale, "api.user.reset_password.method").await;
+        self.update_password_send_email(caller_session, &user, new_password, &method)
             .await?;
 
         if let Err(err) = self.delete_token(&token).await {
@@ -790,11 +806,20 @@ impl App {
         self.verify_user_email(&data.user_id, &email).await?;
 
         if user.email != email {
-            // Go's `SendEmailChangeEmail` goroutine. Not ported — see [D-238].
-            tracing::warn!(
-                user_id = %user.id,
-                "email changed by verification; the change notification Go sends is not ported (D-238)"
-            );
+            // Go's `SendEmailChangeEmail` goroutine, to the **old** address: only logged on
+            // failure, and never awaited by the response.
+            let app = self.clone();
+            let (old_email, locale, new_email) =
+                (user.email.clone(), user.locale.clone(), email.clone());
+            tokio::spawn(async move {
+                let site_url = app.live_site_url().await.unwrap_or_default();
+                if let Err(err) = app
+                    .send_email_change_email(&old_email, &new_email, &locale, &site_url)
+                    .await
+                {
+                    tracing::error!(error = %err, "Failed to send email change email");
+                }
+            });
         }
 
         if let Err(err) = self.delete_token(&token).await {

@@ -12,6 +12,8 @@ mm-model.workspace = true
 mm-plugin.workspace = true
 # `gobwire::Interface`: the plugin API's log methods read the `[]any` pairs a plugin sends.
 gobwire = { path = "../gobwire" }
+# Go's `html/template`, which every e-mail body is rendered with (`crate::email`).
+gotemplate = { path = "../gotemplate" }
 tar.workspace = true
 flate2.workspace = true
 mm-markdown.workspace = true

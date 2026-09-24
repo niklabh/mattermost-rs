@@ -71,7 +71,7 @@ fn map_from_json(bytes: &[u8]) -> StringMap {
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing
 /// newline**, because it is a `w.Write` rather than an encoder.
-fn status_ok() -> Response {
+pub(crate) fn status_ok() -> Response {
     (
         StatusCode::OK,
         [
@@ -205,6 +205,7 @@ pub async fn create_user(
     // body is consumed and, more importantly, before anything is written.
     let token_id = query_get(&request, "t");
     let invite_id = query_get(&request, "iid");
+    let redirect = query_get(&request, "r");
     if !token_id.is_empty() {
         tracing::Span::current().record("forwarded", true);
         tracing::Span::current().record("branch", "token");
@@ -248,10 +249,16 @@ pub async fn create_user(
 
     let created = if is_admin {
         tracing::Span::current().record("branch", "admin");
-        state.app.create_user_as_admin(&hook_ctx, &user).await
+        state
+            .app
+            .create_user_as_admin(&hook_ctx, &user, &redirect)
+            .await
     } else {
         tracing::Span::current().record("branch", "signup");
-        state.app.create_user_from_signup(&hook_ctx, &user).await
+        state
+            .app
+            .create_user_from_signup(&hook_ctx, &user, &redirect)
+            .await
     };
 
     match created {
@@ -295,16 +302,16 @@ pub async fn create_user(
 /// a successful send are indistinguishable to the caller. The lower-casing happens before the
 /// emptiness test, which makes no difference (`strings.ToLower("") == ""`) but is Go's order.
 ///
-/// The served half is the 400 and the unmatched-address OK. A matched address forwards, because
-/// `SendEmailVerification` mints a `Tokens` row before it sends and this process has no mail
-/// service to send with.
-#[tracing::instrument(skip_all, fields(forwarded = false, outcome))]
+/// The redirect is `r.URL.Query().Get("r")`, passed to the link **unescaped** (see
+/// [`mm_app::App::send_verify_email`]).
+#[tracing::instrument(skip_all, fields(outcome))]
 pub async fn send_verification_email(
     State(state): State<AppState>,
     _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
-    let (request, bytes) = match split_body(request, "email").await {
+    let redirect = query_get(&request, "r");
+    let (_request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
     };
@@ -320,14 +327,25 @@ pub async fn send_verification_email(
     // it honours `EnableSignInWithEmail`/`EnableSignInWithUsername` and will match a *username*
     // that happens to equal the submitted string. On a server with e-mail sign-in switched off it
     // fails for every address, and this route answers OK to everything.
-    if state.app.get_user_for_login("", &email).await.is_err() {
+    let Ok(user) = state.app.get_user_for_login("", &email).await else {
         tracing::Span::current().record("outcome", "unmatched");
         return status_ok();
-    }
+    };
 
-    tracing::Span::current().record("forwarded", true);
-    tracing::Span::current().record("outcome", "send");
-    proxy::forward_to_go(State(state), request).await
+    // `SendEmailVerification(user, user.Email, redirect)` — to the address on the **account**,
+    // not the one submitted, which differs whenever the login lookup matched a username. Its
+    // failure is logged (`LogErrorByCode`) and answered OK like everything else.
+    if let Err(err) = state
+        .app
+        .send_email_verification(&user, &user.email, &redirect)
+        .await
+    {
+        tracing::Span::current().record("outcome", "send_failed");
+        tracing::error!(error = %err.id, "sending the verification e-mail failed");
+        return status_ok();
+    }
+    tracing::Span::current().record("outcome", "sent");
+    status_ok()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -357,15 +375,15 @@ pub async fn send_verification_email(
 /// success. Note what it does **not** cover: the `email == ""` 400 is raised by the handler
 /// before `SendPasswordReset` is called and stays a 400 either way.
 ///
-/// Anything that gets past the refusals forwards: `CreatePasswordRecoveryToken` deletes this
-/// user's existing recovery tokens and inserts a new one, and both of those are writes.
-#[tracing::instrument(skip_all, fields(forwarded = false, hardened, outcome))]
+/// Past the refusals, [`mm_app::App::send_password_reset_to`] mints the token and mails it, and
+/// its failures — the token save, the SMTP send — are subject to the same hardened-mode rewrite.
+#[tracing::instrument(skip_all, fields(hardened, outcome))]
 pub async fn send_password_reset(
     State(state): State<AppState>,
     _csrf: crate::auth::CsrfGuard,
     request: Request,
 ) -> Response {
-    let (request, bytes) = match split_body(request, "email").await {
+    let (_request, bytes) = match split_body(request, "email").await {
         Ok(pair) => pair,
         Err(err) => return err.into_response(),
     };
@@ -414,9 +432,23 @@ pub async fn send_password_reset(
         .into_response();
     }
 
-    tracing::Span::current().record("forwarded", true);
-    tracing::Span::current().record("outcome", "send");
-    proxy::forward_to_go(State(state), request).await
+    // `c.App.GetSiteURL()` — the live `ServiceSettings.SiteURL`.
+    let site_url = state.app.live_site_url().await.unwrap_or_default();
+    match state.app.send_password_reset_to(&user, &site_url).await {
+        Ok(_sent) => {
+            tracing::Span::current().record("outcome", "sent");
+            status_ok()
+        }
+        Err(err) => {
+            let hardened = state.app.config().experimental_enable_hardened_mode;
+            tracing::Span::current().record("hardened", hardened);
+            tracing::Span::current().record("outcome", err.id.as_str());
+            if hardened {
+                return status_ok();
+            }
+            ApiError::from(*err).into_response()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

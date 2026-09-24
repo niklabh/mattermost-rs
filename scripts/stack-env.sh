@@ -43,6 +43,13 @@ export MMRS_API_PORT=$((8066 + 100 * MMRS_STACK))
 # Added to every hardcoded `SecondServer::start(80xx)` port in the parity suites, at **runtime**,
 # so the call sites keep naming one number and two stacks still never collide.
 export MMRS_PORT_OFFSET=$((100 * MMRS_STACK))
+# The SMTP port both servers of this stack send to (`EmailSettings.SMTPPort`), as an environment
+# override on each. Stack 0 keeps Mattermost's own default, 10025. Nothing listens there between
+# runs, so a send fails with "connection refused" exactly as it did before this existed; the
+# parity suite binds an in-process sink on it (`common::smtp_sink`) to capture what Go and mm-api
+# each send and compare the two. Per stack because every stack's Go server used to send to the one
+# `localhost:10025`, which two concurrent suites would both have tried to bind.
+export MMRS_SMTP_PORT=$((10025 + 100 * MMRS_STACK))
 
 export MMRS_GO_BASE="http://localhost:$MMRS_GO_PORT"
 export MMRS_RUST_BASE="http://127.0.0.1:$MMRS_API_PORT"

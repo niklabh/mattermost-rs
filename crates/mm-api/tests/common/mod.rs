@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 pub mod local_socket;
+pub mod smtp_sink;
 
 use std::time::Duration;
 

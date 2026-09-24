@@ -296,7 +296,14 @@ pub async fn update_password(
     } else if can_update {
         state
             .app
-            .update_password_by_user_id_send_email(Some(&session.0), &user_id, &new_password)
+            .update_password_by_user_id_send_email(
+                Some(&session.0),
+                &user_id,
+                &new_password,
+                // `c.AppContext.T` — the **request's** language, where the self path translates
+                // the same sentence with the user's.
+                &crate::error::request_t("api.user.reset_password.method"),
+            )
             .await
     } else {
         Err(context_error())

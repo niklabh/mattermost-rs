@@ -83,6 +83,9 @@
 # there is no Go server to ask. An explicit `MMRS_SITE_URL` wins. Following Go rather than taking
 # the variable alone is what keeps the pair agreeing when the harness restarts mm-api on a stack
 # the demo launched: `GET /config/client` answers `SiteURL`, and the config suites compare it.
+# `MM_EMAILSETTINGS_SMTPPORT` (2026-09-24) is the stack's SMTP port from `stack-env.sh`, which
+# `go-server.sh` sets on the Go side too: both servers must send to the same place, or the parity
+# suite's SMTP sink hears only one of them.
 # `MMRS_API_HOST` (2026-09-18) is the address mm-api binds, loopback unless set. `0.0.0.0` makes
 # the stack reachable from another machine on the network — the browser UI through mm-api, as
 # `scripts/mm-api.sh` documents. The parity harness never sets it.
@@ -109,6 +112,7 @@ mmrs_launch_mm_api() {
     MM_GO_PLUGIN_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/plugins" \
     MM_API_GO_CACHE_USER=sliceuser \
     MM_API_CONFIG_POLL_MS=200 \
+    MM_EMAILSETTINGS_SMTPPORT="$MMRS_SMTP_PORT" \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

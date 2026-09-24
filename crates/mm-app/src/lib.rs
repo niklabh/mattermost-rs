@@ -40,6 +40,7 @@ pub mod config;
 pub mod custom_profile_attributes;
 pub mod desktop_login;
 pub mod draft;
+pub mod email;
 pub mod emoji;
 /// Port of the file-backend half of `app/export.go`.
 pub mod export;
@@ -150,6 +151,7 @@ pub mod view;
 pub mod webhook;
 // Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
 pub mod logs;
+pub mod mail;
 pub mod manualtest;
 pub mod searchengine;
 pub mod upgrader;

@@ -1784,6 +1784,7 @@ dependencies = [
  "flate2",
  "gobwire",
  "goimage",
+ "gotemplate",
  "hmac",
  "if-addrs",
  "libc",
