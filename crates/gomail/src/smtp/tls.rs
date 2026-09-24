@@ -5,7 +5,7 @@
 //! # Verification
 //!
 //! `InsecureSkipVerify` accepts any certificate (the handshake signature is still checked, as
-//! Go checks it). Otherwise [`GoVerifier`] does what `crypto/x509.Certificate.Verify` does for a
+//! Go checks it). Otherwise `GoVerifier` does what `crypto/x509.Certificate.Verify` does for a
 //! server certificate, in its order:
 //!
 //! 1. the leaf's validity period — `x509: certificate has expired or is not yet valid: current

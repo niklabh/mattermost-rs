@@ -63,7 +63,7 @@ mm-markdown = { path = "crates/mm-markdown" }
 mm-store = { path = "crates/mm-store" }
 mm-app = { path = "crates/mm-app" }
 goimage = { path = "crates/goimage" }
-gohtml = { path = "crates/gohtml" }
+gohtml = { path = "crates/gohtml", version = "0.1.0" }
 
 # Runtime
 tokio = { version = "1", features = ["full"] }

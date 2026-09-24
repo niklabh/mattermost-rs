@@ -1,7 +1,7 @@
 //! Port of goldmark's `parser` package: the block phase (`parser.go` `parseBlocks`,
 //! `openBlocks`, `closeBlocks`) and every default block parser, plus the paragraph and AST
-//! transformers. The inline phase is in [`inline`], the HTML patterns in [`html`], the GFM table
-//! transformer in [`table`].
+//! transformers. The inline phase is in `inline`, the HTML patterns in `html`, the GFM table
+//! transformer in `table`.
 //!
 //! goldmark dispatches through interfaces registered by trigger byte and priority; the set here
 //! is closed (the default parsers and the four GFM extensions), so each family is an enum and

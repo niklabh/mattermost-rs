@@ -9,7 +9,7 @@
 //! `<noscript>`, `<title>`, `<textarea>`, …) swallow any `<meta>` inside them, and a tag's
 //! **duplicate attributes are dropped, the first one winning** (`attrNames`, readTag). That
 //! oracle is `fixtures/behaviour_opengraph.json`, which records Go's whole token stream for every
-//! corpus document. The other caller is this crate's tree builder ([`crate::parse`]), which drives
+//! corpus document. The other caller is this crate's tree builder ([`crate::parse()`]), which drives
 //! [`Tokenizer::token`], [`Tokenizer::allow_cdata`] and [`Tokenizer::next_is_not_raw_text`] exactly
 //! as parse.go drives Go's.
 //!
@@ -1006,7 +1006,7 @@ pub struct Token {
 impl Tokenizer<'_> {
     /// Port of `Token` (token.go:1255). Every string is built from spans that start and end on
     /// ASCII delimiters of the input, or from decoded entities, so a UTF-8 document yields UTF-8
-    /// strings; [`lossless_string`] only guards a byte input that was not UTF-8 to begin with.
+    /// strings; `lossless_string` only guards a byte input that was not UTF-8 to begin with.
     pub fn token(&mut self) -> Token {
         let mut t = Token {
             token_type: self.tt,

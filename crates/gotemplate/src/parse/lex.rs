@@ -218,12 +218,13 @@ impl Lexer {
     }
 
     fn backup(&mut self) {
-        if !self.at_eof && self.pos > 0 {
-            if let Some(c) = self.input[..self.pos].chars().next_back() {
-                self.pos -= c.len_utf8();
-                if c == '\n' {
-                    self.line -= 1;
-                }
+        if !self.at_eof
+            && self.pos > 0
+            && let Some(c) = self.input[..self.pos].chars().next_back()
+        {
+            self.pos -= c.len_utf8();
+            if c == '\n' {
+                self.line -= 1;
             }
         }
     }

@@ -6,7 +6,7 @@
 //! comments. A different template engine produces *an* e-mail, not *the* e-mail, so this crate
 //! ports the Go packages line by line:
 //!
-//! * [`parse`](crate::parse): `text/template/parse` — lexer, parse tree, parser.
+//! * `parse`: `text/template/parse` — lexer, parse tree, parser.
 //! * `exec`, `funcs`, `fmt`, `strconv`: `text/template`'s executor and builtins, with the parts
 //!   of `fmt` and `strconv` they print through.
 //! * `html`: `html/template`'s contextual autoescaper — contexts, transitions, the escaper that
@@ -18,6 +18,11 @@
 //! module asserts byte equality against it.
 //!
 //! This crate contains no Mattermost code and never depends on an `mm-*` crate.
+
+/// The README's examples, compiled and run as doctests so the crates.io page cannot drift.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
 
 mod exec;
 mod fmt;

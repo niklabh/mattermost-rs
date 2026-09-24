@@ -31,6 +31,11 @@
 //! `olekukonko/tablewriter`. Mattermost never enables them; [`Options`] has no such field, so
 //! tables always take the plain paragraph path. `FromReader` is subsumed by [`from_string`].
 
+/// The README's examples, compiled and run as doctests so the crates.io page cannot drift.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 use gohtml::{Atom, Document, NodeId, NodeType, ParseError};
 
 /// The error `FromString` returns: only ever the parser's (nesting past 512 elements).

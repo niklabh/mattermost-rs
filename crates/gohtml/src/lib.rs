@@ -13,6 +13,11 @@
 //! Not ported: `ParseFragment`, `Render`, the `Node` iterators (iter.go) and the `charset`
 //! sub-package (mm-model keeps its own `go_charset`).
 
+/// The README's examples, compiled and run as doctests so the crates.io page cannot drift.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 pub mod atom;
 pub mod entity;
 mod gostrings;

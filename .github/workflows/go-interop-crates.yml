@@ -1,4 +1,5 @@
-# The four publishable Go-interop crates: gobwire, gobwire-derive, go-netrpc, goplugin.
+# The publishable, mm-*-free crates, in two sets: the Go-interop crates (gobwire, gobwire-derive,
+# go-netrpc, goplugin) and the e-mail ports (gohtml, gotemplate, gohtml2text, gomail, gogoldmark).
 # Everything runs through scripts/crates-preflight.sh, so a local run and CI check the same things.
 name: go-interop crates
 
@@ -10,7 +11,19 @@ on:
       - crates/gobwire-derive/**
       - crates/go-netrpc/**
       - crates/goplugin/**
+      - crates/gohtml/**
+      - crates/gotemplate/**
+      - crates/gohtml2text/**
+      - crates/gomail/**
+      - crates/gogoldmark/**
       - fixtures/gob/**
+      - fixtures/behaviour_gotemplate.json
+      - fixtures/behaviour_opengraph.json
+      - fixtures/behaviour_html2text.json
+      - fixtures/behaviour_mail.json
+      - fixtures/behaviour_quote.json
+      - fixtures/behaviour_goldmark.json
+      - crates/mm-model/src/go_unicode_generated.rs
       - reference/dump/go.mod
       - reference/dump/go.sum
       - reference/dump/gob/**
@@ -25,7 +38,19 @@ on:
       - crates/gobwire-derive/**
       - crates/go-netrpc/**
       - crates/goplugin/**
+      - crates/gohtml/**
+      - crates/gotemplate/**
+      - crates/gohtml2text/**
+      - crates/gomail/**
+      - crates/gogoldmark/**
       - fixtures/gob/**
+      - fixtures/behaviour_gotemplate.json
+      - fixtures/behaviour_opengraph.json
+      - fixtures/behaviour_html2text.json
+      - fixtures/behaviour_mail.json
+      - fixtures/behaviour_quote.json
+      - fixtures/behaviour_goldmark.json
+      - crates/mm-model/src/go_unicode_generated.rs
       - reference/dump/go.mod
       - reference/dump/go.sum
       - reference/dump/gob/**
@@ -83,4 +108,38 @@ jobs:
             crates/gobwire/fuzz
 
       - name: Preflight, MSRV and a short fuzz
-        run: scripts/crates-preflight.sh --msrv --fuzz 60
+        run: scripts/crates-preflight.sh --set plugin --msrv --fuzz 60
+
+  mail-crates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Their oracles are committed fixtures, so no Go. gotemplate's parity test also globs the
+      # e-mail templates at the pinned commit, and gomail's reads mm-model's Unicode tables.
+      - name: Fetch the pinned Mattermost e-mail templates
+        run: |
+          git init -q reference/mattermost
+          cd reference/mattermost
+          git remote add origin https://github.com/mattermost/mattermost.git
+          git sparse-checkout set --no-cone /server/templates/
+          git fetch -q --depth 1 --filter=blob:none origin "$PINNED_SHA"
+          git checkout -q FETCH_HEAD
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # The crates' declared rust-versions.
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.88
+      - run: rustup default stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Preflight and MSRV
+        run: scripts/crates-preflight.sh --set mail --msrv

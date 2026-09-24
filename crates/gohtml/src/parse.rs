@@ -4,12 +4,12 @@
 //!
 //! # Shape of the port
 //!
-//! Each insertion mode is a method, dispatched through [`Im`]; Go stores a function value in
+//! Each insertion mode is a method, dispatched through `Im`; Go stores a function value in
 //! `p.im`, and a `nil` one is reachable (`resetInsertionMode` copies the top of an empty template
 //! stack), so the mode is an `Option`. Go's `parse` recovers every panic into the error `Parse`
 //! returns — the explicit ones (`"html: open stack of elements exceeds 512 nodes"`) and runtime
 //! ones (a nil dereference, an index out of range) alike — so every operation that panics in Go
-//! returns [`Panic`] here, carrying Go's message, and `?` plays the part of unwinding.
+//! returns `Panic` here, carrying Go's message, and `?` plays the part of unwinding.
 //!
 //! # What is not ported
 //!

@@ -2,7 +2,7 @@
 //! `util/unicode_case_folding.go`) — the parts the parser and the HTML renderer call.
 //!
 //! The byte tables are copied verbatim from util.go; the entity table, the case-folding table and
-//! the rune predicates live in [`crate::tables_generated`], generated from goldmark's own data.
+//! the rune predicates live in `tables_generated`, generated from goldmark's own data.
 
 use crate::tables_generated::{
     CASE_FOLDINGS, HTML5_ENTITIES, PUNCT_RUNE_RANGES, SPACE_RUNE_RANGES,

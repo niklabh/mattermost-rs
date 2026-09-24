@@ -2,12 +2,18 @@
 name = "gogoldmark"
 version = "0.1.0"
 edition.workspace = true
-rust-version.workspace = true
+# Not the workspace value: `let` chains need 1.88, and `scripts/crates-preflight.sh --msrv` checks it.
+rust-version = "1.88"
 # A port of github.com/yuin/goldmark v1.8.2 (MIT). It contains no Mattermost code and must never
 # depend on an `mm-*` crate.
 license = "MIT"
 repository.workspace = true
 description = "Byte-exact port of yuin/goldmark v1.8.2 (CommonMark, the HTML renderer and GFM)"
+keywords = ["markdown", "commonmark", "gfm", "goldmark", "go"]
+categories = ["parser-implementations", "text-processing"]
+readme = "README.md"
+# The tests are left out: they read the Go-generated corpus under fixtures/, which does not ship.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [dependencies]
 thiserror.workspace = true

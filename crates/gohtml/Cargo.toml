@@ -9,7 +9,11 @@ rust-version.workspace = true
 license = "BSD-3-Clause"
 repository.workspace = true
 description = "Byte-exact port of golang.org/x/net/html's tokenizer and HTML5 tree builder"
-include = ["src/**/*.rs", "LICENSE"]
+keywords = ["html", "html5", "parser", "tokenizer", "go"]
+categories = ["parser-implementations", "web-programming"]
+readme = "README.md"
+# The tests are left out: they read the Go-generated corpus under fixtures/, which does not ship.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [dependencies]
 thiserror.workspace = true

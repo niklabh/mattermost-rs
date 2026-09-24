@@ -4,7 +4,7 @@
 //! (`invalidValue`, `HTMLBlock.ClosureLine`), and several computations briefly go negative.
 //!
 //! Go has one `Reader` interface with two implementations. Here they are two concrete types:
-//! [`Reader`] walks the whole source line by line (the block phase), [`BlockReader`] walks the
+//! `Reader` walks the whole source line by line (the block phase), [`BlockReader`] walks the
 //! lines of one block (the inline phase and link reference definitions). No goldmark code path
 //! calls a method on the "other" reader, so nothing is lost by not sharing a trait.
 

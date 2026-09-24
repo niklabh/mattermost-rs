@@ -9,7 +9,11 @@ rust-version.workspace = true
 license = "MIT"
 repository.workspace = true
 description = "Byte-exact port of jaytaylor/html2text as Mattermost's mail sender calls it"
-include = ["src/**/*.rs", "LICENSE*"]
+keywords = ["html", "text", "email", "plaintext", "go"]
+categories = ["text-processing", "email"]
+readme = "README.md"
+# The tests are left out: they read the Go-generated corpus under fixtures/, which does not ship.
+include = ["src/**/*.rs", "README.md", "CHANGELOG.md", "LICENSE*"]
 
 [dependencies]
 gohtml.workspace = true

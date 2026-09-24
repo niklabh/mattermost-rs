@@ -13,6 +13,11 @@
 //! Every error's `Display` is Go's `err.Error()` for the same failure: these strings reach the
 //! HTTP wire inside `app.admin.test_email.failure`.
 
+/// The README's examples, compiled and run as doctests so the crates.io page cannot drift.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 pub mod base64;
 pub mod mime;
 pub mod msg;
