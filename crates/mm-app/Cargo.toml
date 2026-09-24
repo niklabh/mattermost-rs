@@ -57,6 +57,9 @@ regex.workspace = true
 # `getpwuid_r`, for the upgrader's port of `os/user.LookupId` — the username of the binary's
 # owner and of this process, which `CanIUpgradeToE0`'s three permission errors carry.
 libc = "0.2"
+# The recipient's zone for a notification e-mail's post time (`notification_email`), as Go's
+# `time.LoadLocation` resolves it.
+chrono-tz.workspace = true
 
 [dev-dependencies]
 # The SMTP sink and transcript normaliser `mail.rs`'s oracle replay shares with gomail.

@@ -383,3 +383,115 @@ async fn a_welcome_mail_matches_gos() {
         common::delete_plain_user(&http, &admin, &id).await;
     }
 }
+
+/// Post through `base` as the admin; return the post's id and `create_at`.
+async fn post_as_admin(
+    base: &str,
+    admin: &str,
+    channel_id: &str,
+    message: &str,
+    root_id: Option<&str>,
+) -> (String, i64) {
+    let mut body = serde_json::json!({ "channel_id": channel_id, "message": message });
+    if let Some(root) = root_id {
+        body["root_id"] = serde_json::Value::from(root);
+    }
+    let response = client()
+        .post(format!("{base}/api/v4/posts"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&body)
+        .send()
+        .await
+        .expect("the server answers");
+    assert_eq!(response.status(), 201, "{base}");
+    let post: serde_json::Value = response.json().await.expect("a post");
+    (
+        post["id"].as_str().unwrap_or_default().to_owned(),
+        post["create_at"].as_i64().unwrap_or_default(),
+    )
+}
+
+/// A mention's notification e-mail — markdown to HTML, a `~channel` link, the sender's avatar
+/// embedded, the post's id as the `Message-ID` — and a reply's, which names its root in
+/// `In-Reply-To` and `References`. The recipient never reads anything, so both servers see them
+/// offline: `userAllowsEmail` refuses an online recipient, and "online" lives in each process's
+/// own status cache.
+#[tokio::test]
+async fn a_mentions_notification_email_matches_gos() {
+    if !stack_enabled() {
+        return;
+    }
+    let sink = sink();
+    let tag = "mailmention";
+    let email = address(tag);
+    let (user, admin) = fixture_user(tag).await;
+    let http = client();
+    let (team_id, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let channel = common::create_channel(&http, &admin, &team_id, tag).await;
+    common::add_user_to_channel(&http, &admin, &channel, &user.id).await;
+    // Being added is a mention too, and mails the added user; drop that mail.
+    let _ = sink.take(&email, Duration::from_secs(5)).await;
+    let username = common::plain_username(tag);
+    let message = format!(
+        "@{username} look at **this** in ~town-square: `code` and [a link](https://example.com)\n\n> quoted"
+    );
+
+    for attempt in 0..3 {
+        let mut mails = Vec::new();
+        let mut minutes = Vec::new();
+        let mut roots = Vec::new();
+        for base in [GO, RUST] {
+            let (id, at) = post_as_admin(base, &admin, &channel, &message, None).await;
+            let mut mail = sink
+                .take(&email, WAIT)
+                .await
+                .unwrap_or_else(|| panic!("{base} sent no notification mail"));
+            mail.data = mask_across_soft_breaks(&mail.data_str(), &id, 'P').into_bytes();
+            mails.push(mail);
+            minutes.push(at / 60_000);
+            roots.push(id);
+        }
+        // The body prints the post's hour and minute; two posts either side of a minute boundary
+        // differ there and nowhere else.
+        if minutes[0] != minutes[1] && attempt < 2 {
+            continue;
+        }
+        assert_same_mail(&mails[0], &mails[1], "mention notification");
+        let go = mails[0].data_str();
+        assert!(
+            go.contains("user-avatar.png"),
+            "the sender's avatar is embedded"
+        );
+        assert!(
+            go.contains("<strong>this</strong>"),
+            "the markdown is rendered"
+        );
+        assert!(
+            go.contains("/channels/town-square"),
+            "the channel mention is a link"
+        );
+
+        let mut replies = Vec::new();
+        for (base, root) in [GO, RUST].into_iter().zip(&roots) {
+            let (id, _) = post_as_admin(base, &admin, &channel, &message, Some(root)).await;
+            let mut mail = sink
+                .take(&email, WAIT)
+                .await
+                .unwrap_or_else(|| panic!("{base} sent no reply notification"));
+            let masked = mask_across_soft_breaks(&mail.data_str(), &id, 'P');
+            mail.data = mask_across_soft_breaks(&masked, root, 'R').into_bytes();
+            replies.push(mail);
+        }
+        assert_same_mail(&replies[0], &replies[1], "reply notification");
+        assert!(
+            replies[0]
+                .data_str()
+                .contains("In-Reply-To: <RRRRRRRRRRRRRRRRRRRRRRRRRR@"),
+            "a reply names its root"
+        );
+        break;
+    }
+
+    common::delete_channel(&http, &admin, &channel).await;
+    common::delete_plain_user(&http, &admin, &user.id).await;
+}

@@ -30,10 +30,18 @@ pub enum MarkdownError {
     /// goldmark's render failed.
     #[error(transparent)]
     Render(#[from] RenderError),
+    /// The large-stack thread could not be started ([`crate::deep_stack`]).
+    #[error("could not start a rendering thread: {0}")]
+    Thread(std::io::Error),
 }
 
 /// Port of `utils.StripMarkdown` (markdown.go:19): markdown to plain text, trimmed.
 pub fn strip_markdown(markdown: &str) -> Result<String, MarkdownError> {
+    crate::deep_stack::run(|| strip_markdown_here(markdown)).map_err(MarkdownError::Thread)?
+}
+
+/// [`strip_markdown`] on the caller's stack; see [`crate::deep_stack`].
+fn strip_markdown_here(markdown: &str) -> Result<String, MarkdownError> {
     let renderer = Renderer::new().with_node_renderer(Rc::new(NotificationRenderer), 500);
     let md = Markdown::with_renderer(&[Extension::Strikethrough], renderer);
     let mut buf = Vec::new();
@@ -45,7 +53,13 @@ pub fn strip_markdown(markdown: &str) -> Result<String, MarkdownError> {
 /// Port of `utils.StripMarkdownAndDecode` (markdown.go:45): [`strip_markdown`], then
 /// `html.UnescapeString`. For plain-text contexts only — the output is not HTML-safe.
 pub fn strip_markdown_and_decode(markdown: &str) -> Result<String, MarkdownError> {
-    let stripped = strip_markdown(markdown)?;
+    crate::deep_stack::run(|| strip_markdown_and_decode_here(markdown))
+        .map_err(MarkdownError::Thread)?
+}
+
+/// [`strip_markdown_and_decode`] on the caller's stack; see [`crate::deep_stack`].
+fn strip_markdown_and_decode_here(markdown: &str) -> Result<String, MarkdownError> {
+    let stripped = strip_markdown_here(markdown)?;
     Ok(mm_model::go_html::unescape_string(&stripped))
 }
 
@@ -168,6 +182,12 @@ fn unescape_blockquotes(s: &str) -> String {
 
 /// Port of `utils.MarkdownToHTML` (markdown.go:57).
 pub fn markdown_to_html(markdown: &str, site_url: &str) -> Result<String, MarkdownError> {
+    crate::deep_stack::run(|| markdown_to_html_here(markdown, site_url))
+        .map_err(MarkdownError::Thread)?
+}
+
+/// [`markdown_to_html`] on the caller's stack; see [`crate::deep_stack`].
+fn markdown_to_html_here(markdown: &str, site_url: &str) -> Result<String, MarkdownError> {
     let abs = absolutize_relative_links(markdown, site_url);
     let clean = unescape_blockquotes(&abs);
     let md = Markdown::new(&[Extension::Gfm]);

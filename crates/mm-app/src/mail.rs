@@ -413,7 +413,15 @@ pub async fn send_mail_using_config(
 
 /// `html2text.FromString` as `sendMail` uses it: a failure is logged and the text part is empty.
 fn html_to_text(html: &str) -> String {
-    match gohtml2text::from_string(html) {
+    let converted = crate::deep_stack::run(|| gohtml2text::from_string(html));
+    let converted = match converted {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::warn!(err = %err, "Unable to convert html body to text");
+            return String::new();
+        }
+    };
+    match converted {
         Ok(text) => text,
         Err(err) => {
             tracing::warn!(err = %err, "Unable to convert html body to text");

@@ -9,8 +9,8 @@
 //! Everything a **database or a websocket** can see: the mention pass over the channel's
 //! members, the thread auto-follow writes and the participants update, `IncrementMentionCount`,
 //! the `posted` event with its three broadcast hooks, the per-follower `thread_updated`
-//! events, and the push notifications ([`crate::push`]). The notification **e-mail** is not here
-//! yet ([D-402]).
+//! events, the push notifications ([`crate::push`]) and the notification e-mail
+//! ([`crate::notification_email`]).
 //!
 //! Three arms are **forwarded before the row is written** rather than reproduced, because each
 //! ends in text this server cannot mint — see [`App::notification_forward_reason`]:
@@ -399,6 +399,69 @@ impl App {
             tracing::Span::current().record("reason", reason);
         }
         Ok(reason)
+    }
+
+    /// The e-mail half of `SendNotifications` (notification.go:411-485): the mentioned and the
+    /// collapsed-threads e-mail followers, each once and in that order; an unverified address is
+    /// skipped while verification is required; the rest go through `userAllowsEmail`. Read from
+    /// the **live** `SendEmailNotifications`, which this stack runs with on.
+    async fn send_post_emails(
+        &self,
+        notification: &PostNotification<'_>,
+        team: &Team,
+        mentioned_users_list: &[String],
+        notifications_for_crt: &CrtNotifiers,
+        member_props: &BTreeMap<String, StringMap>,
+    ) {
+        let Ok(config) = crate::config::load_model_config(self.store().config()).await else {
+            return;
+        };
+        if !config
+            .email_settings
+            .send_email_notifications
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let require_verification = config
+            .email_settings
+            .require_email_verification
+            .unwrap_or(false);
+        let mut recipients: Vec<&String> = Vec::new();
+        for id in mentioned_users_list
+            .iter()
+            .chain(&notifications_for_crt.email)
+        {
+            if !recipients.contains(&id) {
+                recipients.push(id);
+            }
+        }
+        for id in recipients {
+            let Some(profile) = notification.profile_map.get(id) else {
+                continue;
+            };
+            if require_verification && !profile.email_verified {
+                continue;
+            }
+            if !self
+                .user_allows_email(profile, member_props.get(id), notification.post)
+                .await
+            {
+                continue;
+            }
+            let image = match self.get_profile_image(&notification.sender.id).await {
+                Ok(image) => Some(image),
+                Err(err) => {
+                    tracing::warn!(user_id = %notification.sender.id, error = ?err, "Unable to get the sender user profile image.");
+                    None
+                }
+            };
+            if let Err(err) =
+                Box::pin(self.send_notification_email(notification, profile, team, image)).await
+            {
+                tracing::warn!(error = %err, "Unable to send notification email.");
+            }
+        }
     }
 
     /// The push half of `SendNotifications` (notification.go:541-705): three lists, each person
@@ -796,17 +859,29 @@ impl App {
             sender,
         };
 
-        // Email — [D-402]. The over-limit channel-wide notice is a forward condition.
+        // The over-limit channel-wide notice is a forward condition.
+        if !suppress_notifications {
+            // Boxed: the e-mail pass is a deep async state machine, and inlined into this one it
+            // overflowed a tokio worker's stack in a debug build (measured 2026-09-24).
+            Box::pin(self.send_post_emails(
+                &notification,
+                team,
+                &mentioned_users_list,
+                &notifications_for_crt,
+                &member_props,
+            ))
+            .await;
+        }
 
         if !suppress_notifications && self.can_send_push_notifications().await {
-            self.send_post_pushes(
+            Box::pin(self.send_post_pushes(
                 &notification,
                 &mentions,
                 &mentioned_users_list,
                 &all_activity_push_user_ids,
                 &notifications_for_crt,
                 &member_props,
-            )
+            ))
             .await;
         }
 

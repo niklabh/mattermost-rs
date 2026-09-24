@@ -7600,10 +7600,10 @@ it:
 
 ## D-402 · email and push do not fire for a post this server writes
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
-**Narrowed** 2026-09-24 — push is served (`App::send_post_pushes`, `parity::push_send`). What
-is owed is the notification **e-mail** (`sendNotificationEmail`, `notification_email.go`,
-batching), which waits on the goldmark port for `MarkdownToHTML`.
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+**Closed** 2026-09-24 — push (`App::send_post_pushes`, `parity::push_send`) and the notification
+e-mail (`mm_app::notification_email`, `parity::email_send::a_mentions_notification_email_matches_gos`)
+are both served. Batching and the generated avatar remain, as [D-1072].
 **Narrowed** 2026-09-20 — the plugin half is served. Under `MMRS_PLUGIN_HOST=rust`,
 `MessageWillBePosted` and `MessageHasBeenPosted` fire where Go fires them, rejection and
 replacement included (`mm_app::plugin_hooks`, `parity::plugin_hooks`); under the default Go host
@@ -10014,4 +10014,22 @@ Measured by `parity::push_send`, whose fixture has to lose focus on **both** ser
 two decisions agree. It is the [D-087] class — one server's cache the other cannot see — now
 deciding a delivery rather than a read. Closing it means a status cache the two processes share,
 or routing every `SetActiveChannel` through one of them.
+
+---
+
+## D-1072 · A post's notification e-mail is never batched, and has no avatar for a sender without a picture
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (the post notification e-mail)
+
+Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`):
+
+- **Batching.** With `EmailSettings.EnableEmailBatching` on (off by default) Go queues the mail
+  in `EmailBatchingJob` — a per-server buffer flushed on a timer into one digest per recipient
+  (`app/email/email_batching.go`). This server sends the single notification instead and logs.
+  It needs the batching job and its digest template, and it holds state only the process that
+  queued it can flush — the two servers would each batch half a user's mail.
+- **The generated avatar.** `GetProfileImage` on a sender with no stored picture makes Go draw
+  the initials avatar and **write it**; this server's `get_profile_image` refuses that case, so
+  the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
+  `mm-app`. Once Go has written the file, both servers embed the same bytes.
 

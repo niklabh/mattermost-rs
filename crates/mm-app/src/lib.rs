@@ -38,6 +38,7 @@ pub mod command_suggestions;
 pub mod common_teams;
 pub mod config;
 pub mod custom_profile_attributes;
+pub mod deep_stack;
 pub mod desktop_login;
 pub mod draft;
 pub mod email;
@@ -84,6 +85,7 @@ pub mod mfa;
 /// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
 pub mod mime;
 pub mod notification;
+pub mod notification_email;
 pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;

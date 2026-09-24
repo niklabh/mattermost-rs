@@ -50,6 +50,10 @@ pub enum EmailError {
     NoTemplates,
     #[error(transparent)]
     Template(#[from] gotemplate::Error),
+    /// The large-stack thread the recursive ports run on could not be started
+    /// ([`crate::deep_stack`]).
+    #[error("could not start a rendering thread: {0}")]
+    Thread(std::io::Error),
     #[error(transparent)]
     Mail(#[from] crate::mail::MailError),
     /// The translations failed to load — also a server Go refuses to start.
@@ -163,6 +167,16 @@ static TEMPLATES: tokio::sync::OnceCell<Option<HtmlTemplates>> = tokio::sync::On
 /// `*.html`, whose `filepath.Glob` hands `ParseFiles` the names **sorted**.
 pub fn load_templates(dir: &std::path::Path) -> Result<HtmlTemplates, EmailError> {
     Ok(HtmlTemplates::parse_glob_html(dir)?)
+}
+
+/// Execute one of `templates/*.html` — `TemplatesContainer().RenderToString(name, data)`.
+pub(crate) async fn render_template(name: &str, data: TemplateData) -> Result<String, EmailError> {
+    let templates = templates().await?;
+    let value = data.into_value();
+    Ok(
+        crate::deep_stack::run(|| templates.execute(name, &value))
+            .map_err(EmailError::Thread)??,
+    )
 }
 
 async fn templates() -> Result<&'static HtmlTemplates, EmailError> {
@@ -364,6 +378,50 @@ impl App {
         })
     }
 
+    /// [`App::new_email_template_data`] with the live configuration read here, for callers
+    /// outside this module.
+    pub(crate) async fn new_email_template_data_for(
+        &self,
+        locale: &str,
+    ) -> Result<TemplateData, EmailError> {
+        let ctx = self.email_context().await?;
+        self.new_email_template_data(&ctx, locale).await
+    }
+
+    /// Port of `Service.SendMailWithEmbeddedFiles` (email/email.go:955): the post notification's
+    /// send, with its own message id and thread headers.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn send_mail_with_embedded_files(
+        &self,
+        to: &str,
+        subject: &str,
+        html_body: &str,
+        embedded: &[(String, Vec<u8>)],
+        message_id: &str,
+        in_reply_to: &str,
+        references: &str,
+        category: &str,
+    ) -> Result<(), EmailError> {
+        let ctx = self.email_context().await?;
+        let config = Self::mail_service_config(&ctx, "");
+        let is_cloud = ctx.license.as_ref().is_some_and(|l| l.is_cloud());
+        let category = if is_cloud { category } else { "" };
+        crate::mail::send_mail_with_embedded_files_using_config(
+            to,
+            subject,
+            html_body,
+            embedded,
+            &config,
+            message_id,
+            in_reply_to,
+            references,
+            "",
+            category,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Port of `Service.mailServiceConfig` (email/utils.go:11).
     fn mail_service_config(ctx: &SendContext, reply_to_address: &str) -> crate::mail::SmtpConfig {
         let email = &ctx.config.email_settings;
@@ -415,8 +473,7 @@ impl App {
     }
 
     async fn render(name: &str, data: TemplateData) -> Result<String, EmailError> {
-        let templates = templates().await?;
-        Ok(templates.execute(name, &data.into_value())?)
+        render_template(name, data).await
     }
 
     /// Port of `Service.SendPasswordResetEmail` (email/email.go:364). `Ok(true)` once sent.
