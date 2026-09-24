@@ -14810,3 +14810,10 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | app/channel.go `setChannelsMuted`, store `UpdateMultipleMembers`, `GetMembersByChannelIds` | `mm_app::channel_member::set_channels_muted`, `mm_store::channel_store` | DONE | 6 unit + `parity::sidebar_category_writes` (3 new); 8/8 mutations caught | Only members whose mute differs are written (no `LastUpdateAt` bump otherwise), and every member is validated before any write, so one invalid membership leaves the whole category unmuted — as Go does. |
+
+## Tech-debt payoff: `patchChannel`'s last two forwards — D-234 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `patchChannel`'s `DeleteGroupConstrainedChannelMemberships` goroutine (api4/channel.go:543) | `mm_api::channel_writes::{turns_group_constraint_on, spawn_group_constrained_removal}` | DONE | 1 unit + `parity::channel_patch_writes` | Asynchronous as in Go: the `200` does not wait for the sweep, and the patching admin is swept too when no group holds them. |
+| `addChannelToDefaultCategory` (app/channel.go:4706), whole | `App::add_channel_to_default_category`, `default_category_plan` | DONE | 5 unit + `parity::channel_patch_writes` (create and patch) | The "already in a category" half was called dead on the create path and is not: the new channel is an orphan in Channels, so Go writes Channels back and publishes a second `sidebar_category_updated`. |

@@ -934,10 +934,11 @@ async fn only_the_patch_route_fills_in_channel_mentions() {
     common::delete_channel(&http, &token, &rust_channel).await;
 }
 
-/// The two branches this server hands to Go. Neither may answer with our header, and both must
-/// still have taken effect — a forward that silently dropped the request would pass a status check.
+/// The two branches forwarded to Go until D-234 are served here now: a `default_category_name`
+/// patch and turning `group_constrained` on and off again. What each one writes is compared
+/// against Go in `parity::channel_patch_writes`; this pins only that none of them is forwarded.
 #[tokio::test]
-async fn the_two_unowned_patch_branches_are_forwarded_and_still_applied() {
+async fn the_sidebar_and_group_constraint_patches_are_served_here() {
     if !stack_enabled() {
         return;
     }
@@ -952,47 +953,31 @@ async fn the_two_unowned_patch_branches_are_forwarded_and_still_applied() {
         RUST,
         &token,
         &category,
-        &serde_json::json!({"default_category_name": "Mmrs Forwarded"}),
-    )
-    .await;
-    assert_eq!(status, 200, "the forwarded patch still succeeds: {body}");
-    assert!(
-        !by_rust,
-        "a default_category_name patch must go to Go, not be served here: {body}"
-    );
-    let answered: serde_json::Value = serde_json::from_str(&body).expect("a channel");
-    assert_eq!(answered["default_category_name"], "Mmrs Forwarded");
-
-    let (status, body, by_rust) = patch(
-        &http,
-        RUST,
-        &token,
-        &constrained,
-        &serde_json::json!({"group_constrained": true}),
-    )
-    .await;
-    assert_eq!(status, 200, "the forwarded patch still succeeds: {body}");
-    assert!(
-        !by_rust,
-        "turning group_constrained on must go to Go: {body}"
-    );
-    let answered: serde_json::Value = serde_json::from_str(&body).expect("a channel");
-    assert_eq!(answered["group_constrained"], true);
-
-    // Turning it **off** again is ours: only the off→on edge writes memberships.
-    let (status, body, by_rust) = patch(
-        &http,
-        RUST,
-        &token,
-        &constrained,
-        &serde_json::json!({"group_constrained": false}),
+        &serde_json::json!({"default_category_name": "Mmrs Served"}),
     )
     .await;
     assert_eq!(status, 200, "{body}");
     assert!(
         by_rust,
-        "turning group_constrained off is served here: {body}"
+        "a default_category_name patch is served here: {body}"
     );
+    let answered: serde_json::Value = serde_json::from_str(&body).expect("a channel");
+    assert_eq!(answered["default_category_name"], "Mmrs Served");
+
+    for on in [true, false] {
+        let (status, body, by_rust) = patch(
+            &http,
+            RUST,
+            &token,
+            &constrained,
+            &serde_json::json!({"group_constrained": on}),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert!(by_rust, "group_constrained {on} is served here: {body}");
+        let answered: serde_json::Value = serde_json::from_str(&body).expect("a channel");
+        assert_eq!(answered["group_constrained"], on);
+    }
 
     common::delete_channel(&http, &token, &category).await;
     common::delete_channel(&http, &token, &constrained).await;

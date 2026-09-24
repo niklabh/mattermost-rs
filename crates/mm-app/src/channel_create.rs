@@ -46,11 +46,11 @@ use mm_model::channel::{
 };
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
 use mm_model::sidebar_category::{
-    SIDEBAR_CATEGORY_CUSTOM, SIDEBAR_CATEGORY_SORT_DEFAULT, SidebarCategory,
-    SidebarCategoryWithChannels,
+    SIDEBAR_CATEGORY_CUSTOM, SIDEBAR_CATEGORY_DIRECT_MESSAGES, SIDEBAR_CATEGORY_SORT_DEFAULT,
+    SidebarCategory, SidebarCategoryWithChannels,
 };
 use mm_model::user::User;
-use mm_model::utils::{AppError, AppResult, get_millis};
+use mm_model::utils::{AppError, AppResult, get_millis, go_equal_fold};
 use mm_model::websocket_message::{
     WEBSOCKET_EVENT_CHANNEL_CREATED, WEBSOCKET_EVENT_DIRECT_ADDED, WEBSOCKET_EVENT_GROUP_ADDED,
     WebSocketEvent,
@@ -486,27 +486,34 @@ impl App {
         Ok(())
     }
 
-    /// Port of `app.App.addChannelToDefaultCategory` (app/channel.go:4706), for a channel that
-    /// has just been created.
+    /// Port of `app.App.addChannelToDefaultCategory` (app/channel.go:4706) — after a create
+    /// (`CreateChannelWithUser`) and after a patch (`PatchChannel`).
     ///
     /// **Fire and forget.** Go logs every failure and returns nothing, so a sidebar that could
-    /// not be written does not fail the create — and a caller cannot tell the two apart. That is
-    /// reproduced: this returns `()`.
+    /// not be written does not fail the request. Reproduced: this returns `()`.
     ///
-    /// The "already in a category" half of Go's logic is dead for a brand-new channel — nothing
-    /// can reference an id the database learned about a millisecond ago — so only the
-    /// find-or-create half is ported, and the doc comment is the record of why the rest is
-    /// missing — along with the `SidebarCategoryDirectMessages` exclusion inside it, which only
-    /// ever mattered for a channel that was already filed somewhere.
+    /// # The channel is always already somewhere
     ///
-    /// Two details that decide whether the channel lands where Go puts it:
+    /// The read goes through `GetSidebarCategoriesForTeamForUser`, which files every channel the
+    /// user belongs to and no category names into **Channels** (the orphan query). So even a
+    /// channel created a millisecond ago has an *original* category, and Go:
     ///
-    /// - the match is **case-insensitive** (`strings.EqualFold`) and only against `custom`
-    ///   categories, so a `default_category_name` of `"channels"` creates a *second*, custom
-    ///   category rather than filing into the built-in one;
-    /// - the channel is **prepended**, not appended, to an existing category.
+    /// 1. returns early if the original **is** the target (the same category, by identity);
+    /// 2. removes the channel from the original (first occurrence) and queues that category;
+    /// 3. creates the target if no `custom` category matches — `strings.EqualFold`, so a name of
+    ///    `"channels"` makes a *second*, custom category — or prepends the channel to the match
+    ///    and queues it;
+    /// 4. calls `UpdateSidebarCategories` with the queue **even when it is empty**, which still
+    ///    publishes a `sidebar_category_updated` carrying `"[]"`.
+    ///
+    /// Step 4 writing Channels back is what turns that category's orphans into explicit
+    /// `SidebarChannels` rows, and it runs the mute reconciliation — a channel moved from an
+    /// unmuted category into a muted one is muted.
+    ///
+    /// The original is searched across every category but **Direct Messages**, the target across
+    /// `custom` ones only; both take the first match.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, channel_id = %channel.id))]
-    async fn add_channel_to_default_category(&self, user_id: &str, channel: &Channel) {
+    pub(crate) async fn add_channel_to_default_category(&self, user_id: &str, channel: &Channel) {
         if channel.default_category_name.is_empty()
             || !self.config().enable_channel_category_sorting
         {
@@ -523,32 +530,32 @@ impl App {
                 return;
             }
         };
+        let mut categories = categories.categories.unwrap_or_default();
 
-        let target = categories
-            .categories
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .find(|category| {
-                category.category.category_type == SIDEBAR_CATEGORY_CUSTOM
-                    && category
-                        .category
-                        .display_name
-                        .eq_ignore_ascii_case(&channel.default_category_name)
-            })
-            .cloned();
+        let plan = default_category_plan(&categories, &channel.id, &channel.default_category_name);
+        let DefaultCategoryPlan::Move { original, target } = plan else {
+            return;
+        };
+
+        let mut to_update = Vec::new();
+        if let Some(index) = original {
+            // Taken rather than cloned: `original != target`, so the two indices are distinct.
+            let mut category = std::mem::take(&mut categories[index]);
+            if let Some(channels) = category.channel_ids.as_mut()
+                && let Some(at) = channels.iter().position(|id| *id == channel.id)
+            {
+                channels.remove(at);
+            }
+            to_update.push(category);
+        }
 
         match target {
-            Some(mut target) => {
-                let mut channels = target.channel_ids.take().unwrap_or_default();
+            Some(index) => {
+                let mut category = std::mem::take(&mut categories[index]);
+                let mut channels = category.channel_ids.take().unwrap_or_default();
                 channels.insert(0, channel.id.clone());
-                target.channel_ids = Some(channels);
-                if let Err(err) = self
-                    .update_sidebar_categories(user_id, &channel.team_id, &[target])
-                    .await
-                {
-                    tracing::error!(error = %err, category_name = %channel.default_category_name, "Failed to update default category");
-                }
+                category.channel_ids = Some(channels);
+                to_update.push(category);
             }
             None => {
                 let new_category = SidebarCategoryWithChannels {
@@ -569,6 +576,13 @@ impl App {
                     tracing::error!(error = %err, category_name = %channel.default_category_name, "Failed to create default category");
                 }
             }
+        }
+
+        if let Err(err) = self
+            .update_sidebar_categories(user_id, &channel.team_id, &to_update)
+            .await
+        {
+            tracing::error!(error = %err, category_name = %channel.default_category_name, "Failed to update default category");
         }
     }
 
@@ -1092,9 +1106,149 @@ fn log_join_failed(handler: &'static str, err: &StoreError) -> Box<AppError> {
     )
 }
 
+/// What [`App::add_channel_to_default_category`] does with the categories it read, decided
+/// without a database.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DefaultCategoryPlan {
+    /// The channel already sits in the category it is being filed into.
+    AlreadyThere,
+    /// Remove it from `original` (if any) and file it in `target`, or in a new category when
+    /// `target` is `None`. Both are indices into the categories as read.
+    Move {
+        original: Option<usize>,
+        target: Option<usize>,
+    },
+}
+
+/// The two searches in `addChannelToDefaultCategory` (app/channel.go:4712-4728): the first
+/// `custom` category whose display name `EqualFold`s `name`, and the first category other than
+/// Direct Messages that lists `channel_id`.
+pub(crate) fn default_category_plan(
+    categories: &[SidebarCategoryWithChannels],
+    channel_id: &str,
+    name: &str,
+) -> DefaultCategoryPlan {
+    let target = categories.iter().position(|category| {
+        category.category.category_type == SIDEBAR_CATEGORY_CUSTOM
+            && go_equal_fold(&category.category.display_name, name)
+    });
+    let original = categories.iter().position(|category| {
+        category.category.category_type != SIDEBAR_CATEGORY_DIRECT_MESSAGES
+            && category
+                .channel_ids
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|id| id == channel_id)
+    });
+    if original.is_some() && original == target {
+        return DefaultCategoryPlan::AlreadyThere;
+    }
+    DefaultCategoryPlan::Move { original, target }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn category(kind: &str, name: &str, channels: &[&str]) -> SidebarCategoryWithChannels {
+        SidebarCategoryWithChannels {
+            category: SidebarCategory {
+                category_type: kind.to_owned(),
+                display_name: name.to_owned(),
+                ..SidebarCategory::default()
+            },
+            channel_ids: Some(channels.iter().map(|c| (*c).to_owned()).collect()),
+        }
+    }
+
+    const CHANNELS: &str = "channels";
+    const FAVORITES: &str = "favorites";
+
+    /// The usual case: the channel is an orphan in Channels, the target is a custom category
+    /// matched case-insensitively — by Go's `EqualFold`, which folds beyond ASCII.
+    #[test]
+    fn the_channel_moves_from_channels_into_a_folded_match() {
+        let categories = [
+            category(FAVORITES, "Favorites", &[]),
+            category(CHANNELS, "Channels", &["x", "c"]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "ÄRGER", &["y"]),
+            category(SIDEBAR_CATEGORY_DIRECT_MESSAGES, "Direct Messages", &[]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "ärger"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: Some(2)
+            }
+        );
+    }
+
+    /// Only a `custom` category can be the target: a name equal to a built-in category's creates
+    /// a new custom one.
+    #[test]
+    fn a_built_in_category_is_never_the_target() {
+        let categories = [
+            category(FAVORITES, "Favorites", &[]),
+            category(CHANNELS, "Channels", &["c"]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "channels"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: None
+            }
+        );
+    }
+
+    /// Already filed where it is asked to go: nothing is written, not even the empty update.
+    #[test]
+    fn already_in_the_target_is_a_no_op() {
+        let categories = [
+            category(CHANNELS, "Channels", &[]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "Zed", &["c"]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "zed"),
+            DefaultCategoryPlan::AlreadyThere
+        );
+    }
+
+    /// Direct Messages is skipped as an original; any other category, Favorites included, is not.
+    /// Both searches take the **first** match.
+    #[test]
+    fn the_original_skips_direct_messages_and_both_searches_take_the_first() {
+        let categories = [
+            category(SIDEBAR_CATEGORY_DIRECT_MESSAGES, "Direct Messages", &["c"]),
+            category(FAVORITES, "Favorites", &["c"]),
+            category(CHANNELS, "Channels", &["c"]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "zed", &[]),
+            category(SIDEBAR_CATEGORY_CUSTOM, "ZED", &[]),
+        ];
+        assert_eq!(
+            default_category_plan(&categories, "c", "Zed"),
+            DefaultCategoryPlan::Move {
+                original: Some(1),
+                target: Some(3)
+            }
+        );
+    }
+
+    /// A channel filed nowhere (not even as an orphan) has no original, and a null channel list
+    /// holds nothing.
+    #[test]
+    fn a_channel_filed_nowhere_has_no_original() {
+        let mut null_list = category(CHANNELS, "Channels", &[]);
+        null_list.channel_ids = None;
+        let categories = [null_list, category(SIDEBAR_CATEGORY_CUSTOM, "Zed", &[])];
+        assert_eq!(
+            default_category_plan(&categories, "c", "Zed"),
+            DefaultCategoryPlan::Move {
+                original: None,
+                target: Some(1)
+            }
+        );
+    }
     use crate::config::Config;
     use mm_model::channel::CHANNEL_TYPE_SPACE;
     use mm_store::SqlStore;

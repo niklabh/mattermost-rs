@@ -1,0 +1,17 @@
+# channel-patch-forwards.plan — D-234 (patchChannel's group sweep and default category) and the
+# bundle-free forwarded-HEAD test, 2026-09-25. api lines run parity::channel_patch_writes (or
+# web_client); unit lines the pure deciders.
+gc-sweep-not-spawned	crates/mm-api/src/channel_writes.rs	    if turns_constraint_on {	    if false {	api	channel_patch_writes
+gc-edge-drops-old-state	crates/mm-api/src/channel_writes.rs	patch.group_constrained == Some(true) && !channel.is_group_constrained()	patch.group_constrained == Some(true)	unit	only_group_constrained_turning_on
+patch-skips-default-category	crates/mm-app/src/channel_write.rs	        self.add_channel_to_default_category(user_id, channel).await;\n\n        if old_display_name	        if old_display_name	api	channel_patch_writes
+original-not-written-back	crates/mm-app/src/channel_create.rs	            to_update.push(category);\n        }\n\n        match target {	        }\n\n        match target {	api	channel_patch_writes
+appended-not-prepended	crates/mm-app/src/channel_create.rs	channels.insert(0, channel.id.clone());	channels.push(channel.id.clone());	api	channel_patch_writes
+# already-there-ignored is equivalent through REST (2026-09-25): the second take of the same index
+# yields an id-less category, the store refuses it and rolls the whole update back. Unit-level only.
+already-there-ignored	crates/mm-app/src/channel_create.rs	if original.is_some() && original == target {	if false {	unit	channel_create::tests
+fold-is-exact	crates/mm-app/src/channel_create.rs	&& go_equal_fold(&category.category.display_name, name)	&& category.category.display_name == name	api	channel_patch_writes
+dm-not-skipped	crates/mm-app/src/channel_create.rs	category.category.category_type != SIDEBAR_CATEGORY_DIRECT_MESSAGES\n	true\n	unit	channel_create::tests
+head-invents-zero	crates/mm-api/src/proxy.rs	.map(|response| crate::web_static::head_framing(&parts.method, response))	.map(|response| response)	api	web_client
+# no-op controls
+control-annotate-edge	crates/mm-api/src/channel_writes.rs	let turns_constraint_on = turns_group_constraint_on(&channel, &patch);	let turns_constraint_on: bool = turns_group_constraint_on(&channel, &patch);	api	channel_patch_writes
+control-capacity	crates/mm-app/src/channel_create.rs	let mut to_update = Vec::new();	let mut to_update = Vec::with_capacity(2);	api	channel_patch_writes

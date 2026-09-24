@@ -6593,8 +6593,12 @@ that channel onward in `total_msg_count` and `last_post_at`. No test re-reads a 
 channel's row, so this suite cannot currently detect the gap widening.
 ## D-234 · Two channel-patch branches are forwarded because they write what this file does not own
 
-**Status** OPEN · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
+**Status** CLOSED · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
 lifecycle)
+**Closed** 2026-09-25 — both served: the group sweep runs on a spawned task after the write, as
+Go's goroutine does (`mm_api::channel_writes::spawn_group_constrained_removal`), and
+`App::add_channel_to_default_category` is ported whole, create path included;
+`parity::channel_patch_writes` (3).
 
 `PUT /api/v4/channels/{channel_id}/patch` is served here except for two bodies, both decided
 before anything is written (`mm_api::channel_writes::patch_needs_go`):
