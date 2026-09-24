@@ -307,36 +307,13 @@ fn oauth_refusal(
 /// Everything else — a string, a number, a bool, an empty body, a field of the wrong type — is an
 /// error on both sides.
 fn decode_go_struct<T: serde::de::DeserializeOwned + Default>(bytes: &[u8]) -> Result<T, String> {
-    let first = serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
-        .next();
-
-    match first {
-        // Go's `Decode` on an empty body is `io.EOF`, which is still an error.
-        None => Err("EOF".to_owned()),
-        Some(Err(err)) => Err(err.to_string()),
-        Some(Ok(serde_json::Value::Null)) => Ok(T::default()),
-        Some(Ok(value @ serde_json::Value::Object(_))) => {
-            serde_json::from_value(value).map_err(|err| err.to_string())
-        }
-        Some(Ok(other)) => Err(format!(
-            "cannot unmarshal {} into a struct",
-            match other {
-                serde_json::Value::Array(_) => "array",
-                serde_json::Value::String(_) => "string",
-                serde_json::Value::Bool(_) => "bool",
-                _ => "number",
-            }
-        )),
-    }
+    mm_model::utils::decode_one_value_from_json(bytes).map_err(|err| err.to_string())
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — **every** decode failure is an empty map.
-///
-/// The three single-token routes read `token_id` out of this, so a body that is not an object, or
-/// not JSON at all, is indistinguishable from `{}` and lands on the empty-`token_id` path below.
-fn map_from_json(bytes: &[u8]) -> std::collections::HashMap<String, String> {
-    serde_json::from_slice(bytes).unwrap_or_default()
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
+fn map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `createUserAccessToken` (user.go:2970) — `POST /api/v4/users/{user_id}/tokens`.
@@ -1017,19 +994,27 @@ mod tests {
     /// indistinguishable from `{}` — and both land on the empty-`token_id` path, which is a 404
     /// rather than the 400 the unreachable `SetInvalidParam` would have given.
     #[test]
-    fn a_malformed_lifecycle_body_is_an_empty_map() {
-        for raw in [&b"[]"[..], b"\"x\"", b"", b"{\"token_id\": 5}", b"not json"] {
+    fn a_lifecycle_body_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
             assert!(
                 map_from_json(raw).is_empty(),
-                "{:?} must decode to an empty map",
+                "{}",
                 String::from_utf8_lossy(raw)
             );
         }
-
-        let props = map_from_json(br#"{"token_id":"j1x3z8ynqjbstd4c4k6qy1p7ph"}"#);
+        let mixed = map_from_json(br#"{"token_id":"j1x3z8ynqjbstd4c4k6qy1p7ph","n":5} trailing"#);
         assert_eq!(
-            props.get("token_id").map(String::as_str),
+            mixed.get("token_id").map(String::as_str),
             Some("j1x3z8ynqjbstd4c4k6qy1p7ph")
+        );
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
+        assert_eq!(
+            map_from_json(br#"{"token_id":7}"#)
+                .get("token_id")
+                .map(String::as_str),
+            Some("")
         );
     }
 

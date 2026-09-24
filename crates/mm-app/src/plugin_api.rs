@@ -517,10 +517,18 @@ impl mm_plugin::rpc::PluginApi for AppPluginApi {
         &self,
         args: api::Z_GetGroupChannelArgs,
     ) -> Result<api::Z_GetGroupChannelReturns, NotImplemented> {
-        let result = self
+        // No creator, so never the shared-GM forward (`creator == nil` skips `ShareChannel`).
+        let result = match self
             .app
             .create_group_channel(&HookContext::default(), &args.a, "")
-            .await;
+            .await
+        {
+            Ok(ChannelCreate::Created(channel)) => Ok(*channel),
+            Ok(ChannelCreate::Forward(why)) => {
+                return Err(self.not_implemented("GetGroupChannel", why));
+            }
+            Err(err) => Err(err),
+        };
         let (a, b) = self.reply(result, |c| channel_to_wire(&c));
         Ok(api::Z_GetGroupChannelReturns { a, b })
     }
@@ -2425,7 +2433,7 @@ impl AppPluginApi {
                 .collect()),
             None => Err(self.not_implemented(
                 "ListBuiltInCommands",
-                "the built-in commands are held in English only, or /exportlink is undecidable",
+                "the built-in commands are held in English only",
             )),
         }
     }

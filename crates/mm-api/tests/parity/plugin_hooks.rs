@@ -827,9 +827,19 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(guarded.clone());
     plant_guard(&guarded, true).await;
 
+    // Both hosts trust two proxy headers, so `IPAddress` is `utils.GetIPAddress`'s header walk
+    // (step 1b) as well as its peer fallback (step 1). An environment override, so nothing is
+    // written to the shared configuration document.
+    const TRUSTED: (&str, &str) = (
+        "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER",
+        "X-Real-IP X-Forwarded-For",
+    );
     let go = start_go(
         &go_run,
-        &[("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy())],
+        &[
+            ("HOOK_RECORDER_TRANSCRIPT", &go_log.to_string_lossy()),
+            TRUSTED,
+        ],
         GO_OFFSET,
     )
     .await;
@@ -845,6 +855,7 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
             ("MM_PLUGINSETTINGS_CLIENTDIRECTORY", client_dir.as_str()),
             ("MM_FILESETTINGS_DIRECTORY", data.as_str()),
             ("HOOK_RECORDER_TRANSCRIPT", &rust_log.to_string_lossy()),
+            TRUSTED,
         ],
     )
     .await
@@ -929,6 +940,10 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
             .header("Accept-Language", "fr-CA,fr;q=0.9")
             .header("Connection-Id", "conn-parity-1")
             .header("X-Request-ID", "client-supplied")
+            // The first trusted header is not an address, so the walk moves on to the second,
+            // whose first element wins.
+            .header("X-Real-IP", "not-an-address")
+            .header("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
             .body(post_body("hook recorder with headers"))
             .send()
             .await
@@ -940,6 +955,10 @@ async fn run_the_hook_tour(client: &reqwest::Client, admin: &str) {
     assert_eq!(context["UserAgent"], "mmrs-hook-parity/1.0");
     assert_eq!(context["AcceptLanguage"], "fr-CA,fr;q=0.9");
     assert_eq!(context["ConnectionId"], "conn-parity-1");
+    assert_eq!(
+        context["IPAddress"], "203.0.113.7",
+        "TrustedProxyIPHeader's walk"
+    );
     assert_ne!(
         context["RequestId"], "client-supplied",
         "the request id is minted, never the client's"

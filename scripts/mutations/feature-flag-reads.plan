@@ -1,0 +1,13 @@
+# D-1161: six feature-flag reads from Config::feature_flags. lib suite, MUTATE_PACKAGE=mm-app.
+team-flag-ignored	crates/mm-app/src/team.rs	        if !self.config().feature_flags.team_membership_access_control {	        if false {	lib	team::
+shared-dm-flag-inverted	crates/mm-app/src/channel_create.rs	    any_remote && !config.feature_flags.enable_shared_channels_dms	    any_remote && config.feature_flags.enable_shared_channels_dms	lib	channel_create::
+shared-dm-any-remote-dropped	crates/mm-app/src/channel_create.rs	    any_remote && !config.feature_flags.enable_shared_channels_dms	    !config.feature_flags.enable_shared_channels_dms	lib	channel_create::
+docs-flag-ignored	crates/mm-app/src/channel_create.rs	    channel.is_space() && !config.feature_flags.enable_docs	    channel.is_space()	lib	channel_create::
+sync-service-setting-ignored	crates/mm-app/src/channel_create.rs	                && self.config().enable_shared_channels,	                && true,	lib	channel_create::
+mentions-flag-constant	crates/mm-app/src/mention.rs	            self.config().feature_flags.mm_blocks_enabled,	            true,	lib	mention::
+emoji-names-param-ignored	crates/mm-app/src/post.rs	        omit_interactive_blocks: !mm_blocks_enabled,	        omit_interactive_blocks: false,	lib	post::
+emoji-caller-constant	crates/mm-app/src/post.rs	            self.config().feature_flags.mm_blocks_enabled,	            true,	lib	post::
+fill-in-props-constant	crates/mm-app/src/post_write.rs	            omit_interactive_blocks: !self.config().feature_flags.mm_blocks_enabled,	            omit_interactive_blocks: false,	lib	post_write::
+# Controls: must survive.
+control-rename-share-fails	crates/mm-app/src/channel_create.rs	        let share_fails = if channel_is_shared && creator_local {	        let share_fails = if creator_local && channel_is_shared {	lib	channel_create::
+control-swap-remote-operands	crates/mm-app/src/channel_create.rs	        let shared = user.is_remote() || other_user.is_remote();	        let shared = other_user.is_remote() || user.is_remote();	lib	channel_create::

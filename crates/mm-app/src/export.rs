@@ -43,14 +43,14 @@ impl App {
         self.remove_export_file(&path).await
     }
 
-    /// Port of `app.App.GeneratePresignURLForExport` (app/export.go:1262).
+    /// Port of `app.App.GeneratePresignURLForExport` (app/export.go:1262), up to the backend.
     ///
-    /// **Always refuses on this deployment, at the first gate.**
-    /// `FeatureFlags.EnableExportDirectDownload` defaults to `false` (feature_flags.go:168) and
-    /// never reaches the persisted configuration document, so there is nothing that could turn it
-    /// on for a Team Edition server. Past it there are two more refusals, and the third is
-    /// structural: `GeneratePublicLink` is on `FileBackendWithLinkGenerator`, which only the S3
-    /// and Azure backends implement — a local backend can never presign anything.
+    /// Three refusals, in Go's order, each a **500**: `FeatureFlags.EnableExportDirectDownload`
+    /// (default `false`), then `FileSettings.DedicatedExportStore`, then an export backend that is
+    /// not a `FileBackendWithLinkGenerator` — which, as in Go, is the backend built at boot
+    /// ([`crate::filestore::FileBackend::generates_links`]). Past them the backend is S3 or Azure,
+    /// whose `FileExists` and `GeneratePublicLink` only the Go server implements, so the rest is
+    /// [`PrepareError::Unreproducible`] and the handler forwards.
     ///
     /// All three ids carry Go's typo, `eport`. Reproduced: a client matching on the string sees
     /// the same one from either server.
@@ -58,13 +58,84 @@ impl App {
         &self,
         _name: &str,
     ) -> Result<serde_json::Value, PrepareError> {
-        // Gate 1 — the feature flag, `false` here and unconfigurable.
-        Err(PrepareError::App(AppError::boxed(
-            "GeneratePresignURLForExport",
-            "app.eport.generate_presigned_url.featureflag.app_error",
-            None,
-            String::new(),
-            500,
-        )))
+        let refuse = |id: &'static str| {
+            PrepareError::App(AppError::boxed(
+                "GeneratePresignURLForExport",
+                id,
+                None,
+                String::new(),
+                500,
+            ))
+        };
+        let config = self.config();
+        if !config.feature_flags.enable_export_direct_download {
+            return Err(refuse(
+                "app.eport.generate_presigned_url.featureflag.app_error",
+            ));
+        }
+        if !config.dedicated_export_store {
+            return Err(refuse("app.eport.generate_presigned_url.config.app_error"));
+        }
+        if !self.export_file_backend().generates_links() {
+            return Err(refuse("app.eport.generate_presigned_url.driver.app_error"));
+        }
+        Err(PrepareError::Unreproducible(
+            "presigning an export needs the S3 or Azure file backend, which only Go implements",
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(flag: bool, dedicated: bool, export_driver: &str) -> App {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        let mut config = crate::config::Config {
+            dedicated_export_store: dedicated,
+            file_export_driver_name: export_driver.to_owned(),
+            ..crate::config::Config::default()
+        };
+        config.feature_flags.enable_export_direct_download = flag;
+        App::with_config(mm_store::SqlStore::from_pool(pool), config)
+    }
+
+    async fn refusal(app: App) -> String {
+        match app.generate_presign_url_for_export("x.zip").await {
+            Err(PrepareError::App(err)) => {
+                assert_eq!(err.status_code, 500);
+                err.id
+            }
+            Err(PrepareError::Unreproducible(_)) => "forward".to_owned(),
+            Ok(value) => panic!("answered {value}"),
+        }
+    }
+
+    /// `GeneratePresignURLForExport`'s three gates in Go's order (export.go:1263-1275): each
+    /// refuses on its own even when a later one would too, and only past all three does the
+    /// request need the S3/Azure backend, which forwards.
+    #[tokio::test]
+    async fn the_presign_gates_refuse_in_gos_order() {
+        assert_eq!(
+            refusal(app(false, true, "amazons3")).await,
+            "app.eport.generate_presigned_url.featureflag.app_error"
+        );
+        assert_eq!(
+            refusal(app(false, false, "local")).await,
+            "app.eport.generate_presigned_url.featureflag.app_error"
+        );
+        assert_eq!(
+            refusal(app(true, false, "amazons3")).await,
+            "app.eport.generate_presigned_url.config.app_error"
+        );
+        assert_eq!(
+            refusal(app(true, true, "local")).await,
+            "app.eport.generate_presigned_url.driver.app_error"
+        );
+        assert_eq!(refusal(app(true, true, "amazons3")).await, "forward");
+        assert_eq!(refusal(app(true, true, "azureblob")).await, "forward");
     }
 }

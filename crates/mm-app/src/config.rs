@@ -7,9 +7,10 @@
 //! is a guess about a wire format nothing can falsify** — the same rule the rest of the project
 //! applies to model files.
 //!
-//! Growing it costs one `Option<T>` in [`Document`], one line in [`Config::from_document`], one
-//! key in `scripts/dump-config-fixture.sh`, and the count in
-//! `the_fixture_covers_every_document_sourced_setting`.
+//! Growing it costs one `Option<T>` in [`Document`], one line in [`Config::from_document`] and
+//! one key in `scripts/dump-config-fixture.sh` — which
+//! `the_fixture_covers_every_document_sourced_setting` enforces by reading `Document`'s own
+//! serde field lists.
 //!
 //! # Where these values come from
 //!
@@ -32,11 +33,10 @@
 //! `MM_SERVICESETTINGS_SITEURL=http://localhost:8065`. Hence [`Config::apply_env`], and hence its
 //! being applied after the document rather than as a fallback for it.
 //!
-//! **`FeatureFlags` is not in the document at all.** Go clears the section before persisting when
-//! `readOnlyFF` is set, which is the default (store.go:306-310) — confirmed against the live row,
-//! which has no `FeatureFlags` key. So [`Config::feature_flag_burn_on_read`] can only ever come
-//! from the environment or from the compiled-in default, and a future flag must not be given a
-//! database source it does not have.
+//! **`FeatureFlags` is not in this stack's document.** Go clears the section before persisting
+//! when `readOnlyFF` is set, which is the default (store.go:306-310) — confirmed against the live
+//! row. Go still *reads* one when a row carries it, and so does [`Config::from_document`]; see
+//! [`Config::feature_flags`].
 //!
 //! # Which direction each default fails
 //!
@@ -56,6 +56,8 @@
 //! consulting the licence, even though every compliance *feature* is licence-gated
 //! (`app/compliance.go:18`). So "Team Edition cannot enable compliance" is not a proof that this
 //! branch is unreachable — the setting alone moves it.
+
+use mm_model::feature_flags::FeatureFlags;
 
 /// Port of `model.Config` (config.go), restricted to the fields a migrated code path reads.
 ///
@@ -257,6 +259,13 @@ pub struct Config {
     /// space-or-comma list of hosts and CIDRs the outbound-connection guard
     /// ([`crate::http_guard`]) lets a user-driven request reach inside the reserved ranges.
     pub allowed_untrusted_internal_connections: String,
+
+    /// `ServiceSettings.TrustedProxyIPHeader` (config.go:379, no `json:` tag, so the key is the
+    /// field name). Go default the **empty list** (`SetDefaults`, config.go:679, which turns a
+    /// `null` or absent key into `[]` and leaves any list as written). The request headers
+    /// `utils.GetIPAddress` walks, in this order, for the client address before falling back to
+    /// the peer's — see `mm_api::client_ip`.
+    pub trusted_proxy_ip_header: Vec<String>,
 
     /// `ServiceSettings.RestrictLinkPreviews` (config.go:398). Go default `""`. The comma-,
     /// space- or `@`-separated domains `isLinkAllowedForPreview` (post_metadata.go:735) refuses
@@ -477,43 +486,6 @@ pub struct Config {
     /// is why being wrong about the default would be silent: every post would be accepted.
     pub experimental_enable_hardened_mode: bool,
 
-    /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
-    ///
-    /// Kept apart from the setting above because `isBurnOnReadEnabled` (app/post_helpers.go:270)
-    /// ands the two, and either one alone turns the feature off. Folding them into a single
-    /// field here would make a deployment that disables only the flag indistinguishable from one
-    /// that disables only the setting — the same value, reached two ways, is exactly the sort of
-    /// coincidence that hides a wrong read.
-    pub feature_flag_burn_on_read: bool,
-
-    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default and
-    /// environment-only like [`Config::feature_flag_burn_on_read`]. Off, the deprecated
-    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
-    pub feature_flag_mobile_sso_code_exchange: bool,
-
-    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169
-    /// and environment-only like [`Config::feature_flag_burn_on_read`]. Off, `moveThread` is
-    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
-    /// and so is a licence-less server with the flag on.
-    pub feature_flag_move_threads_enabled: bool,
-
-    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214,
-    /// environment-only. Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
-    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
-    pub feature_flag_mm_blocks_enabled: bool,
-
-    /// `FeatureFlags.AppsEnabled` (feature_flags.go:26), defaulted **`false`** at :165,
-    /// environment-only. Off, the Apps plugin (`com.mattermost.apps`) is disabled whatever its
-    /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
-    pub feature_flag_apps_enabled: bool,
-
-    /// `FeatureFlags.RecurringScheduledPosts` (feature_flags.go:156), defaulted **`false`** at
-    /// :222, environment-only. Off, `SaveScheduledPost` refuses any `repeat_type` and
-    /// `UpdateScheduledPost` refuses turning one **on** — both with
-    /// `app.scheduled_post.recurring_disabled.app_error` at 400 — while an existing series can
-    /// still be edited or ended.
-    pub feature_flag_recurring_scheduled_posts: bool,
-
     /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
     /// (`model.ImageDriverLocal`, config.go:1900).
     ///
@@ -630,11 +602,6 @@ pub struct Config {
     /// keys `verifyPlugin` accepts. Go's environment decoder splits a `[]string` on **spaces**
     /// (config/environment.go:80).
     pub plugin_signature_public_key_files: Vec<String>,
-
-    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
-    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key. Environment-only, like
-    /// every feature flag.
-    pub feature_flag_enable_mfi_plugin_signature_public_key: bool,
 
     /// `EmailSettings.SendEmailNotifications` (config.go:2143, defaulted **`true`** at :2186,
     /// unconditionally — not from `isUpdate`).
@@ -812,65 +779,6 @@ pub struct Config {
     /// `mm_api::jobs::download_job`.
     pub message_export_download_export_results: bool,
 
-    /// `FeatureFlags.SessionAttributes` (feature_flags.go:116, defaulted **`false`** at :204).
-    ///
-    /// Gates `GET /api/v4/users/sessions/attributes/manifest` through
-    /// `App.sessionAttributesEnabled` (app/session_attributes.go:24), which is this flag **and**
-    /// an Enterprise Advanced licence. Closed, the route is
-    /// `api.user.session_attributes.disabled.app_error` at 501.
-    ///
-    /// Like [`Config::feature_flag_burn_on_read`], it can only come from the environment or the
-    /// compiled-in default — `FeatureFlags` is cleared before the document is persisted, so there
-    /// is no database source to read and giving it one would be inventing a value.
-    pub feature_flag_session_attributes: bool,
-
-    /// The four other flags of the five-way `if` that registers `api4/properties.go`
-    /// (properties.go:23), alongside [`Config::feature_flag_session_attributes`]:
-    /// `IntegratedBoards`, `ManagedChannelCategories`, `ClassificationMarkings` and
-    /// `PostAttributes`.
-    ///
-    /// **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185) and the other three
-    /// to `false`, so on a stock server the nine property routes *are* registered and the `if` is
-    /// satisfied by that one flag alone. A port that assumed the whole family was dark — which
-    /// every other flag in this block would suggest — would forward nine live routes.
-    ///
-    /// All four are environment-or-default like [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_integrated_boards: bool,
-    /// See [`Config::feature_flag_integrated_boards`].
-    pub feature_flag_managed_channel_categories: bool,
-    /// See [`Config::feature_flag_integrated_boards`]. **Defaults to `true`.**
-    pub feature_flag_classification_markings: bool,
-    /// See [`Config::feature_flag_integrated_boards`].
-    pub feature_flag_post_attributes: bool,
-
-    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
-    ///
-    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
-    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
-    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
-    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
-    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
-    ///
-    /// Environment-or-default like [`Config::feature_flag_burn_on_read`]: `FeatureFlags` never
-    /// reaches the persisted document, which is exactly what [D-153] records.
-    pub feature_flag_discoverable_channels: bool,
-
-    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
-    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
-    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
-    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
-    /// type-less search drops permission policies from its page. Environment-or-default like
-    /// [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_permission_policies: bool,
-    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
-    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
-    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
-    pub feature_flag_channel_permission_policies: bool,
-    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
-    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
-    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
-    pub feature_flag_policy_simulation: bool,
-
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -897,17 +805,6 @@ pub struct Config {
     /// off a channel is still marked read and the client is simply not told. Nothing on the HTTP
     /// response body changes either way.
     pub enable_channel_viewed_messages: bool,
-
-    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
-    /// at :181).
-    ///
-    /// Gates `PUT /channels/members/{user_id}/direct/read` and
-    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
-    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
-    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
-    ///
-    /// Environment-or-default only, like [`Config::feature_flag_burn_on_read`].
-    pub feature_flag_enable_shift_escape_to_mark_all_read: bool,
 
     /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
     /// :599).
@@ -1166,23 +1063,6 @@ pub struct Config {
     /// is the reachable one.
     pub scheduled_posts: bool,
 
-    /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
-    ///
-    /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
-    /// `/recaps` and `/scheduled_recaps` routes. Like [`Config::feature_flag_burn_on_read`] it is
-    /// deliberately **not** read from the persisted document: Go strips `FeatureFlags` before
-    /// writing (config/store.go:306), so the environment is its only source.
-    ///
-    /// The Go comment beside it reads `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA
-    /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
-    /// below alone.
-    pub feature_flag_enable_ai_recaps: bool,
-
-    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
-    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
-    /// create a `rank` user field or to convert one. Environment-only, like every feature flag.
-    pub feature_flag_property_field_rank: bool,
-
     /// `AIRecapSettings.Enable` (ai_recap_settings.go:88).
     ///
     /// The other half of `AIRecapsEnabled()`, and it is `Option<bool>` for a reason that changes
@@ -1253,15 +1133,6 @@ pub struct Config {
     /// Go's exact conjunction rather than on "any licence".
     pub use_anonymous_urls: bool,
 
-    /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
-    ///
-    /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
-    /// key that appears and disappears rather than a value that changes. Like
-    /// [`Config::feature_flag_burn_on_read`] it is deliberately not read from the persisted
-    /// document — Go strips `FeatureFlags` before writing (config/store.go:306) — so the
-    /// environment is its only source.
-    pub feature_flag_test_feature: String,
-
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -1317,6 +1188,175 @@ pub struct Config {
     pub notices_skip_cache: bool,
 
     pub license_public_key: Option<String>,
+
+    /// `Config.FeatureFlags` (config.go:4226): every flag of `model.FeatureFlags`
+    /// (feature_flags.go:11), as `mm_model::feature_flags::FeatureFlags`.
+    ///
+    /// # Where the flags come from
+    ///
+    /// The document **when it has the section**, else `FeatureFlags.SetDefaults` — never both:
+    /// `Config.SetDefaults` fills the section only when it is nil (config.go:4345), so a partial
+    /// section leaves every flag it omits at Go's zero value, not its default. Go never *writes*
+    /// the section while `readOnlyFF` holds (store.go:306-310, the default whenever
+    /// `ServiceSettings.SplitKey` is empty — app/platform/feature_flags.go:24), so on this stack
+    /// the row has none and the defaults apply; but a row that carries one (a cloud cache
+    /// written with a split key) is read, as Go reads it. Then the `MM_FEATUREFLAGS_<FLAG>`
+    /// overlay, flag by flag ([`feature_flags_from_env`]). The Split synchroniser that rewrites
+    /// the flags at run time needs `SplitKey` and the Split SaaS, and is not ported.
+    ///
+    /// What each flag this server reads decides, by flag:
+    ///
+    /// ## `EnableExportDirectDownload`
+    ///
+    /// `FeatureFlags.EnableExportDirectDownload` (feature_flags.go:33), defaulted **`false`** at
+    /// :168. The first condition of both `ExportLinkProvider.GetCommand` (which reserves the
+    /// `exportlink` trigger — see [`crate::command_provider::provider_command`]) and
+    /// `GeneratePresignURLForExport`.
+    ///
+    /// ## `BurnOnRead`
+    ///
+    /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
+    ///
+    /// Kept apart from `ServiceSettings.EnableBurnOnRead` because `isBurnOnReadEnabled` (app/post_helpers.go:270)
+    /// ands the two, and either one alone turns the feature off. Folding them into a single
+    /// field here would make a deployment that disables only the flag indistinguishable from one
+    /// that disables only the setting — the same value, reached two ways, is exactly the sort of
+    /// coincidence that hides a wrong read.
+    ///
+    /// ## `MobileSSOCodeExchange`
+    ///
+    /// `FeatureFlags.MobileSSOCodeExchange` (feature_flags.go:74), **`false`** by default. Off, the deprecated
+    /// `POST /users/login/sso/code-exchange` is the 410; on, it is forwarded.
+    ///
+    /// ## `MoveThreadsEnabled`
+    ///
+    /// `FeatureFlags.MoveThreadsEnabled` (feature_flags.go:35), defaulted **`false`** at :169.
+    /// Off, `moveThread` is
+    /// the 501 `api.post.move_thread.disabled.app_error` ahead of everything but the post id —
+    /// and so is a licence-less server with the flag on.
+    ///
+    /// ## `MmBlocksEnabled`
+    ///
+    /// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214.
+    /// Off, `doPostAction` refuses an `mm_block`/`block`/`card` integration
+    /// format and any mm_blocks cookie with the 400 `api.post.do_action.action_integration`.
+    ///
+    /// ## `AppsEnabled`
+    ///
+    /// `FeatureFlags.AppsEnabled` (feature_flags.go:26), defaulted **`false`** at :165.
+    /// Off, the Apps plugin (`com.mattermost.apps`) is disabled whatever its
+    /// `PluginStates` entry says (app/plugin.go, `getPluginStateOverride`).
+    ///
+    /// ## `RecurringScheduledPosts`
+    ///
+    /// `FeatureFlags.RecurringScheduledPosts` (feature_flags.go:156), defaulted **`false`** at
+    /// :222. Off, `SaveScheduledPost` refuses any `repeat_type` and
+    /// `UpdateScheduledPost` refuses turning one **on** — both with
+    /// `app.scheduled_post.recurring_disabled.app_error` at 400 — while an existing series can
+    /// still be edited or ended.
+    ///
+    /// ## `EnableMFIPluginSignaturePublicKey`
+    ///
+    /// `FeatureFlags.EnableMFIPluginSignaturePublicKey` (feature_flags.go:153, defaulted **`true`**
+    /// at :220): whether `verifyPlugin` also tries the compiled-in MFI key.
+    ///
+    /// ## `SessionAttributes`
+    ///
+    /// `FeatureFlags.SessionAttributes` (feature_flags.go:116, defaulted **`false`** at :204).
+    ///
+    /// Gates `GET /api/v4/users/sessions/attributes/manifest` through
+    /// `App.sessionAttributesEnabled` (app/session_attributes.go:24), which is this flag **and**
+    /// an Enterprise Advanced licence. Closed, the route is
+    /// `api.user.session_attributes.disabled.app_error` at 501.
+    ///
+    /// ## `IntegratedBoards`
+    ///
+    /// The four other flags of the five-way `if` that registers `api4/properties.go`
+    /// (properties.go:23), alongside `SessionAttributes`:
+    /// `IntegratedBoards`, `ManagedChannelCategories`, `ClassificationMarkings` and
+    /// `PostAttributes`.
+    ///
+    /// **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185) and the other three
+    /// to `false`, so on a stock server the nine property routes *are* registered and the `if` is
+    /// satisfied by that one flag alone. A port that assumed the whole family was dark — which
+    /// every other flag in this block would suggest — would forward nine live routes.
+    ///
+    /// ## `ManagedChannelCategories`
+    ///
+    /// See `IntegratedBoards`.
+    ///
+    /// ## `ClassificationMarkings`
+    ///
+    /// See `IntegratedBoards`. **Defaults to `true`.**
+    ///
+    /// ## `PostAttributes`
+    ///
+    /// See `IntegratedBoards`.
+    ///
+    /// ## `DiscoverableChannels`
+    ///
+    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
+    ///
+    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
+    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
+    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
+    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
+    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
+    ///
+    /// ## `PermissionPolicies`
+    ///
+    /// `FeatureFlags.PermissionPolicies` (feature_flags.go:51), defaulted **`true`** at :172 —
+    /// the umbrella over the two below. Read by `createAccessControlPolicy` and
+    /// `searchAccessControlPolicies` (api4/access_control.go): off, a `permission`-type policy
+    /// is the 501 `api.access_control_policy.permission_policies.feature_disabled`, and a
+    /// type-less search drops permission policies from its page.
+    ///
+    /// ## `ChannelPermissionPolicies`
+    ///
+    /// `FeatureFlags.ChannelPermissionPolicies` (feature_flags.go:59), defaulted **`true`** at
+    /// :174. Only meaningful through [`Config::channel_permission_policies_enabled`], which
+    /// `and`s it with the umbrella as Go's `IsChannelPermissionPoliciesEnabled` does.
+    ///
+    /// ## `PolicySimulation`
+    ///
+    /// `FeatureFlags.PolicySimulation` (feature_flags.go:65), defaulted **`true`** at :175. Read
+    /// through [`Config::policy_simulation_enabled`] by `simulatePolicyForUsers`, whose first
+    /// line is the 501 `api.access_control_policy.policy_simulation.feature_disabled`.
+    ///
+    /// ## `EnableShiftEscapeToMarkAllRead`
+    ///
+    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
+    /// at :181).
+    ///
+    /// Gates `PUT /channels/members/{user_id}/direct/read` and
+    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
+    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
+    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
+    ///
+    /// ## `EnableAIRecaps`
+    ///
+    /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
+    ///
+    /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
+    /// `/recaps` and `/scheduled_recaps` routes.
+    ///
+    /// The Go comment beside it reads `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA
+    /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
+    /// below alone.
+    ///
+    /// ## `PropertyFieldRank`
+    ///
+    /// `FeatureFlags.PropertyFieldRank` (feature_flags.go:133), **`true`** by default
+    /// (feature_flags.go:212). Off, `rankPropertyFieldGate` (app/property_field.go:80) refuses to
+    /// create a `rank` user field or to convert one.
+    ///
+    /// ## `TestFeature`
+    ///
+    /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
+    ///
+    /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
+    /// key that appears and disappears rather than a value that changes.
+    pub feature_flags: FeatureFlags,
 }
 
 impl Config {
@@ -1330,7 +1370,7 @@ impl Config {
     /// Fifteen routes are gated on this. It is a *configuration* gate, not a licence one: an
     /// operator can turn it on, at which point this server must stop answering and forward.
     pub fn ai_recaps_enabled(&self) -> bool {
-        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)
+        self.feature_flags.enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)
     }
 
     /// Port of `utils.GetSubpathFromConfig` (channels/utils/subpath.go:242).
@@ -1405,19 +1445,19 @@ impl Config {
     /// **Both halves default to true**, so on a stock server this is on — which is why
     /// `getCursorPostId` reaches the read-receipt-aware cursor query rather than the plain one.
     pub fn burn_on_read(&self) -> bool {
-        self.feature_flag_burn_on_read && self.enable_burn_on_read
+        self.feature_flags.burn_on_read && self.enable_burn_on_read
     }
 
     /// Port of `FeatureFlags.IsChannelPermissionPoliciesEnabled` (feature_flags.go:232): the
     /// sub-flag **and** the `PermissionPolicies` umbrella.
     pub fn channel_permission_policies_enabled(&self) -> bool {
-        self.feature_flag_permission_policies && self.feature_flag_channel_permission_policies
+        self.feature_flags.permission_policies && self.feature_flags.channel_permission_policies
     }
 
     /// Port of `FeatureFlags.IsPolicySimulationEnabled` (feature_flags.go:242): the sub-flag
     /// **and** the umbrella.
     pub fn policy_simulation_enabled(&self) -> bool {
-        self.feature_flag_permission_policies && self.feature_flag_policy_simulation
+        self.feature_flags.permission_policies && self.feature_flags.policy_simulation
     }
 
     /// `InitProperties`' five-way registration `if` (api4/properties.go:23).
@@ -1427,11 +1467,11 @@ impl Config {
     /// server: `ClassificationMarkings` defaults to `true`, so this is `true` unless an operator
     /// explicitly turns that one off.
     pub fn properties_api_enabled(&self) -> bool {
-        self.feature_flag_integrated_boards
-            || self.feature_flag_managed_channel_categories
-            || self.feature_flag_classification_markings
-            || self.feature_flag_session_attributes
-            || self.feature_flag_post_attributes
+        self.feature_flags.integrated_boards
+            || self.feature_flags.managed_channel_categories
+            || self.feature_flags.classification_markings
+            || self.feature_flags.session_attributes
+            || self.feature_flags.post_attributes
     }
 }
 
@@ -1480,6 +1520,7 @@ impl Default for Config {
             enable_permalink_previews: true,
             enable_file_search: true,
             allowed_untrusted_internal_connections: String::new(),
+            trusted_proxy_ip_header: Vec::new(),
             restrict_link_previews: String::new(),
             link_metadata_timeout_milliseconds: 5000,
             default_server_locale: "en".to_owned(),
@@ -1520,12 +1561,8 @@ impl Default for Config {
             post_edit_time_limit: -1,
             // config.go:906 — `new(false)`.
             experimental_enable_hardened_mode: false,
-            feature_flag_burn_on_read: true,
-            feature_flag_mobile_sso_code_exchange: false,
-            feature_flag_move_threads_enabled: false,
-            feature_flag_mm_blocks_enabled: true,
-            feature_flag_apps_enabled: false,
-            feature_flag_recurring_scheduled_posts: false,
+            // `Config.SetDefaults` on a nil section (config.go:4345).
+            feature_flags: default_feature_flags(),
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
@@ -1549,7 +1586,6 @@ impl Default for Config {
             plugin_marketplace_url: DEFAULT_MARKETPLACE_URL.to_owned(),
             plugin_allow_insecure_download_url: false,
             plugin_signature_public_key_files: Vec::new(),
-            feature_flag_enable_mfi_plugin_signature_public_key: true,
             send_email_notifications: true,
             // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
             ldap_picture_attribute: String::new(),
@@ -1574,19 +1610,6 @@ impl Default for Config {
             maximum_personal_access_token_lifetime_days: 0,
             enable_user_access_tokens: false,
             message_export_download_export_results: false,
-            feature_flag_session_attributes: false,
-            // feature_flags.go:194, :202, :206 — all three `false`.
-            feature_flag_integrated_boards: false,
-            feature_flag_managed_channel_categories: false,
-            feature_flag_post_attributes: false,
-            // feature_flags.go:208 — `false`, like the other four.
-            feature_flag_discoverable_channels: false,
-            // feature_flags.go:172-175 — all three **`true`**.
-            feature_flag_permission_policies: true,
-            feature_flag_channel_permission_policies: true,
-            feature_flag_policy_simulation: true,
-            // feature_flags.go:185 — **`true`**, and the only one of the five that is.
-            feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
             collapsed_threads: mm_model::config::COLLAPSED_THREADS_ALWAYS_ON.to_owned(),
             // config.go:978 — `new(true)`.
@@ -1594,7 +1617,6 @@ impl Default for Config {
             // config.go:708 — `new(true)`.
             enable_channel_viewed_messages: true,
             // feature_flags.go:181 — `false`.
-            feature_flag_enable_shift_escape_to_mark_all_read: false,
             show_full_name: true,
             show_email_address: true,
             // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
@@ -1649,8 +1671,6 @@ impl Default for Config {
             // the licence arm of the scheduled-post gate the reachable one.
             scheduled_posts: true,
             // `f.EnableAIRecaps = false` (feature_flags.go:192).
-            feature_flag_enable_ai_recaps: false,
-            feature_flag_property_field_rank: true,
             // Absent, and absent means **enabled** — see the field's note.
             ai_recap_settings_enable: None,
             // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
@@ -1666,7 +1686,6 @@ impl Default for Config {
             elasticsearch_enable_indexing: false,
             experimental_enable_authentication_transfer: true,
             use_anonymous_urls: false,
-            feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
             license_public_key: None,
             max_users_for_statistics: 2500,
@@ -1686,8 +1705,42 @@ impl Config {
     ///
     /// Kept as the constructor for tests and for a deployment whose Go server has never written a
     /// configuration row.
+    ///
+    /// `fixConfig` runs on both sides of the overlay, as [`Config::load`] runs it.
     pub fn from_env() -> Self {
-        Self::default().apply_env()
+        let env = get_environment();
+        Self::from_env_with(&|key| process_lookup(&env, key))
+    }
+
+    /// [`Config::from_env`] against an arbitrary environment lookup.
+    fn from_env_with(lookup: &impl Fn(&str) -> Option<String>) -> Self {
+        Self::default()
+            .fix_config()
+            .apply_env_from(lookup)
+            .fix_config()
+    }
+
+    /// Port of `fixConfig` (config/utils.go:135) over the settings modelled here: a trailing
+    /// slash comes off `SiteURL`, a local driver's `Directory` gains one, and an unsupported
+    /// default server or client locale becomes `en`.
+    ///
+    /// `AvailableLocales` is not a field of this config — nothing reads it through this struct —
+    /// so the half of `fixInvalidLocales` that rewrites it is [`fix_config_document`]'s alone;
+    /// it never moves either default locale, so leaving it out changes nothing here.
+    ///
+    /// `Store.Load` runs this **twice** (store.go:290, :293): on the document, and again after
+    /// the environment overlay. A single pass after the overlay is not the same function — a
+    /// local driver in the document gives `Directory` its slash even when the environment then
+    /// names S3 — and `fix_config_go_parity` has the rows that tell the two apart.
+    #[must_use]
+    fn fix_config(mut self) -> Self {
+        if let Some(site_url) = self.site_url.as_mut() {
+            fix_site_url(site_url);
+        }
+        fix_file_directory(&self.file_driver_name, &mut self.file_directory);
+        fix_locale(&mut self.default_server_locale);
+        fix_locale(&mut self.default_client_locale);
+        self
     }
 
     /// Apply the `MM_<SECTION>_<SETTING>` overlay on top of `self`.
@@ -1700,9 +1753,13 @@ impl Config {
     ///
     /// The variable names are Mattermost's own convention, so this agrees with the neighbouring
     /// Go server for free whenever that server is configured by environment.
+    ///
+    /// The variables are read the way `GetEnvironment` reads them — see [`process_lookup`] — not
+    /// with `std::env::var`, whose exact-case, exact-name match misses variables Go applies.
     #[must_use]
     pub fn apply_env(self) -> Self {
-        self.apply_env_from(&|key| std::env::var(key).ok())
+        let env = get_environment();
+        self.apply_env_from(&|key| process_lookup(&env, key))
     }
 
     /// [`Config::apply_env`] against an arbitrary lookup.
@@ -1844,6 +1901,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWEDUNTRUSTEDINTERNALCONNECTIONS",
             )
             .unwrap_or(default.allowed_untrusted_internal_connections),
+            // [`split_env_list`]: an empty variable is one empty name, which `GetIPAddress` then
+            // looks up and never finds.
+            trusted_proxy_ip_header: lookup("MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER")
+                .map(|raw| split_env_list(&raw))
+                .unwrap_or(default.trusted_proxy_ip_header),
             restrict_link_previews: lookup("MM_SERVICESETTINGS_RESTRICTLINKPREVIEWS")
                 .unwrap_or(default.restrict_link_previews),
             link_metadata_timeout_milliseconds: lookup_int(
@@ -1942,12 +2004,11 @@ impl Config {
                 "MM_TEAMSETTINGS_MAXNOTIFICATIONSPERCHANNEL",
                 default.max_notifications_per_channel,
             ),
-            // Go's env decoder splits a `[]string` setting on commas, so the environment form of
-            // this is `town-square,welcome`. An unset variable and an empty one are different:
-            // unset keeps the default, and `""` is an empty list — which is also the default, so
-            // the distinction is invisible here and would not be for a non-empty default.
+            // See [`split_env_list`]: `town-square welcome`, and an empty variable is `[""]` —
+            // which [`crate::App::default_channel_names`] then treats as a configured list, so it
+            // drops `off-topic` exactly as Go's `DefaultChannelNames` does.
             experimental_default_channels: lookup("MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS")
-                .map(|raw| split_list(&raw))
+                .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: lookup_bool(
                 lookup,
@@ -1979,36 +2040,7 @@ impl Config {
                 "MM_SERVICESETTINGS_EXPERIMENTALENABLEHARDENEDMODE",
                 default.experimental_enable_hardened_mode,
             ),
-            feature_flag_burn_on_read: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_BURNONREAD",
-                default.feature_flag_burn_on_read,
-            ),
-            feature_flag_mobile_sso_code_exchange: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MOBILESSOCODEEXCHANGE",
-                default.feature_flag_mobile_sso_code_exchange,
-            ),
-            feature_flag_move_threads_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MOVETHREADSENABLED",
-                default.feature_flag_move_threads_enabled,
-            ),
-            feature_flag_mm_blocks_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MMBLOCKSENABLED",
-                default.feature_flag_mm_blocks_enabled,
-            ),
-            feature_flag_apps_enabled: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_APPSENABLED",
-                default.feature_flag_apps_enabled,
-            ),
-            feature_flag_recurring_scheduled_posts: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_RECURRINGSCHEDULEDPOSTS",
-                default.feature_flag_recurring_scheduled_posts,
-            ),
+            feature_flags: feature_flags_from_env(default.feature_flags, lookup),
             // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
@@ -2039,7 +2071,18 @@ impl Config {
             ),
             plugin_client_directory: lookup("MM_PLUGINSETTINGS_CLIENTDIRECTORY")
                 .unwrap_or(default.plugin_client_directory),
-            plugin_states: default.plugin_states,
+            // The map arm of `applyEnvKey`: the variable **replaces** the map, `SetDefaults`' four
+            // entries included, and a value that does not decode changes nothing.
+            plugin_states: lookup("MM_PLUGINSETTINGS_PLUGINSTATES")
+                .and_then(|raw| decode_env_plugin_states(&raw))
+                .map(|states| {
+                    states
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|(id, enable)| enable.map(|on| (id, on)))
+                        .collect()
+                })
+                .unwrap_or(default.plugin_states),
             plugin_require_signature: lookup_bool(
                 lookup,
                 "MM_PLUGINSETTINGS_REQUIREPLUGINSIGNATURE",
@@ -2072,15 +2115,9 @@ impl Config {
                 "MM_PLUGINSETTINGS_ALLOWINSECUREDOWNLOADURL",
                 default.plugin_allow_insecure_download_url,
             ),
-            // `strings.Split(value, " ")`: unlike `split_list`, an empty value is one empty name.
             plugin_signature_public_key_files: lookup("MM_PLUGINSETTINGS_SIGNATUREPUBLICKEYFILES")
-                .map(|raw| raw.split(' ').map(str::to_owned).collect())
+                .map(|raw| split_env_list(&raw))
                 .unwrap_or(default.plugin_signature_public_key_files),
-            feature_flag_enable_mfi_plugin_signature_public_key: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLEMFIPLUGINSIGNATUREPUBLICKEY",
-                default.feature_flag_enable_mfi_plugin_signature_public_key,
-            ),
             send_email_notifications: lookup_bool(
                 lookup,
                 "MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS",
@@ -2125,8 +2162,6 @@ impl Config {
                 .unwrap_or(default.ios_latest_version),
             ios_min_version: lookup("MM_CLIENTREQUIREMENTS_IOSMINVERSION")
                 .unwrap_or(default.ios_min_version),
-            feature_flag_test_feature: lookup("MM_FEATUREFLAGS_TESTFEATURE")
-                .unwrap_or(default.feature_flag_test_feature),
             enable_testing: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLETESTING",
@@ -2136,16 +2171,6 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_SCHEDULEDPOSTS",
                 default.scheduled_posts,
-            ),
-            feature_flag_enable_ai_recaps: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLEAIRECAPS",
-                default.feature_flag_enable_ai_recaps,
-            ),
-            feature_flag_property_field_rank: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_PROPERTYFIELDRANK",
-                default.feature_flag_property_field_rank,
             ),
             // An overlay can only ever *set* this, never restore it to absent — which matches
             // Go, whose environment layer writes a pointer to the parsed value.
@@ -2229,51 +2254,6 @@ impl Config {
                 "MM_MESSAGEEXPORTSETTINGS_DOWNLOADEXPORTRESULTS",
                 default.message_export_download_export_results,
             ),
-            feature_flag_session_attributes: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
-                default.feature_flag_session_attributes,
-            ),
-            feature_flag_integrated_boards: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_INTEGRATEDBOARDS",
-                default.feature_flag_integrated_boards,
-            ),
-            feature_flag_managed_channel_categories: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES",
-                default.feature_flag_managed_channel_categories,
-            ),
-            feature_flag_classification_markings: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_CLASSIFICATIONMARKINGS",
-                default.feature_flag_classification_markings,
-            ),
-            feature_flag_post_attributes: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_POSTATTRIBUTES",
-                default.feature_flag_post_attributes,
-            ),
-            feature_flag_discoverable_channels: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
-                default.feature_flag_discoverable_channels,
-            ),
-            feature_flag_permission_policies: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_PERMISSIONPOLICIES",
-                default.feature_flag_permission_policies,
-            ),
-            feature_flag_channel_permission_policies: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_CHANNELPERMISSIONPOLICIES",
-                default.feature_flag_channel_permission_policies,
-            ),
-            feature_flag_policy_simulation: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_POLICYSIMULATION",
-                default.feature_flag_policy_simulation,
-            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -2285,11 +2265,6 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLECHANNELVIEWEDMESSAGES",
                 default.enable_channel_viewed_messages,
-            ),
-            feature_flag_enable_shift_escape_to_mark_all_read: lookup_bool(
-                lookup,
-                "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD",
-                default.feature_flag_enable_shift_escape_to_mark_all_read,
             ),
             show_full_name: lookup_bool(
                 lookup,
@@ -2580,19 +2555,7 @@ impl Config {
                 .unwrap_or_default()
                 .download_export_results
                 .unwrap_or(default.message_export_download_export_results),
-            // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
-            // persisted document, so there is nothing here to read.
-            feature_flag_session_attributes: default.feature_flag_session_attributes,
-            feature_flag_integrated_boards: default.feature_flag_integrated_boards,
-            feature_flag_managed_channel_categories: default
-                .feature_flag_managed_channel_categories,
-            feature_flag_classification_markings: default.feature_flag_classification_markings,
-            feature_flag_post_attributes: default.feature_flag_post_attributes,
-            feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
-            feature_flag_permission_policies: default.feature_flag_permission_policies,
-            feature_flag_channel_permission_policies: default
-                .feature_flag_channel_permission_policies,
-            feature_flag_policy_simulation: default.feature_flag_policy_simulation,
+            feature_flags: feature_flags_from_document(parsed.feature_flags),
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),
@@ -2603,8 +2566,6 @@ impl Config {
                 .enable_channel_viewed_messages
                 .unwrap_or(default.enable_channel_viewed_messages),
             // `FeatureFlags` is stripped before the document is persisted; see the field docs.
-            feature_flag_enable_shift_escape_to_mark_all_read: default
-                .feature_flag_enable_shift_escape_to_mark_all_read,
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -2676,6 +2637,9 @@ impl Config {
             allowed_untrusted_internal_connections: service
                 .allowed_untrusted_internal_connections
                 .unwrap_or(default.allowed_untrusted_internal_connections),
+            trusted_proxy_ip_header: service
+                .trusted_proxy_ip_header
+                .unwrap_or(default.trusted_proxy_ip_header),
             restrict_link_previews: service
                 .restrict_link_previews
                 .unwrap_or(default.restrict_link_previews),
@@ -2781,15 +2745,6 @@ impl Config {
             experimental_enable_hardened_mode: service
                 .experimental_enable_hardened_mode
                 .unwrap_or(default.experimental_enable_hardened_mode),
-            // Deliberately NOT read from the document: Go clears `FeatureFlags` before persisting
-            // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
-            // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
-            feature_flag_burn_on_read: default.feature_flag_burn_on_read,
-            feature_flag_mobile_sso_code_exchange: default.feature_flag_mobile_sso_code_exchange,
-            feature_flag_move_threads_enabled: default.feature_flag_move_threads_enabled,
-            feature_flag_mm_blocks_enabled: default.feature_flag_mm_blocks_enabled,
-            feature_flag_apps_enabled: default.feature_flag_apps_enabled,
-            feature_flag_recurring_scheduled_posts: default.feature_flag_recurring_scheduled_posts,
             file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
@@ -2841,8 +2796,6 @@ impl Config {
             plugin_signature_public_key_files: plugin_settings
                 .signature_public_key_files
                 .unwrap_or(default.plugin_signature_public_key_files),
-            feature_flag_enable_mfi_plugin_signature_public_key: default
-                .feature_flag_enable_mfi_plugin_signature_public_key,
             send_email_notifications: email_settings
                 .send_email_notifications
                 .unwrap_or(default.send_email_notifications),
@@ -3043,11 +2996,6 @@ impl Config {
                 .as_ref()
                 .and_then(|p| p.use_anonymous_urls)
                 .unwrap_or(default.use_anonymous_urls),
-            // Same rule as `feature_flag_burn_on_read` above: `FeatureFlags` is cleared before
-            // the document is persisted, so reading it here would turn an absence into a value.
-            feature_flag_test_feature: default.feature_flag_test_feature,
-            feature_flag_enable_ai_recaps: default.feature_flag_enable_ai_recaps,
-            feature_flag_property_field_rank: default.feature_flag_property_field_rank,
             // **Not** `unwrap_or(default)`: the field is `Option` on purpose and an absent
             // `Enable` is a different input from `false`. Carried through as it arrived.
             ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,
@@ -3093,7 +3041,8 @@ impl Config {
     /// missing row with a marshalled default config (database.go:232) — so this falls back to
     /// [`Config::default`] and still applies the overlay.
     pub async fn load(store: &impl mm_store::ConfigStore) -> Result<Self, ConfigError> {
-        Self::load_with_env(store, &|key| std::env::var(key).ok()).await
+        let env = get_environment();
+        Self::load_with_env(store, &|key| process_lookup(&env, key)).await
     }
 
     /// [`Config::load`] against an arbitrary environment lookup, so the *composition* of document
@@ -3113,7 +3062,8 @@ impl Config {
                 Self::default()
             }
         };
-        Ok(base.apply_env_from(lookup))
+        // store.go:290 → :292 → :293: fix the document, overlay, fix again.
+        Ok(base.fix_config().apply_env_from(lookup).fix_config())
     }
 }
 
@@ -3147,6 +3097,9 @@ pub enum ConfigError {
 /// Confirmed against the live row rather than assumed.
 #[derive(Debug, serde::Deserialize)]
 struct Document {
+    /// See [`Config::feature_flags`]: read when present, as `json.Unmarshal` reads it.
+    #[serde(rename = "FeatureFlags")]
+    feature_flags: Option<FeatureFlags>,
     #[serde(rename = "ServiceSettings")]
     service_settings: Option<ServiceSettingsDocument>,
     #[serde(rename = "ComplianceSettings")]
@@ -3481,6 +3434,8 @@ struct ServiceSettingsDocument {
     enable_file_search: Option<bool>,
     #[serde(rename = "AllowedUntrustedInternalConnections")]
     allowed_untrusted_internal_connections: Option<String>,
+    #[serde(rename = "TrustedProxyIPHeader")]
+    trusted_proxy_ip_header: Option<Vec<String>>,
     #[serde(rename = "RestrictLinkPreviews")]
     restrict_link_previews: Option<String>,
     #[serde(rename = "EnableInsecureOutgoingConnections")]
@@ -3804,14 +3759,170 @@ fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64)
         .unwrap_or(default)
 }
 
-/// Go's environment decoder for a `[]string` setting: split on commas, keep the pieces as
-/// written. Whitespace is **not** trimmed — `"a, b"` is `["a", " b"]` in Go too — and an empty
-/// string yields an empty list rather than one empty element.
-fn split_list(raw: &str) -> Vec<String> {
-    if raw.is_empty() {
-        return Vec::new();
+/// `&FeatureFlags{}` with `SetDefaults` applied — what `Config.SetDefaults` plants in a nil
+/// section (config.go:4345).
+fn default_feature_flags() -> FeatureFlags {
+    let mut flags = FeatureFlags::default();
+    flags.set_defaults();
+    flags
+}
+
+/// The document's `FeatureFlags` section, or the defaults when it has none.
+///
+/// **Present means no defaults at all.** `SetDefaults` only acts on a nil section, so a row
+/// carrying `{"BurnOnRead": false}` leaves every other flag at Go's zero value — `false`, and `""`
+/// for `TestFeature` — which is what `#[serde(default)]` on the derived `Default` gives too. A
+/// JSON `null` is Go's nil pointer and takes the defaults.
+fn feature_flags_from_document(section: Option<FeatureFlags>) -> FeatureFlags {
+    section.unwrap_or_else(default_feature_flags)
+}
+
+/// The `MM_FEATUREFLAGS_<FLAG>` overlay: `applyEnvKey` descends through the `*FeatureFlags`
+/// pointer like any section, so every flag is reachable, a bool through `strconv.ParseBool` and
+/// `TestFeature` as the raw string. A value that does not parse leaves the flag alone.
+///
+/// The flags are walked through their JSON form so that a flag added to
+/// `mm_model::feature_flags::FeatureFlags` is overlaid without a line here — the key *is* the Go
+/// field name (feature_flags.rs), and upper-casing it gives the variable name.
+fn feature_flags_from_env(
+    flags: FeatureFlags,
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> FeatureFlags {
+    let Ok(serde_json::Value::Object(mut fields)) = serde_json::to_value(&flags) else {
+        return flags;
+    };
+    for (name, value) in &mut fields {
+        let Some(raw) = lookup(&format!("MM_FEATUREFLAGS_{}", name.to_uppercase())) else {
+            continue;
+        };
+        match value {
+            serde_json::Value::Bool(current) => {
+                if let Some(parsed) = parse_bool(&raw) {
+                    *current = parsed;
+                }
+            }
+            serde_json::Value::String(current) => *current = raw,
+            _ => {}
+        }
     }
-    raw.split(',').map(str::to_owned).collect()
+    serde_json::from_value(serde_json::Value::Object(fields)).unwrap_or(flags)
+}
+
+/// The slice arm of `applyEnvKey` (config/environment.go:80): `strings.Split(value, " ")`.
+///
+/// **A single ASCII space, not a comma** and not any whitespace: `"a,b"` is one element, a tab
+/// does not separate, and doubled or edge spaces leave empty elements (`" a  b "` is
+/// `["", "a", "", "b", ""]`). An empty variable is `[""]` — one empty element, never `[]` — because
+/// that is what `strings.Split("", " ")` returns. Every `[]string` setting read from the
+/// environment goes through this, in both [`Config::apply_env_from`] and [`apply_environment_map`].
+fn split_env_list(raw: &str) -> Vec<String> {
+    raw.split(' ').map(str::to_owned).collect()
+}
+
+/// `GetEnvironment`'s view of one variable, for [`Config::apply_env_from`].
+///
+/// `env` is [`get_environment`]'s map, so the names are already upper-cased: Go applies
+/// `mm_teamsettings_experimentaldefaultchannels` exactly as it applies the upper-case spelling.
+/// A variable naming a setting **plus leftover key parts** also reaches it — `applyEnvKey` stops
+/// at the first non-struct field and ignores the rest, so `MM_SERVICESETTINGS_SITEURL_X` sets
+/// `SiteURL`. The exact name wins when both are set; Go's choice between them is map-iteration
+/// order, i.e. undefined.
+///
+/// `MM_LICENSE` and the `MMRS_` variables are not part of the overlay — Go reads the licence
+/// with `os.Getenv` (app/platform/license.go:26), exact case and exact name — so those are read
+/// from the process directly.
+fn process_lookup(env: &std::collections::BTreeMap<String, String>, key: &str) -> Option<String> {
+    if key == "MM_LICENSE" || key.starts_with("MMRS_") {
+        return std::env::var(key).ok();
+    }
+    overlay_lookup(env, key)
+}
+
+/// The overlay half of [`process_lookup`], over an upper-cased environment map.
+fn overlay_lookup(env: &std::collections::BTreeMap<String, String>, key: &str) -> Option<String> {
+    if let Some(value) = env.get(key) {
+        return Some(value.to_owned());
+    }
+    let prefix = format!("{key}_");
+    env.range::<str, _>((
+        std::ops::Bound::Included(prefix.as_str()),
+        std::ops::Bound::Unbounded,
+    ))
+    .take_while(|(name, _)| name.starts_with(&prefix))
+    .map(|(_, value)| value.to_owned())
+    .next()
+}
+
+/// The map arm of `applyEnvKey` for `PluginSettings.PluginStates` (`map[string]*PluginState`):
+/// `json.Unmarshal` of the whole variable into a **fresh** map.
+///
+/// `None` is "did not decode", under which Go assigns nothing. `Some(None)` is a JSON `null`,
+/// which Go assigns as a nil map. An entry is `None` for a `null` state (a nil `*PluginState`)
+/// and otherwise its `Enable`. What `encoding/json` does and serde does not by default, and so
+/// what [`GoPluginState`] reproduces: the field name matches case-insensitively, the **last**
+/// matching key wins, a `null` `Enable` leaves it `false`, unknown keys are skipped, and a
+/// wrong-typed `Enable` fails the whole variable.
+fn decode_env_plugin_states(
+    raw: &str,
+) -> Option<Option<std::collections::BTreeMap<String, Option<bool>>>> {
+    let decoded: Option<std::collections::BTreeMap<String, Option<GoPluginState>>> =
+        serde_json::from_str(raw).ok()?;
+    Some(decoded.map(|states| {
+        states
+            .into_iter()
+            .map(|(id, state)| (id, state.map(|s| s.enable)))
+            .collect()
+    }))
+}
+
+/// `model.PluginState` (config.go:3598) as `encoding/json` decodes it — see
+/// [`decode_env_plugin_states`].
+struct GoPluginState {
+    enable: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for GoPluginState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = GoPluginState;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a PluginState object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<GoPluginState, A::Error> {
+                let mut enable = false;
+                while let Some(key) = map.next_key::<String>()? {
+                    // `encoding/json`'s fold is ASCII case-insensitive for a name with no `k`
+                    // or `s` in it (fold.go) — `Enable` has neither.
+                    if key.eq_ignore_ascii_case("Enable") {
+                        if let Some(value) = map.next_value::<Option<bool>>()? {
+                            enable = value;
+                        }
+                    } else {
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                }
+                Ok(GoPluginState { enable })
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+/// The map arm of `applyEnvKey` for `PluginSettings.Plugins` (`map[string]map[string]any`): a
+/// JSON object whose entries are objects or `null`, or `null` itself. `None` when it would not
+/// decode into that type.
+fn decode_env_plugins(raw: &str) -> Option<serde_json::Value> {
+    let decoded: Option<
+        std::collections::BTreeMap<
+            String,
+            Option<std::collections::BTreeMap<String, serde_json::Value>>,
+        >,
+    > = serde_json::from_str(raw).ok()?;
+    serde_json::to_value(decoded).ok()
 }
 
 #[cfg(test)]
@@ -3842,7 +3953,7 @@ mod tests {
         assert!(config.post_priority, "config.go:993 — new(true)");
         assert!(config.enable_burn_on_read, "config.go:1034 — new(true)");
         assert!(
-            config.feature_flag_burn_on_read,
+            config.feature_flags.burn_on_read,
             "feature_flags.go:187 — f.BurnOnRead = true"
         );
         // And therefore the conjunction, which is what decides which cursor query runs.
@@ -3875,10 +3986,8 @@ mod tests {
         };
         assert!(!config.burn_on_read(), "the setting alone disables it");
 
-        let config = Config {
-            feature_flag_burn_on_read: false,
-            ..Config::default()
-        };
+        let mut config = Config::default();
+        config.feature_flags.burn_on_read = false;
         assert!(!config.burn_on_read(), "the flag alone disables it");
     }
 
@@ -4094,11 +4203,11 @@ mod tests {
             "config.go:266"
         );
         assert!(
-            !default.feature_flag_move_threads_enabled,
+            !default.feature_flags.move_threads_enabled,
             "feature_flags.go:169"
         );
         assert!(
-            default.feature_flag_mm_blocks_enabled,
+            default.feature_flags.mm_blocks_enabled,
             "feature_flags.go:214"
         );
 
@@ -4120,8 +4229,12 @@ mod tests {
         assert_eq!(moved.burn_on_read_duration_seconds, 7);
         assert_eq!(moved.outgoing_integration_requests_timeout, 9);
         assert!(
-            !moved.feature_flag_move_threads_enabled,
-            "FeatureFlags is never read from the document"
+            moved.feature_flags.move_threads_enabled,
+            "a FeatureFlags section in the document is read, as json.Unmarshal reads it"
+        );
+        assert!(
+            !moved.feature_flags.mm_blocks_enabled,
+            "and a flag it omits is Go's zero value: SetDefaults skips a non-nil section"
         );
 
         let env = |key: &str| -> Option<String> {
@@ -4136,8 +4249,8 @@ mod tests {
         let overridden = Config::default().apply_env_from(&env);
         assert_eq!(overridden.burn_on_read_duration_seconds, 11);
         assert_eq!(overridden.outgoing_integration_requests_timeout, 13);
-        assert!(overridden.feature_flag_move_threads_enabled);
-        assert!(!overridden.feature_flag_mm_blocks_enabled);
+        assert!(overridden.feature_flags.move_threads_enabled);
+        assert!(!overridden.feature_flags.mm_blocks_enabled);
     }
 }
 
@@ -4156,12 +4269,12 @@ mod go_parity {
     #[test]
     fn an_absent_recap_setting_means_enabled_not_disabled() {
         let gate = |flag: bool, enable: Option<bool>| {
-            Config {
-                feature_flag_enable_ai_recaps: flag,
+            let mut config = Config {
                 ai_recap_settings_enable: enable,
                 ..Config::default()
-            }
-            .ai_recaps_enabled()
+            };
+            config.feature_flags.enable_ai_recaps = flag;
+            config.ai_recaps_enabled()
         };
 
         assert!(!gate(false, None), "the feature flag is off by default");
@@ -4182,7 +4295,7 @@ mod go_parity {
     #[test]
     fn recaps_are_off_on_a_stock_server() {
         assert!(!Config::default().ai_recaps_enabled());
-        assert!(!Config::default().feature_flag_enable_ai_recaps);
+        assert!(!Config::default().feature_flags.enable_ai_recaps);
         assert_eq!(Config::default().ai_recap_settings_enable, None);
     }
 
@@ -4503,45 +4616,279 @@ mod go_parity {
         );
     }
 
-    /// The fixture covers **every** setting read from the document.
+    /// `TrustedProxyIPHeader`: `SetDefaults` turns `null` or an absent key into `[]`
+    /// (config.go:679) and leaves a list alone, empty entries included.
+    #[test]
+    fn trusted_proxy_ip_header_defaults_to_empty_and_keeps_a_list_verbatim() {
+        let doc = |v: &str| {
+            Config::from_document(&format!(
+                r#"{{"ServiceSettings": {{"TrustedProxyIPHeader": {v}}}}}"#
+            ))
+            .expect("valid document")
+            .trusted_proxy_ip_header
+        };
+        assert!(Config::default().trusted_proxy_ip_header.is_empty());
+        assert!(
+            Config::from_document("{}")
+                .unwrap()
+                .trusted_proxy_ip_header
+                .is_empty()
+        );
+        assert!(doc("null").is_empty());
+        assert!(doc("[]").is_empty());
+        assert_eq!(doc(r#"["X-Forwarded-For", ""]"#), ["X-Forwarded-For", ""]);
+    }
+
+    /// `strings.Split(value, " ")` (environment.go:80): spaces, never commas, and an empty
+    /// variable is one empty name, not an empty list.
+    #[test]
+    fn trusted_proxy_ip_header_env_splits_on_spaces() {
+        let with = |value: &'static str| {
+            Config::default()
+                .apply_env_from(&move |key| {
+                    (key == "MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER").then(|| value.to_owned())
+                })
+                .trusted_proxy_ip_header
+        };
+        assert_eq!(
+            with("X-Real-IP X-Forwarded-For"),
+            ["X-Real-IP", "X-Forwarded-For"]
+        );
+        assert_eq!(
+            with("X-Real-IP,X-Forwarded-For"),
+            ["X-Real-IP,X-Forwarded-For"]
+        );
+        assert_eq!(with(""), [""]);
+        let document = Config::from_document(
+            r#"{"ServiceSettings": {"TrustedProxyIPHeader": ["X-Real-IP"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            document.apply_env_from(&|_| None).trusted_proxy_ip_header,
+            ["X-Real-IP"],
+            "an unset variable leaves the document's value"
+        );
+    }
+
+    /// Keys [`Document`] reads that the fixture deliberately does not carry.
     ///
-    /// Without this the coverage rots silently. `scripts/dump-config-fixture.sh` carries its own
-    /// copy of the key list, so a field added to [`Config`] but not to the script is simply absent
-    /// from the fixture — and then `every_default_matches_what_go_actually_wrote` compares its
-    /// *default* against its default and passes, having proved nothing about the new field. The
-    /// count is the cheapest thing that fails instead.
+    /// `FileSettings.PublicLinkSalt` is a secret generated at first boot — a different value on
+    /// every stack, and not one to commit.
+    const NEVER_PROJECTED: &[&str] = &["FileSettings.PublicLinkSalt"];
+
+    /// The fixture covers **every** setting read from the document, and nothing else.
     ///
-    /// **The count was 17 and the script's key list had drifted to match it.** `Document` had
-    /// grown to fourteen sections and thirty-eight keys while the projection still carried six
-    /// sections and seventeen, so eight sections of Go's own output were never compared against
-    /// anything and this assertion agreed with the omission. The list in the script is now the
-    /// struct's keys, and the number below is what the script writes: **40** — the thirty-eight
-    /// modelled keys plus `ServiceSettings.SiteURL`, projected for its presence rather than its
-    /// value, and counted here like any other.
+    /// `scripts/dump-config-fixture.sh` carries its own copy of the key list, so a field added to
+    /// [`Document`] but not to the script is simply absent from the fixture — and then
+    /// `every_default_matches_what_go_actually_wrote` compares its *default* against its default
+    /// and passes, having proved nothing about the new field.
     ///
-    /// **It drifted again, the same way, and the count is why.** The four image-route settings —
-    /// `FileSettings.MaxFileSize`, `TeamSettings.LockProfileFieldsForEmailUsers`,
-    /// `LdapSettings.PictureAttribute` and `SamlSettings.EnableSyncWithLdap` — were added to
-    /// [`Config`] with their defaults transcribed from `config.go` and *not* added to the
-    /// script, so [`every_default_matches_what_go_actually_wrote`] compared four defaults against
-    /// their own fallback and passed. A hardcoded number cannot notice a missing key on its own;
-    /// what it can do is fail the moment somebody adds the key, which is what happened here.
+    /// **This used to assert a hardcoded count, and the count drifted with the list three times**
+    /// (17 against a struct of 38 keys; then four image-route settings; then [D-454]'s five
+    /// `TeamSettings` keys and three whole sections). A number beside the fixture agrees with the
+    /// script, not with the struct. So the expected keys are now read **from the struct itself**:
+    /// [`document_keys`] walks `Document` through serde's own field lists, and the fixture must
+    /// hold exactly that set. A key added to `Document` fails here until the script projects it;
+    /// a key left in the script after it leaves `Document` fails too.
+    ///
+    /// `FeatureFlags` is the one section excluded, because the row cannot carry it (the script
+    /// asserts its absence and dumps the running flags to `config_feature_flags.json` instead).
+    /// [`NEVER_PROJECTED`] is the one key excluded.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
-        let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
-        let keys: usize = fixture
+        for key in NEVER_PROJECTED {
+            assert!(
+                document_keys().iter().any(|k| k == key),
+                "{key} is excused from the fixture but Document no longer reads it"
+            );
+        }
+
+        let (unprojected, stale) = coverage_gaps(ACTIVE);
+        assert!(
+            unprojected.is_empty() && stale.is_empty(),
+            "Document reads {unprojected:?} and the fixture does not carry them — add them to \
+             scripts/dump-config-fixture.sh and re-run it. The fixture carries {stale:?}, which \
+             Document does not read."
+        );
+    }
+
+    /// Both directions of [`coverage_gaps`] fire: a fixture short of a key, and one carrying a
+    /// key `Document` does not read. The committed fixture exercises neither, so without this a
+    /// gap check reduced to one direction would still pass.
+    #[test]
+    fn coverage_gaps_reports_both_directions() {
+        let mut fixture: serde_json::Value = serde_json::from_str(ACTIVE).unwrap();
+        fixture["TeamSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("MaxUsersPerTeam");
+        fixture["TeamSettings"]["NotAKeyDocumentReads"] = serde_json::json!(true);
+
+        let (unprojected, stale) = coverage_gaps(&fixture.to_string());
+        assert_eq!(unprojected, ["TeamSettings.MaxUsersPerTeam"]);
+        assert_eq!(stale, ["TeamSettings.NotAKeyDocumentReads"]);
+    }
+
+    /// `(keys Document reads that the fixture lacks, keys the fixture has that Document does not
+    /// read)`, less the `FeatureFlags` section and [`NEVER_PROJECTED`].
+    fn coverage_gaps(fixture: &str) -> (Vec<String>, Vec<String>) {
+        let fixture: serde_json::Value =
+            serde_json::from_str(fixture).expect("the fixture is JSON");
+        let in_fixture: std::collections::BTreeSet<String> = fixture
             .as_object()
             .expect("an object of sections")
-            .values()
-            .map(|section| section.as_object().expect("a section of settings").len())
-            .sum();
+            .iter()
+            .flat_map(|(section, keys)| {
+                keys.as_object()
+                    .expect("a section of settings")
+                    .keys()
+                    .map(move |key| format!("{section}.{key}"))
+            })
+            .collect();
+        let in_document: std::collections::BTreeSet<String> = document_keys()
+            .into_iter()
+            .filter(|key| !key.starts_with("FeatureFlags."))
+            .filter(|key| !NEVER_PROJECTED.contains(&key.as_str()))
+            .collect();
+        (
+            in_document.difference(&in_fixture).cloned().collect(),
+            in_fixture.difference(&in_document).cloned().collect(),
+        )
+    }
 
-        assert_eq!(
-            keys, 128,
-            "the fixture covers {keys} settings and Config reads 128 from the document. \
-             Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
-             setting the fixture does not carry is a setting Go's own output never checked"
+    /// The walker itself: it must see the sections and keys it is trusted to see, or the test
+    /// above would pass vacuously on an empty set.
+    #[test]
+    fn document_keys_walks_every_section_of_the_struct() {
+        let keys = document_keys();
+        for expected in [
+            "ServiceSettings.SiteURL",
+            "TeamSettings.ExperimentalDefaultChannels",
+            "PluginSettings.PluginStates",
+            "AnnouncementSettings.NoticesSkipCache",
+            "GitLabSettings.Enable",
+            "Office365Settings.Enable",
+        ] {
+            assert!(keys.contains(&expected.to_owned()), "missing {expected}");
+        }
+        assert!(
+            keys.iter().any(|key| key.starts_with("FeatureFlags.")),
+            "the FeatureFlags section is walked too, and only filtered by its caller"
         );
+    }
+
+    /// Every `Section.Key` pair [`Document`] deserialises, read from serde's own field lists.
+    ///
+    /// A derived `Deserialize` hands `deserialize_struct` the `&'static [&'static str]` of its
+    /// field names. This deserializer records the top-level list, answers each section as
+    /// present, records that section's list, and then answers it as an empty map — every field
+    /// in these structs is an `Option` (or `#[serde(default)]`), so an empty section
+    /// deserialises and nothing below the key level is ever visited.
+    fn document_keys() -> Vec<String> {
+        use serde::de::{self, IntoDeserializer, value::Error};
+        use std::cell::RefCell;
+
+        struct Root<'a>(&'a RefCell<Vec<String>>);
+        struct Section<'a> {
+            name: &'static str,
+            keys: &'a RefCell<Vec<String>>,
+        }
+        struct Sections<'a> {
+            names: std::slice::Iter<'static, &'static str>,
+            pending: Option<&'static str>,
+            keys: &'a RefCell<Vec<String>>,
+        }
+
+        impl<'de> de::MapAccess<'de> for Sections<'_> {
+            type Error = Error;
+            fn next_key_seed<K: de::DeserializeSeed<'de>>(
+                &mut self,
+                seed: K,
+            ) -> Result<Option<K::Value>, Error> {
+                let Some(name) = self.names.next() else {
+                    return Ok(None);
+                };
+                self.pending = Some(name);
+                seed.deserialize((*name).into_deserializer()).map(Some)
+            }
+            fn next_value_seed<V: de::DeserializeSeed<'de>>(
+                &mut self,
+                seed: V,
+            ) -> Result<V::Value, Error> {
+                let name = self
+                    .pending
+                    .take()
+                    .ok_or_else(|| de::Error::custom("value before key"))?;
+                seed.deserialize(Section {
+                    name,
+                    keys: self.keys,
+                })
+            }
+        }
+
+        impl<'de> de::Deserializer<'de> for Root<'_> {
+            type Error = Error;
+            fn deserialize_struct<V: de::Visitor<'de>>(
+                self,
+                _: &'static str,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                visitor.visit_map(Sections {
+                    names: fields.iter(),
+                    pending: None,
+                    keys: self.0,
+                })
+            }
+            fn deserialize_any<V: de::Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(de::Error::custom("Document is expected to be a struct"))
+            }
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+                byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map enum
+                identifier ignored_any
+            }
+        }
+
+        impl<'de> de::Deserializer<'de> for Section<'_> {
+            type Error = Error;
+            fn deserialize_option<V: de::Visitor<'de>>(
+                self,
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                visitor.visit_some(self)
+            }
+            fn deserialize_struct<V: de::Visitor<'de>>(
+                self,
+                _: &'static str,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                self.keys
+                    .borrow_mut()
+                    .extend(fields.iter().map(|key| format!("{}.{key}", self.name)));
+                visitor.visit_map(de::value::MapDeserializer::new(std::iter::empty::<(
+                    &str,
+                    &str,
+                )>()))
+            }
+            fn deserialize_any<V: de::Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(de::Error::custom(format!(
+                    "section {} is not a derived struct; teach document_keys its shape",
+                    self.name
+                )))
+            }
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+                byte_buf unit unit_struct newtype_struct seq tuple tuple_struct map enum
+                identifier ignored_any
+            }
+        }
+
+        let keys = RefCell::new(Vec::new());
+        <Document as serde::Deserialize>::deserialize(Root(&keys))
+            .expect("every section of Document is a struct of optional fields");
+        keys.into_inner()
     }
 
     /// The document supplies values; it does not merely fail to override defaults. Flipping every
@@ -4571,6 +4918,7 @@ mod go_parity {
                 "EnablePostSearch": false,
                 "EnableFileSearch": false,
                 "AllowedUntrustedInternalConnections": "10.0.0.0/8 localhost",
+                "TrustedProxyIPHeader": ["X-Real-IP", "X-Forwarded-For"],
                 "RestrictLinkPreviews": "example.com",
                 "EnableInsecureOutgoingConnections": true,
                 "EnableMultifactorAuthentication": true,
@@ -4641,6 +4989,11 @@ mod go_parity {
         assert_eq!(
             config.allowed_untrusted_internal_connections,
             "10.0.0.0/8 localhost"
+        );
+        assert_eq!(
+            config.trusted_proxy_ip_header,
+            ["X-Real-IP", "X-Forwarded-For"],
+            "kept in the order written: GetIPAddress walks it in that order"
         );
         assert_eq!(config.restrict_link_previews, "example.com");
         assert_eq!(config.link_metadata_timeout_milliseconds, 250);
@@ -4956,17 +5309,86 @@ mod go_parity {
         assert!(config.enable_custom_emoji);
     }
 
-    /// `FeatureFlags` is never persisted (config/store.go:306-310), so it must not be sourced from
-    /// the document even when something puts one there — a stray section must not be able to turn
-    /// a flag off. `scripts/dump-config-fixture.sh` fails loudly if the live row ever grows one.
+    /// Every flag against the values the stack's Go server is running on, read from its client
+    /// config by `scripts/dump-config-fixture.sh` — Go's own `ToMap` over `SetDefaults` plus the
+    /// one `MM_FEATUREFLAGS_*` variable `scripts/go-server.sh` starts it with.
     #[test]
-    fn feature_flags_are_not_read_from_the_document() {
-        let config = Config::from_document(r#"{"FeatureFlags":{"BurnOnRead":false}}"#)
-            .expect("valid document");
-        assert!(
-            config.feature_flag_burn_on_read,
-            "the flag comes from the environment or the compiled-in default, never the row"
+    fn the_flags_match_what_the_stacks_go_server_runs_on() {
+        let go: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(include_str!("../../../fixtures/config_feature_flags.json"))
+                .expect("the fixture is a flag map");
+        assert!(go.len() >= 40, "every flag is in the fixture");
+        let flags = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD").then(|| "true".to_owned())
+        });
+        let ours: std::collections::BTreeMap<String, String> = flags.to_map().into_iter().collect();
+        assert_eq!(ours, go);
+        assert_eq!(
+            go["EnableExportDirectDownload"], "false",
+            "feature_flags.go:168"
         );
+    }
+
+    /// Each flag has its own variable, named by upper-casing the Go field name, and moves
+    /// nothing else. A bool takes `strconv.ParseBool`'s spellings only; a string is taken whole.
+    #[test]
+    fn every_flag_has_its_own_environment_variable() {
+        let defaults = default_feature_flags().to_map();
+        for (name, value) in &defaults {
+            let variable = format!("MM_FEATUREFLAGS_{}", name.to_uppercase());
+            let set = match value.as_str() {
+                "true" => "F".to_owned(),
+                "false" => "T".to_owned(),
+                _ => "some value".to_owned(),
+            };
+            let moved = feature_flags_from_env(default_feature_flags(), &|key| {
+                (key == variable).then(|| set.clone())
+            })
+            .to_map();
+            for (other, before) in &defaults {
+                if other == name {
+                    assert_ne!(&moved[other], before, "{variable} moves {name}");
+                } else {
+                    assert_eq!(&moved[other], before, "{variable} leaves {other} alone");
+                }
+            }
+        }
+
+        let unparsed = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_BURNONREAD").then(|| "off".to_owned())
+        });
+        assert!(unparsed.burn_on_read, "an unparseable bool changes nothing");
+        let exported = feature_flags_from_env(default_feature_flags(), &|key| {
+            (key == "MM_FEATUREFLAGS_ENABLEEXPORTDIRECTDOWNLOAD").then(|| "true".to_owned())
+        });
+        assert!(exported.enable_export_direct_download);
+    }
+
+    /// `json.Unmarshal` fills `Config.FeatureFlags` from a row that has the section, and
+    /// `Config.SetDefaults` then leaves it alone (config.go:4345) — so a partial section zeroes the
+    /// flags it omits, and only an absent or `null` section takes `FeatureFlags.SetDefaults`. Go
+    /// never writes the section while `readOnlyFF` holds, which is why the stack's own row has
+    /// none (`scripts/dump-config-fixture.sh` checks).
+    #[test]
+    fn a_feature_flags_section_in_the_document_replaces_the_defaults_whole() {
+        let partial = Config::from_document(r#"{"FeatureFlags":{"BurnOnRead":false}}"#)
+            .expect("valid document");
+        assert!(!partial.feature_flags.burn_on_read, "the section is read");
+        assert!(
+            !partial.feature_flags.mm_blocks_enabled,
+            "an omitted flag is false, not its `true` default"
+        );
+        assert_eq!(
+            partial.feature_flags.test_feature, "",
+            "and a string is empty"
+        );
+
+        for document in [r#"{}"#, r#"{"FeatureFlags":null}"#] {
+            let config = Config::from_document(document).expect("valid document");
+            assert_eq!(config.feature_flags, default_feature_flags(), "{document}");
+            assert!(config.feature_flags.mm_blocks_enabled);
+            assert_eq!(config.feature_flags.test_feature, "off");
+        }
     }
 
     /// The flag is not the setting. `isBurnOnReadEnabled` ands the two (app/post_helpers.go:270),
@@ -4981,7 +5403,7 @@ mod go_parity {
             "the setting is read from the row"
         );
         assert!(
-            config.feature_flag_burn_on_read,
+            config.feature_flags.burn_on_read,
             "the flag is not, and must not follow it"
         );
         assert!(
@@ -5326,9 +5748,25 @@ mod go_parity {
 /// beginning with those two letters; `applyEnvironmentMap` trims a leading `MM_` and simply finds
 /// no field for what is left. Narrowing the filter to `MM_` would look tidier and would change
 /// which keys [`generate_environment_map`] reports.
+///
+/// Read with `vars_os` and decoded lossily: `std::env::vars` panics on a variable that is not
+/// UTF-8, and Go reads such a variable without complaint.
 pub fn get_environment() -> std::collections::BTreeMap<String, String> {
-    std::env::vars()
-        .map(|(key, value)| (key.to_uppercase(), value))
+    environment_from(std::env::vars_os().map(|(key, value)| {
+        (
+            key.to_string_lossy().into_owned(),
+            value.to_string_lossy().into_owned(),
+        )
+    }))
+}
+
+/// [`get_environment`] over arbitrary pairs: the key is upper-cased (`strings.ToUpper`, Unicode
+/// like [`str::to_uppercase`]) and kept when it starts with `MM`. A later pair whose name
+/// upper-cases to an earlier one's replaces it, as Go's map assignment does.
+fn environment_from(
+    vars: impl Iterator<Item = (String, String)>,
+) -> std::collections::BTreeMap<String, String> {
+    vars.map(|(key, value)| (key.to_uppercase(), value))
         .filter(|(key, _)| key.starts_with("MM"))
         .collect()
 }
@@ -5402,14 +5840,39 @@ fn apply_env_key(key: &str, value: &str, subject: &mut serde_json::Value, path: 
         return;
     };
 
-    if RAW_MESSAGE_PATHS.contains(&child_path.as_str())
-        || MAP_VALUED_PATHS.contains(&child_path.as_str())
-    {
-        // `json.Unmarshal([]byte(value), target)` for a map; a raw assignment of the bytes for a
-        // `json.RawMessage`. Both are "the variable is the value, parsed as JSON", and both leave
-        // the field alone when it does not parse — Go's map arm by its `if err == nil`, and the
-        // raw-message arm because storing non-JSON bytes there would only produce a document that
-        // cannot be marshalled again.
+    if MAP_VALUED_PATHS.contains(&child_path.as_str()) {
+        // `json.Unmarshal([]byte(value), target)` into a fresh map of the field's **type**, and
+        // nothing assigned when it fails (`if err == nil`). Valid JSON of the wrong shape — a
+        // number where a plugin's state belongs — is a failure too, so the value is decoded as
+        // the Go type rather than merely parsed; see [`decode_env_plugin_states`].
+        let decoded = if child_path == "PluginSettings.PluginStates" {
+            decode_env_plugin_states(value).map(|states| match states {
+                Some(states) => serde_json::Value::Object(
+                    states
+                        .into_iter()
+                        .map(|(id, enable)| {
+                            let state = enable.map_or(
+                                serde_json::Value::Null,
+                                |on| serde_json::json!({ "Enable": on }),
+                            );
+                            (id, state)
+                        })
+                        .collect(),
+                ),
+                None => serde_json::Value::Null,
+            })
+        } else {
+            decode_env_plugins(value)
+        };
+        if let Some(decoded) = decoded {
+            *child = decoded;
+        }
+        return;
+    }
+    if RAW_MESSAGE_PATHS.contains(&child_path.as_str()) {
+        // A raw assignment of the bytes. Go stores even non-JSON bytes; this leaves the field
+        // alone instead, because such bytes would only produce a document that cannot be
+        // marshalled again — on Go's side too.
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
             *child = parsed;
         }
@@ -5432,14 +5895,14 @@ fn apply_env_key(key: &str, value: &str, subject: &mut serde_json::Value, path: 
                 *child = serde_json::Value::from(parsed);
             }
         }
-        // `strings.Split(value, " ")` — **spaces, not commas**, and unlike [`split_list`] an
-        // empty variable yields one empty element rather than an empty list, because that is what
-        // `strings.Split("", " ")` returns.
+        // [`split_env_list`]. The one slice setting that is not a `[]string`,
+        // `SqlSettings.ReplicaLagSettings`, makes Go's `reflect.Set` **panic** at boot; here the
+        // strings land in the document and its decode into `mm_model::config::Config` fails.
         serde_json::Value::Array(_) => {
             *child = serde_json::Value::Array(
-                value
-                    .split(' ')
-                    .map(|piece| serde_json::Value::String(piece.to_owned()))
+                split_env_list(value)
+                    .into_iter()
+                    .map(serde_json::Value::String)
                     .collect(),
             );
         }
@@ -5548,9 +6011,126 @@ pub async fn load_model_config_with_env(
         }
     }
 
+    // store.go:290 → :292 → :293: fix the document, overlay, fix again.
+    fix_config_document(&mut value);
     apply_environment_map(&mut value, env);
+    fix_config_document(&mut value);
 
     serde_json::from_value(value).map_err(|source| ConfigError::Malformed { source })
+}
+
+/// Port of `fixConfig` (config/utils.go:135) over a whole `model.Config` document, for
+/// [`load_model_config`], which is the only reader of `AvailableLocales`.
+///
+/// Go runs it on a config `SetDefaults` has filled; [`load_model_config`] does not run
+/// `SetDefaults`, so an absent (or `null`) setting is left absent, never invented. Where
+/// `fixConfig` *reads* a setting to decide another, an absent one is read as the value
+/// `SetDefaults` would have given it — `DriverName` as `local` (config.go `FileSettings.SetDefaults`)
+/// and `DefaultClientLocale` as `en` (config.go:2904) — because that is what Go decides on.
+fn fix_config_document(document: &mut serde_json::Value) {
+    if let Some(serde_json::Value::String(site_url)) =
+        document.pointer_mut("/ServiceSettings/SiteURL")
+    {
+        fix_site_url(site_url);
+    }
+
+    let driver = match document.pointer("/FileSettings/DriverName") {
+        Some(serde_json::Value::String(driver)) => driver.as_str(),
+        _ => crate::filestore::DRIVER_LOCAL,
+    };
+    // Owned because the next line borrows the same document mutably: the driver is a few bytes.
+    let driver = driver.to_owned();
+    if let Some(serde_json::Value::String(directory)) =
+        document.pointer_mut("/FileSettings/Directory")
+    {
+        fix_file_directory(&driver, directory);
+    }
+
+    for key in [
+        "/LocalizationSettings/DefaultServerLocale",
+        "/LocalizationSettings/DefaultClientLocale",
+    ] {
+        if let Some(serde_json::Value::String(locale)) = document.pointer_mut(key) {
+            fix_locale(locale);
+        }
+    }
+    let client = match document.pointer("/LocalizationSettings/DefaultClientLocale") {
+        Some(serde_json::Value::String(client)) => client.as_str(),
+        _ => mm_model::user::DEFAULT_LOCALE,
+    };
+    // Owned for the same reason as `driver`.
+    let client = client.to_owned();
+    if let Some(serde_json::Value::String(available)) =
+        document.pointer_mut("/LocalizationSettings/AvailableLocales")
+    {
+        fix_available_locales(available, &client);
+    }
+}
+
+/// `fixConfig`'s `SiteURL` step (config/utils.go:137): `strings.TrimRight(url, "/")` — **every**
+/// trailing slash, so `"///"` and `"/"` both become `""`.
+fn fix_site_url(site_url: &mut String) {
+    let trimmed = site_url.trim_end_matches('/').len();
+    site_url.truncate(trimmed);
+}
+
+/// `fixConfig`'s `Directory` step (config/utils.go:142): only for the `local` driver — compared
+/// exactly, as Go compares it — and only for a non-empty directory not already ending in `/`.
+/// One slash is added; a directory ending in several keeps them all.
+fn fix_file_directory(driver: &str, directory: &mut String) {
+    if driver == crate::filestore::DRIVER_LOCAL
+        && !directory.is_empty()
+        && !directory.ends_with('/')
+    {
+        directory.push('/');
+    }
+}
+
+/// `fixInvalidLocales`' default-locale steps (config/utils.go:155, :161): a locale that is not a
+/// key of `i18n.GetSupportedLocales()` — [`crate::i18n::is_supported_locale`], exact and
+/// case-sensitive — becomes `model.DefaultLocale`.
+fn fix_locale(locale: &mut String) {
+    if !crate::i18n::is_supported_locale(locale) {
+        mm_model::user::DEFAULT_LOCALE.clone_into(locale);
+    }
+}
+
+/// `fixInvalidLocales`' `AvailableLocales` step (config/utils.go:167), after the client locale
+/// has been fixed.
+///
+/// Walks the comma-separated list in order: the **first** unsupported piece clears the whole
+/// setting (and counts as "includes the client", so nothing is appended); otherwise the client
+/// locale is appended when no piece equals it exactly. Pieces are never trimmed, so `"de, fr"`
+/// and `"de,,fr"` are cleared. Last, `RemoveDuplicatesFromStringArray` keeps the first of each.
+fn fix_available_locales(available: &mut String, client: &str) {
+    if available.is_empty() {
+        return;
+    }
+    let mut includes_client = false;
+    let mut all_supported = true;
+    for word in available.split(',') {
+        if !crate::i18n::is_supported_locale(word) {
+            all_supported = false;
+            includes_client = true;
+            break;
+        }
+        if word == client {
+            includes_client = true;
+        }
+    }
+    if !all_supported {
+        available.clear();
+    }
+    if !includes_client {
+        available.push(',');
+        available.push_str(client);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<&str> = available
+        .split(',')
+        .filter(|word| seen.insert(*word))
+        .collect();
+    *available = deduped.join(",");
 }
 
 /// Port of `(*model.Config).Sanitize(nil, nil)` (config.go:5346) — what `GET /api/v4/config`
@@ -7336,8 +7916,8 @@ mod document {
         assert_eq!(config["ServiceSettings"]["WebsocketPort"], 80);
     }
 
-    /// `strings.Split(value, " ")` — **spaces**, not the commas [`split_list`] uses for the
-    /// settings the narrow `Config` reads. Getting this wrong turns one cipher name into several.
+    /// `strings.Split(value, " ")` — **spaces**, not commas. Getting this wrong turns one cipher
+    /// name into several.
     #[test]
     fn a_slice_splits_on_spaces_and_never_on_commas() {
         let mut config = document();
@@ -8114,5 +8694,531 @@ mod licensed_client_config {
         assert_eq!(settings.get_message_retention_hours(), 72);
         settings.message_retention_hours = Some(5);
         assert_eq!(settings.get_message_retention_hours(), 5);
+    }
+}
+
+/// The environment overlay against `fixtures/behaviour_env_override.json`, which Go's own
+/// `Store.Load` produced from real process variables (`reference/dump/behaviour_env_override.go`).
+/// Both overlays are held to it: [`Config::apply_env_from`] behind [`process_lookup`], and
+/// [`apply_environment_map`] over the decoded document.
+#[cfg(test)]
+mod env_go_parity {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn rows() -> Vec<serde_json::Value> {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_env_override.json"
+        ))
+        .expect("behaviour_env_override.json is generated by reference/dump");
+        let rows = oracle["env_override"].as_array().expect("rows").clone();
+        assert!(rows.len() >= 55, "the corpus is all there");
+        rows
+    }
+
+    fn row_env(row: &serde_json::Value) -> BTreeMap<String, String> {
+        environment_from(row["env"].as_array().expect("env").iter().map(|pair| {
+            (
+                pair[0].as_str().expect("name").to_owned(),
+                pair[1].as_str().expect("value").to_owned(),
+            )
+        }))
+    }
+
+    fn strings(value: &serde_json::Value) -> Vec<String> {
+        value
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|piece| piece.as_str().expect("a string").to_owned())
+            .collect()
+    }
+
+    /// Go's `PluginStates` as the narrow config holds it: a nil map is empty and a nil state is
+    /// absent.
+    fn states(value: &serde_json::Value) -> BTreeMap<String, bool> {
+        value
+            .as_object()
+            .map(|states| {
+                states
+                    .iter()
+                    .filter(|(_, state)| !state.is_null())
+                    .map(|(id, state)| (id.clone(), state["Enable"].as_bool().expect("bool")))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_narrow_config_overlays_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let env = row_env(&row);
+            let got = Config::default().apply_env_from(&|key| overlay_lookup(&env, key));
+            let want = &row["want"];
+            assert_eq!(
+                got.experimental_default_channels,
+                strings(&want["TeamSettings"]["ExperimentalDefaultChannels"]),
+                "{name}: ExperimentalDefaultChannels"
+            );
+            assert_eq!(
+                got.max_channels_per_team,
+                want["TeamSettings"]["MaxChannelsPerTeam"]
+                    .as_i64()
+                    .expect("i64"),
+                "{name}: MaxChannelsPerTeam"
+            );
+            assert_eq!(
+                got.trusted_proxy_ip_header,
+                strings(&want["ServiceSettings"]["TrustedProxyIPHeader"]),
+                "{name}: TrustedProxyIPHeader"
+            );
+            assert_eq!(
+                Some(got.enable_custom_emoji),
+                want["ServiceSettings"]["EnableCustomEmoji"].as_bool(),
+                "{name}: EnableCustomEmoji"
+            );
+            assert_eq!(
+                Some(got.goroutine_health_threshold),
+                want["ServiceSettings"]["GoroutineHealthThreshold"].as_i64(),
+                "{name}: GoroutineHealthThreshold"
+            );
+            // `Store.Load` plants `""` before `SetDefaults`; `Config::default` leaves it absent.
+            assert_eq!(
+                got.site_url.unwrap_or_default(),
+                want["ServiceSettings"]["SiteURL"].as_str().expect("str"),
+                "{name}: SiteURL"
+            );
+            assert_eq!(
+                got.plugin_signature_public_key_files,
+                strings(&want["PluginSettings"]["SignaturePublicKeyFiles"]),
+                "{name}: SignaturePublicKeyFiles"
+            );
+            assert_eq!(
+                got.plugin_states,
+                states(&want["PluginSettings"]["PluginStates"]),
+                "{name}: PluginStates"
+            );
+            assert_eq!(
+                Some(got.feature_flags.burn_on_read),
+                want["FeatureFlags"]["BurnOnRead"].as_bool(),
+                "{name}: FeatureFlags.BurnOnRead"
+            );
+            assert_eq!(
+                got.feature_flags.test_feature,
+                want["FeatureFlags"]["TestFeature"].as_str().expect("str"),
+                "{name}: FeatureFlags.TestFeature"
+            );
+        }
+    }
+
+    /// The first row is Go's config with nothing set; each row's overlay, applied to it as a
+    /// document, must land exactly on that row's answer.
+    #[test]
+    fn the_document_overlay_matches_every_row_exactly() {
+        let rows = rows();
+        assert_eq!(rows[0]["name"], "nothing set");
+        let base = rows[0]["want"].clone();
+        for row in &rows {
+            let name = row["name"].as_str().expect("name");
+            let mut document = base.clone();
+            apply_environment_map(&mut document, &row_env(row));
+            assert_eq!(document, row["want"], "{name}");
+        }
+    }
+
+    /// The rows the corpus exists for, named, so a regenerated fixture cannot quietly lose them.
+    #[test]
+    fn the_rows_that_decide_the_rules_are_present() {
+        let rows = rows();
+        let want = |name: &str| {
+            rows.iter()
+                .find(|row| row["name"] == name)
+                .unwrap_or_else(|| panic!("row {name:?} is missing"))["want"]
+                .clone()
+        };
+        assert_eq!(
+            want("slice from an empty variable is one empty name")["TeamSettings"]["ExperimentalDefaultChannels"],
+            serde_json::json!([""])
+        );
+        assert_eq!(
+            want("slice never splits on a comma")["TeamSettings"]["ExperimentalDefaultChannels"],
+            serde_json::json!(["alpha,beta"])
+        );
+        assert_eq!(
+            want("states replace the whole map")["PluginSettings"]["PluginStates"],
+            serde_json::json!({"x": {"Enable": true}})
+        );
+        assert_eq!(
+            want("states: the last fold-equal key wins")["PluginSettings"]["PluginStates"],
+            serde_json::json!({"x": {"Enable": false}})
+        );
+    }
+}
+
+/// `fixConfig` (config/utils.go:135) as `Store.Load` runs it, against the Go oracle
+/// `reference/dump/behaviour_fix_config.go` → `fixtures/behaviour_fix_config.json`.
+///
+/// Each row is a document (the six settings `fixConfig` reads or writes, after `SetDefaults`), an
+/// environment, what Go runs on (`want`) and what it writes back (`persisted`: one pass, no
+/// environment). All three of this module's paths are held to it — [`Config::load`],
+/// [`load_model_config`] and [`fix_config_document`] on its own.
+#[cfg(test)]
+mod fix_config_go_parity {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_fix_config.json"))
+            .expect("behaviour_fix_config.json is generated by reference/dump")
+    }
+
+    fn rows() -> Vec<serde_json::Value> {
+        let rows = oracle()["fix_config"].as_array().expect("rows").clone();
+        assert!(rows.len() >= 48, "the corpus is all there");
+        rows
+    }
+
+    fn row_env(row: &serde_json::Value) -> BTreeMap<String, String> {
+        environment_from(row["env"].as_array().expect("env").iter().map(|pair| {
+            (
+                pair[0].as_str().expect("name").to_owned(),
+                pair[1].as_str().expect("value").to_owned(),
+            )
+        }))
+    }
+
+    struct DocumentStore(String);
+
+    impl mm_store::ConfigStore for DocumentStore {
+        async fn load_active(&self) -> Result<Option<String>, mm_store::StoreError> {
+            Ok(Some(self.0.clone()))
+        }
+
+        async fn active_id(&self) -> Result<Option<String>, mm_store::StoreError> {
+            Ok(None)
+        }
+
+        async fn has_file(&self, _name: &str) -> Result<bool, mm_store::StoreError> {
+            Ok(false)
+        }
+
+        async fn get_file(&self, _name: &str) -> Result<Option<Vec<u8>>, mm_store::StoreError> {
+            Ok(None)
+        }
+    }
+
+    /// The oracle's projection of a whole-config document.
+    fn projection(document: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "ServiceSettings": {"SiteURL": document["ServiceSettings"]["SiteURL"]},
+            "FileSettings": {
+                "DriverName": document["FileSettings"]["DriverName"],
+                "Directory": document["FileSettings"]["Directory"],
+            },
+            "LocalizationSettings": {
+                "DefaultServerLocale": document["LocalizationSettings"]["DefaultServerLocale"],
+                "DefaultClientLocale": document["LocalizationSettings"]["DefaultClientLocale"],
+                "AvailableLocales": document["LocalizationSettings"]["AvailableLocales"],
+            },
+        })
+    }
+
+    /// Go's supported-locale map is built at run time from the i18n directory, filtered by the
+    /// hard-coded list; the oracle records the map it actually had.
+    #[test]
+    fn the_supported_locales_are_gos_runtime_map() {
+        let mut ours: Vec<&str> = crate::i18n::SUPPORTED_LOCALES.to_vec();
+        ours.sort_unstable();
+        let theirs: Vec<String> = oracle()["supported_locales"]
+            .as_array()
+            .expect("list")
+            .iter()
+            .map(|l| l.as_str().expect("str").to_owned())
+            .collect();
+        assert_eq!(ours, theirs);
+    }
+
+    #[tokio::test]
+    async fn the_narrow_config_loads_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let env = row_env(&row);
+            let store = DocumentStore(row["doc"].to_string());
+            let got = Config::load_with_env(&store, &|key| overlay_lookup(&env, key))
+                .await
+                .expect("loads");
+            let want = &row["want"];
+            assert_eq!(
+                got.site_url.as_deref(),
+                want["ServiceSettings"]["SiteURL"].as_str(),
+                "{name}: SiteURL"
+            );
+            assert_eq!(
+                got.file_driver_name, want["FileSettings"]["DriverName"],
+                "{name}: DriverName"
+            );
+            assert_eq!(
+                got.file_directory, want["FileSettings"]["Directory"],
+                "{name}: Directory"
+            );
+            assert_eq!(
+                got.default_server_locale, want["LocalizationSettings"]["DefaultServerLocale"],
+                "{name}: DefaultServerLocale"
+            );
+            assert_eq!(
+                got.default_client_locale, want["LocalizationSettings"]["DefaultClientLocale"],
+                "{name}: DefaultClientLocale"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_model_config_loads_every_row_as_go_does() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let store = DocumentStore(row["doc"].to_string());
+            let got = load_model_config_with_env(&store, &row_env(&row))
+                .await
+                .expect("loads");
+            let got = serde_json::to_value(&got).expect("serializes");
+            assert_eq!(projection(&got), row["want"], "{name}");
+        }
+    }
+
+    /// What Go writes back to the store: the document with one pass and no environment.
+    #[test]
+    fn one_pass_over_the_document_is_what_go_persists() {
+        for row in rows() {
+            let name = row["name"].as_str().expect("name");
+            let mut document = row["doc"].clone();
+            fix_config_document(&mut document);
+            assert_eq!(document, row["persisted"], "{name}");
+        }
+    }
+
+    /// The corpus can tell two passes from one: on these rows, fixing only after the overlay
+    /// answers differently from Go. Without it, dropping the first pass would survive.
+    #[test]
+    fn the_first_pass_is_observable() {
+        let rows = rows();
+        for name in [
+            "an s3 driver from the environment keeps the slash the document's local driver added",
+            "a document client locale and an environment client locale are both appended",
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row["name"] == name)
+                .unwrap_or_else(|| panic!("row {name:?} is missing"));
+            let mut one_pass = row["doc"].clone();
+            apply_environment_map(&mut one_pass, &row_env(row));
+            fix_config_document(&mut one_pass);
+            assert_ne!(one_pass, row["want"], "{name}: must discriminate");
+        }
+    }
+
+    /// `from_env` is `Load` over an empty store: the defaults already pass `fixConfig`, and the
+    /// environment's values are fixed after the overlay.
+    #[test]
+    fn from_env_fixes_the_overlay() {
+        let env = environment_from(
+            [
+                (
+                    "MM_SERVICESETTINGS_SITEURL".to_owned(),
+                    "http://x.example.com//".to_owned(),
+                ),
+                ("MM_FILESETTINGS_DIRECTORY".to_owned(), "/srv/mm".to_owned()),
+                (
+                    "MM_LOCALIZATIONSETTINGS_DEFAULTSERVERLOCALE".to_owned(),
+                    "xx".to_owned(),
+                ),
+            ]
+            .into_iter(),
+        );
+        let got = Config::from_env_with(&|key| overlay_lookup(&env, key));
+        assert_eq!(got.site_url.as_deref(), Some("http://x.example.com"));
+        assert_eq!(got.file_directory, "/srv/mm/");
+        assert_eq!(got.default_server_locale, "en");
+        assert_eq!(Config::default().fix_config(), Config::default());
+    }
+
+    /// `fix_config_document` reads an absent driver or client locale as `SetDefaults` would
+    /// have filled it, and does not invent the absent settings themselves.
+    #[test]
+    fn an_absent_setting_is_read_as_its_default_and_left_absent() {
+        let mut document = serde_json::json!({
+            "FileSettings": {"Directory": "./files"},
+            "LocalizationSettings": {"AvailableLocales": "de"},
+        });
+        fix_config_document(&mut document);
+        assert_eq!(
+            document,
+            serde_json::json!({
+                "FileSettings": {"Directory": "./files/"},
+                "LocalizationSettings": {"AvailableLocales": "de,en"},
+            })
+        );
+        // Go's `!= ""` guard: an empty directory gains nothing (and `IsValid` then refuses it).
+        let mut empty = serde_json::json!({"FileSettings": {"Directory": ""}});
+        fix_config_document(&mut empty);
+        assert_eq!(empty["FileSettings"]["Directory"], "");
+        let mut s3 =
+            serde_json::json!({"FileSettings": {"DriverName": "amazons3", "Directory": "d"}});
+        fix_config_document(&mut s3);
+        assert_eq!(s3["FileSettings"]["Directory"], "d");
+    }
+}
+
+#[cfg(test)]
+mod env_overlay {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        environment_from(
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        )
+    }
+
+    #[test]
+    fn a_list_splits_on_single_spaces_only() {
+        assert_eq!(split_env_list("a b"), ["a", "b"]);
+        assert_eq!(split_env_list("a,b"), ["a,b"]);
+        assert_eq!(split_env_list(""), [""]);
+        assert_eq!(split_env_list(" a  b "), ["", "a", "", "b", ""]);
+        assert_eq!(split_env_list("a\tb"), ["a\tb"]);
+    }
+
+    /// `[""]` is a configured list, so `off-topic` goes — the observable half of D-1141.
+    #[test]
+    fn an_empty_default_channels_variable_is_one_empty_name_not_none() {
+        let config = Config::default().apply_env_from(&|key| {
+            (key == "MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS").then(String::new)
+        });
+        assert_eq!(config.experimental_default_channels, [""]);
+    }
+
+    #[test]
+    fn the_environment_names_are_upper_cased_and_filtered_on_mm() {
+        let map = env(&[
+            ("mm_servicesettings_siteurl", "a"),
+            ("Mm_X", "b"),
+            ("MMRS_STACK", "5"),
+            ("PATH", "/bin"),
+            ("XMM_Y", "c"),
+        ]);
+        assert_eq!(
+            map.keys().collect::<Vec<_>>(),
+            ["MMRS_STACK", "MM_SERVICESETTINGS_SITEURL", "MM_X"]
+        );
+    }
+
+    #[test]
+    fn a_leftover_key_part_still_reaches_the_setting_and_the_exact_name_wins() {
+        let map = env(&[("MM_SERVICESETTINGS_SITEURL_EXTRA", "suffix")]);
+        assert_eq!(
+            overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL").as_deref(),
+            Some("suffix")
+        );
+
+        let map = env(&[
+            ("MM_SERVICESETTINGS_SITEURL", "exact"),
+            ("MM_SERVICESETTINGS_SITEURL_EXTRA", "suffix"),
+        ]);
+        assert_eq!(
+            overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL").as_deref(),
+            Some("exact")
+        );
+
+        // A longer field name is not a leftover key part of a shorter one.
+        let map = env(&[("MM_SERVICESETTINGS_SITEURLX", "other")]);
+        assert_eq!(overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL"), None);
+        let map = env(&[("MM_SERVICESETTINGS__SITEURL", "other")]);
+        assert_eq!(overlay_lookup(&map, "MM_SERVICESETTINGS_SITEURL"), None);
+    }
+
+    #[test]
+    fn the_licence_variable_is_not_an_overlay_key() {
+        // `MM_LICENSE_EXTRA` would reach `MM_LICENSE` through the overlay rule; Go's `os.Getenv`
+        // never sees it. Nothing in the test process sets either name.
+        let map = env(&[("MM_LICENSE_EXTRA", "x"), ("mm_license", "y")]);
+        assert_eq!(process_lookup(&map, "MM_LICENSE"), None);
+        assert_eq!(
+            process_lookup(&map, "MM_LICENSE_EXTRA").as_deref(),
+            Some("x"),
+            "an ordinary key goes through the overlay rule"
+        );
+    }
+
+    #[test]
+    fn plugin_states_decode_as_encoding_json_decodes_them() {
+        let decode = |raw: &str| decode_env_plugin_states(raw);
+        let map = |pairs: &[(&str, Option<bool>)]| {
+            Some(Some(
+                pairs
+                    .iter()
+                    .map(|(id, on)| ((*id).to_owned(), *on))
+                    .collect::<BTreeMap<_, _>>(),
+            ))
+        };
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true}}"#),
+            map(&[("x", Some(true))])
+        );
+        assert_eq!(
+            decode(r#"{"x":{"eNaBlE":true}}"#),
+            map(&[("x", Some(true))])
+        );
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true,"enable":false}}"#),
+            map(&[("x", Some(false))]),
+            "the last matching key wins"
+        );
+        assert_eq!(
+            decode(r#"{"x":{"Enable":true,"enable":null}}"#),
+            map(&[("x", Some(true))]),
+            "a null leaves the field as it was"
+        );
+        assert_eq!(decode(r#"{"x":{"Other":1}}"#), map(&[("x", Some(false))]));
+        assert_eq!(decode(r#"{"x":null}"#), map(&[("x", None)]));
+        assert_eq!(decode("null"), Some(None));
+        assert_eq!(decode(r#"{"x":{"Enable":"true"}}"#), None);
+        assert_eq!(decode(r#"{"x":{"Enable":1}}"#), None);
+        assert_eq!(decode(r#"{"x":1}"#), None);
+        assert_eq!(decode("[]"), None);
+        assert_eq!(decode(""), None);
+        assert_eq!(decode(r#"{} {}"#), None);
+    }
+
+    #[test]
+    fn the_plugin_states_variable_replaces_the_defaults_and_a_bad_one_changes_nothing() {
+        let with = |raw: &'static str| {
+            Config::default().apply_env_from(&move |key| {
+                (key == "MM_PLUGINSETTINGS_PLUGINSTATES").then(|| raw.to_owned())
+            })
+        };
+        assert_eq!(
+            with(r#"{"x":{"Enable":true},"y":null}"#).plugin_states,
+            BTreeMap::from([("x".to_owned(), true)])
+        );
+        assert_eq!(with("null").plugin_states, BTreeMap::new());
+        assert_eq!(
+            with(r#"{"x":1}"#).plugin_states,
+            Config::default().plugin_states
+        );
+    }
+
+    #[test]
+    fn plugins_decode_only_as_a_map_of_maps() {
+        assert_eq!(
+            decode_env_plugins(r#"{"p":{"k":[1]},"q":null}"#),
+            Some(serde_json::json!({"p": {"k": [1]}, "q": null}))
+        );
+        assert_eq!(decode_env_plugins("null"), Some(serde_json::Value::Null));
+        assert_eq!(decode_env_plugins(r#"{"p":1}"#), None);
+        assert_eq!(decode_env_plugins(r#"{"p":[]}"#), None);
+        assert_eq!(decode_env_plugins("1"), None);
     }
 }

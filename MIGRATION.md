@@ -9241,8 +9241,8 @@ first. The same request — another user's id, `not json` — is a 403 on one an
 
 ### Three things this port does not do on these routes
 
-* **`ExtendSessionExpiryIfNeeded`** ([D-214]). Off on every persisted configuration document, so
-  both servers do nothing here today; it is a `Set-Cookie` when it is on.
+* **`ExtendSessionExpiryIfNeeded`** — ported 2026-09-24 ([D-214], closed); see *Sliding session
+  expiry* below.
 * **`clearPushNotification`** ([D-215]). There is no hub. The channel list it would consume is
   computed in full anyway, because its notify-prop fall-through is three branches deep and would
   be invisible until there *is* a hub.
@@ -13100,8 +13100,11 @@ remove (a guest, a shared channel) forwards the whole request.
 | test | `crates/mm-api/tests/parity/channel_move.rs` — 3, each move on its own channel, the five writes read back from the database | DONE |
 | mutation | `scripts/mutations/channel-move.plan` — 12 run, 10 caught, 2 controls survived | DONE |
 
-- **The move post is English** (`api.team.move_channel.success` with the *previous* team's
-  name), the same exception every system post makes — see `App::create_system_post`.
+- **The move post is in the server locale** since 2026-09-24 (`i18n.T` + `fmt.Sprintf`, see
+  `App::post_channel_move_message`); it was English until then.
+- **D-480 closed (2026-09-24):** webhooks re-homed through the settings-gated page reads (a disabled
+  kind stays behind) with the store stamping `UpdateAt`, and the two `LogAudit` rows written — 5
+  parity tests; `scripts/mutations/channel-move-d480.plan` — 12 run, 10 caught, 2 controls survived.
 
 ## `POST /api/v4/notifications/ack` (2026-09-14)
 
@@ -14245,7 +14248,7 @@ the behaviour is what it was. D-402 and D-811 are narrowed; the other 28 sites a
 
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
-| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (`TrustedProxyIPHeader` not modelled, [D-930]) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
+| `pluginContext` (app/context.go:41), `utils.GetIPAddress`' `RemoteAddr` half | `mm-api/src/plugin_context.rs`, `mm_app::plugin_hooks::HookContext` | DONE (the header walk since 2026-09-24, [D-930] closed) | 3 unit + parity | Built per request in the handler and passed down, because there is no `request.CTX` here; `mm-api`'s TCP listener gained `ConnectInfo` so the peer address reaches it. |
 | `Channels.RunMultiHook*` (app/channels.go:341), `runGuardedMessageWillBePosted`/`Updated` and `resolveGuards` (app/guarded_hooks.go), `store.ChannelGuardStore.GetForChannel` | `mm-app/src/plugin_hooks.rs`, `mm-store/src/channel_guard_store.rs` | DONE (the guard *register* API is Phase 6) | 1 parity | The two `MessageWillBe*` hooks disagree on what a rejection is — a reason for one, a nil post for the other — and the reason is concatenated into the error **id**. A guard whose plugin is not active is 503 before any hook runs. |
 | `MessageWillBePosted`, `MessageHasBeenPosted` (post.go:368, :430), `MessageWillBeUpdated`, `MessageHasBeenUpdated` (post.go:978, :1007), `MessageHasBeenDeleted` (post.go:3393), `ReactionHasBeenAdded`/`Removed` (reaction.go:105, :187) | `mm-app/src/{post_create,post_write,reaction}.rs` | DONE | 1 parity (`plugin_hooks`, 14 hooks diffed) + 4 unit | `PostStore::update` now mutates both arguments as Go does: `MessageHasBeenUpdated`'s old post **is** the edit-history row (minted id, `OriginalId`, `DeleteAt`), which this suite is what found. |
 
@@ -14738,4 +14741,72 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `app/notification_push.go`, push half of `SendNotifications` | `mm_app::push`, `App::send_post_pushes` | DONE | `parity::push_send` (8), `parity::push_ack` (2) | Badge counts every team's threads — the store's thread counts gated the team filter unconditionally until this. `ActiveChannel` is per-process ([D-1071]). |
 | `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
 | `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
+
+## API compression — D-208 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `gzhttp.GzipHandler` around every `APIHandler`-family handler (api4/handlers.go:42, web/handlers.go:553) | `mm_api::go_global_headers` → `gzhttp::wrap` (now streaming), `gzhttp::net_http_framing`; `proxy::forwardable` keeps `Accept-Encoding` | DONE | `gzhttp_stream` oracle (17 rows), `parity::api_compression` (3); mutations in `scripts/mutations/api-gzip.plan` | The mode is read at start, as Go wraps at registration; an answer with no type is sniffed and the header set, as gzhttp does. |
+
+## Tech-debt payoff: the proxy's `HEAD` framing and `TrustedProxyIPHeader` (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `net/http`'s `HEAD` framing through the Strangler proxy | `mm_api::proxy::forward` | DONE, closes [D-903] | `parity::web_client::a_forwarded_head_keeps_gos_content_length`, 1 unit (8 framing cases over real sockets) | A `HEAD` keeps Go's `Content-Length` verbatim and gets none when Go sent none; `204`/`304` already matched (Go suppresses the header, hyper writes none). |
+| `ServiceSettings.TrustedProxyIPHeader`, `utils.GetIPAddress` (utils.go:94), its `web.Handler.ServeHTTP` call | `mm_app::config`, `mm_api::client_ip` (a middleware on both routers), `plugin_context` | DONE, closes [D-930] | `go_parity` (70 rows, `behaviour_ip_address.json`) + 3 unit + 2 config; `parity::plugin_hooks` walks two trusted headers | The address is returned as written, not re-formatted; the plugin hook context is the only reader this server has (audit rows, session attributes and rate limiting are unported). |
+| `config.GetEnvironment`, `applyEnvKey` (config/environment.go:16, :28) — the whole overlay, audited | `mm_app::config` (`split_env_list`, `process_lookup`, `decode_env_plugin_states`) | DONE, closes [D-1141]; opens [D-1160] | `env_go_parity` (60 rows, `behaviour_env_override.json`, Go's own `Store.Load`) + 8 unit | Slices split on single spaces (`""` is `[""]`), names match case-insensitively and a leaf ignores leftover key parts, and `PluginStates` from the environment replaces the map whole with `encoding/json`'s fold and last-key-wins rules; bools and ints already matched. |
+| `model.FeatureFlags` in `Config` (config.go:4226, `SetDefaults`, the `MM_FEATUREFLAGS_*` overlay), `ExportLinkProvider.GetCommand` (command_exportlink.go:35), `GeneratePresignURLForExport`'s gates, `validateCommandTriggerUniqueness` via the providers | `mm_app::config` (`feature_flags`), `command_provider`, `command`, `filestore::generates_links`, `export` | DONE, closes [D-260]; opens [D-1161] | `config_feature_flags.json` (Go's running flags, from `dump-config-fixture.sh`), `behaviour_export_link.json` go_parity, 7 unit | The flags are read from the document when a row has the section (a partial one zeroes the rest, as in Go) and the row on this stack has none. `/exportlink` asks the export backend built at boot, as Go does; the flag is settable only by environment at Go's start, so there is no two-server parity test of the reserved branch. |
+
+## Sliding session expiry (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `Context.ExtendSessionExpiryIfNeeded`, `App.ExtendSessionExpiryIfNeeded`, `GetSessionLengthInMillis`, `platform.ExtendSessionExpiry`, `AttachSessionCookies` + `AttachCloudSessionCookie` | `mm_app::session::{session_extension_due, session_length_in_millis, extension_threshold}`, `mm_api::session_expiry` | DONE | 22 unit + cloud-cookie oracle; `parity::session_expiry` (3) | On `viewChannel`, `createPost` and `user_typing` (no cookies); a bot's expiring token session is never due, a never-expiring session always is. No session cache to update here (D-087). |
+| `Context.SessionRequired` (web/context.go:138) | `mm_api::auth::session_required` | DONE | 5 unit + `parity::session_expiry::a_humans_token_session_is_refused_while_tokens_are_off` | Was missing: a non-bot token session with `EnableUserAccessTokens` off got a 200 here and a 401 from Go. |
+| `net/http` `Cookie.String` domain and value rules | `mm_api::sessions::{valid_cookie_domain, cookie_value}` | DONE | `behaviour_session_write.json` (+28 rows) | An invalid `Domain` (an IPv6 SiteURL's hostname) is dropped, a leading dot stripped, a value with a space or comma quoted. |
+
+## Configuration load: `fixConfig` and the feature-flag reads (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `fixConfig`, `fixInvalidLocales` (config/utils.go:135, :151), both passes of `Store.Load` | `mm_app::config` (`Config::fix_config`, `fix_config_document`) | DONE, closes [D-1160] | `fix_config_go_parity` (48 rows, `behaviour_fix_config.json`, Go's own `Store.Load` after `TranslationsPreInit`) + 3 unit | Runs twice — on the document and after the overlay — and two rows only a two-pass port answers; `AvailableLocales` is fixed only in the whole-config path, since the narrow config does not hold it. |
+| Six `FeatureFlags` reads (`EnableSharedChannelsDMs`, `EnableDocs`, `MmBlocksEnabled`, `TeamMembershipAccessControl`, `EnableConcurrentReact`, `CJKSearch`) | `mm_app::channel_create`, `mention` (`App::explicit_mentions`), `post`, `post_write`, `team`; `mm_store::post_store::term_clause`; `mm_api::web_static` | DONE, closes [D-1161] | 9 unit (flag flipped each way, offline app) | Flags are settable only by environment at start, so there is no two-server parity test; with `EnableSharedChannelsDMs` on, a shared DM/GM is created with `ShareChannel`'s failure logged, and forwarded when the sync service would run. |
+
+## Tech-debt payoff: `HEAD` on the api4 tree, and rate limiting (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| gorilla's method match for `HEAD` (api4/api.go:418, :527; file.go:35-38), its `cleanPath` redirect (mux.go:176) | `mm_api::mux_guard` (both routers), `partially_migrated` | DONE, closes [D-1110] | `parity::api_head` (8: every api4 and local `GET`), 6 unit; `scripts/mutations/mux-guard.plan` | Only the three file reads take `HEAD`; an unclean path is redirected here on every method, since the forward leg resolves dot segments and Go would 404 the clean one. |
+| `app/ratelimit.go` (`NewRateLimiter`, `GenerateKey`, `RateLimitWriter`, `UserIdRateLimit`), throttled v2.15.0's GCRA and `memstore`, `RateLimitedHandler` (api4/handlers.go:222), `Server.Start`'s wrapper, `ServeHTTP`'s per-user step | `mm_api::ratelimit` (global layer, three route layers, a `route_layer` per user) | DONE, closes [D-430]; opens [D-1150], [D-1151] | `go_parity` (`behaviour_ratelimit.json`: GCRA, writer, 144 keys) + 5 unit; `parity::ratelimit` against its own rate-limited Go; `scripts/mutations/ratelimit.plan` | Read once, on the first request, from the configuration Go started on; the route limiters key on the peer alone, ignoring `TrustedProxyIPHeader`, as Go's do. |
+
+## Config fixture coverage — D-454 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| The live `Configurations.Value` row, projected by `scripts/dump-config-fixture.sh` | `mm_app::config` tests (`document_keys`, `coverage_gaps`) | DONE, closes [D-454] | 3 unit; 10 mutations, 8 caught, 2 controls survived | The fixture's key set is checked against `Document`'s serde field lists, not a count; 27 keys were added and none moved an existing value. |
+
+## Websocket struct payloads in Go's key order — D-541 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `(*WebSocketEvent).Add` of a struct (`message.Add("user", user)`, `"field"`, `"manifest"`) | `mm_model::websocket_message::WebSocketEvent::{add_raw, add_struct}` | DONE, closes [D-541] | 9 unit; `parity::cpa_licensed` and `parity::custom_status_writes` compare frames as bytes (`common::json_skeleton`); 11 mutations, 9 caught, 2 controls survived | A struct added as a `Value` goes out sorted; `serde_json`'s `preserve_order` must stay off (49 suite failures measured). |
+
+## Tech-debt payoff: `removeUserFromChannel`'s guest, group and shared branches — D-1130 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `removeUserFromChannel` guest arm (app/channel.go:3036), `FilterNonGroupChannelMembers` (user.go:2666), `User().GetChannelGroupUsers` | `App::remove_user_from_channel_inner`, `App::filter_non_group_channel_members`, `UserStore::get_channel_group_user_ids` | DONE, closes [D-1130], opens [D-1170] | `parity::channel_member_removal` (5), 1 unit; `scripts/mutations/channel-remove-member-d1130.plan` — 14 run, 14 caught (after a fixture fix), 2 controls survived | A guest's eviction reuses `LeaveTeam`'s `remove_team_member`/`post_process_team_member_leave` but writes no team-leave post; a shared channel forwards only while Go's sync service runs. |
+| `removeChannelMember`'s and `localRemoveChannelMember`'s `c.LogAudit`; `LogAudit`'s `c.AppContext.IPAddress()` | `mm_api::channel_member_writes`, `local_channels`, `channel_move` via `client_ip::client_ip` | DONE, [D-270] continued | `parity::channel_member_writes`, `parity::local_channels` read the rows back | The address was already the same value through the hook context; it is now read where Go reads it. |
+
+## Body decoding: absent keys and malformed bodies — D-192, D-043, D-941 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `encoding/json`'s absent-field-is-zero, for every struct a handler or the app decodes | `#[serde(default)]` on every `Deserialize` struct; `mm_model::serde_default_guard` | DONE, closes [D-192], [D-043] | `every_deserialize_struct_zero_fills_an_absent_key` (a `syn` walk of six crates) | Exempt only where Go's own decoder also refuses a missing key: `AutocompleteArgWire`, i18n `Entry`, `EcdsaKeyRow`. An explicit `null` in a scalar field is still [D-057]'s. |
+| `json.NewDecoder(r.Body).Decode` into a value or a pointer, `json.Unmarshal`, `MapFromJSON`, `MapBoolFromJSON`, `StringInterfaceFromJSON` — at every api4 body read | `mm_model::utils::{decode_one_from_json, decode_one_value_from_json, unmarshal_from_json, map_from_json, map_bool_from_json, string_interface_from_json}`, `mm_model::go_decode::Strict` | DONE, closes [D-941] | `body_decode_go_parity` (48 bodies × 3 decodes, map-bool and int64 rows), 5 `go_decode` unit, `parity::malformed_bodies` (24 cases, whole error bodies) | An array is never a struct and a repeated key is last-wins at any depth; each call site uses the form its Go declaration implies. The local `MapFromJSON` copies (eleven) now keep Go's partial decode (a mistyped member is `""`, not an empty map). |
+
+## Tech-debt payoff: muting a sidebar category — D-224 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
 | app/channel.go `setChannelsMuted`, store `UpdateMultipleMembers`, `GetMembersByChannelIds` | `mm_app::channel_member::set_channels_muted`, `mm_store::channel_store` | DONE | 6 unit + `parity::sidebar_category_writes` (3 new); 8/8 mutations caught | Only members whose mute differs are written (no `LastUpdateAt` bump otherwise), and every member is validated before any write, so one invalid membership leaves the whole category unmuted — as Go does. |

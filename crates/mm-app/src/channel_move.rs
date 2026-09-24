@@ -13,6 +13,15 @@
 //! inside the move and again only logged, every member not in the new team is removed — the
 //! `force` sweep the handler may already have run, repeated after the row changed.
 //!
+//! # The webhooks are re-homed through the *app* page reads, so their settings gate them
+//!
+//! Go reads the old team's hooks with `GetIncomingWebhooksForTeamPage` and
+//! `GetOutgoingWebhooksForTeamPage`, which refuse with a 501 when
+//! `ServiceSettings.EnableIncomingWebhooks`/`EnableOutgoingWebhooks` is off. The move logs that
+//! and carries on, so **with a kind of webhook disabled its hooks stay on the old team** while
+//! the channel moves. The store is not asked directly for that reason. Each re-homed hook gets a
+//! fresh `UpdateAt` from the store's own stamp.
+//!
 //! # `members_do_not_match` is a **500**
 //!
 //! A member of the channel who is not a member of the destination team, without `force`, is
@@ -34,6 +43,51 @@ use crate::channel_member::MemberWrite;
 
 /// `GetChannelMembersPage(rctx, channel.Id, 0, 10000000)` — Go's "all of them".
 const ALL_MEMBERS: i64 = 10_000_000;
+
+/// The i18n id of the move notice (en.json: `This channel has been moved to this team from %v.`).
+const MOVE_CHANNEL_SUCCESS: &str = "api.team.move_channel.success";
+
+/// Go's `fmt.Sprintf(format, arg)` for one **string** operand, as far as a translated sentence
+/// can exercise it: `%%` is a literal `%`, the first `%v` is `arg`, a later `%v` is
+/// `%!v(MISSING)`, and an operand no verb consumed is appended as `%!(EXTRA string=arg)`.
+///
+/// Every shipped translation of `api.team.move_channel.success` — all 22 supported locales —
+/// carries exactly one `%v` and no other `%`, so only the first rule is reached in practice; the
+/// others are Go's answers for a translation that drifts. Any other verb is copied verbatim,
+/// which Go would not do, and none occurs.
+pub(crate) fn go_sprintf_v(format: &str, arg: &str) -> String {
+    let mut out = String::with_capacity(format.len() + arg.len());
+    let mut used = false;
+    let mut chars = format.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('%') => {
+                chars.next();
+                out.push('%');
+            }
+            Some('v') => {
+                chars.next();
+                if used {
+                    out.push_str("%!v(MISSING)");
+                } else {
+                    out.push_str(arg);
+                    used = true;
+                }
+            }
+            _ => out.push('%'),
+        }
+    }
+    if !used {
+        out.push_str("%!(EXTRA string=");
+        out.push_str(arg);
+        out.push(')');
+    }
+    out
+}
 
 impl App {
     /// Port of `App.RemoveAllDeactivatedMembersFromChannel` (app/channel.go:3811): one
@@ -63,14 +117,16 @@ impl App {
     ///
     /// Every channel member without a `TeamMembers` row on `team` is removed through the
     /// **inner** `removeUserFromChannel` — the membership, the history row and the two
-    /// `user_removed` events, but **no** leave or removal post. A member whose removal this port
-    /// cannot reproduce (a guest, a shared channel) is a [`MemberWrite::Forward`], reported
-    /// before anything of that member's is written; members earlier in the list stay removed,
-    /// which is what Go's own partial failure leaves behind too.
+    /// `user_removed` events, but **no** leave or removal post — and, for a guest leaving their
+    /// last channel on the channel's team, that team. A shared channel while Go's shared-channel
+    /// service runs is a [`MemberWrite::Forward`], reported at the first member swept and before
+    /// anything is written. A member a group-constrained channel's groups still vouch for fails
+    /// the sweep with `api.channel.remove_members.denied`; members earlier in the list stay
+    /// removed, which is what Go's own partial failure leaves behind too.
     ///
-    /// `GetTeamMembersByIds` returns only the ids that have a row — deleted memberships
-    /// included, since the query does not filter `DeleteAt` — so the comparison is by count and
-    /// then by set.
+    /// `GetTeamMembersByIds` returns only the ids with a **live** row — the store filters
+    /// `TeamMembers.DeleteAt = 0` (team_store.go:1164), so a member who once left the target team
+    /// counts as not in it — and the comparison is by count and then by set.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, team_id = %team.id))]
     pub async fn remove_users_from_channel_not_member_of_team(
         &self,
@@ -122,7 +178,8 @@ impl App {
     }
 
     /// Port of `App.MoveChannel` (app/channel.go:3822). `channel` is updated in place — the
-    /// handler encodes it, `TeamId` and the store's `UpdateAt` included.
+    /// handler encodes it, `TeamId` and the store's `UpdateAt` included. Never forwards: its
+    /// one membership sweep logs what it cannot do (see the comment at the sweep).
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, team_id = %team.id))]
     pub async fn move_channel(
         &self,
@@ -130,7 +187,7 @@ impl App {
         channel: &mut Channel,
         user: Option<&User>,
         hook_ctx: &crate::plugin_hooks::HookContext,
-    ) -> Result<MemberWrite<()>, Box<AppError>> {
+    ) -> AppResult<()> {
         if channel.is_space() {
             return Err(AppError::boxed(
                 "MoveChannel",
@@ -221,18 +278,16 @@ impl App {
             .await
             .map_err(crate::channel_write::update_channel_error)?;
 
-        // The three re-homings Go only logs.
+        // The three re-homings Go only logs. `page 0, per_page 10000000` — offset 0.
         match self
-            .store()
-            .webhook()
-            .get_incoming_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)
+            .get_incoming_webhooks_for_team_page_by_user(&previous_team.id, "", 0, ALL_MEMBERS)
             .await
         {
             Ok(hooks) => {
                 for mut hook in hooks {
                     if hook.channel_id == channel.id {
                         hook.team_id = team.id.clone();
-                        if let Err(err) = self.store().webhook().update_incoming(&hook).await {
+                        if let Err(err) = self.store().webhook().update_incoming(&mut hook).await {
                             tracing::warn!(error = %err, hook_id = %hook.id, "Failed to move incoming webhook to new team");
                         }
                     }
@@ -241,16 +296,14 @@ impl App {
             Err(err) => tracing::warn!(error = %err, "Failed to get incoming webhooks"),
         }
         match self
-            .store()
-            .webhook()
-            .get_outgoing_by_team_by_user(&previous_team.id, "", 0, ALL_MEMBERS)
+            .get_outgoing_webhooks_for_team_page_by_user(&previous_team.id, "", 0, ALL_MEMBERS)
             .await
         {
             Ok(hooks) => {
                 for mut hook in hooks {
                     if hook.channel_id == channel.id {
                         hook.team_id = team.id.clone();
-                        if let Err(err) = self.store().webhook().update_outgoing(&hook).await {
+                        if let Err(err) = self.store().webhook().update_outgoing(&mut hook).await {
                             tracing::warn!(error = %err, hook_id = %hook.id, "Failed to move outgoing webhook to new team.");
                         }
                     }
@@ -267,14 +320,25 @@ impl App {
             tracing::warn!(error = %err, "error while updating threads after channel move");
         }
 
-        // The sweep again, after the row changed; a failure is logged, a forward is the
-        // caller's to act on.
+        // The sweep again, after the row changed; a failure is logged, as Go logs it.
+        //
+        // A member this port cannot remove (see `remove_user_from_channel_inner`) is logged
+        // too, and **not** forwarded: the channel row has already moved, so Go re-running the
+        // whole request would find the *new* team as the previous one and post a second notice
+        // naming it. The precondition above has just proved every member is on the new team, so
+        // this is reachable only by a join racing the move — the window Go's own comment on
+        // `MoveChannel` concedes.
         match self
             .remove_users_from_channel_not_member_of_team(user, channel, team, hook_ctx)
             .await
         {
             Ok(MemberWrite::Done(())) => {}
-            Ok(MemberWrite::Forward(why)) => return Ok(MemberWrite::Forward(why)),
+            Ok(MemberWrite::Forward(why)) => {
+                tracing::warn!(
+                    reason = why,
+                    "a member who joined during the move was left on the channel"
+                );
+            }
             Err(err) => {
                 tracing::warn!(error = %err, "error while removing non-team member users");
             }
@@ -285,13 +349,19 @@ impl App {
             self.post_channel_move_message(hook_ctx, user, channel, &previous_team)
                 .await;
         }
-        Ok(MemberWrite::Done(()))
+        Ok(())
     }
 
-    /// Port of `App.postChannelMoveMessage` (app/channel.go:3937): the English
-    /// `api.team.move_channel.success` with the **previous** team's name, as a
-    /// `system_move_channel` post by the mover. Logged on failure, like the other system posts;
-    /// see [`App::create_system_post`] for why the sentence is a literal.
+    /// Port of `App.postChannelMoveMessage` (app/channel.go:3935):
+    /// `fmt.Sprintf(i18n.T("api.team.move_channel.success"), previousTeam.Name)` — the
+    /// **previous** team's name — as a `system_move_channel` post by the mover. Logged on
+    /// failure, like the other system posts.
+    ///
+    /// `i18n.T` is the **server** locale's function (`GetTranslationsBySystemLocale`), not the
+    /// mover's, so a German `DefaultServerLocale` writes the German sentence whatever the
+    /// admin's own locale — [`Translations::server_locale`](crate::i18n::Translations::server_locale)
+    /// over the bundle. The sentence is then a Go format string, not a template, and
+    /// [`go_sprintf_v`] applies it.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
     async fn post_channel_move_message(
         &self,
@@ -300,17 +370,69 @@ impl App {
         channel: &Channel,
         previous_team: &Team,
     ) {
+        let format = match crate::i18n::translations().await {
+            Some(bundle) => bundle.translate(
+                bundle.server_locale(&self.config().default_server_locale),
+                MOVE_CHANNEL_SUCCESS,
+            ),
+            // No bundle is a server Go refuses to start (`i18n::init`); `en.json`'s sentence.
+            None => "This channel has been moved to this team from %v.".to_owned(),
+        };
         let mut post = Post {
             channel_id: channel.id.clone(),
-            message: format!(
-                "This channel has been moved to this team from {}.",
-                previous_team.name
-            ),
+            message: go_sprintf_v(&format, &previous_team.name),
             post_type: POST_TYPE_MOVE_CHANNEL.to_owned(),
             user_id: user.id.clone(),
             ..Post::default()
         };
         post.add_prop("username", serde_json::Value::String(user.username.clone()));
         self.post_system_message(ctx, post, channel).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::go_sprintf_v;
+
+    /// Transcribed from Go's `fmt` package documentation (`%!v(MISSING)`, `%!(EXTRA …)`); no
+    /// fixture: the shipped translations only ever reach the first case.
+    #[test]
+    fn go_sprintf_v_follows_fmt() {
+        assert_eq!(
+            go_sprintf_v("This channel has been moved to this team from %v.", "alpha"),
+            "This channel has been moved to this team from alpha."
+        );
+        assert_eq!(
+            go_sprintf_v("此频道已从 %v 移至此团队。", "b"),
+            "此频道已从 b 移至此团队。"
+        );
+        assert_eq!(go_sprintf_v("100%% from %v", "x"), "100% from x");
+        assert_eq!(go_sprintf_v("%v and %v", "x"), "x and %!v(MISSING)");
+        assert_eq!(go_sprintf_v("moved", "x"), "moved%!(EXTRA string=x)");
+        // The operand is inserted, never re-scanned.
+        assert_eq!(go_sprintf_v("from %v.", "50%v"), "from 50%v.");
+    }
+
+    /// Every supported locale's sentence has the one `%v` the port relies on.
+    #[test]
+    fn every_shipped_move_sentence_has_one_operand() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../reference/mattermost/server/i18n");
+        if !dir.is_dir() {
+            return;
+        }
+        for locale in crate::i18n::SUPPORTED_LOCALES {
+            let text = std::fs::read_to_string(dir.join(format!("{locale}.json"))).unwrap();
+            let entries: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
+            let Some(sentence) = entries
+                .iter()
+                .find(|e| e["id"] == super::MOVE_CHANNEL_SUCCESS)
+                .and_then(|e| e["translation"].as_str())
+            else {
+                continue;
+            };
+            assert_eq!(sentence.matches('%').count(), 1, "{locale}: {sentence}");
+            assert_eq!(sentence.matches("%v").count(), 1, "{locale}: {sentence}");
+        }
     }
 }

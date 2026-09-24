@@ -90,9 +90,8 @@ pub struct PingParams {
 ///
 /// # `TestFeatureFlag` is a key that appears, not a value that changes
 ///
-/// Present only when `FeatureFlags.TestFeature != "off"` (system.go:346). Go strips the
-/// `FeatureFlags` section before persisting the config, so the environment is its only source and
-/// the default is `"off"` — see [`mm_app::config::Config::feature_flag_test_feature`].
+/// Present only when `FeatureFlags.TestFeature != "off"` (system.go:346). The default is
+/// `"off"` and on this stack only the environment moves it — see [`mm_app::config::Config::feature_flags`].
 ///
 /// # Wire format: `model.ToJSON`, so no trailing newline, and sorted keys
 ///
@@ -158,10 +157,10 @@ pub(crate) async fn ping_answer(
         "IosMinVersion".to_owned(),
         Value::from(config.ios_min_version.as_str()),
     );
-    if config.feature_flag_test_feature != "off" {
+    if config.feature_flags.test_feature != "off" {
         body.insert(
             "TestFeatureFlag".to_owned(),
-            Value::from(config.feature_flag_test_feature.as_str()),
+            Value::from(config.feature_flags.test_feature.as_str()),
         );
     }
     // `if deviceID := r.FormValue("device_id"); deviceID != ""` — an **empty** value is not a

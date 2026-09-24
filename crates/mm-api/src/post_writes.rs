@@ -21,7 +21,7 @@
 //! and that ordering is the whole difference between a 200 and a 400 for an old post.
 
 use axum::extract::{Path, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::plugin_hooks::HookContext;
 use mm_app::post::PrepareError;
@@ -326,7 +326,7 @@ pub async fn update_post(
 
     // `c.SetInvalidParamWithErr("post", jsonErr)` — the wrapped error only reaches
     // `detailed_error`, which the api boundary strips unless `EnableDeveloper` is on.
-    let mut post: Post = match serde_json::from_slice(&bytes) {
+    let mut post: Post = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(post) => post,
         Err(err) => {
             tracing::debug!(error = %err, "post body did not decode");
@@ -484,7 +484,7 @@ pub async fn patch_post(
         }
     };
 
-    let patch: PostPatch = match serde_json::from_slice(&bytes) {
+    let patch: PostPatch = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(patch) => patch,
         Err(err) => {
             tracing::debug!(error = %err, "patch body did not decode");
@@ -866,7 +866,7 @@ pub async fn create_post(
     };
 
     // `c.SetInvalidParamWithErr("post", jsonErr)`.
-    let mut post: Post = match serde_json::from_slice(&bytes) {
+    let mut post: Post = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(post) => post,
         Err(err) => {
             tracing::debug!(error = %err, "post body did not decode");
@@ -883,7 +883,16 @@ pub async fn create_post(
     let query = parts.uri.query().map(str::to_owned);
 
     let hook_ctx = crate::plugin_context::hook_context(&parts, Some(&session.0));
-    match serve_create(&state, &session, post, query.as_deref(), &hook_ctx).await {
+    match serve_create(
+        &state,
+        &session,
+        post,
+        query.as_deref(),
+        &parts.headers,
+        &hook_ctx,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
         Err(PrepareError::Unreproducible(why)) => {
@@ -900,6 +909,7 @@ async fn serve_create(
     session: &AuthenticatedSession,
     mut post: Post,
     query: Option<&str>,
+    headers: &HeaderMap,
     hook_ctx: &HookContext,
 ) -> Result<Response, PrepareError> {
     // "if post.CreateAt != 0 && !c.App.SessionHasPermissionTo(session, PermissionManageSystem)".
@@ -965,14 +975,16 @@ async fn serve_create(
     }
 
     // `c.App.Srv().Platform().UpdateLastActivityAtIfNeeded(*c.AppContext.Session())` — throttled,
-    // so most requests write nothing. `ExtendSessionExpiryIfNeeded` needs
-    // `ExtendSessionLengthWithActivity`, which is off by default and is not modelled.
+    // so most requests write nothing — then `c.ExtendSessionExpiryIfNeeded(w, r)`, a no-op unless
+    // `ExtendSessionLengthWithActivity` is on (see `crate::session_expiry`).
     state
         .app
         .update_last_activity_at_if_needed(&session.0)
         .await;
+    let cookies =
+        crate::session_expiry::extend_session_expiry_if_needed(state, headers, &session.0).await;
 
-    created_post(created)
+    created_post(created).map(|response| cookies.apply(response))
 }
 
 /// Port of `createEphemeralPost` (api4/post.go:215) — `POST /api/v4/posts/ephemeral`.
@@ -1014,7 +1026,7 @@ pub async fn create_ephemeral_post(
 
     // `c.SetInvalidParamWithErr("body", jsonErr)` — the parameter name is `body` here and `post`
     // on the sibling route.
-    let ephemeral: PostEphemeral = match serde_json::from_slice(&bytes) {
+    let ephemeral: PostEphemeral = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(ephemeral) => ephemeral,
         Err(err) => {
             tracing::debug!(error = %err, "ephemeral post body did not decode");
@@ -1225,12 +1237,12 @@ pub async fn set_post_unread(
     // A key present with a non-boolean value stays `false` on both: Go's `saveError` leaves the
     // element at its zero value and still sets it, and `as_bool()` answers `None` here. A body
     // that is not a JSON object at all fails on both, for the same reason — Go's map is left nil.
-    let collapsed_threads_supported =
-        serde_json::from_slice::<std::collections::HashMap<String, serde_json::Value>>(&bytes)
-            .unwrap_or_default()
-            .get("collapsed_threads_supported")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+    //
+    // `model.MapBoolFromJSON` (utils.go:519) is that decode, trailing bytes ignored.
+    let collapsed_threads_supported = mm_model::utils::map_bool_from_json(&bytes)
+        .get("collapsed_threads_supported")
+        .copied()
+        .unwrap_or(false);
 
     if session.0.user_id != user_id
         && !state

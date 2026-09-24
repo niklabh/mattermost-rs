@@ -1,0 +1,15 @@
+# Mutation plan for the audit follow-up to D-1130: removeChannelMember's LogAudit rows (REST and
+# local socket) and moveChannel's session id, with the address from mm_api::client_ip.
+# 2026-09-25: 7 run, 5 caught, 2 controls survived.
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-remove-member-audit.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+rest-audit-extra-without-name	crates/mm-api/src/channel_member_writes.rs	                    &format!("name={} user_id={user_id}", channel.name),	                    &format!("user_id={user_id}"),	api	channel_member_writes
+rest-audit-without-session	crates/mm-api/src/channel_member_writes.rs	                    &session.0.user_id,\n                    &session.0.id,	                    &session.0.user_id,\n                    "",	api	channel_member_writes
+rest-audit-no-address	crates/mm-api/src/channel_member_writes.rs	                    &crate::client_ip::client_ip(request.headers(), request.extensions()),\n                    request.uri().path(),	                    "",\n                    request.uri().path(),	api	channel_member_writes
+local-audit-extra-without-name	crates/mm-api/src/local_channels.rs	                    &format!("name={} user_id={user_id}", channel.name),	                    &format!("user_id={user_id}"),	api	local_channels
+move-audit-session-dropped	crates/mm-api/src/channel_move.rs	                &session.0.user_id,\n                &session.0.id,	                &session.0.user_id,\n                "",	api	channel_move
+control-rest-audit-binding	crates/mm-api/src/channel_member_writes.rs	            // `c.LogAudit("name=" + channel.Name + " user_id=" + c.Params.UserId)` on success.	            // `c.LogAudit(...)` on success (control).	api	channel_member_writes
+control-local-audit-comment	crates/mm-api/src/local_channels.rs	            // `c.LogAudit` on success: no session, so no user or session id.	            // `c.LogAudit` on success (control).	api	local_channels

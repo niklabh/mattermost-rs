@@ -45,21 +45,21 @@ const VOLATILE: [&str; 6] = [
 ];
 
 /// What every current Firefox and Chrome send — and so what selects zstd.
-const BROWSER_ENCODINGS: &str = "gzip, deflate, br, zstd";
+pub(crate) const BROWSER_ENCODINGS: &str = "gzip, deflate, br, zstd";
 
 #[derive(Debug)]
-struct Raw {
-    status: u16,
+pub(crate) struct Raw {
+    pub(crate) status: u16,
     /// Lower-cased names, sorted, volatile ones removed.
-    headers: Vec<(String, String)>,
-    served_by: Option<String>,
-    chunked: bool,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) served_by: Option<String>,
+    pub(crate) chunked: bool,
     /// Decoded according to `Content-Encoding`.
-    body: Vec<u8>,
+    pub(crate) body: Vec<u8>,
 }
 
 impl Raw {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|(k, _)| k == name)
@@ -71,7 +71,12 @@ fn host_port(base: &str) -> String {
     base.trim_start_matches("http://").to_owned()
 }
 
-async fn raw_request(base: &str, method: &str, target: &str, headers: &[(&str, &str)]) -> Raw {
+pub(crate) async fn raw_request(
+    base: &str,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) -> Raw {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let addr = host_port(base);
     let mut stream = tokio::net::TcpStream::connect(&addr)
@@ -185,7 +190,13 @@ async fn both(method: &str, target: &str, headers: &[(&str, &str)]) -> (Raw, Raw
     )
 }
 
-fn assert_equivalent(go: &Raw, rust: &Raw, method: &str, target: &str, headers: &[(&str, &str)]) {
+pub(crate) fn assert_equivalent(
+    go: &Raw,
+    rust: &Raw,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) {
     let context = format!("{method} {target} {headers:?}");
     assert_eq!(go.status, rust.status, "{context}: status");
     let compressed = go.header("content-encoding").is_some();
@@ -479,6 +490,45 @@ async fn what_is_not_the_web_clients_is_still_forwarded() {
         };
         assert_eq!(unsigned(&go), unsigned(&rust), "{method} {target}");
     }
+}
+
+/// D-903: a forwarded `HEAD` is framed as Go framed it. The proxy rebuilds every body, and a
+/// `HEAD` has none, so Go's `Content-Length` — the entity's length — must be carried over rather
+/// than recomputed as `0`; and where Go sent none (its handler wrote nothing), none is invented.
+#[tokio::test]
+async fn a_forwarded_head_keeps_gos_content_length() {
+    if !stack_enabled() {
+        return;
+    }
+    let mut sized = 0;
+    for target in [
+        "/api/v5/x",
+        // Not `/api/v4/no-such-route`: a `HEAD` into the api4 tree is `mux_guard`'s own 404 now
+        // (D-1110). The bare prefix is the web client's, and still forwarded.
+        "/api/v4",
+        "/plugins/com.example.none/x",
+        "/login/sso/saml",
+        "/oauth/authorize",
+        "/?access_token=abcdefghijklmnopqrstuvwxyz",
+    ] {
+        let (go, rust) = both("HEAD", target, &[]).await;
+        assert_eq!(
+            rust.served_by.as_deref(),
+            Some("go"),
+            "HEAD {target} must be forwarded, or this compares nothing"
+        );
+        assert_eq!(go.status, rust.status, "HEAD {target}");
+        assert_eq!(
+            go.header("content-length"),
+            rust.header("content-length"),
+            "HEAD {target}: Content-Length"
+        );
+        assert_eq!(go.chunked, rust.chunked, "HEAD {target}: framing");
+        sized += usize::from(go.header("content-length").is_some_and(|l| l != "0"));
+    }
+    // Both branches must be exercised: a length Go stated, and none at all.
+    assert!(sized >= 2, "at least two answers carry a non-zero length");
+    assert!(sized < 6, "at least one answer carries no length");
 }
 
 /// D-782's off-branch with no client directory at all: a server whose working directory has no

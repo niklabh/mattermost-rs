@@ -236,7 +236,7 @@ pub async fn save_reaction(
         }
     };
 
-    let mut reaction: Reaction = match serde_json::from_slice(&bytes) {
+    let mut reaction: Reaction = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(reaction) => reaction,
         Err(err) => {
             tracing::debug!(error = %err, "reaction body did not decode");

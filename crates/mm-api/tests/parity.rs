@@ -29,6 +29,7 @@ mod common;
 mod parity {
     pub mod access_control_policies;
     pub mod access_control_reads;
+    pub mod api_compression;
     pub mod auth_migrations;
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
@@ -45,6 +46,7 @@ mod parity {
     pub mod channel_get;
     pub mod channel_join_requests;
     pub mod channel_member;
+    pub mod channel_member_removal;
     pub mod channel_member_writes;
     pub mod channel_members_for_team_for_user;
     pub mod channel_members_for_user;
@@ -161,6 +163,7 @@ mod parity {
     pub mod schemes;
     pub mod server_limits;
     pub mod session_activity;
+    pub mod session_expiry;
     pub mod session_team_members;
     pub mod session_writes;
     pub mod sessions_for_user;
@@ -302,4 +305,10 @@ mod parity {
     pub mod manualtest;
     // Appended 2026-09-20: the translated error message in eight locales (D-092).
     pub mod error_i18n;
+    // Appended 2026-09-24: HEAD on the api4 tree, as gorilla answers it (D-1110).
+    pub mod api_head;
+    // Appended 2026-09-24: rate limiting against its own Go server (D-430).
+    pub mod ratelimit;
+    // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
+    pub mod malformed_bodies;
 }

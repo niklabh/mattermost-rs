@@ -282,7 +282,7 @@ pub async fn create_oauth_app(
             return ApiError::invalid_param("oauth_app").into_response();
         }
     };
-    let app_request: OAuthAppRequest = match serde_json::from_slice(&bytes) {
+    let app_request: OAuthAppRequest = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(request) => request,
         Err(err) => {
             tracing::debug!(error = %err, "oauth_app body did not decode");
@@ -370,7 +370,7 @@ pub async fn update_oauth_app(
             return ApiError::invalid_param("oauth_app").into_response();
         }
     };
-    let mut updated: OAuthApp = match serde_json::from_slice(&bytes) {
+    let mut updated: OAuthApp = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(app) => app,
         Err(err) => {
             tracing::debug!(error = %err, "oauth_app body did not decode");
@@ -518,9 +518,8 @@ pub async fn regenerate_oauth_app_secret(
 /// turns DCR on is handed to Go, because the registration itself has a validation surface this
 /// port has not been through.
 ///
-/// Go also rate-limits it to 2/sec with a burst of 1. There is no rate limiter here; the forward
-/// is what carries that for an enabled deployment, and for a disabled one there is nothing to
-/// limit. See [D-192].
+/// Go also rate-limits it to 2/sec with a burst of 1, as `crate::ratelimit` does here, in front of
+/// both branches. See [D-192].
 #[tracing::instrument(skip_all, fields(forwarded))]
 pub async fn register_oauth_client(
     State(state): State<AppState>,
@@ -541,7 +540,7 @@ pub async fn register_oauth_client(
 
     // **The decode comes first**, before either gate — so a malformed body on a server with the
     // feature off answers `invalid_client_metadata`, not `unsupported_operation`.
-    if serde_json::from_slice::<ClientRegistrationRequest>(&bytes).is_err() {
+    if mm_model::utils::decode_one_value_from_json::<ClientRegistrationRequest>(&bytes).is_err() {
         return dcr_error(
             DCR_ERROR_INVALID_CLIENT_METADATA,
             "Invalid JSON in request body",

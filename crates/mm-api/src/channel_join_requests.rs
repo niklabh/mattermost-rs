@@ -73,7 +73,7 @@ use mm_model::channel_join_request::{
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_CHANNEL_JOIN_REQUESTS, make_permission_error,
 };
-use mm_model::utils::{AppError, decode_one_from_json, is_valid_id};
+use mm_model::utils::{AppError, decode_one_value_from_json, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -223,7 +223,7 @@ pub async fn request_join_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let (parts, body) = request.into_parts();
@@ -252,7 +252,8 @@ async fn serve_request_join(
         return Outcome::Failed(err);
     }
 
-    let body: ChannelJoinRequestBody = match decode_one_from_json(body) {
+    // A value (channel_join_request.go:57): `null` is the zero body.
+    let body: ChannelJoinRequestBody = match decode_one_value_from_json(body) {
         Ok(body) => body,
         Err(err) => {
             tracing::debug!(error = %err, "malformed join-request body");
@@ -298,7 +299,7 @@ pub async fn get_my_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -357,7 +358,7 @@ pub async fn withdraw_my_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -417,7 +418,7 @@ pub async fn get_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -467,7 +468,7 @@ pub async fn count_pending_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -530,7 +531,7 @@ pub async fn patch_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let (parts, body) = request.into_parts();
@@ -568,7 +569,8 @@ async fn serve_patch(
         return Outcome::Failed(err);
     }
 
-    let patch: ChannelJoinRequestPatch = match decode_one_from_json(body) {
+    // A value (channel_join_request.go:234): `null` is the zero patch.
+    let patch: ChannelJoinRequestPatch = match decode_one_value_from_json(body) {
         Ok(patch) => patch,
         Err(err) => {
             tracing::debug!(error = %err, "malformed join-request patch");
@@ -613,7 +615,7 @@ pub async fn get_my_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -685,9 +687,10 @@ mod tests {
 
     #[test]
     fn an_empty_body_decodes_to_an_empty_message_only_when_it_is_an_object() {
-        let body: ChannelJoinRequestBody = decode_one_from_json(b"{}").expect("an object decodes");
+        let body: ChannelJoinRequestBody =
+            decode_one_value_from_json(b"{}").expect("an object decodes");
         assert_eq!(body.message, "");
         // Zero bytes is `io.EOF` in Go and an error here — the 400 both servers answer.
-        assert!(decode_one_from_json::<ChannelJoinRequestBody>(b"").is_err());
+        assert!(decode_one_value_from_json::<ChannelJoinRequestBody>(b"").is_err());
     }
 }

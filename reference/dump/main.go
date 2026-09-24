@@ -771,7 +771,7 @@ func main() {
 	rustOutGoldmark := flag.String("rust-out-goldmark", "../../crates/gogoldmark/src", "directory to write gogoldmark's generated Rust into")
 	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
 	// iterating on one oracle should not.
-	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate, goldmark) and exit")
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate, goldmark, ip_address, env_override, fix_config, export_link, ratelimit, body_decode) and exit")
 	flag.Parse()
 
 	if *only == "imaging" {
@@ -827,6 +827,42 @@ func main() {
 	} else if *only == "plugin_requests" {
 		if err := writePluginRequestsBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: plugin requests behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "body_decode" {
+		if err := writeBodyDecodeBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: body decode behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "export_link" {
+		if err := writeExportLinkBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: export link behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "env_override" {
+		if err := writeEnvOverrideBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: env override behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "fix_config" {
+		if err := writeFixConfigBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: fix config behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "ip_address" {
+		if err := writeIPAddressBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: ip address behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "ratelimit" {
+		if err := writeRateLimitBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: rate limit behaviour fixture: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -1231,6 +1267,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeBodyDecodeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: body decode behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeUserIsValidBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: user is_valid behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -1293,6 +1334,31 @@ func main() {
 
 	if err := writeSessionWriteBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: session write behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeIPAddressBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: ip address behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeExportLinkBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: export link behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeEnvOverrideBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: env override behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeFixConfigBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: fix config behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeRateLimitBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: rate limit behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 

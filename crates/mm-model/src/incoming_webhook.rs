@@ -247,24 +247,27 @@ impl IncomingWebhookRequest {
     /// Decodes, and on failure retries the escaped payload — see the module docs. The attachments
     /// are then stringified exactly as `CommandResponseFromJSON` does.
     pub fn from_json(data: &[u8]) -> AppResult<IncomingWebhookRequest> {
-        let mut request: IncomingWebhookRequest = match serde_json::from_slice(data) {
-            Ok(request) => request,
-            Err(_) => {
-                let escaped = escape_control_chars_from_payload(data);
-                serde_json::from_slice(&escaped).map_err(|e| {
-                    Box::new(
-                        AppError::new(
-                            "IncomingWebhookRequestFromJSON",
-                            "model.incoming_hook.parse_data.app_error",
-                            None,
-                            "",
-                            400,
+        // `decodeIncomingWebhookRequest` is `json.NewDecoder(...).Decode(&o)` into a value: `null`
+        // is the zero request, trailing bytes are ignored and an array is not a request.
+        let mut request: IncomingWebhookRequest =
+            match crate::utils::decode_one_value_from_json(data) {
+                Ok(request) => request,
+                Err(_) => {
+                    let escaped = escape_control_chars_from_payload(data);
+                    crate::utils::decode_one_value_from_json(&escaped).map_err(|e| {
+                        Box::new(
+                            AppError::new(
+                                "IncomingWebhookRequestFromJSON",
+                                "model.incoming_hook.parse_data.app_error",
+                                None,
+                                "",
+                                400,
+                            )
+                            .wrap(e),
                         )
-                        .wrap(e),
-                    )
-                })?
-            }
-        };
+                    })?
+                }
+            };
 
         if let Some(attachments) = request.attachments.take() {
             request.attachments = Some(stringify_message_attachment_field_value(attachments));

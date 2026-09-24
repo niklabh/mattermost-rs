@@ -38,12 +38,7 @@ use mm_store::post_store::PostStore;
 use mm_store::thread_store::ThreadStore;
 
 use crate::App;
-use crate::mention::{MentionKeywords, get_explicit_mentions};
-
-/// `FeatureFlags.MmBlocksEnabled` (feature_flags.go:138), defaulted **`true`** at :214 and
-/// `true` on this deployment — the same literal `crate::post::get_emoji_names_for_post` and
-/// `crate::post_write` carry, for the same reason.
-pub(crate) const MM_BLOCKS_ENABLED: bool = true;
+use crate::mention::MentionKeywords;
 
 impl App {
     /// Port of `app.App.UpdateThreadReadForUserByPost` (app/user.go:3221).
@@ -299,7 +294,7 @@ impl App {
         let mut count = 0_i64;
         for reply in &posts {
             if reply.create_at >= timestamp {
-                let mentions = get_explicit_mentions(reply, &keywords, MM_BLOCKS_ENABLED);
+                let mentions = self.explicit_mentions(reply, &keywords);
                 if mentions.mentions.contains_key(&user.id) {
                     count += 1;
                 }

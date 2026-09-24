@@ -153,10 +153,11 @@ impl App {
             None,
             "",
         );
-        message.add(
-            "user",
-            serde_json::to_value(&user).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = message.add_struct("user", &user) {
+            // Go marshals at write time and skips the frame; nothing is worth publishing.
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         self.publish(message).await;
     }
 }

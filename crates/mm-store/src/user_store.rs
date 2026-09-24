@@ -194,6 +194,19 @@ pub trait UserStore {
         since: i64,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.GetChannelGroupUsers` (user_store.go:2142), projected to the user
+    /// ids: every user in a live group linked to `channel_id` by a live `GroupChannels` row.
+    ///
+    /// Go selects whole sanitized users through `applyChannelGroupConstrainedFilter`
+    /// (user_store.go:778); its one caller, `FilterNonGroupChannelMembers`, compares ids only, so
+    /// the id is what is read here. **Three `DeleteAt = 0` predicates**, one per join — the link,
+    /// the group and the membership — and no predicate on `Users.DeleteAt`: a deactivated group
+    /// member is still a group member.
+    fn get_channel_group_user_ids(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209): the other
     /// members of each named group channel, keyed by channel id.
     fn get_profile_by_group_channel_ids_for_user(
@@ -1723,6 +1736,44 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", rows.len());
 
         rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    async fn get_channel_group_user_ids(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        // `usersQuery` (a `LEFT JOIN Bots`, which filters nothing) under
+        // `applyChannelGroupConstrainedFilter`'s `Users.Id IN (…)`. Go's `if channelId == ""`
+        // short-circuit returns the unfiltered query — every user — but its only caller passes a
+        // loaded channel's id, which is never empty.
+        let ids = sqlx::query_scalar!(
+            r#"
+            SELECT u.id
+              FROM users u
+             WHERE u.id IN (
+                   SELECT gm.userid
+                     FROM channels c
+                     JOIN groupchannels gc ON gc.channelid = c.id
+                     JOIN usergroups ug ON ug.id = gc.groupid
+                     JOIN groupmembers gm ON gm.groupid = ug.id
+                    WHERE c.id = $1
+                      AND gc.deleteat = 0
+                      AND ug.deleteat = 0
+                      AND gm.deleteat = 0
+                    GROUP BY gm.userid
+             )
+            "#,
+            channel_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", ids.len());
+        Ok(ids)
     }
 
     /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209).

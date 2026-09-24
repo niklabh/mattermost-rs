@@ -23,8 +23,22 @@
 //! returns a new event, so two events can share one mutable data map. Rust's ownership makes that
 //! sharing unrepresentable: the builders here clone, which is `DeepCopy`'s behaviour and the
 //! safe direction.
+//!
+//! # A struct in `data` keeps Go's key order only through [`WebSocketEvent::add_raw`]
+//!
+//! Go's `data` is a `map[string]any`, so its **top-level** keys marshal sorted — which a
+//! `serde_json::Map` (a `BTreeMap`: `preserve_order` is off, and must stay off, because every Go
+//! map in the tree relies on the sort) reproduces. But a *struct* placed into it
+//! (`message.Add("user", user)`) marshals in the struct's **declaration** order, and a struct
+//! turned into a `serde_json::Value` has lost that order before the event ever sees it. So such a
+//! value is added pre-serialised: the event keeps the text beside the parsed value, and the
+//! encoder emits the text. Readers of `data` still see the parsed value. [D-541]
 
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Serialize, Serializer};
+use serde_json::value::RawValue;
 
 use crate::serde_helpers::{is_none, is_none_or_empty_map, is_none_or_empty_vec, is_zero_i64};
 use crate::utils::{AppError, StringInterface};
@@ -388,11 +402,26 @@ impl WebsocketBroadcast {
     }
 }
 
+/// The text [`WebSocketEvent::add_raw`] was given for one key of `data`, and the value it parsed
+/// to — kept so the encoder can tell whether `data` still holds that value.
+#[derive(Debug, Clone)]
+struct RawEntry {
+    text: Box<RawValue>,
+    parsed: serde_json::Value,
+}
+
+impl PartialEq for RawEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.text.get() == other.text.get()
+    }
+}
+
 /// Port of `model.WebSocketEvent` (websocket_message.go:239).
 ///
 /// Go keeps every field unexported and marshals through `webSocketEventJSON`; the wire shape is
-/// `event`, `data`, `broadcast`, **`seq`** — note the last key is not `sequence`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// `event`, `data`, `broadcast`, **`seq`** — note the last key is not `sequence`. Serialised by
+/// hand (below) so `data` can carry [`WebSocketEvent::add_raw`]'s text.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct WebSocketEvent {
     #[serde(rename = "event")]
@@ -400,6 +429,10 @@ pub struct WebSocketEvent {
 
     #[serde(rename = "data")]
     pub data: Option<StringInterface>,
+
+    /// Pre-serialised values for keys of `data`, by key. See [`WebSocketEvent::add_raw`].
+    #[serde(skip)]
+    raw_data: BTreeMap<String, RawEntry>,
 
     #[serde(rename = "broadcast")]
     pub broadcast: Option<Box<WebsocketBroadcast>>,
@@ -411,6 +444,41 @@ pub struct WebSocketEvent {
     /// crosses the wire and does not survive a round trip.
     #[serde(skip)]
     pub rejected: bool,
+}
+
+impl Serialize for WebSocketEvent {
+    /// `webSocketEventJSON` (websocket_message.go:247): `event`, `data`, `broadcast`, `seq`.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = serializer.serialize_struct("WebSocketEvent", 4)?;
+        st.serialize_field("event", &self.event)?;
+        st.serialize_field("data", &self.wire_data())?;
+        st.serialize_field("broadcast", &self.broadcast)?;
+        st.serialize_field("seq", &self.sequence)?;
+        st.end()
+    }
+}
+
+/// `data` as it goes on the wire: Go's sorted map, with each key [`WebSocketEvent::add_raw`] set
+/// emitted as the text it was given — **while `data` still holds the value that text parsed to**.
+/// A key later replaced through `data` directly goes out as the new value; one replaced through
+/// [`WebSocketEvent::add`] or [`WebSocketEvent::set_data`] has no text any more.
+struct WireData<'a> {
+    data: &'a StringInterface,
+    raw: &'a BTreeMap<String, RawEntry>,
+}
+
+impl Serialize for WireData<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(Some(self.data.len()))?;
+        for (key, value) in self.data {
+            match self.raw.get(key) {
+                Some(raw) if raw.parsed == *value => map.serialize_entry(key, &raw.text)?,
+                _ => map.serialize_entry(key, value)?,
+            }
+        }
+        map.end()
+    }
 }
 
 impl WebSocketEvent {
@@ -427,6 +495,7 @@ impl WebSocketEvent {
             event: event.into(),
             // Go allocates an empty map, so `data` is `{}` rather than `null` on the wire.
             data: Some(StringInterface::new()),
+            raw_data: BTreeMap::new(),
             broadcast: Some(Box::new(WebsocketBroadcast {
                 team_id: team_id.to_string(),
                 channel_id: channel_id.to_string(),
@@ -441,10 +510,55 @@ impl WebSocketEvent {
     }
 
     /// Port of `(*WebSocketEvent).Add` (websocket_message.go:287).
+    ///
+    /// For a value Go adds as a **struct**, use [`WebSocketEvent::add_raw`]: a `Value` object's
+    /// keys are sorted by the time it arrives here.
     pub fn add(&mut self, key: impl Into<String>, value: serde_json::Value) {
+        let key = key.into();
+        self.raw_data.remove(&key);
         self.data
             .get_or_insert_with(StringInterface::new)
-            .insert(key.into(), value);
+            .insert(key, value);
+    }
+
+    /// `(*WebSocketEvent).Add` for a value Go adds as a **struct** (or a slice of them), which
+    /// `encoding/json` marshals in declaration order: `json` is that value already serialised —
+    /// by [`crate::utils::go_json_marshal`] of the Rust struct, whose fields are declared in Go's
+    /// order — and goes on the wire as given. `data` gets the parsed value too, so a reader of
+    /// the event sees what it always saw. [D-541]
+    ///
+    /// Fails only when `json` is not a JSON text, which a `go_json_marshal` output always is.
+    pub fn add_raw(
+        &mut self,
+        key: impl Into<String>,
+        json: String,
+    ) -> Result<(), serde_json::Error> {
+        let key = key.into();
+        let parsed: serde_json::Value = serde_json::from_str(&json)?;
+        let text = RawValue::from_string(json)?;
+        self.data
+            .get_or_insert_with(StringInterface::new)
+            .insert(key.clone(), parsed.clone());
+        self.raw_data.insert(key, RawEntry { text, parsed });
+        Ok(())
+    }
+
+    /// [`WebSocketEvent::add_raw`] of `value` marshalled as Go would marshal it
+    /// ([`crate::utils::go_json_marshal`]): the call for `message.Add(key, someStruct)`.
+    pub fn add_struct<T: Serialize>(
+        &mut self,
+        key: impl Into<String>,
+        value: &T,
+    ) -> Result<(), serde_json::Error> {
+        self.add_raw(key, crate::utils::go_json_marshal(value)?)
+    }
+
+    /// `data` for the encoder — see [`WireData`]. `None` stays `null`, as Go's nil map does.
+    fn wire_data(&self) -> Option<WireData<'_>> {
+        self.data.as_ref().map(|data| WireData {
+            data,
+            raw: &self.raw_data,
+        })
     }
 
     /// Port of `(*WebSocketEvent).GetData` (websocket_message.go:326).
@@ -476,6 +590,7 @@ impl WebSocketEvent {
     pub fn set_data(&self, data: StringInterface) -> WebSocketEvent {
         let mut copy = self.clone();
         copy.data = Some(data);
+        copy.raw_data.clear();
         copy
     }
 
@@ -544,6 +659,7 @@ impl WebSocketEvent {
         WebSocketEvent {
             event: self.event.clone(),
             data: self.data.clone(),
+            raw_data: self.raw_data.clone(),
             broadcast: self.broadcast.as_ref().map(|b| Box::new(b.copy_like_go())),
             sequence: self.sequence,
             rejected: false,
@@ -574,7 +690,7 @@ impl WebSocketEvent {
     /// a **32-bit truncation on a 32-bit platform**, though not on any this server runs on.
     pub fn to_json_precomputed(&self) -> Result<String, serde_json::Error> {
         let event = crate::utils::go_json_marshal(&self.event)?;
-        let data = crate::utils::go_json_marshal(&self.data)?;
+        let data = crate::utils::go_json_marshal(&self.wire_data())?;
         let broadcast = crate::utils::go_json_marshal(&self.broadcast)?;
         Ok(format!(
             r#"{{"event": {event}, "data": {data}, "broadcast": {broadcast}, "seq": {}}}"#,
@@ -740,5 +856,173 @@ mod wire_parity {
         let mut copy = copy;
         copy.add("should_ack", serde_json::Value::Bool(true));
         assert!(event.get_data().unwrap().get("should_ack").is_none());
+    }
+}
+
+/// [`WebSocketEvent::add_raw`] and the key order it exists for ([D-541]).
+#[cfg(test)]
+mod raw_data {
+    use super::*;
+    use serde_json::json;
+
+    /// A struct whose declaration order is not alphabetical, as `CPAField` and `User` are not.
+    #[derive(Serialize)]
+    struct Unsorted {
+        #[serde(rename = "zeta")]
+        zeta: i64,
+        #[serde(rename = "alpha")]
+        alpha: &'static str,
+    }
+
+    fn event() -> WebSocketEvent {
+        WebSocketEvent::new(
+            "custom_profile_attributes_field_created",
+            "",
+            "",
+            "",
+            None,
+            "",
+        )
+    }
+
+    #[test]
+    fn a_struct_keeps_its_declaration_order_on_both_encoders() {
+        let mut ev = event();
+        ev.add_struct(
+            "field",
+            &Unsorted {
+                zeta: 1,
+                alpha: "<a>",
+            },
+        )
+        .unwrap();
+        ev.add("b_after", json!(true));
+
+        let plain = ev.to_json().unwrap();
+        assert!(
+            plain.contains(r#""data":{"b_after":true,"field":{"zeta":1,"alpha":"\u003ca\u003e"}}"#),
+            "{plain}"
+        );
+        let pre = ev.to_json_precomputed().unwrap();
+        assert!(
+            pre.contains(r#""data": {"b_after":true,"field":{"zeta":1,"alpha":"\u003ca\u003e"}}"#),
+            "{pre}"
+        );
+    }
+
+    /// The contrast the entry is about: the same struct through `add` comes out sorted.
+    #[test]
+    fn the_same_struct_as_a_value_is_sorted() {
+        let mut ev = event();
+        ev.add(
+            "field",
+            serde_json::to_value(Unsorted {
+                zeta: 1,
+                alpha: "a",
+            })
+            .unwrap(),
+        );
+        assert!(
+            ev.to_json()
+                .unwrap()
+                .contains(r#""field":{"alpha":"a","zeta":1}"#)
+        );
+    }
+
+    #[test]
+    fn readers_of_data_see_the_parsed_value() {
+        let mut ev = event();
+        ev.add_raw("field", r#"{"zeta":1,"alpha":"a"}"#.to_owned())
+            .unwrap();
+        assert_eq!(
+            ev.get_data().unwrap()["field"],
+            json!({"alpha": "a", "zeta": 1})
+        );
+    }
+
+    #[test]
+    fn add_over_a_raw_key_replaces_the_text() {
+        let mut ev = event();
+        ev.add_raw("field", r#"{"zeta":1,"alpha":"a"}"#.to_owned())
+            .unwrap();
+        ev.add("field", json!({"zeta": 1, "alpha": "a"}));
+        assert!(
+            ev.to_json()
+                .unwrap()
+                .contains(r#""field":{"alpha":"a","zeta":1}"#)
+        );
+    }
+
+    /// A value changed behind the text's back goes out as the new value, never as stale text.
+    #[test]
+    fn a_direct_change_to_data_wins_over_the_text() {
+        let mut ev = event();
+        ev.add_raw("field", r#"{"zeta":1,"alpha":"a"}"#.to_owned())
+            .unwrap();
+        ev.data.as_mut().unwrap()["field"] = json!({"zeta": 2});
+        assert!(ev.to_json().unwrap().contains(r#""field":{"zeta":2}"#));
+    }
+
+    #[test]
+    fn set_data_drops_the_text_and_deep_copy_keeps_it() {
+        let mut ev = event();
+        ev.add_raw("field", r#"{"zeta":1,"alpha":"a"}"#.to_owned())
+            .unwrap();
+        let copy = ev.deep_copy_like_go();
+        assert!(
+            copy.to_json()
+                .unwrap()
+                .contains(r#""field":{"zeta":1,"alpha":"a"}"#)
+        );
+        let replaced = ev.set_data(ev.get_data().unwrap().clone());
+        assert!(
+            replaced
+                .to_json()
+                .unwrap()
+                .contains(r#""field":{"alpha":"a","zeta":1}"#)
+        );
+    }
+
+    #[test]
+    fn a_text_that_is_not_json_is_refused_and_adds_nothing() {
+        let mut ev = event();
+        assert!(ev.add_raw("field", "{".to_owned()).is_err());
+        assert!(ev.get_data().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_nil_data_map_is_still_null() {
+        let mut ev = event();
+        ev.data = None;
+        assert!(ev.to_json().unwrap().contains(r#""data":null"#));
+        assert!(
+            ev.to_json_precomputed()
+                .unwrap()
+                .contains(r#""data": null"#)
+        );
+    }
+
+    /// The three structs this tree adds with [`WebSocketEvent::add_struct`] serialise in Go's
+    /// declaration order: `go_json_marshal_indent` of the decoded Go fixture is the fixture's own
+    /// bytes. A value comparison would pass whatever the order.
+    #[test]
+    fn the_structs_added_raw_serialise_in_gos_order() {
+        fn same_bytes<T: Serialize + serde::de::DeserializeOwned>(raw: &str, name: &str) {
+            let decoded: T = serde_json::from_str(raw).unwrap();
+            assert_eq!(
+                crate::utils::go_json_marshal_indent(&decoded).unwrap(),
+                raw.trim_end(),
+                "{name}"
+            );
+        }
+        same_bytes::<crate::user::User>(include_str!("../../../fixtures/user.json"), "user");
+        same_bytes::<crate::manifest::Manifest>(
+            include_str!("../../../fixtures/manifest.json"),
+            "manifest",
+        );
+        same_bytes::<crate::custom_profile_attributes::CPAField>(
+            include_str!("../../../fixtures/cpa_field.json"),
+            "cpa_field",
+        );
     }
 }

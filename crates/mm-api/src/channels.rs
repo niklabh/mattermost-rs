@@ -3222,8 +3222,8 @@ pub async fn get_recommended_channels_for_team(
 /// # The route exists only while `FeatureFlags.ManagedChannelCategories` is on
 ///
 /// `InitChannel` registers it inside `if …FeatureFlags.ManagedChannelCategories` (api4/
-/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) and is
-/// environment-only (see [`mm_app::config::Config::feature_flag_integrated_boards`]). With it off
+/// channel.go:71), and the flag defaults to **false** (feature_flags.go:202) (see
+/// [`mm_app::config::Config::feature_flags`]). With it off
 /// gorilla has never heard of the path and answers its own 404 `api.context.404.app_error`,
 /// *before* any session check. [`managed_categories_flag_or_forward`] reproduces that by
 /// forwarding ahead of the session extractor, so an unauthenticated request gets Go's 404 and
@@ -3296,7 +3296,7 @@ pub(crate) async fn managed_categories_flag_or_forward(
     request: Request,
     next: axum::middleware::Next,
 ) -> Response {
-    if !state.app.config().feature_flag_managed_channel_categories {
+    if !state.app.config().feature_flags.managed_channel_categories {
         return proxy::forward_to_go(State(state), request).await;
     }
     next.run(request).await
@@ -3605,7 +3605,10 @@ fn view_response(
 ///    to say "focus loss or initial view" and must not be rejected.
 /// 5. Each non-empty id is checked against [`reject_board_channel_by_id`], again `channel_id`
 ///    first.
-/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`.
+/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`, then `ExtendSessionExpiryIfNeeded`
+///    — the sliding-expiry write and its `Set-Cookie` headers ([`crate::session_expiry`]). This
+///    is the request every client makes on every channel switch, so it is the one that keeps a
+///    long session alive when `ExtendSessionLengthWithActivity` is on.
 ///
 /// # What a bad `channel_id` is *not*
 ///
@@ -3613,13 +3616,6 @@ fn view_response(
 /// the caller is not in contributes no row to the join, so it is simply absent from
 /// `last_viewed_at_times` — a **200**, not a 403 or a 404.
 ///
-/// # `ExtendSessionExpiryIfNeeded` is not ported
-///
-/// Go calls it after `UpdateLastActivityAtIfNeeded` (channel.go:2052). It is a no-op unless
-/// `ServiceSettings.ExtendSessionLengthWithActivity` is on, and that setting defaults to
-/// `!isUpdate` — false for every persisted configuration document (see [D-088]'s note). When it
-/// *is* on it rewrites `Sessions.ExpiresAt` and re-attaches the session cookies, neither of which
-/// this port does anywhere yet. [D-214].
 #[tracing::instrument(skip_all, fields(user_id = %user_id, channels))]
 pub async fn view_channel(
     State(state): State<AppState>,
@@ -3657,7 +3653,8 @@ async fn serve_view_channel(
         )));
     }
 
-    let bytes = read_body(request, "viewChannel").await?;
+    let (parts, body) = request.into_parts();
+    let bytes = read_body(Request::new(body), "viewChannel").await?;
     // `json.NewDecoder(r.Body).Decode(&view)` into a **value**, not a pointer. Two consequences,
     // and both need the `Value` round-trip rather than a direct `from_slice`:
     //
@@ -3725,8 +3722,11 @@ async fn serve_view_channel(
         .app
         .update_last_activity_at_if_needed(&session.0)
         .await;
+    let cookies =
+        crate::session_expiry::extend_session_expiry_if_needed(state, &parts.headers, &session.0)
+            .await;
 
-    view_response(times, "viewChannel")
+    view_response(times, "viewChannel").map(|response| cookies.apply(response))
 }
 
 /// Port of `readMultipleChannels` (api4/channel.go:2066), reached as
@@ -3829,7 +3829,8 @@ fn require_mark_all_as_read(state: &AppState, where_: &'static str) -> Result<()
     if state
         .app
         .config()
-        .feature_flag_enable_shift_escape_to_mark_all_read
+        .feature_flags
+        .enable_shift_escape_to_mark_all_read
     {
         return Ok(());
     }

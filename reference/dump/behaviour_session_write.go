@@ -229,6 +229,124 @@ var sessionCookieCorpus = []sessionCookieCase{
 	{Name: "login csrf", CookieName: "MMCSRF", Token: "f9jnw7z47fbbzmkxt9ba9naene", Path: "/", MaxAge: 4320 * 3600},
 	{Name: "login user id secure embedded", CookieName: "MMUSERID", Token: "opukwu61f7ft8exssjxf3huyjy", Path: "/sub", Domain: "mm.example.com", MaxAge: 3600, Secure: true, SameSiteNone: true},
 	{Name: "login csrf subpath", CookieName: "MMCSRF", Token: "f9jnw7z47fbbzmkxt9ba9naene", Path: "/mattermost", MaxAge: 3600},
+
+	// `Cookie.String` validates `Domain` and **drops** one it will not accept, and strips a
+	// leading dot from one it will. `GetCookieDomain` hands it `url.Hostname()` verbatim, so an
+	// IPv6 SiteURL, an underscore or a trailing dash all reach it; the cloud cookie hands it a
+	// dotted suffix. Each row isolates one rule of `validCookieDomain` / `isCookieDomainName`.
+	{Name: "domain leading dot", CookieName: "MMCLOUDURL", Token: "example", Path: "/", Domain: ".cloud.mattermost.com", MaxAge: 3600},
+	{Name: "domain ipv6 dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "::1", MaxAge: 3600},
+	{Name: "domain ipv4 kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "127.0.0.1", MaxAge: 3600},
+	{Name: "domain ipv4 leading zero", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "127.0.0.01", MaxAge: 3600},
+	{Name: "domain ipv4 out of range", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "256.0.0.1", MaxAge: 3600},
+	{Name: "domain localhost", CookieName: "MMCLOUDURL", Token: "localhost", Path: "/", Domain: "localhost", MaxAge: 3600},
+	{Name: "domain underscore dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm_1.example.com", MaxAge: 3600},
+	{Name: "domain dash after dot dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm.-example.com", MaxAge: 3600},
+	{Name: "domain trailing dash dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm.example-", MaxAge: 3600},
+	{Name: "domain dash before dot dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm-.example.com", MaxAge: 3600},
+	{Name: "domain inner dash kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "m-m.example.com", MaxAge: 3600},
+	{Name: "domain double dot dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm..example.com", MaxAge: 3600},
+	{Name: "domain trailing dot kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "mm.example.com.", MaxAge: 3600},
+	{Name: "domain digits only dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "123.456", MaxAge: 3600},
+	{Name: "domain one letter kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "1.a", MaxAge: 3600},
+	{Name: "domain label 63 kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: strings.Repeat("a", 63) + ".com", MaxAge: 3600},
+	{Name: "domain label 64 dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: strings.Repeat("a", 64) + ".com", MaxAge: 3600},
+	{Name: "domain last label 64 dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "a." + strings.Repeat("a", 64), MaxAge: 3600},
+	// The 255-byte cap is checked **before** a leading dot is stripped, so the dot counts.
+	{Name: "domain 255 kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: strings.Repeat(strings.Repeat("a", 50)+".", 4) + strings.Repeat("a", 51), MaxAge: 3600},
+	{Name: "domain 256 dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: strings.Repeat(strings.Repeat("a", 50)+".", 4) + strings.Repeat("a", 52), MaxAge: 3600},
+	{Name: "domain leading dot 255 kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "." + strings.Repeat(strings.Repeat("a", 50)+".", 4) + strings.Repeat("a", 50), MaxAge: 3600},
+	{Name: "domain leading dot 256 dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "." + strings.Repeat(strings.Repeat("a", 50)+".", 4) + strings.Repeat("a", 51), MaxAge: 3600},
+	{Name: "domain bare dot dropped", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: ".", MaxAge: 3600},
+	{Name: "domain upper case kept", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "MM.Example.COM", MaxAge: 3600},
+
+	// `sanitizeCookieValue`: bytes outside 0x20-0x7e and `"`, `;`, `\` are dropped, and a value
+	// holding a space or a comma is then double-quoted. Reachable through the cloud cookie, whose
+	// value is the first label of the SiteURL host.
+	{Name: "value comma quoted", CookieName: "MMCLOUDURL", Token: "a,b", Path: "/", MaxAge: 3600},
+	{Name: "value space quoted", CookieName: "MMCLOUDURL", Token: "a b", Path: "/", MaxAge: 3600},
+	{Name: "value quote dropped", CookieName: "MMCLOUDURL", Token: "a\"b", Path: "/", MaxAge: 3600},
+	{Name: "value backslash and semicolon dropped", CookieName: "MMCLOUDURL", Token: "a\\b;c", Path: "/", MaxAge: 3600},
+	{Name: "value dropped byte then comma", CookieName: "MMCLOUDURL", Token: "a\x01,", Path: "/", MaxAge: 3600},
+}
+
+// cloudCookieCorpus is the SiteURLs `AttachCloudSessionCookie` (app/login.go:243) is handed: the
+// shapes that reach its three exits (no host, `localhost` anywhere in the host, and anything that
+// is not exactly four labels) and the ones that produce a cookie.
+var cloudCookieCorpus = []string{
+	"",
+	"https://example.cloud.mattermost.com",
+	"https://example.cloud.mattermost.com/sub",
+	"https://example.cloud.mattermost.com:8443/",
+	"https://cloud.mattermost.com",
+	"https://a.example.cloud.mattermost.com",
+	"http://localhost:8065",
+	"http://localhost",
+	"http://mylocalhost.example.com",
+	"http://my.localhost.example.com",
+	"http://127.0.0.1:8065",
+	"http://1.2.3.4",
+	"http://[::1]:8065",
+	"https://EXAMPLE.Cloud.Mattermost.COM",
+	"https://a,b.cloud.mattermost.com",
+	"https://example.cloud.mattermost.com.",
+	"https://.cloud.mattermost.com",
+	"https://example..mattermost.com",
+	"mattermost",
+	"http://%zz/sub",
+	"https://example.cloud.mattermost.com/a%2Fb",
+}
+
+// cloudCookieCase is one `AttachCloudSessionCookie` outcome. `SetCookie` is empty when Go
+// returns without setting a cookie.
+type cloudCookieCase struct {
+	SiteURL     string `json:"site_url"`
+	Secure      bool   `json:"secure"`
+	MaxAge      int    `json:"max_age"`
+	ExpiresUnix int64  `json:"expires_unix"`
+	SetCookie   string `json:"set_cookie"`
+}
+
+// renderCloudCookie is app/login.go:243-286 transcribed with the clock pinned and the config and
+// protocol hoisted to parameters. `url.Parse`, `Hostname`, `strings` and `Cookie.String` are Go's
+// own; the subpath is `getSubpathFromSiteURL` (behaviour_subpath.go), itself a transcription of
+// `utils.GetSubpathFromConfig`. Copy any upstream change character for character.
+func renderCloudCookie(siteURL string, secure bool, maxAgeSeconds int) string {
+	subpath, _ := getSubpathFromSiteURL(&siteURL)
+	expiresAt := time.Unix(cookieExpiresUnix, 0)
+
+	domain := ""
+	if u, err := url.Parse(siteURL); err == nil {
+		domain = u.Hostname()
+	}
+
+	if domain == "" {
+		return ""
+	}
+
+	var workspaceName string
+	if strings.Contains(domain, "localhost") {
+		workspaceName = "localhost"
+	} else {
+		// ensure we have a format for a cloud workspace url i.e. example.cloud.mattermost.com
+		if len(strings.Split(domain, ".")) != 4 {
+			return ""
+		}
+		workspaceName = strings.SplitN(domain, ".", 2)[0]
+		domain = strings.SplitN(domain, ".", 3)[2]
+		domain = "." + domain
+	}
+
+	cookie := &http.Cookie{
+		Name:    "MMCLOUDURL",
+		Value:   workspaceName,
+		Path:    subpath,
+		MaxAge:  maxAgeSeconds,
+		Expires: expiresAt,
+		Domain:  domain,
+		Secure:  secure,
+	}
+	return cookie.String()
 }
 
 // renderSessionCookie is api4/user.go:2789-2807 transcribed: the struct literal `attachDeviceIds`
@@ -283,7 +401,21 @@ func writeSessionWriteBehaviourFixture(outDir string) error {
 		splits[host] = (&url.URL{Host: host}).Hostname()
 	}
 
+	clouds := make([]cloudCookieCase, 0, 2*len(cloudCookieCorpus))
+	for _, siteURL := range cloudCookieCorpus {
+		for _, secure := range []bool{false, true} {
+			clouds = append(clouds, cloudCookieCase{
+				SiteURL:     siteURL,
+				Secure:      secure,
+				MaxAge:      4320 * 3600,
+				ExpiresUnix: cookieExpiresUnix,
+				SetCookie:   renderCloudCookie(siteURL, secure, 4320*3600),
+			})
+		}
+	}
+
 	out := map[string]any{
+		"cloud_cookie":    clouds,
 		"strict_semver":   strict,
 		"url_hostname":    hostnames,
 		"session_cookie":  cookies,

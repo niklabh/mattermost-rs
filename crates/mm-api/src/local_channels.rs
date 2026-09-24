@@ -546,8 +546,8 @@ async fn local_patch_channel(
 /// `moveChannel`'s order without its two user steps: channel (404), `team_id` (400), `force`
 /// (400), team (404), DM/GM (**403** `api.channel.move_channel.type.invalid`), then the
 /// deactivated-member sweep, the forced sweep with a **nil remover**, and `MoveChannel(team,
-/// channel, nil)` — which posts nothing. A member the sweep cannot remove here (a guest, a shared
-/// channel) forwards the whole request over the socket.
+/// channel, nil)` — which posts nothing. A shared channel while Go's shared-channel service runs
+/// forwards the whole request over the socket.
 async fn local_move_channel(
     State(state): State<AppState>,
     Extension(go): Extension<GoLocalSocket>,
@@ -563,6 +563,8 @@ async fn local_move_channel(
     };
 
     let (parts, body) = request.into_parts();
+    let path = parts.uri.path().to_owned();
+    let ip_address = crate::client_ip::client_ip(&parts.headers, &parts.extensions);
     // A local-socket request has no session and no peer address, which is what Go's
     // `pluginContext` reads off one: every field but `RequestId` is empty there too.
     let hook_ctx = crate::plugin_context::hook_context(&parts, None);
@@ -621,14 +623,24 @@ async fn local_move_channel(
         }
     }
 
-    match state
+    if let Err(err) = state
         .app
         .move_channel(&team, &mut channel, None, &hook_ctx)
         .await
     {
-        Ok(MemberWrite::Done(())) => {}
-        Ok(MemberWrite::Forward(why)) => return forward_over_unix(&go.0, forward(why)).await,
-        Err(err) => return ApiError::from(err).into_response(),
+        return ApiError::from(err).into_response();
+    }
+
+    // `c.LogAudit` twice: a local session has no user or session id and the socket no address,
+    // so the rows carry only the path and the text, as Go's do.
+    for extra_info in [
+        format!("channel={}", channel.name),
+        format!("team={}", team.name),
+    ] {
+        state
+            .app
+            .log_audit("", "", &ip_address, &path, &extra_info)
+            .await;
     }
 
     match channel_writes::channel_response("moveChannel", &channel) {
@@ -806,7 +818,20 @@ async fn local_remove_channel_member(
         )
         .await
     {
-        Ok(MemberWrite::Done(())) => channel_writes::status_ok(),
+        Ok(MemberWrite::Done(())) => {
+            // `c.LogAudit` on success: no session, so no user or session id.
+            state
+                .app
+                .log_audit(
+                    "",
+                    "",
+                    &crate::client_ip::client_ip(request.headers(), request.extensions()),
+                    request.uri().path(),
+                    &format!("name={} user_id={user_id}", channel.name),
+                )
+                .await;
+            channel_writes::status_ok()
+        }
         Ok(MemberWrite::Forward(why)) => {
             tracing::debug!(
                 reason = why,

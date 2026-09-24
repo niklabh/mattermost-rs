@@ -520,7 +520,7 @@ pub async fn create_incoming_hook(
             return ApiError::invalid_param("incoming_webhook").into_response();
         }
     };
-    let mut hook: IncomingWebhook = match serde_json::from_slice(&bytes) {
+    let mut hook: IncomingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "incoming_webhook body did not decode");
@@ -638,7 +638,7 @@ pub async fn update_incoming_hook(
             return ApiError::invalid_param("incoming_webhook").into_response();
         }
     };
-    let mut updated: IncomingWebhook = match serde_json::from_slice(&bytes) {
+    let mut updated: IncomingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "incoming_webhook body did not decode");
@@ -830,7 +830,7 @@ pub async fn create_outgoing_hook(
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
-    let mut hook: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+    let mut hook: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "outgoing_webhook body did not decode");
@@ -897,7 +897,7 @@ pub async fn update_outgoing_hook(
             return ApiError::invalid_param("outgoing_webhook").into_response();
         }
     };
-    let updated: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+    let updated: OutgoingWebhook = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(hook) => hook,
         Err(err) => {
             tracing::debug!(error = %err, "outgoing_webhook body did not decode");

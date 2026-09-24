@@ -80,55 +80,19 @@ pub(crate) async fn split_body(
     Ok((rebuilt, bytes.to_vec()))
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — `json.NewDecoder(r.Body).Decode(&map[string]string)`
-/// with the error **discarded**, which is not the same thing as "an empty map on any problem".
-///
-/// Three behaviours the three existing one-line copies of this helper in the crate do not have,
-/// and that `updateUserRoles` can actually be handed:
-///
-/// 1. **A partial decode survives.** `encoding/json` records the first `UnmarshalTypeError` and
-///    keeps going, so `{"roles":"system_user","n":1}` leaves `roles` set. A
-///    `from_slice::<BTreeMap<String,String>>().unwrap_or_default()` returns the *empty* map for
-///    that body — and an empty map means `roles: ""`, which this route writes. The divergence is
-///    not a 400 versus a 200; it is one user keeping their roles versus having them erased.
-/// 2. **The offending key is still inserted, holding `""`.** Measured, not assumed: the fixture
-///    row for `{"roles":1}` is `{"roles":""}`, not `{}`, and `{"roles":null}` is the same. Go's
-///    decoder assigns the zero value and records the error rather than skipping the entry, so a
-///    port that *dropped* the key would agree on every `.get("roles")` and disagree on
-///    `len(props)` — and on any future reader of a second key.
-/// 3. **Trailing bytes after the first value are ignored** (`Decoder.Decode`, not `Unmarshal`),
-///    and a duplicate key is last-wins.
-/// 4. A non-object — `null`, an array, a number, a malformed body — leaves the map nil, which Go
-///    replaces with an empty one.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`], which is
+/// this module's former copy made shared: a partial decode survives with the mistyped key at `""`,
+/// and `updateUserRoles` would otherwise erase a user's roles on `{"roles":"…","n":1}`.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    use serde::Deserialize;
-
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    match serde_json::Value::deserialize(&mut deserializer) {
-        Ok(serde_json::Value::Object(map)) => map
-            .into_iter()
-            .map(|(key, value)| match value {
-                serde_json::Value::String(value) => (key, value),
-                _ => (key, String::new()),
-            })
-            .collect(),
-        _ => StringMap::new(),
-    }
+    mm_model::utils::map_from_json(bytes)
 }
 
-/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — the same call into a
-/// `map[string]any`, where every JSON value is assignable, so only a non-object top level
-/// produces the empty map. Trailing bytes are ignored for the same reason as above.
+/// Port of `model.StringInterfaceFromJSON` (utils.go:590) — see
+/// [`mm_model::utils::string_interface_from_json`].
 pub(crate) fn string_interface_from_json(
     bytes: &[u8],
 ) -> serde_json::Map<String, serde_json::Value> {
-    use serde::Deserialize;
-
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    match serde_json::Value::deserialize(&mut deserializer) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(bytes)
 }
 
 /// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}` with **no trailing

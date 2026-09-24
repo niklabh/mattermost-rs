@@ -2027,6 +2027,22 @@ async fn each_write_publishes_the_same_events_on_both() {
             .collect();
         assert!(!go_ev.is_empty(), "Go published no {event}");
         assert_eq!(go_ev, rs_ev, "{event}");
+
+        // The same frames as **bytes**, values masked ([D-541]). `data.field` on the two CPA
+        // field events is Go's `CPAField` struct, marshalled in declaration order with `attrs`
+        // last; a parsed comparison cannot see that order, and a `serde_json::Value` loses it.
+        let skeletons = |probe: &SocketProbe| -> Vec<String> {
+            probe
+                .raw_events_named(event)
+                .into_iter()
+                .map(crate::common::json_skeleton)
+                .collect()
+        };
+        assert_eq!(
+            skeletons(&go_probe),
+            skeletons(&rs_probe),
+            "{event}, as bytes"
+        );
     }
 
     let _ = me;

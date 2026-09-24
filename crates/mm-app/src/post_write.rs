@@ -847,11 +847,11 @@ impl App {
         post: &mut Post,
         channel: Option<&Channel>,
     ) -> Result<(), PrepareError> {
-        // `ChannelMentionsAllWithOptions` reads the message *and* the attachments and interactive
-        // payloads. `omit_interactive_blocks` is `!FeatureFlags.MmBlocksEnabled`, and that flag
-        // defaults to true, so the blocks are walked.
+        // `ChannelMentionsAllWithOptions` reads the message *and* the attachments and, unless
+        // `FeatureFlags.MmBlocksEnabled` is off (it defaults on), the interactive payloads
+        // (app/post.go:568).
         let channel_mentions = post.channel_mentions_all_with_options(AllStringsOptions {
-            omit_interactive_blocks: false,
+            omit_interactive_blocks: !self.config().feature_flags.mm_blocks_enabled,
         });
         let mut channel_mentions_prop = StringInterface::new();
 
@@ -1340,6 +1340,46 @@ pub fn channel_is_archived(channel: &Channel) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `FillInPostProps` reads channel mentions with
+    /// `OmitInteractiveBlocks: !FeatureFlags.MmBlocksEnabled` (app/post.go:568). A `~town` only
+    /// inside `props.mm_blocks` is a mention with the flag on — so, with no channel in hand, the
+    /// post's channel is looked up (here an unreachable store: Go's 400) — and nothing with it
+    /// off, which answers without touching the store.
+    #[tokio::test]
+    async fn a_channel_mention_inside_mm_blocks_counts_only_with_the_flag_on() {
+        let app = |mm_blocks_enabled: bool| {
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(250))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+                .expect("a lazy pool is built without connecting");
+            let mut config = crate::config::Config::default();
+            config.feature_flags.mm_blocks_enabled = mm_blocks_enabled;
+            crate::App::with_config(mm_store::SqlStore::from_pool(pool), config)
+        };
+        let post = || {
+            let mut post = Post {
+                message: "nothing to see".to_owned(),
+                ..Post::default()
+            };
+            post.add_prop(
+                POST_PROPS_MM_BLOCKS,
+                serde_json::json!([{"type": "text", "text": "see ~town"}]),
+            );
+            post
+        };
+
+        let mut off = post();
+        assert!(app(false).fill_in_post_props(&mut off, None).await.is_ok());
+
+        let mut on = post();
+        match app(true).fill_in_post_props(&mut on, None).await {
+            Err(PrepareError::App(err)) => {
+                assert_eq!(err.id, "api.context.invalid_param.app_error");
+            }
+            other => panic!("expected the channel lookup to fail, got {other:?}"),
+        }
+    }
 
     fn post_at(create_at: i64) -> Post {
         Post {

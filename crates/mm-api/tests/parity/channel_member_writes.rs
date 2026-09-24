@@ -567,6 +567,32 @@ async fn removing_a_member_agrees_and_the_second_removal_is_a_404() {
     )
     .await;
 
+    // `c.LogAudit` on success: one `Audits` row per server, the path as the action, the remover's
+    // session and address, and `name=<channel> user_id=<user>` — compared across the two.
+    if let Some(pool) = common::fixture_pool().await {
+        let mut rows = Vec::new();
+        for (path, channel) in [(&go, &fixture.go_channel), (&rust, &fixture.rust_channel)] {
+            let name: String = sqlx::query_scalar("SELECT name FROM channels WHERE id = $1")
+                .bind(channel)
+                .fetch_one(&pool)
+                .await
+                .expect("the channel");
+            let found: Vec<(String, String, String, String)> = sqlx::query_as(
+                "SELECT extrainfo, userid, sessionid, ipaddress FROM audits WHERE action = $1",
+            )
+            .bind(path)
+            .fetch_all(&pool)
+            .await
+            .expect("the audit rows");
+            assert_eq!(found.len(), 1, "{path}: one audit row: {found:?}");
+            let (extra, user_id, session_id, ip) = found[0].clone();
+            assert_eq!(extra, format!("name={name} user_id={user}"), "{path}");
+            rows.push((user_id, session_id, ip));
+        }
+        assert_eq!(rows[0], rows[1], "the two rows' user, session and address");
+        assert_eq!(rows[1].0, logged_in_user_id());
+    }
+
     // **Not idempotent**, unlike `deleteDraft`: the member lookup inside
     // `removeUserFromChannel` 404s.
     both(

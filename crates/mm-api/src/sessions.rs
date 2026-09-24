@@ -117,18 +117,10 @@ fn status_ok() -> Response {
         .into_response()
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507).
-///
-/// Every failure is an empty map — Go discards the decode error and replaces a nil map with an
-/// allocated one, so a caller can never tell "no keys" from "unparseable". That matters here:
-/// `revokeSession` reads `props["session_id"]` out of the result, so a malformed body and a body
-/// with no `session_id` produce the **same** 400 on the same parameter.
-///
-/// Go's decoder fills the map as it goes and only then fails, so `{"a":"b","c":5}` yields
-/// `{"a":"b"}` there and `{}` here. Reachable only with a mixed-type object; recorded on
-/// `channel_member_writes::map_from_json`, which is the same divergence.
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
 fn map_from_json(bytes: &[u8]) -> StringMap {
-    serde_json::from_slice::<StringMap>(bytes).unwrap_or_default()
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `revokeSession` (user.go:2602), reached as
@@ -569,7 +561,8 @@ async fn attach_device_ids(
 ///
 /// Attribute order is `Path`, `Domain`, `Expires`, `Max-Age`, `HttpOnly`, `SameSite` — Go's
 /// emission order, which the parity suite compares verbatim. An empty `Path` or `Domain` is
-/// **omitted entirely** rather than sent empty; that is the same rule
+/// **omitted entirely** rather than sent empty, and a `Domain` `net/http` will not accept is
+/// dropped (see [`valid_cookie_domain`]); that is the same rule
 /// [`crate::auth`]'s `remove_session_cookie_header` documents, and the reachable case here is a
 /// `SiteURL` Go cannot parse.
 ///
@@ -597,17 +590,20 @@ pub(crate) fn render_session_cookie(
     secure: bool,
     same_site_none: bool,
 ) -> String {
-    let mut cookie = format!("{name}={token}");
+    let mut cookie = format!("{name}={}", cookie_value(token));
 
     let path = sanitize_cookie_value(subpath);
     if !path.is_empty() {
         cookie.push_str("; Path=");
         cookie.push_str(&path);
     }
-    let domain = sanitize_cookie_value(domain);
-    if !domain.is_empty() {
+    // `Cookie.String` does not sanitize a `Domain`: it **drops** one `validCookieDomain` refuses
+    // (logging it) and strips a leading dot from one it accepts. Reachable both ways — the
+    // cloud cookie's domain is always dotted, and `GetCookieDomain` hands over an IPv6 SiteURL's
+    // hostname, which has colons and is refused.
+    if !domain.is_empty() && valid_cookie_domain(domain) {
         cookie.push_str("; Domain=");
-        cookie.push_str(&domain);
+        cookie.push_str(domain.strip_prefix('.').unwrap_or(domain));
     }
     if let Some(expires) = chrono::DateTime::from_timestamp(expires_unix_seconds, 0) {
         cookie.push_str("; Expires=");
@@ -652,6 +648,77 @@ fn sanitize_cookie_value(value: &str) -> String {
         .filter(|&b| (0x20..0x7f).contains(&b) && b != b';')
         .map(char::from)
         .collect()
+}
+
+/// Port of `sanitizeCookieValue` (net/http/cookie.go:510) for an unquoted cookie: the bytes
+/// `validCookieValueByte` refuses — outside `0x20..0x7f`, and `"`, `;`, `\` — are dropped, and
+/// a value that then holds a space or a comma is wrapped in double quotes.
+fn cookie_value(value: &str) -> String {
+    let kept: String = value
+        .bytes()
+        .filter(|&b| (0x20..0x7f).contains(&b) && b != b'"' && b != b';' && b != b'\\')
+        .map(char::from)
+        .collect();
+    if kept.contains([' ', ',']) {
+        format!("\"{kept}\"")
+    } else {
+        kept
+    }
+}
+
+/// Port of `validCookieDomain` (net/http/cookie.go:418): a cookie domain name, or an IPv4
+/// literal. An IP with a colon — any IPv6 form — is refused, which is all Go's
+/// `net.ParseIP(v) != nil && !strings.Contains(v, ":")` leaves of `ParseIP`; the standard
+/// library's IPv4 parser shares Go's refusal of a leading zero.
+fn valid_cookie_domain(domain: &str) -> bool {
+    is_cookie_domain_name(domain) || domain.parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+/// Port of `isCookieDomainName` (net/http/cookie.go:437), byte for byte.
+///
+/// The 255-byte cap is checked **before** an optional leading dot is stripped. Then labels of
+/// letters, digits and inner dashes, each 1-63 bytes, with at least one letter somewhere. A
+/// trailing dot passes (the last label is then empty and never checked); an underscore does not.
+fn is_cookie_domain_name(domain: &str) -> bool {
+    if domain.is_empty() || domain.len() > 255 {
+        return false;
+    }
+    let bytes = domain.as_bytes();
+    let bytes = bytes.strip_prefix(b".").unwrap_or(bytes);
+
+    let mut last = b'.';
+    let mut seen_letter = false;
+    let mut part_len = 0;
+    for &c in bytes {
+        match c {
+            b'a'..=b'z' | b'A'..=b'Z' => {
+                seen_letter = true;
+                part_len += 1;
+            }
+            b'0'..=b'9' => part_len += 1,
+            b'-' => {
+                if last == b'.' {
+                    return false;
+                }
+                part_len += 1;
+            }
+            b'.' => {
+                if last == b'.' || last == b'-' {
+                    return false;
+                }
+                if part_len > 63 || part_len == 0 {
+                    return false;
+                }
+                part_len = 0;
+            }
+            _ => return false,
+        }
+        last = c;
+    }
+    if last == b'-' || part_len > 63 {
+        return false;
+    }
+    seen_letter
 }
 
 /// Port of `utils.CheckEmbeddedCookie` (channels/utils/api.go:42).
@@ -958,18 +1025,24 @@ mod tests {
     /// `MapFromJSON` swallows everything, so `revokeSession` cannot tell a malformed body from
     /// one with no `session_id` — both are the same 400 on the same parameter.
     #[test]
-    fn map_from_json_swallows_every_failure() {
-        assert!(map_from_json(b"").is_empty());
-        assert!(map_from_json(b"[]").is_empty());
-        assert!(map_from_json(b"null").is_empty());
-        assert!(map_from_json(b"\"x\"").is_empty());
-        assert!(map_from_json(b"{\"session_id\": 5}").is_empty());
-        assert!(map_from_json(b"not json at all").is_empty());
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
+            assert!(
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
+        }
+        let mixed = map_from_json(br#"{"session_id":"abc","n":5} trailing"#);
+        assert_eq!(mixed.get("session_id").map(String::as_str), Some("abc"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(b"{\"session_id\":\"abc\"}")
+            map_from_json(br#"{"session_id":7}"#)
                 .get("session_id")
                 .map(String::as_str),
-            Some("abc")
+            Some("")
         );
         // An explicitly empty value is present-but-empty, which the handler treats exactly as
         // absent — the `sessionId == ""` test, not a `_, ok :=`.
