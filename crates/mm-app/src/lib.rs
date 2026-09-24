@@ -154,6 +154,7 @@ pub mod webhook;
 pub mod logs;
 pub mod mail;
 pub mod manualtest;
+pub mod markdown_utils;
 pub mod searchengine;
 pub mod upgrader;
 

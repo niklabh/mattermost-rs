@@ -65,6 +65,33 @@ async fn post(base: &str, token: &str, path: &str, body: serde_json::Value) -> (
     )
 }
 
+/// Read the fixture channel through Go (zeroing its mentions), then lose focus on **both**
+/// servers. `ActiveChannel` lives only in each process's status cache — never in the `Status`
+/// row — and a user active in the channel is not pushed, so both caches must say "nowhere".
+async fn read_and_lose_focus(viewer_token: &str, channel_id: &str, device: &str) {
+    let (status, _) = post(
+        GO,
+        viewer_token,
+        "/api/v4/channels/members/me/view",
+        serde_json::json!({ "channel_id": channel_id }),
+    )
+    .await;
+    assert_eq!(status, 200, "the read");
+    for base in [GO, RUST] {
+        let (status, _) = post(
+            base,
+            viewer_token,
+            "/api/v4/channels/members/me/view",
+            serde_json::json!({ "channel_id": "" }),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: the focus loss");
+    }
+    let _ = proxy()
+        .take(Duration::from_secs(2), for_device(device, "clear"))
+        .await;
+}
+
 /// A reader with a "phone" session carrying `device` and a second session to read with, in a
 /// fresh channel the admin posts into.
 struct Fixture {
@@ -84,6 +111,29 @@ async fn fixture(tag: &str, device: &str) -> Fixture {
     let viewer_token = common::login_plain_user(&http, tag).await;
     let channel_id = common::create_channel(&http, &admin, &team_id, tag).await;
     common::add_user_to_channel(&http, &admin, &channel_id, &reader.id).await;
+    // Being added is itself a mention — the `system_add_to_channel` post names the added user —
+    // so read the channel once, or the first post's badge counts it and the second's does not.
+    // The add-to-channel post's notification pass runs after the add returns, so wait for its
+    // increment to land before reading, or the read races it and the mention survives.
+    if let Some(pool) = common::fixture_pool().await {
+        for _ in 0..100 {
+            let count: Option<i64> = sqlx::query_scalar(
+                "SELECT mentioncount FROM channelmembers WHERE channelid = $1 AND userid = $2",
+            )
+            .bind(&channel_id)
+            .bind(&reader.id)
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten();
+            if count.unwrap_or(0) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    }
+    let device_suffix = device.split(':').nth(1).unwrap_or(device).to_owned();
+    read_and_lose_focus(&viewer_token, &channel_id, &device_suffix).await;
     Fixture {
         admin,
         reader,
@@ -274,6 +324,94 @@ async fn marking_a_post_unread_updates_the_badge() {
         normalize_push(badges[0].json()),
         normalize_push(badges[1].json()),
         "the badge updates differ"
+    );
+
+    common::delete_channel(&client(), &f.admin, &f.channel_id).await;
+    common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;
+}
+
+/// Post `message` through `base` as the admin, then take the `message` push for `device`, with the
+/// channel read again through Go afterwards so the next post starts from the same badge.
+async fn post_and_take_push(f: &Fixture, base: &str, message: &str, device: &str) -> PushRequest {
+    let proxy = proxy();
+    let (status, body) = post(
+        base,
+        &f.admin,
+        "/api/v4/posts",
+        serde_json::json!({ "channel_id": f.channel_id, "message": message }),
+    )
+    .await;
+    assert_eq!(status, 201, "{base}: {}", String::from_utf8_lossy(&body));
+    let push = proxy
+        .take(WAIT, for_device(device, "message"))
+        .await
+        .unwrap_or_else(|| panic!("{base} sent no message push"));
+    read_and_lose_focus(&f.viewer_token, &f.channel_id, device).await;
+    push
+}
+
+/// The post's own id differs between the two posts; everything else must not.
+fn without_post_id(request: &PushRequest) -> serde_json::Value {
+    let mut body = normalize_push(request.json());
+    body["post_id"] = serde_json::Value::from("<post>");
+    body
+}
+
+/// A post that @-mentions a member with a device pushes them the full-contents message.
+#[tokio::test]
+async fn a_mention_pushes_the_same_message() {
+    if !stack_enabled() {
+        return;
+    }
+    let device = "android_rn:mmrs-push-mention";
+    let f = fixture("pushmention", device).await;
+    let message = format!("@{} are you there", f.username);
+    let go = post_and_take_push(&f, GO, &message, "mmrs-push-mention").await;
+    let rs = post_and_take_push(&f, RUST, &message, "mmrs-push-mention").await;
+    assert_eq!(
+        without_post_id(&go),
+        without_post_id(&rs),
+        "the mention pushes differ"
+    );
+    assert!(
+        go.json()["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("are you there"),
+        "the full contents: {}",
+        go.json()
+    );
+
+    common::delete_channel(&client(), &f.admin, &f.channel_id).await;
+    common::delete_plain_user(&client(), &f.admin, &f.reader.id).await;
+}
+
+/// A member whose `push` notify prop is `all` is pushed for a post that does not mention them.
+#[tokio::test]
+async fn an_all_activity_member_is_pushed_without_a_mention() {
+    if !stack_enabled() {
+        return;
+    }
+    let device = "android_rn:mmrs-push-all";
+    let f = fixture("pushall", device).await;
+    let response = client()
+        .put(format!("{GO}/api/v4/users/{}/patch", f.reader.id))
+        .header("Authorization", format!("Bearer {}", f.admin))
+        .json(&serde_json::json!({ "notify_props": {
+            "push": "all", "push_status": "online", "email": "false", "desktop": "mention",
+            "channel": "true", "comments": "never", "mention_keys": "", "first_name": "false",
+        }}))
+        .send()
+        .await
+        .expect("answers");
+    assert_eq!(response.status(), 200, "patching notify props");
+
+    let go = post_and_take_push(&f, GO, "nothing personal", "mmrs-push-all").await;
+    let rs = post_and_take_push(&f, RUST, "nothing personal", "mmrs-push-all").await;
+    assert_eq!(
+        without_post_id(&go),
+        without_post_id(&rs),
+        "the all-activity pushes differ"
     );
 
     common::delete_channel(&client(), &f.admin, &f.channel_id).await;
