@@ -651,22 +651,28 @@ async fn local_get_incoming_hooks(
 async fn local_get_incoming_hook(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
-    webhooks::get_incoming_hook(state, path, local_session()).await
+    webhooks::get_incoming_hook(state, path, local_session(), audit).await
 }
 
 /// `updateIncomingHook` through `APILocal` (webhook_local.go:18).
 async fn local_update_incoming_hook(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    webhooks::update_incoming_hook(state, local_session(), path, request).await
+    webhooks::update_incoming_hook(state, local_session(), path, audit, request).await
 }
 
 /// `deleteIncomingHook` through `APILocal` (webhook_local.go:19).
-async fn local_delete_incoming_hook(state: State<AppState>, path: UrlPath<String>) -> Response {
-    webhooks::delete_incoming_hook(state, local_session(), path).await
+async fn local_delete_incoming_hook(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
+) -> Response {
+    webhooks::delete_incoming_hook(state, local_session(), path, audit).await
 }
 
 /// `getOutgoingHooks` through `APILocal` (webhook_local.go:22).
@@ -681,22 +687,28 @@ async fn local_get_outgoing_hooks(
 async fn local_get_outgoing_hook(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
-    webhooks::get_outgoing_hook(state, path, local_session()).await
+    webhooks::get_outgoing_hook(state, path, local_session(), audit).await
 }
 
 /// `updateOutgoingHook` through `APILocal` (webhook_local.go:24).
 async fn local_update_outgoing_hook(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    webhooks::update_outgoing_hook(state, local_session(), path, request).await
+    webhooks::update_outgoing_hook(state, local_session(), path, audit, request).await
 }
 
 /// `deleteOutgoingHook` through `APILocal` (webhook_local.go:25).
-async fn local_delete_outgoing_hook(state: State<AppState>, path: UrlPath<String>) -> Response {
-    webhooks::delete_outgoing_hook(state, local_session(), path).await
+async fn local_delete_outgoing_hook(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
+) -> Response {
+    webhooks::delete_outgoing_hook(state, local_session(), path, audit).await
 }
 
 /// Port of `localCreateIncomingHook` (webhook_local.go:28) — `POST /api/v4/hooks/incoming`
@@ -710,7 +722,11 @@ async fn local_delete_outgoing_hook(state: State<AppState>, path: UrlPath<String
 /// `channel_locked` and all. The channel is still fetched **before** the user, so a bad
 /// `channel_id` beats a bad `user_id`.
 #[tracing::instrument(skip_all, fields(channel_id, user_id))]
-async fn local_create_incoming_hook(State(state): State<AppState>, request: Request) -> Response {
+async fn local_create_incoming_hook(
+    State(state): State<AppState>,
+    audit: crate::audit_log::AuditRequest,
+    request: Request,
+) -> Response {
     let hook: IncomingWebhook = match decode_body(request, "incoming_webhook").await {
         Ok(hook) => hook,
         Err(err) => return err.into_response(),
@@ -730,13 +746,17 @@ async fn local_create_incoming_hook(State(state): State<AppState>, request: Requ
     if let Err(err) = state.app.get_user(&hook.user_id).await {
         return ApiError::from(err).into_response();
     }
+    audit.log(&state.app, None, "attempt").await;
 
     match state
         .app
         .create_incoming_webhook_for_channel(&hook.user_id, &channel, &hook)
         .await
     {
-        Ok(saved) => webhooks::created_json(&saved),
+        Ok(saved) => {
+            audit.log(&state.app, None, "success").await;
+            webhooks::created_json(&saved)
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -749,13 +769,19 @@ async fn local_create_incoming_hook(State(state): State<AppState>, request: Requ
 /// .CreateOutgoingWebhook` then applies `IsValid`, the channel and team checks and the
 /// trigger-uniqueness rule exactly as for the HTTP route.
 #[tracing::instrument(skip_all, fields(team_id, creator_id))]
-async fn local_create_outgoing_hook(State(state): State<AppState>, request: Request) -> Response {
+async fn local_create_outgoing_hook(
+    State(state): State<AppState>,
+    audit: crate::audit_log::AuditRequest,
+    request: Request,
+) -> Response {
     let hook: OutgoingWebhook = match decode_body(request, "outgoing_webhook").await {
         Ok(hook) => hook,
         Err(err) => return err.into_response(),
     };
     tracing::Span::current().record("team_id", &hook.team_id);
     tracing::Span::current().record("creator_id", &hook.creator_id);
+    // `"attempt"` precedes the `creator_id` check here, unlike the incoming twin.
+    audit.log(&state.app, None, "attempt").await;
 
     if hook.creator_id.is_empty() {
         return ApiError::invalid_param("creator_id").into_response();
@@ -766,8 +792,14 @@ async fn local_create_outgoing_hook(State(state): State<AppState>, request: Requ
     }
 
     match state.app.create_outgoing_webhook(&hook).await {
-        Ok(saved) => webhooks::created_json(&saved),
-        Err(err) => ApiError::from(err).into_response(),
+        Ok(saved) => {
+            audit.log(&state.app, None, "success").await;
+            webhooks::created_json(&saved)
+        }
+        Err(err) => {
+            audit.log(&state.app, None, "fail").await;
+            ApiError::from(err).into_response()
+        }
     }
 }
 
@@ -805,23 +837,29 @@ async fn local_get_command(
 async fn local_update_command(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    commands::update_command(state, path, local_session(), request).await
+    commands::update_command(state, path, local_session(), audit, request).await
 }
 
 /// `moveCommand` through `APILocal` (command_local.go:21).
 async fn local_move_command(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    commands::move_command(state, path, local_session(), request).await
+    commands::move_command(state, path, local_session(), audit, request).await
 }
 
 /// `deleteCommand` through `APILocal` (command_local.go:22).
-async fn local_delete_command(state: State<AppState>, path: UrlPath<String>) -> Response {
-    commands::delete_command(state, path, local_session()).await
+async fn local_delete_command(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
+) -> Response {
+    commands::delete_command(state, path, local_session(), audit).await
 }
 
 /// Port of `localCreateCommand` (command_local.go:25) — `POST /api/v4/commands` over the
@@ -834,20 +872,27 @@ async fn local_delete_command(state: State<AppState>, path: UrlPath<String>) -> 
 /// (`model.command.is_valid.user_id.app_error`) rather than by a 404 — and an empty one the
 /// same way, where the HTTP route would have silently filled it.
 #[tracing::instrument(skip_all, fields(team_id, trigger))]
-async fn local_create_command(State(state): State<AppState>, request: Request) -> Response {
+async fn local_create_command(
+    State(state): State<AppState>,
+    audit: crate::audit_log::AuditRequest,
+    request: Request,
+) -> Response {
     let command: Command = match decode_body(request, "command").await {
         Ok(command) => command,
         Err(err) => return err.into_response(),
     };
     tracing::Span::current().record("team_id", &command.team_id);
     tracing::Span::current().record("trigger", &command.trigger);
+    audit.log(&state.app, None, "attempt").await;
 
     match state.app.create_command(command).await {
-        Ok(created) => match commands::encoded(StatusCode::CREATED, &created, "localCreateCommand")
-        {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(created) => {
+            audit.log(&state.app, None, "success").await;
+            match commands::encoded(StatusCode::CREATED, &created, "localCreateCommand") {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }

@@ -254,6 +254,7 @@ pub async fn update_channel(
         return ApiError::invalid_param("channel_id").into_response();
     }
 
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let request = Request::from_parts(parts, axum::body::Body::from(bytes));
     match licensed(&state).await {
         Ok(true) => {
@@ -264,7 +265,16 @@ pub async fn update_channel(
         Err(err) => return err.into_response(),
     }
 
-    match serve_update_channel(&state, &session.0, &channel_id, &submitted, &hook_ctx).await {
+    match serve_update_channel(
+        &state,
+        &session.0,
+        &channel_id,
+        &submitted,
+        &hook_ctx,
+        &audit,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -276,6 +286,7 @@ async fn serve_update_channel(
     channel_id: &str,
     submitted: &Channel,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     let mut channel = state.app.get_channel(channel_id).await?;
 
@@ -387,6 +398,16 @@ async fn serve_update_channel(
             .await;
     }
 
+    // `c.LogAudit("name=" + channel.Name)` — Go's `channel` here is the **decoded body**, so the
+    // row carries the submitted name, raw, and `name=` when the body omitted it.
+    audit
+        .log(
+            &state.app,
+            Some(session),
+            &format!("name={}", submitted.name),
+        )
+        .await;
+
     //
     // **No `FillInChannelProps`.** `patchChannel` calls it and this does not, so the same channel
     // answers with `props` from one route and without from the other.
@@ -486,6 +507,7 @@ pub async fn patch_channel(
         }
     };
 
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let request = Request::from_parts(parts, axum::body::Body::from(bytes));
 
     let mut channel = match decide_patch(&state, &session.0, &channel_id, &patch).await {
@@ -523,6 +545,9 @@ pub async fn patch_channel(
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
         return ApiError::from(err).into_response();
     }
+
+    // `c.LogAudit("")`, after the props are filled and before the encode.
+    audit.log(&state.app, Some(&session.0), "").await;
 
     match channel_response("patchChannel", &channel) {
         Ok(response) => response,
@@ -844,6 +869,7 @@ pub async fn update_channel_privacy(
     };
     tracing::Span::current().record("privacy", privacy);
 
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     let request = Request::from_parts(parts, axum::body::Body::from(bytes));
     match licensed(&state).await {
         Ok(true) => {
@@ -865,10 +891,20 @@ pub async fn update_channel_privacy(
         .update_channel_privacy(&hook_ctx, &mut channel, Some(&author))
         .await
     {
-        Ok(ChannelWrite::Done) => match channel_response("updateChannelPrivacy", &channel) {
-            Ok(response) => response,
-            Err(err) => err.into_response(),
-        },
+        Ok(ChannelWrite::Done) => {
+            // `c.LogAudit("name=" + updatedChannel.Name)`.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("name={}", channel.name),
+                )
+                .await;
+            match channel_response("updateChannelPrivacy", &channel) {
+                Ok(response) => response,
+                Err(err) => err.into_response(),
+            }
+        }
         Ok(ChannelWrite::Forward(why)) => {
             tracing::Span::current().record("forwarded", true);
             tracing::debug!(reason = why, "handing the privacy change to Go");
@@ -1009,7 +1045,17 @@ pub async fn delete_channel(
     // `cleanupChannelAccessControlPolicy` runs on this path on every server; its store fallback
     // is ported in `App::delete_channel`, so a licensed installation is no longer forwarded here
     // ([D-371], closed 2026-09-13).
-    match serve_delete_channel(&state, &session.0, &channel_id, permanent, &hook_ctx).await {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    match serve_delete_channel(
+        &state,
+        &session.0,
+        &channel_id,
+        permanent,
+        &hook_ctx,
+        &audit,
+    )
+    .await
+    {
         Ok(Some(response)) => response,
         Ok(None) => {
             tracing::Span::current().record("forwarded", true);
@@ -1027,6 +1073,7 @@ async fn serve_delete_channel(
     channel_id: &str,
     permanent: bool,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<Option<Response>, ApiError> {
     let channel = state.app.get_channel(channel_id).await?;
 
@@ -1101,6 +1148,11 @@ async fn serve_delete_channel(
         .delete_channel(hook_ctx, &channel, &session.user_id)
         .await?;
 
+    // `c.LogAudit("name=" + channel.Name)` on the archive; the forwarded permanent delete is Go's.
+    audit
+        .log(&state.app, Some(session), &format!("name={}", channel.name))
+        .await;
+
     Ok(Some(status_ok()))
 }
 
@@ -1151,7 +1203,8 @@ pub async fn restore_channel(
         return err.into_response();
     }
 
-    match serve_restore_channel(&state, &session.0, &channel_id, &hook_ctx).await {
+    let audit = crate::audit_log::AuditRequest::of(&parts);
+    match serve_restore_channel(&state, &session.0, &channel_id, &hook_ctx, &audit).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -1162,6 +1215,7 @@ async fn serve_restore_channel(
     session: &Session,
     channel_id: &str,
     hook_ctx: &mm_app::plugin_hooks::HookContext,
+    audit: &crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
     let mut channel = state.app.get_channel(channel_id).await?;
 
@@ -1184,6 +1238,11 @@ async fn serve_restore_channel(
         .app
         .restore_channel(hook_ctx, &mut channel, &session.user_id)
         .await?;
+
+    // `c.LogAudit("name=" + channel.Name)`.
+    audit
+        .log(&state.app, Some(session), &format!("name={}", channel.name))
+        .await;
 
     channel_response("restoreChannel", &channel)
 }

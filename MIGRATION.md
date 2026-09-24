@@ -14833,3 +14833,11 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `patchChannel`'s `DeleteGroupConstrainedChannelMemberships` goroutine (api4/channel.go:543) | `mm_api::channel_writes::{turns_group_constraint_on, spawn_group_constrained_removal}` | DONE | 1 unit + `parity::channel_patch_writes` | Asynchronous as in Go: the `200` does not wait for the sweep, and the patching admin is swept too when no group holds them. |
 | `addChannelToDefaultCategory` (app/channel.go:4706), whole | `App::add_channel_to_default_category`, `default_category_plan` | DONE | 5 unit + `parity::channel_patch_writes` (create and patch) | The "already in a category" half was called dead on the create path and is not: the new channel is an orphan in Channels, so Go writes Channels back and publishes a second `sidebar_category_updated`. |
+
+## Tech-debt payoff: the `Audits` rows of every served `LogAudit` — D-270, D-870 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `web.Context.LogAudit`, `LogAuditWithUserId` (web/context.go:95, :103) at all 207 api4/web call sites | `mm_api::audit_log::AuditRequest`, called from the channel, view, command, webhook, OAuth, outgoing-OAuth, licence, marketplace, notice, onboarding, role, team, image, user, session, token, login and terms handlers | DONE, closes [D-270]; opens [D-1220], [D-1221] | `parity::audit_rows` (9), 3 unit; `scripts/mutations/audit-rows-d270.plan` — 14 run, 12 caught, 2 controls survived | Rows are written only on branches served here, at Go's point (entry, refusal or success); the web OAuth/SAML/magic-link handlers are forwarded whole, so theirs are Go's. |
+| The Go session-cache purge (`mm_api::go_cache`) | `PUT /users/sessions/device` as the probe session instead of an audited revoke | DONE, closes [D-870] | `audit_rows::the_session_purge_is_not_audited`, `user_permanent_delete` compares `audits` whole | |
+| `FilterNonGroupChannelMembers` on the add paths (`addChannelMember`, `localAddChannelMember`, `addUserToChannel`) | `channel_member_writes::group_filter_refusal`, `App::add_user_to_channel_row` | DONE | `channel_member_removal::an_add_to_a_group_constrained_channel_admits_only_whom_a_group_vouches_for` | A group-constrained add was forwarded; the filter's two error kinds are now a typed `NonGroupFilterError`. |

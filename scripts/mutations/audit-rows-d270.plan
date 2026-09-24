@@ -1,0 +1,21 @@
+# Mutation plan for D-270 (the Audits rows of served LogAudit calls) and the add-path group filter.
+# 2026-09-25: 14 run, 12 caught, 2 controls survived.
+#
+#   scripts/mutate-batch.sh scripts/mutations/audit-rows-d270.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+session-user-suffix-always-dropped	crates/mm-api/src/audit_log.rs	    if session_user.is_empty() {	    if true || session_user.is_empty() {	api	audit_rows
+update-channel-row-names-the-stored-channel	crates/mm-api/src/channel_writes.rs	            &format!("name={}", submitted.name),	            &format!("name={}", channel.name),	api	audit_rows
+add-member-row-loses-user	crates/mm-api/src/channel_member_writes.rs	                        &format!("name={} user_id={}", channel.name, member.user_id),	                        &format!("name={}", channel.name),	api	audit_rows
+delete-command-attempt-dropped	crates/mm-api/src/commands.rs	    // `"attempt"` precedes the fetch here, so an unknown command still leaves a row.\n    audit.log(&state.app, Some(&session.0), "attempt").await;	    // `"attempt"` precedes the fetch here, so an unknown command still leaves a row.	api	audit_rows
+command-first-rung-fail-row-dropped	crates/mm-api/src/commands.rs	        audit\n            .log(&state.app, Some(&session.0), FAIL_PERMISSIONS)\n            .await;\n        return Some(command_not_found().into_response());	        return Some(command_not_found().into_response());	api	audit_rows
+incoming-delete-fail-row-dropped	crates/mm-api/src/webhooks.rs	        // No `"attempt"` and no `"success"` on this route: only its two refusals are audited.\n        audit\n            .log(&state.app, Some(&session.0), "fail - bad permissions")\n            .await;	        // No `"attempt"` and no `"success"` on this route: only its two refusals are audited.	api	audit_rows
+license-remove-success-dropped	crates/mm-api/src/license_writes.rs	            audit.log(&state.app, audit_session, "success").await;	            let _ = audit_session;	api	audit_rows
+oauth-regen-writes-attempt	crates/mm-api/src/oauth.rs	            // Only `"success"`: this route writes no `"attempt"`.\n            audit.log(&state.app, Some(&session.0), "success").await;	            // Only `"success"`: this route writes no `"attempt"`.\n            audit.log(&state.app, Some(&session.0), "attempt").await;	api	audit_rows
+token-revoke-entry-row-dropped	crates/mm-api/src/tokens.rs	pub async fn revoke_user_access_token(\n    State(state): State<AppState>,\n    session: AuthenticatedSession,\n    request: axum::extract::Request,\n) -> Response {\n    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.\n    let audit = crate::audit_log::AuditRequest::of_request(&request);\n    audit.log(&state.app, Some(&session.0), "").await;	pub async fn revoke_user_access_token(\n    State(state): State<AppState>,\n    session: AuthenticatedSession,\n    request: axum::extract::Request,\n) -> Response {\n    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.\n    let audit = crate::audit_log::AuditRequest::of_request(&request);	api	audit_rows
+password-failed-row-dropped	crates/mm-api/src/auth_writes.rs	            audit.log(&state.app, Some(&session.0), "failed").await;	            let _ = &audit;	api	audit_rows
+group-add-filter-ignored	crates/mm-api/src/channel_member_writes.rs	        Ok(non_members) if non_members.is_empty() => None,	        Ok(_) => None,	api	channel_member_removal
+active-row-constant	crates/mm-api/src/user_updates.rs	            &format!("user_id={} active={active}", user.id),	            &format!("user_id={} active=true", user.id),	api	audit_rows
+control-session-ids-binding	crates/mm-api/src/audit_log.rs	    session.map_or(("", ""), |s| (s.user_id.as_str(), s.id.as_str()))	    session.map_or(("", ""), |session| (session.user_id.as_str(), session.id.as_str()))	api	audit_rows
+control-webhook-const-doc	crates/mm-api/src/webhooks.rs	/// The `ExtraInfo` of an unreadable channel on the incoming-hook create and update.	/// The `ExtraInfo` written when the incoming-hook create or update cannot read the channel.	api	audit_rows

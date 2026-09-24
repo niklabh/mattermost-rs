@@ -218,15 +218,17 @@ impl App {
     ///
     /// # Errors
     ///
-    /// The group-user read is `GetChannelGroupUsers`' 500 `app.user.get_profiles.app_error`. The
-    /// profile read is a bare store error in Go, with no id of its own; it is given the same one
-    /// here, and the only caller replaces either with its own 500 before a client sees it.
+    /// Go returns a bare `error`, and two of its callers tell the two kinds apart:
+    /// `addChannelMember` passes an `*AppError` through and wraps anything else as its own 400.
+    /// The group-user read is `GetChannelGroupUsers`' 500 `app.user.get_profiles.app_error`
+    /// ([`NonGroupFilterError::GroupUsers`]); the profile read is the store's own error
+    /// ([`NonGroupFilterError::Profiles`]).
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, asked = user_ids.len(), non_members))]
     pub async fn filter_non_group_channel_members(
         &self,
         user_ids: &[String],
         channel: &mm_model::channel::Channel,
-    ) -> AppResult<Vec<String>> {
+    ) -> Result<Vec<String>, NonGroupFilterError> {
         let group_users = self
             .store
             .user()
@@ -234,34 +236,38 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel group users could not be read");
-                AppError::boxed(
+                NonGroupFilterError::GroupUsers(AppError::boxed(
                     "GetChannelGroupUsers",
                     "app.user.get_profiles.app_error",
                     None,
                     String::new(),
                     500,
-                )
+                ))
             })?;
         let users = self
             .store
             .user()
             .get_profile_by_ids(user_ids, 0)
             .await
-            .map_err(|err| {
-                tracing::error!(error = %err, "profiles to filter could not be read");
-                AppError::boxed(
-                    "filterNonGroupUsers",
-                    "app.user.get_profiles.app_error",
-                    None,
-                    String::new(),
-                    500,
-                )
-            })?;
+            .map_err(NonGroupFilterError::Profiles)?;
 
         let non_members = non_group_users(&users, &group_users);
         tracing::Span::current().record("non_members", non_members.len());
         Ok(non_members)
     }
+}
+
+/// Why [`App::filter_non_group_channel_members`] failed: Go's `error` is either the
+/// `*AppError` `GetChannelGroupUsers` built or the profile store's own error, and
+/// `addChannelMember` answers the two differently.
+#[derive(Debug, thiserror::Error)]
+pub enum NonGroupFilterError {
+    /// `GetChannelGroupUsers`' 500, passed through as it is.
+    #[error("{0}")]
+    GroupUsers(Box<AppError>),
+    /// `GetProfileByIds` failed; no id of its own.
+    #[error("the profiles to filter could not be read: {0}")]
+    Profiles(#[source] StoreError),
 }
 
 /// `filterNonGroupUsers`' loop (app/user.go:2683): a user is a member when they are a **bot** or

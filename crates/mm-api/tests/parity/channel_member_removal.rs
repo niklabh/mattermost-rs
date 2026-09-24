@@ -763,3 +763,146 @@ async fn a_shared_channel_is_served_unless_the_sync_service_runs() {
     );
     common::delete_plain_user(&http, &admin, &member.id).await;
 }
+
+/// Adding to a group-constrained channel, over HTTP and over the socket: a user no linked group
+/// vouches for is 400 `api.channel.add_members.user_denied` naming them, a user a live group holds
+/// is added, and a bot is added without any group. Served here since the filter was ported; it
+/// used to forward.
+#[tokio::test]
+async fn an_add_to_a_group_constrained_channel_admits_only_whom_a_group_vouches_for() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team = create_team(&http, &admin, "rmgadd").await;
+
+    let mut results = Vec::new();
+    for (base, side) in [(GO, "go"), (RUST, "rs")] {
+        let tag = format!("rmgadd{side}");
+        let channel = create_channel_typed(&http, &admin, &team, &tag, "O").await;
+        let vouched = create_plain_user(&http, &admin, &team, &format!("{tag}v")).await;
+        let stranger = create_plain_user(&http, &admin, &team, &format!("{tag}s")).await;
+        plant_group(&pool, &tag, &channel, &[&vouched.id], false, false, false).await;
+        sqlx::query("UPDATE channels SET groupconstrained = true WHERE id = $1")
+            .bind(&channel)
+            .execute(&pool)
+            .await
+            .expect("the channel is group-constrained");
+        invalidate_go_caches(&http, &admin).await;
+
+        let path = format!("/api/v4/channels/{channel}/members");
+        let mut outcome = Vec::new();
+        for body in [
+            serde_json::json!({ "user_id": stranger.id }),
+            serde_json::json!({ "user_ids": [vouched.id, stranger.id] }),
+            serde_json::json!({ "user_id": vouched.id }),
+        ] {
+            let (status, served, body) = send(
+                &http,
+                base,
+                reqwest::Method::POST,
+                &path,
+                &admin,
+                Some(&body),
+            )
+            .await;
+            assert_eq!(served, base == RUST, "{base}: served where it was sent");
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+            let masked = if status >= 400 {
+                // The message names the refused ids, which differ per server.
+                serde_json::json!({
+                    "id": value["id"],
+                    "status_code": value["status_code"],
+                    "message": value["message"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .replace(&stranger.id, "<stranger>"),
+                })
+            } else {
+                serde_json::json!({ "user_id": value["user_id"] == vouched.id.as_str() })
+            };
+            outcome.push((status, masked));
+        }
+        let members = scalar(
+            &pool,
+            "SELECT COUNT(*) FROM channelmembers WHERE channelid = $1 AND userid = ANY(ARRAY[$2, $3])",
+            &[&channel, &vouched.id, &stranger.id],
+        )
+        .await;
+        results.push((outcome, members));
+        for user in [&vouched.id, &stranger.id] {
+            common::delete_plain_user(&http, &admin, user).await;
+        }
+    }
+    let rust = results.pop().expect("two results");
+    let go = results.pop().expect("two results");
+    assert_eq!(go.0[0].0, 400, "{go:?}");
+    assert_eq!(go.0[0].1["id"], "api.channel.add_members.user_denied");
+    assert_eq!(go.0[1].0, 400, "a mixed list is refused whole: {go:?}");
+    assert_eq!(go.0[2].0, 201, "{go:?}");
+    assert_eq!(go.1, 1, "only the vouched member was added");
+    assert_eq!(rust, go);
+
+    // Over the socket: the same filter, under `localAddChannelMember`'s own `where`.
+    if !common::local_socket::sockets_enabled() {
+        return;
+    }
+    let mut results = Vec::new();
+    for (socket, side) in [
+        (common::local_socket::go_socket(), "go"),
+        (common::local_socket::rust_socket(), "rs"),
+    ] {
+        let socket = socket.expect("checked by sockets_enabled");
+        let tag = format!("rmgaddl{side}");
+        let channel = create_channel_typed(&http, &admin, &team, &tag, "O").await;
+        let stranger = create_plain_user(&http, &admin, &team, &format!("{tag}s")).await;
+        plant_group(&pool, &tag, &channel, &[], false, false, false).await;
+        sqlx::query("UPDATE channels SET groupconstrained = true WHERE id = $1")
+            .bind(&channel)
+            .execute(&pool)
+            .await
+            .expect("the channel is group-constrained");
+        invalidate_go_caches(&http, &admin).await;
+        let body = serde_json::json!({ "user_id": stranger.id }).to_string();
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/v4/channels/{channel}/members"))
+            .header("Host", "localhost")
+            .header("Content-Type", "application/json")
+            .header("Content-Length", body.len().to_string())
+            .body(axum::body::Body::from(body))
+            .expect("request builds");
+        let response = mm_api::local::send_over_unix(&socket, request)
+            .await
+            .expect("the socket answers");
+        let status = response.status().as_u16();
+        let served = response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok())
+            == Some("rust");
+        assert_eq!(served, side == "rs", "{side}: served where it was sent");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body reads");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        results.push((
+            status,
+            value["id"].clone(),
+            value["message"]
+                .as_str()
+                .unwrap_or_default()
+                .replace(&stranger.id, "<stranger>"),
+        ));
+        common::delete_plain_user(&http, &admin, &stranger.id).await;
+    }
+    let rust = results.pop().expect("two results");
+    let go = results.pop().expect("two results");
+    assert_eq!(go.0, 400, "{go:?}");
+    assert_eq!(go.1, "api.channel.add_members.user_denied");
+    assert_eq!(rust, go);
+}

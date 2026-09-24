@@ -6875,35 +6875,13 @@ property of a backend this server does not construct. The sibling `/test`, gated
 conditional on it.
 ---
 
-## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table
+## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
 
-`Context.LogAudit` (web/context.go:95) builds a `model.Audit` and calls `Store().Audit().Save`
-**unconditionally** — no config gate, no feature flag. Five of the seven personal-access-token
-writes call it, once on entry and again on success, so a token revoked through Go leaves two
-`Audits` rows and the same revoke through `mm-api` leaves none.
-
-That is observable through the API, which is what makes this an entry rather than a note:
-`GET /api/v4/users/{user_id}/audits` is already served from Rust (`mm_api::audits`) and reads the
-same table. So the two servers disagree about a user's audit history in proportion to how much of
-their traffic each one answered.
-
-It is **not** specific to this family. Every migrated write has the gap — the channel-member
-writes, the team-member writes, the auth writes, the post writes — and it had not been written
-down. Raised here because this is the first family whose Go handlers call `LogAudit` on *every*
-route rather than on some of them, and because the reading route is already ported, so the
-divergence can be measured rather than argued about.
-
-What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only today) and a
-`Context`-equivalent hook in `mm-api` that has the session, the request path and the client IP —
-`mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
-**separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
-database, so nothing over the API can see them and they need no entry.
-
-**Started 2026-09-24:** `AuditStore::save` and `App::log_audit` exist, and `moveChannel` and
-`removeChannelMember` (REST and local socket) write their rows through them, with the address from
-`mm_api::client_ip` — the pattern for the rest.
+Every served branch of a Go handler that calls `c.LogAudit`/`c.LogAuditWithUserId` now writes the
+same rows at the same point, through `mm_api::audit_log::AuditRequest`; `parity::audit_rows`
+compares them family by family and through `GET /users/{id}/audits`.
 ---
 
 ## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment
@@ -9262,17 +9240,14 @@ under a Go host. Closes when the Rust host becomes the default (D-811).
 
 ---
 
-## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own
+## D-870 · a served deactivation leaves an `Audits` row Go never writes for its own — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-19 (permanent user delete)
 
-`mm_api::go_cache::clear_user_sessions` makes Go forget a user's sessions by having it revoke a
-probe session through `POST /users/{id}/sessions/revoke`, authenticated as
-`MM_API_GO_CACHE_USER`. Go audits that request, so every deactivation (and permanent delete)
-served here adds an `Audits` row — action `/api/v4/users/<id>/sessions/revoke`, attributed to the
-cache administrator — that the same operation through Go does not. Measured by
-`parity::user_permanent_delete`, which drops those rows as apparatus. **What is owed:** a purge
-route that Go does not audit, or deleting the row after the call.
+`mm_api::go_cache` now purges Go's session cache through `PUT /users/sessions/device` with an empty
+body, authenticated by the probe session itself, which Go does not audit;
+`parity::audit_rows::the_session_purge_is_not_audited` and the unfiltered `audits` table in
+`parity::user_permanent_delete` pin it.
 
 ## D-880 · An edit that previews a permalink forwards: `addPostPreviewProp` and the edit's `PermalinkFate`
 
@@ -10120,3 +10095,25 @@ per-user rate limit included. The web client's fallback and `/manualtest` check 
 does not: `GET /api/v4/system/ping?x=<3000 bytes>` is Go 414, here 200, and the per-user step counts
 it. **What is owed:** a layer on the API router with Go's 414 body, ahead of `ratelimit::per_user`.
 
+---
+
+## D-1220 · `updateIncomingHook` skips the owner's access check on the new channel
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+
+When the body moves an incoming hook to another channel, Go runs
+`ValidateIncomingWebhookUserChannelAccess` for the hook's **owner** (api4/webhook.go:177) and answers
+403 `api.webhook.incoming.user_membership.app_error` plus a `"fail - invalid webhook user"` audit
+row when the owner cannot read it; `mm_api::webhooks::update_incoming_hook` performs the update.
+**What is owed:** the check (split out of `App::validate_incoming_webhook_user`) and its row.
+
+---
+
+## D-1221 · `updateOutgoingHook` does not refuse a body naming another team
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+
+Go fills an empty `team_id` from the stored hook and answers 400 `api.webhook.team_mismatch.app_error`
+for a different one (api4/webhook.go:425-432); `mm_api::webhooks::update_outgoing_hook` lets the app
+layer reset the team silently and answers 200. **What is owed:** the fill and the 400, with a parity
+row (`the_id_checks_and_the_team_mismatch_agree` covers only incoming hooks).

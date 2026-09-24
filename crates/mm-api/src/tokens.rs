@@ -369,6 +369,7 @@ pub async fn create_user_access_token(
         return oauth_refusal(&session.0, &PERMISSION_CREATE_USER_ACCESS_TOKEN).into_response();
     }
 
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -389,6 +390,8 @@ pub async fn create_user_access_token(
     if access_token.description.is_empty() {
         return ApiError::invalid_param("description").into_response();
     }
+    // `c.LogAudit("")` between the description check and the three permission checks.
+    audit.log(&state.app, Some(&session.0), "").await;
 
     if !state
         .app
@@ -437,6 +440,13 @@ pub async fn create_user_access_token(
         Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("token_id", &token.id);
+    audit
+        .log(
+            &state.app,
+            Some(&session.0),
+            &format!("success - token_id={}", token.id),
+        )
+        .await;
 
     encoded_with_newline(&token, "createUserAccessToken")
 }
@@ -541,6 +551,9 @@ pub async fn revoke_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -555,7 +568,16 @@ pub async fn revoke_user_access_token(
     };
 
     match state.app.revoke_user_access_token(&token).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -570,6 +592,9 @@ pub async fn disable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -584,7 +609,16 @@ pub async fn disable_user_access_token(
     };
 
     match state.app.disable_user_access_token(&token).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -601,6 +635,9 @@ pub async fn enable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    // `c.LogAudit("")` on entry, before the OAuth refusal, so every answer carries it.
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
+    audit.log(&state.app, Some(&session.0), "").await;
     let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
@@ -615,7 +652,16 @@ pub async fn enable_user_access_token(
     };
 
     match state.app.enable_user_access_token(&token.id).await {
-        Ok(()) => status_ok(),
+        Ok(()) => {
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", token.id),
+                )
+                .await;
+            status_ok()
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }
@@ -656,6 +702,7 @@ pub async fn rotate_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
+    let audit = crate::audit_log::AuditRequest::of_request(&request);
     let bytes = match read_body(request, "rotate_user_access_token").await {
         Ok(bytes) => bytes,
         Err(err) => return err.into_response(),
@@ -673,6 +720,8 @@ pub async fn rotate_user_access_token(
     if props.token_id.is_empty() {
         return ApiError::invalid_param("token_id").into_response();
     }
+    // `c.LogAudit("")` once the body has a `token_id`; the two 400s above write nothing.
+    audit.log(&state.app, Some(&session.0), "").await;
 
     if session.0.is_oauth {
         return oauth_refusal(&session.0, &PERMISSION_CREATE_USER_ACCESS_TOKEN).into_response();
@@ -756,7 +805,17 @@ pub async fn rotate_user_access_token(
         .rotate_user_access_token(token, props.expires_at)
         .await
     {
-        Ok(rotated) => encoded_with_newline(&rotated, "rotateUserAccessToken"),
+        Ok(rotated) => {
+            // The **new** token's id.
+            audit
+                .log(
+                    &state.app,
+                    Some(&session.0),
+                    &format!("success - token_id={}", rotated.id),
+                )
+                .await;
+            encoded_with_newline(&rotated, "rotateUserAccessToken")
+        }
         Err(err) => ApiError::from(err).into_response(),
     }
 }

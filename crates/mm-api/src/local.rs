@@ -566,9 +566,10 @@ async fn local_get_role_by_name(
 async fn local_patch_role(
     state: State<AppState>,
     path: UrlPath<String>,
+    audit: crate::audit_log::AuditRequest,
     request: Request,
 ) -> Response {
-    roles::patch_role(state, path, local_session(), request).await
+    roles::patch_role(state, path, local_session(), audit, request).await
 }
 
 /// `getRolesByNames` through `APILocal` (role_local.go:12).

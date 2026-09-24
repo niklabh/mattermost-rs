@@ -462,7 +462,10 @@ pub async fn complete_onboarding(
 pub async fn get_onboarding(
     State(state): State<AppState>,
     session: AuthenticatedSession,
+    audit: crate::audit_log::AuditRequest,
 ) -> Result<Response, ApiError> {
+    // `c.LogAudit("attempt")` before the permission check, on a `GET`; no `"success"` row.
+    audit.log(&state.app, Some(&session.0), "attempt").await;
     if !state
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
