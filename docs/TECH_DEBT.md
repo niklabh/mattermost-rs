@@ -8598,23 +8598,14 @@ routes, **before any write**, and `parity::group_syncables::licensed_refusals_ma
 pins that the answer that comes back is Go's own. What is owed: replace the `Forward` arm with
 `App::session_has_permission_to_group` once it exists, and turn that test's expectation from
 "served by go" into a served 403 for the outsider and a served link for a group member.
-## D-541 · a struct placed into a websocket event's `data` as a `Value` loses Go's key order
+## D-541 · a struct placed into a websocket event's `data` as a `Value` loses Go's key order — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
 
-`custom_profile_attributes_field_created` and `_updated` carry the field under `data.field` as an
-**object** — Go's `message.Add("field", cpaField)` stores the struct and marshals it in
-declaration order, `attrs` last. Here `WebSocketEvent::add` takes a `serde_json::Value`, and a
-`serde_json::Map` is a `BTreeMap` without `preserve_order`, so the nested object goes out with
-sorted keys. Same bytes as a JSON value, different bytes on the wire; `parity::cpa_licensed`
-compares the events parsed and passes. [D-022] records the same hazard for `go_json_marshal` on a
-struct-in-map; this is the event-payload instance of it. Every event in this tree that adds a
-struct as a `Value` has it — the `property_field_created` twin does not, because Go adds that
-field as a JSON **string** and so do we.
-
-**What is owed:** a `WebSocketEvent::add_raw(key, String)` carrying pre-serialised JSON, and a
-`StringInterface` value type that can hold it — or `preserve_order` on `serde_json`, which
-changes every map in the tree and needs the full parity suite to say what else moves.
+Paid off with `WebSocketEvent::add_raw`/`add_struct` (pre-serialised text kept beside the parsed
+value), used at all seven struct-valued sites (`user_updated` ×4, the two CPA field events,
+`plugin_enabled`/`plugin_disabled`); `preserve_order` was measured and rejected — 49 failures
+across the full suite, because every Go map modelled as a `serde_json::Map` relies on the sort.
 
 ---
 

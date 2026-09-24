@@ -1,0 +1,14 @@
+# D-541: WebSocketEvent::add_raw / add_struct keep a struct's declaration order on the wire.
+# lib suite with MUTATE_PACKAGE=mm-model for the model; api suite for the two call sites.
+wire-never-uses-text	crates/mm-model/src/websocket_message.rs	                Some(raw) if raw.parsed == *value => map.serialize_entry(key, &raw.text)?,	                Some(raw) if false => map.serialize_entry(key, &raw.text)?,	lib	websocket_message::raw_data
+wire-ignores-snapshot	crates/mm-model/src/websocket_message.rs	                Some(raw) if raw.parsed == *value => map.serialize_entry(key, &raw.text)?,	                Some(raw) if true => map.serialize_entry(key, &raw.text)?,	lib	websocket_message::raw_data
+add-keeps-stale-text	crates/mm-model/src/websocket_message.rs	        self.raw_data.remove(&key);	        let _ = &key;	lib	websocket_message::raw_data
+set-data-keeps-text	crates/mm-model/src/websocket_message.rs	        copy.raw_data.clear();	        let _ = &copy;	lib	websocket_message::raw_data
+deep-copy-drops-text	crates/mm-model/src/websocket_message.rs	            raw_data: self.raw_data.clone(),	            raw_data: BTreeMap::new(),	lib	websocket_message::raw_data
+precomputed-ignores-text	crates/mm-model/src/websocket_message.rs	        let data = crate::utils::go_json_marshal(&self.wire_data())?;	        let data = crate::utils::go_json_marshal(&self.data)?;	lib	websocket_message::raw_data
+add-raw-skips-data	crates/mm-model/src/websocket_message.rs	            .insert(key.clone(), parsed.clone());	            .len();	lib	websocket_message::raw_data
+cpa-field-as-value	crates/mm-api/src/custom_profile_attributes.rs	    match message.add_struct("field", field) {	    match { message.add("field", serde_json::to_value(field).unwrap_or_default()); Ok::<(), serde_json::Error>(()) } {	api	each_write_publishes_the_same_events_on_both
+own-user-as-value	crates/mm-app/src/user.rs	        if let Err(err) = own_message.add_struct("user", &own_copy) {	        if let Err(err) = { own_message.add("user", serde_json::to_value(&own_copy).unwrap_or_default()); Ok::<(), serde_json::Error>(()) } {	api	a_custom_status_publishes_the_same_events_on_both_servers
+# Controls: must survive.
+control-rename-entry	crates/mm-model/src/websocket_message.rs	                Some(raw) if raw.parsed == *value => map.serialize_entry(key, &raw.text)?,	                Some(entry) if entry.parsed == *value => map.serialize_entry(key, &entry.text)?,	lib	websocket_message::raw_data
+control-own-user-log-text	crates/mm-app/src/user.rs	        if let Err(err) = own_message.add_struct("user", &own_copy) {\n            tracing::warn!(error = %err, "Error in encoding websocket message");	        if let Err(err) = own_message.add_struct("user", &own_copy) {\n            tracing::warn!(error = %err, "Could not encode the websocket message");	api	a_custom_status_publishes_the_same_events_on_both_servers

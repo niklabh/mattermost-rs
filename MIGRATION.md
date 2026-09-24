@@ -14770,3 +14770,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | Go | Rust | Status | Tests | Note |
 |---|---|---|---|---|
 | The live `Configurations.Value` row, projected by `scripts/dump-config-fixture.sh` | `mm_app::config` tests (`document_keys`, `coverage_gaps`) | DONE, closes [D-454] | 3 unit; 10 mutations, 8 caught, 2 controls survived | The fixture's key set is checked against `Document`'s serde field lists, not a count; 27 keys were added and none moved an existing value. |
+
+## Websocket struct payloads in Go's key order — D-541 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `(*WebSocketEvent).Add` of a struct (`message.Add("user", user)`, `"field"`, `"manifest"`) | `mm_model::websocket_message::WebSocketEvent::{add_raw, add_struct}` | DONE, closes [D-541] | 9 unit; `parity::cpa_licensed` and `parity::custom_status_writes` compare frames as bytes (`common::json_skeleton`); 11 mutations, 9 caught, 2 controls survived | A struct added as a `Value` goes out sorted; `serde_json`'s `preserve_order` must stay off (49 suite failures measured). |
