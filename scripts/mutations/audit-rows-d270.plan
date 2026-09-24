@@ -1,4 +1,5 @@
 # Mutation plan for D-270 (the Audits rows of served LogAudit calls) and the add-path group filter.
+# 2026-09-25: 14 run, 12 caught, 2 controls survived.
 #
 #   scripts/mutate-batch.sh scripts/mutations/audit-rows-d270.plan
 #
