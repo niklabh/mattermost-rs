@@ -424,10 +424,11 @@ async fn sliding_expiry_matches_go_on_every_call_site() {
     let _setting = SESSION_EXPIRY_SETTING.write().await;
     let http = client();
     let admin = go_minted_token(&http).await;
-    // A channel of its own: the shared fixture channel is written by every post suite, and a
-    // create into it was measured forwarded under the full run's concurrency.
+    // A **private** channel of its own. A create into an open channel is forwarded whenever the
+    // team has an outgoing webhook, and other suites plant those on the shared team — measured,
+    // twice, as `webpost` forwarded under the full run. A private channel never triggers one.
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
-    let channel_id = common::create_channel(&http, &admin, &team_id, "sessexp").await;
+    let channel_id = common::create_channel_typed(&http, &admin, &team_id, "sessexp", "P").await;
     let pool = pool().await;
     let mut cases = Cases {
         http: &http,
@@ -592,10 +593,11 @@ async fn nothing_slides_with_the_setting_off() {
     let _setting = SESSION_EXPIRY_SETTING.read().await;
     let http = client();
     let admin = go_minted_token(&http).await;
-    // A channel of its own: the shared fixture channel is written by every post suite, and a
-    // create into it was measured forwarded under the full run's concurrency.
+    // A **private** channel of its own. A create into an open channel is forwarded whenever the
+    // team has an outgoing webhook, and other suites plant those on the shared team — measured,
+    // twice, as `webpost` forwarded under the full run. A private channel never triggers one.
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&http, &admin).await;
-    let channel_id = common::create_channel(&http, &admin, &team_id, "sessexpoff").await;
+    let channel_id = common::create_channel_typed(&http, &admin, &team_id, "sessexpoff", "P").await;
     let pool = pool().await;
     let mut cases = Cases {
         http: &http,
