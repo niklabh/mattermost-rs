@@ -6347,9 +6347,14 @@ headers.
 
 ---
 
-## D-208 · A client that asks for gzip gets a compressed body from Go and an uncompressed one from us
+## D-208 · A client that asks for gzip gets a compressed body from Go and an uncompressed one from us — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-09 (phase 2, file backend)
+**Status** CLOSED 2026-09-24 · **Severity** divergence · **Raised** 2026-09-09 (phase 2, file backend)
+
+**Closed:** `go_global_headers` now runs every locally-served API answer through
+`gzhttp::wrap` in `gzip` mode (read at start, as Go registers it), streaming so a file download is
+never held whole, and the proxy forwards `Accept-Encoding` so a forwarded answer is Go's,
+compressed once — pinned by `gzhttp_stream` in `behaviour_web_static.json` and `parity::api_compression`.
 
 `WebserverMode` defaults to `gzip`, and Go wraps every API handler in `gzhttp.GzipHandler`. This
 port reproduces the `Vary: Accept-Encoding` that wrapper adds ([D-207]) but **not the compression
@@ -10033,3 +10038,14 @@ Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`
   the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
   `mm-app`. Once Go has written the file, both servers embed the same bytes.
 
+---
+
+## D-1110 · `HEAD` on an api4 `GET` route is Go's 404 and our `GET` headers
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+
+Go registers api4 routes with `.Methods("GET")`, and gorilla does not add `HEAD`, so
+`HEAD /api/v4/system/ping` is a 404 from Go. axum's `get()` answers `HEAD` with the `GET` handler,
+so this server returns 200 (or the handler's 401). Found by `parity::api_compression`; true of
+every served `GET`. **What is owed:** refuse `HEAD` on the api4 `GET` routes as Go's mux does
+(the web client's routes, which do take `HEAD`, excepted).

@@ -45,21 +45,21 @@ const VOLATILE: [&str; 6] = [
 ];
 
 /// What every current Firefox and Chrome send — and so what selects zstd.
-const BROWSER_ENCODINGS: &str = "gzip, deflate, br, zstd";
+pub(crate) const BROWSER_ENCODINGS: &str = "gzip, deflate, br, zstd";
 
 #[derive(Debug)]
-struct Raw {
-    status: u16,
+pub(crate) struct Raw {
+    pub(crate) status: u16,
     /// Lower-cased names, sorted, volatile ones removed.
-    headers: Vec<(String, String)>,
-    served_by: Option<String>,
-    chunked: bool,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) served_by: Option<String>,
+    pub(crate) chunked: bool,
     /// Decoded according to `Content-Encoding`.
-    body: Vec<u8>,
+    pub(crate) body: Vec<u8>,
 }
 
 impl Raw {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
             .find(|(k, _)| k == name)
@@ -71,7 +71,12 @@ fn host_port(base: &str) -> String {
     base.trim_start_matches("http://").to_owned()
 }
 
-async fn raw_request(base: &str, method: &str, target: &str, headers: &[(&str, &str)]) -> Raw {
+pub(crate) async fn raw_request(
+    base: &str,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) -> Raw {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let addr = host_port(base);
     let mut stream = tokio::net::TcpStream::connect(&addr)
@@ -185,7 +190,13 @@ async fn both(method: &str, target: &str, headers: &[(&str, &str)]) -> (Raw, Raw
     )
 }
 
-fn assert_equivalent(go: &Raw, rust: &Raw, method: &str, target: &str, headers: &[(&str, &str)]) {
+pub(crate) fn assert_equivalent(
+    go: &Raw,
+    rust: &Raw,
+    method: &str,
+    target: &str,
+    headers: &[(&str, &str)],
+) {
     let context = format!("{method} {target} {headers:?}");
     assert_eq!(go.status, rust.status, "{context}: status");
     let compressed = go.header("content-encoding").is_some();

@@ -27,9 +27,6 @@ const HOP_BY_HOP: &[&str] = &[
     // Not hop-by-hop in the RFC, but the client library sets it from the body it actually sends.
     // Carrying the inbound value risks contradicting that.
     "content-length",
-    // reqwest applies its own decompression policy; a copied value can describe a body that has
-    // already been decoded.
-    "accept-encoding",
 ];
 
 fn is_hop_by_hop(name: &str) -> bool {
@@ -37,6 +34,14 @@ fn is_hop_by_hop(name: &str) -> bool {
 }
 
 /// Copy headers, dropping the ones that belong to a single connection.
+///
+/// **`Accept-Encoding` goes through.** Go's gzip wrapper answers it, and the forwarding client
+/// decodes nothing (reqwest is built without its decompression features, and
+/// [`crate::AppState::forward_http`] turns them off besides), so Go's `Content-Encoding` and
+/// compressed bytes come back to the client exactly as Go wrote them. Dropping it — which this
+/// did until D-208 — gave every forwarded route an uncompressed answer Go would have compressed.
+/// A forwarded response is never compressed a second time: `go_global_headers` leaves anything
+/// marked `x-mmrs-served-by: go` alone.
 fn forwardable(headers: &HeaderMap) -> HeaderMap {
     let mut out = HeaderMap::with_capacity(headers.len());
     for (name, value) in headers {

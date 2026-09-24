@@ -191,6 +191,11 @@ pub struct AppState {
     /// What Go's `InitStatic` reads once — see [`web_static::StaticSetup`]. Shared by every clone
     /// of the state, filled on the first request that reaches the web client.
     pub web_setup: std::sync::Arc<tokio::sync::OnceCell<web_static::StaticSetup>>,
+    /// `ServiceSettings.WebserverMode == "gzip"` **as read at start**. Go decides whether to wrap
+    /// each API handler in `gzhttp.GzipHandler` when it registers the route (api4/handlers.go:42
+    /// and its eight siblings, web/handlers.go:553), so a mode saved later changes nothing until
+    /// a restart — and here it does not either. See [`go_global_headers`].
+    pub api_gzip: bool,
 }
 
 impl std::fmt::Debug for AppState {
@@ -208,10 +213,16 @@ impl std::fmt::Debug for AppState {
 impl AppState {
     pub fn new(app: App, go_upstream: String) -> Self {
         Self {
-            app,
             http: reqwest::Client::new(),
             forward_http: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                // The client's own `Accept-Encoding` is forwarded and Go's compressed body is
+                // passed back undecoded (`proxy::forwardable`). These are no-ops while the
+                // features are off in Cargo.toml; they keep it so if one is ever turned on.
+                .no_gzip()
+                .no_brotli()
+                .no_deflate()
+                .no_zstd()
                 .build()
                 .unwrap_or_else(|err| {
                     // Only a TLS backend that fails to initialise gets here, and then the default
@@ -221,6 +232,8 @@ impl AppState {
                 }),
             go_upstream: go_upstream.trim_end_matches('/').to_owned(),
             web_setup: std::sync::Arc::default(),
+            api_gzip: app.config().webserver_mode == "gzip",
+            app,
         }
     }
 
@@ -403,37 +416,6 @@ pub(crate) async fn refresh_config_after_write(
     response
 }
 
-/// Port of the security headers `web.Handler.ServeHTTP` sets on **every** API response
-/// (web/handlers.go:242) and of the `Vary` that `gzhttp.GzipHandler` adds around it.
-///
-/// # This was missing from every migrated route, and no test could see it
-///
-/// Go sets these before the handler runs, so they are on the wire for all 285 route+method pairs
-/// this server answers — and until the file-bytes suite, **no parity test compared response
-/// headers at all**. `fetch_both` asserts bodies. So 264 pairs shipped without
-/// `Referrer-Policy`, `Permissions-Policy` or `Expires`, byte-identical in the body and
-/// materially different on the wire. See [D-207].
-///
-/// # Only our own responses
-///
-/// Guarded on `x-mmrs-served-by: rust`, which every locally-served response carries; a proxied
-/// one carries `go`. A forwarded response already has Go's own headers, including the two
-/// per-request ones this cannot mint (`X-Request-Id`, `X-Version-Id`).
-///
-/// # Three details
-///
-/// - **`Permissions-Policy` is the empty string**, deliberately (Go's comment calls these
-///   "hardcoded sensible default values"). An empty header value is legal and is what Go sends.
-/// - **`Expires: 0` is `GET` only.** Go's guard is `if r.Method == "GET"`, so a `HEAD` on the
-///   same route has no `Expires` — which axum's GET/HEAD dispatch makes easy to get wrong, since
-///   the *handler* cannot tell the difference by then.
-/// - **`Vary: Accept-Encoding` comes from the gzip wrapper**, not from the handler, so it is
-///   present exactly when `WebserverMode` is `gzip` — the default. What this port does *not*
-///   reproduce is the compression itself: a client sending `Accept-Encoding: gzip` gets a
-///   compressed body from Go and an uncompressed one from us. See [D-208].
-///
-/// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
-/// defaults to `false` and is not modelled in [`mm_app::config::Config`].
 /// Port of the translation half of `web.Handler.ServeHTTP`: pick this request's `T` before the
 /// handler runs (handlers.go:191) so that `handleContextError` can apply it to whatever error
 /// comes back (handlers.go:431).
@@ -469,13 +451,55 @@ pub(crate) async fn translate_error_messages(
         .await
 }
 
+/// Port of the security headers `web.Handler.ServeHTTP` sets on **every** API response
+/// (web/handlers.go:242) and of the `Vary` that `gzhttp.GzipHandler` adds around it.
+///
+/// # This was missing from every migrated route, and no test could see it
+///
+/// Go sets these before the handler runs, so they are on the wire for all 285 route+method pairs
+/// this server answers — and until the file-bytes suite, **no parity test compared response
+/// headers at all**. `fetch_both` asserts bodies. So 264 pairs shipped without
+/// `Referrer-Policy`, `Permissions-Policy` or `Expires`, byte-identical in the body and
+/// materially different on the wire. See [D-207].
+///
+/// # Only our own responses
+///
+/// Guarded on `x-mmrs-served-by: rust`, which every locally-served response carries; a proxied
+/// one carries `go`. A forwarded response already has Go's own headers, including the two
+/// per-request ones this cannot mint (`X-Request-Id`, `X-Version-Id`).
+///
+/// # Three details
+///
+/// - **`Permissions-Policy` is the empty string**, deliberately (Go's comment calls these
+///   "hardcoded sensible default values"). An empty header value is legal and is what Go sends.
+/// - **`Expires: 0` is `GET` only.** Go's guard is `if r.Method == "GET"`, so a `HEAD` on the
+///   same route has no `Expires` — which axum's GET/HEAD dispatch makes easy to get wrong, since
+///   the *handler* cannot tell the difference by then.
+/// - **`Vary: Accept-Encoding` and the compression come from the gzip wrapper**, not from the
+///   handler: every `APIHandler`-family constructor (api4/handlers.go:28-219, web/handlers.go:541)
+///   wraps its `web.Handler` in `gzhttp.GzipHandler` when `WebserverMode` is `gzip` — the
+///   default — and in `uncompressed` or `disabled` mode wraps nothing, so there is neither
+///   `Vary` nor compression. The mode is the one read at start ([`AppState::api_gzip`]), as Go
+///   reads it at registration. [`gzhttp::wrap`] is the wrapper, rules and framing included.
+///   A forwarded response is left alone here: Go compressed it already, and the proxy passes the
+///   client's `Accept-Encoding` through and Go's `Content-Encoding` and bytes back, so it is
+///   compressed exactly once. See [D-208].
+///
+/// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
+/// defaults to `false` and is not modelled in [`mm_app::config::Config`].
 pub(crate) async fn go_global_headers(
     State(state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Response {
     let is_get = request.method() == axum::http::Method::GET;
-    let gzip_mode = state.app.config().webserver_mode == "gzip";
+    // Both are read before the request moves into the handler; the wrapper needs them after.
+    let method = request.method().clone();
+    let accept_encoding = request
+        .headers()
+        .get(axum::http::header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
 
     let mut response = next.run(request).await;
 
@@ -519,14 +543,21 @@ pub(crate) async fn go_global_headers(
             axum::http::HeaderValue::from_static("0"),
         );
     }
-    if gzip_mode {
-        headers.insert(
-            axum::http::header::VARY,
-            axum::http::HeaderValue::from_static("Accept-Encoding"),
-        );
+    if !state.api_gzip {
+        return gzhttp::net_http_framing(&method, response);
     }
-
-    response
+    match gzhttp::wrap(&method, accept_encoding.as_deref(), response).await {
+        Ok(response) => gzhttp::net_http_framing(&method, response),
+        Err(err) => {
+            // Only a failed read of the handler's own body (a file that errors mid-stream) or
+            // the compressor's allocation gets here, before a byte is written; Go's writer would
+            // fail the same response part-way through.
+            tracing::error!(error = %err, "compressing an API response failed");
+            axum::response::IntoResponse::into_response(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    }
 }
 
 /// The 400 `/api/v4/posts/{post_id}` answers for a segment that is not a 26-character id.
@@ -3814,6 +3845,120 @@ mod tests {
         ));
         let state = AppState::new(app, "http://localhost:8065/".to_owned());
         assert_eq!(state.go_upstream, "http://localhost:8065");
+    }
+
+    /// `go_global_headers` is Go's `gzhttp.GzipHandler` around every API handler in `gzip`
+    /// mode, nothing in any other mode, and never a second time around a forwarded answer.
+    #[tokio::test]
+    async fn the_gzip_wrapper_compresses_our_answers_once_and_only_in_gzip_mode() {
+        use axum::http::{Request, header};
+        use tower::ServiceExt;
+
+        let payload = "{\"id\":\"mmrs\"}".repeat(400);
+        let ours = payload.clone();
+        let theirs = payload.clone();
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let gzip_state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+        assert!(gzip_state.api_gzip, "gzip is the default mode");
+        let mut plain_state = gzip_state.clone();
+        plain_state.api_gzip = false;
+
+        let build = |state: AppState| {
+            let ours = ours.clone();
+            let theirs = theirs.clone();
+            Router::new()
+                .route(
+                    "/ours",
+                    get(move || async move {
+                        (
+                            [
+                                (header::CONTENT_TYPE, "application/json"),
+                                (crate::error::SERVED_BY, "rust"),
+                            ],
+                            ours,
+                        )
+                    }),
+                )
+                .route(
+                    "/theirs",
+                    get(move || async move {
+                        // What the proxy hands back: Go's own encoding and bytes, marked `go`.
+                        (
+                            [
+                                (header::CONTENT_TYPE, "application/json"),
+                                (header::CONTENT_ENCODING, "gzip"),
+                                (crate::error::SERVED_BY, "go"),
+                            ],
+                            theirs,
+                        )
+                    }),
+                )
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    go_global_headers,
+                ))
+                .with_state(state)
+        };
+        let call = |state: AppState, path: &'static str, ae: Option<&'static str>| {
+            let router = build(state);
+            async move {
+                let mut request = Request::builder().uri(path);
+                if let Some(ae) = ae {
+                    request = request.header(header::ACCEPT_ENCODING, ae);
+                }
+                let response = router
+                    .oneshot(request.body(axum::body::Body::empty()).unwrap())
+                    .await
+                    .unwrap();
+                let (parts, body) = response.into_parts();
+                let exact = axum::body::HttpBody::size_hint(&body).exact();
+                let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+                let get = |name: header::HeaderName| {
+                    parts
+                        .headers
+                        .get(name)
+                        .map(|v| v.to_str().unwrap().to_owned())
+                };
+                (
+                    get(header::CONTENT_ENCODING),
+                    get(header::VARY),
+                    bytes.to_vec(),
+                    exact,
+                )
+            }
+        };
+
+        let (encoding, vary, body, _) = call(gzip_state.clone(), "/ours", Some("gzip")).await;
+        assert_eq!(encoding.as_deref(), Some("gzip"));
+        assert_eq!(vary.as_deref(), Some("Accept-Encoding"));
+        let mut decoded = String::new();
+        std::io::Read::read_to_string(
+            &mut flate2::read::GzDecoder::new(body.as_slice()),
+            &mut decoded,
+        )
+        .unwrap();
+        assert_eq!(decoded, payload);
+
+        // Not compressed, and over 2048 bytes: chunked, as `net/http` frames it.
+        let (encoding, vary, body, exact) = call(gzip_state.clone(), "/ours", None).await;
+        assert_eq!((encoding, vary.as_deref()), (None, Some("Accept-Encoding")));
+        assert_eq!(body, payload.as_bytes());
+        assert_eq!(exact, None, "a 6000-byte answer is chunked");
+
+        // `uncompressed` (and `disabled`): Go registers the bare handler — no Vary, no encoding.
+        let (encoding, vary, body, exact) = call(plain_state, "/ours", Some("gzip")).await;
+        assert_eq!((encoding, vary), (None, None));
+        assert_eq!(body, payload.as_bytes());
+        assert_eq!(exact, None, "chunked in every mode");
+
+        // Forwarded: untouched — not re-encoded, and no `Vary` of ours on top of Go's.
+        let (encoding, vary, body, _) = call(gzip_state, "/theirs", Some("gzip")).await;
+        assert_eq!((encoding.as_deref(), vary), (Some("gzip"), None));
+        assert_eq!(body, payload.as_bytes());
     }
 
     /// Every route this server answers must still be answered after a sibling is registered.

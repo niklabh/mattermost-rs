@@ -4,8 +4,8 @@
 # Unit lines run the oracle-backed lib tests; api lines run parity::web_client on the stack.
 gz-tie-goes-to-gzip	crates/mm-api/src/gzhttp.rs	        return Encoding::Gzip;\n    }\n    Encoding::Zstd\n}	        return Encoding::Gzip;\n    }\n    Encoding::Gzip\n}	unit	gzhttp
 gz-head-compressed	crates/mm-api/src/gzhttp.rs	    if method == Method::HEAD {\n        return Encoding::None;	    if false {\n        return Encoding::None;	unit	gzhttp
-gz-min-size-off-by-one	crates/mm-api/src/gzhttp.rs	        body_len >= DEFAULT_MIN_SIZE	        body_len > DEFAULT_MIN_SIZE	unit	gzhttp
-gz-min-size-judges-body	crates/mm-api/src/gzhttp.rs	        declared >= DEFAULT_MIN_SIZE	        body_len >= DEFAULT_MIN_SIZE	unit	gzhttp
+gz-min-size-off-by-one	crates/mm-api/src/gzhttp.rs	        buffered >= DEFAULT_MIN_SIZE	        buffered > DEFAULT_MIN_SIZE	unit	gzhttp
+gz-min-size-judges-body	crates/mm-api/src/gzhttp.rs	        declared >= DEFAULT_MIN_SIZE	        buffered >= DEFAULT_MIN_SIZE	unit	gzhttp
 gz-filter-all-images	crates/mm-api/src/gzhttp.rs	"image/jp"]	"image/"]	unit	gzhttp
 gz-framing-boundary	crates/mm-api/src/gzhttp.rs	if bytes.len() <= BUFFER_BEFORE_CHUNKING_SIZE {	if bytes.len() < BUFFER_BEFORE_CHUNKING_SIZE {	unit	gzhttp
 ua-floor-exclusive	crates/mm-api/src/web_static.rs	ua.browser_version.major >= minimum	ua.browser_version.major > minimum	unit	web_static
