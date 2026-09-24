@@ -19,6 +19,9 @@ flate2.workspace = true
 mm-markdown.workspace = true
 # Byte-exact ports of Go's image codecs and the imaging libraries (BSD-3-Clause AND MIT).
 goimage.workspace = true
+# Byte-exact port of goldmark (MIT): push-notification text and notification e-mail HTML
+# (`crate::markdown_utils`).
+gogoldmark = { path = "../gogoldmark" }
 
 serde.workspace = true
 serde_json.workspace = true

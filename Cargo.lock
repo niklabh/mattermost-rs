@@ -1145,6 +1145,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gogoldmark"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "gohtml2text"
 version = "0.1.0"
 dependencies = [
@@ -1783,6 +1791,7 @@ dependencies = [
  "chrono-tz",
  "flate2",
  "gobwire",
+ "gogoldmark",
  "goimage",
  "gotemplate",
  "hmac",
