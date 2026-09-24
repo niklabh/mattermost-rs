@@ -365,22 +365,25 @@ async fn a_guest_with_another_channel_or_a_space_stays_on_the_team() {
         let second =
             create_channel_typed(&http, &admin, &fixture.team, &format!("{tag}2"), "O").await;
         add_user_to_channel(&http, &admin, &second, &fixture.guest.id).await;
-        let space = common::plant_channel_of_type(&fixture.team, "S", &format!("{tag}s"))
-            .await
-            .expect("the space channel");
-        copy_membership(&pool, &fixture.guest.id, &fixture.channel, &space).await;
         keep_only(
             &pool,
             &fixture.guest.id,
             &fixture.team,
-            &[&fixture.channel, &second, &space],
+            &[&fixture.channel, &second],
         )
         .await;
         invalidate_go_caches(&http, &admin).await;
 
-        // Another channel left: the first read keeps them.
+        // Another channel left, and **no** space yet: only the first read can keep them. With a
+        // space already planted the second read would keep them too, and dropping the first read
+        // went unseen (the `channel-read-ignored` mutation survived that fixture).
         let first = remove_guest(&http, &pool, base, &admin, &fixture, &fixture.channel).await;
-        // Only the space left: the second read keeps them.
+        // Only a space left: the second read keeps them.
+        let space = common::plant_channel_of_type(&fixture.team, "S", &format!("{tag}s"))
+            .await
+            .expect("the space channel");
+        copy_membership(&pool, &fixture.guest.id, &second, &space).await;
+        invalidate_go_caches(&http, &admin).await;
         let then = remove_guest(&http, &pool, base, &admin, &fixture, &second).await;
         results.push((first, then));
         common::delete_plain_user(&http, &admin, &fixture.guest.id).await;
