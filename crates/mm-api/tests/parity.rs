@@ -309,4 +309,6 @@ mod parity {
     pub mod api_head;
     // Appended 2026-09-24: rate limiting against its own Go server (D-430).
     pub mod ratelimit;
+    // Appended 2026-09-25: arrays, nulls and trailing bytes as bodies (D-941).
+    pub mod malformed_bodies;
 }

@@ -32,10 +32,7 @@ async fn props(request: Request) -> serde_json::Map<String, serde_json::Value> {
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
-    match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => serde_json::Map::new(),
-    }
+    mm_model::utils::string_interface_from_json(&bytes)
 }
 
 /// The `from` provider check both handlers share, with each one's third accepted provider.

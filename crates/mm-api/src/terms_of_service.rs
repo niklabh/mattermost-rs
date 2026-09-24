@@ -65,14 +65,10 @@ pub async fn get_latest_terms_of_service(
         .into_response())
 }
 
-/// Port of `model.MapFromJSON` (utils.go:507) — **every** failure is an empty map.
-///
-/// Same shape and the same one divergence as [`crate::team_member_writes`]'s copy: Go's decoder
-/// fills its map before it fails, so `{"text":"hi","n":5}` leaves `text` behind where `serde_json`
-/// yields `{}` and this route then answers `empty_text`. Recorded rather than papered over; no
-/// client sends a mixed-type props object here.
-fn map_from_json(bytes: &[u8]) -> std::collections::HashMap<String, String> {
-    serde_json::from_slice(bytes).unwrap_or_default()
+/// Port of `model.MapFromJSON` (utils.go:507) — see [`mm_model::utils::map_from_json`] for how a
+/// partial, mistyped or trailing body decodes.
+fn map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// `app.ErrorTermsOfServiceNoRowsFound` (app/config.go:24).
@@ -320,29 +316,25 @@ mod tests {
     /// `MapFromJSON` swallows every failure into an empty map, which is what makes an
     /// unparseable body reach the `empty_text` 400 rather than a parse error of its own.
     #[test]
-    fn map_from_json_swallows_everything_and_leaves_an_empty_text() {
-        for body in [
-            b"".as_slice(),
-            b"not json",
-            b"[1,2]",
-            br#"{"text":5}"#,
-            b"null",
-        ] {
+    fn map_from_json_is_gos_partial_decode() {
+        // `model.MapFromJSON`: non-objects are empty; a mistyped member is kept as `""` and does
+        // not cost its siblings (Go's partial decode), and trailing bytes are never read.
+        for raw in [&b""[..], b"null", b"[]", b"\"x\"", b"not json", b"{"] {
             assert!(
-                !map_from_json(body).contains_key("text"),
-                "{} should have left no text",
-                String::from_utf8_lossy(body)
+                map_from_json(raw).is_empty(),
+                "{}",
+                String::from_utf8_lossy(raw)
             );
         }
+        let mixed = map_from_json(br#"{"text":"hi","n":5} trailing"#);
+        assert_eq!(mixed.get("text").map(String::as_str), Some("hi"));
+        assert_eq!(mixed.get("n").map(String::as_str), Some(""));
         assert_eq!(
-            map_from_json(br#"{"text":"hello"}"#)
+            map_from_json(br#"{"text":7}"#)
                 .get("text")
                 .map(String::as_str),
-            Some("hello")
+            Some("")
         );
-        // Go's decoder fills its map before failing, so `{"text":"hi","n":5}` leaves `text`
-        // behind on Go and nothing here. See the function's doc comment.
-        assert!(map_from_json(br#"{"text":"hi","n":5}"#).is_empty());
     }
 
     /// The empty-text refusal carries **`Config.IsValid`** as its `where` — Go's own paste from

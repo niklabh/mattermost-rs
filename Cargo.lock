@@ -1850,6 +1850,7 @@ dependencies = [
  "chrono-tz",
  "encoding_rs",
  "gohtml",
+ "proc-macro2",
  "rand 0.9.5",
  "regex",
  "serde",
@@ -1857,6 +1858,7 @@ dependencies = [
  "sha1",
  "sha2",
  "subtle",
+ "syn 2.0.119",
  "thiserror",
  "unicode-normalization",
 ]

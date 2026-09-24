@@ -363,7 +363,7 @@ pub async fn query_logs(
     // Through a `Value` first: serde's derive would read a JSON *array* as a struct, field by
     // position, where Go's decoder refuses anything but an object (or `null`, which is the nil
     // pointer this handler also refuses).
-    let filter: LogFilter = match serde_json::from_slice::<Value>(&bytes) {
+    let filter: LogFilter = match mm_model::utils::decode_one_from_json::<Value>(&bytes) {
         Ok(object @ Value::Object(_)) => match serde_json::from_value::<LogFilter>(object) {
             Ok(filter) => filter,
             Err(_) => {
@@ -818,7 +818,8 @@ fn go_field<'a>(object: &'a serde_json::Map<String, Value>, name: &str) -> Optio
 /// discovers a type mismatch — so `"ConnectionURL": 5` passes the nil check as `""`, and only
 /// an absent or `null` field fails it. Keys match case-insensitively.
 fn decode_elasticsearch_body(bytes: &[u8]) -> Result<Option<ElasticsearchTestSettings>, ()> {
-    let body: Value = match serde_json::from_slice(bytes) {
+    // One value off the body, as `Decode` reads it: trailing bytes are never seen.
+    let body: Value = match mm_model::utils::decode_one_from_json(bytes) {
         Ok(Value::Null) | Err(_) => return Ok(None),
         Ok(body) => body,
     };

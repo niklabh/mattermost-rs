@@ -1515,7 +1515,9 @@ lands with the logging layer and reduces to `if let Err(e) = self.props_is_valid
 
 ## D-043 · Absent JSON keys must zero-fill, and 14 of 75 types say so
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Closed** 2026-09-24 with [D-192] — every `Deserialize` struct in the server crates now zero-fills
+an absent key, and `mm_model::serde_default_guard` parses their source so a new one cannot forget.
 
 Go's `encoding/json` leaves an absent field at its zero value; serde's derived `Deserialize`
 **errors** with `missing field` unless the field or the container carries `#[serde(default)]`. So
@@ -2570,6 +2572,10 @@ worth re-checking when the app layer lands.
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `channel_view.go`)
 **Related** [D-040] (the other crate-wide `encoding/json`-versus-serde decode difference)
+**Narrowed** 2026-09-25 — option (b) is built for request bodies: every `mm_model::utils` body
+decoder buffers a struct's members through `go_decode::Strict`, so a repeated key is last-wins
+there ([D-941]). What is left is decoding that does not go through them — store rows, config,
+`serde_json::from_value` of an already-parsed document.
 
 `encoding/json` has no duplicate-key rule: it walks the object and assigns each field as it comes,
 so the **last** occurrence wins. `serde_derive`'s generated `Deserialize` tracks which fields it
@@ -6109,7 +6115,10 @@ question about who decides that a status changed.
 
 ## D-192 · A `Deserialize` derive without `#[serde(default)]` rejects bodies Go accepts
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Closed** 2026-09-24 — `Permission` was the last struct without the attribute; three types keep
+`missing field` because Go errors too, each named with its reason in `mm_model::serde_default_guard`,
+the `syn` walk over mm-model, mm-api, mm-app, mm-store, mm-ws and mm-plugin that fails on a new one.
 
 Go's `json.Decode` into a struct leaves an **absent field at its zero value**. A serde derive
 without `#[serde(default)]` makes an absent field a *decode error*. So any type a handler decodes
@@ -9624,7 +9633,11 @@ thirteen ids. Nothing does today.
 
 ## D-941 · Body decoders: serde takes a JSON array for a struct, and refuses `null` for one
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-20 (D-092, the error translation)
+**Closed** 2026-09-25 — the array refusal (and last-wins for a repeated key) now lives inside every
+`mm_model::utils` body decoder through `go_decode::Strict`, and all ~120 body-decode sites were
+audited against their Go declaration and moved onto the value, pointer or `Unmarshal` form, held
+by `behaviour_body_decode.json` and `parity::malformed_bodies`.
 
 Two habits of `encoding/json` that serde does not share, both reachable from any route that
 decodes a body, and both invisible until error *messages* started being compared — the answers

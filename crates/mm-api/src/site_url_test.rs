@@ -40,8 +40,8 @@ pub async fn test_site_url(
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
-    // `model.MapFromJSON` — every failure is an empty map.
-    let props: StringMap = serde_json::from_slice(&bytes).unwrap_or_default();
+    // `model.MapFromJSON` (utils.go:507).
+    let props: StringMap = mm_model::utils::map_from_json(&bytes);
     let site_url = props.get("site_url").map_or("", String::as_str);
     if site_url.is_empty() {
         return ApiError::invalid_param("site_url").into_response();

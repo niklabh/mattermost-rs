@@ -266,7 +266,8 @@ fn error(
 /// The container carries `#[serde(default)]` because Go's `encoding/json` leaves an absent field
 /// at its zero value, and inbound posts are **always** partial — a client creating a post sends
 /// `channel_id` and `message` and nothing else. Without it serde rejects a document the Go
-/// server accepts. See [D-043] for the other types in the crate that still need this.
+/// server accepts. Every other `Deserialize` struct now does the same ([D-043], [D-192]), held by
+/// `serde_default_guard`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Post {

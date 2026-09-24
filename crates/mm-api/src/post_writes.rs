@@ -326,7 +326,7 @@ pub async fn update_post(
 
     // `c.SetInvalidParamWithErr("post", jsonErr)` — the wrapped error only reaches
     // `detailed_error`, which the api boundary strips unless `EnableDeveloper` is on.
-    let mut post: Post = match serde_json::from_slice(&bytes) {
+    let mut post: Post = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(post) => post,
         Err(err) => {
             tracing::debug!(error = %err, "post body did not decode");
@@ -484,7 +484,7 @@ pub async fn patch_post(
         }
     };
 
-    let patch: PostPatch = match serde_json::from_slice(&bytes) {
+    let patch: PostPatch = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(patch) => patch,
         Err(err) => {
             tracing::debug!(error = %err, "patch body did not decode");
@@ -866,7 +866,7 @@ pub async fn create_post(
     };
 
     // `c.SetInvalidParamWithErr("post", jsonErr)`.
-    let mut post: Post = match serde_json::from_slice(&bytes) {
+    let mut post: Post = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(post) => post,
         Err(err) => {
             tracing::debug!(error = %err, "post body did not decode");
@@ -1026,7 +1026,7 @@ pub async fn create_ephemeral_post(
 
     // `c.SetInvalidParamWithErr("body", jsonErr)` — the parameter name is `body` here and `post`
     // on the sibling route.
-    let ephemeral: PostEphemeral = match serde_json::from_slice(&bytes) {
+    let ephemeral: PostEphemeral = match mm_model::utils::decode_one_value_from_json(&bytes) {
         Ok(ephemeral) => ephemeral,
         Err(err) => {
             tracing::debug!(error = %err, "ephemeral post body did not decode");
@@ -1237,12 +1237,12 @@ pub async fn set_post_unread(
     // A key present with a non-boolean value stays `false` on both: Go's `saveError` leaves the
     // element at its zero value and still sets it, and `as_bool()` answers `None` here. A body
     // that is not a JSON object at all fails on both, for the same reason — Go's map is left nil.
-    let collapsed_threads_supported =
-        serde_json::from_slice::<std::collections::HashMap<String, serde_json::Value>>(&bytes)
-            .unwrap_or_default()
-            .get("collapsed_threads_supported")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+    //
+    // `model.MapBoolFromJSON` (utils.go:519) is that decode, trailing bytes ignored.
+    let collapsed_threads_supported = mm_model::utils::map_bool_from_json(&bytes)
+        .get("collapsed_threads_supported")
+        .copied()
+        .unwrap_or(false);
 
     if session.0.user_id != user_id
         && !state

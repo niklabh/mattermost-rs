@@ -27,3 +27,8 @@ sha2.workspace = true
 sha1.workspace = true
 base64.workspace = true
 unicode-normalization.workspace = true
+
+[dev-dependencies]
+# `serde_default_guard` parses the server crates' source to hold D-192 closed.
+syn = { version = "2", features = ["full"] }
+proc-macro2 = "1"

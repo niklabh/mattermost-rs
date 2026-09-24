@@ -37,7 +37,10 @@ pub const PERMISSION_SCOPE_RUN: &str = "run_scope";
 /// const position — 311 `Permission`s with no allocation and no lazy initialiser — while a value
 /// arriving over the wire still deserialises into owned storage. The JSON is identical either way;
 /// serde treats `Cow<'_, str>` exactly as it treats `String`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `#[serde(default)]` for [D-192]: an absent key is Go's `""`, which `Cow`'s `Default` is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Permission {
     /// The value stored in `Roles.Permissions` and matched by every permission check.
     #[serde(rename = "id")]

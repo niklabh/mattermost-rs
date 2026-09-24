@@ -35,20 +35,10 @@ use crate::error::ApiError;
 const MESSAGE_CUT: usize = 399;
 const MESSAGE_PREFIX: &str = "Client Logs API Endpoint Message: ";
 
-/// `json.NewDecoder(r.Body).Decode(&m)` into a `map[string]string`: every key of an object,
-/// a non-string value as `""` — the entry exists before its value fails to decode — and
-/// nothing for anything else.
-fn string_map_from_json(bytes: &[u8]) -> std::collections::BTreeMap<String, String> {
-    match serde_json::from_slice::<serde_json::Value>(bytes) {
-        Ok(serde_json::Value::Object(fields)) => fields
-            .into_iter()
-            .map(|(key, value)| match value {
-                serde_json::Value::String(value) => (key, value),
-                _ => (key, String::new()),
-            })
-            .collect(),
-        _ => std::collections::BTreeMap::new(),
-    }
+/// `json.NewDecoder(r.Body).Decode(&m)` into a `map[string]string` — `model.MapFromJSON`'s
+/// decode; see [`mm_model::utils::map_from_json`].
+fn string_map_from_json(bytes: &[u8]) -> mm_model::utils::StringMap {
+    mm_model::utils::map_from_json(bytes)
 }
 
 /// Port of `postLog` — `POST /api/v4/logs`.

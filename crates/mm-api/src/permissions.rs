@@ -10,7 +10,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::role::add_ancillary_permissions;
-use mm_model::utils::{AppError, remove_duplicate_strings_non_sort};
+use mm_model::utils::AppError;
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -96,8 +96,7 @@ pub async fn append_ancillary_permissions_post(
 /// [`None`] is "answer 400", which is what Go's `err != nil || len(permissions) < 1` collapses to.
 /// Separating them would invite a caller to distinguish two cases the wire cannot.
 fn parse_permissions(body: &[u8]) -> Option<Vec<String>> {
-    let parsed: Vec<String> = serde_json::from_slice(body).ok()?;
-    let deduped = remove_duplicate_strings_non_sort(&parsed);
+    let deduped = mm_model::utils::non_sorted_array_from_json(body).ok()?;
     (!deduped.is_empty()).then_some(deduped)
 }
 

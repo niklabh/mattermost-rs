@@ -809,7 +809,8 @@ async fn serve_sort_order(
         return Outcome::Failed(err);
     }
 
-    let new_sort_order: i64 = match decode_one_from_json(body) {
+    // `var newSortOrder int64; Decode` (view.go:313): a `null` body leaves it `0`.
+    let new_sort_order: i64 = match mm_model::utils::decode_one_value_from_json(body) {
         Ok(value) => value,
         Err(err) => {
             tracing::debug!(error = %err, "the sort-order body did not decode");
