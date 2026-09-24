@@ -90,6 +90,7 @@ pub mod properties;
 pub mod properties_writes;
 pub mod proxy;
 pub mod push_ack;
+pub mod ratelimit;
 pub mod reactions;
 pub mod recaps;
 pub mod redirect_location;
@@ -198,6 +199,9 @@ pub struct AppState {
     /// and its eight siblings, web/handlers.go:553), so a mode saved later changes nothing until
     /// a restart — and here it does not either. See [`go_global_headers`].
     pub api_gzip: bool,
+    /// The rate limiters Go builds at start when `RateLimitSettings.Enable` — see
+    /// [`ratelimit::RateLimits`]. Shared by every clone, filled on the first request.
+    pub rate_limits: std::sync::Arc<tokio::sync::OnceCell<ratelimit::RateLimits>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -235,6 +239,7 @@ impl AppState {
             go_upstream: go_upstream.trim_end_matches('/').to_owned(),
             web_setup: std::sync::Arc::default(),
             api_gzip: app.config().webserver_mode == "gzip",
+            rate_limits: std::sync::Arc::default(),
             app,
         }
     }
@@ -938,14 +943,17 @@ pub fn router(state: AppState) -> Router {
         // request is the normal case rather than a 401.
         //
         // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
-        // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
-        // [D-430]. `/login/cws` is served since 2026-09-14 — its first statement is the
+        // 2/s, each with a `route_layer` of [`ratelimit`] when `RateLimitSettings.Enable` was on
+        // at start. `/login/cws` is served since 2026-09-14 — its first statement is the
         // Cloud-licence refusal, which is all this deployment reaches — `/login/desktop_token`
         // since the same day, on the desktop-token store, and `/login/sso/code-exchange` too,
         // up to its feature flag.
         .route(
             "/api/v4/users/login",
-            partially_migrated(post(login::login)),
+            // `RateLimitedHandler(…, {PerSec: 5, MaxBurst: 10})` (api4/user.go:69).
+            partially_migrated(post(login::login).route_layer(
+                axum::middleware::from_fn_with_state(state.clone(), ratelimit::login),
+            )),
         )
         .route(
             "/api/v4/users/login/cws",
@@ -953,7 +961,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/login/desktop_token",
-            partially_migrated(post(login::login_with_desktop_token)),
+            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/user.go:71).
+            partially_migrated(post(login::login_with_desktop_token).route_layer(
+                axum::middleware::from_fn_with_state(state.clone(), ratelimit::desktop_token),
+            )),
         )
         // `BaseRoutes.Users.Handle("/login/sso/code-exchange")`: the 410 its feature flag gives
         // while off, served; on, forwarded whole.
@@ -1886,7 +1897,10 @@ pub fn router(state: AppState) -> Router {
         // one route in this file that takes no session.
         .route(
             "/api/v4/oauth/apps/register",
-            partially_migrated(post(oauth::register_oauth_client)),
+            // `RateLimitedHandler(…, {PerSec: 2, MaxBurst: 1})` (api4/oauth.go:24).
+            partially_migrated(post(oauth::register_oauth_client).route_layer(
+                axum::middleware::from_fn_with_state(state.clone(), ratelimit::oauth_register),
+            )),
         )
         .route(
             "/api/v4/oauth/apps/{app_id}",
@@ -3798,6 +3812,13 @@ pub fn router(state: AppState) -> Router {
         )
         // Every path no route claimed: the web client's handlers, which forward whatever is not
         // theirs — see `web_static::fallback`.
+        // `UserIdRateLimit` in `ServeHTTP`, over every route served here and none of the
+        // fallbacks — a `route_layer` skips both `Router::fallback` and each method router's
+        // `any` forward. Outside the three routes' own limiters, so their set comes first.
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            ratelimit::per_user,
+        ))
         .fallback(web_static::fallback)
         // Outermost, so it sees every response this server produces — including the proxy's,
         // which it then leaves alone. See [`go_global_headers`].
@@ -3829,6 +3850,12 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             client_ip::stamp_client_ip,
+        ))
+        // `Server.Start`'s `RateLimitHandler` around the whole root router — outermost of all.
+        // See [`ratelimit`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            ratelimit::global,
         ))
         .with_state(state)
 }

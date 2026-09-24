@@ -611,7 +611,7 @@ pub async fn login_cws(
 }
 
 /// Port of `loginWithDesktopToken` (api4/user.go:2300) — `POST /api/v4/users/login/desktop_token`,
-/// an `APIHandler` (no session) behind a route-level limit of 2/s that is not ported ([D-430]).
+/// an `APIHandler` (no session) behind a route-level limit of 2/s ([`crate::ratelimit`]).
 ///
 /// The desktop app's half of an SSO login: the browser finished OAuth or SAML and was handed a
 /// `DesktopTokens` row; the app posts that token here and gets a session. So the body is a

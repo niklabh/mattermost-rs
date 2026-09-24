@@ -305,4 +305,6 @@ mod parity {
     pub mod error_i18n;
     // Appended 2026-09-24: HEAD on the api4 tree, as gorilla answers it (D-1110).
     pub mod api_head;
+    // Appended 2026-09-24: rate limiting against its own Go server (D-430).
+    pub mod ratelimit;
 }

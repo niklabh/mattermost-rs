@@ -771,7 +771,7 @@ func main() {
 	rustOutGoldmark := flag.String("rust-out-goldmark", "../../crates/gogoldmark/src", "directory to write gogoldmark's generated Rust into")
 	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
 	// iterating on one oracle should not.
-	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate, goldmark, ip_address, env_override, export_link) and exit")
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate, goldmark, ip_address, env_override, export_link, ratelimit) and exit")
 	flag.Parse()
 
 	if *only == "imaging" {
@@ -845,6 +845,12 @@ func main() {
 	} else if *only == "ip_address" {
 		if err := writeIPAddressBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: ip address behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "ratelimit" {
+		if err := writeRateLimitBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: rate limit behaviour fixture: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -1326,6 +1332,11 @@ func main() {
 
 	if err := writeEnvOverrideBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: env override behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeRateLimitBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: rate limit behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 
