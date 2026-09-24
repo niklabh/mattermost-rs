@@ -11,7 +11,7 @@
 //! |---|---|
 //! | `POST   …/ack`        | refuses, 501 `<untranslated>` |
 //! | `DELETE …/ack`        | refuses, 501 `license_error.feature_unavailable` |
-//! | `POST   …/set_unread` | serves a DM/GM root or CRT-supported post; forwards the rest |
+//! | `POST   …/set_unread` | serves every arm ([D-421] closed) |
 //! | `POST   …/reminder`   | forwards — not registered at all ([D-420]) |
 //!
 //! The two `/ack` halves are the interesting pair: same path, same gate, same status, same
@@ -469,18 +469,14 @@ async fn set_unread_on_a_dm_root_matches_go_with_four_distinct_counters() {
     unwind(&client, &token, fixture).await;
 }
 
-/// The same post, two values of `collapsed_threads_supported`, two different servers answering.
+/// The same post, two values of `collapsed_threads_supported`, two different answers.
 ///
-/// A **reply** with the flag set takes the CRT arm and is served here; the same reply without it
-/// takes the arm that follows the thread and recounts its mentions, which this port refuses — so
-/// the request is forwarded, and Go answers it. Both bodies must still match Go's, and the
-/// forwarded one must carry no `x-mmrs-served-by`.
-///
-/// This is the test that proves the forward is real. Without the header assertion a forwarded
-/// route and a correctly-ported one are indistinguishable, because in both cases the bytes came
-/// from Go.
+/// A **reply** with the flag set takes the CRT arm; the same reply without it takes the arm that
+/// follows the thread and recounts its mentions. Both are served here since [D-421] closed, and
+/// both bodies must match Go's. The thread-membership side of the second arm is compared in
+/// `parity::set_unread_mentions`.
 #[tokio::test]
-async fn a_reply_is_served_with_the_crt_flag_and_forwarded_without_it() {
+async fn a_reply_is_served_with_the_crt_flag_and_without_it() {
     if !stack_enabled() {
         return;
     }
@@ -522,8 +518,8 @@ async fn a_reply_is_served_with_the_crt_flag_and_forwarded_without_it() {
     .await;
     assert_eq!(go_plain.0, 200);
     assert!(
-        !ours_plain.2,
-        "a reply without the flag needs countThreadMentions, so it must be forwarded whole"
+        ours_plain.2,
+        "a reply without the flag follows the thread and recounts it here since D-421 closed"
     );
     assert_eq!(
         (
@@ -550,10 +546,10 @@ async fn a_reply_is_served_with_the_crt_flag_and_forwarded_without_it() {
     unwind(&client, &token, fixture).await;
 }
 
-/// An open channel needs the mention parser, so `set_unread` there is forwarded — and still
-/// matches Go.
+/// An open channel is served since the mention engine landed ([D-421]) — and matches Go. The
+/// mention counting itself is compared in `parity::set_unread_mentions`.
 #[tokio::test]
-async fn set_unread_in_an_open_channel_is_forwarded() {
+async fn set_unread_in_an_open_channel_is_served() {
     if !stack_enabled() {
         return;
     }
@@ -573,10 +569,7 @@ async fn set_unread_in_an_open_channel_is_forwarded() {
     )
     .await;
     assert_eq!(go.0, 200);
-    assert!(
-        !ours.2,
-        "an open channel needs MentionKeywords and isPostMention, so it must be forwarded"
-    );
+    assert!(ours.2, "an open channel is answered here");
     assert_eq!(
         (ours.0, String::from_utf8_lossy(&ours.1).into_owned()),
         (go.0, String::from_utf8_lossy(&go.1).into_owned()),
@@ -702,7 +695,7 @@ async fn a_malformed_set_unread_body_is_not_an_error() {
 /// Every other test in this file sends the flag explicitly, and on a **root** post both values
 /// answer the same thing — so `unwrap_or(false)` and `unwrap_or(true)` are indistinguishable
 /// everywhere else in the suite. A reply with no flag at all is the one request that separates
-/// them: `false` sends it to Go, `true` answers it here with a different `mention_count_root`.
+/// them: `false` takes the thread arm and zeroes `mention_count_root`, `true` does not.
 ///
 /// The same request pins the key's spelling: read a different key and the `unwrap_or` decides,
 /// which is the same observation from the other side.
@@ -724,8 +717,17 @@ async fn an_absent_collapsed_threads_key_is_false() {
             post_both_allowing_forward(&client, &fixture.reader.token, &path, body).await;
         assert_eq!(go.0, 200);
         assert!(
-            !ours.2,
-            "an absent flag is false, so a reply must be forwarded: body {:?}",
+            ours.2,
+            "answered here: body {:?}",
+            String::from_utf8_lossy(body)
+        );
+        // Both arms are served since [D-421]; which one ran is in the body. The false arm zeroes
+        // `mention_count_root`, and this fixture makes the CRT arm's non-zero.
+        let parsed: serde_json::Value = serde_json::from_slice(&ours.1).expect("decodes");
+        assert_eq!(
+            parsed["mention_count_root"],
+            0,
+            "an absent flag is false, so the reply takes the thread arm: body {:?}",
             String::from_utf8_lossy(body)
         );
         assert_eq!(
@@ -821,17 +823,29 @@ async fn a_good_flag_survives_a_bad_value_beside_it() {
         (go.0, String::from_utf8_lossy(&go.1).into_owned()),
     );
 
-    // The mirror: a bad value does not turn an explicit `false` into a `true`, so the reply is
-    // still forwarded.
-    let (_, ours_false) = post_both_allowing_forward(
+    // The mirror: a bad value does not turn an explicit `false` into a `true`, so the reply
+    // takes the thread arm, whose `mention_count_root` is Go's `false` answer.
+    let (go_false, ours_false) = post_both_allowing_forward(
         &client,
         &fixture.reader.token,
         &ours_path,
         br#"{"collapsed_threads_supported":false,"x":"nope"}"#,
     )
     .await;
-    assert!(
-        !ours_false.2,
+    assert!(ours_false.2, "answered here");
+    assert_eq!(
+        (
+            ours_false.0,
+            String::from_utf8_lossy(&ours_false.1).into_owned()
+        ),
+        (
+            go_false.0,
+            String::from_utf8_lossy(&go_false.1).into_owned()
+        ),
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&ours_false.1).expect("decodes");
+    assert_eq!(
+        parsed["mention_count_root"], with_false["mention_count_root"],
         "a bad value beside an explicit false leaves it false"
     );
 

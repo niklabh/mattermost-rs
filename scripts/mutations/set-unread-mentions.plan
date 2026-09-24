@@ -1,0 +1,16 @@
+# D-421: set_unread's open-channel and CRT-unsupported reply arms against parity::set_unread_mentions.
+self-mention-counted	crates/mm-app/src/post_unread.rs	        if post.user_id == user.id && !from_webhook {	        if false && !from_webhook {	api	set_unread_mentions
+add-to-channel-ignored	crates/mm-app/src/post_unread.rs	        if post.post_type == POST_TYPE_ADD_TO_CHANNEL	        if false && post.post_type == POST_TYPE_ADD_TO_CHANNEL	api	set_unread_mentions
+comment-mentions-off	crates/mm-app/src/post_unread.rs	            comment_mentions == COMMENTS_NOTIFY_ROOT || comment_mentions == COMMENTS_NOTIFY_ANY;	            comment_mentions == COMMENTS_NOTIFY_ROOT && comment_mentions == COMMENTS_NOTIFY_ANY;	api	set_unread_mentions
+priorities-not-collected	crates/mm-app/src/post_unread.rs	                        mention_post_ids.push(id.clone());	                        let _ = id;	api	set_unread_mentions
+every-mention-a-root	crates/mm-app/src/post_unread.rs	                    if candidate.root_id.is_empty() {	                    if true {	api	set_unread_mentions
+thread-last-viewed-kept	crates/mm-app/src/post_unread.rs	        membership.last_viewed = post.create_at - 1;	        let _ = post.create_at;	api	set_unread_mentions
+thread-count-window-shifted	crates/mm-app/src/post_unread.rs	            .count_thread_mentions(user, &root_post, &channel.team_id, post.create_at - 1)	            .count_thread_mentions(user, &root_post, &channel.team_id, post.create_at + 1)	api	set_unread_mentions
+thread-event-never	crates/mm-app/src/post_unread.rs	        if self.is_crt_enabled_for_user(&user.id).await {	        if false {	api	set_unread_mentions
+started-thread-not-a-mention	crates/mm-app/src/post_unread.rs	    let mut mentioned = root.user_id == user.id;	    let mut mentioned = false;	api	set_unread_mentions
+later-comment-counts	crates/mm-app/src/post_unread.rs	                && other.create_at < post.create_at	                && other.create_at > post.create_at	api	set_unread_mentions
+reply-arm-sets-root-count	crates/mm-app/src/post_unread.rs	        (0, 0, false)	        (0, 0, true)	api	set_unread_mentions
+auto-follow-gate-inverted	crates/mm-app/src/post_unread.rs	        if !self.config().thread_auto_follow {	        if self.config().thread_auto_follow {	api	set_unread_mentions
+# Controls: must survive.
+control-swap-comment-conditions	crates/mm-app/src/post_unread.rs	            other.id != post.id\n                && other.root_id == post.root_id	            other.root_id == post.root_id\n                && other.id != post.id	api	set_unread_mentions
+control-empty-capacity	crates/mm-app/src/post_unread.rs	            let mut mention_post_ids: Vec<String> = Vec::new();	            let mut mention_post_ids: Vec<String> = Vec::with_capacity(0);	api	set_unread_mentions

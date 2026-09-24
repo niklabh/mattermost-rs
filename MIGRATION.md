@@ -14827,3 +14827,10 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `Channel.BannerInfo` (`*ChannelBannerInfo`) | `channel_from_row` | DONE | `…a_null_banner_is_null_and_a_json_null_banner_is_an_empty_struct` | jsonb `null` is the struct with three `null` fields. |
 | `StringArray` over text (`OutgoingWebhook`, `OAuthApp`, `Draft.FileIds`, `ScheduledPost.FileIds`), `ThreadParticipants`, `GetChannelMembersTimezones` | `webhook_store::string_array_column`, `oauth_store`, `draft_store::decode_array`, `threaded_post_from_row`, `get_channel_members_timezones` | DONE | `…string_array…`, `…draft…`, `…participant…`, the timezones half of the user test | The text `null` — what `StringArray.Value` writes for nil — decoded as a failed read. |
 
+## createPost's webhook forward and setPostUnread's mention arms — D-421 (2026-09-25)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `handleWebhookEvents` relevance loop (app/webhook.go:62) | `mm_app::post_create::outgoing_hook_fires` | DONE | 1 unit table, `parity::post_creates::only_an_outgoing_webhook_that_fires_forwards_the_post`; 8 mutations, 6 caught, 2 controls survived | A createPost is forwarded only when a hook would fire; any hook on the team used to forward every post (the `licensed_sweep` priority regression). |
+| `countMentionsFromPost`, `isPostMention`, `isCommentMention`, `markChannelAsUnreadFromPostCRTUnsupported`'s reply arm | `mm_app::post_unread` | DONE, closes [D-421] | 2 unit, `parity::set_unread_mentions` (2), `parity::post_acks` flipped to served; 14 mutations, 12 caught, 2 controls survived | `GetPostsAfterPost` reads as the **session's** user, not the marked user. |
+

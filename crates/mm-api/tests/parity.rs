@@ -314,4 +314,6 @@ mod parity {
     // Appended 2026-09-25: SQL NULL versus JSON null in every map, slice and pointer column
     // (D-331, D-158).
     pub mod null_columns;
+    // Appended 2026-09-25: set_unread's open-channel and reply arms (D-421).
+    pub mod set_unread_mentions;
 }

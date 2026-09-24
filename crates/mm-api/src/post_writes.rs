@@ -1194,12 +1194,12 @@ fn require_post_id_then_user_id(
 /// `mention_count_root` and `urgent_mention_count` depend on the flag from the body; see
 /// [`mm_app::post_unread`] for the table.
 ///
-/// # What forwards, and why it forwards before writing anything
+/// # Every arm is served
 ///
-/// [`MarkUnreadError::Unreproducible`] — an open or private channel (the mention parser), or a
-/// reply post when the client did not claim collapsed-thread support (the thread-membership
-/// recount). Both are decided from reads alone, so the forwarded request reaches Go with the
-/// database untouched and Go performs the single write itself.
+/// Open and private channels, and a reply when the client did not claim collapsed-thread
+/// support, were forwarded until the mention engine landed ([D-421], closed). The
+/// [`MarkUnreadError::Unreproducible`] arm below stays as the forward for any future refusal,
+/// which must still be decided before a write.
 #[tracing::instrument(skip_all, fields(user_id = %path_user_id, post_id = %post_id, forwarded))]
 pub async fn set_post_unread(
     State(state): State<AppState>,
@@ -1274,6 +1274,7 @@ pub async fn set_post_unread(
         .app
         .mark_channel_as_unread_from_post(
             &hook_ctx,
+            &session.0.user_id,
             &post_id,
             &user_id,
             collapsed_threads_supported,

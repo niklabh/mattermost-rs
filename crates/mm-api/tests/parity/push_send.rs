@@ -286,9 +286,8 @@ async fn an_ack_reaches_the_proxy_as_go_sends_it() {
     );
 }
 
-/// Marking a post unread sends an `update_badge` to every device of the user. In a **DM**: mm-api
-/// serves `set_unread` for direct and group channels and forwards the rest ([D-421]), so an open
-/// channel would compare Go with Go.
+/// Marking a post unread sends an `update_badge` to every device of the user. In a **DM**, which
+/// was the only arm served until [D-421] closed; every arm sends the badge from the same line.
 #[tokio::test]
 async fn marking_a_post_unread_updates_the_badge() {
     if !stack_enabled() {
