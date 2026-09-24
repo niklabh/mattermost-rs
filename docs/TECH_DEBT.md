@@ -7816,7 +7816,10 @@ forward remains, [D-551].
 
 ## D-430 · `POST /users/login` is not rate limited here; Go limits it to 5/s
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+**Closed** 2026-09-24 — `mm_api::ratelimit` ports throttled's GCRA and LRU store and all three of Go's
+limiters (the three `RateLimitedHandler` routes, `Server.Start`'s global one, `ServeHTTP`'s per-user one);
+`go_parity` against `behaviour_ratelimit.json` and `parity::ratelimit` against a rate-limited Go. Open: [D-1150], [D-1151].
 
 Go registers the route as
 `RateLimitedHandler(APIHandler(login), RateLimitSettings{PerSec: 5, MaxBurst: 10})`
@@ -10015,7 +10018,10 @@ Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`
 
 ## D-1110 · `HEAD` on an api4 `GET` route is Go's 404 and our `GET` headers
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (API compression)
+**Closed** 2026-09-24 — `mm_api::mux_guard` answers every `HEAD /api/v4/…` but the three file reads with
+the catch-all's `Handle404` on both routers (and gorilla's clean-path redirect on every method);
+`partially_migrated` no longer adds `Allow` to a forwarded method. `parity::api_head` sweeps all api4 `GET`s.
 
 Go registers api4 routes with `.Methods("GET")`, and gorilla does not add `HEAD`, so
 `HEAD /api/v4/system/ping` is a 404 from Go. axum's `get()` answers `HEAD` with the `GET` handler,
@@ -10092,3 +10098,33 @@ Each is Go's default and so right on a stock server, and wrong under the matchin
 hashes; and in `mm-store`, `CJKSearch` (always on) and `channel_store`'s `EnableDocs` cascade,
 which have no config in reach. **What is owed:** read `Config::feature_flags` at each site (the
 store ones through a parameter), with a test that moves each flag.
+
+---
+
+## D-1150 · With `RateLimitSettings.Enable`, a forwarded request is limited twice
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+
+`mm_api::ratelimit` limits every request at the front, as Go's `Server.Start` wrapper does, and a
+forwarded one then meets the Go process's own limiters: its global one keys on **this server's
+address** (the client's `X-Forwarded-For` is not trusted unless `TrustedProxyIPHeader` says so, and
+the forward leg adds none), so every client's forwarded traffic shares one budget there, and a
+per-user budget is split between two stores. The global set Go adds to a forwarded answer is replaced
+with ours (`ratelimit::prepend`); a 429 from Go's own limiter is not. A served handler that forwards a
+branch, or a path segment outside Go's mux class, is counted by the per-user limiter here and again in
+Go. **What is owed:** a forward leg Go can key on the client — an `X-Forwarded-For` it trusts, set from
+`client_ip` — or a documented operator setting, plus a parity test that forwards a burst.
+
+---
+
+## D-1151 · `UserIdRateLimit` does not run for the web client's pages
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (D-430)
+
+Go's static handler (`NewStaticHandler`, the SPA page and `/static/…`) is a `web.Handler`, so with
+`VaryByUser` a request that carries a session cookie spends the user's budget there too and can be
+refused after `IsStatic`'s headers (`X-Frame-Options`, the CSP). `ratelimit::per_user` is a
+`route_layer` and never sees `web_static::fallback`. **What is owed:** call the per-user step from
+`web_static`'s `root` and `static_files`, with the static header set on its refusal, and a parity row
+that exhausts a user's budget on `/`.
+
