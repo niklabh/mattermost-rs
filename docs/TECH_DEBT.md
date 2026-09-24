@@ -10081,7 +10081,9 @@ naming the service).
 
 ## D-1160 · `fixConfig` is not applied when this server loads the configuration
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-24 (env overlay audit, D-1141)
+**Closed** 2026-09-24 — `Config::load`, `Config::from_env` and `load_model_config` now run `fixConfig` on the
+document and again after the overlay, as `Store.Load` does; held to a 48-row Go oracle (`behaviour_fix_config.json`).
 
 `Store.Load` runs `fixConfig` (config/utils.go:135) on both the stored and the environment-applied
 config: `SiteURL` loses its trailing slashes, a local driver's `FileSettings.Directory` gains one,
