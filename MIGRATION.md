@@ -14771,3 +14771,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | `fixConfig`, `fixInvalidLocales` (config/utils.go:135, :151), both passes of `Store.Load` | `mm_app::config` (`Config::fix_config`, `fix_config_document`) | DONE, closes [D-1160] | `fix_config_go_parity` (48 rows, `behaviour_fix_config.json`, Go's own `Store.Load` after `TranslationsPreInit`) + 3 unit | Runs twice — on the document and after the overlay — and two rows only a two-pass port answers; `AvailableLocales` is fixed only in the whole-config path, since the narrow config does not hold it. |
 | Six `FeatureFlags` reads (`EnableSharedChannelsDMs`, `EnableDocs`, `MmBlocksEnabled`, `TeamMembershipAccessControl`, `EnableConcurrentReact`, `CJKSearch`) | `mm_app::channel_create`, `mention` (`App::explicit_mentions`), `post`, `post_write`, `team`; `mm_store::post_store::term_clause`; `mm_api::web_static` | DONE, closes [D-1161] | 9 unit (flag flipped each way, offline app) | Flags are settable only by environment at start, so there is no two-server parity test; with `EnableSharedChannelsDMs` on, a shared DM/GM is created with `ShareChannel`'s failure logged, and forwarded when the sync service would run. |
+
+## Body decoding: absent keys and malformed bodies — D-192, D-043 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `encoding/json`'s absent-field-is-zero, for every struct a handler or the app decodes | `#[serde(default)]` on every `Deserialize` struct; `mm_model::serde_default_guard` | DONE, closes [D-192], [D-043] | `every_deserialize_struct_zero_fills_an_absent_key` (a `syn` walk of six crates) | Exempt only where Go's own decoder also refuses a missing key: `AutocompleteArgWire`, i18n `Entry`, `EcdsaKeyRow`. An explicit `null` in a scalar field is still [D-057]'s. |

@@ -1515,7 +1515,9 @@ lands with the logging layer and reduces to `if let Err(e) = self.props_is_valid
 
 ## D-043 · Absent JSON keys must zero-fill, and 14 of 75 types say so
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Closed** 2026-09-24 with [D-192] — every `Deserialize` struct in the server crates now zero-fills
+an absent key, and `mm_model::serde_default_guard` parses their source so a new one cannot forget.
 
 Go's `encoding/json` leaves an absent field at its zero value; serde's derived `Deserialize`
 **errors** with `missing field` unless the field or the container carries `#[serde(default)]`. So
@@ -6109,7 +6111,10 @@ question about who decides that a status changed.
 
 ## D-192 · A `Deserialize` derive without `#[serde(default)]` rejects bodies Go accepts
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+**Closed** 2026-09-24 — `Permission` was the last struct without the attribute; three types keep
+`missing field` because Go errors too, each named with its reason in `mm_model::serde_default_guard`,
+the `syn` walk over mm-model, mm-api, mm-app, mm-store, mm-ws and mm-plugin that fails on a new one.
 
 Go's `json.Decode` into a struct leaves an **absent field at its zero value**. A serde derive
 without `#[serde(default)]` makes an absent field a *decode error*. So any type a handler decodes

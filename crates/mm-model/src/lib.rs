@@ -179,6 +179,8 @@ pub mod scheme;
 pub mod search_params;
 pub mod search_requests;
 pub mod security_bulletin;
+#[cfg(test)]
+mod serde_default_guard;
 pub mod serde_helpers;
 pub mod service_environment;
 pub mod session;
