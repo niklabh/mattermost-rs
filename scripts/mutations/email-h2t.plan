@@ -1,0 +1,72 @@
+# gohtml (x/net/html parser) and gohtml2text (jaytaylor/html2text).
+# Run with scripts/mutate-pkg-plan.py; the sixth field is the package, not a test filter.
+control-parse-noop	crates/gohtml/src/parse.rs	let data = mem::take(&mut self.nm(n).data);	let data = std::mem::take(&mut self.nm(n).data);	pkg	gohtml
+foster-drops-tr	crates/gohtml/src/parse.rs	                &[A::Table, A::Tbody, A::Tfoot, A::Thead, A::Tr],\n            )\n    }	                &[A::Table, A::Tbody, A::Tfoot, A::Thead],\n            )\n    }	pkg	gohtml
+foster-template-order	crates/gohtml/src/parse.rs	if table.is_none() || j > i {	if table.is_none() || j < i {	pkg	gohtml
+foster-no-text-merge	crates/gohtml/src/parse.rs	if self.n(prev).node_type == NodeType::Text && self.n(n).node_type == NodeType::Text {	if self.n(prev).node_type == NodeType::Text && false {	pkg	gohtml
+adoption-7-iterations	crates/gohtml/src/parse.rs	for _ in 0..8 {	for _ in 0..7 {	pkg	gohtml
+adoption-inner-j-2	crates/gohtml/src/parse.rs	if j > 3 && ni > -1 {	if j > 2 && ni > -1 {	pkg	gohtml
+# UNREACHED adoption-bookmark-lt: survives. A probe returning an error whenever step 14.5 removes a node
+# with ni == bookmark fired on none of 3,000,000 random formatting/block soups (release build), so
+# the < / <= distinction is not observable on anything we could generate. Kept as a comment, not a line.
+# adoption-bookmark-lt	crates/gohtml/src/parse.rs	if ni <= bookmark {	if ni < bookmark {	pkg	gohtml
+adoption-oldloc-le	crates/gohtml/src/parse.rs	if old_loc != -1 && old_loc < bookmark {	if old_loc != -1 && old_loc <= bookmark {	pkg	gohtml
+adoption-common-ancestor-foster	crates/gohtml/src/parse.rs	                &[A::Table, A::Tbody, A::Tfoot, A::Thead, A::Tr],\n            ) {\n                self.foster_parent(last_node)?;	                &[A::Table, A::Tbody, A::Tfoot, A::Thead],\n            ) {\n                self.foster_parent(last_node)?;	pkg	gohtml
+noahs-ark-4	crates/gohtml/src/parse.rs	if identical_elements >= 3 {	if identical_elements > 3 {	pkg	gohtml
+formatting-no-sort	crates/gohtml/src/parse.rs	self.nm(top).attr.sort();		pkg	gohtml
+clone-keeps-namespace	crates/gohtml/src/node.rs	m.data_atom = n.data_atom;	m.data_atom = n.data_atom;\n        m.namespace = n.namespace.clone();	pkg	gohtml
+table-text-drops-tbody	crates/gohtml/src/parse.rs	                    &[A::Table, A::Tbody, A::Tfoot, A::Thead, A::Tr],\n                ) && self.tok.data.trim_matches(WHITESPACE).is_empty()	                    &[A::Table, A::Tfoot, A::Thead, A::Tr],\n                ) && self.tok.data.trim_matches(WHITESPACE).is_empty()	pkg	gohtml
+table-quirks-inverted	crates/gohtml/src/parse.rs	if !self.quirks {	if self.quirks {	pkg	gohtml
+reset-cell-as-row	crates/gohtml/src/parse.rs	Some(A::Td | A::Th) => Some(Im::InCell),	Some(A::Td | A::Th) => Some(Im::InRow),	pkg	gohtml
+html-ip-ignores-text	crates/gohtml/src/parse.rs	if html_integration_point(n) && matches!(tt, TokenType::StartTag | TokenType::Text) {	if html_integration_point(n) && matches!(tt, TokenType::StartTag) {	pkg	gohtml
+font-breakout-no-size	crates/gohtml/src/parse.rs	.any(|a| matches!(a.key.as_str(), "color" | "face" | "size"))	.any(|a| matches!(a.key.as_str(), "color" | "face"))	pkg	gohtml
+depth-513	crates/gohtml/src/parse.rs	if self.oe.len() > 512 {	if self.oe.len() > 513 {	pkg	gohtml
+button-scope-div	crates/gohtml/src/parse.rs	if tag_atom == Some(A::Button) {	if tag_atom == Some(A::Div) {	pkg	gohtml
+implied-end-no-exceptions	crates/gohtml/src/parse.rs	if !implied || exceptions.contains(&n.data.as_str()) {	if !implied {	pkg	gohtml
+copy-attributes-dup	crates/gohtml/src/parse.rs	if !keys.contains(&t.key) {	if true {	pkg	gohtml
+textarea-keeps-lf	crates/gohtml/src/parse.rs	if self.n(n).data_atom == Some(A::Textarea) && self.n(n).first_child.is_none() {	if self.n(n).data_atom == Some(A::Textarea) && self.n(n).first_child.is_some() {	pkg	gohtml
+pre-strip-always	crates/gohtml/src/parse.rs	if is(self.n(n).data_atom, &[A::Pre, A::Listing]) && self.n(n).first_child.is_none()	if is(self.n(n).data_atom, &[A::Pre, A::Listing])	pkg	gohtml
+doctype-case-insensitive	crates/gohtml/src/parse.rs	let mut quirks = name != "html";	let mut quirks = !name.eq_ignore_ascii_case("html");	pkg	gohtml
+cdata-one-bracket	crates/gohtml/src/token.rs	b'>' if brackets >= 2 => {	b'>' if brackets >= 1 => {	pkg	gohtml
+foreign-attr-no-xml-lang	crates/gohtml/src/parse.rs	                | "xml:lang"\n	\n	pkg	gohtml
+after-head-keeps-head	crates/gohtml/src/parse.rs	                    remove_from(&mut self.oe, head);\n	\n	pkg	gohtml
+a-ignores-marker	crates/gohtml/src/parse.rs	while i > 0 && !self.is_marker(self.afe[i - 1]) {	while i > 0 {	pkg	gohtml
+list-item-special-inverted	crates/gohtml/src/parse.rs	} else if is(node.data_atom, &[A::Address, A::Div, A::P]) || !is_special_element(node)	} else if is(node.data_atom, &[A::Address, A::Div, A::P]) || is_special_element(node)	pkg	gohtml
+reconstruct-from-zero	crates/gohtml/src/parse.rs	            if i == 0 {\n                i = -1;\n                break;\n            }	            if i == 0 {\n                break;\n            }	pkg	gohtml
+select-in-select-kept	crates/gohtml/src/parse.rs	                if self.pop_until(Scope::Default, &[A::Select]) {\n                    return Ok(true);\n                }	                if self.pop_until(Scope::Default, &[A::Select]) {\n                }	pkg	gohtml
+# EQUIVALENT in-body-eof-keeps-li: inBodyIM's ErrorToken loop returns true on both paths (dead in Go too).
+equal-fold-exact	crates/gohtml/src/parse.rs	if equal_fold(&self.n(self.oe[i]).data, &self.tok.data) {	if self.n(self.oe[i]).data == self.tok.data {	pkg	gohtml
+control-h2t-noop	crates/gohtml2text/src/lib.rs	let starts_with_dot = data.starts_with('.');	let starts_with_dot = data.starts_with(".");	pkg	gohtml2text
+emit-ignores-dot	crates/gohtml2text/src/lib.rs	if !is_space(first) && !self.ends_with_space && !starts_with_dot {	if !is_space(first) && !self.ends_with_space {	pkg	gohtml2text
+emit-ignores-ends-with-space	crates/gohtml2text/src/lib.rs	if !is_space(first) && !self.ends_with_space && !starts_with_dot {	if !is_space(first) && !starts_with_dot {	pkg	gohtml2text
+# EQUIVALENT emit-dot-per-line: every line after the first follows a "\n" line, so endsWithSpace already suppresses the space.
+divider-off-by-one	crates/gohtml2text/src/lib.rs	divider_len = line_len - 1;	divider_len = line_len;	pkg	gohtml2text
+# EQUIVALENT divider-ge: when lineLen-1 == dividerLen the branch reassigns the same value.
+break-search-forward-first	crates/gohtml2text/src/lib.rs	let mut i = match runes[..=limit].iter().rposition(|&c| is_space(c)) {	let mut i = match runes[..=limit].iter().position(|&c| is_space(c)) {	pkg	gohtml2text
+break-limit-exclusive	crates/gohtml2text/src/lib.rs	runes[..=limit].iter().rposition	runes[..limit].iter().rposition	pkg	gohtml2text
+break-forward-plus-one	crates/gohtml2text/src/lib.rs	.map_or(runes.len(), |p| limit + p),	.map_or(runes.len(), |p| limit + p + 1),	pkg	gohtml2text
+break-existing-gt	crates/gohtml2text/src/lib.rs	if existing >= MAX_LINE_LEN {	if existing > MAX_LINE_LEN {	pkg	gohtml2text
+max-line-75	crates/gohtml2text/src/lib.rs	const MAX_LINE_LEN: usize = 74;	const MAX_LINE_LEN: usize = 75;	pkg	gohtml2text
+break-keeps-spaces	crates/gohtml2text/src/lib.rs	            while i < runes.len() && is_space(runes[i]) {\n                i += 1;\n            }		pkg	gohtml2text
+prefix-space-only-when-not-text-only	crates/gohtml2text/src/lib.rs	                if ctx.blockquote_level > 0 {\n                    ctx.prefix.push(' ');\n                }	                if ctx.blockquote_level > 0 && !ctx.options.text_only {\n                    ctx.prefix.push(' ');\n                }	pkg	gohtml2text
+prefix-without-space	crates/gohtml2text/src/lib.rs	ctx.prefix = ">".repeat(ctx.blockquote_level) + " ";	ctx.prefix = ">".repeat(ctx.blockquote_level);	pkg	gohtml2text
+blockquote-extra-newline-nested	crates/gohtml2text/src/lib.rs	if ctx.blockquote_level == 1 {	if ctx.blockquote_level >= 1 {	pkg	gohtml2text
+div-newline-always	crates/gohtml2text/src/lib.rs	if ctx.line_length > 0 {	if ctx.line_length > 1 {	pkg	gohtml2text
+div-flag-not-reset	crates/gohtml2text/src/lib.rs	        self.ctx().just_closed_div = false;\n	\n	pkg	gohtml2text
+anchor-img-not-only-child	crates/gohtml2text/src/lib.rs	.filter(|&c| n.last_child == Some(c) && doc[c].data_atom == Some(Atom::Img));	.filter(|&c| doc[c].data_atom == Some(Atom::Img));	pkg	gohtml2text
+mailto-no-colon	crates/gohtml2text/src/lib.rs	href.strip_prefix("mailto:")	href.strip_prefix("mailto")	pkg	gohtml2text
+link-text-always-printed	crates/gohtml2text/src/lib.rs	if !href.is_empty() && link_text != href && !options.omit_links && !options.text_only	if !href.is_empty() && !options.omit_links && !options.text_only	pkg	gohtml2text
+href-not-trimmed	crates/gohtml2text/src/lib.rs	            let href = trim_space(href);\n	\n	pkg	gohtml2text
+bold-sub-ctx-no-space	crates/gohtml2text/src/lib.rs	                    ends_with_space: true,\n	\n	pkg	gohtml2text
+heading-sub-ctx-ends-with-space	crates/gohtml2text/src/lib.rs	                self.ctxs.push(Ctx::default());\n                self.children_then(node, After::Heading(a));	                self.ctxs.push(Ctx { ends_with_space: true, ..Ctx::default() });\n                self.children_then(node, After::Heading(a));	pkg	gohtml2text
+bom-once	crates/gohtml2text/src/lib.rs	let input = clean_bom(clean_bom(input));	let input = clean_bom(input);	pkg	gohtml2text
+space-no-nbsp	crates/gohtml2text/src/lib.rs	            | '\\u{a0}'\n	\n	pkg	gohtml2text
+newlines-collapse-to-one	crates/gohtml2text/src/lib.rs	if run <= 2 {	if run <= 1 {	pkg	gohtml2text
+no-newline-space-strip	crates/gohtml2text/src/lib.rs	buf.replace("\\n ", "\\n")	buf.replace("\\n  ", "\\n")	pkg	gohtml2text
+pre-flag-sticks	crates/gohtml2text/src/lib.rs	After::Pre => self.ctx().is_pre = false,	After::Pre => {}	pkg	gohtml2text
+spacing-keeps-cr	crates/gohtml2text/src/lib.rs	if matches!(c, ' ' | '\\r' | '\\n' | '\\t') {	if matches!(c, ' ' | '\\n' | '\\t') {	pkg	gohtml2text
+text-only-heading-no-dot	crates/gohtml2text/src/lib.rs	ctx.emit(&(s + ".\\n\\n"));	ctx.emit(&(s + "\\n\\n"));	pkg	gohtml2text
+table-not-paragraph	crates/gohtml2text/src/lib.rs	Some(Atom::P | Atom::Ul | Atom::Table) => {	Some(Atom::P | Atom::Ul) => {	pkg	gohtml2text
+li-bullet-in-text-only	crates/gohtml2text/src/lib.rs	                if !ctx.options.text_only {\n                    ctx.emit("* ");	                {\n                    ctx.emit("* ");	pkg	gohtml2text
+line-length-not-reset	crates/gohtml2text/src/lib.rs	                    self.line_length = 0;\n	\n	pkg	gohtml2text
+attr-val-last	crates/gohtml2text/src/lib.rs	.find(|a| a.key == name)	.rfind(|a| a.key == name)	pkg	gohtml2text

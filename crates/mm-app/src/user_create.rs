@@ -21,14 +21,12 @@
 //! from the token branch, so `guest = true` is not modelled at all rather than modelled and left
 //! untested.
 //!
-//! # The e-mail that is not sent
+//! # The welcome e-mail
 //!
-//! Every one of Go's four branches ends with `SendWelcomeEmail`, whose failure is a
-//! `Logger.Warn` and nothing else — it cannot change the response. There is no e-mail service in
-//! this port ([D-238]), so the served branches skip it and log. That is a real divergence on a
-//! server with SMTP configured and it is recorded as [D-450]; it is *not* a reason to forward,
-//! because the send happens strictly after the user row is committed and a forward there would
-//! create the account twice.
+//! Every one of Go's four branches ends with `SendWelcomeEmail` ([`crate::email`]), whose failure
+//! is a `Logger.Warn` and nothing else — it cannot change the response. It is **not** a
+//! goroutine: the request waits for the SMTP round trip, and on a server requiring verification
+//! the verify token is minted inside it, after the user row is committed.
 
 use mm_model::preference::{
     PREFERENCE_CATEGORY_RECOMMENDED_NEXT_STEPS, PREFERENCE_CATEGORY_SYSTEM_NOTICE,
@@ -121,7 +119,12 @@ impl App {
     ///
     /// The order matters: a closed server with sign-ups disabled answers 501, not 403.
     #[tracing::instrument(skip_all, fields(first_account))]
-    pub async fn create_user_from_signup(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
+    pub async fn create_user_from_signup(
+        &self,
+        ctx: &HookContext,
+        user: &User,
+        redirect: &str,
+    ) -> AppResult<User> {
         self.is_user_signup_allowed()?;
 
         let first = self.is_first_user_account().await;
@@ -140,8 +143,12 @@ impl App {
         user.email_verified = false;
 
         let ruser = self.create_user(ctx, &user).await?;
-        // `SendWelcomeEmail` — see the module docs and [D-450].
-        tracing::info!(user_id = %ruser.id, "welcome e-mail not sent: no e-mail service");
+        self.welcome(
+            &ruser,
+            redirect,
+            "Failed to send welcome email on create user from signup",
+        )
+        .await;
         Ok(ruser)
     }
 
@@ -153,10 +160,39 @@ impl App {
     /// and `SanitizeInput(true)` is what let the flag through. The permission that reaches this
     /// function is the whole authorisation.
     #[tracing::instrument(skip_all)]
-    pub async fn create_user_as_admin(&self, ctx: &HookContext, user: &User) -> AppResult<User> {
+    pub async fn create_user_as_admin(
+        &self,
+        ctx: &HookContext,
+        user: &User,
+        redirect: &str,
+    ) -> AppResult<User> {
         let ruser = self.create_user(ctx, user).await?;
-        tracing::info!(user_id = %ruser.id, "welcome e-mail not sent: no e-mail service");
+        self.welcome(
+            &ruser,
+            redirect,
+            "Failed to send welcome email to the new user, created by system admin",
+        )
+        .await;
         Ok(ruser)
+    }
+
+    /// The `SendWelcomeEmail` call every create path ends with, its failure a warning.
+    async fn welcome(&self, ruser: &User, redirect: &str, warning: &str) {
+        let site_url = self.live_site_url().await.unwrap_or_default();
+        if let Err(err) = self
+            .send_welcome_email(
+                &ruser.id,
+                &ruser.email,
+                ruser.email_verified,
+                ruser.disable_welcome_email,
+                &ruser.locale,
+                &site_url,
+                redirect,
+            )
+            .await
+        {
+            tracing::warn!(error = %err, "{warning}");
+        }
     }
 
     /// Port of `App.CreateUser` (app/user.go:324) → `createUserOrGuest(rctx, user, false)`

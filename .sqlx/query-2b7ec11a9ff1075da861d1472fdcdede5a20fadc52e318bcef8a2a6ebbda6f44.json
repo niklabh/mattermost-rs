@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT gc.groupid, gc.channelid, gc.autoadd, gc.schemeadmin, gc.createat,\n                       gc.updateat, gc.deleteat,\n                       COALESCE(c.displayname, '') AS \"channeldisplayname!\",\n                       COALESCE(t.displayname, '') AS \"teamdisplayname!\",\n                       COALESCE(c.type::text, '')  AS \"channeltype!\",\n                       COALESCE(t.type::text, '')  AS \"teamtype!\",\n                       t.id                        AS \"teamid!\"\n                  FROM groupchannels gc\n                  JOIN channels c ON c.id = gc.channelid\n                  JOIN teams t ON t.id = c.teamid\n                 WHERE gc.groupid = $1 AND gc.deleteat = 0\n                ",
+  "query": "\n                SELECT gc.groupid, gc.channelid, gc.autoadd, gc.schemeadmin, gc.createat,\n                       gc.updateat, gc.deleteat,\n                       COALESCE(c.displayname, '') AS \"channeldisplayname!\",\n                       COALESCE(t.displayname, '') AS \"teamdisplayname!\",\n                       COALESCE(c.type::text, '')  AS \"channeltype!\",\n                       COALESCE(t.type::text, '')  AS \"teamtype!\"\n                  FROM groupchannels gc\n                  JOIN channels c ON c.id = gc.channelid\n                  JOIN teams t ON t.id = c.teamid\n                 WHERE gc.groupid = $1 AND gc.deleteat = 0\n                ",
   "describe": {
     "columns": [
       {
@@ -57,11 +57,6 @@
         "ordinal": 10,
         "name": "teamtype!",
         "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "teamid!",
-        "type_info": "Varchar"
       }
     ],
     "parameters": {
@@ -80,9 +75,8 @@
       null,
       null,
       null,
-      null,
-      false
+      null
     ]
   },
-  "hash": "3f3fb802827587a4b803dce519937aba8681bd6ac424b1ebbf1bf152e1570a1b"
+  "hash": "2b7ec11a9ff1075da861d1472fdcdede5a20fadc52e318bcef8a2a6ebbda6f44"
 }

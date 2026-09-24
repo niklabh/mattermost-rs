@@ -84,6 +84,7 @@ mod parity {
     pub mod desktop_login;
     pub mod draft_and_preference_writes;
     pub mod drafts;
+    pub mod email_send;
     pub mod email_test;
     pub mod emoji_autocomplete;
     pub mod emoji_by_names;
@@ -148,6 +149,7 @@ mod parity {
     /// Appended out of alphabetical order; see `config_reads`.
     pub mod properties;
     pub mod push_ack;
+    pub mod push_send;
     pub mod reaction_writes;
     pub mod recaps;
     pub mod recommended_channels;

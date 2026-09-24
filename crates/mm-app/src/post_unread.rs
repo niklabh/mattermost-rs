@@ -41,12 +41,10 @@
 //! Every one of those decisions is taken from rows read, never written, so a forwarded request
 //! reaches Go with the database exactly as Go expects to find it.
 //!
-//! # `UpdateMobileAppBadge` is not ported
+//! # `UpdateMobileAppBadge`
 //!
-//! Both arms end with it. It queues a `notificationTypeUpdateBadge` on
-//! `Srv().PushNotificationsHub` (notification_push.go:436); there is no hub here and no device to
-//! badge, and nothing about it reaches the HTTP response or the websocket. Same posture as the
-//! push clear in [`crate::channel_view`] ([D-215]).
+//! Both arms end with it: an `update_badge` push to every device of the user
+//! ([`crate::push`]), which nothing in the response waits for.
 
 use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP};
 use mm_model::channel_member::ChannelUnreadAt;
@@ -149,7 +147,7 @@ impl App {
 
         self.send_web_socket_post_unread_event(&channel_unread, post_id)
             .await;
-        // `a.UpdateMobileAppBadge(userID)` — see the module docs.
+        self.update_mobile_app_badge(user_id);
 
         Ok(channel_unread)
     }

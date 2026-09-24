@@ -8,10 +8,9 @@
 //!
 //! Everything a **database or a websocket** can see: the mention pass over the channel's
 //! members, the thread auto-follow writes and the participants update, `IncrementMentionCount`,
-//! the `posted` event with its three broadcast hooks, and the per-follower `thread_updated`
-//! events. Email and push are external and gated on settings this server does not act on
-//! ([D-402]); the mobile all-activity list is computed by Go only to feed push, so it is not
-//! built here.
+//! the `posted` event with its three broadcast hooks, the per-follower `thread_updated`
+//! events, the push notifications ([`crate::push`]) and the notification e-mail
+//! ([`crate::notification_email`]).
 //!
 //! Three arms are **forwarded before the row is written** rather than reproduced, because each
 //! ends in text this server cannot mint — see [`App::notification_forward_reason`]:
@@ -402,6 +401,177 @@ impl App {
         Ok(reason)
     }
 
+    /// The e-mail half of `SendNotifications` (notification.go:411-485): the mentioned and the
+    /// collapsed-threads e-mail followers, each once and in that order; an unverified address is
+    /// skipped while verification is required; the rest go through `userAllowsEmail`. Read from
+    /// the **live** `SendEmailNotifications`, which this stack runs with on.
+    async fn send_post_emails(
+        &self,
+        notification: &PostNotification<'_>,
+        team: &Team,
+        mentioned_users_list: &[String],
+        notifications_for_crt: &CrtNotifiers,
+        member_props: &BTreeMap<String, StringMap>,
+    ) {
+        let Ok(config) = crate::config::load_model_config(self.store().config()).await else {
+            return;
+        };
+        if !config
+            .email_settings
+            .send_email_notifications
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let require_verification = config
+            .email_settings
+            .require_email_verification
+            .unwrap_or(false);
+        let mut recipients: Vec<&String> = Vec::new();
+        for id in mentioned_users_list
+            .iter()
+            .chain(&notifications_for_crt.email)
+        {
+            if !recipients.contains(&id) {
+                recipients.push(id);
+            }
+        }
+        for id in recipients {
+            let Some(profile) = notification.profile_map.get(id) else {
+                continue;
+            };
+            if require_verification && !profile.email_verified {
+                continue;
+            }
+            if !self
+                .user_allows_email(profile, member_props.get(id), notification.post)
+                .await
+            {
+                continue;
+            }
+            let image = match self.get_profile_image(&notification.sender.id).await {
+                Ok(image) => Some(image),
+                Err(err) => {
+                    tracing::warn!(user_id = %notification.sender.id, error = ?err, "Unable to get the sender user profile image.");
+                    None
+                }
+            };
+            if let Err(err) =
+                Box::pin(self.send_notification_email(notification, profile, team, image)).await
+            {
+                tracing::warn!(error = %err, "Unable to send notification email.");
+            }
+        }
+    }
+
+    /// The push half of `SendNotifications` (notification.go:541-705): three lists, each person
+    /// once per list — the mentioned (unless they will get the collapsed-threads push instead),
+    /// the members set to push on **all** activity who were not mentioned, and the thread
+    /// followers under collapsed threads, whose only gate is their status.
+    ///
+    /// A status that will not read is an **offline** status, never an error.
+    async fn send_post_pushes(
+        &self,
+        notification: &PostNotification<'_>,
+        mentions: &MentionResults,
+        mentioned_users_list: &[String],
+        all_activity_push_user_ids: &[String],
+        notifications_for_crt: &CrtNotifiers,
+        member_props: &BTreeMap<String, StringMap>,
+    ) {
+        let post = notification.post;
+        let is_gm = notification.channel.channel_type == CHANNEL_TYPE_GROUP;
+        let status_of = |id: String| async move {
+            self.get_status(&id).await.unwrap_or_else(|_| Status {
+                user_id: id,
+                status: mm_model::status::STATUS_OFFLINE.to_owned(),
+                ..Status::default()
+            })
+        };
+
+        for id in mentioned_users_list {
+            let Some(profile) = notification.profile_map.get(id) else {
+                continue;
+            };
+            if notifications_for_crt.push.contains(id) {
+                continue;
+            }
+            let status = status_of(id.clone()).await;
+            let mention_type = mentions
+                .mentions
+                .get(id)
+                .copied()
+                .unwrap_or(MentionType::NoMention);
+            let explicitly = mention_type > MentionType::GmMention;
+            if App::should_send_push_notification(
+                profile,
+                member_props.get(id),
+                explicitly,
+                &status,
+                post,
+                is_gm,
+            ) {
+                let reply_to_thread_type = match mention_type {
+                    MentionType::ThreadMention => COMMENTS_NOTIFY_ANY,
+                    MentionType::CommentMention => COMMENTS_NOTIFY_ROOT,
+                    _ => "",
+                };
+                self.send_push_notification(
+                    notification,
+                    profile,
+                    matches!(
+                        mention_type,
+                        MentionType::KeywordMention
+                            | MentionType::ChannelMention
+                            | MentionType::DmMention
+                    ),
+                    mention_type == MentionType::ChannelMention,
+                    reply_to_thread_type,
+                )
+                .await;
+            }
+        }
+
+        for id in all_activity_push_user_ids {
+            let Some(profile) = notification.profile_map.get(id) else {
+                continue;
+            };
+            if notifications_for_crt.push.contains(id) || mentions.mentions.contains_key(id) {
+                continue;
+            }
+            let status = status_of(id.clone()).await;
+            if App::should_send_push_notification(
+                profile,
+                member_props.get(id),
+                false,
+                &status,
+                post,
+                is_gm,
+            ) {
+                self.send_push_notification(notification, profile, false, false, "")
+                    .await;
+            }
+        }
+
+        for id in &notifications_for_crt.push {
+            let Some(profile) = notification.profile_map.get(id) else {
+                continue;
+            };
+            let status = status_of(id.clone()).await;
+            if crate::push::does_status_allow_push_notification(
+                profile.notify_props.as_ref(),
+                &status,
+                &post.channel_id,
+                true,
+            )
+            .is_none()
+            {
+                self.send_push_notification(notification, profile, false, false, "crt")
+                    .await;
+            }
+        }
+    }
+
     /// Port of `App.SendNotifications` (app/notification.go:53). See the module docs for what is
     /// and is not here.
     ///
@@ -479,6 +649,7 @@ impl App {
         let mut mentions = MentionResults::default();
         let mut new_participants: BTreeSet<String> = BTreeSet::new();
         let mut participant_memberships: BTreeMap<String, ThreadMembership> = BTreeMap::new();
+        let mut all_activity_push_user_ids: Vec<String> = Vec::new();
 
         if !suppress_notifications {
             let (found, keywords) = self
@@ -503,7 +674,24 @@ impl App {
                 if !mentions.other_potential_mentions.is_empty() {
                     tracing::warn!(post_id = %post.id, potential = ?mentions.other_potential_mentions, "an out-of-channel mention reached the fan-out; the pre-write gate should have forwarded it");
                 }
-                // `allActivityPushUserIds` feeds push only — [D-402].
+                // "find which users in the channel are set up to always receive mobile
+                // notifications; excludes CRT users since those should be added in
+                // notificationsForCRT".
+                for (id, profile) in &profile_map {
+                    let user_all = user_prop(profile.notify_props.as_ref(), PUSH_NOTIFY_PROP)
+                        == USER_NOTIFY_ALL;
+                    let channel_all = member_props
+                        .get(id)
+                        .and_then(|props| props.get(PUSH_NOTIFY_PROP))
+                        .map(String::as_str)
+                        == Some(CHANNEL_NOTIFY_ALL);
+                    if (user_all || channel_all)
+                        && (&post.user_id != id || prop_is_true(post, POST_PROPS_FROM_WEBHOOK))
+                        && !(!post.root_id.is_empty() && self.is_crt_enabled_for_user(id).await)
+                    {
+                        all_activity_push_user_ids.push(id.clone());
+                    }
+                }
             }
 
             let thread_auto_follow = self.config().thread_auto_follow;
@@ -671,7 +859,31 @@ impl App {
             sender,
         };
 
-        // Email and push — [D-402]. The over-limit channel-wide notice is a forward condition.
+        // The over-limit channel-wide notice is a forward condition.
+        if !suppress_notifications {
+            // Boxed: the e-mail pass is a deep async state machine, and inlined into this one it
+            // overflowed a tokio worker's stack in a debug build (measured 2026-09-24).
+            Box::pin(self.send_post_emails(
+                &notification,
+                team,
+                &mentioned_users_list,
+                &notifications_for_crt,
+                &member_props,
+            ))
+            .await;
+        }
+
+        if !suppress_notifications && self.can_send_push_notifications().await {
+            Box::pin(self.send_post_pushes(
+                &notification,
+                &mentions,
+                &mentioned_users_list,
+                &all_activity_push_user_ids,
+                &notifications_for_crt,
+                &member_props,
+            ))
+            .await;
+        }
 
         let mut message =
             WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", &post.channel_id, "", None, "");

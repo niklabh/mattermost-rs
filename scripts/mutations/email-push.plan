@@ -1,0 +1,32 @@
+# Mutation plan for the e-mail service and the push hub (2026-09-24).
+#
+#   scripts/mutate-batch.sh scripts/mutations/email-push.plan
+#
+# The library ports carry their own plans (gotemplate.plan, email-h2t.plan, gomail-mail.plan,
+# mm-app-mail.plan); this one covers the Mattermost call sequence on top of them: which session
+# a clear skips, which channels are cleared, the badge-only shape, which token is usable, the
+# proxy's REMOVE answer, the full-contents text, the mute and status gates, the all-activity list,
+# and the e-mail service's category gate, forced support address, redirect, welcome opt-out,
+# token filter and masked-password check. The last two lines are no-op controls and must SURVIVE.
+push-skip-session	crates/mm-app/src/push.rs	skip_session_id == session.id	skip_session_id != session.id	api	push_send
+push-clear-over-unreads	crates/mm-app/src/channel_view.rs	            self.publish(message).await;\n        }\n\n        for channel_id in &unreads.with_mentions {	            self.publish(message).await;\n        }\n\n        for channel_id in &unreads.with_unreads {	api	push_send
+push-clear-content-available	crates/mm-app/src/push.rs	            root_id: root_id.to_owned(),\n            content_available: 1,	            root_id: root_id.to_owned(),\n            content_available: 0,	api	push_send
+push-badge-sound	crates/mm-app/src/push.rs	sound: "none".to_owned(),	sound: String::new(),	api	push_send
+push-standard-usable	crates/mm-app/src/push.rs	prop(PROP_LAST_REMOVED_DEVICE_ID) != session.device_id	prop(PROP_LAST_REMOVED_DEVICE_ID) == session.device_id	api	push_send
+push-remove-is-false	crates/mm-app/src/push.rs	Some(PUSH_STATUS_REMOVE) => "false",	Some(PUSH_STATUS_REMOVE) => "unknown",	api	push_send
+push-full-sender-prefix	crates/mm-app/src/push.rs	"{sender_name}: {}",	"{sender_name} {}",	api	push_send
+push-muted-channel	crates/mm-app/src/push.rs	channel_prop("mark_unread") == Some("mention")	channel_prop("mark_unread") == Some("all")	api	push_send
+push-missing-push-status	crates/mm-app/src/push.rs	|| push_status.is_none()) && send_online_notification	|| false) && send_online_notification	api	push_send
+push-all-activity-or	crates/mm-app/src/notification.rs	if (user_all || channel_all)	if (user_all && channel_all)	api	push_send
+# push-explicit-strict is unreachable through a served route: `> GmMention` differs from `>=` only for
+# a group-message post, and mm-api forwards those (createPost). Kept here, disabled, for when it is served.
+#push-explicit-strict	crates/mm-app/src/notification.rs	mention_type > MentionType::GmMention	mention_type >= MentionType::GmMention	api	push_send
+push-badge-crt-column	crates/mm-store/src/user_store.rs	CASE WHEN $2 THEN cm.mentioncountroot ELSE cm.mentioncount END	CASE WHEN $2 THEN cm.mentioncount ELSE cm.mentioncountroot END	api	push_send
+email-category-cloud-only	crates/mm-app/src/email.rs	let category = if is_cloud { category } else { "" };	let category = if is_cloud { "" } else { category };	api	email_send
+email-change-verify-support	crates/mm-app/src/email.rs	"feedback@mattermost.com"	"feedback@example.com"	api	email_send
+email-verify-redirect	crates/mm-app/src/email.rs	            mm_model::go_url::query_escape(user_email)\n        );\n        if !redirect.is_empty() {\n            link.push_str(&format!("&redirect_to={redirect}"));	            mm_model::go_url::query_escape(user_email)\n        );\n        if !redirect.is_empty() {\n            link.push_str(&format!("&redirect={redirect}"));	api	email_send
+email-welcome-opt-out	crates/mm-app/src/email.rs	if disable_welcome_email {	if !disable_welcome_email {	api	email_send
+email-token-filter	crates/mm-app/src/email.rs	if extra.user_id != user_id {	if extra.user_id == user_id {	api	email_send
+email-masked-password	crates/mm-app/src/email.rs	if setting(&cfg.smtp_password) == mm_model::utils::FAKE_SETTING	if setting(&cfg.smtp_password) != mm_model::utils::FAKE_SETTING	api	email_test
+control-push-noop	crates/mm-app/src/push.rs	            tmp.ack_id = mm_model::utils::new_id();	            tmp.ack_id = mm_model::utils::new_id();\n            let _unused = 0;	api	push_send
+control-email-noop	crates/mm-app/src/email.rs	fn s(value: impl Into<String>) -> Value {	fn s(value: impl Into<String>) -> Value {\n    let _unused = 0;	api	email_send

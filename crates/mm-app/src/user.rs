@@ -892,9 +892,7 @@ impl App {
     ///
     /// # Not reproduced
     ///
-    /// The three background sends (`SendEmailVerification`, `SendEmailChangeEmail`,
-    /// `SendChangeUsernameEmail`) — no mail service is ported, and every one of them is
-    /// `a.Srv().Go(...)`, so none can affect the response. `UpdateDefaultProfileImage` on a
+    /// `UpdateDefaultProfileImage` on a
     /// username change with no custom picture — needs the image pipeline; the consequence is a
     /// stale initials avatar, recorded rather than guessed at. `InvalidateCacheForUser`,
     /// `onUserProfileChange` and the auto-translation locale cache are all in-process caches this
@@ -988,9 +986,52 @@ impl App {
         let new_user = update.new;
 
         if send_notifications {
-            // The three mails are not ported; the event is. `newEmail != ""` is Go's own signal
-            // that the address changed even though the row did not.
-            let _ = (&new_email, &update.old.email);
+            // `newEmail != ""` is Go's own signal that the address changed even though the row
+            // did not (verification pending). Each mail is a `Srv().Go` goroutine whose failure
+            // is only logged.
+            if new_user.email != update.old.email || !new_email.is_empty() {
+                let app = self.clone();
+                let (user, old_email) = (new_user.clone(), update.old.email.clone());
+                let require_verification = self.config().require_email_verification;
+                tokio::spawn(async move {
+                    if require_verification {
+                        if let Err(err) = app.send_email_verification(&user, &new_email, "").await {
+                            tracing::error!(error = %err.id, "Failed to send email verification");
+                        }
+                    } else {
+                        let site_url = app.live_site_url().await.unwrap_or_default();
+                        if let Err(err) = app
+                            .send_email_change_email(
+                                &old_email,
+                                &user.email,
+                                &user.locale,
+                                &site_url,
+                            )
+                            .await
+                        {
+                            tracing::error!(error = %err, "Failed to send email change email");
+                        }
+                    }
+                });
+            }
+            if new_user.username != update.old.username {
+                let app = self.clone();
+                let user = new_user.clone();
+                tokio::spawn(async move {
+                    let site_url = app.live_site_url().await.unwrap_or_default();
+                    if let Err(err) = app
+                        .send_change_username_email(
+                            &user.username,
+                            &user.email,
+                            &user.locale,
+                            &site_url,
+                        )
+                        .await
+                    {
+                        tracing::error!(error = %err, "Failed to send change username email");
+                    }
+                });
+            }
             self.send_updated_user_event(&new_user).await;
         }
 

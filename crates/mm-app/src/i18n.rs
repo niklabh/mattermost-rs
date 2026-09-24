@@ -415,6 +415,17 @@ impl Translations {
             .unwrap_or(true)
     }
 
+    /// The locale `GetUserTranslations(locale)` (i18n.go:251) translates with: `locale` itself
+    /// when a file was loaded for it — an **exact**, case-sensitive key lookup, with none of the
+    /// tag fallback a request's `Accept-Language` gets — else `en`.
+    pub fn user_locale<'a>(&self, locale: &'a str) -> &'a str {
+        if self.locales.contains(locale) {
+            locale
+        } else {
+            FALLBACK_LOCALE
+        }
+    }
+
     /// Port of `GetTranslationsBySystemLocale` (i18n.go:223): `DefaultServerLocale` when a file
     /// was loaded for it, else `en`.
     ///

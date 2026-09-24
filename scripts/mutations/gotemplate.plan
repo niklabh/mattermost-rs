@@ -1,0 +1,105 @@
+# Mutation plan for crates/gotemplate (Go's text/template + html/template port).
+#
+#   MMRS_STACK_LOCKED=1 MUTATE_PACKAGE=gotemplate scripts/mutate-batch.sh scripts/mutations/gotemplate.plan
+#
+# The pkg suite touches no stack, so the stack lock is not needed. Each line moves one decision a
+# reader could get wrong -- a context transition, the URL filter predicate, which escaper a
+# context picks, comment stripping, the missing-key branch -- and the go_parity module (the
+# oracle's 2,170 escaper cases, the text corpus and every Mattermost template) must see it. The
+# last two lines are no-op controls.
+ttext-comment-at-end-offbyone	crates/gotemplate/src/html/transition.rs	if i + 4 <= s.len() && &s[i..i + 4] == COMMENT_START {	if i + 4 < s.len() && &s[i..i + 4] == COMMENT_START {	pkg
+ttag-meta-not-special	crates/gotemplate/src/html/transition.rs	        if c.element == Element::Meta {\n            return (Context::with_state(State::Text), i + 1);	        if c.element == Element::Title {\n            return (Context::with_state(State::Text), i + 1);	pkg
+tafter-name-gt-is-equals	crates/gotemplate/src/html/transition.rs	    } else if s[i] != b'=' {\n        c.state = State::Tag;	    } else if s[i] != b'=' && s[i] != b'>' {\n        c.state = State::Tag;	pkg
+tbefore-value-quotes-swapped	crates/gotemplate/src/html/transition.rs	        b'\\'' => {\n            delim = Delim::SingleQuote;	        b'\\'' => {\n            delim = Delim::DoubleQuote;	pkg
+thtmlcmt-end-offset	crates/gotemplate/src/html/transition.rs	        return (Context::default(), i + 3);	        return (Context::default(), i + 2);	pkg
+tspecial-tag-end-ignores-js-comments	crates/gotemplate/src/html/transition.rs	if c.element == Element::Script && (is_in_script_literal(c.state) || is_comment(c.state)) {	if c.element == Element::Script && is_in_script_literal(c.state) {	pkg
+index-tag-end-slash-not-separator	crates/gotemplate/src/html/transition.rs	b"> \\t\\n\\x0c/".contains(&s[0])	b"> \\t\\n\\x0c".contains(&s[0])	pkg
+turl-hash-not-query	crates/gotemplate/src/html/transition.rs	    if index_any(s, b"#?").is_some() {	    if index_any(s, b"?").is_some() {	pkg
+turl-prequery-overwrites	crates/gotemplate/src/html/transition.rs	    } else if s.len() != eat_white_space(s, 0) && c.url_part == UrlPart::None {	    } else if s.len() != eat_white_space(s, 0) {	pkg
+tjs-divop-slash-stays-regexp-ctx	crates/gotemplate/src/html/transition.rs	            } else if c.js_ctx == JsCtx::DivOp {\n                c.js_ctx = JsCtx::Regexp;	            } else if c.js_ctx == JsCtx::DivOp {\n                c.js_ctx = JsCtx::DivOp;	pkg
+nextjsctx-plus-parity-flipped	crates/gotemplate/src/html/js.rs	            if (n - start) & 1 == 1 {	            if (n - start) & 1 == 0 {	pkg
+# nextjsctx-close-brace-divop -- EQUIVALENT: `}` is one of tJS's delimiter bytes, so nextJSCtx never sees a run ending in it.
+tjsdelimited-regexp-script-close	crates/gotemplate/src/html/transition.rs	if i > 0 && i + 7 <= s.len() && s[i - 1..i + 7].eq_ignore_ascii_case(b"</script") {	if false {	pkg
+tcss-url-keyword-ignored	crates/gotemplate/src/html/transition.rs	                if ends_with_css_keyword(p, "url") {	                if ends_with_css_keyword(p, "uri") {	pkg
+# (the remainder decode, t_url(c, &decode_css(&s[k..])), is equivalent: the remainder holds no backslash)
+tcssstr-decodes-before-turl	crates/gotemplate/src/html/transition.rs	        c = t_url(c, &decode_css(&s[..i + 1])).0;	        c = t_url(c, &s[..i + 1]).0;	pkg
+tlinecmt-css-formfeed	crates/gotemplate/src/html/transition.rs	(&[b"\\n", b"\\x0c", b"\\r"], State::Css)	(&[b"\\n", b"\\r"], State::Css)	pkg
+eat-tag-name-no-dash	crates/gotemplate/src/html/transition.rs	if (x == b':' || x == b'-') && j + 1 < s.len() && s[j + 1].is_ascii_alphanumeric() {	if x == b':' && j + 1 < s.len() && s[j + 1].is_ascii_alphanumeric() {	pkg
+eat-attr-name-lt-allowed	crates/gotemplate/src/html/transition.rs	            b'\\'' | b'"' | b'<' => {	            b'\\'' | b'"' => {	pkg
+issafeurl-slash-in-scheme	crates/gotemplate/src/html/url.rs	        && !protocol.contains('/')\n	        && !protocol.contains('#')\n	pkg
+issafeurl-no-mailto	crates/gotemplate/src/html/url.rs	        && !equal_fold(protocol, "mailto")	        && !equal_fold(protocol, "mailto:")	pkg
+urlfilter-trusts-nothing	crates/gotemplate/src/html/url.rs	    if t == ContentType::Url {\n        return s;\n    }\n    if !is_safe_url(&s) {	    if t == ContentType::Srcset {\n        return s;\n    }\n    if !is_safe_url(&s) {	pkg
+url-norm-pct-boundary	crates/gotemplate/src/html/url.rs	if norm && i + 2 < bytes.len() && is_hex(bytes[i + 1]) && is_hex(bytes[i + 2]) {	if norm && i + 1 < bytes.len() && is_hex(bytes[i + 1]) {	pkg
+url-escape-uppercase-hex	crates/gotemplate/src/html/url.rs	        b.push_str(&format!("%{c:02x}"));	        b.push_str(&format!("%{c:02X}"));	pkg
+srcset-metadata-check	crates/gotemplate/src/html/url.rs	            .all(|&c| is_html_space_or_ascii_alnum(c));	            .all(|&c| c != 0);	pkg
+action-url-start-no-filter	crates/gotemplate/src/html/escape.rs	                    if c.url_part == UrlPart::None {\n                        s.push("_html_template_urlfilter");	                    if c.url_part == UrlPart::PreQuery {\n                        s.push("_html_template_urlfilter");	pkg
+action-css-str-normalizes	crates/gotemplate/src/html/escape.rs	                        State::CssDqStr | State::CssSqStr => s.push("_html_template_cssescaper"),	                        State::CssDqStr => s.push("_html_template_cssescaper"),	pkg
+action-js-leaves-regexp-ctx	crates/gotemplate/src/html/escape.rs	                s.push("_html_template_jsvalescaper");\n                c.js_ctx = JsCtx::DivOp;	                s.push("_html_template_jsvalescaper");\n                c.js_ctx = JsCtx::Regexp;	pkg
+action-rcdata-uses-html	crates/gotemplate/src/html/escape.rs	            State::Rcdata => s.push("_html_template_rcdataescaper"),	            State::Rcdata => s.push("_html_template_htmlescaper"),	pkg
+action-unquoted-uses-attr	crates/gotemplate/src/html/escape.rs	            Delim::SpaceOrTagEnd => s.push("_html_template_nospaceescaper"),	            Delim::SpaceOrTagEnd => s.push("_html_template_attrescaper"),	pkg
+action-meta-url-unfiltered	crates/gotemplate/src/html/escape.rs	            State::MetaContentUrl => s.push("_html_template_urlfilter"),	            State::MetaContentUrl => {}	pkg
+action-srcset-uses-url	crates/gotemplate/src/html/escape.rs	            State::Srcset => s.push("_html_template_srcsetescaper"),	            State::Srcset => s.push("_html_template_urlnormalizer"),	pkg
+text-html-comment-start-offset	crates/gotemplate/src/html/escape.rs	                if c1.state == State::HtmlCmt || c1.state == State::JsHtmlOpenCmt {\n                    cs -= 2;	                if c1.state == State::HtmlCmt || c1.state == State::JsHtmlOpenCmt {\n                    cs -= 1;	pkg
+text-js-block-comment-newline	crates/gotemplate/src/html/escape.rs	                        b.push(if has_nl { b'\\n' } else { b' ' });	                        b.push(b' ');	pkg
+# text-comment-tail-kept -- EQUIVALENT: in a comment state every iteration sets written = i1, so the tail it guards is always empty.
+text-doctype-escaped	crates/gotemplate/src/html/escape.rs	&& !(s.len() - j >= 9 && s[j..j + 9].eq_ignore_ascii_case(b"<!DOCTYPE"))	&& !(s.len() - j >= 9 && s[j..j + 9] == *b"<!DOCTYPE")	pkg
+text-lt-escape-boundary	crates/gotemplate/src/html/escape.rs	                if c1.state != c.state {\n                    for j in (i..end).rev() {	                if false {\n                    for j in (i..end).rev() {	pkg
+exec-missing-key-is-nil	crates/gotemplate/src/exec.rs	                        MissingKey::Invalid => Ok(Rv::Invalid),	                        MissingKey::Invalid => Ok(Rv::nil_iface()),	pkg
+stringify-keeps-nil	crates/gotemplate/src/html/content.rs	            None | Some(Value::Nil) => None,\n            Some(v) => Some(Some(indirect(v))),	            None | Some(Value::Nil) => Some(None),\n            Some(v) => Some(Some(indirect(v))),	pkg
+evalargs-no-value-text	crates/gotemplate/src/funcs.rs	    let no_value = Value::String("<no value>".to_string());	    let no_value = Value::String("<nil>".to_string());	pkg
+join-url-part-unknown	crates/gotemplate/src/html/escape.rs	        c.url_part = UrlPart::Unknown;\n        return c;	        c.url_part = UrlPart::QueryOrFrag;\n        return c;	pkg
+nudge-before-value-delim	crates/gotemplate/src/html/escape.rs	            c.state = attr_start_state(c.attr);\n            c.delim = Delim::SpaceOrTagEnd;	            c.state = attr_start_state(c.attr);\n            c.delim = Delim::DoubleQuote;	pkg
+ensure-pipeline-dedupe	crates/gotemplate/src/html/escape.rs	                if normalize_esc_fn(&esc) == normalize_esc_fn(e) {	                if esc == *e {	pkg
+redundant-funcs-ignored	crates/gotemplate/src/html/escape.rs	        && redundant(last, next)\n	        && redundant(next, last)\n	pkg
+nospace-empty-failsafe	crates/gotemplate/src/html/html.rs	    if s.is_empty() {\n        return FILTER_FAILSAFE.to_string();\n    }\n    if t == ContentType::Html {\n        return html_replacer(&strip_tags(&s), Table::NospaceNorm, false);	    if s.is_empty() {\n        return String::new();\n    }\n    if t == ContentType::Html {\n        return html_replacer(&strip_tags(&s), Table::NospaceNorm, false);	pkg
+attr-escaper-no-strip	crates/gotemplate/src/html/html.rs	        return html_replacer(&strip_tags(&s), Table::HtmlNorm, true);\n    }\n    html_replacer(&s, Table::Html, true)\n}\n\n/// `rcdataEscaper`	        return html_replacer(&s, Table::HtmlNorm, true);\n    }\n    html_replacer(&s, Table::Html, true)\n}\n\n/// `rcdataEscaper`	pkg
+html-norm-escapes-amp	crates/gotemplate/src/html/html.rs	        '&' if !norm => "&amp;",	        '&' => "&amp;",	pkg
+html-replacer-bad-runes	crates/gotemplate/src/html/html.rs	        } else if (0xfdd0..=0xfdef).contains(&u) || (0xfff0..=0xffff).contains(&u) {	        } else if (0xfdd0..=0xfdef).contains(&u) {	pkg
+name-filter-attr-type	crates/gotemplate/src/html/html.rs	    if attr_type(&s) != ContentType::Plain {	    if attr_type(&s) == ContentType::Url {	pkg
+css-value-double-dash	crates/gotemplate/src/html/css.rs	                if i != 0 && b[i - 1] == b'-' {	                if i > 1 && b[i - 1] == b'-' {	pkg
+css-escaper-space-after-hex	crates/gotemplate/src/html/css.rs	            && (written == bytes.len() || is_hex(bytes[written]) || is_css_space(bytes[written]))	            && (is_hex(bytes[written.min(bytes.len() - 1)]) || is_css_space(bytes[written.min(bytes.len() - 1)]))	pkg
+decode-css-skips-space	crates/gotemplate/src/html/css.rs	            s = skip_css_space(&s[j..]);	            s = &s[j..];	pkg
+jsval-no-pad	crates/gotemplate/src/html/js.rs	    let pad = is_js_ident_part(first) || is_js_ident_part(last);	    let pad = is_js_ident_part(first) && is_js_ident_part(last);	pkg
+json-float-exp-cutoff	crates/gotemplate/src/html/json.rs	!(1e-6..1e21).contains(&abs)	!(1e-6..1e20).contains(&abs)	pkg
+jsstr-slash-unescaped	crates/gotemplate/src/html/js.rs	        '/' => "\\\\/",\n        '<' => "\\\\u003c",\n        '>' => "\\\\u003e",\n        '\\\\' => "\\\\\\\\",\n        _ => return None,\n    })\n}\n\nfn js_bq_str_table	        '<' => "\\\\u003c",\n        '>' => "\\\\u003e",\n        '\\\\' => "\\\\\\\\",\n        _ => return None,\n    })\n}\n\nfn js_bq_str_table	pkg
+attr-type-data-prefix	crates/gotemplate/src/html/attr.rs	    if let Some(rest) = name.strip_prefix("data-") {	    if let Some(rest) = name.strip_prefix("data:") {	pkg
+istrue-struct-false	crates/gotemplate/src/rv.rs	        Value::Struct(..) => true,	        Value::Struct(..) => false,	pkg
+print-value-no-indirect	crates/gotemplate/src/exec.rs	        let v = if v.kind() == Kind::Pointer {\n            v.indirect().0	        let v = if v.kind() == Kind::Map {\n            v.indirect().0	pkg
+sprint-space-rule	crates/gotemplate/src/fmt.rs	        if i > 0 && !is_string && !prev_string {	        if i > 0 && !is_string {	pkg
+ideal-constant-hex-float	crates/gotemplate/src/exec.rs	        if n.is_float && !is_hex_int && !is_rune_int && n.text.contains(['.', 'e', 'E', 'p', 'P']) {	        if n.is_float && !is_rune_int && n.text.contains(['.', 'e', 'E', 'p', 'P']) {	pkg
+lex-trim-marker-needs-space	crates/gotemplate/src/parse/lex.rs	    b.len() >= 2 && b[0] == TRIM_MARKER && is_space(i32::from(b[1]))	    !b.is_empty() && b[0] == TRIM_MARKER	pkg
+parse-else-if-chain	crates/gotemplate/src/parse/parse.rs	                if context == "if" && self.peek().typ == ItemType::If {	                if context == "if" && self.peek().typ == ItemType::With {	pkg
+eq-incompatible-silent	crates/gotemplate/src/funcs.rs	            if arg1.is_valid() && arg.is_valid() {\n                return Err(format!(	            if arg1.is_valid() && arg.is_valid() && false {\n                return Err(format!(	pkg
+mangle-jsctx-condition	crates/gotemplate/src/html/context.rs	        if self.js_ctx != JsCtx::Regexp {	        if self.js_ctx == JsCtx::Unknown {	pkg
+range-else-when-ran	crates/gotemplate/src/exec.rs	        if !ran && let Some(e) = &r.else_list {	        if let Some(e) = &r.else_list {	pkg
+# strip-tags-all-text -- EQUIVALENT: when every state stays text the rebuilt buffer is the input byte for byte.
+unescape-numeric-c1-table	crates/gotemplate/src/html/entity.rs	        if (0x80..=0x9f).contains(&x) {	        if (0x80..=0x9e).contains(&x) {	pkg
+tmetacontent-url	crates/gotemplate/src/html/transition.rs	        if i + 3 < s.len() && s[i..i + 4].eq_ignore_ascii_case(b"url=") {	        if i + 3 < s.len() && s[i..i + 4] == *b"url=" {	pkg
+context-after-text-unquoted-bad-chars	crates/gotemplate/src/html/escape.rs	        && let Some(j) = index_any(&s[..i], b"\\"'<=`")	        && let Some(j) = index_any(&s[..i], b"\\"'<`")	pkg
+script-type-non-js	crates/gotemplate/src/html/escape.rs	        && !is_js_type(&String::from_utf8_lossy(&s[..i]))	        && is_js_type(&String::from_utf8_lossy(&s[..i]))	pkg
+control-rename-binding	crates/gotemplate/src/html/url.rs	    let mut start = left;\n    while start < right && is_html_space(bytes[start]) {\n        start += 1;\n    }	    let mut begin = left;\n    while begin < right && is_html_space(bytes[begin]) {\n        begin += 1;\n    }\n    let start = begin;	pkg
+control-reorder-independent	crates/gotemplate/src/html/js.rs	        '\\n' => "\\\\n".to_string(),\n        '\\x0c' => "\\\\f".to_string(),	        '\\x0c' => "\\\\f".to_string(),\n        '\\n' => "\\\\n".to_string(),	pkg
+# --- text/template executor, parser, fmt and strconv ---
+with-rebinds-dot	crates/gotemplate/src/exec.rs	                self.walk(val, Node2::List(&b.list))?;	                self.walk(dot.clone(), Node2::List(&b.list))?;	pkg
+if-else-branch-skipped	crates/gotemplate/src/exec.rs	            self.walk(dot, Node2::List(e))?;\n        }\n        self.pop(mark);	            let _ = e;\n        }\n        self.pop(mark);	pkg
+range-index-and-element-swapped	crates/gotemplate/src/exec.rs	                self.set_top_var(2, index);	                self.set_top_var(1, index);	pkg
+continue-acts-as-break	crates/gotemplate/src/exec.rs	            Err(Flow::Continue) => Ok(()),	            Err(Flow::Continue) => Err(Flow::Break),	pkg
+break-escapes-range	crates/gotemplate/src/exec.rs	            Err(Flow::Break) => Ok(()),	            Err(Flow::Break) => Err(Flow::Err(String::new())),	pkg
+and-or-short-circuit-inverted	crates/gotemplate/src/exec.rs	                if crate::rv::truth(&v) == is_or {	                if crate::rv::truth(&v) != is_or {	pkg
+and-or-pipeline-final-ignored	crates/gotemplate/src/exec.rs	                v = f;	                let _ = f;	pkg
+index-bound-offbyone	crates/gotemplate/src/funcs.rs	    if x < 0 || x as usize > cap {	    if x < 0 || x as usize >= cap {	pkg
+slice-order-check-loose	crates/gotemplate/src/funcs.rs	    if idx[0] > idx[1] {	    if idx[0] > idx[1] + 1 {	pkg
+le-is-ge	crates/gotemplate/src/funcs.rs	    let less = lt(arg1, arg2)?;	    let less = lt(arg2, arg1)?;	pkg
+missingkey-zero-is-invalid	crates/gotemplate/src/exec.rs	                        MissingKey::Zero => Ok(Rv::nil_iface()),	                        MissingKey::Zero => Ok(Rv::Invalid),	pkg
+field-args-ignore-pipeline-final	crates/gotemplate/src/exec.rs	        let has_args = args.is_some_and(|a| a.len() > 1) || fin.is_some();	        let has_args = args.is_some_and(|a| a.len() > 1);	pkg
+field-unexported-accepted	crates/gotemplate/src/exec.rs	                        if !field_name.chars().next().is_some_and(char::is_uppercase) {	                        if false {	pkg
+fmt-zero-flag-ignored	crates/gotemplate/src/fmt.rs	                b'0' => p.f.zero = true,	                b'0' => p.f.zero = false,	pkg
+fmt-float-plus-sign-dropped	crates/gotemplate/src/fmt.rs	        if self.f.plus || num[0] != b'+' {	        if num[0] != b'+' {	pkg
+fmt-integer-precision-offbyone	crates/gotemplate/src/fmt.rs	        while buf.len() < prec {	        while buf.len() + 1 < prec {	pkg
+strconv-g-exponent-cutoff	crates/gotemplate/src/strconv.rs	            if exp < -4 || exp >= eprec {	            if exp < -5 || exp >= eprec {	pkg
+strconv-g-precision-zero	crates/gotemplate/src/strconv.rs	            let prec = if prec == 0 { 1 } else { prec };	            let prec = if prec == 0 { 2 } else { prec };	pkg
+urlquery-space-as-pct20	crates/gotemplate/src/funcs.rs	            b' ' => out.push('+'),	            b' ' => out.push_str("%20"),	pkg
+lex-left-trim-ignored	crates/gotemplate/src/parse/lex.rs	                    trim_length = right_trim_length(&self.input[self.start..self.pos]);	                    trim_length = 0;	pkg
+# lex-trim-space-count -- EQUIVALENT: whether the one space before `-}}` becomes a Space item or is skipped, the parser ignores it.
+parse-range-three-vars	crates/gotemplate/src/parse/parse.rs	                if context == "range" && pipe.decl.len() < 2 {	                if context == "range" && pipe.decl.len() < 3 {	pkg
+parse-action-line-suffix	crates/gotemplate/src/parse/parse.rs	            if self.t.action_line != 0 && self.t.action_line != token.line {	            if false {	pkg

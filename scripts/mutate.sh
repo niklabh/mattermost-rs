@@ -14,6 +14,10 @@
 #           pkg     every test target of one package: MUTATE_PACKAGE=<crate> (no stack). For the
 #                   generic crates (gobwire, …) whose parity suites are integration tests and run
 #                   their Go oracle as a subprocess rather than against the stack.
+#           lib     the library unit tests of one package: MUTATE_PACKAGE=<crate> (no stack). For
+#                   a module of a big crate (mm-app's `mail::`) whose oracle replay is a unit test:
+#                   `pkg` would build every DB integration binary per mutation, `unit` every
+#                   workspace crate that depends on it.
 #
 # Pick the *narrowest* suite that should catch the mutation. The whole point of a mutation is that
 # you can predict which test dies; running everything turns a 5-second check into a 90-second one.
@@ -67,7 +71,7 @@ export MM_STORE_DB=1 MM_PARITY_STACK=1
 export MMRS_GO_BASE MMRS_RUST_BASE MMRS_PORT_OFFSET
 
 NAME="$1"; FILE="$2"; FROM="$3"; TO="$4"; SUITE="${5:-unit}"
-[ -n "$FILE" ] || { sed -n '2,28p' "$0"; exit 2; }
+[ -n "$FILE" ] || { sed -n '2,32p' "$0"; exit 2; }
 
 # Stack-backed suites share :8066 and the database with every other checkout; serialise them.
 case "$SUITE" in
@@ -146,6 +150,7 @@ case "$SUITE" in
   store) cargo test -p mm-store ${=MUTATE_STORE_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   pkg)   cargo test -p "${MUTATE_PACKAGE:?pkg suite needs MUTATE_PACKAGE}" ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
+  lib)   cargo test -p "${MUTATE_PACKAGE:?lib suite needs MUTATE_PACKAGE}" --lib ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
            # The parity tests are now in a single `--test parity` binary. Filter by test name
            # to narrow the suite under test — otherwise an unrelated failure decides the verdict:

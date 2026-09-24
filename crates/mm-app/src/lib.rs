@@ -38,8 +38,10 @@ pub mod command_suggestions;
 pub mod common_teams;
 pub mod config;
 pub mod custom_profile_attributes;
+pub mod deep_stack;
 pub mod desktop_login;
 pub mod draft;
+pub mod email;
 pub mod emoji;
 /// Port of the file-backend half of `app/export.go`.
 pub mod export;
@@ -73,6 +75,8 @@ pub mod link_image;
 /// Link selection for previews — `getFirstLink`, `getImages`, `isLinkAllowedForPreview`.
 pub mod link_metadata;
 pub mod login;
+/// Outbound mail — port of `platform/shared/mail/mail.go` over `gomail`.
+pub mod mail;
 /// The `FirstAdminVisitMarketplace` system row and its broadcast (api4/plugin.go:434-492).
 pub mod marketplace;
 pub mod marketplace_visit;
@@ -81,6 +85,7 @@ pub mod mfa;
 /// Port of Go's `mime.TypeByExtension` and its Unix table loader — `FileInfo.mime_type`.
 pub mod mime;
 pub mod notification;
+pub mod notification_email;
 pub mod notify_admin;
 pub mod oauth;
 pub mod onboarding;
@@ -111,6 +116,7 @@ pub mod preference;
 pub mod product_notices;
 pub mod properties;
 pub mod property_hooks;
+pub mod push;
 pub mod reaction;
 pub mod remote_cluster;
 pub mod report;
@@ -151,6 +157,8 @@ pub mod webhook;
 // Appended 2026-09-15: the system-operations family (api4/system.go, elasticsearch.go).
 pub mod logs;
 pub mod manualtest;
+/// Port of `channels/utils/markdown.go` — goldmark-backed markdown stripping and HTML.
+pub mod markdown_utils;
 pub mod searchengine;
 pub mod upgrader;
 

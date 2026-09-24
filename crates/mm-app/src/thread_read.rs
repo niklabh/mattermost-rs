@@ -98,11 +98,10 @@ impl App {
     /// "If the thread doesn't have a membership, we shouldn't try to mark it as unread": a
     /// caller who never followed the thread gets a 404, not a row.
     ///
-    /// # `clearPushNotification` is not called
+    /// # The push clear
     ///
-    /// Go clears the mobile badge when the thread is fully read and collapsed threads are on
-    /// for the user. This server has no push hub ([D-215]); the condition is evaluated and
-    /// traced so the decision is visible, and the call it guards does not exist yet.
+    /// Go clears the thread's notification on the user's other devices when the thread is fully
+    /// read and collapsed threads are on for the user.
     #[tracing::instrument(
         skip(self),
         fields(user_id = %user_id, team_id = %team_id, thread_id = %thread_id, timestamp, unread_mentions, unread_replies)
@@ -167,13 +166,7 @@ impl App {
 
         // Clear if user has read the messages.
         if thread.unread_replies == 0 && self.is_crt_enabled_for_user(user_id).await {
-            // `a.clearPushNotification(currentSessionId, userID, post.ChannelId, threadID)` —
-            // no push hub, see [D-215].
-            tracing::debug!(
-                session_id = %current_session_id,
-                channel_id = %post.channel_id,
-                "thread fully read; the push-notification clear has no hub to reach"
-            );
+            self.clear_push_notification(current_session_id, user_id, &post.channel_id, thread_id);
         }
 
         let mut message = WebSocketEvent::new(

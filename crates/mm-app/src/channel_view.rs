@@ -7,15 +7,9 @@
 //! `MsgCount`/`MsgCountRoot`/`LastViewedAt` forward. Optionally a second one does —
 //! `Thread().MarkAllAsReadByChannels`, and only when the client says it does *not* render
 //! collapsed threads itself. Everything else on the path is announcement: a websocket event per
-//! configuration flag, and a push-notification clear this port does not have (see below).
-//!
-//! # `clearPushNotification` is not ported
-//!
-//! Go queues a `notificationTypeClear` on `Srv().PushNotificationsHub` for each channel in
-//! `channelsToClearPushNotifications` (notification_push.go:406). There is no push hub in this
-//! port and no device to clear, so the list is computed — the store query that produces it is
-//! ported in full, because getting its notify-prop fall-through wrong would be invisible until
-//! there *is* a hub — and then dropped. Nothing about it reaches the HTTP response. [D-215].
+//! configuration flag, and a push-notification `clear` per channel whose notification level
+//! would have raised one ([`crate::push`]), sent to every device of the user except the session
+//! that did the reading.
 
 use mm_model::config::{COLLAPSED_THREADS_ALWAYS_ON, COLLAPSED_THREADS_DISABLED};
 use mm_model::preference::{
@@ -139,6 +133,7 @@ impl App {
         &self,
         channel_ids: &[String],
         user_id: &str,
+        current_session_id: &str,
         collapsed_threads_supported: bool,
         is_crt_enabled: bool,
     ) -> AppResult<BTreeMap<String, i64>> {
@@ -220,6 +215,10 @@ impl App {
             self.publish(message).await;
         }
 
+        for channel_id in &unreads.with_mentions {
+            self.clear_push_notification(current_session_id, user_id, channel_id, "");
+        }
+
         if update_threads && is_crt_enabled {
             let timestamp = get_millis();
             for channel_id in &unreads.with_unreads {
@@ -254,6 +253,7 @@ impl App {
         &self,
         view: &mm_model::channel_view::ChannelView,
         user_id: &str,
+        current_session_id: &str,
         collapsed_threads_supported: bool,
     ) -> AppResult<BTreeMap<String, i64>> {
         self.set_active_channel(user_id, &view.channel_id).await;
@@ -274,6 +274,7 @@ impl App {
         self.mark_channels_as_viewed(
             &channel_ids,
             user_id,
+            current_session_id,
             collapsed_threads_supported,
             is_crt_enabled,
         )
@@ -303,6 +304,7 @@ impl App {
         &self,
         team_id: &str,
         user_id: &str,
+        current_session_id: &str,
         is_crt_enabled: bool,
     ) -> AppResult<BTreeMap<String, i64>> {
         let user = self.store().user().get(user_id).await.map_err(|err| {
@@ -344,6 +346,10 @@ impl App {
         )
         .await?;
 
+        for channel_id in &unreads.with_mentions {
+            self.clear_push_notification(current_session_id, user_id, channel_id, "");
+        }
+
         if is_crt_enabled {
             let mut message = mm_model::websocket_message::WebSocketEvent::new(
                 mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,
@@ -372,6 +378,7 @@ impl App {
     pub async fn mark_all_direct_and_group_messages_viewed(
         &self,
         user_id: &str,
+        current_session_id: &str,
         is_crt_enabled: bool,
     ) -> AppResult<BTreeMap<String, i64>> {
         let user = self.store().user().get(user_id).await.map_err(|err| {
@@ -410,6 +417,10 @@ impl App {
             &unreads,
         )
         .await?;
+
+        for channel_id in &unreads.with_mentions {
+            self.clear_push_notification(current_session_id, user_id, channel_id, "");
+        }
 
         if is_crt_enabled {
             let timestamp = get_millis();

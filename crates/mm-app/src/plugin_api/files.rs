@@ -15,8 +15,6 @@
 //! - `UploadFile` of a `WebP` canvas declaring alpha, which this port does not decode.
 //! - A file backend this port does not drive, on any method that reads or writes a file; for
 //!   `UploadFile` that is found at the write, after the plugins' `FileWillBeUploaded` ran.
-//! - `SendMail` past its three refusals while `SendEmailNotifications` is on: there is no mail
-//!   sender here ([D-238]).
 
 use mm_model::file_info::{FileInfo, GetFileInfosOptions};
 use mm_model::integration_action::{
@@ -335,8 +333,10 @@ impl AppPluginApi {
 
     /// Port of `PluginAPI.SendMail` (app/plugin_api.go:1136): the recipient, the subject and the
     /// body must each be set, in that order; then `SendNotificationMail`, which sends nothing
-    /// and succeeds while `EmailSettings.SendEmailNotifications` is off. With it on the mail
-    /// would go out, and there is no sender here ([D-238]).
+    /// and succeeds while `EmailSettings.SendEmailNotifications` is off.
+    ///
+    /// **A failed send reuses `plugin_api.send_mail.missing_htmlbody`**, at 500 — Go's copy of
+    /// the line above it, kept because the id is what the plugin receives.
     pub(super) async fn files_send_mail(
         &self,
         args: api::Z_SendMailArgs,
@@ -346,10 +346,25 @@ impl AppPluginApi {
                 a: self.wire(refusal),
             });
         }
-        if self.app.config().send_email_notifications {
-            return Err(self.not_implemented("SendMail", "no SMTP sender is ported (D-238)"));
-        }
-        Ok(api::Z_SendMailReturns { a: None })
+        let result = self
+            .app
+            .send_notification_mail(&args.a, &args.b, &args.c)
+            .await
+            .map_err(|err| {
+                Box::new(
+                    AppError::new(
+                        "SendMail",
+                        "plugin_api.send_mail.missing_htmlbody",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                    .wrap(err),
+                )
+            });
+        Ok(api::Z_SendMailReturns {
+            a: result.err().and_then(|e| self.wire(e)),
+        })
     }
 }
 

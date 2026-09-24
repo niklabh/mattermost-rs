@@ -25,11 +25,8 @@ use crate::error::StoreError;
 /// Port of `store.TokenStore` (store/store.go:732), narrowed to what the password-reset and
 /// email-verification routes need.
 ///
-/// `ConsumeOnce`, `Cleanup`, `GetAllTokensByType`, `RemoveAllTokensByType` and
-/// `GetTokenByTypeAndEmail` are not here: the first is the magic-link/SSO path, the second is a
-/// scheduled job, and the rest serve the invitation and password-reset-*send* routes, which stay
-/// with Go for want of an e-mail service ([D-238]). None is reachable from a route this server
-/// answers.
+/// `ConsumeOnce`, `Cleanup` and `GetTokenByTypeAndEmail` are not here: the first is the
+/// magic-link/SSO path, the second is a scheduled job, and the third serves the invitation routes.
 pub trait TokenStore {
     /// Port of `SqlTokenStore.Save` (tokens_store.go:36).
     ///
@@ -62,6 +59,18 @@ pub trait TokenStore {
         &self,
         token: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlTokenStore.GetAllTokensByType` (tokens_store.go:102) — every row of one type,
+    /// in whatever order Postgres returns them (Go has no `ORDER BY` either).
+    ///
+    /// The password-recovery and verify-email invalidations read the whole table of their type
+    /// and filter by the user id inside `Extra` in the app, because the id lives in a JSON blob
+    /// the store never parses. A NULL `CreateAt`/`Type`/`Extra` fails Go's scan of the **whole**
+    /// call; here it reads as the zero value, as for the other reads (module docs).
+    fn get_all_tokens_by_type(
+        &self,
+        token_type: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Token>, StoreError>> + Send;
 
     /// Port of `SqlTokenStore.RemoveAllTokensByType` (tokens_store.go:117) — one `DELETE`, no
     /// expiry check, no row count.
@@ -121,6 +130,23 @@ impl TokenStore for SqlTokenStore {
                 source,
             })?;
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(token_type = %token_type, found))]
+    async fn get_all_tokens_by_type(&self, token_type: &str) -> Result<Vec<Token>, StoreError> {
+        let rows = sqlx::query_as!(
+            TokenRow,
+            r#"SELECT token AS "token!", createat, type, extra FROM tokens WHERE type = $1"#,
+            token_type
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get all tokens of Type={token_type}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows.into_iter().map(Token::from).collect())
     }
 
     #[tracing::instrument(skip_all, fields(token_type = %token.type_))]

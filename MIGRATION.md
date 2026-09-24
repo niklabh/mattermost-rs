@@ -21,7 +21,7 @@ Blended, the migration is **roughly 60–65% by route traffic** and **about 40% 
 on routes, websocket, plugins and jobs**. The backlog is 161 OPEN entries in
 [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md). What remains, largest first: the 258 plugin API
 methods and the Driver, 28 job workers, the forwarded branches inside served routes, and the
-missing e-mail ([D-238]) and push-notification ([D-215]) services.
+e-mail batching and the generated sender avatar ([D-1072]).
 
 The "~65%" counts functions, not routes: a helper that forwards for several routes counts once,
 and a branch that forwards only because the code is private is counted although it is permanent.
@@ -14716,4 +14716,25 @@ routes, not api4 pairs, so the api4 count is unchanged. Closes [D-1040] and [D-1
 | `doPluginRequest`, `LocalResponseWriter` (integration_action.go:197-290), `getDynamicListArgument` (command_autocomplete.go:242) | `App::do_plugin_request`, `LocalResponseWriter`, `App::autocomplete_suggestions`, `decode_list_items` | DONE | the tranche (`/hookrec fetch` ×3) + 4 unit | Only the plugin's last write is read; the parser halts at each list and re-runs with the answers. |
 
 Mutation tally (`plugin-servehttp.plan`): 34 run, 32 caught, 2 controls survived, 0 harness faults.
+
+## E-mail and push notifications (2026-09-24)
+
+The e-mail service and the push hub, over four library ports made for them. No api4 pair is newly
+registered; six lose their last forwarded branch — `POST /users/password/reset/send`,
+`POST /users/email/verify/send`, `POST /email/test` (all but a non-object body),
+`POST /notifications/ack`, `GET /system/ping?device_id=` and a self-deactivation through
+`PUT /users/{user_id}/active`. Closes [D-238], [D-215], [D-450], [D-452], [D-402]; opens [D-1071],
+[D-1072]. Every stack now sends to a per-stack SMTP port and push proxy
+(`scripts/stack-env.sh`), which the parity suite serves.
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `text/template`, `html/template` (Go 1.26.4 stdlib) | `gotemplate` | DONE | 53 + `go_parity` (every Mattermost template ×5 data sets, 2,185 escaper cases); 90 mutations, 88 caught | `Struct` carries its Go type name — Go's error messages print it. |
+| `golang.org/x/net/html` parser, `jaytaylor/html2text` | `gohtml` (tokenizer moved from mm-model), `gohtml2text` | DONE | 5,136 trees, 2,246 renders; 63 mutations, 61 caught | `mm_model::go_html` re-exports `gohtml::token`. |
+| `wneessen/go-mail` v0.8.1 writer, `net/mail`, `net/smtp`, `mime/*` | `gomail` | DONE | 31 + 79 real SMTP scenarios from Go; 27 mutations, 25 caught | Go 1.26.4's `textproto.Error` quotes its message. |
+| `platform/shared/mail/mail.go` | `mm_app::mail` | DONE | 8 + oracle; 23 mutations, 21 caught | No QUIT after a send: the deferred `Close` runs before `Quit`. |
+| `app/email` senders, `NewEmailTemplateData`, token creators, `SendPasswordReset`, `SendEmailVerification`, `TestEmail` | `mm_app::email` | DONE | `parity::email_send` (6, byte-equal mail after masking date, id, boundary, token) | `TestEmail` checks the body's settings and sends through the **live** ones. |
+| `app/notification_push.go`, push half of `SendNotifications` | `mm_app::push`, `App::send_post_pushes` | DONE | `parity::push_send` (8), `parity::push_ack` (2) | Badge counts every team's threads — the store's thread counts gated the team filter unconditionally until this. `ActiveChannel` is per-process ([D-1071]). |
+| `yuin/goldmark` v1.8.2 + GFM, `channels/utils/markdown.go` | `gogoldmark`, `mm_app::markdown_utils` | DONE | ~71,500 HTML comparisons, 11,924 inputs; 49 + 17 mutations, all non-equivalent caught | Push text and notification HTML. |
+| `app/notification_email.go`, `userAllowsEmail`, `GetMessageForNotification`, `ProcessMessageAttachments`, `GetFormattedPostTime` | `mm_app::notification_email` | DONE | `parity::email_send::a_mentions_notification_email_matches_gos` (mention + reply) | The e-mail pass is boxed: inlined, its future overflowed a debug worker's stack. Batching and the generated avatar: [D-1072]. |
 

@@ -41,6 +41,20 @@ tokio::task_local! {
     pub(crate) static REQUEST_TRANSLATOR: Option<RequestTranslator>;
 }
 
+/// `c.AppContext.T(id)` — the current request's translate function (`Accept-Language`, then
+/// `DefaultClientLocale`), or the id when no bundle is in scope, as before `AppErrorInit`.
+pub(crate) fn request_t(id: &str) -> String {
+    REQUEST_TRANSLATOR
+        .try_with(|translator| {
+            translator
+                .as_ref()
+                .map(|t| t.bundle.translate(&t.locale, id))
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| id.to_owned())
+}
+
 /// Port of `c.Err.Translate(c.AppContext.T)` (web/handlers.go:431) for the current request.
 fn translate(err: &mut AppError) {
     let _ = REQUEST_TRANSLATOR.try_with(|translator| {

@@ -43,8 +43,7 @@
 //! it to serve. It is served anyway now, because the two steps this process cannot reproduce are
 //! no-ops for an account that owns no bots and that is one `SELECT` away. See
 //! [`mm_app::user_delete`], [`crate::user_deletes`] and `parity/user_deletes.rs`. That closes
-//! [D-461]; what still forwards is a *self*-deactivation the flag permits, because
-//! `SendDeactivateAccountEmail` follows the write ([D-238]).
+//! [D-461]; a *self*-deactivation also sends `SendDeactivateAccountEmail` after the write.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -604,10 +603,7 @@ pub async fn update_user_active(
             ))
             .into_response();
         }
-        // The flag is on, so the write would go through and `SendDeactivateAccountEmail` would
-        // follow it — [D-238]. Forwarded before anything is read, let alone written.
-        tracing::Span::current().record("forwarded", true);
-        return proxy::forward_to_go(State(state), request).await;
+        // The flag is on: the deactivation goes through below, with the e-mail after it.
     }
 
     // No licence question here since 2026-09-13: the seat-limit refusal and its two ids are
@@ -615,15 +611,16 @@ pub async fn update_user_active(
     // log line. Both sit inside `if active` (app/user.go:1230, :1287), so a deactivation neither
     // consults the licence nor can be refused by a limit.
 
-    // Required of everyone except a self-deactivator, who returned above — including the
-    // account's own owner reactivating itself.
-    if !state
-        .app
-        .session_has_permission_to(
-            &session.0,
-            &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_USERS,
-        )
-        .await
+    // Required of everyone except a self-deactivator — including the account's own owner
+    // reactivating itself.
+    if !is_self_deactivate
+        && !state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_USERS,
+            )
+            .await
     {
         return ApiError::from(AppError::new(
             "updateUserActive",
@@ -700,6 +697,25 @@ pub async fn update_user_active(
         if let Err(err) = state.app.deactivate_user(&hook_ctx, &user).await {
             return ApiError::from(err).into_response();
         }
+    }
+
+    // `SendDeactivateAccountEmail` in a `Srv().Go` goroutine, to the address the account had
+    // before the write; a failure is `LogErrorByCode` and nothing else.
+    if is_self_deactivate {
+        let app = state.app.clone();
+        tokio::spawn(async move {
+            let site_url = app.live_site_url().await.unwrap_or_default();
+            if let Err(err) = app
+                .send_deactivate_account_email(&user.email, &user.locale, &site_url)
+                .await
+            {
+                tracing::error!(
+                    error = %err,
+                    id = "api.user.send_deactivate_email_and_forget.failed.error",
+                    "SendDeactivateEmail"
+                );
+            }
+        });
     }
 
     let message = mm_model::websocket_message::WebSocketEvent::new(

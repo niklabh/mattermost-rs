@@ -69,9 +69,11 @@ pub mod github_release;
 pub mod gitlab;
 pub mod go_bytes;
 pub mod go_charset;
-pub mod go_html;
-/// The x/net entity table and the htmlindex label table, emitted from the Go module cache by
-/// `scripts/gen-go-html-tables.py`. Private: `go_html` and `go_charset` wrap them.
+/// x/net/html's tokenizer, which lives in the generic crate `gohtml` (it is Go's code, not
+/// Mattermost's) and is re-exported here under the path the link-preview code has always used.
+pub use gohtml::token as go_html;
+/// The htmlindex label table, emitted from the Go module cache by
+/// `scripts/gen-go-html-tables.py`. Private: `go_charset` wraps it.
 mod go_html_tables;
 pub mod go_json;
 pub mod go_path;

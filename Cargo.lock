@@ -1145,6 +1145,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "gogoldmark"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "gohtml"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "gohtml2text"
+version = "0.1.0"
+dependencies = [
+ "gohtml",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "goimage"
 version = "0.1.0"
 dependencies = [
@@ -1152,6 +1178,20 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+]
+
+[[package]]
+name = "gomail"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rand 0.9.5",
+ "rustls",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
 ]
 
 [[package]]
@@ -1167,6 +1207,14 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "gotemplate"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1756,7 +1804,11 @@ dependencies = [
  "chrono-tz",
  "flate2",
  "gobwire",
+ "gogoldmark",
+ "gohtml2text",
  "goimage",
+ "gomail",
+ "gotemplate",
  "hmac",
  "if-addrs",
  "libc",
@@ -1797,6 +1849,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "encoding_rs",
+ "gohtml",
  "rand 0.9.5",
  "regex",
  "serde",
@@ -2589,6 +2642,7 @@ version = "0.23.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",

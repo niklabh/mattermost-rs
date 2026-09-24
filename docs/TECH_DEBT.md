@@ -6442,7 +6442,11 @@ session expire on schedule while the same client talking to Go would not.
 
 ## D-215 · No push-notification hub, so `clearPushNotification` does nothing
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+**Closed** 2026-09-24 — `mm_app::push`: the hub, the badge, the device fan-out, the ES256 ack
+JWT and the proxy exchange, wired into every clear and badge site, the ack route and the ping's
+device test. The stacks now run with push on against a per-stack proxy the parity suite serves
+(`parity::push_send`). What follows is the 2026-09-10 state.
 
 `MarkChannelsAsViewed` ends by queueing a `notificationTypeClear` on
 `Srv().PushNotificationsHub` for every channel in `channelsToClearPushNotifications`
@@ -6672,7 +6676,13 @@ circuit, so only a *change* reaches the 400.
 
 ## D-238 · There is no e-mail service, so four routes stay with Go and two writes are silent
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-11 (phase 2, auth writes)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-09-11 (phase 2, auth writes)
+**Closed** 2026-09-24 — `mm_app::email` over three new library ports (`gotemplate`,
+`gohtml2text` over `gohtml`, `gomail`) and `mm_app::mail`. The three send routes are served
+through, every side-effect site this server answers sends (password change, email change,
+welcome, access token added/rotated, username change, self-deactivation, plugin `SendMail`), and
+`parity::email_send` compares each mail with Go's through a per-stack SMTP sink. The MFA-change
+mail goes with MFA itself, which is still forwarded. What follows is the 2026-09-11 state.
 
 `Srv().EmailService` has no counterpart in this tree. Two consequences, of different kinds.
 
@@ -7590,7 +7600,10 @@ it:
 
 ## D-402 · email and push do not fire for a post this server writes
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+**Closed** 2026-09-24 — push (`App::send_post_pushes`, `parity::push_send`) and the notification
+e-mail (`mm_app::notification_email`, `parity::email_send::a_mentions_notification_email_matches_gos`)
+are both served. Batching and the generated avatar remain, as [D-1072].
 **Narrowed** 2026-09-20 — the plugin half is served. Under `MMRS_PLUGIN_HOST=rust`,
 `MessageWillBePosted` and `MessageHasBeenPosted` fire where Go fires them, rejection and
 replacement included (`mm_app::plugin_hooks`, `parity::plugin_hooks`); under the default Go host
@@ -7790,9 +7803,7 @@ no route that archives one; an open channel, which can be archived, is forwarded
 is touched. A mutation dropping the guard therefore survives, and the reason is the route shape
 rather than a missing fixture — recorded here so the next batch does not re-derive it.
 
-`App.UpdateMobileAppBadge` is deliberately absent from both served arms: there is no push
-notifications hub in this port and nothing about it reaches the HTTP response or the websocket.
-Same posture as [D-215].
+`App.UpdateMobileAppBadge` is sent from both served arms since 2026-09-24 ([D-215] closed).
 
 ## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists — CLOSED 2026-09-13
 
@@ -7854,7 +7865,9 @@ the other two) to `Config`, to `scripts/dump-config-fixture.sh` and to the third
 
 ## D-450 · no welcome e-mail is sent by any served account-creation branch
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+**Closed** 2026-09-24 — both served branches call `App::send_welcome_email`
+(`parity::email_send::a_welcome_mail_matches_gos`).
 
 All four of Go's create branches end in `EmailService.SendWelcomeEmail`
 (app/user.go:240, :263, :280, :303) and all four treat its failure as a `Logger.Warn`. There is no
@@ -7893,7 +7906,9 @@ additionally needs `Token().GetAllTokensByType` semantics for the invitation typ
 
 ## D-452 · the send half of both e-mail-token routes is still Go's
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+**Closed** 2026-09-24 — both routes are served through the send, `GetAllTokensByType` is ported,
+and both templates are compared with Go's in `parity::email_send`.
 
 `POST /users/email/verify/send` and `POST /users/password/reset/send` serve every refusal that
 precedes `Token().Save` and forward from there. What is not served is
@@ -8001,8 +8016,8 @@ and the two assertions above inverted.
 ported; the bot notification and the bot cascade are **not**, and both are no-ops for an account
 that owns no bots — which is one `SELECT` away and therefore knowable before the `UPDATE`. So the
 deactivation is served for an owner of no bots and forwarded for an owner of one, with the
-decision taken from reads alone. The self-deactivation e-mail keeps that one arm forwarded; see
-[D-238], still open. What remains of the original entry is below, for the reader who wants the
+decision taken from reads alone. The self-deactivation arm, forwarded for its e-mail, is served
+since 2026-09-24 with [D-238]. What remains of the original entry is below, for the reader who wants the
 list of what `userDeactivated` does.
 
 `App.UpdateActive(active = false)` writes the row and *then* runs `RevokeAllSessions` and
@@ -9981,3 +9996,40 @@ recorder's bundle has no `public/` directory, so the tranche only checks its 404
 request is the file server's one unported answer and is forwarded, to a Go that has no such plugin.
 **What is owed:** a bundle with public files, and a tranche step for a file, a range, an
 `index.html` redirect and a directory without its slash.
+
+---
+
+## D-1071 · Whether a user is pushed depends on a status cache each process keeps alone
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (push for posts)
+
+`doesStatusAllowPushNotification` skips a user who is active in the post's channel: the status's
+`ActiveChannel` is the channel and `LastActivityAt` is under 20 seconds old. `ActiveChannel` is
+written only by `SetActiveChannel`, and only into the **in-process** status cache — never the
+`Status` row (`mm_app::channel_view::set_active_channel` says why). So a channel read through Go
+marks the user active in Go's cache and nowhere else, and a post written through mm-api then
+pushes that user where Go would not; the reverse holds for a read through mm-api.
+
+Measured by `parity::push_send`, whose fixture has to lose focus on **both** servers to make the
+two decisions agree. It is the [D-087] class — one server's cache the other cannot see — now
+deciding a delivery rather than a read. Closing it means a status cache the two processes share,
+or routing every `SetActiveChannel` through one of them.
+
+---
+
+## D-1072 · A post's notification e-mail is never batched, and has no avatar for a sender without a picture
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-24 (the post notification e-mail)
+
+Two arms of `sendNotificationEmail` are not ported (`mm_app::notification_email`):
+
+- **Batching.** With `EmailSettings.EnableEmailBatching` on (off by default) Go queues the mail
+  in `EmailBatchingJob` — a per-server buffer flushed on a timer into one digest per recipient
+  (`app/email/email_batching.go`). This server sends the single notification instead and logs.
+  It needs the batching job and its digest template, and it holds state only the process that
+  queued it can flush — the two servers would each batch half a user's mail.
+- **The generated avatar.** `GetProfileImage` on a sender with no stored picture makes Go draw
+  the initials avatar and **write it**; this server's `get_profile_image` refuses that case, so
+  the mail goes without the embedded photo. It needs the initials renderer (the `gofont` port) in
+  `mm-app`. Once Go has written the file, both servers embed the same bytes.
+

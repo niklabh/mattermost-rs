@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET expiresat = $1, expirednotify = false WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "decbea01b317ba07882d5f9e6ce615e6a05ce63713e3db70da131b12325c5c7e"
+}

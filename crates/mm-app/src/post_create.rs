@@ -538,6 +538,7 @@ impl App {
                 .mark_channels_as_viewed(
                     std::slice::from_ref(&saved.channel_id),
                     &saved.user_id,
+                    &session.id,
                     true,
                     is_crt_enabled,
                 )

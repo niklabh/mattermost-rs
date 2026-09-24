@@ -1,19 +1,28 @@
-//! Port of `testEmail` (api4/system.go) — `POST /api/v4/email/test`, the system console's
-//! "send a test email" button, served up to the SMTP send.
+//! Port of `testEmail` (api4/system.go:243) — `POST /api/v4/email/test`, the system console's
+//! "send a test email" button, served through to the SMTP send ([`mm_app::App::test_email`]).
 //!
 //! # The nil-field check comes before the permission
 //!
 //! The body is decoded as a whole `model.Config`; `checkHasNilFields(&cfg.EmailSettings)` then
 //! refuses with the 400 `api.file.test_connection_email_settings_nil.app_error` if **any** of
 //! the section's thirty pointer fields is absent — so a plain member sending a partial section
-//! learns that before being refused for `test_email`. A body that does not decode leaves `cfg`
-//! nil and Go substitutes its **live** configuration, which passes the check; that arm, and
-//! everything past the empty-`SMTPServer` refusal (the fake-password swap, the user's locale,
-//! the SMTP send), is forwarded.
+//! learns that before being refused for `test_email`.
 //!
-//! `json.Decode` fills the struct before it fails, so a body with a mistyped field is a
-//! partially filled section on Go's side — usually the nil-field 400 — where serde drops the
-//! whole thing; that difference is forwarded too rather than guessed at.
+//! # When Go tests its live configuration instead
+//!
+//! `json.NewDecoder(r.Body).Decode(&cfg)` into a nil `*model.Config` leaves it nil for an empty
+//! body, for `null`, and for any syntax error — the decoder scans the whole first value before it
+//! unmarshals a byte of it — and `cfg == nil` means "use `c.App.Config()`". Those are served here
+//! from the live configuration. A first value that is valid JSON but not an object (`[]`, `"x"`)
+//! **does** allocate the struct before the type error, so Go goes on with a zero config — that,
+//! and an object serde will not decode where Go fills the struct partway before failing, are
+//! forwarded rather than guessed at.
+//!
+//! # The send ignores the body's server
+//!
+//! Past the permission, the body is only checked — an empty `SMTPServer`, or a masked password
+//! for different connection settings — and the mail then goes through the **live** SMTP
+//! settings; see [`mm_app::App::test_email`].
 
 use axum::extract::{Request, State};
 use axum::response::{IntoResponse, Response};
@@ -48,7 +57,10 @@ pub async fn test_email(
         .await
         .unwrap_or_default();
 
-    let parsed = serde_json::from_slice::<serde_json::Value>(&bytes);
+    // `Decoder.Decode` reads the *first* value only, so trailing bytes after it are ignored.
+    let first = serde_json::Deserializer::from_slice(&bytes)
+        .into_iter::<serde_json::Value>()
+        .next();
     let forward = |state: AppState, why: &'static str| async move {
         tracing::Span::current().record("forwarded", true);
         tracing::debug!(reason = why, "handing an email test to Go");
@@ -56,15 +68,34 @@ pub async fn test_email(
         proxy::forward_to_go(State(state), request).await
     };
 
-    let cfg = match parsed {
-        Ok(value @ serde_json::Value::Object(_)) => match serde_json::from_value::<Config>(value) {
-            Ok(cfg) => cfg,
-            Err(_) => return forward(state, "a body Go decodes partially").await,
-        },
-        _ => return forward(state, "no config in the body: Go tests its live one").await,
+    let email_settings = match first {
+        Some(Ok(value @ serde_json::Value::Object(_))) => {
+            match serde_json::from_value::<Config>(value) {
+                Ok(cfg) => cfg.email_settings,
+                Err(_) => return forward(state, "a body Go decodes partially").await,
+            }
+        }
+        // EOF, `null`, or a syntax error: `cfg` stays nil and Go tests its live configuration.
+        None | Some(Ok(serde_json::Value::Null)) | Some(Err(_)) => {
+            match mm_app::config::load_model_config(state.app.store().config()).await {
+                Ok(live) => live.email_settings,
+                Err(err) => {
+                    tracing::error!(error = %err, "could not read the live configuration");
+                    return ApiError::from(AppError::new(
+                        "testEmail",
+                        "app.admin.test_email.failure",
+                        None,
+                        String::new(),
+                        500,
+                    ))
+                    .into_response();
+                }
+            }
+        }
+        Some(Ok(_)) => return forward(state, "a non-object body Go zero-fills").await,
     };
 
-    if email_settings_have_nil_fields(&cfg.email_settings) {
+    if email_settings_have_nil_fields(&email_settings) {
         return ApiError::from(AppError::new(
             "testEmail",
             "api.file.test_connection_email_settings_nil.app_error",
@@ -87,26 +118,14 @@ pub async fn test_email(
         .into_response();
     }
 
-    // `TestEmail`'s first statement; its detail is the translated `invalid_param` sentence for
-    // `SMTPServer`, blanked on the wire.
-    if cfg
-        .email_settings
-        .smtp_server
-        .as_deref()
-        .unwrap_or("")
-        .is_empty()
+    match state
+        .app
+        .test_email(&session.0.user_id, &email_settings)
+        .await
     {
-        return ApiError::from(AppError::new(
-            "testEmail",
-            "api.admin.test_email.missing_server",
-            None,
-            "Invalid or missing SMTPServer parameter in request body.",
-            400,
-        ))
-        .into_response();
+        Ok(()) => crate::user_creates::status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
     }
-
-    forward(state, "the SMTP send").await
 }
 
 #[cfg(test)]

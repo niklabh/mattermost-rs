@@ -222,11 +222,10 @@ impl App {
     /// enforced. Go's comment says why: integrations that provision bots would break the moment
     /// an admin enabled enforcement.
     ///
-    /// # The e-mail is not sent
+    /// # The e-mail
     ///
-    /// Go calls `SendUserAccessTokenAddedEmail` for a non-bot owner and only **logs** a failure,
-    /// so it changes no response. There is no e-mail service in this port — see D-238 — and this
-    /// route is therefore silent where Go writes to an inbox.
+    /// Go calls `SendUserAccessTokenAddedEmail` for a non-bot owner — synchronously, after the
+    /// save — and only **logs** a failure, so it changes no response.
     #[tracing::instrument(skip_all, fields(user_id = %token.user_id, token_id))]
     pub async fn create_user_access_token(
         &self,
@@ -271,6 +270,15 @@ impl App {
             .map_err(|err| save_error("CreateUserAccessToken", err))?;
 
         tracing::Span::current().record("token_id", &saved.id);
+        if !user.is_bot {
+            let site_url = self.live_site_url().await.unwrap_or_default();
+            if let Err(err) = self
+                .send_user_access_token_added_email(&user.email, &user.locale, &site_url)
+                .await
+            {
+                tracing::error!(error = %err, user_id = %user.id, "Unable to send user access token added email");
+            }
+        }
         Ok(saved)
     }
 
@@ -385,7 +393,8 @@ impl App {
     /// directly, which is the same thing without the copy: nothing is mutated before the store
     /// call succeeds.
     ///
-    /// As with creation, the non-bot e-mail (`SendUserAccessTokenRotatedEmail`) is not sent.
+    /// As with creation, a non-bot owner is mailed (`SendUserAccessTokenRotatedEmail`) after the
+    /// write, synchronously, its failure only logged.
     #[tracing::instrument(skip_all, fields(token_id = %token.id, expires_at = expires_at))]
     pub async fn rotate_user_access_token(
         &self,
@@ -440,6 +449,15 @@ impl App {
         // carries the pre-rotation `description` and `is_active` beside the new secret and expiry.
         token.token = new_secret;
         token.expires_at = expires_at;
+        if !user.is_bot {
+            let site_url = self.live_site_url().await.unwrap_or_default();
+            if let Err(err) = self
+                .send_user_access_token_rotated_email(&user.email, &user.locale, &site_url)
+                .await
+            {
+                tracing::error!(error = %err, user_id = %user.id, "Unable to send user access token rotated email");
+            }
+        }
         Ok(token)
     }
 

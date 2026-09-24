@@ -1,5 +1,5 @@
-//! Cross-server parity for `POST /api/v4/email/test` — the refusals served here and the send
-//! handed to Go.
+//! Cross-server parity for `POST /api/v4/email/test` — the refusals, and the send through the
+//! live SMTP settings to the stack's sink.
 //!
 //! ```sh
 //! scripts/parity.sh --test parity email_test
@@ -75,9 +75,9 @@ async fn both_refuse(client: &reqwest::Client, token: &str, body: &str, status: 
 
 /// A partial section is the nil-field 400 for anyone, before the permission; a full one is the
 /// 403 for a plain member; a full one with no server the 400 for the admin; and a full one with
-/// a server, or no decodable body at all, is Go's — which tries the SMTP send.
+/// a server, or no decodable body at all, mails the caller through the live settings.
 #[tokio::test]
-async fn the_refusals_are_served_and_the_send_is_gos() {
+async fn the_refusals_and_the_send_are_served() {
     if !stack_enabled() {
         return;
     }
@@ -125,14 +125,50 @@ async fn the_refusals_are_served_and_the_send_is_gos() {
     )
     .await;
 
-    // Past the refusals the send is Go's: with a server, and with no body at all.
-    for body in [full_settings("127.0.0.1"), "null".to_owned(), "".to_owned()] {
+    // A masked password for settings that are not the live ones must be re-entered.
+    let mut masked: serde_json::Value =
+        serde_json::from_str(&full_settings("smtp.example")).expect("JSON");
+    masked["EmailSettings"]["SMTPPassword"] =
+        serde_json::Value::from("********************************");
+    both_refuse(
+        &client,
+        &admin,
+        &masked.to_string(),
+        400,
+        "api.admin.test_email.reenter_password",
+    )
+    .await;
+
+    // Past the refusals the send is served here, through the **live** SMTP settings whatever the
+    // body names — so both servers mail the stack's sink and answer OK.
+    let sink = common::smtp_sink::smtp_sink().expect("the SMTP sink");
+    for body in [
+        full_settings("127.0.0.1"),
+        "null".to_owned(),
+        "".to_owned(),
+        "{not json".to_owned(),
+    ] {
+        let (go_status, _, go) = post(&client, GO, &admin, &body).await;
         let (status, served, response) = post(&client, RUST, &admin, &body).await;
-        assert_eq!(served.as_deref(), Some("go"), "{body}: forwarded");
-        assert!(
-            status == 200 || status == 500,
-            "{body}: Go's send answered {status}: {}",
-            String::from_utf8_lossy(&response)
+        assert_eq!(served.as_deref(), Some("rust"), "{body}: served here");
+        assert_eq!(
+            (status, String::from_utf8_lossy(&response)),
+            (go_status, String::from_utf8_lossy(&go)),
+            "{body}"
         );
+        assert_eq!(status, 200, "{body}");
+        for _ in 0..2 {
+            assert!(
+                sink.take(common::LOGIN_ID, std::time::Duration::from_secs(10))
+                    .await
+                    .is_some(),
+                "{body}: a test mail to the caller"
+            );
+        }
     }
+
+    // A first value that is JSON but not an object makes Go zero-fill the struct before its type
+    // error; that is still Go's to answer.
+    let (_, served, _) = post(&client, RUST, &admin, "[]").await;
+    assert_eq!(served.as_deref(), Some("go"), "[]: forwarded");
 }

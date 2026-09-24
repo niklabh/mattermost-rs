@@ -768,9 +768,10 @@ func main() {
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	rustOutMarkdown := flag.String("rust-out-markdown", "../../crates/mm-markdown/src", "directory to write mm-markdown's generated Rust into")
+	rustOutGoldmark := flag.String("rust-out-goldmark", "../../crates/gogoldmark/src", "directory to write gogoldmark's generated Rust into")
 	// -only=imaging writes just the image-pipeline fixtures and exits. The full run takes minutes;
 	// iterating on one oracle should not.
-	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests) and exit")
+	only := flag.String("only", "", "write only the named behaviour fixture set (imaging, web_error, i18n, support_packet, plugin_requests, html2text, mail, gotemplate, goldmark) and exit")
 	flag.Parse()
 
 	if *only == "imaging" {
@@ -795,6 +796,12 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	} else if *only == "gotemplate" {
+		if err := writeGotemplateBehaviourFixture(*out, filepath.Join(*out, "..", "crates", "gotemplate", "src")); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: gotemplate behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	} else if *only == "support_packet" {
 		if err := writeGoYAMLBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: goyaml behaviour fixture: %v\n", err)
@@ -805,9 +812,27 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	} else if *only == "html2text" {
+		if err := writeHTML2TextBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: html2text behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "mail" {
+		if err := writeMailBehaviourFixture(*out); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: mail behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	} else if *only == "plugin_requests" {
 		if err := writePluginRequestsBehaviourFixture(*out); err != nil {
 			fmt.Fprintf(os.Stderr, "FAIL: plugin requests behaviour fixture: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	} else if *only == "goldmark" {
+		if err := writeGoldmarkBehaviourFixture(*out, *rustOutGoldmark); err != nil {
+			fmt.Fprintf(os.Stderr, "FAIL: goldmark behaviour fixture: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -1293,6 +1318,21 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_i18n.json"))
+
+	if err := writeHTML2TextBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: html2text behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeGotemplateBehaviourFixture(*out, filepath.Join(*out, "..", "crates", "gotemplate", "src")); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: gotemplate behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeGoldmarkBehaviourFixture(*out, *rustOutGoldmark); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: goldmark behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := writeJSONFoldBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: json fold behaviour fixture: %v\n", err)

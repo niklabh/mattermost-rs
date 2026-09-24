@@ -678,6 +678,80 @@ const FILE_DOWNLOAD_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::fro
 /// `Participants` **is** sent now that [`user_to_wire`] exists. It is nil on every path that
 /// reaches these hooks — only the thread reads fill it — so this changes no byte any plugin has
 /// seen; it removes the silent gap rather than a live divergence.
+/// `model.PushNotification` as gob carries it to `NotificationWillBePushed` — every field,
+/// including the two `json:"-"` ones (`PostType`, `ChannelType`) that only plugins see.
+pub fn push_notification_to_wire(
+    msg: &mm_model::push_notification::PushNotification,
+) -> wire_model::PushNotification {
+    wire_model::PushNotification {
+        ack_id: msg.ack_id.clone(),
+        platform: msg.platform.clone(),
+        server_id: msg.server_id.clone(),
+        device_id: msg.device_id.clone(),
+        post_id: msg.post_id.clone(),
+        category: msg.category.clone(),
+        sound: msg.sound.clone(),
+        message: msg.message.clone(),
+        badge: msg.badge,
+        content_available: msg.content_available,
+        team_id: msg.team_id.clone(),
+        channel_id: msg.channel_id.clone(),
+        root_id: msg.root_id.clone(),
+        channel_name: msg.channel_name.clone(),
+        r#type: msg.type_.clone(),
+        sub_type: msg.sub_type.0.clone(),
+        transport: msg.transport.0.clone(),
+        sender_id: msg.sender_id.clone(),
+        sender_name: msg.sender_name.clone(),
+        override_username: msg.override_username.clone(),
+        override_icon_url: msg.override_icon_url.clone(),
+        from_webhook: msg.from_webhook.clone(),
+        version: msg.version.clone(),
+        is_crt_enabled: msg.is_crt_enabled,
+        is_id_loaded: msg.is_id_loaded,
+        post_type: msg.post_type.clone(),
+        channel_type: msg.channel_type.clone(),
+        signature: msg.signature.clone(),
+    }
+}
+
+/// The inverse of [`push_notification_to_wire`]: a plugin's replacement, whole.
+pub fn push_notification_from_wire(
+    wire: &wire_model::PushNotification,
+) -> mm_model::push_notification::PushNotification {
+    use mm_model::push_notification::{PushNotification, PushSubType, PushTransport};
+    PushNotification {
+        ack_id: wire.ack_id.clone(),
+        platform: wire.platform.clone(),
+        server_id: wire.server_id.clone(),
+        device_id: wire.device_id.clone(),
+        post_id: wire.post_id.clone(),
+        category: wire.category.clone(),
+        sound: wire.sound.clone(),
+        message: wire.message.clone(),
+        badge: wire.badge,
+        content_available: wire.content_available,
+        team_id: wire.team_id.clone(),
+        channel_id: wire.channel_id.clone(),
+        root_id: wire.root_id.clone(),
+        channel_name: wire.channel_name.clone(),
+        type_: wire.r#type.clone(),
+        sub_type: PushSubType(wire.sub_type.clone()),
+        transport: PushTransport(wire.transport.clone()),
+        sender_id: wire.sender_id.clone(),
+        sender_name: wire.sender_name.clone(),
+        override_username: wire.override_username.clone(),
+        override_icon_url: wire.override_icon_url.clone(),
+        from_webhook: wire.from_webhook.clone(),
+        version: wire.version.clone(),
+        is_crt_enabled: wire.is_crt_enabled,
+        is_id_loaded: wire.is_id_loaded,
+        post_type: wire.post_type.clone(),
+        channel_type: wire.channel_type.clone(),
+        signature: wire.signature.clone(),
+    }
+}
+
 pub fn post_to_wire(post: &Post) -> wire_model::Post {
     wire_model::Post {
         id: post.id.clone(),
@@ -965,7 +1039,7 @@ fn rejection_error(reason: &str, caller: &str) -> Box<AppError> {
 impl App {
     /// The environment a hook may run in: `Channels.GetPluginsEnvironment()` (app/plugin.go:47),
     /// and `None` whenever this process is not the host (docs/PLUGIN_PLAN.md, D6).
-    fn hook_environment(&self) -> Option<Arc<PluginsEnvironment>> {
+    pub(crate) fn hook_environment(&self) -> Option<Arc<PluginsEnvironment>> {
         if !self.plugin_host().hosted() {
             return None;
         }

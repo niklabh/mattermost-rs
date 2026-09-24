@@ -136,6 +136,11 @@ env_for_server() {
   # **Whatever is set here must also be set in `scripts/mm-api-env.sh`**: an environment override
   # never reaches the configuration document, which is what `mm-api` reads.
   export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
+  # This stack's SMTP port (`stack-env.sh`). `SMTPServer` stays the document's `localhost`.
+  export MM_EMAILSETTINGS_SMTPPORT="$MMRS_SMTP_PORT"
+  # This stack's push proxy (`stack-env.sh`), and push on.
+  export MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS=true
+  export MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER="http://localhost:$MMRS_PUSH_PORT"
 }
 
 case "${1:-run}" in

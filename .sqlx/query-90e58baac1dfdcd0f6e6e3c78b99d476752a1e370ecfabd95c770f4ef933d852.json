@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT SUM(CASE WHEN $2 THEN cm.mentioncountroot ELSE cm.mentioncount END)::bigint\n              FROM channels c\n             INNER JOIN channelmembers cm\n                ON cm.channelid = c.id\n               AND cm.userid = $1\n               AND c.deleteat = 0\n             WHERE c.type NOT IN ('S')\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sum",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "90e58baac1dfdcd0f6e6e3c78b99d476752a1e370ecfabd95c770f4ef933d852"
+}

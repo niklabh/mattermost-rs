@@ -12,11 +12,20 @@ mm-model.workspace = true
 mm-plugin.workspace = true
 # `gobwire::Interface`: the plugin API's log methods read the `[]any` pairs a plugin sends.
 gobwire = { path = "../gobwire" }
+# Go's `html/template`, which every e-mail body is rendered with (`crate::email`).
+gotemplate = { path = "../gotemplate" }
 tar.workspace = true
 flate2.workspace = true
 mm-markdown.workspace = true
 # Byte-exact ports of Go's image codecs and the imaging libraries (BSD-3-Clause AND MIT).
 goimage.workspace = true
+# Byte-exact ports of net/mail, net/smtp, mime and go-mail's writer (MIT AND BSD-3-Clause), and
+# of jaytaylor/html2text — what `mail.rs` (platform/shared/mail) drives.
+gomail = { path = "../gomail" }
+gohtml2text = { path = "../gohtml2text" }
+# Byte-exact port of goldmark (MIT): push-notification text and notification e-mail HTML
+# (`crate::markdown_utils`).
+gogoldmark = { path = "../gogoldmark" }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -48,8 +57,13 @@ regex.workspace = true
 # `getpwuid_r`, for the upgrader's port of `os/user.LookupId` — the username of the binary's
 # owner and of this process, which `CanIUpgradeToE0`'s three permission errors carry.
 libc = "0.2"
+# The recipient's zone for a notification e-mail's post time (`notification_email`), as Go's
+# `time.LoadLocation` resolves it.
+chrono-tz.workspace = true
 
 [dev-dependencies]
+# The SMTP sink and transcript normaliser `mail.rs`'s oracle replay shares with gomail.
+gomail = { path = "../gomail", features = ["testing"] }
 # Only to construct a `sqlx::Error` when testing the store-error-to-AppError mapping. The crate
 # itself never touches sqlx — that is mm-store's business.
 sqlx.workspace = true

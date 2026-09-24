@@ -12,6 +12,19 @@ use crate::error::StoreError;
 /// The subset of Go's `store.UserStore` (store/store.go:448-550) that is ported.
 pub trait UserStore {
     /// Port of `SqlUserStore.Get` (user_store.go:609).
+    /// Port of `SqlUserStore.GetUnreadCount` (user_store.go:1583) — the mobile badge: the sum of
+    /// `MentionCount` (or `MentionCountRoot` under collapsed threads) over the user's memberships
+    /// in live channels that are not space-backing (`Type NOT IN ('S')`).
+    ///
+    /// **A user in no such channel is an error, not zero**: `SUM` over no rows is `NULL`, which Go
+    /// scans into an `int64` and fails on. The badge then fails to build and the push is dropped
+    /// with a log line.
+    fn get_unread_count(
+        &self,
+        user_id: &str,
+        is_crt_enabled: bool,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
     /// Port of `SqlUserStore.UpdateUpdateAt` (user_store.go) — one column, no read, no
@@ -1058,6 +1071,39 @@ pub(crate) fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    async fn get_unread_count(
+        &self,
+        user_id: &str,
+        is_crt_enabled: bool,
+    ) -> Result<i64, StoreError> {
+        let sum: Option<i64> = sqlx::query_scalar!(
+            r#"
+            SELECT SUM(CASE WHEN $2 THEN cm.mentioncountroot ELSE cm.mentioncount END)::bigint
+              FROM channels c
+             INNER JOIN channelmembers cm
+                ON cm.channelid = c.id
+               AND cm.userid = $1
+               AND c.deleteat = 0
+             WHERE c.type NOT IN ('S')
+            "#,
+            user_id,
+            is_crt_enabled
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to count unread Channels for userId={user_id}"),
+            source,
+        })?;
+        // `sql: Scan error on column index 0, name "sum": converting NULL to int64 is
+        // unsupported`, wrapped — a 500-shaped failure the badge path only logs.
+        sum.ok_or(StoreError::Argument {
+            entity: "UnreadCount",
+            detail: "converting NULL to int64 is unsupported",
+        })
+    }
+
     #[tracing::instrument(skip(self), fields(user_id = %user_id))]
     async fn update_update_at(&self, user_id: &str) -> Result<i64, StoreError> {
         let now = mm_model::utils::get_millis();
