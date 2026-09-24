@@ -227,9 +227,9 @@ async fn a_superseded_revision_is_not_returned() {
 /// `FeatureFlags` is not persisted, so it can never be read from here.
 ///
 /// `Store.Load` clears the section on all three configs before comparing or persisting when
-/// `readOnlyFF` is set, which is the default (config/store.go:306-310). `mm_app::config` documents
-/// this and deliberately sources `feature_flag_burn_on_read` from the environment instead; if the
-/// section ever starts appearing, that decision needs revisiting and this test is the alarm.
+/// `readOnlyFF` is set, which is the default (config/store.go:306-310). `mm_app::config` reads the
+/// section when a row has one, as Go does, and otherwise takes `SetDefaults`; this test pins that
+/// this stack's rows take the second path.
 #[tokio::test]
 async fn feature_flags_are_absent_from_the_persisted_document() {
     if !db_enabled() {

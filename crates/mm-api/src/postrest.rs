@@ -290,7 +290,7 @@ pub async fn move_thread(
         Ok(license) => license.is_some(),
         Err(err) => return ApiError::from(err).into_response(),
     };
-    if !state.app.config().feature_flag_move_threads_enabled || !licensed {
+    if !state.app.config().feature_flags.move_threads_enabled || !licensed {
         return app_error("moveThread", "api.post.move_thread.disabled.app_error", 501)
             .into_response();
     }
@@ -380,7 +380,7 @@ pub async fn reveal_post(
     }
     let connection_id = header_value(headers, CONNECTION_ID_HEADER).to_owned();
 
-    if !state.app.config().feature_flag_burn_on_read {
+    if !state.app.config().feature_flags.burn_on_read {
         return app_error("revealPost", "api.post.reveal_post.disabled.app_error", 501)
             .into_response();
     }

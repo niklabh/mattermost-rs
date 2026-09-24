@@ -230,7 +230,7 @@ impl App {
             return Ok(());
         }
         let config = self.config();
-        if config.feature_flag_enable_mfi_plugin_signature_public_key
+        if config.feature_flags.enable_mfi_plugin_signature_public_key
             && verify_signature(MFI_PLUGIN_PUBLIC_KEY, plugin, signature).is_ok()
         {
             tracing::debug!("Plugin signature verified using hard-coded MFI public key");

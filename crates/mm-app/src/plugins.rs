@@ -268,7 +268,7 @@ impl App {
                 .copied()
                 .unwrap_or(false);
             // getPluginStateOverride: the Apps plugin follows its feature flag.
-            if manifest.id == PLUGIN_ID_APPS && !config.feature_flag_apps_enabled {
+            if manifest.id == PLUGIN_ID_APPS && !config.feature_flags.apps_enabled {
                 on = false;
             }
             if on {

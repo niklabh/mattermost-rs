@@ -223,7 +223,7 @@ pub async fn request_join_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let (parts, body) = request.into_parts();
@@ -298,7 +298,7 @@ pub async fn get_my_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -357,7 +357,7 @@ pub async fn withdraw_my_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -417,7 +417,7 @@ pub async fn get_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -467,7 +467,7 @@ pub async fn count_pending_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
 
@@ -530,7 +530,7 @@ pub async fn patch_channel_join_request(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let (parts, body) = request.into_parts();
@@ -613,7 +613,7 @@ pub async fn get_my_channel_join_requests(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !state.app.config().feature_flag_discoverable_channels {
+    if !state.app.config().feature_flags.discoverable_channels {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
