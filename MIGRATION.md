@@ -14764,3 +14764,9 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 | `Context.ExtendSessionExpiryIfNeeded`, `App.ExtendSessionExpiryIfNeeded`, `GetSessionLengthInMillis`, `platform.ExtendSessionExpiry`, `AttachSessionCookies` + `AttachCloudSessionCookie` | `mm_app::session::{session_extension_due, session_length_in_millis, extension_threshold}`, `mm_api::session_expiry` | DONE | 22 unit + cloud-cookie oracle; `parity::session_expiry` (3) | On `viewChannel`, `createPost` and `user_typing` (no cookies); a bot's expiring token session is never due, a never-expiring session always is. No session cache to update here (D-087). |
 | `Context.SessionRequired` (web/context.go:138) | `mm_api::auth::session_required` | DONE | 5 unit + `parity::session_expiry::a_humans_token_session_is_refused_while_tokens_are_off` | Was missing: a non-bot token session with `EnableUserAccessTokens` off got a 200 here and a 401 from Go. |
 | `net/http` `Cookie.String` domain and value rules | `mm_api::sessions::{valid_cookie_domain, cookie_value}` | DONE | `behaviour_session_write.json` (+28 rows) | An invalid `Domain` (an IPv6 SiteURL's hostname) is dropped, a leading dot stripped, a value with a space or comma quoted. |
+
+## Config fixture coverage — D-454 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| The live `Configurations.Value` row, projected by `scripts/dump-config-fixture.sh` | `mm_app::config` tests (`document_keys`, `coverage_gaps`) | DONE, closes [D-454] | 3 unit; 10 mutations, 8 caught, 2 controls survived | The fixture's key set is checked against `Document`'s serde field lists, not a count; 27 keys were added and none moved an existing value. |

@@ -7945,30 +7945,14 @@ whenever `ProductNoticeViewState` is otherwise needed.
 
 ---
 
-## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads
+## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
+**Status** CLOSED · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
 
-The script's key list is meant to be `mm_app::config::Document`'s own keys, and
-`the_fixture_covers_every_document_sourced_setting` asserts a **hardcoded count** against the
-fixture the script wrote — so the test agrees with the list rather than with the struct, and the
-drift CLAUDE.md warns about is invisible by construction. It has now happened a third time:
-`TeamSettings` declares `EnableOpenServer`, `EnableChannelCategorySorting`, `MaxChannelsPerTeam`,
-`MaxUsersPerTeam` and `ExperimentalDefaultChannels` in `TeamSettingsDocument` and the script
-projects none of them, and `PasswordSettings`, `ExportSettings` and `ImportSettings` have no
-section in the script at all.
-
-Every one of those settings is therefore tested only against `Config::default`, comparing a
-transcribed default with itself.
-
-This session added its own three keys (`TeamSettings.EnableUserCreation`,
-`EmailSettings.EnableSignUpWithEmail`, `LocalizationSettings.DefaultClientLocale`) and moved the
-count from 67 to 70 rather than closing the gap, because regenerating the missing sections rewrites
-committed fixture values other suites assert against and that belongs in its own change.
-
-**What is owed:** derive the key list from `Document` — or, cheaper and nearly as good, assert the
-count against a `const` that lives beside the struct instead of beside the fixture — then
-regenerate and review the values that appear for the first time.
+Paid off: `the_fixture_covers_every_document_sourced_setting` now reads the expected keys from
+`Document`'s own serde field lists (`document_keys` in `mm_app::config`) and fails on a gap in either
+direction; the script projects all 27 keys it was missing (only `FileSettings.PublicLinkSalt`, a
+secret, is excused by name), and every newly compared value agreed with `Config::default`.
 
 ---
 
