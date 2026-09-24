@@ -1,4 +1,6 @@
 # Mutation plan for the decoded audit path, the unparseable-target forward, and D-1220/D-1221.
+# 2026-09-25: 10 run, 7 caught, 3 survived — two controls, and `unparseable-target-routed`, whose
+# test sent requests that were forwarded either way; with a tokenless GET it is caught (1 of 1).
 #
 #   scripts/mutate-batch.sh scripts/mutations/hook-updates-d1220.plan
 #

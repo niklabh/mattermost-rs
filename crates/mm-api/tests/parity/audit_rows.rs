@@ -1272,13 +1272,19 @@ async fn a_target_go_cannot_parse_is_its_400_and_writes_no_row() {
         let mut answers = Vec::new();
         for base in [GO, RUST] {
             let since = now_millis() - 1;
-            let response = http
-                .put(format!("{base}{path}"))
-                .header("Authorization", format!("Bearer {}", who.admin))
-                .json(&serde_json::json!({ "nickname": "never" }))
-                .send()
-                .await
-                .expect("the server answers");
+            // The username route **without a token**: its handler forwards a segment outside the
+            // username charset itself, so only a request refused before the handler — the session
+            // extractor's 401 — shows whether the guard handed the target to Go. A `PUT` (an
+            // unregistered method) or an authenticated `GET` is forwarded either way; the
+            // `unparseable-target-routed` mutation survived both versions of this test.
+            let request = if path.starts_with("/api/v4/users/username/") {
+                http.get(format!("{base}{path}"))
+            } else {
+                http.put(format!("{base}{path}"))
+                    .header("Authorization", format!("Bearer {}", who.admin))
+                    .json(&serde_json::json!({ "nickname": "never" }))
+            };
+            let response = request.send().await.expect("the server answers");
             let status = response.status().as_u16();
             let served = response
                 .headers()
