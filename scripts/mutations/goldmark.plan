@@ -11,6 +11,7 @@ underscore-close	crates/gogoldmark/src/parser/inline.rs	is_right && (!is_left ||
 rule-of-three-closer-mod	crates/gogoldmark/src/parser/inline.rs	        && closer.original_length % 3 != 0\n	\n	pkg
 consume-two-needs-both	crates/gogoldmark/src/parser/inline.rs	if d.length >= 2 && closer.length >= 2 {	if d.length >= 2 || closer.length >= 2 {	pkg
 strike-after-tilde	crates/gogoldmark/src/parser/inline.rs	(d.original_length > 2 || before == '~')	(d.original_length > 2)	pkg
+# Equivalent: see LinkBottom (parser/mod.rs).
 typed-nil-link-bottom	crates/gogoldmark/src/parser/inline.rs	LinkBottom::One(x) => Bottom::Node(x),	LinkBottom::One(x) => x.map_or(Bottom::Nil, |v| Bottom::Node(Some(v))),	pkg
 # Link destination and title.
 dest-paren-balance	crates/gogoldmark/src/parser/inline.rs	            opened -= 1;\n            if opened < 0 {	            opened -= 1;\n            if opened < 1 {	pkg
@@ -31,9 +32,11 @@ setext-level	crates/gogoldmark/src/parser/mod.rs	let level = if c == b'-' { 2 } 
 setext-dash-run-whole-line	crates/gogoldmark/src/parser/mod.rs	|| (level2 > 0 && start + level2 == end)) {	|| (level2 > 0)) {	pkg
 atx-level-cap	crates/gogoldmark/src/parser/mod.rs	if i == pos || level > 6 {	if i == pos || level > 7 {	pkg
 atx-needs-space	crates/gogoldmark/src/parser/mod.rs	    let l = util::trim_left_space_length(&line[i..]);\n    if l == 0 {	    let l = util::trim_left_space_length(&line[i..]);\n    if l == 0 && false {	pkg
+# Equivalent: the heading text was right-trimmed, so its last byte is never a space.
 atx-closing-needs-space	crates/gogoldmark/src/parser/mod.rs	if i != stop - 1 && util::is_space(hv[i]) {	if util::is_space(hv[i]) {	pkg
 atx-all-hashes	crates/gogoldmark/src/parser/mod.rs	if i == 0 && hv[0] == b'#' {	if i == 0 {	pkg
 # Linkify boundaries.
+# Equivalent: the trailing-punctuation loop strips the same `.`.
 linkify-trailing-dot	crates/gogoldmark/src/parser/inline.rs	        if last_char == b'.' {\n            *end -= 1;	        if last_char == b'.' {\n            *end -= 0;	pkg
 linkify-paren-balance	crates/gogoldmark/src/parser/inline.rs	if closing > 0 {	if closing > 1 {	pkg
 linkify-entity-semicolon	crates/gogoldmark/src/parser/inline.rs	line[i as usize] == b'&' {	line[i as usize] == b'#' {	pkg
@@ -45,6 +48,7 @@ linkify-in-label	crates/gogoldmark/src/parser/inline.rs	    if pc.link_label_sta
 # Tables.
 table-align-left	crates/gogoldmark/src/parser/table.rs	(true, false) => Alignment::Left,	(true, false) => Alignment::Right,	pkg
 table-align-center	crates/gogoldmark/src/parser/table.rs	(true, true) => Alignment::Center,	(true, true) => Alignment::None,	pkg
+# Equivalent: util.IsSpace rejects \v in isTableDelim before the column regexes run.
 table-vtab-not-re-space	crates/gogoldmark/src/parser/table.rs	matches!(c, b'\\t' | b'\\n' | b'\\x0c' | b'\\r' | b' ')	matches!(c, b'\\t' | b'\\n' | b'\\x0b' | b'\\x0c' | b'\\r' | b' ')	pkg
 table-header-count	crates/gogoldmark/src/parser/table.rs	if alignments.len() as isize != ast.child_count(header) {	if alignments.len() as isize > ast.child_count(header) {	pkg
 table-escaped-pipe	crates/gogoldmark/src/parser/table.rs	if closure == 0 || line[closure - 1] != b'\\\\' {	if closure == 0 || line[closure - 1] != b'|' {	pkg

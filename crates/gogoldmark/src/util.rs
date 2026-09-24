@@ -90,7 +90,8 @@ pub fn is_punct(c: u8) -> bool {
     PUNCT_TABLE[c as usize] == 1
 }
 
-/// Port of `util.IsSpace`: `\t \n \v \f \r` and space.
+/// Port of `util.IsSpace`: `\t`, `\n`, `\r` and space. **Not** `\v` or `\f`: goldmark's
+/// `spaceTable` leaves them out, although its `spaces` trim set (`TrimLeftSpace` & co.) has them.
 pub fn is_space(c: u8) -> bool {
     SPACE_TABLE[c as usize] == 1
 }

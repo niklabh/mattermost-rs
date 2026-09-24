@@ -26,7 +26,8 @@ fn is_table_delim(bs: &[u8]) -> bool {
     !all_sep
 }
 
-/// Go's `\s` (`[\t\n\f\r ]` — not `\v`, which `util.IsSpace` does accept).
+/// Go's `\s` (`[\t\n\f\r ]`). Only `\t`, `\n`, `\r` and space can reach it: `\v` and `\f`
+/// fail `util.IsSpace` in [`is_table_delim`] first, so whether `\s` would take them is moot.
 fn is_re_space(c: u8) -> bool {
     matches!(c, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')
 }

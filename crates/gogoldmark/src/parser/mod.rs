@@ -142,7 +142,10 @@ pub(crate) struct EscapedPipeCell {
 /// The value under `linkBottom` (link.go:160). Go stores `pc.LastDelimiter()` — a
 /// `*Delimiter` — in an `any`, so an empty stack is an **untyped** nil but a pushed "no
 /// delimiter" is a **typed** nil that compares non-nil. [`inline`]'s `process_delimiters`
-/// takes the difference into account, because goldmark's does.
+/// takes the difference into account, because goldmark's does — though no output has been found
+/// that depends on it: every delimiter still listed is a sibling of the last one, so both paths
+/// start from the same closer (mutation `typed-nil-link-bottom` survives the corpus and a
+/// two-million-input differential search).
 #[derive(Clone, Debug, Default)]
 pub(crate) enum LinkBottom {
     #[default]

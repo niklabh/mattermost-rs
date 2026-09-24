@@ -4,7 +4,9 @@ control-capacity	crates/mm-app/src/markdown_utils.rs	    let mut out = String::w
 control-capacity-2	crates/mm-app/src/markdown_utils.rs	    let mut out = String::with_capacity(s.len());	    let mut out = String::new();	pkg	markdown_utils
 # notificationRenderer: spacing, newlines, registration.
 item-space-needs-sibling	crates/mm-app/src/markdown_utils.rs	    if !entering && ast.next_sibling(n).is_some() {\n        w.push(b' ');	    if !entering {\n        w.push(b' ');	pkg	markdown_utils
+# Equivalent: every line of a text block yields at least one inline child.
 textblock-space-needs-child	crates/mm-app/src/markdown_utils.rs	&& ast.next_sibling(n).is_some() && ast.first_child(n).is_some() {	&& ast.next_sibling(n).is_some() {	pkg	markdown_utils
+# Equivalent: raw Text nodes (code spans, table splits) never carry line-break flags.
 text-raw-no-newline	crates/mm-app/src/markdown_utils.rs	if !ast.is_raw(n) && (ast.hard_line_break(n) || ast.soft_line_break(n)) {	if ast.hard_line_break(n) || ast.soft_line_break(n) {	pkg	markdown_utils
 text-hard-newline	crates/mm-app/src/markdown_utils.rs	(ast.hard_line_break(n) || ast.soft_line_break(n))	(ast.soft_line_break(n))	pkg	markdown_utils
 strike-noop-registration	crates/mm-app/src/markdown_utils.rs	reg.register(NodeKind::Strikethrough, default);	reg.register(NodeKind::Blockquote, default);	pkg	markdown_utils
@@ -14,6 +16,7 @@ decode-entities	crates/mm-app/src/markdown_utils.rs	Ok(mm_model::go_html::unesca
 # relLinkReg and blockquoteReg pre-passes, and Expand.
 rel-last-paren	crates/mm-app/src/markdown_utils.rs	rposition(|&c| c == b')')?	position(|&c| c == b')')?	pkg	markdown_utils
 rel-greedy-group1	crates/mm-app/src/markdown_utils.rs	        .rev()\n        .find(|&j| j + 3 <= last_paren	        .find(|&j| j + 3 <= last_paren	pkg	markdown_utils
+# Equivalent: position j+2 holds the `/`, so the last `)` is never there.
 rel-paren-after-slash	crates/mm-app/src/markdown_utils.rs	.find(|&j| j + 3 <= last_paren	.find(|&j| j + 2 <= last_paren	pkg	markdown_utils
 blockquote-offset-zero	crates/mm-app/src/markdown_utils.rs	        if offset + p == 0 {	        if offset + p == 0 && false {	pkg	markdown_utils
 expand-leading-zero	crates/mm-app/src/markdown_utils.rs	        if name.len() > 1 && name.starts_with('0') {	        if false {	pkg	markdown_utils

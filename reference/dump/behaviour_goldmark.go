@@ -432,6 +432,15 @@ func goldmarkChatCorpus() []string {
 		"#\tTab heading",
 		"### closed ###",
 		"\\# escaped",
+		// The linkify domain run is capped at 256 before backing off to the last `.`.
+		"www." + strings.Repeat("a", 255) + ".bc.de",
+		"www." + strings.Repeat("a", 256) + ".bc.de",
+		"www." + strings.Repeat("a", 300) + ".bc",
+		"http://" + strings.Repeat("a.", 140) + "com/x",
+		// A vertical tab or form feed in a delimiter row: util.IsSpace rejects both, so isTableDelim does.
+		"a|b\n\v--|--",
+		"a|b\n--\v|--",
+		"a|b\n\t--|--",
 	}
 }
 
