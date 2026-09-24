@@ -618,6 +618,14 @@ pub trait ChannelStore {
         user_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetMembersByChannelIds` (channel_store.go:4013): one user's
+    /// memberships in a named set of channels — the mirror of [`Self::get_members_by_ids`].
+    fn get_members_by_channel_ids(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMembersForUser` (channel_store.go:3261): every membership
     /// of one user in one team's channels, plus the teamless ones.
     fn get_members_for_user(
@@ -727,6 +735,13 @@ pub trait ChannelStore {
         &self,
         member: ChannelMember,
     ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateMultipleMembers` (channel_store.go:1991): every member
+    /// validated before anything is written, then one transaction for all of them.
+    fn update_multiple_members(
+        &self,
+        members: Vec<ChannelMember>,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.UpdateMemberNotifyProps` (channel_store.go:2060).
     ///
@@ -1801,6 +1816,15 @@ impl ChannelStore for SqlChannelStore {
         get_members_by_ids(&self.pool, channel_id, user_ids).await
     }
 
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, asked = channel_ids.len()))]
+    async fn get_members_by_channel_ids(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+    ) -> Result<Vec<ChannelMember>, StoreError> {
+        get_members_by_channel_ids(&self.pool, channel_ids, user_id).await
+    }
+
     #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
     async fn get_members_for_user(
         &self,
@@ -1853,6 +1877,14 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(channel_id = %member.channel_id, user_id = %member.user_id))]
     async fn update_member(&self, member: ChannelMember) -> Result<ChannelMember, StoreError> {
         update_member(&self.pool, member).await
+    }
+
+    #[tracing::instrument(skip_all, fields(members = members.len()))]
+    async fn update_multiple_members(
+        &self,
+        members: Vec<ChannelMember>,
+    ) -> Result<Vec<ChannelMember>, StoreError> {
+        update_multiple_members(&self.pool, members).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id, keys = props.len()))]
@@ -2444,6 +2476,68 @@ pub async fn get_members_by_ids(
     .map_err(|source| StoreError::Db {
         context: format!(
             "failed to find ChannelMembers with channelId={channel_id} and userId in {user_ids:?}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_member_from_row).collect()
+}
+
+/// Port of `SqlChannelStore.GetMembersByChannelIds` (channel_store.go:4013) — the body of
+/// `setChannelsMuted`'s read.
+///
+/// The same select as [`get_members_by_ids`] with the list on the other column. **No
+/// `ORDER BY`**, as in Go, so the answer is in the database's order; the caller publishes one
+/// event per row in that order. A channel id named twice (the mute reconciliation does not
+/// de-duplicate) matches its row once, as squirrel's `IN (...)` does.
+#[tracing::instrument(skip(pool, channel_ids), fields(user_id = %user_id, asked = channel_ids.len(), found))]
+pub async fn get_members_by_channel_ids(
+    pool: &PgPool,
+    channel_ids: &[String],
+    user_id: &str,
+) -> Result<Vec<ChannelMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.channelid = ANY($1::text[])
+           AND cm.userid = $2
+        "#,
+        channel_ids,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find ChannelMembers with userId={user_id} and channelId in {channel_ids:?}"
         ),
         source,
     })?;
@@ -6312,18 +6406,80 @@ pub async fn update_member(
     pool: &PgPool,
     mut member: ChannelMember,
 ) -> Result<ChannelMember, StoreError> {
+    prepare_member_update(&mut member)?;
+
+    let mut tx = begin_member_write(pool).await?;
+    let updated = write_member(&mut *tx, &member).await?;
+    commit_member_write(tx).await?;
+
+    Ok(updated)
+}
+
+/// Port of `SqlChannelStore.UpdateMultipleMembers` (channel_store.go:1991) — the write behind
+/// `setChannelsMuted`, and what [`update_member`] is the one-member case of.
+///
+/// # Validate everything, then write everything
+///
+/// `PreUpdate` and `IsValid` run over the **whole list before the transaction opens**, so one
+/// invalid member means nothing is written, not "the ones before it are". And the writes share a
+/// transaction, so a member whose row has gone (`ErrNotFound`, see [`write_member`]) rolls back
+/// the members before it too.
+///
+/// The answer is in the caller's order, each entry the fresh read-back from [`write_member`].
+#[tracing::instrument(skip(pool, members), fields(members = members.len()))]
+pub async fn update_multiple_members(
+    pool: &PgPool,
+    mut members: Vec<ChannelMember>,
+) -> Result<Vec<ChannelMember>, StoreError> {
+    for member in &mut members {
+        prepare_member_update(member)?;
+    }
+
+    let mut tx = begin_member_write(pool).await?;
+    let mut updated = Vec::with_capacity(members.len());
+    for member in &members {
+        updated.push(write_member(&mut *tx, member).await?);
+    }
+    commit_member_write(tx).await?;
+
+    Ok(updated)
+}
+
+/// `member.PreUpdate()` then `member.IsValid()`, the per-member prologue of
+/// `UpdateMultipleMembers`.
+fn prepare_member_update(member: &mut ChannelMember) -> Result<(), StoreError> {
     member.pre_update();
     member.is_valid().map_err(|app_error| StoreError::Invalid {
         entity: "ChannelMember",
         app_error,
-    })?;
+    })
+}
 
-    let notify_props = notify_props_to_jsonb(member.notify_props.as_ref());
-
-    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+async fn begin_member_write(
+    pool: &PgPool,
+) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, StoreError> {
+    pool.begin().await.map_err(|source| StoreError::Db {
         context: "begin_transaction".to_owned(),
         source,
-    })?;
+    })
+}
+
+async fn commit_member_write(
+    tx: sqlx::Transaction<'static, sqlx::Postgres>,
+) -> Result<(), StoreError> {
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })
+}
+
+/// The loop body of `UpdateMultipleMembers`: the full-row `UPDATE`, then the re-select through
+/// the scheme joins, both on the caller's transaction.
+async fn write_member(
+    tx: &mut sqlx::PgConnection,
+    member: &ChannelMember,
+) -> Result<ChannelMember, StoreError> {
+    let notify_props = notify_props_to_jsonb(member.notify_props.as_ref());
 
     sqlx::query!(
         r#"
@@ -6388,14 +6544,7 @@ pub async fn update_member(
         });
     };
 
-    let updated = channel_member_from_row(row)?;
-
-    tx.commit().await.map_err(|source| StoreError::Db {
-        context: "commit_transaction".to_owned(),
-        source,
-    })?;
-
-    Ok(updated)
+    channel_member_from_row(row)
 }
 
 /// Port of `SqlChannelStore.UpdateMemberNotifyProps` (channel_store.go:2060).
