@@ -818,6 +818,25 @@ func gtHTMLCorpus() []gtCase {
 	add(gtOne("html/nospace_empty", `<p title={{.}}>`, ""))
 	add(gtOne("html/nospace_bad_runes", `<p title={{.}}>`, "a\ufdd0b\ufff0c\uffff"))
 
+	// Cases added for mutation survivors: each separates the right answer from a plausible wrong one.
+	one("surv/comment_start_ends_text", "a<!--{{.S}}-->b")
+	one("surv/js_comment_hides_script_end", "<script>/* </script> */ x = {{.S}}</script>")
+	one("surv/rcdata_end_tag_slash", "<textarea>{{.S}}</textarea/>{{.S}}")
+	one("surv/url_query_stays_query", `<a href="/x?q={{.S}}/y{{.S}}">`)
+	one("surv/js_close_brace_regexp", "<script>function f(){} /{{.S}}/.test(x)</script>")
+	one("surv/js_regexp_script_close", "<script>var r = /a</script>b/; x = {{.S}}</script>")
+	// tCSSStr decodes s[:i+1] from the start of the string, so an escape completed before a later
+	// backslash (\23 is the byte for #) moves the URL part.
+	one("surv/css_url_escape_decoded", `<style>p { background: url("\23 x\q{{.S}}") }</style>`)
+	one("surv/css_line_comment_formfeed", "<style>// c\fp { color: {{.S}} }</style>")
+	one("surv/dashed_tag_not_style", "<style-x>{{.S}}</style-x>")
+	one("surv/urlquery_at_url_start", `<a href="{{.U | urlquery}}">`)
+	add(gtOne("surv/css_leading_double_dash", `<p style="color: {{.}}">`, "--x"))
+	add(gtOne("surv/js_float_below_exp_cutoff", `<script>var f = {{.}};</script>`, 5e20))
+	one("surv/meta_url_uppercase", `<meta http-equiv="refresh" content="0; URL={{.U}}">`)
+	one("surv/unquoted_attr_equals", "<p title=a=b>{{.S}}")
+	one("surv/attr_c1_entity", `<a onclick="x=&#159;/{{.S}}/">`)
+
 	// Parse errors through html/template.
 	one("parse/unclosed", `{{.S`)
 	one("parse/undefined_fn", `{{nope .S}}`)
@@ -944,6 +963,7 @@ func gtTextCorpus() []gtCase {
 	t("fn/printf_misc", `{{printf "%t|%v|%v|%v|%v|%%|%d|%s|%d" true .L .M .Q nil 1 .LS .Q}}`)
 	t("fn/printf_errors", `{{printf "%d|%s|%z|%d" "str" 5 1}}|{{printf "%d %d" 1}}|{{printf "%d" 1 2 "x"}}|{{printf "%!"}}|{{printf "%"}}`)
 	t("fn/printf_star", `{{printf "%*d|%-*d|%.*f" 5 1 4 2 2 3.14159}}`)
+	t("fn/printf_hex_const", `{{printf "%d|%v" 0x1E 0x1p-2}}`)
 	t("fn/printf_ptr", `{{printf "%s|%v|%d" .NP .NP .Z}}`)
 	t("fn/printf_nonstring_format", `{{printf .N}}`)
 	t("fn/printf_nil_format", `{{printf nil}}`)
@@ -1100,7 +1120,16 @@ func writeGotemplateBehaviourFixture(outDir, rustDir string) error {
 	for _, c := range gtTextCorpus() {
 		textAsHTML = append(textAsHTML, gtRun(c, true))
 	}
+	var unescape []any
+	for _, in := range []string{
+		"a &amp; b", "&quot;x&quot;", "&#x6a;&#106;&#128;&#159;&#0;&#xD800;&#x110000;", "&ampx",
+		"&notit;", "&notin;", "&bogus; & &#; &#x; &#xz", "&NotEqualTilde;", "&lt&gt", "&AMP",
+		"&nbsp;&NewLine;&Tab;", "&#9999999999;", "&amp;amp;", "&", "&#", "&#x", "&acE;", "&Aacute",
+	} {
+		unescape = append(unescape, map[string]any{"in": in, "out": html.UnescapeString(in)})
+	}
 	out := map[string]any{
+		"unescape":     unescape,
 		"mattermost":   mm,
 		"html":         htmlCases,
 		"text":         textCases,

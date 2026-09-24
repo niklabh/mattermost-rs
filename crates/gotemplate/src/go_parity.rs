@@ -308,3 +308,21 @@ fn fixture_is_populated() {
     assert!(f["html"].as_array().unwrap().len() > 2000);
     assert!(f["text"].as_array().unwrap().len() > 100);
 }
+
+/// `html.UnescapeString`, which html/template runs over attribute values before their
+/// transitions: the decoded text decides the context, so it is checked directly.
+#[test]
+fn html_unescape_string() {
+    let f = fixture();
+    let cases = f["unescape"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for c in cases {
+        let input = c["in"].as_str().unwrap();
+        let got = crate::html::entity::unescape_string(input.as_bytes());
+        assert_eq!(
+            String::from_utf8_lossy(&got),
+            c["out"].as_str().unwrap(),
+            "{input:?}"
+        );
+    }
+}

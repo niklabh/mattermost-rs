@@ -71770,6 +71770,1237 @@
    "exec": [
     "t"
    ],
+   "name": "surv/comment_start_ends_text",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "ab"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "a\u003c!--{{.S}}--\u003eb"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/js_comment_hides_script_end",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cscript\u003e  x = \"\\u003cs\\u0026'\\\"\\u003e\"\u003c/script\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cscript\u003e/* \u003c/script\u003e */ x = {{.S}}\u003c/script\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/rcdata_end_tag_slash",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003ctextarea\u003e\u0026lt;s\u0026amp;\u0026#39;\u0026#34;\u0026gt;\u003c/textarea/\u003e\u0026lt;s\u0026amp;\u0026#39;\u0026#34;\u0026gt;"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003ctextarea\u003e{{.S}}\u003c/textarea/\u003e{{.S}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/url_query_stays_query",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003ca href=\"/x?q=%3cs%26%27%22%3e/y%3cs%26%27%22%3e\"\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003ca href=\"/x?q={{.S}}/y{{.S}}\"\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/js_close_brace_regexp",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cscript\u003efunction f(){} /\"\\u003cs\\u0026'\\\"\\u003e\"/.test(x)\u003c/script\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cscript\u003efunction f(){} /{{.S}}/.test(x)\u003c/script\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/js_regexp_script_close",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cscript\u003evar r = /a\\x3C/script\u003eb/; x = \"\\u003cs\\u0026'\\\"\\u003e\"\u003c/script\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cscript\u003evar r = /a\u003c/script\u003eb/; x = {{.S}}\u003c/script\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/css_url_escape_decoded",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cstyle\u003ep { background: url(\"\\23 x\\q%3cs%26%27%22%3e\") }\u003c/style\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cstyle\u003ep { background: url(\"\\23 x\\q{{.S}}\") }\u003c/style\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/css_line_comment_formfeed",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cstyle\u003e\fp { color: ZgotmplZ }\u003c/style\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cstyle\u003e// c\fp { color: {{.S}} }\u003c/style\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/dashed_tag_not_style",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cstyle-x\u003e\u0026lt;s\u0026amp;\u0026#39;\u0026#34;\u0026gt;\u003c/style-x\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cstyle-x\u003e{{.S}}\u003c/style-x\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/urlquery_at_url_start",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003ca href=\"%23ZgotmplZ\"\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003ca href=\"{{.U | urlquery}}\"\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "string",
+    "v": "--x"
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/css_leading_double_dash",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cp style=\"color: ZgotmplZ\"\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cp style=\"color: {{.}}\"\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "float",
+    "v": "5e+20"
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/js_float_below_exp_cutoff",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cscript\u003evar f =  500000000000000000000 ;\u003c/script\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cscript\u003evar f = {{.}};\u003c/script\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/meta_url_uppercase",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003cmeta http-equiv=\"refresh\" content=\"0; URL=#ZgotmplZ\"\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cmeta http-equiv=\"refresh\" content=\"0; URL={{.U}}\"\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/unquoted_attr_equals",
+   "option": "",
+   "runs": [
+    {
+     "err": "html/template:t: \"=\" in unquoted attr: \"a=b\"",
+     "name": "t",
+     "out": ""
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003cp title=a=b\u003e{{.S}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "surv/attr_c1_entity",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "\u003ca onclick=\"x=\u0026#159;/\u0026#34;\\u003cs\\u0026\u0026#39;\\\u0026#34;\\u003e\u0026#34;/\"\u003e"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "\u003ca onclick=\"x=\u0026#159;/{{.S}}/\"\u003e"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "F": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003eh\u003c/b\u003e"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a\u003c"
+       },
+       {
+        "t": "string",
+        "v": "b\u003e"
+       },
+       {
+        "t": "string",
+        "v": "c\u0026"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "k1": {
+        "t": "string",
+        "v": "v\u003c1\u003e"
+       },
+       "k2": {
+        "t": "string",
+        "v": "v2"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 7
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "S": {
+      "t": "string",
+      "v": "\u003cs\u0026'\"\u003e"
+     },
+     "U": {
+      "t": "string",
+      "v": "javascript:x()"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
    "name": "parse/unclosed",
    "option": "",
    "parse_err": "template: t:1: unclosed action",
@@ -102029,6 +103260,345 @@
     [
      "t",
      "{{printf \"%*d|%-*d|%.*f\" 5 1 4 2 2 3.14159}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
+   "name": "fn/printf_hex_const",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "30|0.25"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "{{printf \"%d|%v\" 0x1E 0x1p-2}}"
     ]
    ]
   },
@@ -148031,6 +149601,345 @@
    "exec": [
     "t"
    ],
+   "name": "fn/printf_hex_const",
+   "option": "",
+   "runs": [
+    {
+     "err": null,
+     "name": "t",
+     "out": "30|0.25"
+    }
+   ],
+   "sources": [
+    [
+     "t",
+     "{{printf \"%d|%v\" 0x1E 0x1p-2}}"
+    ]
+   ]
+  },
+  {
+   "data": {
+    "t": "map",
+    "v": {
+     "B": {
+      "t": "bool",
+      "v": true
+     },
+     "Big": {
+      "t": "float",
+      "v": "1e+21"
+     },
+     "E": {
+      "t": "string",
+      "v": ""
+     },
+     "EL": {
+      "t": "list",
+      "v": []
+     },
+     "EM": {
+      "t": "map",
+      "v": {}
+     },
+     "F": {
+      "t": "float",
+      "v": "2.5"
+     },
+     "Fa": {
+      "t": "bool",
+      "v": false
+     },
+     "H": {
+      "t": "html",
+      "v": "\u003cb\u003e"
+     },
+     "Inf": {
+      "t": "float",
+      "v": "+Inf"
+     },
+     "L": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "a"
+       },
+       {
+        "t": "int",
+        "v": 2
+       },
+       {
+        "t": "nil"
+       },
+       {
+        "t": "float",
+        "v": "3.5"
+       }
+      ]
+     },
+     "LS": {
+      "t": "list",
+      "v": [
+       {
+        "t": "string",
+        "v": "x"
+       },
+       {
+        "t": "string",
+        "v": "y"
+       },
+       {
+        "t": "string",
+        "v": "z"
+       }
+      ]
+     },
+     "M": {
+      "t": "map",
+      "v": {
+       "a": {
+        "t": "string",
+        "v": "A"
+       },
+       "b": {
+        "t": "int",
+        "v": 1
+       },
+       "c": {
+        "t": "nil"
+       }
+      }
+     },
+     "N": {
+      "t": "int",
+      "v": 42
+     },
+     "NP": {
+      "t": "ptr",
+      "type": "*string",
+      "v": null
+     },
+     "NaN": {
+      "t": "float",
+      "v": "NaN"
+     },
+     "Neg": {
+      "t": "int",
+      "v": -3
+     },
+     "NegZero": {
+      "t": "float",
+      "v": "-0"
+     },
+     "O": {
+      "name": "main.outer",
+      "t": "struct",
+      "v": [
+       [
+        "Name",
+        {
+         "t": "string",
+         "v": "o"
+        }
+       ],
+       [
+        "Inner",
+        {
+         "name": "main.inner",
+         "t": "struct",
+         "v": [
+          [
+           "X",
+           {
+            "t": "string",
+            "v": "ix"
+           }
+          ],
+          [
+           "Y",
+           {
+            "t": "ptr",
+            "v": {
+             "t": "string",
+             "v": "iy"
+            }
+           }
+          ],
+          [
+           "Z",
+           {
+            "t": "nil"
+           }
+          ]
+         ]
+        }
+       ],
+       [
+        "PI",
+        {
+         "t": "ptr",
+         "v": {
+          "name": "main.inner",
+          "t": "struct",
+          "v": [
+           [
+            "X",
+            {
+             "t": "string",
+             "v": "px"
+            }
+           ],
+           [
+            "Y",
+            {
+             "t": "ptr",
+             "type": "*string",
+             "v": null
+            }
+           ],
+           [
+            "Z",
+            {
+             "t": "nil"
+            }
+           ]
+          ]
+         }
+        }
+       ],
+       [
+        "NilPI",
+        {
+         "t": "ptr",
+         "type": "*main.inner",
+         "v": null
+        }
+       ],
+       [
+        "List",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "l1"
+          },
+          {
+           "t": "string",
+           "v": "l2"
+          }
+         ]
+        }
+       ],
+       [
+        "Map",
+        {
+         "t": "map",
+         "v": {
+          "k": {
+           "t": "int",
+           "v": 1
+          }
+         }
+        }
+       ],
+       [
+        "Any",
+        {
+         "t": "int",
+         "v": 5
+        }
+       ],
+       [
+        "Low",
+        {
+         "t": "int",
+         "v": 9
+        }
+       ]
+      ]
+     },
+     "P": {
+      "t": "ptr",
+      "v": {
+       "t": "string",
+       "v": "ptr"
+      }
+     },
+     "Q": {
+      "name": "struct { A string; B int; C []string; D map[string]interface {}; E interface {} }",
+      "t": "struct",
+      "v": [
+       [
+        "A",
+        {
+         "t": "string",
+         "v": "qa"
+        }
+       ],
+       [
+        "B",
+        {
+         "t": "int",
+         "v": 2
+        }
+       ],
+       [
+        "C",
+        {
+         "t": "list",
+         "v": [
+          {
+           "t": "string",
+           "v": "c1"
+          }
+         ]
+        }
+       ],
+       [
+        "D",
+        {
+         "t": "map",
+         "v": {
+          "d": {
+           "t": "float",
+           "v": "1.5"
+          }
+         }
+        }
+       ],
+       [
+        "E",
+        {
+         "t": "nil"
+        }
+       ]
+      ]
+     },
+     "S": {
+      "t": "string",
+      "v": "str\u003c\u0026\u003e"
+     },
+     "Small": {
+      "t": "float",
+      "v": "1e-07"
+     },
+     "Tenth": {
+      "t": "float",
+      "v": "0.1"
+     },
+     "Whole": {
+      "t": "float",
+      "v": "3"
+     },
+     "Z": {
+      "t": "nil"
+     }
+    }
+   },
+   "exec": [
+    "t"
+   ],
    "name": "fn/printf_ptr",
    "option": "",
    "runs": [
@@ -169516,6 +171425,80 @@
      "{{.Nämé}}"
     ]
    ]
+  }
+ ],
+ "unescape": [
+  {
+   "in": "a \u0026amp; b",
+   "out": "a \u0026 b"
+  },
+  {
+   "in": "\u0026quot;x\u0026quot;",
+   "out": "\"x\""
+  },
+  {
+   "in": "\u0026#x6a;\u0026#106;\u0026#128;\u0026#159;\u0026#0;\u0026#xD800;\u0026#x110000;",
+   "out": "jj€Ÿ���"
+  },
+  {
+   "in": "\u0026ampx",
+   "out": "\u0026x"
+  },
+  {
+   "in": "\u0026notit;",
+   "out": "¬it;"
+  },
+  {
+   "in": "\u0026notin;",
+   "out": "∉"
+  },
+  {
+   "in": "\u0026bogus; \u0026 \u0026#; \u0026#x; \u0026#xz",
+   "out": "\u0026bogus; \u0026 \u0026#; � \u0026#xz"
+  },
+  {
+   "in": "\u0026NotEqualTilde;",
+   "out": "≂̸"
+  },
+  {
+   "in": "\u0026lt\u0026gt",
+   "out": "\u003c\u003e"
+  },
+  {
+   "in": "\u0026AMP",
+   "out": "\u0026"
+  },
+  {
+   "in": "\u0026nbsp;\u0026NewLine;\u0026Tab;",
+   "out": " \n\t"
+  },
+  {
+   "in": "\u0026#9999999999;",
+   "out": "�"
+  },
+  {
+   "in": "\u0026amp;amp;",
+   "out": "\u0026amp;"
+  },
+  {
+   "in": "\u0026",
+   "out": "\u0026"
+  },
+  {
+   "in": "\u0026#",
+   "out": "\u0026#"
+  },
+  {
+   "in": "\u0026#x",
+   "out": "\u0026#x"
+  },
+  {
+   "in": "\u0026acE;",
+   "out": "∾̳"
+  },
+  {
+   "in": "\u0026Aacute",
+   "out": "Á"
   }
  ]
 }
