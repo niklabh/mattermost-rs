@@ -469,12 +469,10 @@ impl App {
 
     async fn publish_plugin_manifest(&self, event: &str, manifest: &Manifest) {
         let mut message = WebSocketEvent::new(event, "", "", "", None, "");
-        match serde_json::to_value(manifest.client_manifest()) {
-            Ok(value) => message.add("manifest", value),
-            Err(err) => {
-                tracing::warn!(error = %err, "Failed to encode a plugin manifest");
-                return;
-            }
+        // A struct in Go (`*model.Manifest`), so its declaration order goes on the wire.
+        if let Err(err) = message.add_struct("manifest", &manifest.client_manifest()) {
+            tracing::warn!(error = %err, "Failed to encode a plugin manifest");
+            return;
         }
         self.publish(message).await;
     }

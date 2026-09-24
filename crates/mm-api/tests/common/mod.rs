@@ -3262,6 +3262,27 @@ impl SocketProbe {
             .collect()
     }
 
+    /// Every collected frame whose `event` is `name`, **as the bytes that arrived** — for the
+    /// comparisons a parsed value cannot make (key order, spacing, the trailing newline). See
+    /// [`json_skeleton`].
+    pub fn raw_events_named(&self, name: &str) -> Vec<&str> {
+        self.raw
+            .iter()
+            .filter(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()
+                    .and_then(|frame| {
+                        frame
+                            .get("event")
+                            .and_then(|e| e.as_str())
+                            .map(|e| e == name)
+                    })
+                    .unwrap_or(false)
+            })
+            .map(String::as_str)
+            .collect()
+    }
+
     /// The frames that answer a request this probe sent, raw and parsed, in arrival order.
     ///
     /// **A socket is not isolated the way a request is.** Anything else running against the same
@@ -3455,3 +3476,93 @@ pub static CONFIG_DOCUMENT: tokio::sync::RwLock<()> = tokio::sync::RwLock::const
 /// sliding expiry is on), so `parity::session_activity`'s idle tests hold it shared: run while it
 /// is on, their idle session would be accepted rather than revoked.
 pub static SESSION_EXPIRY_SETTING: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// A JSON text with its **values** masked and everything else kept byte for byte: key order,
+/// punctuation, the space Go's precomputed frame puts after each colon, and a trailing newline.
+///
+/// Two servers never agree on ids and timestamps, so a frame cannot be compared as bytes; parsed,
+/// it loses exactly what [D-541] is about — the order of an object's keys. This keeps the order and
+/// drops the values: a string value becomes `"…"` (an empty one stays `""`), a number `0`, and an
+/// object key that is a 26-character Mattermost id `"<id>"`. `true`, `false` and `null` are kept. A
+/// string value that itself holds a JSON object or array — Go's `property_field` is one — is
+/// skeletonised recursively, since its key order is on the wire too.
+pub fn json_skeleton(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] != b'"' {
+                    j += if bytes[j] == b'\\' { 2 } else { 1 };
+                }
+                let token = &raw[i..=j];
+                i = j + 1;
+                let mut k = i;
+                while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                let text: String = serde_json::from_str(token).expect("a JSON string token");
+                if k < bytes.len() && bytes[k] == b':' {
+                    let is_id = text.len() == 26
+                        && text
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+                    out.push_str(if is_id { "\"<id>\"" } else { token });
+                } else if text.is_empty() {
+                    out.push_str("\"\"");
+                } else if (text.starts_with('{') || text.starts_with('['))
+                    && serde_json::from_str::<serde_json::Value>(&text).is_ok()
+                {
+                    out.push_str("\"<json:");
+                    out.push_str(&json_skeleton(&text));
+                    out.push_str(">\"");
+                } else {
+                    out.push_str("\"…\"");
+                }
+            }
+            b'-' | b'0'..=b'9' => {
+                while i < bytes.len()
+                    && matches!(bytes[i], b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9')
+                {
+                    i += 1;
+                }
+                out.push('0');
+            }
+            // Outside a string every byte of a JSON text is ASCII.
+            other => {
+                out.push(char::from(other));
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod json_skeleton_tests {
+    use super::json_skeleton;
+
+    #[test]
+    fn keeps_order_and_spacing_and_masks_values() {
+        assert_eq!(
+            json_skeleton(
+                "{\"b\": 1, \"a\":\"x\",\"c\":[true,null,\"\"],\"abcdefghijklmnopqrstuvwxyz\":-1.5e3}\n"
+            ),
+            "{\"b\": 0, \"a\":\"…\",\"c\":[true,null,\"\"],\"<id>\":0}\n"
+        );
+        assert_ne!(
+            json_skeleton(r#"{"a":1,"b":2}"#),
+            json_skeleton(r#"{"b":1,"a":2}"#)
+        );
+    }
+
+    #[test]
+    fn recurses_into_a_string_holding_json() {
+        assert_eq!(
+            json_skeleton(r#"{"f":"{\"z\":\"q\",\"a\":7}"}"#),
+            r#"{"f":"<json:{"z":"…","a":0}>"}"#
+        );
+    }
+}

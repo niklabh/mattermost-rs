@@ -14778,3 +14778,15 @@ registered; six lose their last forwarded branch — `POST /users/password/reset
 |---|---|---|---|---|
 | gorilla's method match for `HEAD` (api4/api.go:418, :527; file.go:35-38), its `cleanPath` redirect (mux.go:176) | `mm_api::mux_guard` (both routers), `partially_migrated` | DONE, closes [D-1110] | `parity::api_head` (8: every api4 and local `GET`), 6 unit; `scripts/mutations/mux-guard.plan` | Only the three file reads take `HEAD`; an unclean path is redirected here on every method, since the forward leg resolves dot segments and Go would 404 the clean one. |
 | `app/ratelimit.go` (`NewRateLimiter`, `GenerateKey`, `RateLimitWriter`, `UserIdRateLimit`), throttled v2.15.0's GCRA and `memstore`, `RateLimitedHandler` (api4/handlers.go:222), `Server.Start`'s wrapper, `ServeHTTP`'s per-user step | `mm_api::ratelimit` (global layer, three route layers, a `route_layer` per user) | DONE, closes [D-430]; opens [D-1150], [D-1151] | `go_parity` (`behaviour_ratelimit.json`: GCRA, writer, 144 keys) + 5 unit; `parity::ratelimit` against its own rate-limited Go; `scripts/mutations/ratelimit.plan` | Read once, on the first request, from the configuration Go started on; the route limiters key on the peer alone, ignoring `TrustedProxyIPHeader`, as Go's do. |
+
+## Config fixture coverage — D-454 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| The live `Configurations.Value` row, projected by `scripts/dump-config-fixture.sh` | `mm_app::config` tests (`document_keys`, `coverage_gaps`) | DONE, closes [D-454] | 3 unit; 10 mutations, 8 caught, 2 controls survived | The fixture's key set is checked against `Document`'s serde field lists, not a count; 27 keys were added and none moved an existing value. |
+
+## Websocket struct payloads in Go's key order — D-541 (2026-09-24)
+
+| Go | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| `(*WebSocketEvent).Add` of a struct (`message.Add("user", user)`, `"field"`, `"manifest"`) | `mm_model::websocket_message::WebSocketEvent::{add_raw, add_struct}` | DONE, closes [D-541] | 9 unit; `parity::cpa_licensed` and `parity::custom_status_writes` compare frames as bytes (`common::json_skeleton`); 11 mutations, 9 caught, 2 controls survived | A struct added as a `Value` goes out sorted; `serde_json`'s `preserve_order` must stay off (49 suite failures measured). |

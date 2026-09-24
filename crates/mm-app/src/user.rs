@@ -785,10 +785,11 @@ impl App {
             Some(omit.clone()),
             "",
         );
-        admin_message.add(
-            "user",
-            serde_json::to_value(&admin_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = admin_message.add_struct("user", &admin_copy) {
+            // Go marshals at write time and skips the frame; nothing is worth publishing.
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         let admin_message = {
             let mut broadcast = admin_message.get_broadcast().cloned().unwrap_or_default();
             broadcast.contains_sensitive_data = true;
@@ -806,10 +807,10 @@ impl App {
             Some(omit),
             "",
         );
-        message.add(
-            "user",
-            serde_json::to_value(&member_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = message.add_struct("user", &member_copy) {
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         let message = {
             let mut broadcast = message.get_broadcast().cloned().unwrap_or_default();
             broadcast.contains_sanitized_data = true;
@@ -830,10 +831,10 @@ impl App {
             None,
             "",
         );
-        own_message.add(
-            "user",
-            serde_json::to_value(&own_copy).unwrap_or(serde_json::Value::Null),
-        );
+        if let Err(err) = own_message.add_struct("user", &own_copy) {
+            tracing::warn!(error = %err, "Error in encoding websocket message");
+            return;
+        }
         self.publish(own_message).await;
     }
 

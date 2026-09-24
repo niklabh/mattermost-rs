@@ -112,6 +112,9 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 # Serde
 serde = { version = "1", features = ["derive"] }
+# Never `preserve_order`: every Go `map[string]any` modelled as a `serde_json::Map` relies on the
+# BTreeMap sort to match Go's sorted keys. Measured 2026-09-24: 49 failures across the full suite.
+# A Go struct inside such a map goes through `WebSocketEvent::add_struct` instead (D-541).
 serde_json = { version = "1", features = ["raw_value"] }
 
 # Errors

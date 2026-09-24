@@ -1,0 +1,13 @@
+# D-454: the config fixture coverage test reads Document's keys through serde.
+# lib suite, MUTATE_PACKAGE=mm-app.
+no-featureflags-filter	crates/mm-app/src/config.rs	            .filter(|key| !key.starts_with("FeatureFlags."))\n	            .filter(|_| true)\n	lib	config::go_parity
+no-salt-excuse	crates/mm-app/src/config.rs	    const NEVER_PROJECTED: &[&str] = &["FileSettings.PublicLinkSalt"];	    const NEVER_PROJECTED: &[&str] = &[];	lib	config::go_parity
+unprojected-direction-dropped	crates/mm-app/src/config.rs	            in_document.difference(&in_fixture).cloned().collect(),	            Vec::new(),	lib	config::go_parity
+stale-direction-dropped	crates/mm-app/src/config.rs	            in_fixture.difference(&in_document).cloned().collect(),	            Vec::new(),	lib	config::go_parity
+section-prefix-lost	crates/mm-app/src/config.rs	                    .extend(fields.iter().map(|key| format!("{}.{key}", self.name)));	                    .extend(fields.iter().map(|key| format!("{key}")));	lib	config::go_parity
+sections-answered-absent	crates/mm-app/src/config.rs	                visitor.visit_some(self)	                visitor.visit_none()	lib	config::go_parity
+new-unprojected-document-key	crates/mm-app/src/config.rs	    #[serde(rename = "EnableOpenServer")]\n    enable_open_server: Option<bool>,	    #[serde(rename = "EnableOpenServer")]\n    enable_open_server: Option<bool>,\n    #[serde(rename = "PhantomSetting")]\n    #[allow(dead_code)]\n    phantom_setting: Option<bool>,	lib	config::go_parity
+renamed-document-key	crates/mm-app/src/config.rs	    #[serde(rename = "MaxChannelsPerTeam")]	    #[serde(rename = "MaxChannelPerTeam")]	lib	config::go_parity::the_fixture_covers
+# Controls: must survive.
+control-swap-filters	crates/mm-app/src/config.rs	            .filter(|key| !key.starts_with("FeatureFlags."))\n            .filter(|key| !NEVER_PROJECTED.contains(&key.as_str()))	            .filter(|key| !NEVER_PROJECTED.contains(&key.as_str()))\n            .filter(|key| !key.starts_with("FeatureFlags."))	lib	config::go_parity
+control-rename-keys-binding	crates/mm-app/src/config.rs	        let keys = RefCell::new(Vec::new());\n        <Document as serde::Deserialize>::deserialize(Root(&keys))\n            .expect("every section of Document is a struct of optional fields");\n        keys.into_inner()	        let recorded = RefCell::new(Vec::new());\n        <Document as serde::Deserialize>::deserialize(Root(&recorded))\n            .expect("every section of Document is a struct of optional fields");\n        recorded.into_inner()	lib	config::go_parity

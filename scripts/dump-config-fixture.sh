@@ -24,8 +24,8 @@
 # sections and seventeen keys while the Rust `Document` had grown to fourteen sections and
 # thirty-eight; the count assertion in `the_fixture_covers_every_document_sourced_setting` was
 # comparing the fixture against a hardcoded 17 rather than against the struct, so it agreed with
-# the stale list. The list below is now the struct's own keys, extracted from it rather than
-# maintained beside it, and the count in that test is the number this script writes.
+# the stale list. Since D-454 that test reads the expected keys from the Rust struct itself
+# (serde's own field lists), so a key missing here fails it by name.
 #
 #   ./scripts/dump-config-fixture.sh
 #
@@ -108,6 +108,11 @@ MODELLED = {
         "AllowCookiesForSubdomains",
         # The headers utils.GetIPAddress walks for the client address (plugin hook contexts).
         "TrustedProxyIPHeader",
+        # Added with D-454, when the coverage test began reading the key list from Document.
+        "WebserverMode", "TerminateSessionsOnPasswordChange", "CollapsedThreads", "ThreadAutoFollow",
+        "EnableChannelViewedMessages", "EnableUserAccessTokens", "EnableBotAccountCreation",
+        "EnableAPIChannelDeletion", "EnableAPITeamDeletion",
+        "ExperimentalEnableDefaultChannelLeaveJoinMessages",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and
@@ -122,6 +127,9 @@ MODELLED = {
     "ImageProxySettings": ["Enable"],
     "FileSettings": [
         "DriverName", "EnablePublicLink", "MaxFileSize",
+        # The storage directories. PublicLinkSalt is modelled too but never projected: it is a
+        # secret generated at first boot, and the Rust test excludes it by name.
+        "Directory", "DedicatedExportStore", "ExportDriverName", "ExportDirectory",
         # The attachment switch and the pixel cap, read by the three file-writing routes.
         "EnableFileAttachments", "MaxImageResolution",
     ],
@@ -135,6 +143,10 @@ MODELLED = {
         # What GET and POST /plugins/marketplace and POST /plugins/install_from_url read.
         "EnableRemoteMarketplace", "MarketplaceURL", "AllowInsecureDownloadURL", "SignaturePublicKeyFiles",
     ],
+    # The password rules IsPasswordValidWithSettings reads.
+    "PasswordSettings": ["MinimumLength", "Lowercase", "Number", "Uppercase", "Symbol"],
+    "ExportSettings": ["Directory"],
+    "ImportSettings": ["Directory"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress", "UseAnonymousURLs"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -154,6 +166,8 @@ MODELLED = {
         # Read twice by the notification pass behind `POST /api/v4/posts`: `>=` refuses
         # channel-wide mentions, `>` sends the author a notice.
         "MaxNotificationsPerChannel",
+        "EnableOpenServer", "EnableChannelCategorySorting", "MaxChannelsPerTeam", "MaxUsersPerTeam",
+        "ExperimentalDefaultChannels",
     ],
     "LdapSettings": ["PictureAttribute", "Enable", "ReAddRemovedMembers"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],

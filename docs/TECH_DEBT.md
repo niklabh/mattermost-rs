@@ -7948,30 +7948,14 @@ whenever `ProductNoticeViewState` is otherwise needed.
 
 ---
 
-## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads
+## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
+**Status** CLOSED · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
 
-The script's key list is meant to be `mm_app::config::Document`'s own keys, and
-`the_fixture_covers_every_document_sourced_setting` asserts a **hardcoded count** against the
-fixture the script wrote — so the test agrees with the list rather than with the struct, and the
-drift CLAUDE.md warns about is invisible by construction. It has now happened a third time:
-`TeamSettings` declares `EnableOpenServer`, `EnableChannelCategorySorting`, `MaxChannelsPerTeam`,
-`MaxUsersPerTeam` and `ExperimentalDefaultChannels` in `TeamSettingsDocument` and the script
-projects none of them, and `PasswordSettings`, `ExportSettings` and `ImportSettings` have no
-section in the script at all.
-
-Every one of those settings is therefore tested only against `Config::default`, comparing a
-transcribed default with itself.
-
-This session added its own three keys (`TeamSettings.EnableUserCreation`,
-`EmailSettings.EnableSignUpWithEmail`, `LocalizationSettings.DefaultClientLocale`) and moved the
-count from 67 to 70 rather than closing the gap, because regenerating the missing sections rewrites
-committed fixture values other suites assert against and that belongs in its own change.
-
-**What is owed:** derive the key list from `Document` — or, cheaper and nearly as good, assert the
-count against a `const` that lives beside the struct instead of beside the fixture — then
-regenerate and review the values that appear for the first time.
+Paid off: `the_fixture_covers_every_document_sourced_setting` now reads the expected keys from
+`Document`'s own serde field lists (`document_keys` in `mm_app::config`) and fails on a gap in either
+direction; the script projects all 27 keys it was missing (only `FileSettings.PublicLinkSalt`, a
+secret, is excused by name), and every newly compared value agreed with `Config::default`.
 
 ---
 
@@ -8617,23 +8601,14 @@ routes, **before any write**, and `parity::group_syncables::licensed_refusals_ma
 pins that the answer that comes back is Go's own. What is owed: replace the `Forward` arm with
 `App::session_has_permission_to_group` once it exists, and turn that test's expectation from
 "served by go" into a served 403 for the outsider and a served link for a group member.
-## D-541 · a struct placed into a websocket event's `data` as a `Value` loses Go's key order
+## D-541 · a struct placed into a websocket event's `data` as a `Value` loses Go's key order — CLOSED 2026-09-24
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-13 (CPA licensed half)
 
-`custom_profile_attributes_field_created` and `_updated` carry the field under `data.field` as an
-**object** — Go's `message.Add("field", cpaField)` stores the struct and marshals it in
-declaration order, `attrs` last. Here `WebSocketEvent::add` takes a `serde_json::Value`, and a
-`serde_json::Map` is a `BTreeMap` without `preserve_order`, so the nested object goes out with
-sorted keys. Same bytes as a JSON value, different bytes on the wire; `parity::cpa_licensed`
-compares the events parsed and passes. [D-022] records the same hazard for `go_json_marshal` on a
-struct-in-map; this is the event-payload instance of it. Every event in this tree that adds a
-struct as a `Value` has it — the `property_field_created` twin does not, because Go adds that
-field as a JSON **string** and so do we.
-
-**What is owed:** a `WebSocketEvent::add_raw(key, String)` carrying pre-serialised JSON, and a
-`StringInterface` value type that can hold it — or `preserve_order` on `serde_json`, which
-changes every map in the tree and needs the full parity suite to say what else moves.
+Paid off with `WebSocketEvent::add_raw`/`add_struct` (pre-serialised text kept beside the parsed
+value), used at all seven struct-valued sites (`user_updated` ×4, the two CPA field events,
+`plugin_enabled`/`plugin_disabled`); `preserve_order` was measured and rejected — 49 failures
+across the full suite, because every Go map modelled as a `serde_json::Map` relies on the sort.
 
 ---
 

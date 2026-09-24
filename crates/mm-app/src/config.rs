@@ -7,9 +7,10 @@
 //! is a guess about a wire format nothing can falsify** — the same rule the rest of the project
 //! applies to model files.
 //!
-//! Growing it costs one `Option<T>` in [`Document`], one line in [`Config::from_document`], one
-//! key in `scripts/dump-config-fixture.sh`, and the count in
-//! `the_fixture_covers_every_document_sourced_setting`.
+//! Growing it costs one `Option<T>` in [`Document`], one line in [`Config::from_document`] and
+//! one key in `scripts/dump-config-fixture.sh` — which
+//! `the_fixture_covers_every_document_sourced_setting` enforces by reading `Document`'s own
+//! serde field lists.
 //!
 //! # Where these values come from
 //!
@@ -4669,45 +4670,225 @@ mod go_parity {
         );
     }
 
-    /// The fixture covers **every** setting read from the document.
+    /// Keys [`Document`] reads that the fixture deliberately does not carry.
     ///
-    /// Without this the coverage rots silently. `scripts/dump-config-fixture.sh` carries its own
-    /// copy of the key list, so a field added to [`Config`] but not to the script is simply absent
-    /// from the fixture — and then `every_default_matches_what_go_actually_wrote` compares its
-    /// *default* against its default and passes, having proved nothing about the new field. The
-    /// count is the cheapest thing that fails instead.
+    /// `FileSettings.PublicLinkSalt` is a secret generated at first boot — a different value on
+    /// every stack, and not one to commit.
+    const NEVER_PROJECTED: &[&str] = &["FileSettings.PublicLinkSalt"];
+
+    /// The fixture covers **every** setting read from the document, and nothing else.
     ///
-    /// **The count was 17 and the script's key list had drifted to match it.** `Document` had
-    /// grown to fourteen sections and thirty-eight keys while the projection still carried six
-    /// sections and seventeen, so eight sections of Go's own output were never compared against
-    /// anything and this assertion agreed with the omission. The list in the script is now the
-    /// struct's keys, and the number below is what the script writes: **40** — the thirty-eight
-    /// modelled keys plus `ServiceSettings.SiteURL`, projected for its presence rather than its
-    /// value, and counted here like any other.
+    /// `scripts/dump-config-fixture.sh` carries its own copy of the key list, so a field added to
+    /// [`Document`] but not to the script is simply absent from the fixture — and then
+    /// `every_default_matches_what_go_actually_wrote` compares its *default* against its default
+    /// and passes, having proved nothing about the new field.
     ///
-    /// **It drifted again, the same way, and the count is why.** The four image-route settings —
-    /// `FileSettings.MaxFileSize`, `TeamSettings.LockProfileFieldsForEmailUsers`,
-    /// `LdapSettings.PictureAttribute` and `SamlSettings.EnableSyncWithLdap` — were added to
-    /// [`Config`] with their defaults transcribed from `config.go` and *not* added to the
-    /// script, so [`every_default_matches_what_go_actually_wrote`] compared four defaults against
-    /// their own fallback and passed. A hardcoded number cannot notice a missing key on its own;
-    /// what it can do is fail the moment somebody adds the key, which is what happened here.
+    /// **This used to assert a hardcoded count, and the count drifted with the list three times**
+    /// (17 against a struct of 38 keys; then four image-route settings; then [D-454]'s five
+    /// `TeamSettings` keys and three whole sections). A number beside the fixture agrees with the
+    /// script, not with the struct. So the expected keys are now read **from the struct itself**:
+    /// [`document_keys`] walks `Document` through serde's own field lists, and the fixture must
+    /// hold exactly that set. A key added to `Document` fails here until the script projects it;
+    /// a key left in the script after it leaves `Document` fails too.
+    ///
+    /// `FeatureFlags` is the one section excluded, because the row cannot carry it (the script
+    /// asserts its absence and dumps the running flags to `config_feature_flags.json` instead).
+    /// [`NEVER_PROJECTED`] is the one key excluded.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
-        let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
-        let keys: usize = fixture
+        for key in NEVER_PROJECTED {
+            assert!(
+                document_keys().iter().any(|k| k == key),
+                "{key} is excused from the fixture but Document no longer reads it"
+            );
+        }
+
+        let (unprojected, stale) = coverage_gaps(ACTIVE);
+        assert!(
+            unprojected.is_empty() && stale.is_empty(),
+            "Document reads {unprojected:?} and the fixture does not carry them — add them to \
+             scripts/dump-config-fixture.sh and re-run it. The fixture carries {stale:?}, which \
+             Document does not read."
+        );
+    }
+
+    /// Both directions of [`coverage_gaps`] fire: a fixture short of a key, and one carrying a
+    /// key `Document` does not read. The committed fixture exercises neither, so without this a
+    /// gap check reduced to one direction would still pass.
+    #[test]
+    fn coverage_gaps_reports_both_directions() {
+        let mut fixture: serde_json::Value = serde_json::from_str(ACTIVE).unwrap();
+        fixture["TeamSettings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("MaxUsersPerTeam");
+        fixture["TeamSettings"]["NotAKeyDocumentReads"] = serde_json::json!(true);
+
+        let (unprojected, stale) = coverage_gaps(&fixture.to_string());
+        assert_eq!(unprojected, ["TeamSettings.MaxUsersPerTeam"]);
+        assert_eq!(stale, ["TeamSettings.NotAKeyDocumentReads"]);
+    }
+
+    /// `(keys Document reads that the fixture lacks, keys the fixture has that Document does not
+    /// read)`, less the `FeatureFlags` section and [`NEVER_PROJECTED`].
+    fn coverage_gaps(fixture: &str) -> (Vec<String>, Vec<String>) {
+        let fixture: serde_json::Value =
+            serde_json::from_str(fixture).expect("the fixture is JSON");
+        let in_fixture: std::collections::BTreeSet<String> = fixture
             .as_object()
             .expect("an object of sections")
-            .values()
-            .map(|section| section.as_object().expect("a section of settings").len())
-            .sum();
+            .iter()
+            .flat_map(|(section, keys)| {
+                keys.as_object()
+                    .expect("a section of settings")
+                    .keys()
+                    .map(move |key| format!("{section}.{key}"))
+            })
+            .collect();
+        let in_document: std::collections::BTreeSet<String> = document_keys()
+            .into_iter()
+            .filter(|key| !key.starts_with("FeatureFlags."))
+            .filter(|key| !NEVER_PROJECTED.contains(&key.as_str()))
+            .collect();
+        (
+            in_document.difference(&in_fixture).cloned().collect(),
+            in_fixture.difference(&in_document).cloned().collect(),
+        )
+    }
 
-        assert_eq!(
-            keys, 129,
-            "the fixture covers {keys} settings and Config reads 129 from the document. \
-             Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
-             setting the fixture does not carry is a setting Go's own output never checked"
+    /// The walker itself: it must see the sections and keys it is trusted to see, or the test
+    /// above would pass vacuously on an empty set.
+    #[test]
+    fn document_keys_walks_every_section_of_the_struct() {
+        let keys = document_keys();
+        for expected in [
+            "ServiceSettings.SiteURL",
+            "TeamSettings.ExperimentalDefaultChannels",
+            "PluginSettings.PluginStates",
+            "AnnouncementSettings.NoticesSkipCache",
+            "GitLabSettings.Enable",
+            "Office365Settings.Enable",
+        ] {
+            assert!(keys.contains(&expected.to_owned()), "missing {expected}");
+        }
+        assert!(
+            keys.iter().any(|key| key.starts_with("FeatureFlags.")),
+            "the FeatureFlags section is walked too, and only filtered by its caller"
         );
+    }
+
+    /// Every `Section.Key` pair [`Document`] deserialises, read from serde's own field lists.
+    ///
+    /// A derived `Deserialize` hands `deserialize_struct` the `&'static [&'static str]` of its
+    /// field names. This deserializer records the top-level list, answers each section as
+    /// present, records that section's list, and then answers it as an empty map — every field
+    /// in these structs is an `Option` (or `#[serde(default)]`), so an empty section
+    /// deserialises and nothing below the key level is ever visited.
+    fn document_keys() -> Vec<String> {
+        use serde::de::{self, IntoDeserializer, value::Error};
+        use std::cell::RefCell;
+
+        struct Root<'a>(&'a RefCell<Vec<String>>);
+        struct Section<'a> {
+            name: &'static str,
+            keys: &'a RefCell<Vec<String>>,
+        }
+        struct Sections<'a> {
+            names: std::slice::Iter<'static, &'static str>,
+            pending: Option<&'static str>,
+            keys: &'a RefCell<Vec<String>>,
+        }
+
+        impl<'de> de::MapAccess<'de> for Sections<'_> {
+            type Error = Error;
+            fn next_key_seed<K: de::DeserializeSeed<'de>>(
+                &mut self,
+                seed: K,
+            ) -> Result<Option<K::Value>, Error> {
+                let Some(name) = self.names.next() else {
+                    return Ok(None);
+                };
+                self.pending = Some(name);
+                seed.deserialize((*name).into_deserializer()).map(Some)
+            }
+            fn next_value_seed<V: de::DeserializeSeed<'de>>(
+                &mut self,
+                seed: V,
+            ) -> Result<V::Value, Error> {
+                let name = self
+                    .pending
+                    .take()
+                    .ok_or_else(|| de::Error::custom("value before key"))?;
+                seed.deserialize(Section {
+                    name,
+                    keys: self.keys,
+                })
+            }
+        }
+
+        impl<'de> de::Deserializer<'de> for Root<'_> {
+            type Error = Error;
+            fn deserialize_struct<V: de::Visitor<'de>>(
+                self,
+                _: &'static str,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                visitor.visit_map(Sections {
+                    names: fields.iter(),
+                    pending: None,
+                    keys: self.0,
+                })
+            }
+            fn deserialize_any<V: de::Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(de::Error::custom("Document is expected to be a struct"))
+            }
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+                byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct map enum
+                identifier ignored_any
+            }
+        }
+
+        impl<'de> de::Deserializer<'de> for Section<'_> {
+            type Error = Error;
+            fn deserialize_option<V: de::Visitor<'de>>(
+                self,
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                visitor.visit_some(self)
+            }
+            fn deserialize_struct<V: de::Visitor<'de>>(
+                self,
+                _: &'static str,
+                fields: &'static [&'static str],
+                visitor: V,
+            ) -> Result<V::Value, Error> {
+                self.keys
+                    .borrow_mut()
+                    .extend(fields.iter().map(|key| format!("{}.{key}", self.name)));
+                visitor.visit_map(de::value::MapDeserializer::new(std::iter::empty::<(
+                    &str,
+                    &str,
+                )>()))
+            }
+            fn deserialize_any<V: de::Visitor<'de>>(self, _: V) -> Result<V::Value, Error> {
+                Err(de::Error::custom(format!(
+                    "section {} is not a derived struct; teach document_keys its shape",
+                    self.name
+                )))
+            }
+            serde::forward_to_deserialize_any! {
+                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes
+                byte_buf unit unit_struct newtype_struct seq tuple tuple_struct map enum
+                identifier ignored_any
+            }
+        }
+
+        let keys = RefCell::new(Vec::new());
+        <Document as serde::Deserialize>::deserialize(Root(&keys))
+            .expect("every section of Document is a struct of optional fields");
+        keys.into_inner()
     }
 
     /// The document supplies values; it does not merely fail to override defaults. Flipping every
