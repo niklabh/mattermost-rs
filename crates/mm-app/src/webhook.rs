@@ -951,9 +951,25 @@ impl App {
             ));
         }
 
+        self.validate_incoming_webhook_user_channel_access(&user.id, channel)
+            .await
+    }
+
+    /// Port of `App.ValidateIncomingWebhookUserChannelAccess` (app/webhook.go:532): the hook's
+    /// owner must be able to read the channel its posts are attributed to —
+    /// `HasPermissionToChannel(read_channel_content)`, so a member of a private channel, or of
+    /// the team for an open one. Otherwise 403 `api.webhook.incoming.user_membership.app_error`.
+    ///
+    /// The second half of [`App::validate_incoming_webhook_user`], and on its own the check
+    /// `updateIncomingHook` makes for the **old** owner when a hook moves to another channel.
+    pub async fn validate_incoming_webhook_user_channel_access(
+        &self,
+        user_id: &str,
+        channel: &mm_model::channel::Channel,
+    ) -> AppResult<()> {
         let (has_permission, _) = self
             .has_permission_to_channel(
-                &user.id,
+                user_id,
                 &channel.id,
                 &mm_model::permission::PERMISSION_READ_CHANNEL_CONTENT,
             )
@@ -963,7 +979,7 @@ impl App {
                 "ValidateIncomingWebhookUserChannelAccess",
                 "api.webhook.incoming.user_membership.app_error",
                 None,
-                format!("user_id={}, channel_id={}", user.id, channel.id),
+                format!("user_id={user_id}, channel_id={}", channel.id),
                 403,
             ));
         }

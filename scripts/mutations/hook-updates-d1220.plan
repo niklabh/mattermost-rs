@@ -1,0 +1,18 @@
+# Mutation plan for the decoded audit path, the unparseable-target forward, and D-1220/D-1221.
+# 2026-09-25: 10 run, 7 caught, 3 survived — two controls, and `unparseable-target-routed`, whose
+# test sent requests that were forwarded either way; with a tokenless GET it is caught (1 of 1).
+#
+#   scripts/mutate-batch.sh scripts/mutations/hook-updates-d1220.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+
+audit-path-raw	crates/mm-api/src/audit_log.rs	    let url = mm_model::go_url::parse_request_uri(target).ok()?;\n    String::from_utf8(url.path).ok()	    let _ = mm_model::go_url::parse_request_uri(target).ok()?;\n    Some(uri.path().to_owned())	api	audit_rows
+unparseable-target-routed	crates/mm-api/src/mux_guard.rs	    let Ok(url) = parse_request_uri(target) else {\n        return Decision::Forward;\n    };	    let Ok(url) = parse_request_uri(target) else {\n        return Decision::Route;\n    };	api	audit_rows
+move-check-dropped	crates/mm-api/src/webhooks.rs	    if updated.channel_id != old_hook.channel_id\n        && let Err(err) = state	    if false\n        && updated.channel_id != old_hook.channel_id\n        && let Err(err) = state	api	webhook_writes
+move-check-always	crates/mm-api/src/webhooks.rs	    if updated.channel_id != old_hook.channel_id\n        && let Err(err) = state	    if (updated.channel_id != old_hook.channel_id || true)\n        && let Err(err) = state	api	webhook_writes
+move-check-the-caller	crates/mm-api/src/webhooks.rs	            .validate_incoming_webhook_user_channel_access(&old_hook.user_id, &channel)	            .validate_incoming_webhook_user_channel_access(&session.0.user_id, &channel)	api	webhook_writes
+move-fail-row-dropped	crates/mm-api/src/webhooks.rs	        audit\n            .log(&state.app, Some(&session.0), "fail - invalid webhook user")\n            .await;\n        return ApiError::from(err).into_response();\n    }\n\n    if !state	        return ApiError::from(err).into_response();\n    }\n\n    if !state	api	webhook_writes
+outgoing-team-fill-dropped	crates/mm-api/src/webhooks.rs	    if updated.team_id.is_empty() {\n        updated.team_id.clone_from(&old_hook.team_id);\n    }	    if updated.team_id.is_empty() {\n        updated.team_id.clear();\n    }	api	webhook_writes
+outgoing-team-mismatch-dropped	crates/mm-api/src/webhooks.rs	    if updated.team_id.is_empty() {\n        updated.team_id.clone_from(&old_hook.team_id);\n    }\n    if updated.team_id != old_hook.team_id {	    if updated.team_id.is_empty() {\n        updated.team_id.clone_from(&old_hook.team_id);\n    }\n    if false && updated.team_id != old_hook.team_id {	api	webhook_writes
+control-audit-path-binding	crates/mm-api/src/audit_log.rs	    let target = uri.path_and_query().map_or("/", |pq| pq.as_str());	    let target: &str = uri.path_and_query().map_or("/", |pq| pq.as_str());	api	audit_rows
+control-move-comment	crates/mm-api/src/webhooks.rs	    // it is the channel the body named.	    // it is the channel that the body named.	api	webhook_writes

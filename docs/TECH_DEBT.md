@@ -10109,26 +10109,23 @@ it. **What is owed:** a layer on the API router with Go's 414 body, ahead of `ra
 
 ---
 
-## D-1220 · `updateIncomingHook` skips the owner's access check on the new channel
+## D-1220 · `updateIncomingHook` skips the owner's access check on the new channel — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
 
-When the body moves an incoming hook to another channel, Go runs
-`ValidateIncomingWebhookUserChannelAccess` for the hook's **owner** (api4/webhook.go:177) and answers
-403 `api.webhook.incoming.user_membership.app_error` plus a `"fail - invalid webhook user"` audit
-row when the owner cannot read it; `mm_api::webhooks::update_incoming_hook` performs the update.
-**What is owed:** the check (split out of `App::validate_incoming_webhook_user`) and its row.
+Ported: a hook moving to another channel is checked for its old owner with
+`App::validate_incoming_webhook_user_channel_access`, with the `"fail - invalid webhook user"` row;
+`parity::webhook_writes::moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel`.
 
 ---
 
-## D-1221 · `updateOutgoingHook` does not refuse a body naming another team
+## D-1221 · `updateOutgoingHook` does not refuse a body naming another team — CLOSED 2026-09-25
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
+**Status** CLOSED 2026-09-25 · **Severity** divergence · **Raised** 2026-09-25 (D-270 audit sweep)
 
-Go fills an empty `team_id` from the stored hook and answers 400 `api.webhook.team_mismatch.app_error`
-for a different one (api4/webhook.go:425-432); `mm_api::webhooks::update_outgoing_hook` lets the app
-layer reset the team silently and answers 200. **What is owed:** the fill and the 400, with a parity
-row (`the_id_checks_and_the_team_mismatch_agree` covers only incoming hooks).
+Ported: an empty `team_id` is filled from the stored hook and any other is the 400, after
+`"attempt"` and before the permissions;
+`parity::webhook_writes::an_outgoing_update_naming_another_team_is_refused`.
 
 ---
 

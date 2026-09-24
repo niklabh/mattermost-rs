@@ -792,3 +792,264 @@ async fn the_id_checks_and_the_team_mismatch_agree() {
     delete_hook(&http, RUST, &token, &format!("/api/v4/hooks/incoming/{id}")).await;
     common::delete_channel(&http, &token, &channel).await;
 }
+
+/// The `Audits` extra texts written on `action` since `since`, in time order.
+async fn audit_extras(pool: &sqlx::PgPool, action: &str, since: i64) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT extrainfo FROM audits WHERE action = $1 AND createat >= $2 ORDER BY createat, extrainfo",
+    )
+    .bind(action)
+    .bind(since)
+    .fetch_all(pool)
+    .await
+    .expect("the audit rows")
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or_default()
+}
+
+/// `(status, error id or "", channel_id)` of one answer.
+fn outcome(status: u16, raw: &str) -> (u16, String, String) {
+    let body: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    (
+        status,
+        body["id"]
+            .as_str()
+            .filter(|_| status >= 400)
+            .unwrap_or_default()
+            .to_owned(),
+        body["channel_id"].as_str().unwrap_or_default().to_owned(),
+    )
+}
+
+/// Moving an incoming hook to another channel is checked for the hook's **owner** (webhook.go:176):
+/// an owner who cannot read the new channel is 403 `api.webhook.incoming.user_membership.app_error`
+/// with a `"fail - invalid webhook user"` row, even though the caller can read it. Once the owner
+/// is a member the move goes through; and an update that keeps the channel is not checked at all,
+/// so it succeeds after the owner has left.
+#[tokio::test]
+async fn moving_an_incoming_hook_checks_its_owner_can_read_the_new_channel() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let team = common::create_team(&http, &token, "hookmove").await;
+
+    let mut results = Vec::new();
+    for (base, side) in [(GO, "go"), (RUST, "rs")] {
+        let owner = common::create_plain_user(&http, &token, &team, &format!("hookmv{side}")).await;
+        let open = create_channel_typed(&http, &token, &team, &format!("hookmvo{side}"), "O").await;
+        let private =
+            create_channel_typed(&http, &token, &team, &format!("hookmvp{side}"), "P").await;
+        // `read_channel_content` is a channel permission: even on an open channel the owner has
+        // to be a member for `HasPermissionToChannel` to grant it.
+        common::add_user_to_channel(&http, &token, &open, &owner.id).await;
+        let (status, raw) = post_hook(
+            &http,
+            base,
+            &token,
+            "/api/v4/hooks/incoming",
+            &serde_json::json!({ "channel_id": open, "user_id": owner.id, "display_name": "move" }),
+        )
+        .await;
+        assert_eq!(status, 201, "{base}: {raw}");
+        let hook: serde_json::Value = serde_json::from_str(&raw).expect("a hook");
+        let id = hook["id"].as_str().expect("an id").to_owned();
+        let path = format!("/api/v4/hooks/incoming/{id}");
+        let body = |channel: &str, name: &str| serde_json::json!({ "id": id, "channel_id": channel, "display_name": name });
+
+        let mut steps = Vec::new();
+        // The owner is not in the private channel: refused, and the hook stays where it was.
+        let since = now_millis() - 1;
+        let (status, raw) = put_hook(&http, base, &token, &path, &body(&private, "move")).await;
+        steps.push((
+            outcome(status, &raw),
+            audit_extras(&pool, &path, since).await,
+        ));
+        // A member now: moved.
+        common::add_user_to_channel(&http, &token, &private, &owner.id).await;
+        let since = now_millis() - 1;
+        let (status, raw) = put_hook(&http, base, &token, &path, &body(&private, "moved")).await;
+        steps.push((
+            outcome(status, &raw),
+            audit_extras(&pool, &path, since).await,
+        ));
+        // The owner leaves; an update that keeps the channel is not checked.
+        let response = http
+            .delete(format!(
+                "{GO}/api/v4/channels/{private}/members/{}",
+                owner.id
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("Go answers");
+        assert!(response.status().is_success(), "the owner leaves");
+        let since = now_millis() - 1;
+        let (status, raw) = put_hook(&http, base, &token, &path, &body(&private, "kept")).await;
+        steps.push((
+            outcome(status, &raw),
+            audit_extras(&pool, &path, since).await,
+        ));
+        // And moving it back to the open channel checks again — the owner is still in that one.
+        let since = now_millis() - 1;
+        let (status, raw) = put_hook(&http, base, &token, &path, &body(&open, "back")).await;
+        steps.push((
+            outcome(status, &raw),
+            audit_extras(&pool, &path, since).await,
+        ));
+
+        let named: Vec<_> = steps
+            .into_iter()
+            .map(|((status, id, channel), rows)| {
+                let channel = if channel == private {
+                    "<private>".to_owned()
+                } else if channel == open {
+                    "<open>".to_owned()
+                } else {
+                    channel
+                };
+                ((status, id, channel), rows)
+            })
+            .collect();
+        results.push(named);
+        common::delete_plain_user(&http, &token, &owner.id).await;
+    }
+    let rust = results.pop().expect("two runs");
+    let go = results.pop().expect("two runs");
+    assert_eq!(
+        go.iter()
+            .map(|((s, id, c), rows)| (*s, id.as_str(), c.as_str(), rows.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                403,
+                "api.webhook.incoming.user_membership.app_error",
+                "",
+                vec![
+                    "attempt".to_owned(),
+                    "fail - invalid webhook user".to_owned()
+                ]
+            ),
+            (
+                201,
+                "",
+                "<private>",
+                vec!["attempt".to_owned(), "success".to_owned()]
+            ),
+            (
+                201,
+                "",
+                "<private>",
+                vec!["attempt".to_owned(), "success".to_owned()]
+            ),
+            (
+                201,
+                "",
+                "<open>",
+                vec!["attempt".to_owned(), "success".to_owned()]
+            ),
+        ],
+        "what Go answered"
+    );
+    assert_eq!(rust, go);
+}
+
+/// `updateOutgoingHook` fills an empty `team_id` from the stored hook and refuses any other with
+/// 400 `api.webhook.team_mismatch.app_error` (webhook.go:425), after `"attempt"` and before the
+/// permission checks — the incoming route's pair of checks.
+#[tokio::test]
+async fn an_outgoing_update_naming_another_team_is_refused() {
+    if !stack_enabled() {
+        return;
+    }
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let team = common::create_team(&http, &token, "hookoteam").await;
+    let other_team = common::create_team(&http, &token, "hookoteamx").await;
+
+    let mut results = Vec::new();
+    for (base, side) in [(GO, "go"), (RUST, "rs")] {
+        let (status, raw) = post_hook(
+            &http,
+            base,
+            &token,
+            "/api/v4/hooks/outgoing",
+            &serde_json::json!({
+                "team_id": team, "display_name": "team", "trigger_words": [format!("hookot{side}")],
+                "callback_urls": ["http://127.0.0.1:1/team"]
+            }),
+        )
+        .await;
+        assert_eq!(status, 201, "{base}: {raw}");
+        let hook: serde_json::Value = serde_json::from_str(&raw).expect("a hook");
+        let id = hook["id"].as_str().expect("an id").to_owned();
+        let path = format!("/api/v4/hooks/outgoing/{id}");
+        let body = |team_id: Option<&str>| {
+            let mut body = serde_json::json!({
+                "id": id, "display_name": "team", "trigger_words": [format!("hookot{side}")],
+                "callback_urls": ["http://127.0.0.1:1/team"]
+            });
+            if let Some(team_id) = team_id {
+                body["team_id"] = serde_json::json!(team_id);
+            }
+            body
+        };
+        let mut steps = Vec::new();
+        for team_id in [Some(other_team.as_str()), None, Some(team.as_str())] {
+            let since = now_millis() - 1;
+            let (status, raw) = put_hook(&http, base, &token, &path, &body(team_id)).await;
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+            let answered_team = if value["team_id"] == team.as_str() {
+                "<team>"
+            } else {
+                ""
+            };
+            steps.push((
+                outcome(status, &raw).0,
+                outcome(status, &raw).1,
+                answered_team,
+                audit_extras(&pool, &path, since).await,
+            ));
+        }
+        results.push(steps);
+    }
+    let rust = results.pop().expect("two runs");
+    let go = results.pop().expect("two runs");
+    assert_eq!(
+        go,
+        vec![
+            (
+                400,
+                "api.webhook.team_mismatch.app_error".to_owned(),
+                "",
+                vec!["attempt".to_owned()]
+            ),
+            (
+                200,
+                String::new(),
+                "<team>",
+                vec!["attempt".to_owned(), "success".to_owned()]
+            ),
+            (
+                200,
+                String::new(),
+                "<team>",
+                vec!["attempt".to_owned(), "success".to_owned()]
+            ),
+        ],
+        "what Go answered"
+    );
+    assert_eq!(rust, go);
+}

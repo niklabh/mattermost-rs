@@ -580,8 +580,7 @@ async fn local_move_channel(
     };
 
     let (parts, body) = request.into_parts();
-    let path = parts.uri.path().to_owned();
-    let ip_address = crate::client_ip::client_ip(&parts.headers, &parts.extensions);
+    let audit = crate::audit_log::AuditRequest::of(&parts);
     // A local-socket request has no session and no peer address, which is what Go's
     // `pluginContext` reads off one: every field but `RequestId` is empty there too.
     let hook_ctx = crate::plugin_context::hook_context(&parts, None);
@@ -654,10 +653,7 @@ async fn local_move_channel(
         format!("channel={}", channel.name),
         format!("team={}", team.name),
     ] {
-        state
-            .app
-            .log_audit("", "", &ip_address, &path, &extra_info)
-            .await;
+        audit.log(&state.app, None, &extra_info).await;
     }
 
     match channel_writes::channel_response("moveChannel", &channel) {
@@ -845,13 +841,10 @@ async fn local_remove_channel_member(
     {
         Ok(MemberWrite::Done(())) => {
             // `c.LogAudit` on success: no session, so no user or session id.
-            state
-                .app
-                .log_audit(
-                    "",
-                    "",
-                    &crate::client_ip::client_ip(request.headers(), request.extensions()),
-                    request.uri().path(),
+            crate::audit_log::AuditRequest::of_request(&request)
+                .log(
+                    &state.app,
+                    None,
                     &format!("name={} user_id={user_id}", channel.name),
                 )
                 .await;
